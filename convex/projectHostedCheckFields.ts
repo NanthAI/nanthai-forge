@@ -50,6 +50,13 @@ export const hostedCheckTables = {
   ]),
   projectHostedCheckRuns: defineTable({
     cause: v.optional(v.union(...Object.values(checkCause).map(code => v.literal(code)))),
+    replayClock: v.optional(
+      v.object({
+        dispatchedAt: v.optional(v.number()),
+        startedAt: v.optional(v.number()),
+        endedAt: v.optional(v.number()),
+      }),
+    ),
     // Dispatch attribution and one idempotent late usage receipt; never acceptance evidence.
     cancelledUsage: v.optional(
       v.object({

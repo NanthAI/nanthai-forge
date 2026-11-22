@@ -131,8 +131,13 @@ export async function queueHostedSource(transport: HostedAgentTransport, input: 
   const parsed = hostedQueueSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted queue parameters. Use queue --help.');
   const { laneId: selected, limit, ...selection } = parsed.data;
-  if (selection.submissionId || selection.batchId)
-    return transport.query('projectHostedLandingAttemptHistory:read', selection);
+  if (selection.submissionId || selection.batchId) {
+    const query = 'projectHostedLandingAttemptHistory:read';
+    const page = await transport.query<{ archived?: true }>(query, selection);
+    return page?.archived
+      ? transport.action('projectLandingCapsuleRead:history', { query, request: JSON.stringify(selection) })
+      : page;
+  }
   const view = await transport.query('projectHostedQueueView:read', limit === undefined ? {} : { limit });
   return markQueueLane(view, selected ?? readHostedLaneCheckout(transport.root)?.selection.laneId);
 }

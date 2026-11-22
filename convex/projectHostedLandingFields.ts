@@ -3,6 +3,7 @@ import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { landingCapsulePointer } from './projectLandingCapsuleFields';
 import type { Doc } from './_generated/dataModel';
+import { landingReplay } from './projectHostedLandingReplay';
 
 type HoldRow = Pick<Doc<'projectHostedLandingRequests'>, 'admission' | 'phase' | 'runnable'>;
 /** A release time is measured only when the release transaction stamped it. */
@@ -475,6 +476,7 @@ export const hostedLandingTables = {
     attemptId: v.string(),
     number: v.number(),
     progress: v.optional(v.string()),
+    replay: v.optional(landingReplay),
     value: v.string(),
   })
     // index-order: caller: convex/projectSelfMetrics.ts#page; order: metrics bound _creationTime for attempt windows.

@@ -27,6 +27,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { recordHostedTestTimings } from './projectHostedTestTimings';
 import { runSigningSecret } from '../src/hosted-collector-key';
+import { observeCheckEnd, observeCheckStart } from './projectHostedCheckClock';
 
 /** Only fixed trusted collection code holds the signing key. Project-code
  * stdout, display records and source-job callbacks cannot supply this evidence.
@@ -173,6 +174,10 @@ export async function receiveHostedCheckCallback(
     };
     if (prior) await ctx.db.replace(prior._id, saved);
     else await ctx.db.insert('projectHostedCheckShards', saved);
+    if (shard.execution) {
+      observeCheckStart(run, shard.execution.startedAt);
+      observeCheckEnd(run, shard.execution.endedAt);
+    }
     run.status = 'running';
   } else {
     invariant(

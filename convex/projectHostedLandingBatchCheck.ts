@@ -39,6 +39,7 @@ import { loadFinish } from './projectHostedFinishStore';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { retainCheckProgress } from './projectHostedLandingCheckProgress';
+import { checkReplay } from './projectHostedLandingReplay';
 import { sharedCheckCounts } from '../src/cost-budgets';
 import type { HostedLandingState } from '../src/hosted-landing';
 
@@ -69,6 +70,7 @@ async function prepareLandingCheckOnce(
         runId: batch.runId,
       });
       retainCheckProgress(state, run, now);
+      const replay = checkReplay(run);
       if (hostedCheckTerminal(run)) {
         const semantic = semanticVerdict(
           run.semanticPlan,
@@ -114,6 +116,9 @@ async function prepareLandingCheckOnce(
                 ...withCounts(sharedCheckCounts(current.counts, runSeconds, included.length, false)),
               },
               false,
+              true,
+              undefined,
+              { replay },
             );
           }
         if (outcome === 'platform') {
@@ -159,7 +164,10 @@ async function prepareLandingCheckOnce(
               false,
               true,
               undefined,
-              run.endedAt ? { settlement: { passedAt: run.endedAt, startedAt: now } } : undefined,
+              {
+                replay,
+                ...(run.endedAt ? { settlement: { passedAt: run.endedAt, startedAt: now } } : {}),
+              },
             );
           }
         } else {
@@ -225,7 +233,7 @@ async function prepareLandingCheckOnce(
               Object.fromEntries(
                 Object.entries(previous).map(([id, tests]) => [
                   id,
-                  tests.filter(test => !red.includes(test)),
+                  tests.filter(test => !red.files.includes(test)),
                 ]),
               ),
               step,

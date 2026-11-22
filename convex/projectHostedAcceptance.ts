@@ -215,7 +215,15 @@ export async function approveHeldLanding(
       error.code === 'POLICY_CHANGED' || Boolean(project && heldPolicy(project, attempt).changed);
     const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
     if (queue?.lease?.submissionId === input.submissionId) await releaseLandingQueue(ctx, queue);
-    await reserveFinishRetry(ctx, finish, JSON.parse(finish.value));
+    await reserveFinishRetry(
+      ctx,
+      finish,
+      JSON.parse(finish.value),
+      undefined,
+      undefined,
+      undefined,
+      error.code === 'POLICY_CHANGED' ? { kind: 'policy', link: attempt.policyDigest } : undefined,
+    );
     return {
       status: 'pending',
       reason: policyMoved

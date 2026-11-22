@@ -174,6 +174,12 @@ test('governance eligibility preserves supervised, contributor and protected-pat
 test('cancellation during the shared check cannot publish the cancelled member', async t => {
   const f = await batchesFixture(t);
   await f.drain();
+  const shared = f.runs()[0];
+  const runRow = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === shared.id);
+  const dispatch = Date.parse(shared.at);
+  f.patch('projectHostedCheckRuns', runRow._id, {
+    replayClock: { dispatchedAt: dispatch, startedAt: dispatch + 1000 },
+  });
   await f.transaction('batch-cancel', landingApi.cancel, {
     projectId: f.projectId,
     request: JSON.stringify({
@@ -182,6 +188,17 @@ test('cancellation during the shared check cannot publish the cancelled member',
       submissionId: f.entries[1].state.id,
     }),
   });
+  const cancelled = states(f).find(s => s.id === f.entries[1].state.id);
+  const attempt = [...f.tables.projectHostedLandingAttempts.values()].find(
+    row => row.attemptId === cancelled.attemptId,
+  );
+  assert.equal(attempt.replay.censor, 'LANDING_CANCELLED');
+  assert.equal(attempt.replay.check.runId, shared.id);
+  assert.deepEqual(
+    attempt.replay.check.predictedBase ?? JSON.parse(attempt.value).main,
+    shared.candidate.base,
+  );
+  assert.equal(attempt.replay.check.startedAt - attempt.replay.check.dispatchedAt, 1000);
   await f.passChecks();
   await f.drain();
   assert.equal(

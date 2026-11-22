@@ -10,6 +10,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { requireLandingLease, type LandingClaim } from './projectHostedLandingControl';
 import { closeOrderWait } from './projectHostedLandingOrder';
+import { checkReplay } from './projectHostedLandingReplay';
 import { loadBatch, writeBatch, wakeBatch, retryLandingBatch } from './projectHostedLandingBatchStore';
 import {
   loadLanding,
@@ -461,6 +462,7 @@ export async function publishLandingBatch(
     await writeLanding(ctx, currentRow, next, false, currentRow.runId !== run.id, completionAlarm, {
       feedLanes: member.plan.feedLanes,
       publishedMainReceiptId: members.at(-1)!.attempt.operations.accept,
+      replay: { ...checkReplay(run), actualBase: receipt.previous },
     });
     await settleLandingOperation(ctx, next);
     if (member.plan.inputPages)

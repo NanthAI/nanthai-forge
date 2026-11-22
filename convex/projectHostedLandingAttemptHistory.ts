@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import { report } from './errors';
 import { sanitizeFailureMessage } from './projectFailureLog';
@@ -13,10 +13,18 @@ import { landingAttemptProgress, landingRow, landingStateFromRow } from './proje
 import { finishRow } from './projectHostedFinishWake';
 import { preparingSourceStep } from './projectHostedPreparingSource';
 import { hostedFinishSchema } from '../src/hosted-finish';
-import { hostedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
+import {
+  hostedLandingAttemptSchema,
+  hostedLandingStateSchema,
+  type HostedLandingAttempt,
+  type HostedLandingState,
+} from '../src/hosted-landing';
 import { sourceStepFailureField } from '../src/hosted-source-retry';
 import { invariant } from '../src/errors';
 import { phaseDuration } from '../src/land-phases';
+import { replayHoldEdges, replayRead } from './projectHostedLandingReplay';
+import { capsuleHistoryContext } from './projectLandingCapsuleContext';
+import type { LandingCapsule } from '../src/landing-capsule';
 
 const PAGE = 8;
 type Timing = NonNullable<HostedLandingState['timing']>;
@@ -106,6 +114,83 @@ function installedTiming(
 const cause = (error: HostedLandingState['error'] | undefined) =>
   error ? { code: error.code.slice(0, 100), message: sanitizeFailureMessage(error.message) } : undefined;
 
+function installedAttempt(
+  row: Doc<'projectHostedLandingAttempts'>,
+  attempt: HostedLandingAttempt,
+  progress: ReturnType<typeof landingAttemptProgress> | undefined,
+  parent: Timing | undefined,
+  current: boolean,
+  runId: string | undefined,
+  observedAt?: string,
+) {
+  const failure = cause(progress?.error);
+  return {
+    id: attempt.id,
+    number: attempt.number,
+    at: attempt.at,
+    current,
+    main: attempt.main,
+    replay: replayRead(attempt, row.replay, progress?.phase),
+    candidateId: attempt.candidate.id,
+    ...(runId ? { runId } : {}),
+    ...(attempt.checkCause ? { checkCause: attempt.checkCause } : {}),
+    ...installedTiming(attempt.parentAttemptId && !parent ? undefined : progress?.timing, parent, {
+      phase: progress?.phase ?? null,
+      queuedAt: attempt.parentAttemptId ? parent?.settledAt : attempt.at,
+      hasCheck: !!runId,
+      observedAt,
+    }),
+    ...(failure ? { cause: failure } : {}),
+  };
+}
+
+/** The authenticated capsule supplies the same attempt and progress rows after relocation. */
+export function archivedAttemptHistory(capsule: LandingCapsule, context: Record<string, unknown>) {
+  const {
+    admissionRunId,
+    beforeAttempt,
+    attempts: live,
+    nextBeforeAttempt,
+    historyPartial,
+    ...reply
+  } = context;
+  const state = capsule.anchor;
+  const page = (capsule.tables.projectHostedLandingAttempts ?? [])
+    .map(text => JSON.parse(text) as Doc<'projectHostedLandingAttempts'>)
+    .filter(row => beforeAttempt === undefined || row.number < (beforeAttempt as number))
+    .sort((a, b) => b.number - a.number)
+    .slice(0, PAGE + 1);
+  const progress = new Map(page.map(row => [row.attemptId, landingAttemptProgress(row, state)]));
+  const attempts = page.map(row => {
+    const attempt = hostedLandingAttemptSchema.parse(JSON.parse(row.value));
+    const parent = attempt.parentAttemptId ? progress.get(attempt.parentAttemptId)?.timing : undefined;
+    const runId =
+      attempt.check?.runId ??
+      (attempt.id === state.firstAttemptId ? (admissionRunId as string | undefined) : undefined);
+    return installedAttempt(
+      row,
+      attempt,
+      progress.get(attempt.id),
+      parent,
+      attempt.id === reply.currentAttemptId,
+      runId,
+    );
+  });
+  const liveAttempts = live as Array<{ id: string; number: number; reserved?: true }>;
+  const merged = new Map(attempts.map(entry => [entry.number, entry as (typeof liveAttempts)[number]]));
+  for (const entry of liveAttempts) if (!entry.reserved) merged.set(entry.number, entry);
+  const selected = [...merged.values()].sort((a, b) => b.number - a.number).slice(0, PAGE);
+  const next = merged.size > PAGE || nextBeforeAttempt != null ? selected.at(-1)!.number : null;
+  const gap = selected.some((entry, index) => index > 0 && selected[index - 1]!.number !== entry.number + 1);
+  const missingFirst = next === null && beforeAttempt !== 0 && selected.at(-1)?.id !== state.firstAttemptId;
+  return {
+    ...reply,
+    attempts: [...liveAttempts.filter(entry => entry.reserved), ...selected],
+    nextBeforeAttempt: next,
+    ...(gap || missingFirst || (!page.length && historyPartial) ? { historyPartial: true } : {}),
+  };
+}
+
 async function reservedAttempt(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
@@ -117,6 +202,8 @@ async function reservedAttempt(
   const step = await preparingSourceStep(ctx, projectId, state.actor, composeOperationId);
   const failure = step ? sourceStepFailureField(step) : undefined;
   const failed = state.phase === 'terminal-failed';
+  const stopped = state.error?.code;
+  const censor = stopped === 'LANDING_CANCELLED' || stopped === 'LANDING_SUPERSEDED' ? stopped : undefined;
   const composition = phasePeriod(
     'composing',
     attempt.at,
@@ -128,6 +215,7 @@ async function reservedAttempt(
     current: true,
     reserved: true,
     phase: failed ? 'terminal-failed' : 'composing',
+    replay: replayRead(attempt, censor ? { censor } : undefined, state.phase),
     composeOperationId,
     periods: composition ? [composition] : [],
     ...(failed ? { cause: cause(state.error) } : {}),
@@ -145,6 +233,7 @@ export const read = query({
     batchId: v.optional(v.string()),
     attemptId: v.optional(v.string()),
     afterLaneId: v.optional(v.string()),
+    capsuleProtocol: v.optional(v.literal(1)),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -152,7 +241,7 @@ export const read = query({
       const { projectId, submissionId, beforeAttempt, batchId, attemptId, afterLaneId } = input;
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read landing attempt history.');
-      await accessibleProject(ctx, projectId, user.subject);
+      const project = await accessibleProject(ctx, projectId, user.subject);
       if (batchId !== undefined) {
         invariant(
           submissionId === undefined &&
@@ -243,23 +332,15 @@ export const read = query({
           const current = currentAttemptId === attempt.id;
           const runId =
             attempt.check?.runId ?? (attempt.id === state.firstAttemptId ? row.admission?.runId : undefined);
-          return {
-            id: attempt.id,
-            number: attempt.number,
-            at: attempt.at,
+          return installedAttempt(
+            entry,
+            attempt,
+            progress,
+            parent,
             current,
-            main: attempt.main,
-            candidateId: attempt.candidate.id,
-            ...(runId ? { runId } : {}),
-            ...(attempt.checkCause ? { checkCause: attempt.checkCause } : {}),
-            ...installedTiming(attempt.parentAttemptId && !parent ? undefined : progress?.timing, parent, {
-              phase: progress?.phase ?? null,
-              queuedAt: attempt.parentAttemptId ? parent?.settledAt : attempt.at,
-              hasCheck: !!runId,
-              observedAt: current && open && !progress?.settled ? observedAt : undefined,
-            }),
-            cause: cause(progress?.error),
-          };
+            runId,
+            current && open && !progress?.settled ? observedAt : undefined,
+          );
         }),
       );
       const current =
@@ -280,16 +361,24 @@ export const read = query({
       const gap = rows.some((entry, index) => index > 0 && rows[index - 1]!.number !== entry.number + 1);
       const missingFirst =
         nextBeforeAttempt === null && beforeAttempt !== 0 && oldest?.attemptId !== state.firstAttemptId;
-      return JSON.stringify({
+      const reply = {
         submissionId,
         observedAt,
         currentAttemptId,
         nextBeforeAttempt,
+        holdEdges: replayHoldEdges(row.orderWaits),
         ...(state.batchId ? { batchId: state.batchId } : {}),
         ...(state.batchOriginId ? { batchOriginId: state.batchOriginId } : {}),
         ...(gap || missingFirst ? { historyPartial: true } : {}),
         attempts: [...current, ...attempts],
-      });
+      };
+      if (row.capsule && input.capsuleProtocol)
+        return await capsuleHistoryContext(ctx, project, row.capsule, input.capsuleProtocol, submissionId, {
+          ...reply,
+          ...(row.admission ? { admissionRunId: row.admission.runId } : {}),
+          ...(beforeAttempt === undefined ? {} : { beforeAttempt }),
+        });
+      return JSON.stringify(row.capsule ? { ...reply, archived: true } : reply);
     } catch (error) {
       return report(error);
     }

@@ -19,6 +19,7 @@ import { requireStoredRepositoryBinding } from './githubBindingAccess';
 import { requestCiCancel } from './projectCiStatusCancel';
 import { roleOf, settleCiStatus, settleCiStatusVerdict, ciBranchCleanup } from './projectCiStatusLifecycle';
 import { invariant } from '../src/errors';
+import { markCheckDispatch, observeCheckEnd, observeCheckStart } from './projectHostedCheckClock';
 
 /**
  * The ci-status check provider (flip 3, src/ci-status.ts): a run publishes its Candidate as the branch
@@ -145,6 +146,7 @@ export const prepare = internalMutation({
       .unique();
     invariant(state, 'SOURCE_UNAVAILABLE', 'The Candidate needs trusted source registration.');
     const whole = { sha256: run.request.expectedHead, size: state.size };
+    markCheckDispatch(run, Date.now());
     run.dispatchStarted = true;
     run.status = 'dispatching';
     run.ci = { branch: candidateBranch(run.id), commit: null, link: null };
@@ -220,7 +222,10 @@ export const failed = internalMutation({
  * ignored and the run waits for its own event. */
 export async function receiveCiStatus(
   ctx: MutationCtx,
-  payload: { workflow_run?: { head_branch?: unknown } },
+  payload: {
+    action?: unknown;
+    workflow_run?: { head_branch?: unknown; run_started_at?: unknown; updated_at?: unknown };
+  },
 ) {
   const branch = payload.workflow_run?.head_branch;
   const match =
@@ -249,6 +254,9 @@ export async function receiveCiStatus(
     return true;
   }
   if (verdict.outcome !== 'pending' && verdict.outcome !== 'terminal') return true;
+  const startedAt = payload.workflow_run?.run_started_at;
+  if (payload.action !== 'requested' && typeof startedAt === 'string') observeCheckStart(run, startedAt);
+  if (verdict.outcome === 'terminal') observeCheckEnd(run, payload.workflow_run?.updated_at);
   if (hostedCheckTerminal(run)) {
     if (run.status === 'cancelled' && verdict.outcome === 'pending') {
       // Cancellation may precede GitHub's first run identity. Bind only its authenticated

@@ -33,6 +33,7 @@ import {
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import { settleBatchConflicts } from './projectHostedLandingCohortConflicts';
 import type { BatchFailure } from '../src/hosted-batch-diagnosis';
+import { checkReplay } from './projectHostedLandingReplay';
 
 export { parkExactOnMainRed } from './projectHostedMainAuditState';
 
@@ -44,10 +45,15 @@ type Entry = { row: LandingRow; state: HostedLandingState };
  * parked entry gets nothing its submission was not already given (owner inputs, batch policy, no
  * recovery gate, no revert, a requested check). */
 /** How an entry parks: the hold, its fork reason and the stored error (main red by default). */
-export type ParkAs = { hold: 'main-red' | 'ci-down'; error: { code: string; message: string } };
-const mainRed = (files: readonly string[]): ParkAs => ({
+export type ParkAs = {
+  hold: 'main-red' | 'ci-down';
+  error: { code: string; message: string };
+  auditRunId?: string;
+};
+const mainRed = ({ files, auditRunId }: { files: readonly string[]; auditRunId: string }): ParkAs => ({
   hold: 'main-red',
   error: { code: 'MAIN_RED', message: parkedMessage(files) },
+  auditRunId,
 });
 export async function parkEntry(
   ctx: MutationCtx,
@@ -108,6 +114,12 @@ export async function parkEntry(
       error: as.error,
     },
     as.hold,
+    {
+      replacementReplay: {
+        ...checkReplay(run),
+        ...(as.auditRunId ? { replacementCause: { kind: 'audit', link: as.auditRunId } } : {}),
+      },
+    },
   );
 }
 
@@ -130,7 +142,7 @@ export async function parkFailedBatch(
   failure: BatchFailure,
   run: HostedCheckRun,
   pending: readonly (Entry & { original: HostedLandingAttempt })[],
-  files: readonly string[],
+  red: { files: readonly string[]; auditRunId: string },
 ) {
   const transition = {
     code: 'MAIN_RED',
@@ -138,7 +150,7 @@ export async function parkFailedBatch(
   };
   await writeBatch(ctx, key, { ...batch, phase: 'failed', failure, transition });
   if (batch.included) await settleBatchConflicts(ctx, key, { ...batch, phase: 'failed' });
-  for (const member of pending) await parkEntry(ctx, member, run, member.original, mainRed(files));
+  for (const member of pending) await parkEntry(ctx, member, run, member.original, mainRed(red));
   if (pending.length) await leaveTrain(ctx, pending);
 }
 

@@ -2050,6 +2050,21 @@ test('a first JWT cannot adopt an unacknowledged execution; cancellation after a
   await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'in_progress', null)) });
   assert.equal(s.scheduled.filter(item => item.name === 'projectHostedActionsWebhook:cancel').length, 1);
 });
+test('a bound provider in-progress event retains the provider start on the check row', async t => {
+  const s = await fixture(t);
+  const reserved = await s.reserve();
+  await s.call(direct, 'observe', { ...s.id, fence: 1, outcome: 'accepted', executionId: '123' });
+  const dispatchedAt = reserved.actions.reservedAt;
+  const startedAt = dispatchedAt + 3000;
+  const event = webhook(s, 'in_progress', null, {
+    created_at: new Date(dispatchedAt).toISOString(),
+    run_started_at: new Date(startedAt).toISOString(),
+  });
+  await s.call(webhooks, 'receive', { payload: JSON.stringify(event) });
+  const row = [...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === s.run.id);
+  assert.equal(row.replayClock.startedAt, startedAt);
+  assert.equal(JSON.parse(row.value).actions.reservedAt, dispatchedAt);
+});
 test('workflow_run uses the existing HMAC webhook boundary', async t => {
   const s = await fixture(t);
   const reserved = await s.reserve();

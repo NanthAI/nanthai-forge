@@ -13,6 +13,7 @@ const { encodeLandingCapsule, decodeLandingCapsule } = await import(
   moduleUrl('../convex/projectLandingCapsuleCodec.ts')
 );
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
+import { queueHostedSource } from '../dist/hosted-agent-reads.js';
 import { landingCapsuleText } from '../dist/landing-capsule.js';
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const capsuleStore = await import(moduleUrl('../convex/projectLandingCapsuleStore.ts'));
@@ -26,11 +27,13 @@ const people = await import(moduleUrl('../convex/publicPeople.ts'));
 const finish = await import(moduleUrl('../convex/projectHostedFinish.ts'));
 const lanes = await import(moduleUrl('../convex/projectHostedLanes.ts'));
 const checks = await import(moduleUrl('../convex/projectHostedCheckRead.ts'));
+const attemptHistory = await import(moduleUrl('../convex/projectHostedLandingAttemptHistory.ts'));
 const queries = {
   'projectHostedFinishObserve:page': observe.page,
   'publicPeople:resolve': people.resolve,
   'projectHostedLanding:status': api.status,
   'projectHostedLanding:attempts': api.attempts,
+  'projectHostedLandingAttemptHistory:read': attemptHistory.read,
   'projectHostedLanding:candidate': api.candidate,
   'projectHostedFinish:inputs': finish.inputs,
   'projectHostedLanes:states': lanes.states,
@@ -378,6 +381,81 @@ test('public-project writer revocation changes the cold marker even when the liv
   const after = await read();
   assert.notEqual(before.landingCapsule.viewVersion, after.landingCapsule.viewVersion);
   assert(!JSON.stringify(after.landingCapsule).includes(reader));
+});
+
+test('queue replay resumes after the eighth attempt and retains the oldest cause after compaction', async t => {
+  const h = await fixture(t);
+  const { replay: _replay, ...initial } = JSON.parse(h.capsule.tables.projectHostedLandingAttempts[0]);
+  const first = JSON.parse(initial.value);
+  const generations = [first];
+  for (let number = 1; number < 11; number++)
+    generations.push({ ...first, number, id: randomUUID(), parentAttemptId: generations.at(-1).id });
+  const rows = generations.map((attempt, index) =>
+    canonicalPayload({
+      ...initial,
+      _id: index === 0 ? initial._id : `${initial._id}-${index}`,
+      attemptId: attempt.id,
+      number: attempt.number,
+      value: canonicalPayload(attempt),
+      ...(index === 0
+        ? {
+            replay: {
+              censor: 'ATTEMPT_REPLACED',
+              replacedByAttemptId: generations[1].id,
+              replacementCause: { kind: 'main-race', link: first.main.receiptId },
+            },
+          }
+        : {}),
+    }),
+  );
+  const anchor = { ...h.capsule.anchor, attemptId: generations.at(-1).id };
+  const encoded = encodeLandingCapsule({
+    ...h.capsule,
+    anchor,
+    tables: { ...h.capsule.tables, projectHostedLandingAttempts: rows },
+  });
+  h.relocate(true);
+  h.f.patch('projectHostedLandingRequests', h.row._id, {
+    capsule: encoded.pointer,
+    attemptId: anchor.attemptId,
+    value: canonicalPayload(anchor),
+  });
+  t.mock.method(globalThis, 'fetch', async () => new Response(encoded.body));
+  const query = 'projectHostedLandingAttemptHistory:read';
+  const transport = {
+    query: async (name, selection) => {
+      assert.equal(name, query);
+      return JSON.parse(
+        await h.f.call('capsuleQueue', queries[name], { projectId: h.f.projectId, ...selection }, reader),
+      );
+    },
+    action: async (name, { query, request }) => {
+      assert.equal(name, 'projectLandingCapsuleRead:history');
+      return JSON.parse(await h.run(reader, query, JSON.parse(request)));
+    },
+  };
+  const firstPage = await queueHostedSource(transport, { submissionId: h.state.id });
+  assert.deepEqual(
+    firstPage.attempts.map(attempt => attempt.number),
+    [10, 9, 8, 7, 6, 5, 4, 3],
+  );
+  assert.equal(firstPage.attempts[0].current, true);
+  const lastPage = await queueHostedSource(transport, {
+    submissionId: h.state.id,
+    beforeAttempt: firstPage.nextBeforeAttempt,
+  });
+  assert.deepEqual(
+    lastPage.attempts.map(attempt => attempt.number),
+    [2, 1, 0],
+  );
+  assert.equal(lastPage.nextBeforeAttempt, null);
+  assert.equal(lastPage.attempts[1].replay.outcome, 'unrecorded');
+  assert.equal(lastPage.attempts[2].replay.outcome, 'censored');
+  assert.equal(lastPage.attempts[2].replay.replacedByAttemptId, generations[1].id);
+  assert.deepEqual(lastPage.attempts[2].replay.replacementCause, {
+    kind: 'main-race',
+    link: first.main.receiptId,
+  });
 });
 
 test('a new live attempt after packing keeps current status live and merges archived attempts and observation versions', async t => {

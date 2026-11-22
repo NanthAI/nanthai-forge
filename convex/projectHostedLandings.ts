@@ -11,6 +11,7 @@ import { receiptMessageForReader } from './projectHostedAcceptanceMessage';
 import { report } from './errors';
 import { landingCapsulePointer } from './projectLandingCapsuleStore';
 import { landingAttemptPrefix } from './projectHostedLandingAttemptRead';
+import { replayHoldEdges, replayRead, type LandingReplay } from './projectHostedLandingReplay';
 import { landingRow } from './projectHostedLandingStore';
 import { finishRow } from './projectHostedFinishWake';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
@@ -37,6 +38,7 @@ import {
 } from '../src/hosted-landings-view';
 
 type AttemptProgress = {
+  phase?: HostedLandingState['phase'];
   timing?: { composeStartedAt?: string; ciEndedAt?: string; settledAt?: string };
   error?: { code: string; message: string } | null;
 };
@@ -121,7 +123,7 @@ async function evidence(
   const archived = pointer?.summary
     ? (JSON.parse(pointer.summary).evidence as
         | {
-            chain: Array<{ number: number; value: string; progress?: string }>;
+            chain: Array<{ number: number; value: string; progress?: string; replay?: LandingReplay }>;
             lastNumber: number | null;
             bytes: number;
           }
@@ -129,7 +131,9 @@ async function evidence(
     : undefined;
   const chain = archived?.chain ?? liveChain;
   const attempts = chain.map(row => {
-    if (!archived) bytes += row.value.length + (row.progress?.length ?? 0);
+    if (!archived)
+      bytes +=
+        row.value.length + (row.progress?.length ?? 0) + (row.replay ? JSON.stringify(row.replay).length : 0);
     return JSON.parse(row.value) as HostedLandingAttempt;
   });
   const progress = chain.map(row => (row.progress ? (JSON.parse(row.progress) as AttemptProgress) : null));
@@ -257,6 +261,11 @@ async function evidence(
         : null,
       // Text-conflict paths of an earlier generation live in retained compose results (R2), not in rows.
       conflictPaths: null,
+      holdEdges: replayHoldEdges(receipt.orderWaits),
+      attemptReplay: attempts.map((attempt, index) =>
+        replayRead(attempt, chain[index]?.replay, progress[index]?.phase),
+      ),
+      ...(last && (chain.at(-1)?.number ?? -1) < last.number ? { attemptReplayPartial: true } : {}),
     },
   };
 }

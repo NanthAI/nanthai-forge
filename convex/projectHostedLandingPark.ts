@@ -17,6 +17,7 @@ import { finishRow } from './projectHostedFinishWake';
 import { cancelPendingTask } from './schedulerCancel';
 import { writeLanding, type LandingRow } from './projectHostedLandingStore';
 import { openMainRedHold } from '../src/hosted-acceptance';
+import type { LandingReplay } from './projectHostedLandingReplay';
 export { parkOnMainRed } from './projectHostedMainAuditState';
 
 /** A finished run whose only failure is one test job: every job reported, none cancelled or
@@ -74,7 +75,7 @@ export async function redOnlyFailure(
   // Unknown paths cannot clear this landing of its own failure.
   if (!paths) return null;
   const member = { paths, tests: declaredTests(candidate.intentId, run, attempt, candidate) };
-  if (own.some(file => memberExplainsFailure(member, file, firstError(run, file)))) return null;
+  if (own.files.some(file => memberExplainsFailure(member, file, firstError(run, file)))) return null;
   return own;
 }
 
@@ -91,7 +92,7 @@ export async function failsOnlyMainRed(
   const red = (await auditRow(ctx, projectId))?.red;
   if (!red?.tests?.length || red.moreTests || !own.tests.every(file => red.tests!.includes(file)))
     return null;
-  return own.tests;
+  return { files: own.tests, auditRunId: red.runId };
 }
 
 /** This Intent's own contract tests, from every copy already in hand (0 reads). A first Lane
@@ -127,13 +128,14 @@ export async function parkLanding(
   row: LandingRow,
   next: HostedLandingState,
   hold: 'main-red' | 'ci-down' = 'main-red',
+  evidence?: { replay?: LandingReplay; replacementReplay?: LandingReplay },
 ) {
   const finish = await finishRow(ctx, { projectId: row.projectId, submissionId: row.submissionId });
   if (finish?.wake) {
     await cancelPendingTask(ctx, finish.wake.taskId);
     await ctx.db.patch(finish._id, { wake: null });
   }
-  await writeLanding(ctx, row, next, false, true, undefined, { hold });
+  await writeLanding(ctx, row, next, false, true, undefined, { hold, ...evidence });
   // The hold's record (Item 687d1eda), closed by releaseMainHolds; the same row in this mutation.
   if (hold === 'main-red')
     await ctx.db.patch(row._id, {

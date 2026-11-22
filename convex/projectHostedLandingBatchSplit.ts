@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkReplay } from './projectHostedLandingReplay';
 import { providerRetryDelay } from '../src/ci-provider-recovery';
 import { settleBatchConflicts } from './projectHostedLandingCohortConflicts';
 import type { MutationCtx } from './_generated/server';
@@ -298,6 +299,10 @@ export async function retryLandingBatchCheck(
       checkOperationId,
       candidate: shared.candidate,
       keepReceipt: true,
+      replacementReplay: {
+        ...checkReplay(run),
+        replacementCause: { kind: 'provider-retry', link: run.id },
+      },
       ...(reason ? { providerDelayed: true } : {}),
       check: {
         runId: next.id,

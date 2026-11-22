@@ -437,7 +437,11 @@ test('687d1eda D review 3: the first error comes from the file summary on R2 run
     };
     return run;
   };
-  assert.deepEqual(await judge(r2(`${RED}: unrelated`)), [RED], 'a red-only failure parks');
+  assert.deepEqual(
+    await judge(r2(`${RED}: unrelated`)),
+    { files: [RED], auditRunId: 'red-audit' },
+    'a red-only failure parks with its audit link',
+  );
   assert.equal(await judge(r2(`${RED}: TypeError at member-0:3`)), null, 'the excerpt names this change');
   assert.equal(await judge(r2(`${RED}: unrelated`, { poolPending: [RED2] })), null, 'unreported pool files');
 });
@@ -473,7 +477,11 @@ test('687d1eda D review 6: a revoked submitter or a changed Candidate fails clos
     };
     return run;
   };
-  assert.deepEqual(await judge(r2(`${RED}: unrelated`)), [RED], 'a red-only failure parks');
+  assert.deepEqual(
+    await judge(r2(`${RED}: unrelated`)),
+    { files: [RED], auditRunId: 'red-audit' },
+    'a red-only failure parks with its audit link',
+  );
   assert.equal(
     await judge(r2(`${RED}: unrelated`), a => ({ ...a, actor: { ...a.actor, id: 'revoked-member' } })),
     null,
@@ -605,7 +613,11 @@ test('687d1eda D round 2 finding 3: only the standard check can park (a project 
       },
       {},
     );
-  assert.deepEqual(await judge(failed), [RED], 'the standard check parks a red-only failure');
+  assert.deepEqual(
+    await judge(failed),
+    { files: [RED], auditRunId: 'red-audit' },
+    'the standard check parks a red-only failure with its audit link',
+  );
   assert.equal(
     await judge({ ...failed, check: { ...failed.check, executable: 'bash', args: ['ci/check.sh'] } }),
     null,
@@ -639,7 +651,7 @@ test("687d1eda D round 2 finding 4: this Intent's own contract tests, from the r
       },
       {},
     );
-  assert.deepEqual(await judge(failed), [RED]);
+  assert.deepEqual(await judge(failed), { files: [RED], auditRunId: 'red-audit' });
   assert.equal(await judge({ ...failed, gate: { mode: 'contract', tests: [RED] } }), null, 'run.gate.tests');
   assert.equal(await judge({ ...failed, semanticPlan: plan(intentId, [RED]) }), null, 'run.semanticPlan');
   assert.equal(
@@ -649,7 +661,7 @@ test("687d1eda D round 2 finding 4: this Intent's own contract tests, from the r
   );
   assert.deepEqual(
     await judge({ ...failed, semanticPlan: plan('00000000-0000-4000-8000-000000000000', [RED]) }),
-    [RED],
+    { files: [RED], auditRunId: 'red-audit' },
     "a peer Intent's contract test does not count as this one's",
   );
 });

@@ -17,6 +17,7 @@ import { requireStoredRepositoryBinding, runnerTokenScope, type RunnerScope } fr
 import { invariant } from '../src/errors';
 import { applyConclusion } from './projectHostedActionsVerdict';
 import { receiveCiStatus } from './projectCiStatus';
+import { hostedCheckClock, observeCheckEnd, observeCheckStart } from './projectHostedCheckClock';
 const payloadSchema = z.object({
   action: z.enum(['requested', 'in_progress', 'completed']),
   repository: z.object({ full_name: z.string() }),
@@ -29,6 +30,8 @@ const payloadSchema = z.object({
     head_branch: z.literal('main'),
     head_sha: z.string().regex(/^[a-f0-9]{40}$/),
     created_at: z.iso.datetime(),
+    run_started_at: z.unknown().optional(),
+    updated_at: z.unknown().optional(),
     conclusion: z.string().nullable(),
   }),
 });
@@ -84,11 +87,14 @@ export const receive = internalMutation({
       'EVIDENCE_CHANGED',
       'Workflow revision changed.',
     );
+    if (payload.action !== 'requested' && typeof workflow.run_started_at === 'string')
+      observeCheckStart(run, workflow.run_started_at);
+    if (payload.action === 'completed') observeCheckEnd(run, workflow.updated_at);
     if (run.status === 'cancelled' && payload.action === 'completed' && !run.executionId) {
       run.executionId = String(workflow.id);
       run.actions.workflowSha = workflow.head_sha;
       // Identity/accounting only: do not re-deliver terminal queue notifications.
-      await ctx.db.patch(row._id, { value: JSON.stringify(run) });
+      await ctx.db.patch(row._id, { value: JSON.stringify(run), replayClock: hostedCheckClock(run) });
     }
     if (row.reportStorage === 'r2' && row.resultBatch && payload.action === 'completed') {
       if (!run.executionId || !run.actions.workflowSha) {

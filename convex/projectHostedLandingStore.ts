@@ -5,6 +5,7 @@ import { wakeLandingCapsule, landingCapsuleGraceMs } from './projectLandingCapsu
 import { withLandingCapsule } from './projectLandingCapsuleStore';
 import { unsealedBy } from '../src/landing-overtake';
 export { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
+import { checkReplay, type LandingReplay } from './projectHostedLandingReplay';
 import { recordLandingFeed } from './projectFeedTerminal';
 import { landingAttemptRow, loadLandingAttempt, pinsFor } from './projectHostedLandingAttemptRead';
 import { closeOrderWait, holdsLandingOrder, landingPriorityState } from './projectHostedLandingOrder';
@@ -176,6 +177,8 @@ export async function writeLanding(
     feedLanes?: readonly { laneId: string; actor?: string }[];
     settlement?: { passedAt: string; startedAt: number };
     publishedMainReceiptId?: string;
+    replay?: LandingReplay | undefined;
+    replacementReplay?: LandingReplay;
   },
 ) {
   const hold = options?.hold;
@@ -297,7 +300,19 @@ export async function writeLanding(
         : undefined,
       entersReview,
     );
-  if (previous.attemptId !== state.attemptId) await retainLandingProgress(ctx, previous, true, attempt.main);
+  const changedAttempt = previous.attemptId !== state.attemptId;
+  if (changedAttempt) {
+    const replacementCause =
+      options?.replacementReplay?.replacementCause ??
+      (attempt.candidate.head === null
+        ? { kind: 'conflict' as const, link: attempt.candidate.id }
+        : undefined);
+    await retainLandingProgress(ctx, previous, true, attempt.main, {
+      ...options?.replacementReplay,
+      replacedByAttemptId: state.attemptId,
+      ...(replacementCause ? { replacementCause } : {}),
+    });
+  }
   // Retain a repaired cohort owner's diagnosis in later observations and the terminal receipt.
   // Its progress token distinguishes historical recovery from a current stall.
   if (!state.observation.stall && retainedStallOwner(previous.observation.stall))
@@ -327,7 +342,10 @@ export async function writeLanding(
       : null
     : await landingAlarmPatch(ctx, state, consumedAlarm, row);
   if (alarm && alarm.id !== row._id) await ctx.db.patch(alarm.id, { alarm: alarm.alarm });
-  await retainLandingProgress(ctx, state);
+  // The existing release lookup can supply the exact check when a withdrawal
+  // ends a live run before its first landing progress update. Freeze once.
+  const freezeAfterRelease = ended && !changedAttempt && releaseRun && row.runId !== null;
+  if (!freezeAfterRelease) await retainLandingProgress(ctx, state, false, undefined, options?.replay);
   const advice = row.wouldConflict ? JSON.parse(row.wouldConflict) : undefined;
   const speculative = Boolean(advice?.predecessor);
   const retireAdvice =
@@ -470,14 +488,16 @@ export async function writeLanding(
       options?.publishedMainReceiptId ?? state.acceptance?.receiptId,
     );
   if (bindsNewRun(row, previous, state, runId, orderLive)) await wakeNewRunFollower(ctx, row);
-  if (
+  const releasedRun =
     releaseRun &&
     row.runId &&
     (row.runId !== runId || state.phase === 'terminal-failed' || state.phase === 'landed')
-  )
-    await cancelUnneededHostedCheck(ctx, {
-      projectId: row.projectId,
-      runId: row.runId,
+      ? await cancelUnneededHostedCheck(ctx, { projectId: row.projectId, runId: row.runId })
+      : null;
+  if (freezeAfterRelease)
+    await retainLandingProgress(ctx, state, false, undefined, {
+      ...options?.replay,
+      ...(releasedRun && !options?.replay?.check ? checkReplay(releasedRun) : {}),
     });
   if (state.phase === 'landed' && previous.phase !== 'landed' && state.acceptance) {
     await recordLandingSpeed(
@@ -606,16 +626,27 @@ export async function retainLandingProgress(
   state: HostedLandingState,
   replaced: boolean | { code: string; message: string } = false,
   nextMain?: HostedLandingAttempt['main'],
+  replay?: LandingReplay,
 ) {
   const row = await landingAttemptRow(ctx, {
     projectId: state.projectId as Id<'hostedProjects'>,
     attemptId: state.attemptId,
   });
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original attempt is unavailable.');
-  const mainChanged =
-    nextMain &&
-    canonicalPayload(hostedLandingAttemptSchema.parse(JSON.parse(row.value)).main) !==
-      canonicalPayload(nextMain);
+  const observedBase = nextMain ?? replay?.actualBase;
+  const observedCheck = replay?.check;
+  const main =
+    observedBase || observedCheck?.predictedBase
+      ? (
+          pinsFor(ctx).get(`${row.projectId}:${row.attemptId}`) ??
+          hostedLandingAttemptSchema.parse(JSON.parse(row.value))
+        ).main
+      : undefined;
+  const ownBase = (base: HostedLandingAttempt['main']) =>
+    base.head === main?.head && base.receiptId === main.receiptId;
+  const mainChanged = nextMain && !ownBase(nextMain);
+  const check = observedCheck ? { ...observedCheck } : undefined;
+  if (check?.predictedBase && ownBase(check.predictedBase)) delete check.predictedBase;
   const replacement =
     replaced === true
       ? mainChanged
@@ -628,6 +659,37 @@ export async function retainLandingProgress(
             message: 'A named child or check binding replaced this attempt.',
           }
       : replaced || null;
+  const censor =
+    replacement?.code ??
+    (state.error?.code === 'LANDING_CANCELLED' || state.observation.state === 'superseded'
+      ? state.error?.code
+      : state.phase === 'terminal-failed'
+        ? (replay?.check ?? row.replay?.check)?.stop
+        : undefined);
+  const evidence: LandingReplay = {
+    ...row.replay,
+    ...replay,
+    ...(check ? { check } : {}),
+    ...(row.replay?.check && replay?.check && row.replay.check.runId !== replay.check.runId
+      ? { earlierChecks: [...(row.replay.earlierChecks ?? []), row.replay.check] }
+      : {}),
+    ...(state.attemptId === state.firstAttemptId &&
+    state.retryReason === 'flake' &&
+    state.supersedes &&
+    !row.replay?.recheckCause &&
+    !replay?.recheckCause
+      ? { recheckCause: { kind: 'flake-retry', link: state.supersedes } }
+      : {}),
+    ...(nextMain ? { actualBase: nextMain } : {}),
+    ...(censor ? { censor } : {}),
+    ...(typeof replaced === 'object' &&
+    replacement?.code === 'CHANNEL_CHANGED' &&
+    nextMain &&
+    !replay?.replacementCause
+      ? { replacementCause: { kind: 'main-race', link: nextMain.receiptId } }
+      : {}),
+  };
+  if (observedBase && ownBase(observedBase)) delete evidence.actualBase;
   if (row.progress) {
     const retained = hostedLandingProgressSchema.parse(JSON.parse(row.progress));
     if (retained.settled) {
@@ -648,6 +710,9 @@ export async function retainLandingProgress(
   }
   await ctx.db.patch(row._id, {
     ...(row.sourceCreatedAt === undefined ? { sourceCreatedAt: row._creationTime, value: row.value } : {}),
+    ...(Object.keys(evidence).length || state.phase === 'landed' || state.phase === 'terminal-failed'
+      ? { replay: evidence }
+      : {}),
     progress: semanticPayload({
       ...(state.semanticConflicts ? { semanticConflicts: state.semanticConflicts } : {}),
       ...(state.batchDiagnostic ? { batchDiagnostic: state.batchDiagnostic } : {}),

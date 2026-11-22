@@ -14,6 +14,12 @@ const api = await import(moduleUrl('../convex/projectHostedLandingAttemptHistory
 const finishStore = await import(moduleUrl('../convex/projectHostedFinishStore.ts'));
 const store = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
 const park = await import(moduleUrl('../convex/projectHostedLandingParkExact.ts'));
+const { reserveFinishRetry } = await import(moduleUrl('../convex/projectHostedFinishCompose.ts'));
+const { checkReplay } = await import(moduleUrl('../convex/projectHostedLandingReplay.ts'));
+const { markCheckDispatch, observeCheckStart, observeCheckEnd } = await import(
+  moduleUrl('../convex/projectHostedCheckClock.ts')
+);
+const landingApi = await import(moduleUrl('../convex/projectHostedLanding.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -130,6 +136,8 @@ test('incident replay e62d834b (d52e034f): the CLI explains a main-race landing 
     ],
   );
   assert.equal(attempts[1].cause.code, 'CHANNEL_CHANGED');
+  assert.equal(attempts[1].replay.dispatchedAt, 'unrecorded');
+  assert.equal(attempts[1].replay.outcome, 'unrecorded');
   assert.match(attempts[1].cause.message, /Main changed/);
   assert.doesNotMatch(wire, /synthetic-secret/);
   const [current, earlier] = cliReplyLines(['agent', cli.root, 'queue'], result);
@@ -163,6 +171,92 @@ test('incident replay e62d834b (d52e034f): the CLI explains a main-race landing 
   assert.equal(failed.attempts[0].cause.code, 'SOURCE_JOB_FENCED');
   assert(failed.attempts[0].periods[0].endedAt, 'the failed reservation is no longer running');
   assert.equal(failed.attempts[1].cause.code, 'CHANNEL_CHANGED');
+});
+
+test('attempt replay records the mover and checked prefix, links a conflict recheck and censors a withdrawn follower', async t => {
+  const f = await finishFixture(t, { startAt: Date.parse(iso('09:18')) });
+  const first = await f.enqueue(f.request({ check: null }));
+  const prior = JSON.parse(attemptRow(f, first.id).value);
+  const prefix = { head: 'a'.repeat(64), receiptId: randomUUID() };
+  const mover = { head: 'b'.repeat(64), receipt: { id: randomUUID() } };
+  const run = {
+    id: randomUUID(),
+    status: 'passed',
+    candidate: { base: prefix },
+    endedAt: iso('09:23'),
+  };
+  markCheckDispatch(run, Date.parse(iso('09:19')));
+  observeCheckStart(run, iso('09:21'));
+  observeCheckEnd(run, iso('09:22'));
+  const tx = (name, handler) => f.transaction(name, { _handler: handler }, {});
+  await tx('replace-checked-attempt', async ctx => {
+    const key = { projectId: f.projectId, submissionId: first.id };
+    const { state } = await store.loadLanding(ctx, key);
+    await store.retainLandingProgress(ctx, state, false, undefined, checkReplay(run));
+    const finish = await finishStore.loadFinish(ctx, key);
+    await reserveFinishRetry(ctx, finish.row, finish.value, undefined, undefined, mover);
+  });
+  const {
+    attempts: [replacement, replaced],
+  } = JSON.parse(await read(f, first.id));
+  assert.deepEqual(replaced.replay, {
+    attempt: prior.number,
+    composedBase: prior.main,
+    runId: run.id,
+    predictedBase: prefix,
+    actualBase: { head: mover.head, receiptId: mover.receipt.id },
+    dispatchedAt: iso('09:19'),
+    startedAt: iso('09:21'),
+    endedAt: iso('09:22'),
+    recordedEndAt: iso('09:23'),
+    waitedToStartMs: 120_000,
+    outcome: 'censored',
+    censorReason: 'CHANNEL_CHANGED',
+    replacementCause: { kind: 'main-race', link: mover.receipt.id },
+    replacedByAttemptId: replacement.id,
+    recheckCause: 'unrecorded',
+  });
+
+  const follower = await f.enqueue(f.request({ check: null, message: 'Follower with a conflicting prefix' }));
+  const key = { projectId: f.projectId, submissionId: follower.id };
+  const conflictBatch = randomUUID();
+  await tx('recheck-exposed-conflict', async ctx => {
+    const { row, state } = await store.loadLanding(ctx, key);
+    const original = await store.loadLandingAttempt(ctx, {
+      projectId: f.projectId,
+      attemptId: state.attemptId,
+    });
+    const child = { ...original, ...(await store.forkLandingAttempt(ctx, state)) };
+    await store.insertLandingAttempt(ctx, child);
+    await store.writeLanding(
+      ctx,
+      row,
+      { ...state, attemptId: child.id, version: state.version + 1 },
+      false,
+      true,
+      undefined,
+      { replacementReplay: { replacementCause: { kind: 'conflict', link: conflictBatch } } },
+    );
+    await ctx.db.patch(row._id, {
+      orderWaits: [{ submissionId: first.id, held: 'dependent', footprints: 'overlap', seconds: 37 }],
+    });
+  });
+  await f.tx('withdraw-follower', landingApi.cancel, {
+    projectId: f.projectId,
+    request: JSON.stringify({
+      operationId: randomUUID(),
+      authorityEpoch: 1,
+      submissionId: follower.id,
+    }),
+  });
+  const history = JSON.parse(await read(f, follower.id));
+  assert.deepEqual(history.holdEdges, [
+    { holderSubmissionId: first.id, edgeType: 'dependent', heldSeconds: 37 },
+  ]);
+  assert.deepEqual(history.attempts[1].replay.replacementCause, { kind: 'conflict', link: conflictBatch });
+  assert.equal(history.attempts[0].replay.outcome, 'censored');
+  assert.equal(history.attempts[0].replay.censorReason, 'LANDING_CANCELLED');
+  assert.equal(history.attempts[0].replay.waitedToStartMs, 'unrecorded');
 });
 
 test('a parked no-check child owns only the new queue interval, even when its parent carried check timestamps', async t => {

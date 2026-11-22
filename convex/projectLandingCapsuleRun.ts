@@ -46,12 +46,20 @@ function evidence(rows: string[]) {
   const selected = all.slice(0, LANDINGS_ATTEMPTS);
   return {
     lastNumber: all.at(-1)?.number ?? null,
-    bytes: selected.reduce((n, row) => n + row.value.length + (row.progress?.length ?? 0), 0),
+    bytes: selected.reduce(
+      (n, row) =>
+        n +
+        row.value.length +
+        (row.progress?.length ?? 0) +
+        (row.replay ? utf8(JSON.stringify(row.replay)) : 0),
+      0,
+    ),
     chain: selected.map(row => {
       const attempt = JSON.parse(row.value),
         progress = row.progress ? JSON.parse(row.progress) : null;
       return {
         number: row.number,
+        ...(row.replay ? { replay: row.replay } : {}),
         value: canonicalPayload({
           number: attempt.number,
           candidate: { id: attempt.candidate.id },
@@ -62,6 +70,7 @@ function evidence(rows: string[]) {
           ? {
               progress: canonicalPayload({
                 timing: progress.timing,
+                phase: progress.phase,
                 error: progress.error
                   ? { ...progress.error, message: progress.error.message.slice(0, LANDINGS_REASON_CHARS) }
                   : null,

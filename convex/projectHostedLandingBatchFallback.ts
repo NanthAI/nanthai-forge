@@ -130,6 +130,15 @@ export async function advanceBatchFallback(
     await ctx.db.patch(next.row._id, { runnable: false });
     return { handled: next.state.id !== submissionId, command: null };
   }
-  await reserveFinishRetry(ctx, finish.row, finish.value, 'BATCH_FALLBACK');
+  const peers = next.state.batchDiagnostic?.failsTogetherWith;
+  await reserveFinishRetry(
+    ctx,
+    finish.row,
+    finish.value,
+    'BATCH_FALLBACK',
+    undefined,
+    undefined,
+    peers?.length === 1 ? { kind: 'pair-interaction', link: peers[0]!.submissionId } : undefined,
+  );
   return { handled: true, command: null };
 }

@@ -40,6 +40,7 @@ import {
   recordOutcome,
 } from '../src/hosted-landing-admission';
 import { digest } from '../src/state/hash';
+import { checkReplay } from './projectHostedLandingReplay';
 
 type Selected = Awaited<ReturnType<typeof requireLandingLease>>;
 /** Stable per submission (and platform restart), so a replay reconciles the same run. */
@@ -125,6 +126,7 @@ export async function settleLandingAdmission(
   if (row.admission?.status !== 'checking' || row.admission.runId !== run.id || state.phase !== 'checking')
     return true;
   const kind = checkFailureKind(run, { conflicts: [] });
+  const replay = checkReplay(run);
   const retries = row.admission.retries ?? 0;
   // An admission check that CI could not run counts toward the CI-down hold; the admission itself
   // still lets the entry join unadmitted, where its queue check holds while CI is down.
@@ -184,6 +186,9 @@ export async function settleLandingAdmission(
           timing: { submittedAt: state.at, ...state.timing, ciProgressAt: new Date().toISOString() },
         },
         false,
+        true,
+        undefined,
+        { replay },
       );
       return true;
     }
@@ -214,9 +219,11 @@ export async function settleLandingAdmission(
       phase: 'queued' as const,
       ...(run.testFiles ? { testFiles: run.testFiles } : {}),
       observation: landingObservation('queued'),
-      error: { code: 'MAIN_RED', message: parkedMessage(parked) },
+      error: { code: 'MAIN_RED', message: parkedMessage(parked.files) },
     };
-    await parkLanding(ctx, { ...row, admission }, next);
+    await parkLanding(ctx, { ...row, admission }, next, 'main-red', {
+      replay: { ...replay, recheckCause: { kind: 'audit', link: parked.auditRunId } },
+    });
     // A kept run (fa2c1383) held queue order, so a follower may be stacked behind it with no run of
     // its own: the park releases that place, and the queue tick lets the follower go on.
     return Boolean(row.admission.kept);
@@ -261,7 +268,7 @@ export async function settleLandingAdmission(
           observation: landingObservation('queued'),
           error: null,
         };
-  await writeLanding(ctx, { ...row, admission }, next, kind !== 'tests');
+  await writeLanding(ctx, { ...row, admission }, next, kind !== 'tests', true, undefined, { replay });
   if (kind === 'tests') await settleLandingOperation(ctx, next);
   return true;
 }

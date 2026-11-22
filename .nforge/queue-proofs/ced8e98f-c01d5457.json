@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedAcceptancePublish.ts": "003dc1e5e0f7a30077c0890a992e5cfbe5c0f5cf0b8b3ca51b2aacf4d11965e9",
+    "convex/projectHostedCheckCallbacks.ts": "66dc05d8552ee3cb8b6178a27168cd3345d83c15f580fdd126bf491d6f654af4",
+    "convex/projectHostedCheckDispatch.ts": "99fb629a0a7785d2ab0fbd5ff34ea550ee6309e794e7df3ada2365e98d1c6a8d",
+    "convex/projectHostedLandingBatchCheck.ts": "1abdef49c714dbf6b2d73ba9a65ec268472ef962eb472c4926e47eff05ec410e",
+    "convex/projectHostedLandingBatchFallback.ts": "a4e52ed835f326b3a2b65a88b5b56043d1e756cc850ad8445344dfc2d7a001aa",
+    "convex/projectHostedLandingBatchFinish.ts": "9cc19ce753ff7edec18cf0617e930ccfc2a96accd61a5278a4165721e1dc7f66",
+    "convex/projectHostedLandingBatchPublish.ts": "485dffaa32ef9ac3bd543a7e2d2550df8dc416617f92eecfa4b42dd18d314a74",
+    "convex/projectHostedLandingBatchSplit.ts": "f14fa264f2c9972c3dbc19af2b6e399222164289f56c5907c7ccadd1579ea608",
+    "convex/projectHostedLandingBatchStore.ts": "54398c2a76ca0aad1b74c75453e4c70a45477d896aff361dcfc65640779a608c",
+    "convex/projectHostedLandingCheckRetry.ts": "1242c950eeafed8d3ac3b93feecba896f7d5563ea491ba93132af3682127f5de",
+    "convex/projectHostedLandingCohortConflicts.ts": "fa70b5fa299961ca05289134861d6c72dd8f3eef4db07bd5477d77b7eff024b7",
+    "convex/projectHostedLandingControl.ts": "a85f3242cc4ac7192725ad980e3a119566e8ae72b735099310327a1d09cde397",
+    "convex/projectHostedLandingPark.ts": "25e89b7e4d162c41ac2ddadfbc19b669192157988733a92483ec820b6b03d46f",
+    "convex/projectHostedLandingPipelineInvalidation.ts": "b11b554922038f332b2c8e42d12c3daf70eb0dfb259c111510eb34c58baeb592"
+  },
+  "replay": {
+    "incident": "c01d5457",
+    "test": "incident c01d5457: failed shared compose splits ${count} saved Lanes without a watchdog or changed member pins",
+    "receipt": "f25eddd9-94ef-44d1-af2a-a0d778f96fd7"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Abf0c8f91-0814-4b46-88c1-732dfd340c5d",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a20080-dafe-7ab2-bdc5-7ee3908e08bb",
+    "receipt": "6d04a7ee-2263-4e49-84f3-bbb84624d910"
+  }
+}

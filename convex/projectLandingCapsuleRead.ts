@@ -17,6 +17,7 @@ import {
 } from './projectLandingCapsuleProject';
 import type { LandingCapsulePointer } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
+import { archivedAttemptHistory } from './projectHostedLandingAttemptHistory';
 
 type Marker = { protocol: 1; submissionId: string; pointer: LandingCapsulePointer };
 type Context = {
@@ -32,6 +33,7 @@ export const capsuleHistoryArgs = {
     v.literal('projectHostedFinishObserve:page'),
     v.literal('projectHostedLanding:status'),
     v.literal('projectHostedLanding:attempts'),
+    v.literal('projectHostedLandingAttemptHistory:read'),
     v.literal('projectHostedLanding:candidate'),
     v.literal('projectHostedFinish:inputs'),
     v.literal('projectRecoveryHosted:page'),
@@ -83,6 +85,8 @@ export async function capsuleHistory(
       projected = capsuleObserveReply(capsule, result, command);
     else if (input.query === 'projectHostedLanding:attempts')
       projected = capsuleAttemptsReply(capsule, result, command);
+    else if (input.query === 'projectHostedLandingAttemptHistory:read')
+      projected = archivedAttemptHistory(capsule, result);
     else if (input.query === 'projectHostedFinish:inputs') {
       const selection = capsuleInputSelection(capsule, result, command);
       const sources = selection.pins.length

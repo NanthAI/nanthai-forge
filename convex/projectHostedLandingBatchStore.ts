@@ -283,6 +283,8 @@ export async function installBatchAttempt(
      * groups stacked on (head, receipt) stay valid (ea86f3fb). */
     keepReceipt?: boolean;
     providerDelayed?: true;
+    moverReceiptId?: string;
+    replacementReplay?: import('./projectHostedLandingReplay').LandingReplay;
   },
 ) {
   const { original } = input;
@@ -334,6 +336,15 @@ export async function installBatchAttempt(
     // A retained verdict has already sent its completion wake. The binding
     // itself makes the attempt selectable for the ordinary queue evaluator.
     input.checkSettled ?? false,
+    true,
+    undefined,
+    {
+      ...(input.moverReceiptId
+        ? { replacementReplay: { replacementCause: { kind: 'main-race', link: input.moverReceiptId } } }
+        : input.replacementReplay
+          ? { replacementReplay: input.replacementReplay }
+          : {}),
+    },
   );
   return attempt;
 }

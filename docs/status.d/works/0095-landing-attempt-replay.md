@@ -1,0 +1,1 @@
+Accepted landing reads include replay evidence for the checked and published bases, check clocks, censored attempts, recorded replacement causes and order holds. Unrecorded observations stay explicit, and each project retains its own evidence with its existing landing history.

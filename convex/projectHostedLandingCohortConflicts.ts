@@ -82,7 +82,7 @@ export async function settleBatchConflicts(ctx: MutationCtx, input: BatchIdentit
         at: batch.at,
       });
     } else if (!exact || batch.phase === 'landed' || !batch.included?.length) {
-      await recomposeRejectedMember(ctx, input, batch, current);
+      await recomposeRejectedMember(ctx, input, batch, current, true);
     }
   }
   if (!batch.included?.length) await writeBatch(ctx, input, { ...batch, phase: 'landed' });
@@ -101,6 +101,7 @@ async function recomposeRejectedMember(
   input: BatchIdentity,
   batch: LandingBatch,
   current: Awaited<ReturnType<typeof loadLanding>>,
+  exposedConflict = Boolean(current.row.wouldConflict && JSON.parse(current.row.wouldConflict).resolution),
 ) {
   const { batchId: _batch, ...state } = current.state;
   void _batch;
@@ -111,6 +112,15 @@ async function recomposeRejectedMember(
     false,
   );
   const finish = await loadFinish(ctx, { projectId: input.projectId, submissionId: state.id });
-  if (!finish.value.pending) await reserveFinishRetry(ctx, finish.row, finish.value, 'BATCH_FALLBACK');
+  if (!finish.value.pending)
+    await reserveFinishRetry(
+      ctx,
+      finish.row,
+      finish.value,
+      'BATCH_FALLBACK',
+      undefined,
+      undefined,
+      exposedConflict ? { kind: 'conflict', link: batch.id } : undefined,
+    );
   else await scheduleFinish(ctx, finish.row);
 }

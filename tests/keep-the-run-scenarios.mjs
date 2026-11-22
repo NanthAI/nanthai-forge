@@ -23,85 +23,87 @@ const LANDED_FEED_ROW_BYTES = 490;
  * Each write total shows its landed feed rows separately. Red baselines include the failed row.
  * Item 9064e885 stamps proof pins and verified wait facts on existing rows. The fixed-clock
  * fixtures add 1,672 to 34,173 read bytes and 223 to 8,502 write bytes, with the same call and
- * document counts. The two C1 follower cases also exercise the order-history fields. */
+ * document counts. The two C1 follower cases also exercise the order-history fields.
+ * Item ced8e98f adds 2,085 to 15,392 read bytes and 1,014 to 4,781 write bytes
+ * on existing rows, with the same call and document counts. */
 export const MEASURED = {
   'global-risk mover, strict': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_174_924,
-    writeBytes: 442_497 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_179_826,
+    writeBytes: 444_612 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, fast': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_174_484,
-    writeBytes: 442_461 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_179_386,
+    writeBytes: 444_576 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'order-sensitive mover, strict': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_174_956,
-    writeBytes: 442_517 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_179_858,
+    writeBytes: 444_632 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'order-sensitive mover, fast': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_174_516,
-    writeBytes: 442_481 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_179_418,
+    writeBytes: 444_596 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, fast': {
     calls: 66,
     documents: 1457,
-    readBytes: 1_562_395,
-    writeBytes: 508_883 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_571_448,
+    writeBytes: 511_731 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, fast, carry off': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_181_104,
-    writeBytes: 443_023 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_186_006,
+    writeBytes: 445_138 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, fast, carry off': {
     calls: 73,
     documents: 1542,
-    readBytes: 1_610_909,
-    writeBytes: 566_602 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_618_105,
+    writeBytes: 569_549 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, strict, red': {
     calls: 49,
     documents: 978,
-    readBytes: 981_801,
-    writeBytes: 382_608 + LANDED_FEED_ROW_BYTES,
+    readBytes: 985_583,
+    writeBytes: 384_538 + LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, strict, red': {
     calls: 32,
     documents: 556,
-    readBytes: 580_075,
-    writeBytes: 228_600 + LANDED_FEED_ROW_BYTES,
+    readBytes: 582_430,
+    writeBytes: 229_934 + LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, strict, C1 follower': {
     calls: 128,
     documents: 2605,
-    readBytes: 2_610_447,
-    writeBytes: 912_726 + 3 * LANDED_FEED_ROW_BYTES,
+    readBytes: 2_621_548,
+    writeBytes: 916_774 + 3 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, strict, C1 follower': {
     calls: 136,
     documents: 2924,
-    readBytes: 3_120_182,
-    writeBytes: 1_005_423 + 3 * LANDED_FEED_ROW_BYTES,
+    readBytes: 3_135_574,
+    writeBytes: 1_010_204 + 3 * LANDED_FEED_ROW_BYTES,
   },
   'no checking row, strict': {
     calls: 23,
     documents: 432,
-    readBytes: 441_875,
-    writeBytes: 169_825 + LANDED_FEED_ROW_BYTES,
+    readBytes: 443_960,
+    writeBytes: 170_839 + LANDED_FEED_ROW_BYTES,
   },
   'no checking row, fast': {
     calls: 23,
     documents: 432,
-    readBytes: 441_711,
-    writeBytes: 169_807 + LANDED_FEED_ROW_BYTES,
+    readBytes: 443_796,
+    writeBytes: 170_821 + LANDED_FEED_ROW_BYTES,
   },
 };
 
@@ -181,10 +183,12 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // acceptance plan during publication. The arms settle different rows and calls stay unchanged.
 // Item 9064e885 adds receipt pins and the first kept transition on existing rows.
 // The keep and retire paths touch those rows a different number of times. Calls are unchanged.
+// Item ced8e98f records replay evidence on existing writes. Each arm touches those rows at
+// different stages. The measured deltas preserve the alias-write split and exact call counts.
 export const WIRED = {
-  carry: { calls: 7, readBytes: 419_707, writeBytes: 77_460 },
-  'scoped-recheck': { calls: 17, readBytes: 553_906, writeBytes: 147_252 },
-  red: { calls: -17, readBytes: -386_699, writeBytes: -144_612 },
+  carry: { calls: 7, readBytes: 423_903, writeBytes: 78_193 },
+  'scoped-recheck': { calls: 17, readBytes: 557_333, writeBytes: 148_084 },
+  red: { calls: -17, readBytes: -388_081, writeBytes: -145_208 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

@@ -14,6 +14,7 @@ import {
   storeCheckReports,
 } from './projectHostedCheckReports';
 import { hostedVerdictKey } from '../src/hosted-check-evidence';
+import { hostedCheckClock } from './projectHostedCheckClock';
 import { onGateRunTerminal } from './projectHostedMainAuditState';
 import { semanticPayload } from '../src/semantic-payload';
 import { wakeExpiredLogs } from './projectCheckLogRetention';
@@ -128,6 +129,7 @@ export async function loadHostedCheck(
     'Hosted run row identity differs from the requested check.',
   );
   const run = hostedCheckRunSchema.parse(JSON.parse(row.value));
+  hostedCheckClock(run, row.replayClock);
   invariant(
     run.id === input.runId && run.projectId === input.projectId,
     'EVIDENCE_CHANGED',
@@ -211,6 +213,7 @@ export async function writeHostedCheck(
   await ctx.db.patch(id, {
     ...reports,
     status: run.status,
+    ...(hostedCheckClock(run) ? { replayClock: hostedCheckClock(run) } : {}),
     ...(reportRecovered ? { reportRecovery: undefined } : {}),
     ...(providerAttested && run.status === 'passed' ? { verdictKey: hostedVerdictKey(run) } : {}),
     value: semanticPayload(hostedCheckRunSchema.parse(stored), true),

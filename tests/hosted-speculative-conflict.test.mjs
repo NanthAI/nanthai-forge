@@ -182,6 +182,11 @@ test('predecessor landing rechecks a speculative rejection on real main and repo
   const failedAttempt = [...f.tables.projectHostedLandingAttempts.values()]
     .map(row => JSON.parse(row.value))
     .find(attempt => attempt.id === failed.attemptId);
+  const retired = [...f.tables.projectHostedLandingAttempts.values()].find(
+    row => row.attemptId === failedAttempt.parentAttemptId,
+  );
+  assert.equal(retired.replay.replacementCause.kind, 'conflict');
+  assert.equal(retired.replay.replacedByAttemptId, failedAttempt.id);
   const candidateRow = [...f.tables.projectHostedRecords.values()].find(
     row => row.kind === 'candidate' && row.key === failedAttempt.candidate.id,
   );

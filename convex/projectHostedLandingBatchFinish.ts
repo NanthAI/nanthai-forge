@@ -273,6 +273,9 @@ export async function batchFinishStep(
         projectId: input.projectId,
         original: member,
         main: source.state.request.expectedMain,
+        ...(batch.nextCheckCause === checkCause.mainMoved && !batch.predecessor
+          ? { moverReceiptId: source.state.request.expectedMain.receiptId }
+          : {}),
         checkOperationId: run.request.operationId,
         candidate: {
           id: candidate.id,

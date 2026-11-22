@@ -3,6 +3,21 @@
   "about": "Regression ladder rung 3 (docs/agents/regression-ladder.md): each core-claim incident and B1.5d case study names the normal-suite test that replays it. tests/incident-replays.test.mjs fails if a named test is renamed, removed, skipped or moved out of tests/*.test.mjs.",
   "replays": [
     {
+      "incident": "ced8e98f",
+      "what": "Replay evidence links a main race and conflict to the retired attempt and distinguishes censoring from failure",
+      "file": "tests/hosted-landing-attempt-history.test.mjs",
+      "paths": [
+        "convex/projectHostedCheckClock.ts",
+        "convex/projectHostedCheckStore.ts",
+        "convex/projectHostedFinishCompose.ts",
+        "convex/projectHostedLandingAdmission.ts",
+        "convex/projectHostedLandingAttemptHistory.ts",
+        "convex/projectHostedLandingReplay.ts",
+        "convex/projectHostedLandingStore.ts"
+      ],
+      "test": "attempt replay records the mover and checked prefix, links a conflict recheck and censors a withdrawn follower"
+    },
+    {
       "incident": "830ccd4b",
       "what": "An unrelated protected-path edit discarded a passing landing check; the failure recurred on submission 81359837",
       "file": "tests/hosted-acceptance.test.mjs",

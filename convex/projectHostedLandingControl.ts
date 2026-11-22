@@ -12,6 +12,7 @@ import {
   semanticBudgetMessage,
 } from '../src/intent-semantic-conflict';
 import { retainCheckProgress } from './projectHostedLandingCheckProgress';
+import { checkReplay, type LandingReplay } from './projectHostedLandingReplay';
 import type { MutationCtx } from './_generated/server';
 import {
   landingQueue,
@@ -223,6 +224,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
     observation = landingObservation('queued');
   let error: HostedLandingState['error'] = null;
   let passedAt: string | null = null;
+  let replay: LandingReplay | undefined;
   try {
     if (await prepareLandingCheck(ctx, claim, { row, state, attempt, queue: held }, now))
       return (await loadLanding(ctx, claim)).state;
@@ -249,6 +251,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
       const check = attempt.check;
       const { run } = await loadHostedCheck(ctx, { projectId: claim.projectId, runId: check.runId });
       retainCheckProgress(state, run, now);
+      replay = checkReplay(run);
       // A verdict (a pass or a failing test) shows CI runs checks: a CI-down hold ends (0 I/O unset).
       if (held?.ciDown && hostedCheckTerminal(run) && checkFailureKind(run, { conflicts: [] }) !== 'platform')
         await clearCiDown(ctx, held);
@@ -358,15 +361,10 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
   if (phase === 'terminal-failed')
     state.timing = { submittedAt: state.at, ...state.timing, settledAt: new Date(now).toISOString() };
   const next = { ...state, version: state.version + 1, phase, observation, error };
-  await writeLanding(
-    ctx,
-    row,
-    next,
-    false,
-    true,
-    undefined,
-    passedAt ? { settlement: { passedAt, startedAt: now } } : undefined,
-  );
+  await writeLanding(ctx, row, next, false, true, undefined, {
+    replay,
+    ...(passedAt ? { settlement: { passedAt, startedAt: now } } : {}),
+  });
   if (phase === 'terminal-failed') await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, held, now);
   return next;

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedCheckClock.ts": "27266ae0b8b33cd17610ad07d946794c36218b31dc82608c8bbb6a601989c940",
+    "convex/projectHostedCheckStore.ts": "b1f5088f3d6155f9ef4cf86a82557099cf38c76234b31a832992d83f20ac79dd",
+    "convex/projectHostedFinishCompose.ts": "d41fa383ca1d8b2a5b598139e36d008c7cc63003319357040c9ad225fa4626be",
+    "convex/projectHostedLandingAdmission.ts": "b15192e19babf5f5e8cf531e99feb472b70ff30eb280c9259b503d0e0379235b",
+    "convex/projectHostedLandingAttemptHistory.ts": "90879e3756109e871db53410642d6c41ff563cee821c953df92341ceb06d90f8",
+    "convex/projectHostedLandingReplay.ts": "2fb7174e651132a9f38709098d71a657a8adcdc28c3e559a0ba3a0eec6a8cafb",
+    "convex/projectHostedLandingStore.ts": "ae2618a8d703be80d319adbacd928ccd686073124adb9218e0477b0106b87676"
+  },
+  "replay": {
+    "incident": "ced8e98f",
+    "test": "attempt replay records the mover and checked prefix, links a conflict recheck and censors a withdrawn follower",
+    "receipt": "f25eddd9-94ef-44d1-af2a-a0d778f96fd7"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Abf0c8f91-0814-4b46-88c1-732dfd340c5d",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a20080-dafe-7ab2-bdc5-7ee3908e08bb",
+    "receipt": "6d04a7ee-2263-4e49-84f3-bbb84624d910"
+  }
+}

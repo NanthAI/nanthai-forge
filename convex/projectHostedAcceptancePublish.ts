@@ -16,6 +16,7 @@ import type { MutationCtx } from './_generated/server';
 import { activeProject } from './projectAuthority';
 import { requireLandingLease, type LandingClaim } from './projectHostedLandingControl';
 import { closeOrderWait } from './projectHostedLandingOrder';
+import { checkReplay } from './projectHostedLandingReplay';
 import { writeLanding, settleLandingOperation, loadLanding } from './projectHostedLandingStore';
 import { releaseLandingQueue } from './projectHostedLandingWake';
 import { acceptanceSelection, acceptanceRow, acceptancePlan } from './projectHostedAcceptanceStore';
@@ -484,6 +485,7 @@ export async function publishAcceptance(
   const completionAlarm = plan.inputPages ? row.alarm?.taskId : undefined;
   await writeLanding(ctx, row, next, false, row.runId !== run?.id, completionAlarm, {
     feedLanes: plan.feedLanes,
+    replay: { ...(run ? checkReplay(run) : {}), actualBase: receipt.previous },
   });
   await endLandedApprovals(ctx, approvals);
   await settleLandingOperation(ctx, next);

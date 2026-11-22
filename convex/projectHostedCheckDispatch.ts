@@ -13,6 +13,7 @@ import {
 import { saveObject } from './projectHostedSaveStore';
 import { hostedCheckPlanSchema, hostedCheckTerminal, checkPin } from '../src/hosted-check';
 import { invariant } from '../src/errors';
+import { markCheckDispatch } from './projectHostedCheckClock';
 
 export const hostedCheckControlSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('claim'), owner: z.uuid(), leaseMs: z.number().safe().positive() }).strict(),
@@ -134,6 +135,7 @@ export async function controlHostedCheck(
       );
       run.recoveryUsed = true;
     } else if (run.dispatchStarted) return { run, acquired: true, dispatch: false };
+    markCheckDispatch(run, now);
     run.dispatchStarted = true;
     run.status = 'dispatching';
     await writeHostedCheck(ctx, row._id, run);

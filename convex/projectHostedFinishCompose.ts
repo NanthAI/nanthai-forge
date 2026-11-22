@@ -83,6 +83,7 @@ export async function reserveFinishRetry(
   cause: 'BATCH_FALLBACK' | 'CHECK_EVIDENCE_REFRESH' = 'CHECK_EVIDENCE_REFRESH',
   precompose?: NonNullable<HostedFinish['pending']>['precompose'],
   observedMain?: { head: string; receipt: { id: string } },
+  replayCause?: import('./projectHostedLandingReplay').LandingReplay['replacementCause'],
 ) {
   invariant(!value.pending, 'WORK_STALE', 'Resume the already pending finish attempt.');
   const input = { projectId: row.projectId, submissionId: row.submissionId };
@@ -113,14 +114,20 @@ export async function reserveFinishRetry(
   };
   const mainChanged = main.head !== previous.main.head || main.receipt.id !== previous.main.receiptId;
   if (!precompose)
-    await retainLandingProgress(ctx, state, {
-      code: mainChanged ? 'CHANNEL_CHANGED' : cause,
-      message: mainChanged
-        ? `${await mainMoveReason(ctx, row.projectId, previous, main.head, state.sequence)}; a named child recomposes the original selection.`
-        : cause === 'BATCH_FALLBACK'
-          ? 'The shared batch fell back to an individual Candidate; main did not change.'
-          : 'The acceptance evidence needs an exact refresh; main did not change.',
-    });
+    await retainLandingProgress(
+      ctx,
+      state,
+      {
+        code: mainChanged ? 'CHANNEL_CHANGED' : cause,
+        message: mainChanged
+          ? `${await mainMoveReason(ctx, row.projectId, previous, main.head, state.sequence)}; a named child recomposes the original selection.`
+          : cause === 'BATCH_FALLBACK'
+            ? 'The shared batch fell back to an individual Candidate; main did not change.'
+            : 'The acceptance evidence needs an exact refresh; main did not change.',
+      },
+      pending.main,
+      { replacedByAttemptId: pending.id, ...(replayCause ? { replacementCause: replayCause } : {}) },
+    );
   const retiringSolo =
     !precompose && !state.batchId && (state.phase === 'checking' || state.phase === 'ready');
   if (retiringSolo && landing.pipelineRetiredAttemptId !== state.attemptId)

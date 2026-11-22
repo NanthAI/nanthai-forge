@@ -7,6 +7,7 @@ import { type HostedCheckRun, checkCause } from '../src/hosted-check';
 import { HOSTED_PLATFORM_RETRIES, checkFailureKind } from '../src/hosted-landing-admission';
 import { enqueueHostedCheck } from './projectHostedChecks';
 import { installBatchAttempt } from './projectHostedLandingBatchStore';
+import { checkReplay } from './projectHostedLandingReplay';
 
 /** The same platform budget and exact-attempt installation as batch checks.
  * Only an explicit infrastructure result retries; test exits and cancellations settle. */
@@ -41,6 +42,10 @@ export async function retrySoloLandingCheck(
     ...(reason ? { providerDelayed: true } : {}),
     original: { ...attempt, platformRetries: (attempt.platformRetries ?? 0) + 1 },
     checkOperationId: operationId,
+    replacementReplay: {
+      ...checkReplay(run),
+      replacementCause: { kind: 'provider-retry', link: run.id },
+    },
     check: {
       runId: next.id,
       checkId: next.check.id,

@@ -692,3 +692,36 @@ test('frictions 659f23ba and c5e40b62: one landing by its receipt id or a unique
   await assert.rejects(byReceipt('receipt-9'), /NOT_FOUND/);
   await assert.rejects(byReceipt('rece'), /at least 8 characters/);
 });
+
+test('the accepted landing ledger exports replay evidence with no check-run lookup', async () => {
+  const f = fixture();
+  const base = { head: 'h-R0', receiptId: 'R0' };
+  f.landing(1, { at: 60 });
+  const before = f.meter.queries;
+  const {
+    landings: [legacy],
+  } = await f.read();
+  const reads = f.meter.queries - before;
+  assert.equal(legacy.attemptReplay[0].outcome, 'unrecorded');
+  assert.equal(legacy.attemptReplay[0].waitedToStartMs, 'unrecorded');
+  const attempt = f.tables.projectHostedLandingAttempts[0];
+  attempt.replay = {
+    check: {
+      runId: 'adm-1',
+      predictedBase: base,
+      dispatchedAt: minute(50),
+      startedAt: minute(51),
+      endedAt: minute(59),
+    },
+    actualBase: base,
+  };
+  attempt.progress = JSON.stringify({ phase: 'landed' });
+  const {
+    landings: [current],
+  } = await f.read();
+  assert.equal(f.meter.queries - before, reads * 2);
+  assert.equal(current.attemptReplay[0].waitedToStartMs, 60_000);
+  assert.equal(current.attemptReplay[0].outcome, 'landed');
+  assert.deepEqual(current.attemptReplay[0].predictedBase, base);
+  assert.deepEqual(current.attemptReplay[0].actualBase, base);
+});

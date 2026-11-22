@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkReplay } from './projectHostedLandingReplay';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { compactDiscardedChecksOn } from './projectHostedLandingRunnerCostSwitch';
 import { retiredCheckUsage } from './projectHostedLandingRunnerCosts';
@@ -116,6 +117,7 @@ async function invalidatePipelineOnce(
         continue;
       }
       let usage;
+      let retiredCheck;
       if (parent.check && row.runId === parent.check.runId) {
         if (state.phase === 'ready') usage = retiredCheckUsage(state.counts);
         else if (compactDiscardedChecksOn()) {
@@ -125,6 +127,7 @@ async function invalidatePipelineOnce(
             runs.get(row.runId) ??
             (await loadHostedCheck(ctx, { projectId: input.projectId, runId: row.runId }));
           runs.set(row.runId, selected);
+          retiredCheck = checkReplay(selected.run);
           if (selected.run.status === 'passed') {
             const members =
               row.runId === descendant.batch.runId
@@ -166,6 +169,13 @@ async function invalidatePipelineOnce(
         },
         true,
         false,
+        undefined,
+        {
+          replacementReplay: {
+            ...retiredCheck,
+            replacementCause: { kind: 'pair-interaction', link: pinned.submissionId },
+          },
+        },
       );
     }
   }
