@@ -1345,13 +1345,13 @@ retained bytes; it does not multiply storage by 22/30.
   publication and status processing, not a second copy of the CI job.
 - **Forge development:** [forge-check.yml](../../.github/workflows/forge-check.yml)
   uses the configured runner labels; [foundation.yml](../../.github/workflows/foundation.yml)
-  separately runs Verify Forge on mirror pushes. Deploy/sign/smoke workflows are
-  Forge development expense. They do not run once per outside-user landing.
+  runs Verify Forge on pull requests and manual dispatches. Deploy/sign/smoke
+  workflows are Forge development expense. They do not run once per outside-user landing.
 
 The ledger measured 77.9 stored shard runner-minutes/landing, distinct from
 12.3 wall minutes. Capture #4 reconciled about 86.4 GitHub forge-check minutes,
-22 Verify Forge minutes and 2.6 deploy/sign/smoke minutes per landing. Use 86.4,
-not their sum, as the illustrative Forge-runner budget. This is Forge's large test
+22 Verify Forge minutes from the former mirror-push trigger and 2.6 deploy/sign/smoke
+minutes per landing. Use 86.4 as the illustrative Forge-runner budget. This is Forge's large test
 suite, not a measurement of arbitrary customer tests; docs/scoped checks can be
 much smaller. At [GitHub's Linux x64 rate](https://docs.github.com/en/billing/reference/actions-runner-pricing)
 of $0.006/minute, a metered Forge-owned runner would add **$0.5184/landing**:

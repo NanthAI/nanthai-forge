@@ -110,26 +110,15 @@ test('fixed Node 24 recipes agree with the generated check workflow', () => {
   assert.match(readFileSync('.github/workflows/forge-check.yml', 'utf8'), /node-version: '24\.22\.1'/);
 });
 
-test('only newer main pushes cancel older public verifies; PR and manual runs remain independent', () => {
-  const section = workflow.split('\nconcurrency:\n')[1].split('\njobs:\n')[0];
-  const group = section.match(/  group: (.+)/)[1];
-  const cancel = section.match(/  cancel-in-progress: \$\{\{ (.+) \}\}/)[1];
-  const evaluate = (expression, github) => Function('github', `return (${expression});`)(github);
-  const context = (event_name, ref, run_id) => ({ workflow: 'Verify Forge', event_name, ref, run_id });
-  const expand = github =>
-    group.replace(/\$\{\{ (.*?) \}\}/g, (_, expression) => evaluate(expression, github));
-  const main1 = context('push', 'refs/heads/main', 1),
-    main2 = context('push', 'refs/heads/main', 2);
-  assert.equal(expand(main1), expand(main2));
-  assert.equal(evaluate(cancel, main1), true);
-  for (const event of ['pull_request', 'workflow_dispatch', 'push']) {
-    const a = context(event, event === 'push' ? 'refs/heads/topic' : 'refs/heads/main', 3);
-    const b = { ...a, run_id: 4 };
-    assert.notEqual(expand(a), expand(b));
-    assert.notEqual(expand(a), expand(main1));
-    assert.equal(evaluate(cancel, a), false);
-  }
-  assert.match(workflow, /push:\n    branches: \[main\]\n  pull_request:\n  workflow_dispatch:/);
+test('public verification runs only for pull requests and manual dispatches', () => {
+  assert.match(workflow, /^on:\n  pull_request:\n  workflow_dispatch:\n\n/m);
+});
+
+test('the workflow forwards the classifier scope and supplies exact pull-request pins', () => {
+  const scope = job('scope');
+  assert.match(scope, /^    outputs:\n      scope: \$\{\{ steps\.classify\.outputs\.scope \}\}$/m);
+  assert.match(scope, /CI_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
+  assert.match(scope, /CI_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
 });
 
 test('public verify actions use immutable SHAs and checkout never persists credentials', () => {
@@ -139,18 +128,4 @@ test('public verify actions use immutable SHAs and checkout never persists crede
     if (step.startsWith('actions/checkout@')) assert.match(step, /persist-credentials: false/);
   }
   assert.equal(steps.filter(step => step.startsWith('actions/checkout@')).length, 5);
-});
-
-test('a newer docs-only main push still runs the full audit it may have superseded', () => {
-  const expression = job('scope').match(/scope: \$\{\{ (.+) \}\}/)[1];
-  const output = (event_name, ref, scope) =>
-    Function(
-      'github',
-      'steps',
-      `return (${expression});`,
-    )({ event_name, ref }, { classify: { outputs: { scope } } });
-  for (const scope of ['docs', 'full']) assert.equal(output('push', 'refs/heads/main', scope), 'full');
-  assert.equal(output('pull_request', 'refs/pull/1/merge', 'docs'), 'docs');
-  assert.equal(output('pull_request', 'refs/pull/1/merge', 'full'), 'full');
-  assert.equal(output('workflow_dispatch', 'refs/heads/main', 'full'), 'full');
 });

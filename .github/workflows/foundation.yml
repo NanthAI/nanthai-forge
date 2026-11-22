@@ -1,25 +1,17 @@
 name: Verify Forge
 
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Only push-to-main runs supersede each other. PR and manual runs remain independent.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'newest-main' || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-
 jobs:
   scope:
     runs-on: ubuntu-latest
     outputs:
-      # A docs-only push can supersede an unfinished code audit; main always runs full.
-      scope: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'full' || steps.classify.outputs.scope }}
+      scope: ${{ steps.classify.outputs.scope }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
@@ -32,7 +24,7 @@ jobs:
         run: node scripts/ci-scope.mjs
         env:
           CI_EVENT_NAME: ${{ github.event_name }}
-          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
   foundation:

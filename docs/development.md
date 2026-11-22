@@ -578,12 +578,12 @@ list through a runner environment variable. Both matrices disable
 fail-fast, and native self-host is independent. The final `verify` job always runs
 and requires every selected job to succeed, including all shards; only jobs
 excluded by the docs-only scope may be skipped. Branch protection can require
-this single `verify` check. Pushes to main share a concurrency group: a newer push
-cancels older queued or running main verifies. Main pushes always select the full
-audit, including docs-only pushes that may supersede an unfinished code audit.
-Pull requests and manual runs each
-keep their own group. Eight test shards keep one full audit well inside the org's concurrent-job
-allowance while preserving the full suite and every static stage.
+this single `verify` check. Verify Forge runs on pull requests and manual
+dispatches. Manual dispatches select full verification. Forge checks the exact
+Candidate before landing on its own main, so pushing that accepted State to the
+GitHub mirror does not start Verify Forge. Eight test shards keep one full audit
+within the org's concurrent-job allowance while preserving the full suite and
+every static stage.
 Separately, `.github/workflows/web-deploy.yml` builds the web app and deploys it to the dev Netlify site on pushes to main that touch web, source, docs or package files. The Netlify CLI is an exact development dependency pinned with its full dependency tree in `package-lock.json`; the workflow installs with `npm ci --ignore-scripts` and invokes `npx --no-install netlify`. The deploy token is present only for the deploy step.
 
 ## Code map

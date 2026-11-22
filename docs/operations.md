@@ -1662,8 +1662,9 @@ those shards, about 54 per accepted check, 5 discarded and 19 for the audits, 78
 repository and about $0.006 a minute at list price for a private one. GitHub's own count for capture
 #4 was 113 a landing, of which the forge-check runs were 86 (the stored shard seconds are about 90% of
 them; the rest is plan, static and setup jobs, check-only runs and cancelled runs no landing owns), this
-repository's own Verify Forge workflow on every push 22, and deploy, sign and smoke jobs 3. A change that
-doubles the shard count or the test set shows in `landing-runner-accepted-mean`, not in the wall time.
+repository's former push-triggered Verify Forge runs were 22, and deploy, sign
+and smoke jobs were 3. A change that doubles the shard count or the test set
+shows in `landing-runner-accepted-mean`, not in the wall time.
 Billed dollars, Convex per-function costs and the R2 operations of saves and check logs still come from the
 live captures (`costGuard.reference` holds the latest per-family dollars, labelled as list-price
 estimates).

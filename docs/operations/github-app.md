@@ -275,6 +275,11 @@ All of these must hold:
   watcher or idle job.
 - The binding is current when the token is minted (`githubBindingStore:requireId`).
 
+The repository's workflow triggers determine which GitHub Actions jobs a mirror
+push starts. In Forge's own repository, the Forge landing check verifies the
+Candidate before acceptance. Verify Forge runs for pull requests and manual
+dispatches, so a mirror push has no second Verify Forge run.
+
 ### What it pushes
 
 - **Branch:** only `refs/heads/main`, by `PATCH` with `force: false`. Lane refs,

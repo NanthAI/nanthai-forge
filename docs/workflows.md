@@ -833,6 +833,11 @@ automatic worker resume. Reconcile explicitly; manual `github-sync --push` can r
 remote history has been resolved. Published source is undone by a compensating
 Lane, never by automatically rewinding GitHub.
 
+Forge checks the exact Candidate for its own repository before accepting it on
+main. Its GitHub mirror pushes do not start Verify Forge. The workflow runs on
+pull requests and on manual dispatch. Other repositories can configure their
+own GitHub Actions workflows to run on mirror pushes.
+
 Two-way GitHub sync (`githubMirror.inbound: true`) brings pushes to GitHub `main` back in as Forge landings and gives every pull request into `main` a Forge check-only run whose result is the `forge/verify` commit status (a fork PR's run waits until a project owner approves it, GitHub's approve-and-run norm); a newer push to the PR supersedes the older run. With the ruleset that `nforge github connect` and `nforge github status` print, imported once by a repository admin, GitHub merges only after `forge/verify` passes and refuses direct pushes to `main`; status reports `protected` or names each missing rule. Details: [two-way sync](operations/github-app.md#two-way-sync).
 
 - **Publish:** in a clean Candidate, choose a repository and optional base. Forge pushes the Candidate's Git projection to `forge/publish/<operation-id>` and opens a PR using your local `gh` login. It never merges. "Check GitHub PR" records the provider's state. Acceptance is reported only after GitHub confirms the merge.
