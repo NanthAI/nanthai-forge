@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingBatchPublish.ts": "ea0ddebd74e78ccd3f81b3f75b511d9aed1a5fe27a823569f7614c74de22d56a",
+    "convex/projectHostedLandingBatchStore.ts": "61c5ee562e0ca1c5d42044af297e2aac9fc19137738b9b580a37fd437b1b1551",
+    "convex/projectHostedLandingBatchState.ts": "5671172fc8bd9f42262918774b580f09c1f70a500e049338912fe038a5ae0387",
+    "convex/projectHostedLandingBatchCheck.ts": "10f1ccd4acba65fa1c8eda013535f9c65058f3885c345156a4c2e2536a4b8c1f",
+    "convex/projectHostedLandingBatchFinish.ts": "dd3e35a1e22edde0a1318446074749d65f304964727c9b91a4d71c88852f71b2",
+    "convex/projectHostedLandingParkExact.ts": "514aedf370c77cc17fb6af5770bbfedd38c0f10989f826c8dfeb4324155baea7"
+  },
+  "replay": {
+    "incident": "687d1eda",
+    "test": "incident 687d1eda: a cohort failing only on main red tests parks every member, no solo re-checks, and re-lands on green",
+    "receipt": "1c3bb411-43b9-4d5f-98a0-a862f36fa52d"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A71908667-41cb-4b63-9015-eddf1324b585",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A9aaa39f4-ff7a-43a1-84fb-bfe9d39f67d9%3Adelegate-task%3A66c05e15-6e65-4e34-b88c-5fb934f70f26",
+    "receipt": "1c3bb411-43b9-4d5f-98a0-a862f36fa52d"
+  }
+}

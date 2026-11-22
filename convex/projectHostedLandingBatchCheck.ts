@@ -33,6 +33,7 @@ import { loadLanding, writeLanding } from './projectHostedLandingStore';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { enqueueHostedCheck } from './projectHostedChecks';
 import { retainLandingTrain, releaseLandingQueue } from './projectHostedLandingWake';
+import { closeOrderWait, recordOrderWait } from './projectHostedLandingOrder';
 import { hostedCheckTerminal, checkCause, submittedCheckCause } from '../src/hosted-check';
 import { landingObservation } from '../src/hosted-landing';
 import { hostedStartMain } from './projectHostedChannels';
@@ -297,10 +298,13 @@ async function prepareLandingCheckOnce(
     const ahead = await reviewCheckAhead(ctx, queue, selected.row);
     if (ahead) {
       await cancelPendingTask(ctx, selected.row.alarm?.taskId);
+      // The same wait record the claim path keeps, so the receipt names this holder (ced8e98f).
       await ctx.db.patch(selected.row._id, {
         runnable: false,
         orderWait: ahead.row.submissionId,
         alarm: null,
+        ...closeOrderWait(selected.row, now, false, 'claim'),
+        orderWaits: recordOrderWait(selected.row, ahead, now, queue.mainReceiptId),
       });
       if (!ahead.row.orderWaited) await ctx.db.patch(ahead.row._id, { orderWaited: true });
       await releaseLandingQueue(ctx, queue, now);

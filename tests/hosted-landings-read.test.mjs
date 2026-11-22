@@ -704,6 +704,7 @@ test('the accepted landing ledger exports replay evidence with no check-run look
   const reads = f.meter.queries - before;
   assert.equal(legacy.attemptReplay[0].outcome, 'unrecorded');
   assert.equal(legacy.attemptReplay[0].waitedToStartMs, 'unrecorded');
+  assert.equal(legacy.holdEdges, 'unrecorded', 'a receipt from before the no-hold stamp invents no "none"');
   const attempt = f.tables.projectHostedLandingAttempts[0];
   attempt.replay = {
     check: {
@@ -714,6 +715,7 @@ test('the accepted landing ledger exports replay evidence with no check-run look
       endedAt: minute(59),
     },
     actualBase: base,
+    holdEdges: 'none',
   };
   attempt.progress = JSON.stringify({ phase: 'landed' });
   const {
@@ -724,4 +726,5 @@ test('the accepted landing ledger exports replay evidence with no check-run look
   assert.equal(current.attemptReplay[0].outcome, 'landed');
   assert.deepEqual(current.attemptReplay[0].predictedBase, base);
   assert.deepEqual(current.attemptReplay[0].actualBase, base);
+  assert.equal(current.holdEdges, 'none');
 });

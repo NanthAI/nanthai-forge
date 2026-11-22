@@ -52,6 +52,8 @@ export async function cancelHostedLanding(
     /** A save of the same Lane moved its head (f7539ebb): the entry ends superseded, not cancelled.
      * The save already authorized the Lane write, so no separate submitter check applies. */
     supersede?: { laneId: string; head: string };
+    /** The caller's cause for the censored attempt (ced8e98f): a save names its head, a recovery its code. */
+    replacementCause?: import('./projectHostedLandingReplay').ReplayCause;
   },
 ) {
   const { projectId, actor, request } = input;
@@ -205,7 +207,16 @@ export async function cancelHostedLanding(
           message: input.reason ?? 'The hosted landing request was cancelled.',
         },
       };
-      result = await writeLanding(ctx, row, result, false);
+      // The caller names the censored attempt's cause; this write never infers it from supersede.
+      result = await writeLanding(
+        ctx,
+        row,
+        result,
+        false,
+        true,
+        undefined,
+        input.replacementCause ? { replay: { replacementCause: input.replacementCause } } : undefined,
+      );
       await settleLandingOperation(ctx, result);
     }
     const batchId = state.batchId ?? state.batchOriginId;

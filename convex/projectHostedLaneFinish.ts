@@ -172,6 +172,7 @@ export async function supersedeLaneFinishes(
           projectId: input.projectId,
           actor: state.actor,
           supersede: replacement,
+          replacementCause: { kind: 'new-save', link: replacement.head },
           request: {
             operationId: crypto.randomUUID(),
             authorityEpoch: state.request.authorityEpoch,
@@ -201,6 +202,7 @@ export async function supersedeLaneFinishes(
       projectId: input.projectId,
       actor: state.actor,
       supersede: replacement,
+      replacementCause: { kind: 'new-save', link: replacement.head },
       request: {
         operationId: crypto.randomUUID(),
         authorityEpoch: state.request.authorityEpoch,
@@ -247,6 +249,8 @@ export async function replaceOwnerlessLanding(ctx: MutationCtx, row: LandingRow)
     projectId: row.projectId,
     actor: state.actor,
     supersede: { laneId: selection.key, head: selection.head ?? attempt.candidate.head ?? '' },
+    // A driver-lost retry, not a new save: an explicit code keeps it countable (ced8e98f).
+    replacementCause: { kind: 'unknown', link: 'LANDING_DRIVER_LOST_RETRY' },
     request: {
       operationId: crypto.randomUUID(),
       authorityEpoch: state.request.authorityEpoch,

@@ -27,85 +27,87 @@ const LANDED_FEED_ROW_BYTES = 490;
  * Item ced8e98f adds 2,085 to 15,392 read bytes and 1,014 to 4,781 write bytes
  * on existing rows, with the same call and document counts.
  * Item 4e013cdb: cadence and first-check donor evidence ride existing rows. The C1 cases
- * each read 4,002 B and write 884 B more, with unchanged calls and document counts. */
+ * each read 4,002 B and write 884 B more, with unchanged calls and document counts.
+ * Item ced8e98f follow-up: each replaced attempt names its cause and each landed attempt
+ * its no-hold stamp, on the same writes: 0 to 180 read and 109 to 398 write bytes more. */
 export const MEASURED = {
   'global-risk mover, strict': {
     calls: 59,
     documents: 1194,
     readBytes: 1_179_826,
-    writeBytes: 444_612 + 2 * LANDED_FEED_ROW_BYTES,
+    writeBytes: 444_740 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, fast': {
     calls: 59,
     documents: 1194,
     readBytes: 1_179_386,
-    writeBytes: 444_576 + 2 * LANDED_FEED_ROW_BYTES,
+    writeBytes: 444_704 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'order-sensitive mover, strict': {
     calls: 59,
     documents: 1194,
     readBytes: 1_179_858,
-    writeBytes: 444_632 + 2 * LANDED_FEED_ROW_BYTES,
+    writeBytes: 444_760 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'order-sensitive mover, fast': {
     calls: 59,
     documents: 1194,
     readBytes: 1_179_418,
-    writeBytes: 444_596 + 2 * LANDED_FEED_ROW_BYTES,
+    writeBytes: 444_724 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, fast': {
     calls: 66,
     documents: 1457,
-    readBytes: 1_571_448,
-    writeBytes: 511_731 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_571_538,
+    writeBytes: 511_949 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, fast, carry off': {
     calls: 59,
     documents: 1194,
     readBytes: 1_186_006,
-    writeBytes: 445_138 + 2 * LANDED_FEED_ROW_BYTES,
+    writeBytes: 445_266 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, fast, carry off': {
     calls: 73,
     documents: 1542,
-    readBytes: 1_618_105,
-    writeBytes: 569_549 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_618_195,
+    writeBytes: 569_857 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, strict, red': {
     calls: 49,
     documents: 978,
     readBytes: 985_583,
-    writeBytes: 384_538 + LANDED_FEED_ROW_BYTES,
+    writeBytes: 384_647 + LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, strict, red': {
     calls: 32,
     documents: 556,
     readBytes: 582_430,
-    writeBytes: 229_934 + LANDED_FEED_ROW_BYTES,
+    writeBytes: 230_043 + LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, strict, C1 follower': {
     calls: 128,
     documents: 2605,
-    readBytes: 2_625_550,
-    writeBytes: 917_658 + 3 * LANDED_FEED_ROW_BYTES,
+    readBytes: 2_625_640,
+    writeBytes: 917_985 + 3 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, strict, C1 follower': {
     calls: 136,
     documents: 2924,
-    readBytes: 3_139_576,
-    writeBytes: 1_011_088 + 3 * LANDED_FEED_ROW_BYTES,
+    readBytes: 3_139_756,
+    writeBytes: 1_011_486 + 3 * LANDED_FEED_ROW_BYTES,
   },
   'no checking row, strict': {
     calls: 23,
     documents: 432,
     readBytes: 443_960,
-    writeBytes: 170_839 + LANDED_FEED_ROW_BYTES,
+    writeBytes: 170_948 + LANDED_FEED_ROW_BYTES,
   },
   'no checking row, fast': {
     calls: 23,
     documents: 432,
     readBytes: 443_796,
-    writeBytes: 170_821 + LANDED_FEED_ROW_BYTES,
+    writeBytes: 170_930 + LANDED_FEED_ROW_BYTES,
   },
 };
 
@@ -189,9 +191,11 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // different stages. The measured deltas preserve the alias-write split and exact call counts.
 // Item 4e013cdb: audit and first-check donor evidence add 180 read bytes to carry and
 // 4,162 read/884 write bytes to scoped recheck. The red delta and call counts are unchanged.
+// Item ced8e98f follow-up: replacement causes add 90 read/90 write bytes to carry and 90 read/180
+// write bytes to scoped recheck. The red delta and call counts are unchanged.
 export const WIRED = {
-  carry: { calls: 7, readBytes: 424_083, writeBytes: 78_193 },
-  'scoped-recheck': { calls: 17, readBytes: 561_495, writeBytes: 148_968 },
+  carry: { calls: 7, readBytes: 424_173, writeBytes: 78_283 },
+  'scoped-recheck': { calls: 17, readBytes: 561_585, writeBytes: 149_148 },
   red: { calls: -17, readBytes: -388_081, writeBytes: -145_208 },
 };
 

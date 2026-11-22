@@ -24,9 +24,16 @@ const cause = v.object({
     v.literal('flake-retry'),
     v.literal('provider-retry'),
     v.literal('audit'),
+    // The queue bound a check (an admission proof, a deferred or cohort check) without recomposing: no recheck.
+    v.literal('check-binding'),
+    // A new save of the author's Lane superseded the entry; the link is the saved Lane head.
+    v.literal('new-save'),
+    // No writer named the cause; the link is the stop code, so the gap stays countable.
+    v.literal('unknown'),
   ),
   link: v.string(),
 });
+export type ReplayCause = Infer<typeof cause>;
 export const landingReplay = v.object({
   check: v.optional(check),
   earlierChecks: v.optional(v.array(check)),
@@ -35,8 +42,25 @@ export const landingReplay = v.object({
   replacementCause: v.optional(cause),
   replacedByAttemptId: v.optional(v.string()),
   recheckCause: v.optional(cause),
+  // Stamped on the landed attempt when its receipt lists no order waits. Older landings omit it.
+  holdEdges: v.optional(v.literal('none')),
 });
 export type LandingReplay = Infer<typeof landingReplay>;
+
+/** The cause of a replacement whose writer named none, from the evidence in hand at that write
+ * (Item ced8e98f): the successor's own pins and the stop code, never dates. */
+export function replacementCauseOf(input: {
+  code: string;
+  nextMain: { receiptId: string } | undefined;
+  successor: Pick<HostedLandingAttempt, 'candidate' | 'check'> | undefined;
+}): ReplayCause {
+  const { code, nextMain, successor } = input;
+  if (successor && successor.candidate.head === null)
+    return { kind: 'conflict', link: successor.candidate.id };
+  if (code === 'CHANNEL_CHANGED' && nextMain) return { kind: 'main-race', link: nextMain.receiptId };
+  if (successor?.check) return { kind: 'check-binding', link: successor.check.runId };
+  return { kind: 'unknown', link: code };
+}
 
 export function checkReplay(run: HostedCheckRun): LandingReplay {
   const clock = hostedCheckClock(run);
@@ -99,14 +123,16 @@ export function replayRead(
   };
 }
 
+/** Hold edges from the receipt's order waits. `none` needs the landed attempt's stamp, so a
+ * receipt written before the stamp reads `unrecorded`, never an invented "no hold". */
 export function replayHoldEdges(
   waits: readonly { submissionId: string; held: string; footprints: string; seconds?: number }[] | undefined,
+  replays: readonly (LandingReplay | undefined)[] = [],
 ) {
-  return (
-    waits?.map(({ submissionId, held, footprints, seconds }) => ({
-      holderSubmissionId: submissionId,
-      edgeType: held === 'dependent' ? 'dependent' : footprints === 'unknown' ? 'unrecorded' : footprints,
-      heldSeconds: seconds ?? 'unrecorded',
-    })) ?? 'unrecorded'
-  );
+  if (!waits?.length) return replays.some(replay => replay?.holdEdges === 'none') ? 'none' : 'unrecorded';
+  return waits.map(({ submissionId, held, footprints, seconds }) => ({
+    holderSubmissionId: submissionId,
+    edgeType: held === 'dependent' ? 'dependent' : footprints === 'unknown' ? 'unrecorded' : footprints,
+    heldSeconds: seconds ?? 'unrecorded',
+  }));
 }

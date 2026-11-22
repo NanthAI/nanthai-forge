@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { CheckCause } from '../src/hosted-check';
+import { checkCause, type CheckCause } from '../src/hosted-check';
 import { retiredCheckUsage } from './projectHostedLandingRunnerCosts';
 import { cancelPendingTask } from './schedulerCancel';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
@@ -350,11 +350,13 @@ export async function installBatchAttempt(
     true,
     undefined,
     {
-      ...(input.moverReceiptId
-        ? { replacementReplay: { replacementCause: { kind: 'main-race', link: input.moverReceiptId } } }
-        : input.replacementReplay
-          ? { replacementReplay: input.replacementReplay }
-          : {}),
+      // With no named mover or retry, this binds the queue's check: a predicted cohort prefix is
+      // not a main race, even when it changes the attempt's base (ced8e98f).
+      replacementReplay: input.moverReceiptId
+        ? { replacementCause: { kind: 'main-race', link: input.moverReceiptId } }
+        : (input.replacementReplay ?? {
+            replacementCause: { kind: 'check-binding', link: input.check.runId },
+          }),
     },
   );
   return attempt;
@@ -400,6 +402,7 @@ export async function retryLandingBatch(
       ...(recheck ? { recheck } : {}),
       // Recomposition may repeat before a provider run exists. Carry the already selected cause.
       ...(cause === undefined ? {} : { nextCheckCause: cause }),
+      ...(cause === checkCause.retry && batch.runId ? { retriedRunId: batch.runId } : {}),
       members: live.map(member => member.original),
       leaderId: live[0]!.state.id,
       composeOperationId: crypto.randomUUID(),

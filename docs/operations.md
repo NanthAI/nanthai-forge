@@ -544,13 +544,23 @@ name the checked base or predicted cohort prefix, the base used to publish or
 replace that attempt, and the dispatch, provider start and provider check end
 times. `recordedEndAt` is when Forge observed a verdict or stopped the check.
 The wait to start is in milliseconds. A replaced or withdrawn attempt
-has outcome `censored` and its recorded stop code. When Forge records a
-replacement cause, its link names the mover receipt, conflicting Candidate
-or batch, other submission, prior policy digest, retried submission, provider
-run or audit run. `replacedByAttemptId` links the retiring attempt to its
-successor. Unavailable observations read as `unrecorded`. A check carried
+has outcome `censored` and its recorded stop code. A replaced attempt also has a
+`replacementCause`, written with the replacement: `main-race` (the mover
+receipt), `conflict` (the conflicting Candidate or batch), `pair-interaction`
+(the other submission or the shared batch), `policy` (the prior policy digest),
+`flake-retry` (the retried submission), `provider-retry` (the provider run),
+`audit` (the audit run), `check-binding` (the queue bound an admission proof,
+deferred check or cohort check without a recheck; the run), `new-save` (a new
+save of the author's Lane superseded the entry; its saved head) or `unknown`
+(no writer named one; the stop code, or `LANDING_DRIVER_LOST_RETRY` when a retry replaced a
+queued landing whose driver was lost). An entry superseded before its first attempt is
+reserved has no attempt to replace, never reaches a landed receipt, and its history reads
+`unrecorded` for the cause. `replacedByAttemptId` links the retiring
+attempt to its successor. Unavailable observations read as `unrecorded`. A check carried
 across attempts keeps the same run ID. Hold edges retain the holder's
-submission, dependency or footprint class, and recorded wait. Follow
+submission, dependency or footprint class, and recorded wait; a landing that
+never waited reads `none`. Receipts written before these fields existed read
+`unrecorded`. Follow
 `attemptReplayPartial` to the submission's paged `queue {submissionId}`
 history for additional attempts, including archived ones. The ledger is project-scoped and
 uses the existing landing and check retention.

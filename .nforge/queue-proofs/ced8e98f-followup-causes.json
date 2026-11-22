@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingAttemptHistory.ts": "bce7b2f5e58f5270b82e3a8ad4a9b3c81368c227cc46e9b569d6df6f098faa35",
+    "convex/projectHostedLandingCancel.ts": "927a1f1536a19c16d6e1b8d6b580c6f924d76000240479f7d1e0ea3aa2bc6249",
+    "convex/projectHostedLaneFinish.ts": "4c2163be6997c9a5bce001ecdf2fa147dfde74a37aa7ab7c9c61a14e4d0a6627",
+    "convex/projectHostedLandingStaleChecks.ts": "bc34e94c165fb29e73f645e53376a68eff2216b6b564b3ae42ce178af114ae3c",
+    "convex/projectHostedLandingStore.ts": "71d009b68377c2c9c272e9ac68c79a4f3e20453019154e822946529225e5077b",
+    "convex/projectHostedLandingReplay.ts": "8930e6824a5ee7104c3452e1fe68c4b9677b6bf2d3bbd076e953c9cf22e36053"
+  },
+  "replay": {
+    "incident": "ced8e98f",
+    "test": "attempt replay records the mover and checked prefix, links a conflict recheck and censors a withdrawn follower",
+    "receipt": "1c3bb411-43b9-4d5f-98a0-a862f36fa52d"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A71908667-41cb-4b63-9015-eddf1324b585",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A9aaa39f4-ff7a-43a1-84fb-bfe9d39f67d9%3Adelegate-task%3A66c05e15-6e65-4e34-b88c-5fb934f70f26",
+    "receipt": "1c3bb411-43b9-4d5f-98a0-a862f36fa52d"
+  }
+}

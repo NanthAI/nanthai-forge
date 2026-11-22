@@ -117,7 +117,10 @@ export async function parkEntry(
     {
       replacementReplay: {
         ...checkReplay(run),
-        ...(as.auditRunId ? { replacementCause: { kind: 'audit', link: as.auditRunId } } : {}),
+        // Main red names its audit; a CI-down park names the run the provider could not serve.
+        replacementCause: as.auditRunId
+          ? { kind: 'audit', link: as.auditRunId }
+          : { kind: 'provider-retry', link: run.id },
       },
     },
   );

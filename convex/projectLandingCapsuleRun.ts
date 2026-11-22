@@ -46,6 +46,8 @@ function evidence(rows: string[]) {
   const selected = all.slice(0, LANDINGS_ATTEMPTS);
   return {
     lastNumber: all.at(-1)?.number ?? null,
+    // The landed attempt's no-hold stamp, kept whatever prefix of the chain is selected.
+    ...(all.at(-1)?.replay?.holdEdges ? { holdEdges: 'none' } : {}),
     bytes: selected.reduce(
       (n, row) =>
         n +

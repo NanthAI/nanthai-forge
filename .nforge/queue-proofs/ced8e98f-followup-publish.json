@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedAcceptancePublish.ts": "195af63ca019048bdd70e7e6c54ac9222b17dbfb5dd23bca728dbe76e449b99c",
+    "convex/projectHostedLandings.ts": "7dfa61d0952b038167e37871bb263d03b3ad17a2eb3e3b7643dda04b0287014c"
+  },
+  "replay": {
+    "incident": "025470bf",
+    "test": "a refused change holds for a peer still deciding and they form one cohort",
+    "receipt": "1c3bb411-43b9-4d5f-98a0-a862f36fa52d"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A71908667-41cb-4b63-9015-eddf1324b585",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A9aaa39f4-ff7a-43a1-84fb-bfe9d39f67d9%3Adelegate-task%3A66c05e15-6e65-4e34-b88c-5fb934f70f26",
+    "receipt": "1c3bb411-43b9-4d5f-98a0-a862f36fa52d"
+  }
+}

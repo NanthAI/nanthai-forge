@@ -20,6 +20,9 @@ const { markCheckDispatch, observeCheckStart, observeCheckEnd } = await import(
   moduleUrl('../convex/projectHostedCheckClock.ts')
 );
 const landingApi = await import(moduleUrl('../convex/projectHostedLanding.ts'));
+const admission = await import(moduleUrl('../convex/projectHostedLandingAdmission.ts'));
+const staleChecks = await import(moduleUrl('../convex/projectHostedLandingStaleChecks.ts'));
+const laneFinish = await import(moduleUrl('../convex/projectHostedLaneFinish.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -257,6 +260,84 @@ test('attempt replay records the mover and checked prefix, links a conflict rech
   assert.equal(history.attempts[0].replay.outcome, 'censored');
   assert.equal(history.attempts[0].replay.censorReason, 'LANDING_CANCELLED');
   assert.equal(history.attempts[0].replay.waitedToStartMs, 'unrecorded');
+
+  // Lead live check 8866a6ed: 57 ATTEMPT_REPLACED and 3 CHANNEL_CHANGED attempts had no cause.
+  // The admission proof's binding, then a retired solo check under a main race, each name theirs.
+  const bound = await f.enqueue(
+    f.request({ check: null, message: 'Admission proof binds, then main moves' }),
+  );
+  const boundKey = { projectId: f.projectId, submissionId: bound.id };
+  const proof = {
+    runId: randomUUID(),
+    checkId: randomUUID(),
+    definition: 'd'.repeat(64),
+    configuration: 'c'.repeat(64),
+    environment: 'e'.repeat(64),
+  };
+  const raced = { head: 'f'.repeat(64), receipt: { id: randomUUID() } };
+  await tx('bind-proof-then-retire-on-race', async ctx => {
+    const selected = await store.loadLanding(ctx, boundKey);
+    const attempt = await store.loadLandingAttempt(ctx, {
+      projectId: f.projectId,
+      attemptId: selected.state.attemptId,
+    });
+    await admission.bindAdmissionProof(ctx, { ...selected, attempt }, attempt, proof);
+    const current = await store.loadLanding(ctx, boundKey);
+    await staleChecks.retireSoloCheck(ctx, {
+      ...current,
+      attempt: await store.loadLandingAttempt(ctx, {
+        projectId: f.projectId,
+        attemptId: current.state.attemptId,
+      }),
+      finish: await finishStore.loadFinish(ctx, boundKey),
+      main: raced,
+    });
+  });
+  const boundHistory = JSON.parse(await read(f, bound.id)).attempts.map(attempt => attempt.replay);
+  // Newest first: the reserved recompose, the deferred fork, the bound proof, the admission attempt.
+  assert.equal(boundHistory.length, 4);
+  const [, deferred, boundProof, admitted] = boundHistory;
+  assert.equal(admitted.censorReason, 'ATTEMPT_REPLACED');
+  assert.deepEqual(admitted.replacementCause, { kind: 'check-binding', link: proof.runId });
+  assert.equal(boundProof.censorReason, 'ATTEMPT_REPLACED');
+  assert.deepEqual(boundProof.replacementCause, { kind: 'main-race', link: raced.receipt.id });
+  assert.equal(deferred.censorReason, 'CHANNEL_CHANGED');
+  assert.deepEqual(deferred.replacementCause, { kind: 'main-race', link: raced.receipt.id });
+
+  // A child installed on a moved main with no named cause still names the mover (the 3 CHANNEL_CHANGED).
+  const moved = await f.enqueue(f.request({ check: null, message: 'Recomposed on a moved main' }));
+  const movedKey = { projectId: f.projectId, submissionId: moved.id };
+  const movedMain = { head: '9'.repeat(64), receiptId: randomUUID() };
+  await tx('install-on-moved-main', async ctx => {
+    const { row, state } = await store.loadLanding(ctx, movedKey);
+    const original = await store.loadLandingAttempt(ctx, {
+      projectId: f.projectId,
+      attemptId: state.attemptId,
+    });
+    const child = { ...original, ...(await store.forkLandingAttempt(ctx, state)), main: movedMain };
+    await store.insertLandingAttempt(ctx, child);
+    await store.writeLanding(ctx, row, { ...state, attemptId: child.id, version: state.version + 1 }, false);
+  });
+  const movedReplay = JSON.parse(await read(f, moved.id)).attempts.at(-1).replay;
+  assert.equal(movedReplay.censorReason, 'CHANNEL_CHANGED');
+  assert.deepEqual(movedReplay.replacementCause, { kind: 'main-race', link: movedMain.receiptId });
+
+  // A new save of the author's Lane supersedes the entry: the censored attempt links that save.
+  const saved = await f.enqueue(f.request({ check: null, message: 'Superseded by a new save' }));
+  const savedHead = '7'.repeat(64);
+  await tx('supersede-by-save', async ctx => {
+    // The real save path, so the cause comes from the caller that knows it is a save.
+    await laneFinish.supersedeLaneFinishes(ctx, {
+      projectId: f.projectId,
+      laneId: randomUUID(),
+      head: savedHead,
+      submissionIds: [saved.id],
+      scope: 'live',
+    });
+  });
+  const savedReplay = JSON.parse(await read(f, saved.id)).attempts[0].replay;
+  assert.equal(savedReplay.censorReason, 'LANDING_SUPERSEDED');
+  assert.deepEqual(savedReplay.replacementCause, { kind: 'new-save', link: savedHead });
 });
 
 test('a parked no-check child owns only the new queue interval, even when its parent carried check timestamps', async t => {

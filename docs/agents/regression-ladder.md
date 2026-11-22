@@ -106,7 +106,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `f5c45985` | A missing accepted-run stamp hid 3,317 discarded runner seconds; projections use the independent discard stamp and existing maintenance repairs retained null samples |
 
 | `025470bf` | A moved-main cohort records its actual hold release. The selected request and receipt agree, and old releases with no stamp stay unavailable. |
-| `ced8e98f` | A replaced check retains its checked prefix, the mover receipt, provider times, and the exact attempt that followed it. A withdrawal is censored and missing older observations remain unrecorded. |
+| `ced8e98f` | A replaced check retains its checked prefix, the mover receipt, provider times, and the exact attempt that followed it. Every replacement names its cause: an admission proof's check binding, a retired solo check's main race, an unnamed move's mover and a superseding save. A withdrawal is censored and missing older observations remain unrecorded. |
 | `9829778c` | A stale conflict beside older board pages or a note already read in another Lane repeatedly interrupts a wait |
 | `4e013cdb` | Main audit cadence coalesces sustained arrivals within the red-detection bound and retains an audited reuse donor. |
 | `30b2efda` | A check harness change can turn identical Candidate source red. Main broke retains the harness change without assigning a landing as culprit. |

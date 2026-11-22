@@ -178,6 +178,9 @@ export function archivedAttemptHistory(capsule: LandingCapsule, context: Record<
     );
   });
   const liveAttempts = live as Array<{ id: string; number: number; reserved?: true }>;
+  // After relocation the stamp travels in the capsule, not in the live rows (ced8e98f).
+  if (reply.holdEdges === 'unrecorded' && page.some(row => row.replay?.holdEdges === 'none'))
+    reply.holdEdges = 'none';
   const merged = new Map(attempts.map(entry => [entry.number, entry as (typeof liveAttempts)[number]]));
   for (const entry of liveAttempts) if (!entry.reserved) merged.set(entry.number, entry);
   const selected = [...merged.values()].sort((a, b) => b.number - a.number).slice(0, PAGE);
@@ -372,7 +375,15 @@ export const read = query({
         currentAttemptId,
         nextBeforeAttempt,
         ...(ownerReview === undefined ? {} : { reviewState: ownerReview }),
-        holdEdges: replayHoldEdges(row.orderWaits),
+        // The first page holds the landed attempt and its stamp; a later page has no answer to give.
+        ...(beforeAttempt === undefined
+          ? {
+              holdEdges: replayHoldEdges(
+                row.orderWaits,
+                rows.map(entry => entry.replay),
+              ),
+            }
+          : {}),
         ...(state.batchId ? { batchId: state.batchId } : {}),
         ...(state.batchOriginId ? { batchOriginId: state.batchOriginId } : {}),
         ...(gap || missingFirst ? { historyPartial: true } : {}),

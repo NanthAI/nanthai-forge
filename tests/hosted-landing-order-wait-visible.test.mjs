@@ -208,6 +208,8 @@ test('replay 19328518: a parked passed landing names the older submission it wai
       assert.equal(wait.release, 'holder-landed');
       assert.equal(wait.seconds, PARKED_MS / 1000);
     }
+    // ced8e98f follow-up: a landing that never waited says so, not "unrecorded".
+    if (submission === older) assert.equal(reply.landings[0].holdEdges, 'none');
     if (submission === newer) {
       const wait = JSON.parse(receipt.value).orderWaits[0];
       assert.deepEqual(reply.landings[0].holdEdges[0], {

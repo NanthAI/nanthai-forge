@@ -279,7 +279,13 @@ export async function batchFinishStep(
         main: source.state.request.expectedMain,
         ...(batch.nextCheckCause === checkCause.mainMoved && !batch.predecessor
           ? { moverReceiptId: source.state.request.expectedMain.receiptId }
-          : {}),
+          : batch.nextCheckCause === checkCause.retry && batch.retriedRunId
+            ? {
+                replacementReplay: {
+                  replacementCause: { kind: 'provider-retry' as const, link: batch.retriedRunId },
+                },
+              }
+            : {}),
         checkOperationId: run.request.operationId,
         candidate: {
           id: candidate.id,
@@ -297,8 +303,9 @@ export async function batchFinishStep(
           environment: run.request.expectedEnvironment,
         },
       });
-    const { nextCheckCause: _cause, ...dispatched } = batch;
+    const { nextCheckCause: _cause, retriedRunId: _retried, ...dispatched } = batch;
     void _cause;
+    void _retried;
     await writeBatch(ctx, key, {
       ...dispatched,
       phase: 'checking',

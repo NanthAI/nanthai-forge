@@ -5,7 +5,7 @@ import { wakeLandingCapsule, landingCapsuleGraceMs } from './projectLandingCapsu
 import { withLandingCapsule } from './projectLandingCapsuleStore';
 import { unsealedBy } from '../src/landing-overtake';
 export { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
-import { checkReplay, type LandingReplay } from './projectHostedLandingReplay';
+import { checkReplay, replacementCauseOf, type LandingReplay } from './projectHostedLandingReplay';
 import { recordLandingFeed } from './projectFeedTerminal';
 import { landingAttemptRow, loadLandingAttempt, pinsFor } from './projectHostedLandingAttemptRead';
 import { closeOrderWait, holdsLandingOrder, landingPriorityState } from './projectHostedLandingOrder';
@@ -309,18 +309,15 @@ export async function writeLanding(
     if (queue?.exactReview === state.id) await ctx.db.patch(queue._id, { exactReview: undefined });
   }
   const changedAttempt = previous.attemptId !== state.attemptId;
-  if (changedAttempt) {
-    const replacementCause =
-      options?.replacementReplay?.replacementCause ??
-      (attempt.candidate.head === null
-        ? { kind: 'conflict' as const, link: attempt.candidate.id }
-        : undefined);
-    await retainLandingProgress(ctx, previous, true, attempt.main, {
-      ...options?.replacementReplay,
-      replacedByAttemptId: state.attemptId,
-      ...(replacementCause ? { replacementCause } : {}),
-    });
-  }
+  if (changedAttempt)
+    await retainLandingProgress(
+      ctx,
+      previous,
+      true,
+      attempt.main,
+      { ...options?.replacementReplay, replacedByAttemptId: state.attemptId },
+      attempt,
+    );
   // Retain a repaired cohort owner's diagnosis in later observations and the terminal receipt.
   // Its progress token distinguishes historical recovery from a current stall.
   if (!state.observation.stall && retainedStallOwner(previous.observation.stall))
@@ -644,6 +641,8 @@ export async function retainLandingProgress(
   replaced: boolean | { code: string; message: string } = false,
   nextMain?: HostedLandingAttempt['main'],
   replay?: LandingReplay,
+  /** The attempt that replaces this one, when the writer installs it now. */
+  successor?: Pick<HostedLandingAttempt, 'candidate' | 'check'>,
 ) {
   const row = await landingAttemptRow(ctx, {
     projectId: state.projectId as Id<'hostedProjects'>,
@@ -699,11 +698,15 @@ export async function retainLandingProgress(
       : {}),
     ...(nextMain ? { actualBase: nextMain } : {}),
     ...(censor ? { censor } : {}),
-    ...(typeof replaced === 'object' &&
-    replacement?.code === 'CHANNEL_CHANGED' &&
-    nextMain &&
-    !replay?.replacementCause
-      ? { replacementCause: { kind: 'main-race', link: nextMain.receiptId } }
+    // Every replacement names its cause in this same write; `unknown` keeps an unnamed one countable.
+    ...(replacement && !replay?.replacementCause && !row.replay?.replacementCause
+      ? {
+          replacementCause: replacementCauseOf({
+            code: replacement.code,
+            nextMain: mainChanged ? nextMain : undefined,
+            successor,
+          }),
+        }
       : {}),
   };
   if (observedBase && ownBase(observedBase)) delete evidence.actualBase;

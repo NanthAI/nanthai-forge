@@ -462,7 +462,11 @@ export async function publishLandingBatch(
     await writeLanding(ctx, currentRow, next, false, currentRow.runId !== run.id, completionAlarm, {
       feedLanes: member.plan.feedLanes,
       publishedMainReceiptId: members.at(-1)!.attempt.operations.accept,
-      replay: { ...checkReplay(run), actualBase: receipt.previous },
+      replay: {
+        ...checkReplay(run),
+        actualBase: receipt.previous,
+        ...(receipt.orderWaits ? {} : { holdEdges: 'none' as const }),
+      },
     });
     await settleLandingOperation(ctx, next);
     if (member.plan.inputPages)

@@ -126,6 +126,7 @@ async function evidence(
         | {
             chain: Array<{ number: number; value: string; progress?: string; replay?: LandingReplay }>;
             lastNumber: number | null;
+            holdEdges?: 'none';
             bytes: number;
           }
         | undefined)
@@ -263,7 +264,12 @@ async function evidence(
         : null,
       // Text-conflict paths of an earlier generation live in retained compose results (R2), not in rows.
       conflictPaths: null,
-      holdEdges: replayHoldEdges(receipt.orderWaits),
+      // The landed attempt carries the no-hold stamp; a long chain's last row or capsule keeps it.
+      holdEdges: replayHoldEdges(receipt.orderWaits, [
+        ...chain.map(row => row.replay),
+        (last as { replay?: LandingReplay } | null)?.replay,
+        archived?.holdEdges ? { holdEdges: archived.holdEdges } : undefined,
+      ]),
       attemptReplay: attempts.map((attempt, index) =>
         replayRead(attempt, chain[index]?.replay, progress[index]?.phase),
       ),
