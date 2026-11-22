@@ -9,3 +9,7 @@ pins, metric scalars and reuse aliases remain query-readable. Recovery exports r
 authorized action; the fixture drill restores capsule-only acceptance history and
 hosted source. Live dev packing and cold reads are recorded on Item b149b16b;
 billed storage is a dated re-check there.
+
+Selected CLI and MCP landing attempts can read an exact reuse proof from a private
+capsule for an earlier archived attempt. The reply gives explicit missing and
+byte-omitted results and rechecks access after the read.

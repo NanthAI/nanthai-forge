@@ -568,6 +568,16 @@
       ]
     },
     {
+      "incident": "c7ad22b0",
+      "what": "Exact check reuse proof for an earlier attempt was unavailable after capsule relocation",
+      "file": "tests/hosted-landing-selection-capsule.test.mjs",
+      "paths": [
+        "convex/projectHostedLandingAttemptHistory.ts",
+        "convex/projectHostedLandingSelectionRead.ts"
+      ],
+      "test": "incident replay c7ad22b0: CLI and MCP resolve only the earlier selected attempt's ${wide ? 'bounded proof pins' : 'exact capsule-only proof'}"
+    },
+    {
       "incident": "a7de3a93",
       "what": "Core claim: a check dispatch threw, the run stayed unknown with no executionId and the queue head sat checking for up to 12 h",
       "file": "tests/hosted-lost-dispatch.test.mjs",

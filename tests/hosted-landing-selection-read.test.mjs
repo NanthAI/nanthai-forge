@@ -12,7 +12,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { finishFixture, code } from './hosted-finish-fixture.mjs';
 import { batchesFixture, batchStore, synthetic } from './hosted-landing-batches-fixture.mjs';
-import { capsuleMaintenanceFixture } from './landing-capsule-maintenance-fixture.mjs';
+import { capsuleMaintenanceFixture, storedFastProof } from './landing-capsule-maintenance-fixture.mjs';
 
 const api = await import(moduleUrl('../convex/projectHostedLandingAttemptHistory.ts'));
 const { metricAttemptRow } = await import(moduleUrl('../convex/projectMetricReadProjection.ts'));
@@ -28,7 +28,7 @@ test.after(() => {
 const wireRead = (f, selection, actor) =>
   f.tx('landing-selection', api.read, { projectId: f.projectId, ...selection }, actor).then(JSON.parse);
 const read = (f, selection, actor) =>
-  queueHostedSource({ query: (_name, input) => wireRead(f, input, actor) }, selection);
+  queueHostedSource({ query: () => wireRead(f, selection, actor) }, selection);
 
 test('incident replay c329d191: CLI and MCP read an exact Candidate selection and the retained origin batch phase', async t => {
   const f = await batchesFixture(t, { count: 2 });
@@ -279,47 +279,6 @@ test('a recheck refusal comes from the selected generation even when the origina
     code('EVIDENCE_CHANGED'),
   );
 });
-
-function storedFastProof(attempt, extraPaths) {
-  const literalPath = '{"owner":"user_test"}';
-  const checked = { id: randomUUID(), head: 'a'.repeat(64), digest: 'b'.repeat(64) };
-  const runId = attempt.check.runId;
-  const planDigest = 'c'.repeat(64),
-    terminalDigest = 'd'.repeat(64),
-    checkedSelection = 'e'.repeat(64);
-  return {
-    algorithm: 'fast-first-check-v1',
-    checked,
-    checkedBase: { head: 'f'.repeat(64), receiptId: randomUUID() },
-    main: attempt.main,
-    head: attempt.candidate.head,
-    runId,
-    terminalDigest,
-    planDigest,
-    candidatePaths: [literalPath, 'package.json', ...extraPaths],
-    mainPaths: [literalPath, 'src/peer.ts'],
-    checkedSelection,
-    cleanComposition: true,
-    audit: {
-      source: 'audit',
-      head: attempt.main.head,
-      runId: randomUUID(),
-      terminalDigest,
-      planDigest,
-      selection: checkedSelection,
-      sequence: 1,
-      coverage: 'main-audit-debt',
-    },
-    riskRule: 'first-check-risk-v7',
-    checkEntries: [],
-    checkedScope: 'full',
-    docsOverlap: [],
-    identicalPaths: [literalPath],
-    testedDocsRule: 'name-mention-v1',
-    relaxed: ['global-risk'],
-    riskPaths: ['package.json'],
-  };
-}
 
 for (const wide of [false, true])
   test(`terminal capsule keeps the exact attempt's ${wide ? 'proof pins when detail exceeds the reply budget' : 'retained reuse proof'}`, async t => {

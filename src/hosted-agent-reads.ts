@@ -133,14 +133,19 @@ export async function queueHostedSource(transport: HostedAgentTransport, input: 
   const { laneId: selected, limit, ...selection } = parsed.data;
   if (selection.submissionId || selection.batchId) {
     const query = 'projectHostedLandingAttemptHistory:read';
-    const page = await transport.query<{ archived?: true; checkReuseBase64?: string }>(query, selection);
+    type Page = { archived?: true; landingCapsule?: unknown; checkReuseBase64?: string };
+    const request = selection.attemptId ? { ...selection, capsuleProtocol: 1 } : selection;
+    let page = await transport.query<Page>(query, request);
+    if (page?.archived || page?.landingCapsule)
+      page = await transport.action<Page>('projectLandingCapsuleRead:history', {
+        query,
+        request: JSON.stringify(selection),
+      });
     if (typeof page?.checkReuseBase64 === 'string') {
       const { checkReuseBase64, ...attempt } = page;
       return { ...attempt, checkReuse: JSON.parse(Buffer.from(checkReuseBase64, 'base64').toString('utf8')) };
     }
-    return page?.archived
-      ? transport.action('projectLandingCapsuleRead:history', { query, request: JSON.stringify(selection) })
-      : page;
+    return page;
   }
   const view = await transport.query('projectHostedQueueView:read', limit === undefined ? {} : { limit });
   return markQueueLane(view, selected ?? readHostedLaneCheckout(transport.root)?.selection.laneId);

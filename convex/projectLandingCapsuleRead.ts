@@ -18,10 +18,12 @@ import {
 import type { LandingCapsulePointer } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 import { archivedAttemptHistory } from './projectHostedLandingAttemptHistory';
+import { archivedSelectedAttempt, type ArchivedSelection } from './projectHostedLandingSelectionRead';
 
 type Marker = { protocol: 1; submissionId: string; pointer: LandingCapsulePointer };
 type Context = {
   landingCapsule?: Marker;
+  selectedAttempt?: ArchivedSelection;
   [key: string]: unknown;
 };
 
@@ -65,8 +67,9 @@ export async function capsuleHistory(
         makeFunctionReference<'action'>('projectLandingCapsuleReadNode:history'),
         input,
       )) as string | null;
-    const capsule = await getLandingCapsule(input.projectId, submissionId, pointer);
-    invariant(capsule, 'SOURCE_UNAVAILABLE', 'The stored landing capsule is unavailable.');
+    const exactAttempt =
+      input.query === 'projectHostedLandingAttemptHistory:read' && typeof command.attemptId === 'string';
+    const capsule = await getLandingCapsule(input.projectId, submissionId, pointer, exactAttempt);
     // Recheck current access and exact selected pointer, including revoked project/CLI access during IO.
     const latestText = await ctx.runQuery(reference, args);
     invariant(typeof latestText === 'string', 'WORK_STALE', 'Landing selection changed during the read.');
@@ -77,6 +80,20 @@ export async function capsuleHistory(
       'WORK_STALE',
       'Landing capsule selection changed during the read; retry the original request.',
     );
+    if (exactAttempt) {
+      const selected = latest.selectedAttempt;
+      invariant(
+        selected &&
+          selected.attemptId === command.attemptId &&
+          selected.submissionId === submissionId &&
+          selected.submissionId === command.submissionId &&
+          canonicalPayload(latest.landingCapsule.pointer) === canonicalPayload(pointer),
+        'EVIDENCE_CHANGED',
+        'The capsule selection differs from the original attempt.',
+      );
+      return archivedSelectedAttempt(capsule, selected);
+    }
+    invariant(capsule, 'SOURCE_UNAVAILABLE', 'The stored landing capsule is unavailable.');
     const result = { ...latest };
     delete result.landingCapsule;
     let projected: Record<string, unknown>;

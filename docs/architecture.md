@@ -2025,7 +2025,7 @@ the canonical handle through operation aliases; current access is checked on eve
 observation. `projectHostedFinishObserve:page` returns preparing, queued and terminal
 versions through the same selected-operation read without scheduling work.
 
-Capsule-capable reads declare `capsuleProtocol: 1` on the five landing-history
+Capsule-capable reads declare `capsuleProtocol: 1` on supported landing-history
 queries. A selected capsule returns a content-pin marker and current redacted
 context. `projectLandingCapsuleRead:history` calls the same authorized query before
 and after its private R2 read, verifies the complete compressed object and each
@@ -2036,6 +2036,12 @@ capability read; browser reads negotiate only after the existing
 capsule receives that error; uncapsuled reads and past-end current-state probes
 retain their existing calls. Attempt ordinal cursors remain stable across
 relocation.
+
+An exact `queue {submissionId,attemptId}` read declares capsule support without
+another capability lookup. Earlier checked attempts retained as compact rows can
+recover their proof via the same action. The action binds the archived row and proof
+to the selected attempt and its stored check and source pins. Transactional attempts
+and batch reads stay query-only.
 
 The writer always runs; its server setting was removed after the live dev proof on
 Item b149b16b. A terminal transition schedules one

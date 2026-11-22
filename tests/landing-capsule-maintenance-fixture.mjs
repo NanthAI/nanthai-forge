@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -20,6 +20,47 @@ const modules = Object.fromEntries(
     ].map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))]),
   ),
 );
+
+export function storedFastProof(attempt, extraPaths) {
+  const literalPath = '{"owner":"user_test"}';
+  const checked = { id: randomUUID(), head: 'a'.repeat(64), digest: 'b'.repeat(64) };
+  const runId = attempt.check.runId;
+  const planDigest = 'c'.repeat(64),
+    terminalDigest = 'd'.repeat(64),
+    checkedSelection = 'e'.repeat(64);
+  return {
+    algorithm: 'fast-first-check-v1',
+    checked,
+    checkedBase: { head: 'f'.repeat(64), receiptId: randomUUID() },
+    main: attempt.main,
+    head: attempt.candidate.head,
+    runId,
+    terminalDigest,
+    planDigest,
+    candidatePaths: [literalPath, 'package.json', ...extraPaths],
+    mainPaths: [literalPath, 'src/peer.ts'],
+    checkedSelection,
+    cleanComposition: true,
+    audit: {
+      source: 'audit',
+      head: attempt.main.head,
+      runId: randomUUID(),
+      terminalDigest,
+      planDigest,
+      selection: checkedSelection,
+      sequence: 1,
+      coverage: 'main-audit-debt',
+    },
+    riskRule: 'first-check-risk-v7',
+    checkEntries: [],
+    checkedScope: 'full',
+    docsOverlap: [],
+    identicalPaths: [literalPath],
+    testedDocsRule: 'name-mention-v1',
+    relaxed: ['global-risk'],
+    riskPaths: ['package.json'],
+  };
+}
 
 export async function capsuleMaintenanceFixture(
   t,

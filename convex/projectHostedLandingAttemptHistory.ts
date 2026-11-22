@@ -251,12 +251,17 @@ export const read = query({
           'BAD_ARGUMENT',
           'Select only batchId to read a retained batch.',
         );
-        return await landingSelectionRead(ctx, projectId, { batchId });
+        return await landingSelectionRead(ctx, project, { batchId });
       }
       invariant(submissionId, 'BAD_ARGUMENT', 'Select submissionId to read a landing attempt.');
       if (attemptId !== undefined) {
         invariant(beforeAttempt === undefined, 'BAD_ARGUMENT', 'Select attemptId without beforeAttempt.');
-        return await landingSelectionRead(ctx, projectId, { submissionId, attemptId, afterLaneId });
+        return await landingSelectionRead(ctx, project, {
+          submissionId,
+          attemptId,
+          afterLaneId,
+          capsuleProtocol: input.capsuleProtocol,
+        });
       }
       invariant(afterLaneId === undefined, 'BAD_ARGUMENT', 'Use afterLaneId with an exact attemptId.');
       invariant(

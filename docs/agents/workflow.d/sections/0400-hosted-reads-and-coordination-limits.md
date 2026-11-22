@@ -34,18 +34,22 @@ MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
   to identify incomplete history. The selector uses transactional attempt pins,
   including the terminal attempt retained for a capsule. Earlier archived attempts
   with a compact record return its stored check reasons and null main, Candidate
-  and selection fields. Evidence that requires the capsule bytes stays unavailable
-  in this selector. Unknown attempts and unavailable batch IDs return `NOT_FOUND`.
+  and selection fields. When an earlier attempt has a check and a capsule, Forge
+  reads the verified capsule for that attempt's proof. Unknown attempts and unavailable
+  batch IDs return `NOT_FOUND`.
   `checkReuse` names that attempt's parent and stored check run, recheck reason,
   fork reason and scoped fallback. A null reason means that field was unavailable
   in the selected attempt record. The receipt's aggregate first-check reason
   describes the admission check. A `retained` proof includes the exact
-  `crossHeadProof`. `unavailable` means this selector found no proof in the
-  transactional records it reads.
+  `crossHeadProof`. `unavailable` means the selected proof or its capsule was absent.
+  A corrupt capsule or a proof that differs from the selected attempt returns
+  `EVIDENCE_CHANGED`.
   `byte-omitted` means the proof exceeded the reply budget, with its identity
   and rule pins in `proofPins` when they fit. The reply stays under 64 KB,
   including the Candidate and the selected page of Lane inputs.
-  Both selectors use one authorized query per reply, without source downloads or writes.
+  Batch and transactional attempt reads use one authorized query. The cold attempt
+  read uses the existing history action, which authorizes the selection before and
+  after one verified capsule read. None of these reads write data.
 
 - `peers {laneId,path?,detail?}` reads saved peer evidence in one query,
   including paths before their first save, as `peerEvidence`. Detail shows 50 items

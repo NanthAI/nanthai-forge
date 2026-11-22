@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingAttemptHistory.ts": "9f40dfd60a12c82613807fd273320884339805c96714335a10485bc043729548",
+    "convex/projectHostedLandingSelectionRead.ts": "f54c66ea56d754087b6e71da13b349f4eaee5a2914a64d9897d9e1e02fb343ec"
+  },
+  "replay": {
+    "incident": "c7ad22b0",
+    "test": "incident replay c7ad22b0: CLI and MCP resolve only the earlier selected attempt's ${wide ? 'bounded proof pins' : 'exact capsule-only proof'}",
+    "receipt": "0678fd0b-c8e5-4e48-a5b9-a81a18b8f992"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ad87cca09-46ee-4136-8155-1eaea27f3b38",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a20185-b4ed-7a31-8f04-96da9307cb9b",
+    "receipt": "17070ebf-29ad-48ed-9ad5-94879e4259e2"
+  }
+}

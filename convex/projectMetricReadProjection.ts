@@ -58,6 +58,7 @@ export function readMetricAttemptPins(row: import('./_generated/dataModel').Doc<
   return {
     id: value.attemptId,
     submissionId: value.submissionId,
+    selection: { projectId: value.projectId, number: value.number, candidateHead: attempt.candidate.head },
     at,
     parentAttemptId,
     mainHead,
@@ -71,6 +72,7 @@ export function readMetricAttemptPins(row: import('./_generated/dataModel').Doc<
 }
 
 export function readMetricAttempt(row: import('./_generated/dataModel').Doc<'projectFinishReadRows'>) {
-  const { forkReason, ...metric } = readMetricAttemptPins(row);
+  const { forkReason, selection: _selection, ...metric } = readMetricAttemptPins(row);
+  void _selection;
   return { ...metric, recheckReason: metric.recheckReason ?? forkReason };
 }
