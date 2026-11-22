@@ -7,12 +7,15 @@ import { compactUnreportedCounts, expandUnreportedCounts } from '../src/hosted-l
 import { compactDiscardedChecksOn } from './projectHostedLandingRunnerCostSwitch';
 import { metricAliasRows, withMetricAliases } from './projectMetricAliasWriter';
 import { metricRequestRow } from './projectMetricSourceRow';
+import { landingMessage } from '../src/landing-message';
+import { landingMessageRefsOn } from './projectHostedLandingMessageBody';
 
 type Row = Record<string, unknown> & {
   _id?: string;
   _creationTime?: number;
   value?: string;
   requestBodyId?: string;
+  messageBodyId?: string;
 };
 type Port = QueryCtx['db'];
 const tag = Symbol('landingRequestBodies');
@@ -68,8 +71,42 @@ export async function deleteLandingRequestBodies(db: MutationCtx['db'], row: Row
     );
     bodies.push(body);
   }
+  if (typeof row.messageBodyId === 'string') {
+    const body = await db.get(row.messageBodyId as Id<'projectHostedLandingBodies'>);
+    if (body) {
+      invariant(
+        body.messageProjectId === row.projectId,
+        'EVIDENCE_CHANGED',
+        'The landing message body belongs to another project.',
+      );
+      bodies.push(body);
+    }
+  }
   for (const body of bodies) await db.delete(body._id);
   return bodies;
+}
+/** Only admitted canonical text is stored; anything else keeps its existing inline form. */
+function storable(message: unknown): message is string {
+  if (typeof message !== 'string' || message === '') return false;
+  try {
+    return landingMessage(message) === message;
+  } catch {
+    return false;
+  }
+}
+/** The ticket's own message body (Item 8c50ce13): project-owned raw canonical text. */
+async function messageBody(db: Port, row: Row, id: string) {
+  const body = (await db.get(id as Id<'projectHostedLandingBodies'>)) as {
+    value: string;
+    messageProjectId?: string;
+  } | null;
+  invariant(body, 'SOURCE_UNAVAILABLE', 'The landing message is unavailable.');
+  invariant(
+    body.messageProjectId === row.projectId && body.value === landingMessage(body.value),
+    'EVIDENCE_CHANGED',
+    'The landing message body belongs to another project or is not canonical.',
+  );
+  return body.value;
 }
 /** The body is owned exclusively by its ticket. No index, scan, migration or RPC is needed. */
 export async function hydrateLandingRequest(db: Port, row: Row | null): Promise<Row | null> {
@@ -92,7 +129,10 @@ export async function hydrateLandingRequest(db: Port, row: Row | null): Promise<
     if (field === 'request')
       result.value = canonicalPayload({
         ...expandUnreportedCounts(JSON.parse(row.value!)),
-        request: cold.request,
+        request:
+          typeof row.messageBodyId === 'string'
+            ? { ...cold.request, message: await messageBody(db, row, row.messageBodyId) }
+            : cold.request,
       });
     else if (cold.batchSelection !== undefined) result.batchSelection = cold.batchSelection;
   }
@@ -177,6 +217,31 @@ export function landingRequestBodies<C extends QueryCtx | MutationCtx>(ctx: C): 
       row[pointer] = id;
     };
     if (state?.request !== undefined) {
+      // Item 8c50ce13: the supplied message is stored once, raw, and receipts reference it.
+      // The pointer is immutable; an existing body must hold this request's exact message.
+      const messageId = previous?.messageBodyId ?? row.messageBodyId;
+      const message = state.request.message;
+      if (typeof messageId === 'string') {
+        invariant(
+          message === (await messageBody(bodyPort, row.projectId ? row : previous!, messageId)),
+          'EVIDENCE_CHANGED',
+          'The landing request message differs from its stored body.',
+        );
+        row.messageBodyId = messageId;
+        const { message: _message, ...request } = state.request;
+        void _message;
+        state.request = request;
+      } else if (!previous && storable(message) && landingMessageRefsOn()) {
+        const id = await writer.insert('projectHostedLandingBodies', {
+          value: message,
+          messageProjectId: row.projectId as Id<'hostedProjects'>,
+        });
+        bodies.set(id, Promise.resolve({ _id: id, value: message, messageProjectId: row.projectId }));
+        row.messageBodyId = id;
+        const { message: _message, ...request } = state.request;
+        void _message;
+        state.request = request;
+      }
       await save('requestBodyId', 'request', state.request);
       delete state.request;
       if (compactDiscardedChecksOn() && state.counts) state.counts = compactUnreportedCounts(state.counts);

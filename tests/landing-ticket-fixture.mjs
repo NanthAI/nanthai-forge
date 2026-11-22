@@ -29,10 +29,17 @@ export function ticketState(f, row) {
     assert.equal(body.submissionId, row.submissionId);
     state.request = body.request;
   }
+  // Item 8c50ce13: a stored message is part of the logical request.
+  if (row.messageBodyId)
+    state.request = {
+      ...state.request,
+      message: f.tables.projectHostedLandingBodies.get(row.messageBodyId).value,
+    };
   return state;
 }
 export function patchTicketState(f, row, state) {
   const value = structuredClone(state);
+  if (row.messageBodyId) delete value.request.message;
   if (row.requestBodyId) {
     const body = f.tables.projectHostedLandingBodies.get(row.requestBodyId);
     f.patch('projectHostedLandingBodies', body._id, {
@@ -74,4 +81,33 @@ export function logicalTicket(f, row) {
       f.tables.projectHostedLandingBodies.get(row.selectionBodyId).value,
     ).batchSelection;
   return result;
+}
+/** Item 8c50ce13: accepted receipts in their logical inline form, whichever writer stored them:
+ * a referenced message reads its body, and a cohort count lists the preceding members' messages. */
+export function logicalReceipts(f) {
+  const receipts = [...f.tables.projectHostedAcceptances.values()]
+    .sort((a, b) => a.sequence - b.sequence)
+    .map(row => JSON.parse(row.value));
+  for (const receipt of receipts)
+    if (receipt.messageRef) {
+      receipt.message = f.tables.projectHostedLandingBodies.get(receipt.messageRef).value;
+      delete receipt.messageRef;
+    }
+  for (const [index, receipt] of receipts.entries())
+    if (receipt.cohortSize) {
+      receipt.cohortMessages = receipts
+        .slice(index + 1 - receipt.cohortSize, index + 1)
+        .flatMap(member => (member.message === undefined ? [] : [member.message]));
+      delete receipt.cohortSize;
+    }
+  return receipts;
+}
+/** Tests that build stored-message records by hand pin the inline writer. */
+export function inlineMessages(t) {
+  const name = 'FORGE_LANDING_MESSAGE_REFS',
+    previous = process.env[name];
+  delete process.env[name];
+  t.after(() => {
+    if (previous !== undefined) process.env[name] = previous;
+  });
 }

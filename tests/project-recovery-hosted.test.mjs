@@ -197,3 +197,77 @@ test('Done-when5: opted-in State recovery pages carry exact retained roots witho
   );
   assert.deepEqual(absent.physicalRoots, [], 'another project never supplies an archival root');
 });
+
+test('Item 8c50ce13: a receipt that references its stored message leaves recovery as the inline receipt', async () => {
+  const f = fixture(),
+    { selection } = await f.prepare();
+  f.tables.projectHostedLandingBodies ??= new Map();
+  f.tables.projectHostedLandingBodies.set('projectHostedLandingBodies-1', {
+    _id: 'projectHostedLandingBodies-1',
+    value: 'Stored subject\n\nCo-Authored-By: Synthetic <noreply@openai.com>',
+    messageProjectId: 'project',
+  });
+  const inline = JSON.stringify({ id: 'inline', message: 'Inline subject' });
+  for (const table of ['projectHostedAcceptances', 'projectHostedAcceptanceEvents']) {
+    for (const [index, value] of [
+      inline,
+      JSON.stringify({ id: 'stored', messageRef: 'projectHostedLandingBodies-1' }),
+    ].entries())
+      f.tables[table].set(`${table}-${index}`, {
+        _id: `${table}-${index}`,
+        _creationTime: index,
+        projectId: 'project',
+        receiptId: `receipt-${index}`,
+        sequence: index + 1,
+        value,
+      });
+    const rows = (await f.page(selection, table)).rows.map(row => JSON.parse(row));
+    assert.equal(rows[0].value, inline, 'inline receipts keep their exact bytes');
+    assert.deepEqual(JSON.parse(rows[1].value), {
+      id: 'stored',
+      message: 'Stored subject\n\nCo-Authored-By: Synthetic <noreply@openai.com>',
+    });
+  }
+});
+
+test('Item 8c50ce13: expanded receipt pages keep the 128 KiB budget and resume at the first row that did not fit', async () => {
+  const f = fixture(),
+    { selection } = await f.prepare();
+  const message = '"'.repeat(1024);
+  f.tables.projectHostedLandingBodies ??= new Map();
+  f.tables.projectHostedLandingBodies.set('projectHostedLandingBodies-1', {
+    _id: 'projectHostedLandingBodies-1',
+    value: message,
+    messageProjectId: 'project',
+  });
+  const table = 'projectHostedAcceptances';
+  for (let index = 0; index < 64; index++)
+    f.tables[table].set(`${table}-${index}`, {
+      _id: `${table}-${index}`,
+      _creationTime: index,
+      projectId: 'project',
+      receiptId: `receipt-${index}`,
+      sequence: index + 1,
+      value: JSON.stringify({ id: `stored-${index}`, messageRef: 'projectHostedLandingBodies-1' }),
+    });
+  const rows = [];
+  let cursor = null,
+    pages = 0;
+  for (;;) {
+    const page = await f.page(selection, table, cursor);
+    pages++;
+    assert(
+      page.rows.reduce((sum, row) => sum + Buffer.byteLength(row), 0) <= 128 * 1024,
+      'every expanded page fits the transport budget',
+    );
+    rows.push(...page.rows.map(row => JSON.parse(JSON.parse(row).value)));
+    if (page.done) break;
+    cursor = page.cursor;
+  }
+  assert(pages > 1, 'the stored page split after expansion');
+  assert.deepEqual(
+    rows,
+    Array.from({ length: 64 }, (_, index) => ({ id: `stored-${index}`, message })),
+    'every receipt leaves once, in order',
+  );
+});

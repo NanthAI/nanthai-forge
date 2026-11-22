@@ -17,6 +17,10 @@ import {
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import type { HostedAcceptance } from '../src/hosted-acceptance';
+import { receiptMessageForReader } from './projectHostedAcceptanceMessage';
+import { referencesStoredMessage } from './projectHostedLandingMessageBody';
+import { internalQuery } from './server';
 import {
   capsuleOwnsRecoveryRow,
   recoveryCapsuleCursor,
@@ -217,6 +221,23 @@ async function readPage(
 }
 /** Read-only recovery export. Rechecks current owner authority and exact source/
  * journal/Channel pins on every page, including resumed and verification reads. */
+/** Item 8c50ce13: archived receipt events name the same live stored messages as their receipts.
+ * Only the capsule read action calls this, after it authorized the page and verified the capsule. */
+export const expandArchivedReceipts = internalQuery({
+  args: { projectId: v.id('hostedProjects'), rows: v.array(v.string()) },
+  returns: v.array(v.string()),
+  handler: async (ctx, input) => {
+    const rows = [];
+    for (const text of input.rows)
+      rows.push(
+        canonicalPayload(
+          await recoveryReceiptRow(ctx, input.projectId, 'projectHostedAcceptanceEvents', JSON.parse(text)),
+        ),
+      );
+    return rows;
+  },
+});
+
 export const page = query({
   args: {
     projectId: v.id('hostedProjects'),
@@ -229,6 +250,25 @@ export const page = query({
   returns: v.string(),
   handler: journalRecoveryRead,
 });
+
+/** Item 8c50ce13: a recovery carries no landing bodies, so a receipt that references its
+ * message leaves as the equivalent inline receipt (message and cohort messages by value). */
+async function recoveryReceiptRow(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  table: string,
+  row: object,
+) {
+  if (table !== 'projectHostedAcceptances' && table !== 'projectHostedAcceptanceEvents') return row;
+  const stored = row as { value: string; sequence: number };
+  if (!referencesStoredMessage(stored.value)) return row;
+  const receipt = JSON.parse(stored.value) as HostedAcceptance;
+  if (receipt.messageRef === undefined && receipt.cohortSize === undefined) return row;
+  return {
+    ...row,
+    value: canonicalPayload(await receiptMessageForReader(ctx, projectId, receipt, stored.sequence)),
+  };
+}
 
 export async function journalRecoveryRead(
   ctx: QueryCtx,
@@ -262,8 +302,13 @@ export async function journalRecoveryRead(
     if (selected.phase === 'capsules')
       return recoveryCapsulePage(ctx, project, table, selected, input.capsuleProtocol);
     const result = await readPage(ctx, input.projectId, table, selected.cursor);
+    const skip = selected.offset ?? 0;
+    invariant(skip <= result.page.length, 'EVIDENCE_CHANGED', 'Continue the original recovery table page.');
+    const receipts = table === 'projectHostedAcceptances' || table === 'projectHostedAcceptanceEvents';
     const rows = [];
-    for (const row of result.page)
+    let consumed = skip,
+      bytes = 0;
+    for (const row of result.page.slice(skip)) {
       if (
         !(
           (table === 'projectHostedOperations' ||
@@ -272,8 +317,19 @@ export async function journalRecoveryRead(
           'journalSegment' in row
         ) &&
         (!usesArchives || !(await capsuleOwnsRecoveryRow(ctx, input.projectId, table, row)))
-      )
-        rows.push(canonicalPayload(journalSourceRow(row)));
+      ) {
+        const text = canonicalPayload(
+          journalSourceRow(await recoveryReceiptRow(ctx, input.projectId, table, row)),
+        );
+        // Expanded receipts can outgrow the stored page; the rest resumes from this page at an offset.
+        const size = receipts ? new TextEncoder().encode(text).length : 0;
+        if (rows.length && bytes + size > RECOVERY_PAGE_BYTES) break;
+        bytes += size;
+        rows.push(text);
+      }
+      consumed++;
+    }
+    const partial = consumed < result.page.length;
     const physicalRoots = [];
     if (input.physicalProtocol === 1 && table === 'projectHostedStates') {
       const states = result.page.filter((row): row is Doc<'projectHostedStates'> => 'head' in row);
@@ -293,12 +349,14 @@ export async function journalRecoveryRead(
       ...(input.physicalProtocol === 1 ? { physicalRoots } : {}),
       table,
       rows,
-      cursor: !result.isDone
-        ? result.continueCursor
-        : usesArchives
-          ? recoveryCapsuleCursor({ table, phase: 'capsules', cursor: null })
-          : null,
-      done: result.isDone && !usesArchives,
+      cursor: partial
+        ? recoveryCapsuleCursor({ table, phase: 'live', cursor: selected.cursor, offset: consumed })
+        : !result.isDone
+          ? result.continueCursor
+          : usesArchives
+            ? recoveryCapsuleCursor({ table, phase: 'capsules', cursor: null })
+            : null,
+      done: !partial && result.isDone && !usesArchives,
     });
   } catch (error) {
     if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);

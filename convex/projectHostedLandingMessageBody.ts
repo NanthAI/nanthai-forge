@@ -50,3 +50,24 @@ export async function landingMessageForReader(
     ? { ...result, request: { ...result.request, message } }
     : { ...result, message };
 }
+
+/** Item 8c50ce13, default off until proved on one project; then this switch and the inline
+ * writer are deleted. On, a new ticket stores its supplied message once and receipts reference it. */
+export const landingMessageRefsOn = () => process.env.FORGE_LANDING_MESSAGE_REFS === '1';
+
+/** A receipt's message field: the ticket's stored body when the accepted message is that body,
+ * else the inline value (legacy omission defaults, inherited resolution text, empty notes). */
+export function receiptMessageField(
+  row: { messageBodyId?: string | undefined },
+  state: HostedLandingState,
+  message: string | undefined,
+) {
+  if (message === undefined) return {};
+  // Turning the switch off stops new references at once; stored tickets still read back inline.
+  return landingMessageRefsOn() && row.messageBodyId && !state.messageRef && state.request.message === message
+    ? { messageRef: row.messageBodyId }
+    : { message };
+}
+
+/** A stored receipt value that names its message instead of carrying it (recovery expands these). */
+export const referencesStoredMessage = (value: string) => /"(?:messageRef|cohortSize)":/.test(value);

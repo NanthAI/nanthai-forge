@@ -167,3 +167,66 @@ test('the projected and canonical landing requests expand compact discarded coun
     .unique();
   assert.deepEqual(JSON.parse(projected.value).counts, counts);
 });
+
+test('Item 8c50ce13: a stored message is one project-owned body, read back in place and deleted with its ticket', async t => {
+  const name = 'FORGE_LANDING_MESSAGE_REFS',
+    previous = process.env[name];
+  process.env[name] = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+  });
+  const s = state([]),
+    ctx = landingRequestBodies(finishReadWriter(s.ctx));
+  const message = 'Store the message once\n\nCo-Authored-By: Synthetic <noreply@openai.com>';
+  const value = {
+    ...ticket(),
+    value: canonicalPayload({
+      id: 'submission',
+      attemptId: 'attempt',
+      phase: 'queued',
+      request: { ...request, message },
+    }),
+  };
+  const id = await ctx.db.insert('projectHostedLandingRequests', value);
+  const raw = structuredClone(s.tables.projectHostedLandingRequests.get(id));
+  const body = s.tables.projectHostedLandingBodies.get(raw.messageBodyId);
+  assert.deepEqual(body, {
+    _id: raw.messageBodyId,
+    _creationTime: body._creationTime,
+    value: message,
+    messageProjectId: 'project',
+  });
+  assert.equal(
+    JSON.parse(s.tables.projectHostedLandingBodies.get(raw.requestBodyId).value).request.message,
+    undefined,
+  );
+  const { messageBodyId: _pointer, ...read } = logical(await ctx.db.get(id));
+  assert.deepEqual(read, value, 'readers see the original logical request');
+  const run = JSON.parse((await ctx.db.get(id)).value);
+  await ctx.db.patch(id, { phase: 'checking', value: JSON.stringify({ ...run, phase: 'checking' }) });
+  assert.equal(
+    s.tables.projectHostedLandingBodies.size,
+    3,
+    'request, selection and message bodies, each once',
+  );
+  assert.deepEqual(
+    s.tables.projectHostedLandingBodies.get(raw.messageBodyId),
+    body,
+    'the message is immutable',
+  );
+  // Another project's message body cannot stand in for this ticket's message.
+  const foreign = await s.ctx.db.insert('projectHostedLandingBodies', {
+    value: message,
+    messageProjectId: 'foreign',
+  });
+  await s.ctx.db.patch(id, { messageBodyId: foreign });
+  await assert.rejects(ctx.db.get(id), /belongs to another project/);
+  // Restore only the tampered pointer and re-read it, as above; deletion removes every owned body.
+  await s.ctx.db.patch(id, { messageBodyId: raw.messageBodyId });
+  await ctx.db.get(id);
+  await ctx.db.delete(id);
+  for (const pointer of [raw.requestBodyId, raw.selectionBodyId, raw.messageBodyId])
+    assert(!s.tables.projectHostedLandingBodies.has(pointer), 'purge and deletion remove every owned body');
+  assert(s.tables.projectHostedLandingBodies.has(foreign));
+});

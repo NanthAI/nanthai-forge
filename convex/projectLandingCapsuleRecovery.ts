@@ -16,6 +16,7 @@ import { RECOVERY_PAGE_ROWS, RECOVERY_PAGE_BYTES } from '../src/recovery-hosted-
 import { LANDING_CAPSULE_TABLES } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { referencesStoredMessage } from './projectHostedLandingMessageBody';
 const prefix = 'recovery-capsules-v1:';
 type Cursor = {
   table: string;
@@ -149,14 +150,30 @@ export async function recoveryCapsulePage(
   });
 }
 /** Raw digests are verified by getLandingCapsule before these rows cross the public identity wrapper. */
-export function projectCapsuleRecovery(capsule: LandingCapsule, context: Record<string, unknown>) {
+export async function projectCapsuleRecovery(
+  capsule: LandingCapsule,
+  context: Record<string, unknown>,
+  expand: (rows: string[]) => Promise<string[]>,
+) {
   const selected = context.recoveryCapsule as { table: RecoveryTable; offset: number };
   invariant(selected && typeof selected.table === 'string', 'EVIDENCE_CHANGED', 'Select a recovery table.');
   const all = capsule.tables[selected.table as keyof LandingCapsule['tables']] ?? [];
   invariant(selected.offset <= all.length, 'EVIDENCE_CHANGED', 'Recovery capsule offset differs.');
+  const window = all.slice(selected.offset, selected.offset + RECOVERY_PAGE_ROWS);
+  // Item 8c50ce13: archived events that name a stored message leave as the inline receipt, as live ones do.
+  if (selected.table === 'projectHostedAcceptanceEvents') {
+    const named = window.flatMap((text, index) =>
+      referencesStoredMessage((JSON.parse(text) as { value: string }).value) ? [index] : [],
+    );
+    if (named.length) {
+      const expanded = await expand(named.map(index => window[index]!));
+      invariant(expanded.length === named.length, 'EVIDENCE_CHANGED', 'Archived receipt expansion differs.');
+      for (const [at, index] of named.entries()) window[index] = expanded[at]!;
+    }
+  }
   const rows: string[] = [];
   let bytes = 0;
-  for (const text of all.slice(selected.offset, selected.offset + RECOVERY_PAGE_ROWS)) {
+  for (const text of window) {
     const size = new TextEncoder().encode(text).length;
     if (rows.length && bytes + size > RECOVERY_PAGE_BYTES) break;
     rows.push(text);

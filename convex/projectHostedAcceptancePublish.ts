@@ -55,6 +55,7 @@ import { hasWriteRole } from './projectRole';
 import { validCrossHeadProof, fastProof } from '../src/hosted-cross-head-proof';
 import { requireReuseAudit } from './projectHostedReuseAudit';
 import { acceptedLandingMessage } from './projectHostedLandingMessage';
+import { receiptMessageField } from './projectHostedLandingMessageBody';
 import { alertSecretAllowAdded } from './projectHostedSecretAllow';
 import { secretAllowMark, secretAllowReview } from '../src/secret-allow';
 import { grantedApproval } from './projectHostedOwnerGrant';
@@ -397,7 +398,7 @@ export async function publishAcceptance(
     submissionId: state.id,
     operationId: state.operationId,
     attemptId: attempt.id,
-    ...(message === undefined ? {} : { message }),
+    ...receiptMessageField(row, state, message),
     at: new Date(now).toISOString(),
     authorityEpoch: attempt.authorityEpoch,
     previous: attempt.main,

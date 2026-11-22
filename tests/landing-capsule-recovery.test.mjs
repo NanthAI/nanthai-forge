@@ -25,7 +25,7 @@ const people = await import(moduleUrl('../convex/publicPeople.ts'));
 const index = await import(moduleUrl('../convex/projectLandingCapsuleIndex.ts'));
 const store = await import(moduleUrl('../convex/projectLandingCapsuleStore.ts'));
 
-async function fixture(t, { privateActor = false } = {}) {
+async function fixture(t, { privateActor = false, storedMessage } = {}) {
   const h = await capsuleMaintenanceFixture(t);
   const f = await hostedRecoveryFixture(t);
   // Portable fixtures use a symbolic project id; the indexed server fake needs its table-qualified id.
@@ -93,6 +93,18 @@ async function fixture(t, { privateActor = false } = {}) {
       handle: 'current-author',
     });
   }
+  if (storedMessage) {
+    // Item 8c50ce13: archived events may name their ticket's stored message, as live receipts do.
+    const body = s.insert('projectHostedLandingBodies', {
+      value: storedMessage,
+      messageProjectId: projectId,
+    });
+    for (const row of f.tables.projectHostedAcceptanceEvents) {
+      const { message: _message, ...receipt } = JSON.parse(row.value);
+      row.value = JSON.stringify({ ...receipt, messageRef: body });
+      s.tables.projectHostedAcceptanceEvents.get(row._id).value = row.value;
+    }
+  }
   const tables = Object.fromEntries(
     [
       'projectHostedAcceptanceSnapshots',
@@ -127,7 +139,11 @@ async function fixture(t, { privateActor = false } = {}) {
     });
   };
   const query = (name, args, actor = 'owner') => {
-    const functions = { 'projectRecoveryHosted:page': hosted.page, 'publicPeople:resolve': people.resolve };
+    const functions = {
+      'projectRecoveryHosted:page': hosted.page,
+      'projectRecoveryHosted:expandArchivedReceipts': hosted.expandArchivedReceipts,
+      'publicPeople:resolve': people.resolve,
+    };
     assert(functions[name], name);
     return s.call('capsuleRecoveryQuery', functions[name], args, actor);
   };
@@ -263,4 +279,25 @@ test('S1 recovery excludes staged pages of an unaccepted earlier attempt through
   h.s.tables.projectHostedAcceptancePlans.delete(plan._id);
   const resumed = await h.f.transport.hostedPage(selection, 'projectHostedAcceptancePages', null);
   assert.deepEqual(resumed.rows, [], 'compact ledger keeps ownership once the old plan copy is removed');
+});
+
+test('Item 8c50ce13: an archived event that names its stored message leaves recovery as the inline receipt', async t => {
+  const message = 'Stored subject\n\nCo-Authored-By: Synthetic <noreply@openai.com>';
+  const h = await fixture(t, { storedMessage: message });
+  h.publish();
+  const { selection } = await h.f.transport.prepare();
+  const table = 'projectHostedAcceptanceEvents';
+  const archived = h.capsule.tables[table];
+  assert(archived.length && archived.every(text => 'messageRef' in JSON.parse(JSON.parse(text).value)));
+  const live = await h.f.transport.hostedPage(selection, table, null);
+  assert.deepEqual(live.rows, [], 'the capsule owns its events');
+  const page = await h.f.transport.hostedPage(selection, table, live.cursor);
+  assert.equal(page.rows.length, archived.length);
+  for (const [index, text] of page.rows.entries()) {
+    const { value, ...row } = JSON.parse(text);
+    const { value: storedValue, ...storedRow } = JSON.parse(archived[index]);
+    assert.deepEqual(row, storedRow, 'only the receipt value changes');
+    const { messageRef: _ref, ...receipt } = JSON.parse(storedValue);
+    assert.deepEqual(JSON.parse(value), { ...receipt, message });
+  }
 });

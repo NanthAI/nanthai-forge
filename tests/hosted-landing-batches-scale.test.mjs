@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
+import { logicalReceipts } from './landing-ticket-fixture.mjs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { LANDING_MESSAGE_BYTES } from '../dist/landing-message.js';
@@ -88,9 +89,7 @@ test('600 Intents and 575 retained receipts do not change bounded eight-member l
     };
   assert(f.entries.every(entry => states(f).find(s => s.id === entry.state.id)?.phase === 'landed'));
   assert.equal(f.runs().length, 1);
-  const receipts = [...f.tables.projectHostedAcceptances.values()]
-    .filter(r => r.value !== '{"synthetic":"unrelated history must not be read"}')
-    .map(r => JSON.parse(r.value));
+  const receipts = logicalReceipts(f).filter(r => r.synthetic === undefined);
   // The last receipt is main's and the mirrored one; it carries the cohort's messages.
   const published = receipts.reduce((a, b) => (b.snapshot.revision > a.snapshot.revision ? b : a));
   assert.deepEqual(published.cohortMessages, memberMessages);

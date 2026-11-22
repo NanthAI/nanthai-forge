@@ -2715,11 +2715,18 @@ provenance so strict older clients keep working; canonical records retain it.
 Readers also understand project-owned message bodies and a final-cohort receipt
 that identifies the preceding members by sequence. They expand those records
 at message-reading boundaries and retain the original receipt text, order and
-trailers. Landing writers still emit inline messages.
+trailers. With the deployment setting `FORGE_LANDING_MESSAGE_REFS=1` (default
+off while it is proved, then removed), a new landing stores its supplied
+message once: one raw body row owned by its landing record, read back into the
+request and deleted with it. Receipts and their events name that body, and the
+final cohort receipt names its member count. A publication step then writes no
+message text, whatever the batch size. Recovery exports such receipts in their
+inline form. Off, writers emit inline messages.
 
-Metadata uses existing calls and records, with zero idle calls. Each message adds
-at most 2,061 JSON bytes; the first cohort receipt adds at most 16,427 more for
-eight messages. Only legacy pending finishes need an indexed finish-record read.
+Metadata uses existing calls and records, with zero idle calls. Inline, each
+message adds at most 2,061 JSON bytes; the final cohort receipt adds at most
+16,427 more for eight messages. Stored, each message is one body insert at
+admission and each receipt carries a short reference. Only legacy pending finishes need an indexed finish-record read.
 Source and cursor artifact bytes remain in R2.
 
 ### GitHub containment and adoption

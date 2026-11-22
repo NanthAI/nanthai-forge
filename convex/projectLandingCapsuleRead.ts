@@ -97,7 +97,13 @@ export async function capsuleHistory(
     const result = { ...latest };
     delete result.landingCapsule;
     let projected: Record<string, unknown>;
-    if (input.query === 'projectRecoveryHosted:page') projected = projectCapsuleRecovery(capsule, result);
+    if (input.query === 'projectRecoveryHosted:page')
+      projected = await projectCapsuleRecovery(capsule, result, rows =>
+        ctx.runQuery(makeFunctionReference<'query'>('projectRecoveryHosted:expandArchivedReceipts'), {
+          projectId: input.projectId,
+          rows,
+        }),
+      );
     else if (input.query === 'projectHostedFinishObserve:page')
       projected = capsuleObserveReply(capsule, result, command);
     else if (input.query === 'projectHostedLanding:attempts')

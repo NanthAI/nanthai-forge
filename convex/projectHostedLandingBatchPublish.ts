@@ -62,6 +62,7 @@ import { landingObservation } from '../src/hosted-landing';
 import { landingAcceptedBy } from '../src/landing-accepted-by';
 import { invariant } from '../src/errors';
 import { acceptedLandingMessage } from './projectHostedLandingMessage';
+import { landingMessageRefsOn, receiptMessageField } from './projectHostedLandingMessageBody';
 import { alertSecretAllowAdded } from './projectHostedSecretAllow';
 import { secretAllowMark } from '../src/secret-allow';
 import { batchCoverageFailure } from './projectHostedBatchCoverage';
@@ -362,14 +363,15 @@ export async function publishLandingBatch(
       previous: candidate.base,
       candidate: member.attempt.candidate,
       memberCandidate: member.original.candidate,
-      ...(message === undefined ? {} : { message }),
+      ...receiptMessageField(member.row, member.state, message),
       // The last receipt is main's receipt and the one the GitHub mirror commits
       // (enqueueGithubMirror below): it carries every member's message, or the
       // commit loses peers' prose and trailers (batch 9f919ded, Issue eacfdb6e).
+      // With stored messages it names the contiguous member count instead (Item 8c50ce13).
       ...(index === members.length - 1
-        ? {
-            cohortMessages: messages.filter((m): m is string => m !== undefined),
-          }
+        ? landingMessageRefsOn()
+          ? { cohortSize: members.length }
+          : { cohortMessages: messages.filter((m): m is string => m !== undefined) }
         : {}),
       batchId: batch.id,
       ...firstCheckField(
