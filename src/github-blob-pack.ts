@@ -41,7 +41,9 @@ export async function githubBlobPack(
       throw new ForgeError('ARTIFACT_INTEGRITY', 'GitHub blob pack exceeds its pinned page size.');
     throw error;
   }
-  return readBlobPage(Buffer.concat(parts), expected);
+  const pack = Buffer.concat(parts);
+  parts.length = 0;
+  return readBlobPage(pack, expected);
 }
 
 /** Whole blobs and both Git delta encodings. Bases in this non-thin pack may be
@@ -54,7 +56,7 @@ function readBlobPage(pack: Buffer, expected: Map<string, number>) {
     maxSize = Math.max(...expected.values()),
     byOffset = new Map<number, Buffer>(),
     blobs = new Map<string, Buffer>(),
-    pending: { offset: number; base: string | number; delta: Buffer }[] = [];
+    pending: { offset: number; base: string | number; start: number; end: number; size: number }[] = [];
   fail(count === expected.size);
   let at = 12;
   const keep = (offset: number, bytes: Buffer) => {
@@ -62,6 +64,21 @@ function readBlobPage(pack: Buffer, expected: Map<string, number>) {
     fail(expected.get(sha) === bytes.length);
     blobs.set(sha, bytes);
     byOffset.set(offset, bytes);
+  };
+  const baseBytes = (base: string | number) =>
+    typeof base === 'number' ? byOffset.get(base) : blobs.get(base);
+  const inflate = (start: number, end: number, size: number) => {
+    let inflated: { buffer: Buffer; engine: { bytesWritten: number } };
+    try {
+      inflated = inflateSync(pack.subarray(start, end), {
+        info: true,
+        maxOutputLength: size + 1,
+      }) as unknown as typeof inflated;
+    } catch {
+      throw new ForgeError('ARTIFACT_INTEGRITY', 'GitHub blob pack contains invalid compressed bytes.');
+    }
+    fail(inflated.buffer.length === size && inflated.engine.bytesWritten > 0);
+    return inflated;
   };
   for (let n = 0; n < count; n++) {
     const offset = at;
@@ -95,28 +112,27 @@ function readBlobPage(pack: Buffer, expected: Map<string, number>) {
       baseId = pack.toString('hex', at, at + 20);
       at += 20;
     }
-    let inflated: { buffer: Buffer; engine: { bytesWritten: number } };
-    try {
-      inflated = inflateSync(pack.subarray(at, end), {
-        info: true,
-        maxOutputLength: size + 1,
-      }) as unknown as typeof inflated;
-    } catch {
-      throw new ForgeError('ARTIFACT_INTEGRITY', 'GitHub blob pack contains invalid compressed bytes.');
-    }
-    fail(inflated.buffer.length === size && inflated.engine.bytesWritten > 0);
+    const start = at;
+    const inflated = inflate(start, end, size);
     at += inflated.engine.bytesWritten;
-    if (baseId !== undefined) pending.push({ offset, base: baseId, delta: inflated.buffer });
-    else keep(offset, inflated.buffer);
+    if (baseId === undefined) keep(offset, inflated.buffer);
+    else {
+      const base = baseBytes(baseId);
+      if (base) keep(offset, applyGitDelta(base, inflated.buffer, maxSize));
+      // Forward references keep compressed offsets only. Re-inflate when the
+      // base arrives so one large blob cannot set the buffer size of every delta.
+      else pending.push({ offset, base: baseId, start, end: at, size });
+    }
   }
   fail(at === end);
   while (pending.length) {
     let resolved = 0;
     for (let i = pending.length - 1; i >= 0; i--) {
       const row = pending[i]!,
-        base = typeof row.base === 'number' ? byOffset.get(row.base) : blobs.get(row.base);
+        base = baseBytes(row.base);
       if (!base) continue;
-      keep(row.offset, applyGitDelta(base, row.delta, maxSize));
+      const delta = inflate(row.start, row.end, row.size).buffer;
+      keep(row.offset, applyGitDelta(base, delta, maxSize));
       pending.splice(i, 1);
       resolved++;
     }

@@ -31,7 +31,7 @@ export type LfsImportIO = {
   ): Promise<void>;
   /** Called once with every LFS oid before `stored` is asked (one batched lookup). */
   preload?(oids: string[]): Promise<void>;
-  record(entry: GithubSourceEntry, pin: Pin): void;
+  record(entry: GithubSourceEntry, pin: Pin, lfs?: true): void;
   drain(): Promise<void>;
   over(): boolean;
   request?: GithubFetch;
@@ -43,6 +43,8 @@ const attributeBytes = lfsAttributeBytes;
 export type LfsImportOptions = {
   /** Unique LFS bytes earlier pages of the same import already fetched. */
   carried?: number;
+  /** The oids included in carried when resuming a checkpoint of resolved paths. */
+  previouslyCounted?: (oid: string) => boolean;
   /** Count only objects not yet stored toward the limit (paged callers). */
   skipStored?: boolean;
   /** Retry advice for callers that have no `lfsLimitBytes` to retry with. */
@@ -111,9 +113,10 @@ export class LfsImport {
     this.held.clear();
     const objects = [...wanted.values()];
     if (objects.length) await io.preload?.(objects.map(object => object.pointer.oid));
-    const counted = this.options.skipStored
-      ? objects.filter(object => !io.stored(object.pointer.oid))
-      : objects;
+    const { previouslyCounted, skipStored } = this.options;
+    const counted = objects.filter(
+      ({ pointer }) => !previouslyCounted?.(pointer.oid) && !(skipStored && io.stored(pointer.oid)),
+    );
     const carried = this.options.carried ?? 0;
     this.objects = objects.length;
     this.objectBytes = counted.reduce((sum, object) => sum + object.pointer.size, 0);
@@ -126,7 +129,7 @@ export class LfsImport {
     }
     const bind = (object: (typeof objects)[number]) => {
       for (const entry of object.entries)
-        io.record(entry, { blob: object.pointer.oid, size: object.pointer.size });
+        io.record(entry, { blob: object.pointer.oid, size: object.pointer.size }, true);
     };
     const pending = objects.filter(object => {
       if (!io.stored(object.pointer.oid)) return true;

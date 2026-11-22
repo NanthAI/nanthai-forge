@@ -270,6 +270,23 @@ export const archiveProgress = internalMutation({
     return true;
   },
 });
+/** A failed archive action checkpoints verified rows without scheduling a step. */
+export const archiveCheckpoint = internalMutation({
+  args: { ...identity, previousCursor: v.string(), cursor: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, input) => {
+    const row = await readJob(ctx, input);
+    if (
+      row.protocol !== 3 ||
+      row.step !== input.step ||
+      row.phase === 'ready' ||
+      row.cursor !== input.previousCursor
+    )
+      return false;
+    await ctx.db.patch(row._id, { cursor: input.cursor });
+    return true;
+  },
+});
 export const fail = internalMutation({
   args: {
     ...identity,

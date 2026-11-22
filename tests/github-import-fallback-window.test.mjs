@@ -7,19 +7,20 @@ import { state } from './hosted-fixture.mjs';
 import { startFakeR2, fakeR2Config } from './fake-r2.mjs';
 import { githubBlobPack } from '../dist/github-blob-pack.js';
 import { wantedBlobResponse } from './github-blob-pack-fixture.mjs';
-import { importPageBytes } from '../dist/github-import-pages.js';
+import { importPageBytes, importPageFiles } from '../dist/github-import-pages.js';
 const { ImportUpload } = await import(moduleUrl('../convex/projectGithubImportUpload.ts'));
-const { stageFallbackBlobs } = await import(moduleUrl('../convex/projectGithubImportArchive.ts'));
+const { stageFallbackBlobs } = await import(moduleUrl('../convex/projectGithubImportFallback.ts'));
 
 const gitSha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
 async function fixture(t, count, size) {
+  const { accessKeyId, secretAccessKey } = fakeR2Config;
   const keys = {
     R2_ACCOUNT_ID: fakeR2Config.accountId,
     R2_BUCKET: fakeR2Config.bucket,
-    R2_ACCESS_KEY_ID: fakeR2Config.accessKeyId,
-    R2_SECRET_ACCESS_KEY: fakeR2Config.secretAccessKey,
+    R2_ACCESS_KEY_ID: accessKeyId,
+    R2_SECRET_ACCESS_KEY: secretAccessKey,
   };
   const saved = Object.fromEntries(Object.keys(keys).map(key => [key, process.env[key]]));
   Object.assign(process.env, keys);
@@ -131,6 +132,28 @@ test("small fallback pages keep today's single window and single PUT", async t =
   await f.upload.drain(true);
   assert.equal(f.upload.putAttempts, 1);
   assert.equal(f.stored.size, 101, 'one pack row plus 100 members');
+});
+
+test('a continuation fetches up to 1,000 blobs within the remaining 8 MiB room', async t => {
+  const f = await fixture(t, 1_001, 8_192);
+  f.io.upload.put(Buffer.alloc(importPageBytes - 1_000 * 8_192, 253));
+  const pages = [];
+  await stageFallbackBlobs(
+    f.entries,
+    {
+      ...f.io,
+      fetchBlobs: entries => {
+        const available = importPageBytes - f.io.upload.stagedBytes;
+        assert.ok(entries.reduce((bytes, entry) => bytes + entry.size, 0) <= available);
+        pages.push(entries.length);
+        return f.io.fetchBlobs(entries);
+      },
+      record: () => {},
+    },
+    importPageFiles,
+  );
+  assert.deepEqual(pages, [1_000, 1]);
+  assert.equal(f.peak(), importPageBytes);
 });
 
 test('a changed fallback blob is rejected before it can be staged', async t => {

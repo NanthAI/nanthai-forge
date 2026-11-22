@@ -31,13 +31,18 @@ export const initialImportProgress = (lfsLimitBytes?: number): ImportProgress =>
  * line with stored history: 1 GiB by default, raisable by the importer to 8 GiB. */
 export const lfsImportDefaultBytes = 1024 ** 3;
 export const lfsImportMaxBytes = 8 * 1024 ** 3;
-/** Archive imports keep only the pinned root tree and run count: progress is the
- * content-addressed objects already stored, never a per-file inventory. */
+/** Archive progress pins an R2 checkpoint of verified listing rows. */
 export const archiveCursorSchema = z
   .object({
     schema: z.literal(3),
     tree: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/),
     runs: z.number().int().nonnegative(),
+    pins: z
+      .object({
+        sha256: z.string().regex(/^[0-9a-f]{64}$/),
+        size: z.number().int().positive(),
+      })
+      .optional(),
     /** Unique Git LFS bytes this import may fetch; 0 keeps pointers. */
     lfsLimitBytes: z.number().int().min(0).max(lfsImportMaxBytes).optional(),
   })

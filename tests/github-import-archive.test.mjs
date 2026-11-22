@@ -89,6 +89,7 @@ function repository({ files = 30, directories = 3, submodules = 1 } = {}) {
   }
   const large = Buffer.alloc(2 * 1024 * 1024 + 3, 7);
   tree.push({ path: 'large.bin', mode: '100644', type: 'blob', sha: gitSha(large), size: large.length });
+  bodies.set(gitSha(large), large);
   members.push({ path: 'large.bin', bytes: large });
   const omitted = Buffer.from('export-ignore keeps this out of archives\n'),
     rewritten = Buffer.from('$Format:%H$ expands in archives only\n');
@@ -105,11 +106,12 @@ function repository({ files = 30, directories = 3, submodules = 1 } = {}) {
   return { tree, archive: tarball(members), bodies, files: files + 3 + submodules };
 }
 
+const { accessKeyId, secretAccessKey } = fakeR2Config;
 const r2Env = {
   R2_ACCOUNT_ID: fakeR2Config.accountId,
   R2_BUCKET: fakeR2Config.bucket,
-  R2_ACCESS_KEY_ID: fakeR2Config.accessKeyId,
-  R2_SECRET_ACCESS_KEY: fakeR2Config.secretAccessKey,
+  R2_ACCESS_KEY_ID: accessKeyId,
+  R2_SECRET_ACCESS_KEY: secretAccessKey,
   FORGE_BLOBS: 'r2',
 };
 /** Tree replies for a repository whose recursive root listing GitHub truncates (entry count or reply
@@ -147,9 +149,9 @@ async function serve(t, repo, counts, hooks = {}) {
     const u = new URL(url),
       path = u.pathname;
     if (u.host === bucket.host) return old(url, options);
-    const count = name => {
+    const count = (name, input) => {
       counts[name] = (counts[name] ?? 0) + 1;
-      hooks[name]?.(counts[name]);
+      hooks[name]?.(counts[name], input);
     };
     if (u.hostname === 'codeload.github.com') {
       count('archive');
@@ -187,7 +189,7 @@ async function serve(t, repo, counts, hooks = {}) {
       });
     }
     if (u.hostname === 'github.com' && path === '/fixture/arch.git/git-upload-pack') {
-      count('blobPacks');
+      count('blobPacks', options);
       return wantedBlobResponse(options, repo.bodies);
     }
     if (path.includes('/git/blobs/')) {
@@ -215,12 +217,15 @@ async function serve(t, repo, counts, hooks = {}) {
   };
   return bucket;
 }
-async function importArchive(s, options = {}, expect = 'ready') {
-  const id = await s.modules.projectGithubImport.start._handler(s.ctx, {
+function startArchive(s, options) {
+  return s.modules.projectGithubImport.start._handler(s.ctx, {
     operationId: randomUUID(),
     url: 'fixture/arch',
     ...options,
   });
+}
+async function importArchive(s, options = {}, expect = 'ready') {
+  const id = await startArchive(s, options);
   for (let i = 0; i < 5 && !['ready', 'error'].includes(s.tables.projectGithubImports.get(id).phase); i++)
     await s.worker(id);
   const job = s.tables.projectGithubImports.get(id);
@@ -289,7 +294,7 @@ function lfsRepository() {
   return {
     tree,
     archive: tarball(files.map(([path, bytes]) => ({ path, bytes }))),
-    bodies: new Map(),
+    bodies: new Map(files.map(([, bytes]) => [gitSha(bytes), bytes])),
     files: files.length,
     lfs: new Map([model, big].map(bytes => [digestOf(bytes), bytes])),
     model,
@@ -681,6 +686,7 @@ test('a publication failure is coded, not an interrupted worker, and the retry p
   const job = s.tables.projectGithubImports.get(id);
   assert.equal(job.phase, 'ready', JSON.stringify(job.error));
   assert.deepEqual(counts, before, 'the retry made no GitHub archive, tree, tarball or blob request');
+  assert.deepEqual(listingKeys(bucket), [], 'publication retry deletes listing and pin scratch');
   await drainPurge(s);
   assert.equal(s.tables.projectGithubImportInventory.size, 0);
   const { files } = await mainFiles(s, bucket, job.projectId);
@@ -786,6 +792,287 @@ function skewClock(t) {
 const listingKeys = bucket => [...bucket.objects.keys()].filter(key => key.includes('/import/'));
 const listingGets = bucket =>
   bucket.requests.filter(request => request.method === 'GET' && request.path.includes('/import/')).length;
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+const packWants = init =>
+  [
+    ...Buffer.from(init.body)
+      .toString()
+      .matchAll(/want ([0-9a-f]{40})/g),
+  ].map(match => match[1]);
+
+/** A deadline after the first 1,000 verified members, with a second upload
+ * window, fallback pack, streamed large blob and every supported file mode. */
+function deadlineRepository() {
+  const tree = [],
+    members = [],
+    bodies = new Map();
+  const append = (path, bytes, mode = '100644', archived = bytes) => {
+    const sha = gitSha(bytes);
+    tree.push({ path, sha, type: 'blob', mode, size: bytes.length });
+    bodies.set(sha, bytes);
+    if (archived !== null)
+      members.push(
+        mode === '120000' ? { path, type: '2', linkname: bytes.toString() } : { path, bytes: archived },
+      );
+  };
+  for (let i = 0; i < 2_400; i++) {
+    const bytes = createHash('shake256', { outputLength: 4096 }).update(String(i)).digest();
+    append('source-' + String(i).padStart(4, '0'), bytes, i === 0 ? '100755' : '100644');
+  }
+  append('link', Buffer.from('source-0001'), '120000');
+  append('large', Buffer.alloc(2 * 1024 * 1024 + 5, 15));
+  append('omitted', Buffer.from('actual omitted'), '100644', null);
+  append('rewritten', Buffer.from('actual version'), '100644', Buffer.from('export version'));
+  tree.push({ path: 'vendor', sha: hex(2), type: 'commit', mode: '160000' });
+  return { tree, archive: tarball(members), bodies };
+}
+
+test('Issue e165787c: the 1,001st archive member hits the deadline and blob packs finish the exact import', async t => {
+  const repo = deadlineRepository();
+  let control;
+  for (const resume of [false, true]) {
+    await t.test(resume ? 'deadline and continuation' : 'one-step control', async t => {
+      const s = pagedFixture(),
+        counts = {},
+        packs = [];
+      const clock = skewClock(t);
+      const bucket = await serve(t, repo, counts, { blobPacks: (_n, init) => packs.push(packWants(init)) });
+      clock.bucket = bucket;
+      if (resume) {
+        const run = s.ctx.runMutation;
+        s.ctx.runMutation = async (ref, input) => {
+          const result = await run(ref, input);
+          if (
+            getFunctionName(ref) === 'projectGithubImportStore:archiveProgress' &&
+            input.completed === 1_000 &&
+            input.objects.length
+          )
+            clock.jump(7);
+          return result;
+        };
+      }
+      const started = performance.now();
+      const id = await startArchive(s);
+      await s.worker(id);
+      let job = s.tables.projectGithubImports.get(id);
+      const perFileInventory = () =>
+        [...s.tables.projectGithubImportInventory.values()].filter(
+          row => row.part === 'files' || row.part === 'imported',
+        );
+      if (resume) {
+        assert.equal(job.phase, 'importing', JSON.stringify(job.error));
+        assert.equal(job.step, 1);
+        assert.equal(job.completed, 1_000);
+        assert.equal(job.bytes, 4_096_000);
+        assert.equal(s.tables.hostedProjects.get(job.projectId).currentBackup, null);
+        assert.equal(counts.tarball, 1);
+        assert.equal(counts.blobPacks, undefined);
+        assert.equal(listingKeys(bucket).length, 2, 'one listing and one pin checkpoint');
+        assert.equal(perFileInventory().length, 0);
+        await s.worker(id);
+        job = s.tables.projectGithubImports.get(id);
+        assert.deepEqual(
+          new Set(packs.flat()),
+          new Set(
+            repo.tree
+              .slice(1_000)
+              .filter(row => row.mode !== '160000')
+              .map(row => row.sha),
+          ),
+          'continuation wants only unpinned Git blobs',
+        );
+      }
+      assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+      assert.equal(job.completed, 2_405);
+      assert.equal(counts.tarball, 1, 'step 2 never opens the tarball');
+      assert.equal(counts.archive, 1, 'step 2 never opens the archive body');
+      assert.equal(perFileInventory().length, 0);
+      assert.deepEqual(listingKeys(bucket), [], 'publication deletes listing and pin scratch');
+      const main = await mainFiles(s, bucket, job.projectId);
+      for (const path of ['large', 'omitted', 'rewritten', 'link', 'vendor']) {
+        const row = repo.tree.find(row => row.path === path);
+        const bytes = row.mode === '160000' ? Buffer.from(row.sha) : repo.bodies.get(row.sha);
+        assert.deepEqual(await main.bytesOf(main.files.get(path).blob), bytes, path);
+      }
+      await drainPurge(s);
+      const stats = s.stats();
+      if (resume) {
+        assert.ok(control, 'one-step control completed');
+        assert.deepEqual(main.files, control.files, 'all digests, lengths and modes match');
+        assert.ok(stats.documentsWritten <= Math.min(72, control.writes) + 8, JSON.stringify(stats));
+      } else {
+        assert.equal(JSON.parse(job.cursor).pins, undefined);
+        control = { files: main.files, writes: stats.documentsWritten };
+      }
+      t.diagnostic(
+        JSON.stringify({
+          ...counts,
+          ...stats,
+          calls: calls(s),
+          puts: bucket.requests.filter(request => request.method === 'PUT').length,
+          ms: Math.round(performance.now() - started),
+        }),
+      );
+    });
+  }
+});
+
+for (const damage of ['missing', 'altered', 'wrong tree', 'wrong listing', 'missing catalog entry'])
+  test(`Issue e165787c: ${damage} pins are reacquired from Git without opening the archive`, async t => {
+    const repo = repository({ files: 12, directories: 2, submodules: 0 });
+    const s = pagedFixture(),
+      counts = {},
+      wants = [];
+    const clock = skewClock(t);
+    const bucket = await serve(t, repo, counts, {
+      archive: n => n === 1 && clock.jump(7),
+      blobPacks: (_n, init) => wants.push(...packWants(init)),
+    });
+    clock.bucket = bucket;
+    const id = await startArchive(s);
+    await s.worker(id);
+    let job = s.tables.projectGithubImports.get(id);
+    assert.equal(job.phase, 'importing', JSON.stringify(job.error));
+    assert.equal(job.completed, 1);
+    const cursor = JSON.parse(job.cursor);
+    const key = listingKeys(bucket).find(key => key.endsWith(cursor.pins.sha256));
+    assert.ok(key);
+    if (damage === 'missing') bucket.objects.delete(key);
+    else if (damage === 'altered') bucket.objects.set(key, Buffer.alloc(cursor.pins.size));
+    else if (damage === 'missing catalog entry') {
+      for (const row of s.tables.projectGithubImportInventory.values())
+        if (row.jobId === id && row.part === 'objects') await s.ctx.db.delete(row._id);
+    } else {
+      const original = ImportedPins.decode(
+        bucket.objects.get(key),
+        cursor.tree,
+        job.listing.sha256,
+        repo.files,
+      );
+      assert.equal(original.count, 1);
+      const bytes = original.encode(
+        damage === 'wrong tree' ? hex(1_000) : cursor.tree,
+        damage === 'wrong listing' ? 'f'.repeat(64) : job.listing.sha256,
+        Buffer.alloc(16),
+      );
+      cursor.pins = { sha256: sha256(bytes), size: bytes.length };
+      bucket.objects.delete(key);
+      bucket.objects.set(key.replace(/[^/]+$/, cursor.pins.sha256), bytes);
+      await s.ctx.db.patch(id, { cursor: JSON.stringify(cursor) });
+    }
+    await s.worker(id);
+    job = s.tables.projectGithubImports.get(id);
+    assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+    assert.equal(job.completed, repo.files);
+    assert.deepEqual(
+      new Set(wants),
+      new Set(repo.tree.filter(row => row.type === 'blob').map(row => row.sha)),
+    );
+    assert.equal(counts.tarball, 1);
+    assert.deepEqual(listingKeys(bucket), []);
+  });
+
+test('Issue e165787c: LFS-only continuation imports object bytes after its source-pack deadline', async t => {
+  const repo = lfsRepository();
+  // The only regular remaining file is removed so holding pointers at the
+  // deadline cannot look like progress.
+  const readme = repo.tree.findIndex(row => row.path === 'README.md');
+  repo.tree.splice(readme, 1);
+  const members = repo.tree
+    .filter(row => row.type === 'blob')
+    .map(row => ({ path: row.path, bytes: repo.bodies.get(row.sha) }));
+  repo.archive = tarball(members);
+  const s = pagedFixture(),
+    counts = {},
+    packs = [];
+  const clock = skewClock(t);
+  const bucket = await serve(t, repo, counts, {
+    archive: n => n === 1 && clock.jump(7),
+    blobPacks: (n, init) => {
+      packs.push(packWants(init));
+      if (n === 2) clock.jump(7);
+    },
+  });
+  clock.bucket = bucket;
+  const job = await importArchive(s);
+  assert.equal(job.step, 1);
+  assert.equal(counts.tarball, 1);
+  assert.equal(counts.lfsDownload, 2);
+  assert.deepEqual(packs[0], [repo.tree.find(row => row.path === '.gitattributes').sha]);
+  const { files, bytesOf } = await mainFiles(s, bucket, job.projectId);
+  assert.deepEqual(await bytesOf(files.get('model.bin').blob), repo.model);
+  assert.deepEqual(await bytesOf(files.get('assets/big.dat').blob), repo.big);
+  assert.deepEqual(await bytesOf(files.get('assets/keep.txt').blob), pointer(repo.untracked));
+});
+
+for (const kind of ['failed advance', 'lost advance reply'])
+  test(`Issue e165787c: ${kind} keeps one selected checkpoint and publication removes it`, async t => {
+    const repo = repository({ files: 14, directories: 2, submodules: 1 });
+    const s = pagedFixture(),
+      counts = {};
+    const clock = skewClock(t);
+    const bucket = await serve(t, repo, counts, {
+      archive: n => n === 1 && clock.jump(7),
+      blobPacks: n => kind === 'failed advance' && n === 1 && clock.jump(7),
+    });
+    clock.bucket = bucket;
+    const run = s.ctx.runMutation;
+    let fault = true;
+    s.ctx.runMutation = async (ref, input) => {
+      if (getFunctionName(ref) !== 'projectGithubImportStore:advance' || !fault) return run(ref, input);
+      fault = false;
+      if (kind === 'lost advance reply') await run(ref, input);
+      throw Error('synthetic advance connection error');
+    };
+    const id = await startArchive(s);
+    await s.worker(id);
+    let job = s.tables.projectGithubImports.get(id);
+    assert.equal(job.phase, kind === 'failed advance' ? 'error' : 'importing');
+    assert.equal(job.completed, 1);
+    const pins = JSON.parse(job.cursor).pins;
+    assert.equal(listingKeys(bucket).length, 2);
+    assert.ok(listingKeys(bucket).some(key => key.endsWith(pins.sha256)));
+    if (job.phase === 'error')
+      await s.modules.projectGithubImportStore.resume._handler(s.ctx, { id, actor: 'owner' });
+    await s.worker(id);
+    job = s.tables.projectGithubImports.get(id);
+    if (kind === 'failed advance') {
+      assert.equal(job.phase, 'importing', JSON.stringify(job.error));
+      assert.equal(listingKeys(bucket).length, 2, 'advance replaces the previous checkpoint');
+      assert.ok(!listingKeys(bucket).some(key => key.endsWith(pins.sha256)));
+      await s.worker(id);
+      job = s.tables.projectGithubImports.get(id);
+    }
+    assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+    assert.equal(counts.tarball, 1);
+    assert.deepEqual(listingKeys(bucket), []);
+  });
+
+test('Issue e165787c: a failed first step leaves durable pins for retry without a second archive', async t => {
+  const repo = repository({ files: 15, directories: 3, submodules: 1 });
+  const s = pagedFixture(),
+    counts = {};
+  const bucket = await serve(t, repo, counts, {
+    blobPacks: n => {
+      if (n === 1) throw Error('synthetic Git pack disconnect');
+    },
+  });
+  const id = await startArchive(s);
+  await s.worker(id);
+  const failed = s.tables.projectGithubImports.get(id);
+  assert.equal(failed.phase, 'error');
+  assert.equal(failed.step, 0);
+  assert.equal(failed.completed, repo.files - 2, 'verified archive members reached the durable catalog');
+  assert.ok(JSON.parse(failed.cursor).pins);
+  assert.equal(listingKeys(bucket).length, 2);
+  await s.modules.projectGithubImportStore.resume._handler(s.ctx, { id, actor: 'owner' });
+  await s.worker(id);
+  const job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+  assert.equal(job.completed, repo.files);
+  assert.equal(counts.tarball, 1);
+  assert.deepEqual(listingKeys(bucket), []);
+});
 
 test('Issue e5be6ef3: a multi-step archive import lists the tree once; every step reads the stored table', async t => {
   const repo = {
@@ -801,15 +1088,15 @@ test('Issue e5be6ef3: a multi-step archive import lists the tree once; every ste
   const job = await importArchive(s);
   assert.equal(job.step, 1, 'two archive runs');
   assert.equal(job.completed, repo.files);
-  // 4 recursive + 2 flat reads are the one listing (start); both runs streamed the archive.
-  assert.deepEqual(counts, { treesRecursive: 4, treesFlat: 2, tarball: 2, archive: 2, blobPacks: 1 });
+  // 4 recursive + 2 flat reads are the one listing (start).
+  assert.deepEqual(counts, { treesRecursive: 4, treesFlat: 2, tarball: 1, archive: 1, blobPacks: 2 });
   assert.equal(
     job.githubRequests.anonymous,
-    2 + 6 + 2 + 2 + 1,
-    'start: repository, commit, 1 listing of 6; run 1: repository, tarball; run 2: repository, tarball; publication: repository',
+    2 + 6 + 2 + 1 + 1,
+    'start: repository, commit, 1 listing of 6; run 1: repository, tarball; run 2: repository; publication: repository',
   );
-  assert.equal(listingGets(bucket), 2, 'each run read the stored table from R2');
-  assert.deepEqual(listingKeys(bucket), [], 'the scratch table is deleted once main is published');
+  assert.equal(listingGets(bucket), 3, 'each step reads the listing and continuation reads the pins');
+  assert.deepEqual(listingKeys(bucket), [], 'scratch is deleted once main is published');
 });
 
 test('Issue e5be6ef3: a run that stored the last file at its time budget publishes in that run, with no second pass over the archive', async t => {
@@ -823,6 +1110,7 @@ test('Issue e5be6ef3: a run that stored the last file at its time budget publish
   assert.equal(job.step, 0, 'no continuation step');
   assert.equal(job.completed, repo.files);
   assert.deepEqual(counts, { trees: 1, tarball: 1, archive: 1, blobPacks: 1 });
+  assert.equal(JSON.parse(job.cursor).pins, undefined, 'one step writes no checkpoint');
 });
 
 for (const damage of ['gone', 'altered'])

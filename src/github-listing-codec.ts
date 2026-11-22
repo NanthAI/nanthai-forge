@@ -254,32 +254,82 @@ export class ListingBuilder {
   }
 }
 
+const pinsHeaderBytes = 92;
+const pinRowBytes = 41;
 /** Verified pins of a table's rows, by row: the SHA-256 blob and its size (an LFS path binds
  * its object's size). About 41 bytes a file, where a path Map of objects held about 185. */
 export class ImportedPins {
   private blobs: Buffer;
-  private sizes: Float64Array;
-  private done: Uint8Array;
+  private sizes: Buffer;
+  private done: Buffer;
   count = 0;
-  constructor(readonly length: number) {
-    this.blobs = Buffer.alloc(length * 32);
-    this.sizes = new Float64Array(length);
-    this.done = new Uint8Array(length);
+  constructor(
+    readonly length: number,
+    private checkpoint: Buffer = Buffer.alloc(pinsHeaderBytes + length * pinRowBytes),
+  ) {
+    this.blobs = checkpoint.subarray(pinsHeaderBytes, pinsHeaderBytes + length * 32);
+    this.sizes = checkpoint.subarray(pinsHeaderBytes + length * 32, pinsHeaderBytes + length * 40);
+    this.done = checkpoint.subarray(pinsHeaderBytes + length * 40);
   }
-  set(index: number, blob: string, size: number) {
+  set(index: number, blob: string, size: number, lfs = false) {
     if (!this.done[index]) this.count++;
-    this.done[index] = 1;
+    this.done[index] = lfs ? 2 : 1;
     this.blobs.write(blob, index * 32, 'hex');
-    this.sizes[index] = size;
+    this.sizes.writeDoubleLE(size, index * 8);
   }
   has(index: number) {
-    return this.done[index] === 1;
+    return !!this.done[index];
+  }
+  isLfs(index: number) {
+    return this.done[index] === 2;
+  }
+  retain(keep: (index: number) => boolean) {
+    for (let index = 0; index < this.length; index++) {
+      if (!this.has(index) || keep(index)) continue;
+      this.done[index] = 0;
+      this.blobs.fill(0, index * 32, (index + 1) * 32);
+      this.sizes.writeDoubleLE(0, index * 8);
+      this.count--;
+    }
   }
   blob(index: number) {
     return this.blobs.toString('hex', index * 32, index * 32 + 32);
   }
   size(index: number) {
-    return this.sizes[index]!;
+    return this.sizes.readDoubleLE(index * 8);
+  }
+  /** Header binds the pin columns to this exact tree and listing. The columns
+   * share the checkpoint buffer so read/write needs no second full pin table. */
+  encode(tree: string, listing: string, attempt: Buffer) {
+    const bytes = this.checkpoint;
+    bytes.write('NFP1', 0, 'ascii');
+    bytes.writeUInt32LE(this.length, 4);
+    bytes[8] = tree.length;
+    bytes.fill(0, 12, 44).write(tree, 12, 'hex');
+    bytes.write(listing, 44, 'hex');
+    // Each attempt owns its scratch key, even when it re-verifies the same pins.
+    attempt.copy(bytes, 76, 0, 16);
+    return bytes;
+  }
+  static decode(bytes: Buffer, tree: string, listing: string, length: number): ImportedPins | null {
+    if (
+      bytes.length !== pinsHeaderBytes + length * pinRowBytes ||
+      bytes.toString('ascii', 0, 4) !== 'NFP1' ||
+      bytes.readUInt32LE(4) !== length ||
+      bytes[8] !== tree.length ||
+      bytes.toString('hex', 12, 12 + tree.length / 2) !== tree ||
+      bytes.toString('hex', 44, 76) !== listing
+    )
+      return null;
+    const pins = new ImportedPins(length, bytes);
+    for (let index = 0; index < length; index++) {
+      const status = pins.done[index]!;
+      if (!status) continue;
+      const size = pins.size(index);
+      if (status > 2 || !Number.isSafeInteger(size) || size < 0) return null;
+      pins.count++;
+    }
+    return pins;
   }
   /** Distinct blobs in ascending digest order, each with its size. */
   *distinct(): Generator<{ sha256: string; size: number }> {
@@ -294,7 +344,7 @@ export class ImportedPins {
       const i = sorted[k]!;
       if (k && blobs.compare(blobs, sorted[k - 1]! * 32, sorted[k - 1]! * 32 + 32, i * 32, i * 32 + 32) === 0)
         continue;
-      yield { sha256: this.blob(i), size: this.sizes[i]! };
+      yield { sha256: this.blob(i), size: this.size(i) };
     }
   }
 }

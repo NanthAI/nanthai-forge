@@ -197,14 +197,20 @@ project-authorized byte ranges with the exact Range header bound into the
 signature. They verify length, offsets and logical
 SHA-256 before use, including source workers, checks and GitHub mirrors.
 
-Progress retains one compact receipt per stored window. Continuations read these
-receipts in bounded pages, re-stream the same archive and skip stored logical
-objects. A run stops at its 6-minute budget before the next archive member, never
-after the last one: a run that stored the final file publishes in that run, so no
-continuation re-reads the archive only to rebuild the path-to-blob map. Create-only uploads reconcile existing keys by verifying their physical
-size and checksum. An interrupted action does not publish partial source. The
-worker's finite action scheduling boundaries do not exclude files. A continuation
-that cannot make progress reports a structured failure rather than looping.
+Progress retains one compact receipt per stored window. The first step reads the
+tarball for up to six minutes. If files remain, it stores one checksummed snapshot
+of the verified file pins in R2. The cursor binds that snapshot to the commit tree
+and exact listing. A continuation loads those pins, checks them against the stored
+object catalog, and fetches the remaining listing rows in byte-bounded Git packs
+of up to 1,000 blobs. It also reloads the commit's Git LFS attributes. A missing
+or damaged checkpoint sends the affected reads back to Git without reopening the
+tarball. A catchable failure retains verified progress for retry.
+
+An import that finishes in one step writes no pin snapshot. Each successful
+advance retires the previous snapshot. Publication deletes the last snapshot and
+the listing. Create-only uploads reconcile existing keys by verifying size and
+checksum. Main is published only after all files are verified and stored. A
+continuation that verifies no new files reports a structured failure.
 
 Memory per file bounds the import size: a Convex Node action has 512 MB, and a near-empty
 import action sits at about 190 to 200 MB. An archive step keeps its per-file state in
@@ -221,10 +227,8 @@ finished the archive at 448 MB and peaked at 494 MB during publication. Now the 
 Firefox's 487,756 files and 3.67 GB): the start listing passes, and archive steps stayed at
 or under 418 MB through 419,111 files; publication at that size is not yet measured, so
 about 490,000 files is the tested bound for the archive and 150,612 for a full import.
-A larger repository than the ceiling runs out of action memory (`Node.js action execution
-ran out of memory`, no main published). At that size each archive step re-reads the
-tarball from its start and skips imported files for 3 to 6 minutes, so later steps make
-less progress: wall time, not memory, then limits the import.
+Continuations replace the repeated archive read with Git pack downloads. Hosted
+continuation throughput and publication memory at Firefox scale remain unmeasured.
 
 State, manifest and Work metadata use the same R2-backed object path. Catalog
 publication and source-index materialization use bounded pages. The ready
@@ -270,10 +274,11 @@ inside submodules stay pointers, as submodules are fetched without LFS smudging.
 The limit is 1 GiB of unique LFS object bytes per import (each oid counted once),
 in line with stored Git history. Start the import with `lfsLimitBytes` to choose
 another limit up to 8 GiB, or `0` to keep every pointer as committed bytes. The
-limit is checked from the pointers before anything is downloaded; over it, the
-import fails with `GITHUB_LFS_LIMIT`, naming the total, the limit and the largest
-object, and publishes no main. A pointer GitHub LFS has no object for fails with
-`GITHUB_LFS_OBJECT_MISSING` and names the path.
+worker checks the limit before downloading the objects selected in that step and
+counts unique LFS objects already verified by earlier steps. If the total
+exceeds the limit, the import fails with `GITHUB_LFS_LIMIT`, names the total, limit
+and largest object in that step, and publishes no main. A pointer GitHub LFS has
+no object for fails with `GITHUB_LFS_OBJECT_MISSING` and names the path.
 
 Protocol 2 (a tree that cannot be split) resolves LFS the same way, page by page.
 The listing records every `.gitattributes` it sees (up to 1,000, else
