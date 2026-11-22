@@ -3509,3 +3509,176 @@ test('2026-11-18 lead: every Item id field of a put and the initiativeId filter 
   );
   assert.equal((await list(p, { id: child, reconcile: false })).item.version, 2);
 });
+
+// Item 66667155: one call ticks a Done-when line and posts its evidence.
+const tickBody = [
+  'Why.',
+  '',
+  'Done-when:',
+  '- [ ] One call ticks a line',
+  '- [ ] A clear error on no match',
+  '- [x] Docs show the way',
+  '- [ ] Test: two concurrent ticks survive',
+].join('\n');
+const tickIssue = async p =>
+  (await put(p, { kind: 'issue', title: 'Tickable', body: tickBody })).result.itemId;
+const tick = (p, input, operationId) => run(p, 'tick-planning-item', input, operationId);
+const stored = async (p, itemId) => (await list(p, { id: itemId, reconcile: false })).item;
+
+test('tick-planning-item ticks the line by position or text prefix and posts the evidence as a decision comment (66667155)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const itemId = await tickIssue(p);
+  p.calls.length = 0;
+  const first = await tick(p, { planningItemId: itemId, line: 2, evidence: 'Evidence two' });
+  assert.deepEqual(first.result.ticked, { line: 2, text: 'A clear error on no match' });
+  assert.equal(first.result.openLines, 2);
+  // One planning write and one comment (plus the reads that fetch the stored body).
+  assert.equal(p.calls.filter(name => name === 'projectWorkCommand:command').length, 2);
+  const byPrefix = await tick(p, {
+    planningItemId: itemId.slice(0, 8),
+    line: 'test: two concurrent',
+    evidence: 'Evidence four',
+  });
+  assert.equal(byPrefix.result.ticked.line, 4);
+  const item = await stored(p, itemId);
+  assert.match(item.body, /- \[ \] One call ticks a line/);
+  assert.match(item.body, /- \[x\] A clear error on no match/);
+  assert.match(item.body, /- \[x\] Test: two concurrent ticks survive/);
+  const read = await list(p, { id: itemId, reconcile: false });
+  assert.deepEqual(
+    read.comments.map(comment => comment.text),
+    ['Evidence two', 'Evidence four'],
+  );
+});
+
+test('tick-planning-item refuses zero or several matches and lists the candidates (66667155)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const itemId = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Twins',
+      body: `${tickBody}\n- [ ] Test: both candidates are listed`,
+    })
+  ).result.itemId;
+  const before = await stored(p, itemId);
+  const refused = async line =>
+    await tick(p, { planningItemId: itemId, line, evidence: 'x' }).then(
+      () => assert.fail('must refuse'),
+      error => error,
+    );
+  const none = await refused('nothing like this');
+  assert.equal(none.code, 'BAD_ARGUMENT');
+  assert.match(none.message, /no Done-when checkbox/);
+  assert.match(
+    none.message,
+    /1\. One call ticks a line \| 2\. A clear error on no match \| 4\. Test: two[^|]*\| 5\. Test: both/,
+  );
+  const several = await refused('test:');
+  assert.match(several.message, /matches 2 checkboxes/);
+  assert.match(several.message, /4\. Test: two concurrent/);
+  assert.match(several.message, /5\. Test: both candidates/);
+  assert.match((await refused(9)).message, /no Done-when checkbox/);
+  // Nothing was written or commented.
+  const after = await list(p, { id: itemId, reconcile: false });
+  assert.equal(after.item.version, before.version);
+  assert.deepEqual(after.comments, []);
+});
+
+test('tick-planning-item on a ticked line writes nothing but still posts the evidence; a replay adds nothing (66667155)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const itemId = await tickIssue(p);
+  const operationId = randomUUID();
+  const done = await tick(p, { planningItemId: itemId, line: 3, evidence: 'Already there' }, operationId);
+  assert.equal(done.result.ticked.alreadyTicked, true);
+  const version = (await stored(p, itemId)).version;
+  const replay = await tick(p, { planningItemId: itemId, line: 3, evidence: 'Already there' }, operationId);
+  assert.equal((await stored(p, itemId)).version, version);
+  assert.equal(replay.result.comment.commentId, done.result.comment.commentId);
+  assert.equal((await list(p, { id: itemId, reconcile: false })).comments.length, 1);
+  // A real tick replays once too.
+  const id = randomUUID();
+  await tick(p, { planningItemId: itemId, line: 1, evidence: 'One' }, id);
+  await tick(p, { planningItemId: itemId, line: 1, evidence: 'One' }, id);
+  const read = await list(p, { id: itemId, reconcile: false });
+  assert.deepEqual(read.comments.map(comment => comment.text).sort(), ['Already there', 'One']);
+});
+
+test('tick-planning-item retries a version race and re-applies only its own line, keeping the other edit (66667155)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const itemId = await tickIssue(p);
+  let raced = false;
+  const mutation = p.mutation;
+  p.mutation = async (name, args) => {
+    const command = JSON.parse(args.command);
+    if (!raced && command.action === 'put-planning-item') {
+      raced = true;
+      // Another writer ticks line 4 and retitles the Item between this tick's read and its write.
+      const operationId = randomUUID();
+      await mutation(name, {
+        operationId,
+        command: JSON.stringify({
+          action: 'put-planning-item',
+          operationId,
+          itemId,
+          expectedVersion: command.expectedVersion,
+          title: 'Retitled',
+          body: tickBody.replace('- [ ] Test:', '- [x] Test:'),
+        }),
+      });
+    }
+    return mutation(name, args);
+  };
+  const result = await tick(p, { planningItemId: itemId, line: 1, evidence: 'Mine' });
+  assert.equal(result.result.retries, 1);
+  const item = await stored(p, itemId);
+  assert.equal(item.title, 'Retitled');
+  assert.match(item.body, /- \[x\] One call ticks a line/);
+  assert.match(item.body, /- \[x\] Test: two concurrent ticks survive/);
+  assert.match(item.body, /- \[ \] A clear error on no match/);
+});
+
+test('tick-planning-item: two concurrent ticks on different lines both survive (66667155)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const itemId = await tickIssue(p);
+  // Convex runs each mutation as one serializable transaction; the fixture's handlers do not, so serialize them here.
+  let queue = Promise.resolve();
+  const mutation = p.mutation;
+  p.mutation = (name, args) => {
+    const run = queue.then(() => mutation(name, args));
+    queue = run.catch(() => {});
+    return run;
+  };
+  const results = await Promise.all([
+    tick(p, { planningItemId: itemId, line: 1, evidence: 'Evidence one' }),
+    tick(p, { planningItemId: itemId, line: 'A clear error', evidence: 'Evidence two' }),
+    tick(p, { planningItemId: itemId, line: 4, evidence: 'Evidence four' }),
+  ]);
+  assert.deepEqual(results.map(result => result.result.ticked.line).sort(), [1, 2, 4]);
+  const read = await list(p, { id: itemId, reconcile: false });
+  assert.equal(read.item.body.match(/- \[x\]/g).length, 4);
+  assert.doesNotMatch(read.item.body, /- \[ \]/);
+  assert.deepEqual(read.comments.map(comment => comment.text).sort(), [
+    'Evidence four',
+    'Evidence one',
+    'Evidence two',
+  ]);
+});
+
+test('tick-planning-item names the missing checkboxes of a body without any (66667155)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const itemId = (await put(p, { kind: 'issue', title: 'Plain', body: 'No boxes here.' })).result.itemId;
+  await assert.rejects(
+    tick(p, { planningItemId: itemId, line: 1, evidence: 'x' }),
+    /no Done-when checkboxes/,
+  );
+  assert.throws(
+    () => hostedAgentCommandSchemas['tick-planning-item'].parse({ line: 1, evidence: 'x' }),
+    /planningItemId/,
+  );
+});

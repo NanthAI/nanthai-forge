@@ -155,8 +155,11 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
     merges, or why nothing can go (growth guard: `node scripts/check-growth.mjs`). After landing (and `complete` when the Lane stays open), read
     `planning {"id":"ISSUE_ID"}` once: a closed Issue is done; a held one
     (`reconciled.held`, or the "N Done-when line(s) still open" comment) names the open
-    lines and the one `put-planning-item … "status":"closed"` command. Run it once the
-    evidence comments cover every line, or tick the boxes; never leave the Issue
+    lines and the one `put-planning-item … "status":"closed"` command. Tick each proven line
+    with its evidence in one call: `tick-planning-item {"planningItemId":"ISSUE_ID","line":2,"evidence":"…"}`
+    (`line` is the checkbox's 1-based position or a unique text prefix; it ticks the box and posts the
+    evidence as a decision comment, retrying a version race). Run the close command once every line is
+    ticked (the next planning read also closes it); never leave the Issue
     in-progress and never close with lines unmet. Handoff files/choices/tests/counts/actual verification/receipt/head,
     unverified work and next action. Abandon unused Lanes with work preserved;
     remove only your own regenerable temporary output.

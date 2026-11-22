@@ -83,6 +83,7 @@ const actionTopic: Record<string, HelpTopicId> = {
   planning: 'planning',
   'put-planning-item': 'planning',
   'comment-planning-item': 'planning',
+  'tick-planning-item': 'planning',
   friction: 'planning',
 };
 

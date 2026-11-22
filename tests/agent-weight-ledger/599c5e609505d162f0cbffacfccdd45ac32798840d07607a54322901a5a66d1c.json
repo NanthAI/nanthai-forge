@@ -1,0 +1,4 @@
+{
+  "issue": "66667155",
+  "reason": "MCP tool-list ceiling 5728 -> 5775 (+47 bytes, measured 5775 on the source build) and agent actions 67 -> 68: forge_planning lists the new tick-planning-item action (line, evidence), which ticks one Done-when checkbox and posts its evidence in one call instead of a hand-edited body put plus a separate comment (Item 66667155). Modules, CPU and installed-byte ceilings are unchanged: the verb is a lazy module loaded only by that command, with no new dependency."
+}

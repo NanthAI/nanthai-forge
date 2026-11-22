@@ -10,9 +10,9 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 
 // Issue 47558a99: the advertised tool list is per-session context. Budgets are in characters of the
 // tools/list JSON; tokens are about chars / 4. Raise one only with before/after numbers on the Issue.
-const LIST_CHARS = 5_758; // 657d63ee: measured pre-parity tools/list, including array punctuation.
-const CLAUDE_CHARS = 5_746;
-const CODEX_CHARS = 5_874; // Same baseline as server-prefixed Codex function definitions.
+const LIST_CHARS = 5_775; // 657d63ee: measured pre-parity tools/list, including array punctuation. 5,758 -> 5,775 (66667155): forge_planning lists tick-planning-item(line,evidence).
+const CLAUDE_CHARS = 5_763; // 5,746 -> 5,763 (66667155).
+const CODEX_CHARS = 5_891; // Same baseline as server-prefixed Codex function definitions; 5,874 -> 5,891 (66667155).
 const DESCRIPTION_CHARS = 920;
 const body = response => JSON.parse(response.content[0].text);
 // The listing names fields in a description ("Fields: a b:n c=x|y ...") and required fields per action.

@@ -182,6 +182,7 @@ export const replayBindings: Record<keyof typeof hostedAgentCommandSchemas, Bind
   planning: read,
   'put-planning-item': server,
   'comment-planning-item': server,
+  'tick-planning-item': server,
 };
 
 /** True when the identical auto-addressed request's retained replay no longer holds (see above). */

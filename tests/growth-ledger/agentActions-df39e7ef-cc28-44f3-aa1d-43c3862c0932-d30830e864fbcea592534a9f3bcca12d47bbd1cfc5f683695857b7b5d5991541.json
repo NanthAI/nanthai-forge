@@ -1,0 +1,6 @@
+{
+  "kind": "agentActions",
+  "delta": 1,
+  "reason": "adds tick-planning-item (agent actions 67 -> 68, Item 66667155): nothing can go because ticking a Done-when line plus its evidence comment is one call that put-planning-item and comment-planning-item cannot do atomically; hand-edited bodies lost ticks on a version race",
+  "date": "2026-11-22"
+}

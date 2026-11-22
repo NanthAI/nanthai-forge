@@ -1136,7 +1136,7 @@ async function flushComments(port: PlanningPort, actor: string) {
 export async function executeHostedPlanning(
   port: PlanningPort,
   actor: string,
-  action: 'planning' | 'put-planning-item' | 'comment-planning-item',
+  action: 'planning' | 'put-planning-item' | 'comment-planning-item' | 'tick-planning-item',
   input: Record<string, unknown>,
   operationId: string | undefined,
   /** A comment the outbox posts again: the author it was written under. */
@@ -1204,6 +1204,53 @@ export async function executeHostedPlanning(
     } finally {
       done();
     }
+  }
+  if (action === 'tick-planning-item') {
+    const tick = hostedAgentCommandSchemas['tick-planning-item'].parse(input);
+    const itemId = await resolvePlanningId(port, tick.itemId!, journal);
+    const { tickPlanningLine } = await import('./hosted-agent-planning-tick.js');
+    const ticked = await tickPlanningLine<PlanningReadItem>({
+      line: tick.line,
+      read: async () => {
+        const item = await fullItem(port, await workspace(port), itemId);
+        invariant(item, 'NOT_FOUND', 'Planning item not found.');
+        return item;
+      },
+      write: async (item, body, key) =>
+        (
+          await writePlanning(
+            port,
+            {
+              action: 'put-planning-item',
+              operationId: await journal.id(key),
+              itemId,
+              expectedVersion: item.version,
+              body,
+              ...putAgent(port),
+            } as PlanningWrite,
+            journal,
+            undefined,
+            item,
+          )
+        ).revision,
+      comment: async () => {
+        const posted: { result: Record<string, unknown> } = await executeHostedPlanning(
+          port,
+          actor,
+          'comment-planning-item',
+          {
+            itemId,
+            text: tick.evidence,
+            decision: true,
+            ...(tick.authorLabel ? { authorLabel: tick.authorLabel } : {}),
+            ...(tick.replyTo ? { replyTo: tick.replyTo } : {}),
+          },
+          await journal.id('tick-comment'),
+        );
+        return posted.result;
+      },
+    });
+    return { operationId: journal.operationId, result: { itemId, ...ticked } };
   }
   if (input.batch !== undefined) {
     const { batch } = hostedAgentCommandSchemas['put-planning-item'].parse(input);

@@ -13,6 +13,7 @@ const issueActions = [
   ['planning', 'id', { reconcile: false }],
   ['put-planning-item', 'itemId', { expectedVersion: 1, status: 'closed' }],
   ['comment-planning-item', 'itemId', { text: 'Synthetic evidence' }],
+  ['tick-planning-item', 'itemId', { line: 1, evidence: 'Synthetic evidence' }],
   ['lanes', 'planningItemId', {}],
   ['friction-triage', 'planningItemId', { frictionIds: [randomUUID()], status: 'planned' }],
 ];

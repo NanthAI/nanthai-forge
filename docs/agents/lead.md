@@ -181,7 +181,8 @@ at that commit; report a pending deploy explicitly. The lead owns authorized
 release/deployment work; builders do not deploy as a side effect of a code task.
 
 Close an Issue only with evidence for every Done-when line (a comment per line, or a
-named Issue that now owns a moved line). A held close names the open lines; never close
+named Issue that now owns a moved line). Tick a proven line and post its evidence in one call with
+`tick-planning-item {planningItemId,line,evidence}`. A held close names the open lines; never close
 with lines unmet, and never leave a fully evidenced Issue open. Merge duplicates and
 close verified work yourself; scope drops and won't-do go to the owner.
 

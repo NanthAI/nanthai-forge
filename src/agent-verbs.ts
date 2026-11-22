@@ -90,6 +90,7 @@ export const namedReads = [
   'planning',
   'put-planning-item',
   'comment-planning-item',
+  'tick-planning-item',
   'preflight',
 ] as const;
 

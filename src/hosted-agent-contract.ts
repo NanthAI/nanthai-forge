@@ -62,7 +62,12 @@ export const hostedAgentActions = [
 ] as const;
 /** Backlog actions are advertised only to clients that ask (planningVersion), so released clients
  * that parse the capability list strictly keep working. */
-export const hostedAgentPlanningActions = ['planning', 'put-planning-item', 'comment-planning-item'] as const;
+export const hostedAgentPlanningActions = [
+  'planning',
+  'put-planning-item',
+  'comment-planning-item',
+  'tick-planning-item',
+] as const;
 /** Owner settings commands. Not advertised in capabilities: released clients parse
  * that list strictly, and the server enforces owner authority on each call. */
 export const hostedAgentOwnerActions = [
@@ -99,6 +104,7 @@ export const hostedAgentClientActions = [
   'pull',
   'snapshots',
   'undo',
+  'tick-planning-item',
 ] as const;
 export { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-address.js';
 export const hostedAgentCapabilitiesSchema = z
@@ -727,6 +733,21 @@ export const hostedAgentCommandSchemas = {
   'comment-planning-item': planningCommentCommandSchema
     .omit({ action: true, operationId: true, agent: true, agentClient: true, decidedBy: true }) // Set by the session and server.
     .extend(planningIssueFields)
+    .strict()
+    .refine(
+      value => Boolean(value.planningItemId || value.id || value.itemId),
+      'planningItemId: name the Issue.',
+    ),
+  /** Tick one Done-when line and post its evidence, composed from put-planning-item and comment-planning-item
+   * (src/hosted-agent-planning-tick.ts). Never advertised: it works on every server that has those two. */
+  'tick-planning-item': z
+    .object({
+      ...planningIssueFields,
+      line: z.union([z.number().int().positive(), z.string().trim().min(1)]),
+      evidence: z.string().trim().min(1),
+      authorLabel: z.string().trim().default(''),
+      replyTo: planningRef.optional(),
+    })
     .strict()
     .refine(
       value => Boolean(value.planningItemId || value.id || value.itemId),

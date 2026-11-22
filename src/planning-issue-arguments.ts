@@ -22,7 +22,7 @@ export function planningIssueArguments(action: string, input: Record<string, unk
   const target =
     action === 'planning'
       ? 'id'
-      : ['put-planning-item', 'comment-planning-item'].includes(action)
+      : ['put-planning-item', 'comment-planning-item', 'tick-planning-item'].includes(action)
         ? 'itemId'
         : ['start', 'lanes', 'friction-triage'].includes(action)
           ? 'planningItemId'
