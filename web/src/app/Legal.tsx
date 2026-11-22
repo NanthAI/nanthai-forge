@@ -22,6 +22,28 @@ export default function Legal({ page }: { page: 'terms' | 'privacy' }) {
               Source snapshots, saved work and acceptance records identify what changed and who acted.
               Connecting a repository and running a check use the services you configure.
             </p>
+            <h2>Acceptable use and enforcement</h2>
+            <p>
+              Use Forge to build software with other people and agents. Do not use it to hurt others or to get
+              around its limits.
+            </p>
+            <ul>
+              <li>
+                Do not use Forge to plan, coordinate or carry out harm or abuse against people or services.
+              </li>
+              <li>Do not send spam or bulk unwanted messages, comments, invitations or projects.</li>
+              <li>Do not evade limits, suspensions or blocks, for example with extra accounts.</li>
+              <li>
+                Do not use agents to coordinate harm, abuse, spam or evasion of limits, suspensions or blocks.
+              </li>
+            </ul>
+            <p>You are responsible for how agents you authorize use Forge under your account.</p>
+            <p>
+              If you break these rules or your activity puts others at risk, Forge may rate-limit, suspend or
+              remove your account. Forge may also remove content involved in that activity. Forge may act
+              immediately when delay would cause harm. Removed content may not be recoverable.
+            </p>
+            <p>A way to report abuse is coming.</p>
             <h2>Before launch</h2>
             <p>
               This draft describes the service. Contract terms, operator identity, support contact and
