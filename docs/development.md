@@ -1028,7 +1028,10 @@ session server-to-server on every ceremony leg and checks the authenticated
 account and session again in the granting transaction. The existing Forge
 account key, handle, project ownership and CLI credentials stay intact. If
 that account already has a passkey, it must confirm the addition with one.
-No account is selected by a typed handle or email address.
+No account is selected by a typed handle or email address. The link keeps
+the sign-in page's return address: after the passkey is added, **Continue with
+your passkey** signs in and returns there, so an account that only had the
+old sign-in can approve an `nforge login` at `/-/device`.
 
 Sign in with the added passkey, open **Sign-in and devices → Manage sign-in
 methods**, then **Link GitHub to this account**. A passkey confirms the link

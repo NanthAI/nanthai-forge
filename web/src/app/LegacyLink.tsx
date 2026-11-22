@@ -4,7 +4,9 @@ import { useRef, useState } from 'react';
 import { api } from '../../../convex/_generated/api';
 import { Key, State } from '../ds';
 import { PublicFrame } from './frames';
-import { errorCode } from './session';
+import { signInHref } from './paths';
+import { useSearch } from './router';
+import { errorCode, safeNext } from './session';
 import { assertPasskey, createPasskey, type CreationOptions, type CeremonyFailure } from './webauthn';
 
 export default function LegacyLink() {
@@ -30,6 +32,8 @@ const failureWords: Record<CeremonyFailure | 'expired', string> = {
 };
 
 function LegacyForm() {
+  // Back on the sign-in page, a passkey sign-in returns where it started, such as /-/device.
+  const back = signInHref(safeNext(useSearch().get('next')));
   const { isLoaded, isSignedIn, sessionId, getToken } = Clerk.useAuth();
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -113,7 +117,7 @@ function LegacyForm() {
               </Key>
             </Clerk.SignInButton>
           ) : done ? (
-            <Key kind="primary" size="lg" className="wide-btn" onClick={() => location.assign('/-/signin')}>
+            <Key kind="primary" size="lg" className="wide-btn" onClick={() => location.assign(back)}>
               Continue with your passkey
             </Key>
           ) : (
@@ -126,7 +130,7 @@ function LegacyForm() {
             kind="ghost"
             className="wide-btn"
             disabled={busy}
-            onClick={() => location.assign('/-/signin')}
+            onClick={() => location.assign(back)}
           >
             Back to sign-in
           </Key>

@@ -157,6 +157,11 @@
   .dec h3, .dec h4 { font-size: var(--t-lead); font-weight: var(--w-bold); line-height: var(--lh-head); letter-spacing: var(--head-track); margin-bottom: 5px; overflow-wrap: anywhere; }
   .dec .why { color: var(--text-2); max-width: var(--m-prose); overflow-wrap: anywhere; }
   .dec .btns { margin-top: var(--s-3); }
+  .decline-why { flex: 1 1 100%; display: grid; gap: var(--s-2); min-width: 0; }
+  .decline-why > * { max-width: var(--m-prose); }
+  .decline-why .faint { color: var(--text-2); font-weight: var(--w-regular); }
+  .decline-why .decline-count { color: var(--text-2); font-size: var(--t-meta); text-align: end; }
+  .decline-why .decline-keys { display: flex; flex-wrap: wrap; gap: var(--s-2); }
   .quote { margin: 10px 0 0; padding: 2px 0 2px var(--s-3); border-left: var(--rule) solid var(--line-strong); max-width: var(--m-prose); overflow-wrap: anywhere; color: var(--text-2); }
   .quote .by { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: var(--t-meta); margin-bottom: var(--s-1); min-width: 0; }
   .quote .q { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; color: var(--text); }

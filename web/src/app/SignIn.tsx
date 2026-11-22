@@ -12,7 +12,7 @@ import { api } from '../../../convex/_generated/api';
 import { Key, State } from '../ds';
 import { WhileAwake } from './awake';
 import { PublicFrame } from './frames';
-import { existingDeleteRequestHref, hrefFor } from './paths';
+import { existingDeleteRequestHref, hrefFor, signInHref } from './paths';
 import { useSearch } from './router';
 import { errorCode, recall, remember, safeNext } from './session';
 import { createPasskey, assertPasskey, type CeremonyFailure, type CreationOptions } from './webauthn';
@@ -28,7 +28,8 @@ const words: Record<string, string> = {
   CHALLENGE_EXPIRED: 'That took longer than ten minutes. Try again.',
   WEBAUTHN_UNSUPPORTED: 'This browser cannot use passkeys here. Continue with GitHub.',
   PASSKEY_ALREADY_REGISTERED: 'This device already holds a Forge passkey. Sign in with it.',
-  USERNAME_TAKEN: 'That handle is taken. If it is yours, sign in with its passkey or GitHub.',
+  USERNAME_TAKEN:
+    'That handle is taken. If it is yours, sign in with its passkey or GitHub, or add a passkey from your existing sign-in below.',
   RATE_LIMITED: 'Too many sign-in attempts just now. Wait a minute, then try again.',
 };
 const say = (code: string | undefined) =>
@@ -174,7 +175,7 @@ function HandleSignIn() {
         {existing ? (
           <a href={existing}>Review with your existing sign-in</a>
         ) : (
-          <a href="/-/signin?link=existing">Add a passkey from your existing sign-in</a>
+          <a href={signInHref(next, true)}>Add a passkey from your existing sign-in</a>
         )}
         <span>
           From a terminal: <code>nforge login</code>

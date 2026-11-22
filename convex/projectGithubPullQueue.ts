@@ -13,6 +13,7 @@ import { suspendHeldMirror } from './projectGithubMirrorCadence';
 import { parseInbound, twoWay } from './projectGithubInboundQueue';
 import { accountFor } from './urlIdentity';
 import { hasWriteRole } from './projectRole';
+import { opaqueApproveUrl } from './projectHostedApprovalStore';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { hostedProjectRoot } from '../src/project-routes';
@@ -31,12 +32,15 @@ const outcome = v.union(
 export const pullSequence = 0.5;
 export const pullOf = (job: Job) => (job.inbound ? parseInbound(job).pull : undefined);
 /** The Forge web page a status links to: the PR's Lane, else the project. Null without a
- * configured web URL (the status then carries no link). */
+ * configured web URL (the status then carries no link). A GitHub reader sees the link before Forge checks access,
+ * so a private project's is the opaque /approve form (no handle, slug or title; members reach the Lane, anyone
+ * else gets not-found) and, with no Lane to name, none at all (Item d357d772). */
 export async function projectLink(
   ctx: QueryCtx | MutationCtx,
   project: Doc<'hostedProjects'>,
   laneId?: string,
 ) {
+  if (project.visibility !== 'public') return laneId ? opaqueApproveUrl(project._id, laneId) : null;
   const web = process.env.FORGE_WEB_URL;
   const account = web && project.slug ? await accountFor(ctx, project.owner) : null;
   if (!web || !account?.handle || !project.slug) return null;

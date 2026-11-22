@@ -84,6 +84,14 @@ export function deleteRequestHref(requestId: string, existingSignIn = false) {
   return `${hrefFor({ frame: 'account', place: 'projects' })}?${search}`;
 }
 
+/** The sign-in page, keeping where to return; `existing` opens the existing-account passkey link (de67c77d). */
+export function signInHref(next?: string, existing = false) {
+  const search = new URLSearchParams(existing ? { link: 'existing' } : {});
+  if (next) search.set('next', next);
+  const query = search.toString();
+  return hrefFor({ frame: 'public', page: 'signin' }) + (query ? `?${query}` : '');
+}
+
 export function existingDeleteRequestHref(next: string) {
   const url = new URL(next, 'https://forge.invalid');
   const request = url.searchParams.get('request');

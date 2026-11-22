@@ -32,10 +32,14 @@ const mutation = (name: string) => makeFunctionReference<'mutation'>(`projectGit
 type Queue = Doc<'projectGithubMirrors'>;
 type Job = Doc<'projectGithubMirrorJobs'>;
 
-function verifyEntry(job: Pick<Job, 'mapping' | 'verifyLink'>) {
+function verifyEntry(
+  job: Pick<Job, 'mapping' | 'verifyLink'>,
+  project: Pick<Doc<'hostedProjects'>, 'visibility'>,
+) {
   return {
     sha: githubSyncCommitSchema.parse(JSON.parse(job.mapping!)).commit,
-    link: job.verifyLink ?? null,
+    // Item d357d772: a link pinned earlier never names a private project on GitHub.
+    link: project.visibility === 'public' ? (job.verifyLink ?? null) : null,
   };
 }
 
@@ -191,7 +195,7 @@ export const select = internalQuery({
       job.mapping &&
       job.verify &&
       job.verify !== job.verifySent
-        ? [{ jobId: job._id, state: job.verify, ...verifyEntry(job) }]
+        ? [{ jobId: job._id, state: job.verify, ...verifyEntry(job, project) }]
         : [],
     );
   },

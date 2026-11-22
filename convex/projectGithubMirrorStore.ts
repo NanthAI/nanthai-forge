@@ -28,7 +28,8 @@ async function seed(
   through: number | undefined,
 ) {
   const { job, queue, project } = active;
-  const verifyLink = job.verifyLink ?? null;
+  // A link pinned before a project went private (or before Item d357d772) is never posted for a private one.
+  const verifyLink = project.visibility === 'public' ? (job.verifyLink ?? null) : null;
   if (job.cursor) return { cursor: job.cursor, repository: job.repository, verifyLink };
   if (job.seed) return { cursor: null, repository: job.repository, seed: JSON.parse(job.seed), verifyLink };
   const row = await acceptanceRow(ctx, { projectId: job.projectId, receiptId: job.receiptId });

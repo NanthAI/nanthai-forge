@@ -26,7 +26,7 @@ import { AccountFrame, BareFrame, ProjectFrame, PublicFrame, type FrameControls 
 import { needsCount, needsRead } from './needs/count';
 import { Keys, useFrameKeys, type Go } from './keys';
 import { oldAddress, type OldAddress } from './old-address';
-import { hrefFor, isPublicProjectView, parseAppPath, type AppRoute } from './paths';
+import { hrefFor, isPublicProjectView, parseAppPath, signInHref, type AppRoute } from './paths';
 import { Head } from './Place';
 import { AccountScreen, PlaceScreen } from './screens';
 import { followLink, navigate, useRoute, useSearch } from './router';
@@ -126,8 +126,6 @@ function finishPasskeyStep(next: string) {
   forget();
   navigate(next, { replace: true });
 }
-const signInHref = (next?: string) =>
-  hrefFor({ frame: 'public', page: 'signin' }) + (next ? `?next=${encodeURIComponent(next)}` : '');
 
 let lastProject: { href: string; name: string } | null = null;
 

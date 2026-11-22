@@ -1,10 +1,66 @@
 // SPDX-License-Identifier: Apache-2.0
 // Approve and land / Decline for one held landing (Item 48049998): the same two keys on Needs me and the Lane page,
 // through decide.ts. The announcement says what happened, or the server's own words when it refused.
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Key } from '../../ds';
 import type { Decide, DecideTarget } from './decide';
 import { githubContinue } from '../../review/github-continue';
+
+/** The most a decline reason can say; the server trims to the same (projectHostedOwnerReview:decline). */
+export const DECLINE_REASON_MAX = 500;
+
+/** Decline with an optional typed reason (Item 0a99ab23; the old /approve page asked for one). The key opens a small
+ * form in place; an empty reason is a plain decline, and the agent is sent the reason when there is one. */
+function DeclineKey({ disabled, onDecline }: { disabled: boolean; onDecline: (reason: string) => void }) {
+  const [open, setOpen] = useState(false),
+    [why, setWhy] = useState(''),
+    count = useId();
+  if (!open)
+    return (
+      <Key disabled={disabled} onClick={() => setOpen(true)}>
+        Decline
+      </Key>
+    );
+  return (
+    <form
+      className="decline-why"
+      onSubmit={event => {
+        event.preventDefault();
+        onDecline(why);
+      }}
+      onKeyDown={event => {
+        if (event.key === 'Escape' && !disabled) setOpen(false);
+      }}
+    >
+      <label className="f">
+        <span>
+          Why <span className="faint">(optional, sent to the agent)</span>
+        </span>
+        <textarea
+          className="inp"
+          rows={3}
+          autoFocus
+          maxLength={DECLINE_REASON_MAX}
+          aria-describedby={count}
+          value={why}
+          disabled={disabled}
+          onChange={event => setWhy(event.target.value)}
+        />
+      </label>
+      <span id={count} className="decline-count">
+        {why.length}/{DECLINE_REASON_MAX}
+      </span>
+      <div className="decline-keys">
+        <Key type="submit" disabled={disabled}>
+          Decline
+        </Key>
+        <Key kind="ghost" disabled={disabled} onClick={() => setOpen(false)}>
+          Not now
+        </Key>
+      </div>
+    </form>
+  );
+}
 
 export function useDecideRun(decide: Decide, announce: (text: string) => void) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -13,12 +69,15 @@ export function useDecideRun(decide: Decide, announce: (text: string) => void) {
     target: DecideTarget,
     decision: 'grant' | 'decline',
     done: string,
+    reason?: string,
   ) => {
+    const why = reason?.trim();
+    const extra = why ? { reason: why } : {};
     const input =
       'landing' in target
-        ? { ...target, ...(laneId ? { laneId } : {}), decision }
+        ? { ...target, ...(laneId ? { laneId } : {}), decision, ...extra }
         : laneId
-          ? { ...target, laneId, decision }
+          ? { ...target, laneId, decision, ...extra }
           : null;
     if (!input) return;
     setBusy(decision);
@@ -73,12 +132,12 @@ export function AheadKeys({
         {connect ? 'Allow on GitHub' : 'Approve'}
       </Key>
       {declined ? null : (
-        <Key
+        <DeclineKey
           disabled={busy !== null}
-          onClick={() => run(row.laneId, { head: row.head }, 'decline', 'Declined. The agent was told.')}
-        >
-          Decline
-        </Key>
+          onDecline={reason =>
+            run(row.laneId, { head: row.head }, 'decline', 'Declined. The agent was told.', reason)
+          }
+        />
       )}
     </>
   );
@@ -108,12 +167,12 @@ export function DecisionKeys({
       >
         Approve and land
       </Key>
-      <Key
+      <DeclineKey
         disabled={busy !== null}
-        onClick={() => run(laneId, target, 'decline', 'Declined. The agent was told and keeps its saves.')}
-      >
-        Decline
-      </Key>
+        onDecline={reason =>
+          run(laneId, target, 'decline', 'Declined. The agent was told and keeps its saves.', reason)
+        }
+      />
     </>
   );
 }

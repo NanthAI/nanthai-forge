@@ -635,3 +635,122 @@ test('SI-01 review: direct passkey sign-in completion preserves the library resu
   );
   assert.deepEqual(s.tables.users.get(s.user._id).deviceApprovalProof, proof);
 });
+
+const legacyStore = await import(moduleUrl('../convex/authLegacyStore.ts'));
+const { policyPreset } = await import(moduleUrl('../src/autonomy-policy.ts'));
+test('de67c77d: a Clerk-only account adds a passkey from its live old session, signs in natively and approves a CLI device; linking never takes over another account', async t => {
+  const s = fixture(t);
+  const oldIssuer = process.env.CLERK_JWT_ISSUER_DOMAIN;
+  process.env.CLERK_JWT_ISSUER_DOMAIN = 'https://legacy.example';
+  t.after(() =>
+    oldIssuer === undefined
+      ? delete process.env.CLERK_JWT_ISSUER_DOMAIN
+      : (process.env.CLERK_JWT_ISSUER_DOMAIN = oldIssuer),
+  );
+  const owner = 'user_clerkOnly';
+  s.tables.forgeAccounts.set('clerk-account', {
+    _id: 'clerk-account',
+    _creationTime: 1,
+    owner,
+    handle: 'clerk-person',
+  });
+  s.tables.accountHandles.set('clerk-handle', {
+    _id: 'clerk-handle',
+    _creationTime: 1,
+    owner,
+    handle: 'clerk-person',
+  });
+  const clerk = (subject, sid) => ({ subject, issuer: 'https://legacy.example', sid });
+  const ownUsers = () => [...s.tables.users.values()].filter(row => row.accountKey === owner);
+  // Stranded before linking: no native sign-in for this handle, and no account is created for it.
+  s.identity(null);
+  assert.deepEqual(await auth.startSignInWithUsernamePasskey._handler(s.ctx, { username: 'clerk-person' }), {
+    success: false,
+    userError: { error: 'USERNAME_TAKEN' },
+  });
+  // Another person's live old session cannot start or finish a link for this account.
+  const proof = { accountKey: owner, sessionId: 'old-session', operationId: 'link' };
+  s.identity(clerk('user_attacker', 'old-session'));
+  await assert.rejects(legacyStore.start._handler(s.ctx, proof), refused('AUTH_REQUIRED'));
+  await assert.rejects(
+    legacyStore.finish._handler(s.ctx, { ...proof, response: registration }),
+    refused('AUTH_REQUIRED'),
+  );
+  assert.equal(ownUsers().length, 0);
+  // The account's own live old session adds its first passkey to the same account key.
+  s.identity(clerk(owner, 'old-session'));
+  assert.equal((await legacyStore.start._handler(s.ctx, proof)).step, 'register');
+  assert.equal(
+    (await legacyStore.finish._handler(s.ctx, { ...proof, response: registration })).success,
+    true,
+  );
+  const [linked] = ownUsers();
+  assert.equal(ownUsers().length, 1);
+  assert.equal(s.passkeys.filter(key => key.userId === linked._id).length, 1);
+  assert.equal(
+    s.tables.users.get(s.user._id).accountKey,
+    s.user.accountKey,
+    'the other account is untouched',
+  );
+  // Native passkey sign-in reaches that account and records the fresh device proof for its new session.
+  s.identity(null);
+  const started = await auth.startSignInWithUsernamePasskey._handler(s.ctx, { username: 'clerk-person' });
+  assert.equal(started.step, 'authenticate');
+  assert.equal(s.starts.at(-1).userId, linked._id);
+  const dispatch = s.ctx.runMutation;
+  s.ctx.runMutation = async (ref, args) => {
+    const name = getFunctionAddress(ref).reference ?? '';
+    if (name.endsWith('/finishAuthentication')) return { success: true, userId: linked._id };
+    if (name.endsWith('/_internal_dangerous_signIn')) {
+      s.sessions.set('native-session', { userId: args.userId });
+      return {
+        userId: args.userId,
+        accessToken: `header.${Buffer.from(JSON.stringify({ sub: 'native-session' })).toString('base64url')}.signature`,
+        refreshToken: 'synthetic-refresh',
+        refreshTokenExpiresAt: 1000,
+      };
+    }
+    return dispatch(ref, args);
+  };
+  const response = {
+    id: 'existing',
+    rawId: 'existing',
+    type: 'public-key',
+    response: { clientDataJSON: '', authenticatorData: '', signature: '' },
+    clientExtensionResults: {},
+  };
+  assert.equal((await auth.finishSignInWithUsernamePasskey._handler(s.ctx, { response })).status, 'complete');
+  s.ctx.runMutation = dispatch;
+  assert.equal(s.tables.users.get(linked._id).deviceApprovalProof.sessionId, 'native-session');
+  // Signed in natively, the account approves a project device sign-in at /-/device; the approval needs that fresh
+  // passkey proof, and the credential belongs to the same Forge account.
+  s.tables.hostedProjects.set(
+    'clerk-project',
+    projectRow({
+      _id: 'clerk-project',
+      owner,
+      autonomyPolicy: { ...policyPreset('trusted'), accessIdentities: { devices: true } },
+    }),
+  );
+  s.identity({ issuer: `${process.env.CONVEX_CLOUD_URL}/components/auth`, subject: 'native-session' });
+  const flow = await begin(s.ctx, {
+    operationId: randomUUID(),
+    clientNonce: randomBytes(32).toString('hex'),
+    name: 'Synthetic CLI',
+    scope: 'cli',
+    projectId: 'clerk-project',
+  });
+  const fresh = s.tables.users.get(linked._id).deviceApprovalProof;
+  s.tables.users.set(linked._id, { ...s.tables.users.get(linked._id), deviceApprovalProof: undefined });
+  await assert.rejects(
+    device.decide._handler(s.ctx, { code: flow.user_code, approve: true, operationId: randomUUID() }),
+    refused('AUTH_REQUIRED'),
+  );
+  s.tables.users.set(linked._id, { ...s.tables.users.get(linked._id), deviceApprovalProof: fresh });
+  await device.decide._handler(s.ctx, { code: flow.user_code, approve: true, operationId: randomUUID() });
+  const issued = await device.poll._handler(s.ctx, {
+    deviceCode: flow.device_code,
+    operationId: randomUUID(),
+  });
+  assert.equal(JSON.parse(Buffer.from(issued.token.split('.')[1], 'base64url')).sub, owner);
+});

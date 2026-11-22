@@ -301,6 +301,79 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       assert.match(await needs.locator('.why').textContent(), /\.github\/workflows\/ci\.yml/);
     });
 
+    // Item 0a99ab23 line 1: a held landing's decline takes an optional typed reason, as the old /approve page did.
+    await t.test(
+      '0a99ab23: declining a held landing sends its attempt and the typed reason, or none',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          const typed = await open(t, viewport, 'review');
+          const row = region(typed, 'Needs you').locator('.dec', {
+            hasText: 'Stream parser: handle split UTF-8',
+          });
+          await row.getByRole('button', { name: 'Decline', exact: true }).click();
+          const why = row.getByRole('textbox', { name: /^Why/ });
+          await why.fill('Touches CI; ask in the Lane first.');
+          assert.match(await row.textContent(), /34\/500/);
+          await row.getByRole('button', { name: 'Decline', exact: true }).click();
+          const [write] = await typed.evaluate(() => window.writes);
+          assert.equal(write[0], 'decide');
+          assert.equal(write[1].decision, 'decline');
+          assert.equal(write[1].landing.submissionId, '5d1c7a0e-0000-4000-8000-000000000501');
+          assert.equal(write[1].reason, 'Touches CI; ask in the Lane first.');
+
+          const plain = await open(t, viewport, 'review');
+          const bare = region(plain, 'Needs you').locator('.dec', {
+            hasText: 'Stream parser: handle split UTF-8',
+          });
+          await bare.getByRole('button', { name: 'Decline', exact: true }).click();
+          await bare.getByRole('button', { name: 'Decline', exact: true }).click();
+          const [none] = await plain.evaluate(() => window.writes);
+          assert.equal(none[1].decision, 'decline');
+          assert.equal('reason' in none[1], false, 'an empty reason is a plain decline');
+        }
+      },
+    );
+
+    await t.test(
+      '0a99ab23: axe with the decline form open on Needs me: both themes, desk and phone',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          const page = await open(t, viewport, 'review');
+          const row = region(page, 'Needs you').locator('.dec', {
+            hasText: 'Stream parser: handle split UTF-8',
+          });
+          await row.getByRole('button', { name: 'Decline', exact: true }).click();
+          await row.getByRole('textbox', { name: /^Why/ }).fill('Touches CI; ask in the Lane first.');
+          await page.addScriptTag({ path: axePath });
+          for (const theme of ['dark', 'light']) {
+            await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+            await page.evaluate(() =>
+              document
+                .getAnimations()
+                .filter(a => a.effect?.getTiming().iterations !== Infinity)
+                .forEach(a => a.finish()),
+            );
+            const [scroll, inner] = await page.evaluate(() => [
+              document.documentElement.scrollWidth,
+              innerWidth,
+            ]);
+            assert.ok(scroll <= inner, `no sideways scroll at ${viewport.width} ${theme}`);
+            await page.evaluate(() => scrollTo(0, 0));
+            const violations = await page.evaluate(async () => {
+              const result = await window.axe.run(document, {
+                runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
+              });
+              return result.violations.map(
+                v =>
+                  `${v.id}: ${v.nodes.map(n => `${n.target.join(' ')} ${JSON.stringify(n.any[0]?.data ?? '')}`).join(', ')}`,
+              );
+            });
+            assert.deepEqual(violations, [], `axe at ${viewport.width} decline form ${theme}`);
+          }
+        }
+      },
+    );
+
     await t.test('Needs you holds what waits on a person; agent conflicts and refusals are FYI', async t => {
       const page = await open(t, DESK);
       const shell = await page.locator('header.top a.needs .cnt').textContent();

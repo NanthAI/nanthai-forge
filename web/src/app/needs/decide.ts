@@ -13,7 +13,7 @@ export type HeldAttempt = { submissionId: string; attemptId: string };
 /** What one decision goes through: the request's Lane head, or the held landing's exact attempt. */
 export type DecideTarget = { head: string } | { landing: HeldAttempt };
 export type Decide = (
-  input: { decision: 'grant' | 'decline' } & (
+  input: { decision: 'grant' | 'decline'; reason?: string } & (
     | { laneId: string; head: string }
     | { laneId?: string; landing: HeldAttempt }
   ),
@@ -58,10 +58,11 @@ export function useProjectDecide(projectId: Id<'hostedProjects'>): Decide {
           head: input.head,
           decision: input.decision,
           operationId,
+          ...(input.reason ? { reason: input.reason } : {}),
         })
       : input.decision === 'grant'
         ? approve(selection!)
-        : decline({ ...selection!, operationId }));
+        : decline({ ...selection!, operationId, ...(input.reason ? { reason: input.reason } : {}) }));
     pending.current.delete(key);
     return reply;
   };

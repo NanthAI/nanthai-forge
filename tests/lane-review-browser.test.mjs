@@ -474,6 +474,97 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
       },
     );
 
+    // Item 0a99ab23 line 1: the old /approve page took an optional typed reason; the owner's decline here does too.
+    await t.test(
+      '0a99ab23: declining a request asked ahead sends the typed reason, or none when it is left empty',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          const typed = await open(t, viewport, 's=asked');
+          const decision = typed.getByRole('region', { name: 'Your decision' });
+          await decision.getByRole('button', { name: 'Decline', exact: true }).click();
+          const why = decision.getByRole('textbox', { name: /^Why/ });
+          assert.equal(await why.evaluate(node => node === document.activeElement), true, 'focus moves in');
+          assert.match(await decision.textContent(), /0\/500/);
+          await why.fill('Wait for the schema review.');
+          assert.match(await decision.textContent(), /27\/500/);
+          await decision.getByRole('button', { name: 'Decline', exact: true }).click();
+          await typed.getByRole('status').filter({ hasText: 'Declined. The agent was told.' }).waitFor();
+          const [sent] = await typed.evaluate(() => window.__decide);
+          assert.equal(sent.decision, 'decline');
+          assert.equal(sent.reason, 'Wait for the schema review.');
+          assert.equal(sent.head, 'c3'.repeat(32));
+
+          const plain = await open(t, viewport, 's=asked');
+          const bare = plain.getByRole('region', { name: 'Your decision' });
+          await bare.getByRole('button', { name: 'Decline', exact: true }).click();
+          await bare.getByRole('button', { name: 'Decline', exact: true }).click();
+          await plain.getByRole('status').filter({ hasText: 'Declined. The agent was told.' }).waitFor();
+          const [none] = await plain.evaluate(() => window.__decide);
+          assert.equal(none.decision, 'decline');
+          assert.equal('reason' in none, false, 'an empty reason is a plain decline');
+        }
+      },
+    );
+
+    await t.test(
+      '0a99ab23: declining the landing an approval link names sends its attempt and the typed reason',
+      async t => {
+        const page = await open(t, DESK, 's=linked&submission=a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d');
+        const decision = page.getByRole('region', { name: 'Your decision' });
+        await decision.getByRole('button', { name: 'Decline', exact: true }).click();
+        await decision.getByRole('textbox', { name: /^Why/ }).fill('  Not this one.  ');
+        await decision.getByRole('button', { name: 'Decline', exact: true }).click();
+        await page.waitForFunction(() => window.__decide?.length === 1);
+        const [sent] = await page.evaluate(() => window.__decide);
+        assert.equal(sent.submissionId, 'a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d');
+        assert.equal(sent.attemptId, 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e');
+        assert.equal(sent.reason, 'Not this one.', 'trimmed');
+        assert.match(sent.operationId, /^[0-9a-f-]{36}$/);
+      },
+    );
+
+    await t.test('0a99ab23: the reason stops at 500 characters and Not now closes the form', async t => {
+      const page = await open(t, PHONE, 's=asked');
+      const decision = page.getByRole('region', { name: 'Your decision' });
+      await decision.getByRole('button', { name: 'Decline', exact: true }).click();
+      const why = decision.getByRole('textbox', { name: /^Why/ });
+      await why.fill('x'.repeat(600));
+      assert.equal((await why.inputValue()).length, 500);
+      assert.match(await decision.textContent(), /500\/500/);
+      await decision.getByRole('button', { name: 'Not now' }).click();
+      assert.equal(await decision.getByRole('textbox').count(), 0);
+      assert.equal(await page.evaluate(() => (window.__decide ?? []).length), 0, 'nothing was sent');
+    });
+
+    await t.test('0a99ab23: axe with the decline form open: both themes, desk and phone', async t => {
+      for (const viewport of [DESK, PHONE]) {
+        const page = await open(t, viewport, 's=asked');
+        const decision = page.getByRole('region', { name: 'Your decision' });
+        await decision.getByRole('button', { name: 'Decline', exact: true }).click();
+        await decision.getByRole('textbox', { name: /^Why/ }).fill('Wait for the schema review.');
+        await page.addScriptTag({ path: axePath });
+        for (const theme of ['dark', 'light']) {
+          await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+          const [scroll, inner] = await page.evaluate(() => [
+            document.documentElement.scrollWidth,
+            innerWidth,
+          ]);
+          assert.ok(scroll <= inner, `no sideways scroll at ${viewport.width} ${theme}`);
+          const violations = await page.evaluate(async () => {
+            const result = await window.axe.run(document, {
+              runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
+            });
+            return result.violations.map(
+              v =>
+                `${v.id}: ${v.nodes.map(n => `${n.target.join(' ')} ${JSON.stringify(n.any[0]?.data ?? '')}`).join(', ')}`,
+            );
+          });
+          assert.deepEqual(violations, [], `axe at ${viewport.width} decline form ${theme}`);
+          await shot(page, `lane-review-decline-${viewport.width}-${theme}`);
+        }
+      }
+    });
+
     await t.test('the Lane sidebar stays pinned below the project bar', async t => {
       const page = await open(t, { width: 1000, height: 540 }, 's=review&frame');
       const change = page.getByRole('region', { name: 'The change' });

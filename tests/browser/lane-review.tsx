@@ -74,7 +74,11 @@ const client = {
     const name = getFunctionName(ref as never);
     calls.push(name);
     (window as unknown as { __calls: string[] }).__calls = calls;
-    if (name === 'projectHostedApprovals:decide' || name === 'projectHostedAcceptance:approve') {
+    if (
+      name === 'projectHostedApprovals:decide' ||
+      name === 'projectHostedAcceptance:approve' ||
+      name === 'projectHostedOwnerReview:decline'
+    ) {
       (window as unknown as { __decide: unknown[] }).__decide ??= [];
       (window as unknown as { __decide: unknown[] }).__decide.push(args);
       return JSON.stringify({ approval: { status: 'granted' } });

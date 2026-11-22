@@ -339,6 +339,7 @@ test('a failed audit closes only the audited pending head and a later clean audi
   assert.equal(f.tables.projectGithubMirrorJobs.get(older).verify, 'pending');
   assert.equal(f.tables.projectGithubMirrorJobs.get(latest).verify, 'failure');
   assert.deepEqual(f.scheduled[0].args.ids, [latest]);
+  f.patch('hostedProjects', f.projectId, { visibility: 'public' });
   const selection = await f.run('selectStatus', mirrorVerify.select._handler, {
     projectId: f.projectId,
     repository: 'SYNTHETIC/Mirror',
@@ -352,6 +353,15 @@ test('a failed audit closes only the audited pending head and a later clean audi
       link: 'https://forge.example/example/repo/code/latest',
     },
   ]);
+  // Item d357d772: a verify link pinned earlier never reaches GitHub for a private project.
+  f.patch('hostedProjects', f.projectId, { visibility: 'private' });
+  const privateSelection = await f.run('selectPrivateStatus', mirrorVerify.select._handler, {
+    projectId: f.projectId,
+    repository: 'SYNTHETIC/Mirror',
+    ids: [latest],
+  });
+  assert.equal(privateSelection[0].link, null);
+  f.patch('hostedProjects', f.projectId, { visibility: 'public' });
   f.patch('projectHostedMainAudits', audit, {
     red: undefined,
     lastGreen: { runId: 'audit-green', sequence: 4, head: git.head },
