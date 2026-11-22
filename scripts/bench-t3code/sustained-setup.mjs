@@ -70,19 +70,30 @@ export async function readSustainedPins(config, exec = runCommand) {
         '--limit',
         '1',
         '--json',
-        'status,conclusion,headSha,databaseId',
+        'displayTitle,status,conclusion,headSha,databaseId',
       ],
       exec,
     ),
   ]);
   const deploy = deployments[0];
-  if (deploy?.status !== 'completed' || deploy.conclusion !== 'success' || deploy.headSha !== controlCommit)
+  // The dispatch itself runs from the workflow branch; its title records
+  // inputs.ref, which the workflow actually checks out and deploys.
+  if (
+    deploy?.status !== 'completed' ||
+    deploy.conclusion !== 'success' ||
+    deploy.displayTitle !== 'Deploy bench Convex at ' + controlCommit
+  )
     throw Error('Latest bench deployment differs from the approved Forge control pin');
   const runnerHead = branch.commit.sha;
   const current = await getGithub(['api', `repos/${repo}/contents/${runnerFile}?ref=${runnerHead}`], exec);
   if (Buffer.from(current.content, 'base64').toString() !== workflow)
     throw Error('Active scratch workflow differs from the pinned, capped workflow');
-  return { deployRun: deploy.databaseId, runnerHead, runnerWorkflow: current.sha };
+  return {
+    deployRun: deploy.databaseId,
+    deploymentWorkflowCommit: deploy.headSha,
+    runnerHead,
+    runnerWorkflow: current.sha,
+  };
 }
 
 /** Provision synthetic source and a separate, public Actions control repository.

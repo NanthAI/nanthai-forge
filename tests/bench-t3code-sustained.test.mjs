@@ -15,7 +15,7 @@ import {
   stopSustainedForge,
   watchSustained,
 } from '../scripts/bench-t3code/sustained-capacity.mjs';
-import { seedSustained } from '../scripts/bench-t3code/sustained-setup.mjs';
+import { readSustainedPins, seedSustained } from '../scripts/bench-t3code/sustained-setup.mjs';
 
 test('both arms get the same 40 releases with 10 solo reds and six overlapping green candidates', () => {
   const plan = sustainedPlan();
@@ -211,6 +211,43 @@ test('scratch runner workflow queues all jobs in bounded groups without replacin
   assert.equal(rendered.match(/repository: NanthAI\/nanthai-forge/g).length, 4);
   assert.equal(rendered.match(new RegExp(commit, 'g')).length, 4);
   assert.throws(() => sustainedWorkflow(workflow.replace('  hosted-pack:', '  other:'), commit), /layout/);
+});
+
+test('bench deployment pin follows the deployed dispatch ref even when the workflow branch is newer', async () => {
+  const controlCommit = 'a'.repeat(40);
+  const deploymentWorkflowCommit = 'b'.repeat(40);
+  const runnerHead = 'c'.repeat(40);
+  const control = readFileSync(new URL('../.github/workflows/forge-check.yml', import.meta.url), 'utf8');
+  const workflow = sustainedWorkflow(control, controlCommit);
+  const deploy = {
+    name: 'Deploy bench Convex',
+    displayTitle: 'Deploy bench Convex at ' + controlCommit,
+    status: 'completed',
+    conclusion: 'success',
+    databaseId: 123,
+    headSha: deploymentWorkflowCommit,
+  };
+  const config = { repo: 'NanthAI/forge-sustained-fixture', controlCommit };
+  const exec = async (_command, args) => {
+    const path = args.at(-1);
+    const result =
+      args[0] === 'run'
+        ? [deploy]
+        : path.endsWith('branches/main')
+          ? { commit: { sha: runnerHead } }
+          : path.endsWith(controlCommit)
+            ? { content: Buffer.from(control).toString('base64') }
+            : { sha: 'pinned-workflow', content: Buffer.from(workflow).toString('base64') };
+    return { stdout: JSON.stringify(result) };
+  };
+  assert.deepEqual(await readSustainedPins(config, exec), {
+    deployRun: 123,
+    deploymentWorkflowCommit,
+    runnerHead,
+    runnerWorkflow: 'pinned-workflow',
+  });
+  deploy.displayTitle = 'Deploy bench Convex at ' + deploymentWorkflowCommit;
+  await assert.rejects(readSustainedPins(config, exec), /Latest bench deployment differs/);
 });
 
 test('candidate-side check names a planted red on exactly one shard', t => {
