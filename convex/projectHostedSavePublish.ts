@@ -11,6 +11,7 @@ import {
   sameSaveLane,
   saveObjects,
   writeSaveState,
+  writeSaveFailure,
   type SaveIdentity,
 } from './projectHostedSaveStore';
 import { finishHostedOperation } from './projectHostedOperations';
@@ -108,6 +109,7 @@ export async function publishHostedSave(
     };
     await finishHostedOperation(ctx, { ...input, receipt: terminal });
     await writeSaveState(ctx, row._id, { ...state, status: 'stale' });
+    await writeSaveFailure(ctx, row, terminal.attemptId, terminal.outcome.error.code);
     await wakeLifecycleSave(ctx, input);
     return terminal;
   }
@@ -128,6 +130,7 @@ export async function publishHostedSave(
     };
     await finishHostedOperation(ctx, { ...input, receipt: terminal });
     await writeSaveState(ctx, row._id, { ...state, status: 'refused' });
+    await writeSaveFailure(ctx, row, terminal.attemptId, terminal.outcome.error.code);
     await wakeLifecycleSave(ctx, input);
     return terminal;
   }

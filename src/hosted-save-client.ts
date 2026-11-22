@@ -779,13 +779,18 @@ async function uploadCapturedFiles(
     }
   }
 }
+type BackgroundSaveTerminal = {
+  attemptId?: string;
+  outcome: { status: string; result?: unknown; error?: { code?: string; message?: string } };
+};
+
 /** Advance only the matching baseline marker; working bytes (including newer
  * local edits) are never installed or overwritten by save reconciliation. */
 function applyHostedSaveReceipt(
   root: string,
   capture: Awaited<ReturnType<typeof captureHostedSave>>,
   request: SaveRequest,
-  terminal: { outcome: { status: string; result?: unknown } },
+  terminal: BackgroundSaveTerminal,
 ) {
   workLocked(join(clientCacheRoot(root), 'lock'), () => {
     // A sync interrupted since capture finishes first, so its marker never moves backwards.
@@ -799,6 +804,21 @@ function applyHostedSaveReceipt(
         rmSync(pending);
     };
     if (terminal.outcome.status !== 'completed') {
+      const background = join(clientCacheRoot(root), 'saves', request.operationId, backgroundSaveName);
+      if (terminal.attemptId && checkoutPathExists(background)) {
+        try {
+          durableReplace(
+            saveFailureAckPath(root),
+            JSON.stringify({
+              laneId: request.laneId,
+              operationId: request.operationId,
+              attemptId: terminal.attemptId,
+            }),
+          );
+        } catch {
+          // Local acknowledgement bookkeeping must not change the original wait outcome.
+        }
+      }
       clearPending();
       return;
     }
@@ -975,7 +995,7 @@ export async function settlePriorHostedSave(
   const prior = saveCommandSchema.parse(JSON.parse(readFileSync(pending, 'utf8')));
   if (prior.operationId === operationId) return;
   const directory = join(clientCacheRoot(root), `saves/${prior.operationId}`);
-  let progress: { terminal?: { outcome: { status: string; result?: unknown } } | null };
+  let progress: { terminal?: BackgroundSaveTerminal | null };
   try {
     progress = JSON.parse(
       await exchange.client.query(makeFunctionReference<'query'>('projectHostedSaves:progress'), {
@@ -1015,11 +1035,11 @@ export async function settlePriorHostedSave(
     return;
   }
   const observed = (wait ? await wait(prior.operationId, resumed) : undefined) as
-    | { outcome?: { status: string; result?: unknown } }
+    | BackgroundSaveTerminal
     | undefined;
   if (observed?.outcome) {
-    applyObservedSaveOutcome(root, prior.operationId, observed as { outcome: { status: string } });
-    reportBackgroundSave(root, prior.operationId, observed as { outcome: { status: string } });
+    applyObservedSaveOutcome(root, prior.operationId, observed);
+    reportBackgroundSave(root, prior.operationId, observed);
     return;
   }
   throw new ForgeError(
@@ -1089,7 +1109,7 @@ function rememberBackgroundSettlement(directory: string): boolean {
 function reportBackgroundSave(
   root: string,
   operationId: string,
-  terminal: { outcome: { status: string; error?: { code?: string; message?: string } } },
+  terminal: BackgroundSaveTerminal,
   reportRetained = false,
 ) {
   const firstReport = rememberBackgroundSettlement(join(clientCacheRoot(root), 'saves', operationId));
@@ -1107,11 +1127,46 @@ function reportBackgroundSave(
 export function applyObservedBackgroundSave(
   root: string,
   operationId: string,
-  terminal: { outcome: { status: string; result?: unknown; error?: { code?: string; message?: string } } },
+  terminal: BackgroundSaveTerminal,
   reportRetained = true,
 ) {
   applyObservedSaveOutcome(root, operationId, terminal);
   reportBackgroundSave(root, operationId, terminal, reportRetained);
+}
+
+const saveFailureAckPath = (root: string) => join(clientCacheRoot(root), 'save-failure-ack.json');
+
+/** Only a command after an observed failure sends this mutation. Explicit waits keep their
+ * exact read-only contract. A lost acknowledgement reply leaves the same exact request for retry. */
+export async function acknowledgeBackgroundSaveFailure(
+  root: string,
+  exchange: Pick<SaveExchange, 'client' | 'projectId'>,
+) {
+  try {
+    const path = saveFailureAckPath(root);
+    if (!checkoutPathExists(path)) return;
+    const text = readFileSync(path, 'utf8');
+    const ack = JSON.parse(text) as { laneId: string; operationId: string; attemptId: string };
+    try {
+      await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaves:dismissFailure'), {
+        projectId: exchange.projectId,
+        laneId: ack.laneId,
+        operationId: ack.operationId,
+        attemptId: ack.attemptId,
+      });
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !/Could not find (?:public )?function|No (?:public )?function found/i.test(error.message)
+      )
+        return;
+    }
+    workLocked(join(clientCacheRoot(root), 'lock'), () => {
+      if (checkoutPathExists(path) && readFileSync(path, 'utf8') === text) rmSync(path);
+    });
+  } catch {
+    // A later command can retry. Acknowledgement never replaces the exact save outcome.
+  }
 }
 
 /** Before any agent command (fea47345 C): when this checkout's pending save returned before its
@@ -1126,9 +1181,8 @@ export async function settleBackgroundSave(
 ) {
   const prior = backgroundSaveOperation(root);
   if (!prior) return;
-  type Terminal = { outcome: { status: string; result?: unknown } };
-  let terminal: Terminal | null | undefined;
-  if (known?.operationId === prior) terminal = known.terminal as Terminal | null;
+  let terminal: BackgroundSaveTerminal | null | undefined;
+  if (known?.operationId === prior) terminal = known.terminal as BackgroundSaveTerminal | null;
   else
     try {
       terminal = (
@@ -1137,7 +1191,7 @@ export async function settleBackgroundSave(
             projectId: exchange.projectId,
             operationId: prior,
           }),
-        ) as { terminal?: Terminal | null }
+        ) as { terminal?: BackgroundSaveTerminal | null }
       ).terminal;
     } catch (error) {
       // An unknown save is the existing reconciliation's case (it drops it); other errors surface.

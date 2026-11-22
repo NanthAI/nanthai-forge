@@ -167,6 +167,7 @@ export async function trackHostedOverlapLane(
     ...(old?.stacked ? { stacked: true as const } : {}),
     // Open exact-conflict notices (flip 4) are ended by closeConflictNotices, never by a record write.
     ...(old?.conflicted ? { conflicted: true as const } : {}),
+    ...(old?.saveFailure ? { saveFailure: old.saveFailure } : {}),
     // Parked (Item e1633718): only an open Lane is parked; closing it ends the park with its presence row.
     ...(open && lane.park ? { park: lane.park } : {}),
     ...projection,

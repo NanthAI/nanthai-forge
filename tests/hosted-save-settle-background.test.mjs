@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { composeFixture } from './hosted-compose-fixture.mjs';
-import { controls, environment } from './hosted-source-efficiency-fixture.mjs';
+import { controls, environment, modules as sourceModules } from './hosted-source-efficiency-fixture.mjs';
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { saveHostedLane, settleBackgroundSave } from '../dist/hosted-save-client.js';
@@ -277,6 +277,8 @@ for (const fromBase of [false, true])
       assert.equal(f.c.calls[next], 'projectHostedAgent:capabilities');
       assert.equal(count(f.c.calls.slice(next), 'projectHostedSaves:progress'), 0);
     }
+    assert.equal(count(f.c.calls, 'projectHostedSaves:dismissFailure'), 0);
+    assert.equal((await projectBoard(f)).saveFailures, undefined);
     const marker = readHostedLaneCheckout(f.root);
     assert.notEqual(marker.selection.head, f.entry.head);
     assert.equal(marker.selection.version, 1);
@@ -377,6 +379,7 @@ test('a printed background wait reports the real failed receipt and keeps the ch
     { code: 'SAVE_SETTLE_FAILED', recovery: { failedSave: saved.operationId, cause: 'WORK_STALE' } },
   );
   assert.equal(readHostedLaneCheckout(f.root).selection.head, f.entry.head);
+  assert.equal((await projectBoard(f)).saveFailures[0].operationId, saved.operationId);
   const wait = f.c.calls.length;
   await settleBackgroundSave(f.root, f.exchange);
   assert.equal(f.c.calls.length, wait, 'the already-reported failure is settled locally');
@@ -384,6 +387,8 @@ test('a printed background wait reports the real failed receipt and keeps the ch
     hostedAgentCli(f.root, 'wait', { operationIds: [saved.operationId] }, address, waitTransport),
     { code: 'SAVE_SETTLE_FAILED', recovery: { failedSave: saved.operationId, cause: 'WORK_STALE' } },
   );
+  await transport.dispatch('status', {});
+  assert.equal((await projectBoard(f)).saveFailures, undefined);
 });
 
 test('a background wait refuses an old source epoch from the same progress subscription', async t => {
@@ -475,6 +480,174 @@ test('a completed background wait preserves the stacked Lane restack', async t =
   assert.equal(waited.restack.head, restackedHead);
 });
 
+const projectBoard = async (f, input = {}) =>
+  JSON.parse(await f.c.call('projectBoard:read', { projectId: f.s.projectId, ...input }));
+
+async function failSaveJob(f, jobId) {
+  const { projectId } = f.s;
+  await f.c.call('projectConvexSource:dispatch', { projectId, jobId });
+  await f.c.call('projectConvexSourceStore:commit', {
+    projectId,
+    jobId,
+    step: 0,
+    cursor: null,
+    objects: [],
+    output: null,
+    failure: 'SOURCE_HASH_MISMATCH',
+    failureReason: 'Synthetic worker diagnostic',
+  });
+  const finalizer = f.scheduled.find(
+    item => item.name === 'projectHostedSaveJobs:complete' && item.args.jobId === jobId,
+  );
+  assert.ok(finalizer, 'the existing worker finalizer settles the failed save');
+  await f.c.call(finalizer.name, finalizer.args);
+}
+
+test('a newer save wins over a delayed terminal job failure on the same Lane pins', async t => {
+  const f = await setup(t),
+    projectId = f.s.projectId;
+  const original = await saveHostedLane(
+    f.root,
+    { operationId: randomUUID(), message: 'original' },
+    f.exchange,
+    contract,
+  );
+  const old = [...f.s.tables.projectHostedSaves.values()].find(row => row.jobId === original.jobId);
+  const request = JSON.parse(old.value).request;
+  await f.c.call('projectHostedSaves:prepare', {
+    projectId,
+    request: JSON.stringify({ ...request, operationId: randomUUID() }),
+  });
+  // Creation time can run ahead of commit order under concurrent preparations.
+  const saves = f.s.tables.projectHostedSaves;
+  const lastCreated = Math.max(...[...saves.values()].map(row => row._creationTime));
+  saves.set(old._id, { ...saves.get(old._id), _creationTime: lastCreated + 1 });
+  await failSaveJob(f, original.jobId);
+  assert.equal((await projectBoard(f)).saveFailures, undefined);
+  const progress = JSON.parse(
+    await f.c.call('projectHostedSaves:progress', { projectId, operationId: old.operationId }),
+  );
+  assert.equal(progress.terminal.outcome.status, 'failed', 'the superseded receipt stays exact');
+});
+
+for (const [action, read] of [
+  ['board', 'projectBoard:read'],
+  ['lanes', 'projectHostedLiveLanes:list'],
+])
+  test(`a checkout's next ${action} reports and clears its exact failure without a healthy follow-up call`, async t => {
+    const f = await setup(t),
+      projectId = f.s.projectId;
+    const command = { operationId: randomUUID(), message: 'split save' };
+    const saved = await saveHostedLane(f.root, command, f.exchange, contract);
+    const transport = new HostedAgentTransport(
+      f.root,
+      { url: 'https://fixture.invalid', projectId },
+      f.exchange,
+    );
+    const healthy = f.c.calls.length;
+    await transport.dispatch(action, {});
+    assert.deepEqual(f.c.calls.slice(healthy), [read]);
+    await failSaveJob(f, saved.jobId);
+    const failed = f.c.calls.length;
+    await assert.rejects(transport.dispatch(action, {}), {
+      code: 'SAVE_SETTLE_FAILED',
+      recovery: { failedSave: command.operationId, cause: 'SOURCE_HASH_MISMATCH' },
+    });
+    assert.deepEqual(f.c.calls.slice(failed), [
+      read,
+      'projectHostedSaves:progress',
+      'projectHostedSaves:dismissFailure',
+    ]);
+    assert.equal((await projectBoard(f)).saveFailures, undefined);
+  });
+
+test('an already submitted save can hand off to the background and project a later worker failure', async t => {
+  const f = await setup(t),
+    projectId = f.s.projectId;
+  const command = { operationId: randomUUID(), message: 'hand off an already-submitted save' };
+  const runMutation = f.c.context.runMutation;
+  f.c.context.runMutation = async (ref, args) => {
+    if (getFunctionName(ref) !== 'projectSourceRunStore:submit') return runMutation(ref, args);
+    const { background, ...inline } = args;
+    assert.equal(background, true);
+    const accepted = JSON.parse(await runMutation(ref, inline));
+    assert.ok(accepted.run, 'the inline job was retained before its caller left');
+    return JSON.stringify({ ...accepted, run: null });
+  };
+  let saved;
+  try {
+    saved = await saveHostedLane(f.root, command, f.exchange, contract);
+  } finally {
+    f.c.context.runMutation = runMutation;
+  }
+  assert.equal(saved.status, 'submitted');
+  await f.c.call('projectSourceRun:submit', {
+    projectId,
+    kind: 'save',
+    operationId: command.operationId,
+    settle: 'background',
+  });
+  await failSaveJob(f, saved.jobId);
+  assert.equal((await projectBoard(f)).saveFailures[0].operationId, command.operationId);
+});
+
+for (const clearBy of ['dismiss', 'retry'])
+  test(`a worker terminal failure is cleared only by its exact ${clearBy}`, async t => {
+    const f = await setup(t),
+      projectId = f.s.projectId,
+      laneId = f.entry.laneId;
+    const command = { operationId: randomUUID(), message: 'worker failed' };
+    const saved = await saveHostedLane(f.root, command, f.exchange, contract);
+    await failSaveJob(f, saved.jobId);
+    const [failure] = (await projectBoard(f)).saveFailures;
+    assert.equal(failure.operationId, command.operationId);
+    assert.equal(failure.code, 'SOURCE_HASH_MISMATCH');
+    assert(!JSON.stringify(failure).includes('Synthetic worker diagnostic'));
+    if (clearBy === 'dismiss') {
+      await f.c.call('projectHostedLanePark:set', {
+        projectId,
+        laneId,
+        authorityEpoch: 1,
+        park: { reason: 'Waiting for the next command' },
+      });
+      assert.deepEqual((await projectBoard(f, { laneId })).saveFailures, [failure]);
+    }
+    const dismiss = params => f.c.call('projectHostedSaves:dismissFailure', { projectId, laneId, ...params });
+    assert.equal(await dismiss({ operationId: randomUUID(), attemptId: failure.attemptId }), false);
+    assert.equal(await dismiss({ operationId: failure.operationId, attemptId: randomUUID() }), false);
+    assert.deepEqual((await projectBoard(f)).saveFailures, [failure]);
+    const held = JSON.parse(
+      await f.c.call('projectHostedSaves:progress', { projectId, operationId: command.operationId }),
+    );
+    if (clearBy === 'retry') {
+      const exact = JSON.parse(
+        await f.c.call('projectHostedSaves:prepare', {
+          projectId,
+          request: JSON.stringify(held.state.request),
+        }),
+      );
+      assert.deepEqual(exact.terminal, held.terminal);
+    } else {
+      assert.equal(await dismiss({ operationId: failure.operationId, attemptId: failure.attemptId }), true);
+      assert.equal(
+        await dismiss({ operationId: failure.operationId, attemptId: failure.attemptId }),
+        false,
+        'a repeated acknowledgement is safe',
+      );
+    }
+    await f.c.call('projectHostedSaveJobs:complete', { projectId, jobId: saved.jobId });
+    assert.equal(
+      (await projectBoard(f)).saveFailures,
+      undefined,
+      'a repeated completion cannot revive a cleared failure',
+    );
+    assert.equal((await projectBoard(f, { laneId })).saveFailures, undefined);
+    const after = JSON.parse(
+      await f.c.call('projectHostedSaves:progress', { projectId, operationId: command.operationId }),
+    );
+    assert.deepEqual(after.terminal, held.terminal);
+  });
+
 test('a settle that fails after the save returned is reported by the next command, once', async t => {
   const f = await setup(t);
   const command = { operationId: randomUUID(), message: 'split save' };
@@ -488,8 +661,70 @@ test('a settle that fails after the save returned is reported by the next comman
     }),
   );
   assert.equal(progress.terminal.outcome.status, 'failed', 'the server could not finish the save');
+  const projectId = f.s.projectId,
+    laneId = f.entry.laneId;
+  const readCalls = f.c.calls.length,
+    scheduled = f.scheduled.length;
+  const failure = {
+    operationId: command.operationId,
+    attemptId: progress.terminal.attemptId,
+    code: 'WORK_STALE',
+  };
+  const board = await projectBoard(f);
+  const [notice] = board.saveFailures;
+  const { at, ...identity } = notice;
+  assert.equal(typeof at, 'number');
+  assert.deepEqual(identity, { laneId, ...failure });
+  const { laneId: _laneId, ...summary } = notice;
+  const query = async (name, args) => {
+    const value = await f.c.call(name, { projectId, ...args });
+    return typeof value === 'string' ? JSON.parse(value) : value;
+  };
+  assert.deepEqual((await query('projectHostedLanes:head', { laneId })).saveFailure, summary);
+  assert.deepEqual((await query('projectHostedLanes:detail', { laneId })).saveFailure, summary);
+  assert.deepEqual(
+    (await query('projectHostedLiveLanes:list', { cursor: null, limit: 10 })).page[0].saveFailure,
+    summary,
+  );
+  const laneRead = f.s.counts.at(-1);
+  assert.equal(
+    laneRead.readRangesByTable.projectFinishReadRows ?? 0,
+    0,
+    'Lane list uses its existing page rows',
+  );
+  assert.deepEqual((await projectBoard(f, { laneId, after: at + 100 })).saveFailures, [notice]);
+  const outside = new HostedAgentTransport(
+    join(f.root, '..'),
+    { url: 'https://fixture.invalid', projectId },
+    f.exchange,
+  );
+  assert.deepEqual((await outside.dispatch('board', {})).result.saveFailures, [notice]);
+  assert.deepEqual(f.c.calls.slice(readCalls), [
+    'projectBoard:read',
+    'projectHostedLanes:head',
+    'projectHostedLanes:detail',
+    'projectHostedLiveLanes:list',
+    'projectBoard:read',
+    'projectBoard:read',
+  ]);
+  assert.equal(f.scheduled.length, scheduled, 'readers schedule no work');
 
-  // The agent's next command, whatever it is (here a read), reports it before doing anything else.
+  for (const [module, method, input] of [
+    ['projectBoard', 'read', { projectId }],
+    ['projectHostedLanes', 'head', { projectId, laneId }],
+    [
+      'projectHostedSaves',
+      'dismissFailure',
+      { projectId, laneId, operationId: failure.operationId, attemptId: failure.attemptId },
+    ],
+  ]) {
+    await assert.rejects(
+      f.s.call(method, sourceModules[module][method], input, 'outside-project'),
+      error => error.data?.code === 'PROJECT_UNAVAILABLE',
+    );
+  }
+
+  // A command that discovers capabilities reports the failure before dispatching its work.
   const agent = new HostedAgentTransport(
     f.root,
     { url: 'https://fixture.invalid', projectId: f.s.projectId },
@@ -504,8 +739,12 @@ test('a settle that fails after the save returned is reported by the next comman
     assert.equal(error.recovery.failedSave, command.operationId);
     return true;
   });
-  // The capability call every command makes carried the outcome: no extra read for it.
-  assert.deepEqual(f.c.calls.slice(reported), ['projectHostedAgent:capabilities']);
+  // Discovery carries the outcome; only a failed settle adds a mutation for acknowledgement.
+  assert.deepEqual(f.c.calls.slice(reported), [
+    'projectHostedAgent:capabilities',
+    'projectHostedSaves:dismissFailure',
+  ]);
+  assert.equal((await projectBoard(f)).saveFailures, undefined);
   assert.equal(readHostedLaneCheckout(f.root).selection.head, f.entry.head, 'the marker never moved');
   // Reported once: the agent's retry of its command goes on with no call for the failed save.
   const retry = f.c.calls.length;

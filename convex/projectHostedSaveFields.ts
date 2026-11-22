@@ -7,10 +7,14 @@ export const hostedSaveTables = {
     actor: v.string(),
     operationId: v.string(),
     jobId: v.string(),
+    laneId: v.optional(v.string()),
+    commitTs: v.optional(v.commitTs()),
+    background: v.optional(v.literal(true)),
     value: v.string(),
   })
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
-    .index('by_project_and_job', ['projectId', 'jobId']),
+    .index('by_project_and_job', ['projectId', 'jobId'])
+    .index('by_project_and_lane_and_commit', ['projectId', 'laneId', 'commitTs']),
   projectHostedSavePages: defineTable({
     journalLaneId: v.optional(v.string()),
     projectId: v.id('hostedProjects'),

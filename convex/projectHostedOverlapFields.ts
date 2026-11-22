@@ -2,6 +2,7 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { mainRedHoldValidator } from './projectHostedLandingFields';
+import { saveFailureView } from './projectHostedRecordFields';
 const session = v.optional(
   v.object({
     sessionId: v.string(),
@@ -75,6 +76,8 @@ export const hostedOverlapTables = {
     ),
     changes: v.string(),
     complete: v.boolean(),
+    /** This Lane's active background save failure, carried by the existing board lookup. */
+    saveFailure: v.optional(saveFailureView),
     /** This Lane's presence row and the activity time it last wrote, so presence costs no read. */
     presenceRow: v.optional(v.object({ id: v.id('projectHostedPresence'), at: v.number() })),
     /** Last Lane record write (ms): save, start, sync or landing. A Lane idle past the project's

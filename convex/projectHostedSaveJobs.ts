@@ -7,7 +7,9 @@ import { wakeLifecycleSave } from './projectHostedLifecycleCascade';
 import { makeFunctionReference } from 'convex/server';
 import { mutation, internalMutation, internalAction } from './cliServer';
 import {
+  clearSaveFailure,
   loadSave,
+  writeSaveFailure,
   saveLane,
   sameSaveLane,
   saveObject,
@@ -69,7 +71,15 @@ export async function submitHostedSave(
   const { index, page, clientMs: measuredMs, ...auth } = input;
   const clientMs = saveDurationMs(measuredMs);
   const prior = await loadSave(ctx, auth, false);
-  if (prior.operation.terminal) return { payload: canonicalPayload(prior.operation.terminal), run: null };
+  if (prior.operation.terminal) {
+    if (prior.row.background && prior.operation.terminal.outcome.status === 'failed')
+      await clearSaveFailure(ctx, {
+        ...auth,
+        laneId: prior.state.request.laneId,
+        attemptId: prior.operation.terminal.attemptId,
+      });
+    return { payload: canonicalPayload(prior.operation.terminal), run: null };
+  }
   invariant(
     (index === undefined) === (page === undefined),
     'BAD_ARGUMENT',
@@ -120,12 +130,17 @@ export async function submitHostedSave(
         ids: { job: row.jobId },
       },
     });
-    await writeSaveState(ctx, row._id, {
-      ...state,
-      status: 'submitted',
-      submittedAt: Date.now(),
-      ...(clientMs === undefined ? {} : { clientMs }),
-    });
+    await writeSaveState(
+      ctx,
+      row._id,
+      {
+        ...state,
+        status: 'submitted',
+        submittedAt: Date.now(),
+        ...(clientMs === undefined ? {} : { clientMs }),
+      },
+      background,
+    );
     if (background && state.overlapChanges !== undefined) {
       const lane = await saveLane(ctx, { ...auth, laneId: state.request.laneId });
       // Only for the exact Lane this save was prepared on, by its author or the project owner (as
@@ -138,6 +153,9 @@ export async function submitHostedSave(
           pending: true,
         });
     }
+  } else if (background && !row.background) {
+    // A replay can hand the existing inline job off to background settlement.
+    await ctx.db.patch(row._id, { background: true, laneId: state.request.laneId });
   }
   const started = await startSubmittedSource(
     ctx,
@@ -170,11 +188,12 @@ export const resultDownload = internalMutation({
   handler: async (ctx, input) => {
     const row = await saveForJob(ctx, input.projectId, input.jobId);
     if (!row) return null;
-    const { operation } = await loadSave(ctx, row, false);
+    const { operation, state } = await loadSave(ctx, row, false);
     if (operation.terminal) return null;
     await loadSave(ctx, row);
     const job = await loadSourceJob(ctx, input.projectId, input.jobId);
     if (job.status === 'failed' || job.status === 'cancelled') {
+      const code = job.control.failureCode ?? 'SOURCE_JOB_CANCELLED';
       await finishHostedOperation(ctx, {
         projectId: row.projectId,
         actor: row.actor,
@@ -185,7 +204,7 @@ export const resultDownload = internalMutation({
           outcome: {
             status: 'failed',
             error: {
-              code: job.control.failureCode ?? 'SOURCE_JOB_CANCELLED',
+              code,
               message:
                 job.control.failureCode === 'SOURCE_RETRY_EXHAUSTED'
                   ? sourceRetryFailureMessage(job.control.failureCause)
@@ -196,8 +215,8 @@ export const resultDownload = internalMutation({
           },
         },
       });
-      const loaded = await loadSave(ctx, row);
-      await writeSaveState(ctx, row._id, { ...loaded.state, status: 'failed' });
+      await writeSaveState(ctx, row._id, { ...state, status: 'failed' });
+      await writeSaveFailure(ctx, row, operation.firstAttempt.id, code);
       await wakeLifecycleSave(ctx, row);
       return null;
     }

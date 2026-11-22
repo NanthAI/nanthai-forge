@@ -238,6 +238,7 @@ export async function writeHostedRecord(
     ...indexed,
     ...(record.kind === 'save' ? { status: indexedSaveStatus } : {}),
     recordId: id,
+    ...(record.kind === 'lane' && head?.saveFailure ? { saveFailure: head.saveFailure } : {}),
     ...(record.kind === 'intent' && itemId !== undefined ? { planningItemId: itemId } : {}),
   };
   if (head) {
@@ -278,6 +279,7 @@ export async function readHostedRecord(
     kind: HostedRecordKind;
     key: string;
     version?: number;
+    withSaveFailure?: boolean;
   },
 ) {
   await accessibleProject(ctx, input.projectId, input.actor);
@@ -300,6 +302,9 @@ export async function readHostedRecord(
   return {
     ...row,
     ...(head?.planningItemId !== undefined ? { planningItemId: head.planningItemId } : {}),
+    ...(input.withSaveFailure && head?.saveFailure
+      ? { saveFailure: { id: head._id, value: head.saveFailure } }
+      : {}),
     value: await hostedRecordBody(ctx, row),
   };
 }

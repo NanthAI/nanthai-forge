@@ -844,8 +844,18 @@ Fast paths (fea47345 B; each falls back to the full path when it cannot prove it
   exists, so idle costs nothing. A completed save advances the marker; any other outcome raises
   `SAVE_SETTLE_FAILED` once (`recovery.failedSave`) and the command does nothing. The same check
   runs where a later save, sync or preflight settles the earlier save. Saves that need their head
-  (land, finish, lifecycle) keep the inline step. The web UI does not show a failed settle yet;
-  a P7 Issue tracks that.
+  (land, finish, lifecycle) keep the inline step. A terminal background failure independently appears
+  in `projectBoard:read` as `saveFailures` and in the Lane head, detail and list as `saveFailure`.
+  These views carry the operation and attempt IDs, failure code and timestamp. Capability discovery
+  and checkout board or Lane reads that see their exact failure acknowledge it. Other fast reads
+  keep their existing call paths. An exact retry clears its own notice,
+  and `projectHostedSaves:dismissFailure` accepts the displayed identity. An explicit wait leaves
+  the notice available for the next command. The retained save receipt still answers exact reads
+  and retries. A newly committed save preparation clears the older notice and fences late failures in that
+  Lane. Publication adds up to three metadata lookups and three writes only on a terminal background
+  failure. The Lane-scoped board reuses its existing Lane lookup.
+  Healthy saves make the same calls and document reads, with one additional index on the existing
+  save row. The projection reads no source bytes and schedules no work.
 
 ## Hosted check output API
 

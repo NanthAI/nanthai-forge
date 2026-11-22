@@ -15,7 +15,10 @@ import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operat
 import { saveRequestSchema, validateSavePage, savePin, saveInputSchema } from '../src/hosted-save';
 import { validateNotVerified } from '../src/agent-handoff-types';
 import {
+  clearLaneSaveFailure,
+  clearSaveFailure,
   loadSave,
+  saveLaneRecord,
   saveLane,
   sameSaveLane,
   saveObject,
@@ -157,6 +160,12 @@ export const prepare = mutation({
         const old = await saveRow(ctx, auth);
         invariant(old, 'SOURCE_UNAVAILABLE', 'The original save preparation is unavailable.');
         const state = JSON.parse(old.value);
+        if (old.background && prepared.operation.terminal?.outcome.status === 'failed')
+          await clearSaveFailure(ctx, {
+            ...auth,
+            laneId: request.laneId,
+            attemptId: prepared.operation.terminal.attemptId,
+          });
         const replayInput = request.pages ? hostedSaveInput(state, prepared.operation.firstAttempt.at) : null;
         return canonicalPayload({
           state,
@@ -179,7 +188,7 @@ export const prepare = mutation({
       const known = input.uploads
         ? await refuseRecipeUploads(ctx, input.projectId, input.uploads)
         : undefined;
-      const lane = await saveLane(ctx, { ...auth, laneId: request.laneId });
+      const { lane, saveFailure } = await saveLaneRecord(ctx, { ...auth, laneId: request.laneId });
       requireLaneHolder(lane, auth.actor, holderSessionId);
       // Only the Lane author or the project owner saves over a Lane (Issue 8809fba5).
       await requireLaneSourceAuthorityById(ctx, input.projectId, lane, auth.actor);
@@ -204,8 +213,11 @@ export const prepare = mutation({
         jobOperationId: prepared.operation.firstAttempt.ids.jobOperation!,
         status: request.pages ? ('staging' as const) : ('ready' as const),
       };
+      if (saveFailure) await clearLaneSaveFailure(ctx, saveFailure);
       await ctx.db.insert('projectHostedSaves', {
         ...auth,
+        laneId: lane.id,
+        commitTs: ctx.db.vars.commitTs,
         jobId: prepared.operation.firstAttempt.ids.job!,
         value: canonicalPayload(state),
       });
@@ -376,6 +388,22 @@ export const progress = query({
           ? { chain: await chainProgress(ctx, auth, state) }
           : {}),
       });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** Clear the exact displayed failure. Its original save receipt remains available for replay. */
+export const dismissFailure = mutation({
+  args: { ...identity, laneId: v.string(), attemptId: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, input) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to dismiss a save failure.');
+      const project = await activeProject(ctx, input.projectId, user.subject);
+      return await clearSaveFailure(ctx, { ...input, actor: user.subject }, project.owner);
     } catch (error) {
       return report(error);
     }

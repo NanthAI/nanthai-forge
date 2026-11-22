@@ -3,9 +3,9 @@ import { assertSourceStateSize, type SourceSizePhase } from '../src/source-state
 import { z } from 'zod';
 import { sessionMetadataSchema } from '../src/hosted-lane';
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
-import { readHostedRecord, hostedWriteProject } from './projectHostedRecords';
+import { readHostedRecord, recordHead, hostedWriteProject } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { saveRequestSchema, saveWorkerObjectSchema, saveObjectSchema } from '../src/hosted-save';
 import { hostedOperationSchema, canonicalPayload } from '../src/hosted-source-operation';
@@ -61,12 +61,18 @@ export async function saveLaneRecord(
   ctx: QueryCtx | MutationCtx,
   input: { projectId: Id<'hostedProjects'>; actor: string; laneId: string },
 ) {
-  const row = await readHostedRecord(ctx, { ...input, kind: 'lane', key: input.laneId });
+  const row = await readHostedRecord(ctx, {
+    ...input,
+    kind: 'lane',
+    key: input.laneId,
+    withSaveFailure: true,
+  });
   invariant(row, 'NOT_FOUND', 'Hosted Lane not found on this project.');
   return {
     lane: hostedLaneSchema.parse(JSON.parse(row.value)),
     ownerOnly: row.ownerOnly === true,
     sourceCreatedAt: row._creationTime,
+    saveFailure: row.saveFailure,
   };
 }
 export async function saveLane(...args: Parameters<typeof saveLaneRecord>) {
@@ -133,10 +139,124 @@ export async function saveObjects(
     await ctx.db.insert('projectCheckLogSourcePins', { projectId, digest: fence });
   return result;
 }
+const saveFailureKind = 'projectHostedSaveFailure';
+type SaveFailure = NonNullable<Doc<'projectHostedRecordHeads'>['saveFailure']>;
+
+/** The public projection contains no worker error text or account identifiers. */
+export const saveFailureSummary = ({
+  operationId,
+  attemptId,
+  code,
+  at,
+}: Pick<SaveFailure, 'operationId' | 'attemptId' | 'code' | 'at'>) => ({
+  operationId,
+  attemptId,
+  code,
+  at,
+});
+
+/** Only terminal background failures do these indexed reads and writes. The latest prepared
+ * save wins even if both saves used the same source pins. A newer prepare clears the old notice in
+ * the same transaction that inserts its save row. */
+export async function writeSaveFailure(
+  ctx: MutationCtx,
+  row: Doc<'projectHostedSaves'>,
+  attemptId: string,
+  code: string,
+) {
+  const { laneId } = row;
+  if (!row.background || !laneId) return;
+  const latest = await ctx.db
+    .query('projectHostedSaves')
+    .withIndex('by_project_and_lane_and_commit', q => q.eq('projectId', row.projectId).eq('laneId', laneId))
+    .order('desc')
+    .first();
+  if (latest?._id !== row._id) return;
+  const head = await recordHead(ctx, row.projectId, 'lane', laneId);
+  if (!head) return;
+  const failure = {
+    operationId: row.operationId,
+    attemptId,
+    code: /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : 'SOURCE_WORKER_FAILED',
+    at: Date.now(),
+  };
+  const mark = {
+    kind: saveFailureKind,
+    projectId: row.projectId,
+    sourceId: laneId,
+    sourceCreatedAt: failure.at,
+    value: canonicalPayload(failure),
+  };
+  const existing = head.saveFailure?.boardRowId;
+  if (existing) await ctx.db.replace(existing, mark);
+  const boardRowId = existing ?? (await ctx.db.insert('projectFinishReadRows', mark));
+  const overlap = await ctx.db
+    .query('projectHostedOverlapLanes')
+    .withIndex('by_project_and_lane', q => q.eq('projectId', row.projectId).eq('laneId', laneId))
+    .unique();
+  if (overlap) await ctx.db.patch(overlap._id, { saveFailure: failure });
+  await ctx.db.patch(head._id, {
+    saveFailure: {
+      ...failure,
+      actor: row.actor,
+      boardRowId,
+      ...(overlap ? { overlapRowId: overlap._id } : {}),
+    },
+  });
+}
+
+export async function clearSaveFailure(
+  ctx: MutationCtx,
+  input: {
+    projectId: Id<'hostedProjects'>;
+    laneId: string;
+    operationId: string;
+    actor: string;
+    attemptId: string;
+  },
+  owner?: string,
+) {
+  const head = await recordHead(ctx, input.projectId, 'lane', input.laneId);
+  const failure = head?.saveFailure;
+  if (!head || failure?.operationId !== input.operationId || failure.attemptId !== input.attemptId)
+    return false;
+  if (failure.actor !== input.actor && owner !== input.actor) return false;
+  await clearLaneSaveFailure(ctx, { id: head._id, value: failure });
+  return true;
+}
+
+export async function clearLaneSaveFailure(
+  ctx: MutationCtx,
+  failure: { id: Id<'projectHostedRecordHeads'>; value: SaveFailure },
+) {
+  const { boardRowId, overlapRowId } = failure.value;
+  await ctx.db.delete(boardRowId);
+  if (overlapRowId) await ctx.db.patch(overlapRowId, { saveFailure: undefined });
+  await ctx.db.patch(failure.id, { saveFailure: undefined });
+}
+
+export async function projectSaveFailures(ctx: QueryCtx, projectId: Id<'hostedProjects'>, limit: number) {
+  const rows = await ctx.db
+    .query('projectFinishReadRows')
+    .withIndex('by_kind_and_project_and_source_time', q =>
+      q.eq('kind', saveFailureKind).eq('projectId', projectId),
+    )
+    .order('desc')
+    .take(limit);
+  return rows.map(row => ({
+    laneId: row.sourceId,
+    ...saveFailureSummary(JSON.parse(row.value)),
+  }));
+}
+
 export async function writeSaveState(
   ctx: MutationCtx,
   id: Id<'projectHostedSaves'>,
   state: z.infer<typeof saveStateSchema>,
+  background = false,
 ) {
-  await ctx.db.patch(id, { value: canonicalPayload(saveStateSchema.parse(state)) });
+  await ctx.db.patch(id, {
+    value: canonicalPayload(saveStateSchema.parse(state)),
+    ...(background ? { background: true, laneId: state.request.laneId } : {}),
+  });
 }

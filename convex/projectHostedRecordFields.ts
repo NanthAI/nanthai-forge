@@ -18,6 +18,12 @@ export const hostedRef = v.object({
   digest: v.string(),
   bytes: v.number(),
 });
+export const saveFailureView = v.object({
+  operationId: v.string(),
+  attemptId: v.string(),
+  code: v.string(),
+  at: v.number(),
+});
 const identity = { projectId: v.id('hostedProjects'), kind: hostedKind, key: v.string() };
 const indexed = {
   parent: v.string(),
@@ -100,6 +106,15 @@ export const hostedRecordTables = {
     ...identity,
     ...indexed,
     recordId: v.id('projectHostedRecords'),
+    /** Transient projection of the latest background save's retained terminal failure. */
+    saveFailure: v.optional(
+      v.object({
+        ...saveFailureView.fields,
+        actor: v.string(),
+        boardRowId: v.id('projectFinishReadRows'),
+        overlapRowId: v.optional(v.id('projectHostedOverlapLanes')),
+      }),
+    ),
     /** The Item at the root of this Intent's chain. Empty means independent, absent means legacy. */
     planningItemId: v.optional(v.string()),
     /** Work store kinds (issue, comment, lifecycle): the current version as its journal row read, so a

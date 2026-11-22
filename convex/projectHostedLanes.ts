@@ -15,6 +15,8 @@ import { report } from './errors';
 import { findObject } from './projectObjectFind';
 import { isStored } from './projectObjectFields';
 import { liveLaneFinish } from './projectHostedLaneFinish';
+import { saveFailureView } from './projectHostedRecordFields';
+import { saveFailureSummary } from './projectHostedSaveStore';
 
 const identity = { projectId: v.id('hostedProjects'), laneId: v.string() };
 async function caller(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
@@ -32,10 +34,14 @@ async function laneRecord(
     actor,
     kind: 'lane',
     key: input.laneId,
-    ...(input.version === undefined ? {} : { version: input.version }),
+    ...(input.version === undefined ? { withSaveFailure: true } : { version: input.version }),
   });
   invariant(row, 'NOT_FOUND', 'Hosted Lane not found on this project.');
-  return { lane: hostedLaneSchema.parse(JSON.parse(row.value)), project };
+  return {
+    lane: hostedLaneSchema.parse(JSON.parse(row.value)),
+    project,
+    saveFailure: row.saveFailure && saveFailureSummary(row.saveFailure.value),
+  };
 }
 export const head = query({
   args: {
@@ -62,6 +68,7 @@ export const head = query({
       }),
     ),
     lastActivityAt: v.string(),
+    saveFailure: v.optional(saveFailureView),
     /** Present once an accepted landing carried this Lane's saved head: receipt, accepted commit (State id), time,
      * and whether the Lane's current head is still that head. Absent while nothing has landed. */
     landing: v.optional(
@@ -88,7 +95,7 @@ export const head = query({
   }),
   handler: async (ctx, input) => {
     try {
-      const { lane, project } = await laneRecord(ctx, input);
+      const { lane, project, saveFailure } = await laneRecord(ctx, input);
       const viewer = (await ctx.auth.getUserIdentity())!.subject;
       const holderVisible =
         input.includeHolder &&
@@ -124,6 +131,7 @@ export const head = query({
             }
           : {}),
         lastActivityAt: lane.at,
+        ...(saveFailure ? { saveFailure } : {}),
         ...(landed
           ? {
               landing: {
@@ -378,7 +386,8 @@ export async function journalLaneRead(
   input: { projectId: Id<'hostedProjects'>; laneId: string; version?: number },
 ) {
   try {
-    return JSON.stringify((await laneRecord(ctx, input)).lane);
+    const { lane, saveFailure } = await laneRecord(ctx, input);
+    return JSON.stringify({ ...lane, ...(saveFailure ? { saveFailure } : {}) });
   } catch (error) {
     if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
     return report(error);

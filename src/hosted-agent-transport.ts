@@ -157,8 +157,10 @@ import {
   takeEarlyCapabilities,
 } from './hosted-capabilities-early.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
+import { backgroundSave } from './hosted-save-pending.js';
 import { finishRefusedKey, selectHostedFinish, unsavedFiles } from './hosted-agent-finish-identity.js';
 import {
+  acknowledgeBackgroundSaveFailure,
   backgroundSaveOperation,
   reconcileHostedSave,
   saveContract,
@@ -457,7 +459,25 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
-    return withCliBuildProvenance(await this.dispatchReceipt(requestedAction, input, signal));
+    if (requestedAction !== 'wait' && !(requestedAction === 'status' && input.files === true))
+      await acknowledgeBackgroundSaveFailure(this.root, this.exchange);
+    try {
+      return withCliBuildProvenance(await this.dispatchReceipt(requestedAction, input, signal));
+    } catch (error) {
+      if (error instanceof ForgeError && error.code === 'SAVE_SETTLE_FAILED')
+        await acknowledgeBackgroundSaveFailure(this.root, this.exchange);
+      throw error;
+    }
+  }
+  /** Board and Lane list already carry terminal failures. Fetch the original receipt only when
+   * this checkout's exact save is among them, so healthy fast reads stay single-call. */
+  private async settleVisibleSaveFailure(
+    rows: readonly { laneId?: unknown; operationId?: unknown }[] | undefined,
+  ) {
+    if (!rows?.length) return;
+    const pending = backgroundSave(this.root);
+    if (pending && rows.some(row => row.laneId === pending.laneId && row.operationId === pending.operationId))
+      await settleBackgroundSave(this.root, this.exchange);
   }
   private async dispatchReceipt(
     requestedAction: string,
@@ -488,7 +508,18 @@ export class HostedAgentTransport {
         result,
       };
     }
-    if (requestedAction === 'lanes') return liveLanes(this, input);
+    if (requestedAction === 'lanes') {
+      const response = await liveLanes(this, input);
+      const rows = (
+        response.result as { page?: { laneId?: unknown; saveFailure?: { operationId?: unknown } }[] }
+      ).page;
+      await this.settleVisibleSaveFailure(
+        rows?.flatMap(row =>
+          row.saveFailure ? [{ laneId: row.laneId, operationId: row.saveFailure.operationId }] : [],
+        ),
+      );
+      return response;
+    }
     if (requestedAction === 'abandon' && Object.hasOwn(input, 'intents')) {
       const { operationId, ...parameters } = input;
       const command = hostedAgentCommandSchemas.abandon.safeParse(parameters);
@@ -583,7 +614,12 @@ export class HostedAgentTransport {
     }
     if (Object.hasOwn(hostedBoardSchemas, requestedAction)) {
       const result = await boardHostedSource(this, requestedAction as keyof typeof hostedBoardSchemas, input);
-      const { conflictNotice, notice } = result as { conflictNotice?: ExactConflictNotice; notice?: string };
+      const { conflictNotice, notice, saveFailures } = result as {
+        conflictNotice?: ExactConflictNotice;
+        notice?: string;
+        saveFailures?: { laneId?: unknown; operationId?: unknown }[];
+      };
+      await this.settleVisibleSaveFailure(saveFailures);
       return {
         schema: 1,
         transport: 'hosted',

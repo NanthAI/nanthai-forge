@@ -34,6 +34,9 @@ const names = [
   'projectHostedResolveChain',
   // The agent's capability call (it carries a split save's outcome, fea47345 C).
   'projectHostedAgent',
+  'projectBoard',
+  'projectHostedLanes',
+  'projectHostedLiveLanes',
   'projectHostedLanePark',
 ];
 export const modules = Object.fromEntries(

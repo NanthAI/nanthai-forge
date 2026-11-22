@@ -26,6 +26,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { tightestBudget } from './abuseLimits';
 import { recordFeedAttention } from './projectFeedStore';
+import { projectSaveFailures } from './projectHostedSaveStore';
 
 const day = 24 * 60 * 60 * 1000;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -330,8 +331,7 @@ export const read = query({
       await recordCaller(ctx, input.projectId, true);
       const projectId = input.projectId;
       const off = await boardStopped(ctx, projectId);
-      if (off && (!input.laneId || input.id))
-        return canonicalPayload({ status: 'off', messages: [], more: 0 });
+      if (off && input.id) return canonicalPayload({ status: 'off', messages: [], more: 0 });
       if (input.id) {
         const message = await messageRow(ctx, projectId, input.id);
         const replies = await ctx.db
@@ -347,14 +347,34 @@ export const read = query({
       }
       let intentId: string | undefined, laneId: string | undefined;
       let conflicts: Awaited<ReturnType<typeof laneConflicts>> = [];
+      let laneFailure;
       if (input.laneId) {
         const lane = await laneRow(ctx, projectId, input.laneId.toLowerCase());
         laneId = lane.laneId;
         intentId = lane.intentId;
+        laneFailure = lane.saveFailure;
         if (lane.open) conflicts = await laneConflicts(ctx, projectId, laneId, lane.head);
       }
-      if (off) return canonicalPayload({ status: 'off', messages: [], more: 0, conflicts });
       const limit = Math.min(10, Math.max(1, Math.floor(input.limit ?? 10)));
+      const saveFailures = laneId
+        ? laneFailure
+          ? [{ laneId, ...laneFailure }]
+          : []
+        : await projectSaveFailures(ctx, projectId, limit + 1);
+      const failureFields = saveFailures.length
+        ? {
+            saveFailures: saveFailures.slice(0, limit),
+            ...(saveFailures.length > limit ? { moreSaveFailures: true } : {}),
+          }
+        : {};
+      if (off)
+        return canonicalPayload({
+          status: 'off',
+          messages: [],
+          more: 0,
+          ...(laneId ? { conflicts } : {}),
+          ...failureFields,
+        });
       const inbox = await boardInbox(ctx, {
         projectId,
         ...(laneId ? { laneId } : {}),
@@ -367,7 +387,12 @@ export const read = query({
         order: input.all ? 'desc' : 'asc',
         ...(input.all ? { includeResolved: true } : {}),
       });
-      return canonicalPayload({ status: 'ok', ...inbox, ...(conflicts.length ? { conflicts } : {}) });
+      return canonicalPayload({
+        status: 'ok',
+        ...inbox,
+        ...(conflicts.length ? { conflicts } : {}),
+        ...failureFields,
+      });
     } catch (error) {
       return report(error);
     }
