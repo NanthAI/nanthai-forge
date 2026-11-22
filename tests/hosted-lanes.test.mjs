@@ -823,6 +823,45 @@ test('a planned start pins an Intent copied from the journal: same id, active, r
   );
 });
 
+test('fails without: starting a planner-written Intent by its id marks it with its same-id Issue; an Intent with no Issue stays unmarked (fc1831eb)', async () => {
+  const s = await setup(),
+    issue = randomUUID(),
+    alone = randomUUID();
+  const copy = id =>
+    s.call('copy', {
+      _handler: ctx =>
+        records.writeHostedRecord(ctx, {
+          projectId: s.projectId,
+          actor: 'owner',
+          authorityEpoch: 1,
+          expectedVersion: null,
+          record: {
+            kind: 'intent',
+            id,
+            version: 0,
+            at: '2026-11-10T00:00:00.000Z',
+            outcome: 'Planned Issue',
+            constraints: '',
+            creatorAccountId: 'owner',
+            assigneeAccountIds: [],
+            status: 'active',
+            journal: { createdAt: '2026-11-10T00:00:00.000Z', title: 'Planned Issue' },
+          },
+        }),
+    });
+  await copy(issue);
+  await copy(alone);
+  const intentHead = id =>
+    [...s.tables.projectHostedRecordHeads.values()].find(row => row.kind === 'intent' && row.key === id);
+  const { _id, _creationTime, ...template } = intentHead(issue);
+  s.insert('projectHostedRecordHeads', { ...template, kind: 'issue' });
+  assert.equal(intentHead(issue).planningItemId, undefined, 'the planner wrote no marker');
+  await s.begin(s.input({ kind: 'existing', intentId: issue }), 'owner');
+  await s.begin(s.input({ kind: 'existing', intentId: alone }), 'owner');
+  assert.equal(intentHead(issue).planningItemId, issue, 'marked with its Issue, so its landing note posts');
+  assert.equal(intentHead(alone).planningItemId, undefined, 'no Issue, no marker');
+});
+
 // Lead 2026-11-19 (Item d3357f40): planning writes are the owner's, so a member's start of a planned Item has the
 // server move it to in progress (convex/projectPlanningStart.ts), scheduled once after the start commits. The owner's
 // own client does it with the claim, so the owner's start schedules nothing; a replayed start schedules nothing again.

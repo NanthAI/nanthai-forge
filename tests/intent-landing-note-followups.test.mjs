@@ -54,6 +54,10 @@ const resolutionOf = (f, origin) => ({
 test('an explicit accept that publishes a cohort labels only the accepted member with its run (66f9ed38)', async t => {
   let now = Date.parse(AT);
   const f = await batchesFixture(t, { count: 3, memberContracts: [[], [], []], startAt: now });
+  // Planned Intents carry their Item marker; only a marked Intent posts a landing note (Item fc1831eb).
+  for (const head of f.tables.projectHostedRecordHeads.values())
+    if (head.kind === 'intent' && head.planningItemId === undefined)
+      f.patch('projectHostedRecordHeads', head._id, { planningItemId: head.key });
   // The accepting agent retries while its cohort still stages completion evidence (publish releases main).
   const first = f.entries[0].state.id;
   let accepted = null;
@@ -122,7 +126,7 @@ const seedIntent = async (f, linked = true) => {
   return intentId;
 };
 
-test('an independent landing saves one write and legacy Intents retain their notes', async t => {
+test('an independent or unmarked legacy landing posts no Item note and schedules no fold; a marked one does both', async t => {
   for (const [name, request] of [
     ['completing', {}],
     ['notes only', { closes: false }],
@@ -171,20 +175,23 @@ test('an independent landing saves one write and legacy Intents retain their not
       const stored = notesOf(f, intentId);
       assert.deepEqual(
         stored.map(note => [note.receiptId, note.laneIds]),
-        kind === 'independent' ? [] : [[receipt.id, [lane.laneId]]],
+        kind === 'planned' ? [[receipt.id, [lane.laneId]]] : [],
         `${name}: ${kind}`,
       );
       result[kind] = meter;
     }
-    assert.equal(result.planned.writes - result.legacy.writes, 1, `${name}: one scheduled Initiative fold`);
-    assert.equal(result.legacy.writes - result.independent.writes, 1, name);
-    assert.deepEqual(
-      result.independent.written,
-      result.legacy.written.filter(table => table !== 'projectIntentLandingNotes'),
-      name,
+    assert.equal(
+      result.planned.writes - result.legacy.writes,
+      2,
+      `${name}: one scheduled Initiative fold and one note`,
     );
+    assert.equal(
+      result.legacy.writes,
+      result.independent.writes,
+      `${name}: an unmarked Intent writes like an independent one`,
+    );
+    assert.deepEqual(result.independent.written, result.legacy.written, name);
     assert.equal(result.planned.ranges - result.independent.ranges, 1, name);
-    assert.equal(result.planned.ranges, result.legacy.ranges, `${name}: fold scheduling adds no reads`);
     t.diagnostic(
       `${name}: ${result.planned.writes} → ${result.independent.writes} writes, ` +
         `${result.planned.writeBytesByTable.projectIntentLandingNotes} note bytes saved`,

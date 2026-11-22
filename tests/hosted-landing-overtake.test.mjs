@@ -383,12 +383,14 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // events name their bodies: 34 fewer read and 68 fewer write bytes, with unchanged calls.
   // Item 5b4b5918: the queue judges a bound admission proof in the tick that binds it, so the
   // second claim and advance go: 109 -> 107 calls, 63,309 fewer read and 20,920 fewer write bytes.
+  // Item fc1831eb: the pair's two Intents carry no Item marker, so the legacy no-Item landing notes are gone: 874 fewer
+  // write bytes, with unchanged calls and reads.
   // Item ced8e98f (recheck none): the causes stamp on existing replay writes adds 1,051 read and
   // 346 write bytes, with unchanged calls.
   const measured = canonicalReplayCost(pair);
   assert.deepEqual(
     measured,
-    { calls: 107, readBytes: 1_822_982, writeBytes: 592_766 },
+    { calls: 107, readBytes: 1_822_982, writeBytes: 591_892 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -443,11 +445,12 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item 8c50ce13: the same 34 fewer read and 68 fewer write bytes from stored messages.
   // Item 5b4b5918: one queue tick fewer per bound admission proof: 2 fewer calls, 63,480 fewer
   // read and 21,001 fewer write bytes at 4,000 files.
+  // Item fc1831eb: the same legacy no-Item notes gone at 4,000 files: 878 fewer write bytes.
   // Item ced8e98f (recheck none): the same 1,051 read and 346 write bytes at 4,000 files.
   const measured = canonicalReplayCost(after);
   assert.deepEqual(
     measured,
-    { calls: 107, readBytes: 1_828_019, writeBytes: 595_190 },
+    { calls: 107, readBytes: 1_828_019, writeBytes: 594_312 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

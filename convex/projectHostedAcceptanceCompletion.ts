@@ -11,12 +11,7 @@ import {
   acceptancePage,
   type ReceiptIdentity,
 } from './projectHostedAcceptanceStore';
-import {
-  independentIntentItem,
-  readHostedRecord,
-  recordHead,
-  writeHostedRecord,
-} from './projectHostedRecords';
+import { readHostedRecord, recordHead, writeHostedRecord } from './projectHostedRecords';
 import { retireLandedOverlapLanes } from './projectHostedOverlapLanded';
 import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
 import { completeResolutionOrigins, noteResolutionOrigins } from './projectHostedResolutionOrigin';
@@ -317,9 +312,8 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   for (const [intentId, { laneIds, viaLaneId }] of noted) {
     const head = await recordHead(ctx, input.projectId, 'intent', intentId);
     if (head?.planningItemId) currentWorkItems.push(head.planningItemId);
-    // Unmarked legacy Intents may belong to an Item. Remove their fallback once no
-    // open unmarked legacy Intents remain.
-    if (head?.planningItemId !== independentIntentItem)
+    // Only an Intent marked with its Item posts a landing note; independent and unmarked legacy Intents have no Item.
+    if (head?.planningItemId)
       await postIntentLandingNote(ctx, input.projectId, {
         intentId,
         receiptId: receipt.id,

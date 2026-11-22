@@ -38,12 +38,20 @@ const runOwner = (f, run) =>
 const notesOf = (f, intentId) =>
   [...f.tables.projectIntentLandingNotes.values()].filter(row => row.intentId === intentId);
 
+/** What the planning path writes for an Intent that belongs to an Item: its marker. Fixture Intents are written
+ * without one; only a marked Intent posts a landing note (Item fc1831eb removed the legacy no-marker fallback). */
+const markLinked = (f, keys) => {
+  for (const head of f.tables.projectHostedRecordHeads.values())
+    if (head.kind === 'intent' && head.planningItemId === undefined && (!keys || keys.includes(head.key)))
+      f.patch('projectHostedRecordHeads', head._id, { planningItemId: head.key });
+};
+
 /** Incident 2bf85ddf (2026-11-17): the builder submitted, its landing parked behind an older entry, the
  * builder stopped ("needs sync"), the older entry landed and the queue landed the parked Lane at 21:46
  * (receipt 1bc84170) with no agent attached. Nothing reached its Item, so the lead briefed a takeover and a
  * review for work already on main. Replay: two Lanes on two Items; the newer passes first and parks behind
  * the older; only scheduled queue steps run after submission (no agent call). */
-async function parkedQueueLanding(t, failFold = false) {
+async function parkedQueueLanding(t, failFold = false, markedItems = (older, parked) => [older, parked]) {
   const f = await batchesFixture(t, {
     count: 2,
     batching: false,
@@ -53,12 +61,8 @@ async function parkedQueueLanding(t, failFold = false) {
   const [older, parked] = f.entries.map(entry => entry.state.id);
   const [olderItem, parkedItem] = f.entries.map(entry => entry.selection.request.intentId);
   assert.notEqual(olderItem, parkedItem, 'two Lanes on two Items');
-  if (failFold) {
-    const head = [...f.tables.projectHostedRecordHeads.values()].find(
-      row => row.kind === 'intent' && row.key === parkedItem,
-    );
-    f.patch('projectHostedRecordHeads', head._id, { planningItemId: parkedItem });
-  }
+  // With a failing fold only the parked Lane's Item is marked: the older Lane's receipt stays independent.
+  markLinked(f, failFold ? [parkedItem] : markedItems(olderItem, parkedItem));
   let wasParked = false;
   for (let tick = 0; ; tick++) {
     assert(tick < 800, JSON.stringify(states(f).map(s => [s.sequence, s.phase])));
@@ -155,6 +159,18 @@ test('incident replay 2bf85ddf: a parked Lane the queue lands after its agent st
   assert.equal(notesOf(f, parkedItem).length, 1);
 });
 
+test('fails without: only an Intent marked with its Item posts a landing note; an unmarked legacy Intent posts none', async t => {
+  const { f, parked, older, olderItem, parkedItem } = await parkedQueueLanding(t, false, (_older, p) => [p]);
+  assert.equal(stateOf(f, older).phase, 'landed');
+  assert.equal(stateOf(f, parked).phase, 'landed');
+  assert.equal(
+    notesOf(f, parkedItem).length,
+    1,
+    'the marked Intent still notes its Item through the normal path',
+  );
+  assert.equal(notesOf(f, olderItem).length, 0, 'the unmarked Intent has no Item to note');
+});
+
 test('landing notes are idempotent per receipt: a replayed completion tick or a repeated post writes nothing', async t => {
   const { f, parked, parkedItem } = await parkedQueueLanding(t);
   const receiptId = stateOf(f, parked).acceptance.receiptId;
@@ -206,8 +222,9 @@ test('an Item reopened onto a successor Intent shows the notes of every Intent i
 });
 
 test('a revert posts a matching reverted note on the reverted Item, once', async t => {
-  const f = await revertFixture(t),
-    receipt = await f.landOriginal();
+  const f = await revertFixture(t);
+  markLinked(f);
+  const receipt = await f.landOriginal();
   const r = f.revertRequest({ kind: 'receipt', receiptId: receipt.id }),
     reverse = await f.reverse(r);
   const selection = f.selectRevert([reverse.entry], reverse.lane.intentId),

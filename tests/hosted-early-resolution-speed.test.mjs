@@ -58,6 +58,8 @@ for (const history of [0, 1150])
     // Item 0930a720: compose root prefetch removes four descriptor calls and 44 document reads in each arm.
     // Item f65d8024: three terminal events add three inserts and three empty expiry probes in both arms.
     // Item 0de95ef2: both arms add the same separately budgeted lookup aliases.
+    // Reads 3152 -> 3149, writes 1138 -> 1135 (Item fc1831eb): the fixture's Intent carries no Item marker, so its three
+    // landings no longer post the legacy no-Item landing note (one read, one insert each); fixture only; equal in both arms.
     // Reads 3150 -> 3152 (Item 0d14c456): a check or runner configuration change is the resume step of an
     // environment hold, so each of the fixture's two settings changes reads the queue row once; nothing per
     // landing or check end, no call or write. Equal in both arms.
@@ -65,7 +67,7 @@ for (const history of [0, 1150])
     assert.equal(after.metricAliasWrites, 47);
     assert.deepEqual(
       [after.calls, after.reads, after.writes - after.metricAliasWrites, after.lateTaskMs, after.idle],
-      [161, 3152, 1138, 180000, 0],
+      [161, 3149, 1135, 180000, 0],
       '8c9b84fc: disjoint baseline must not grow',
     );
     t.diagnostic(JSON.stringify({ history, before, after }));

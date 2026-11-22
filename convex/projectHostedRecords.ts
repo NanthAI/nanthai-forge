@@ -57,8 +57,8 @@ export async function recordHead(
   return row;
 }
 
-// An empty string fits the existing optional string field. Missing is legacy and may
-// still be a planned Intent whose Item link predated the reverse pointer.
+// An empty string fits the existing optional string field. Missing is legacy: it predates the marker and posts no
+// landing note (Item fc1831eb marked every open legacy Intent that has a same-id Issue).
 export const independentIntentItem = '';
 export async function recordVersion(
   ctx: QueryCtx | MutationCtx,

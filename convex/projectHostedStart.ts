@@ -8,7 +8,12 @@ import { mutation, receiptMutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { beginHostedOperation, finishHostedOperation } from './projectHostedOperations';
-import { independentIntentItem, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
+import {
+  independentIntentItem,
+  readHostedRecord,
+  recordHead,
+  writeHostedRecord,
+} from './projectHostedRecords';
 import { hostedStartMain } from './projectHostedChannels';
 import {
   hostedStartSchema,
@@ -186,6 +191,14 @@ async function execute(
     });
     plannedExists = Boolean(row);
     planningItemId ??= row?.planningItemId === independentIntentItem ? null : row?.planningItemId;
+    // An Issue's Intent the planner wrote has no marker yet. Starting it by Intent id pins it: mark it with its
+    // Issue (the same id) so its landing note reaches the Issue (Item fc1831eb).
+    if (
+      row &&
+      planningItemId === undefined &&
+      (await recordHead(ctx, projectId, 'issue', payload.intent.intentId))
+    )
+      planningItemId = payload.intent.intentId;
     invariant(
       row || payload.intent.kind === 'planned',
       'NOT_FOUND',

@@ -268,15 +268,17 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // (option B), adding 724 read bytes to scoped recheck. Writes, red, carry and calls are unchanged.
 // Item 5b4b5918: the keep arms judge their bound admission proof in the binding tick, so a claim and
 // an advance go: carry and scoped recheck each 2 fewer calls, about 51 KB fewer reads and 21 KB fewer writes.
+// Item fc1831eb: the fixture Intent has no Item marker, so the legacy no-Item landing note is no longer posted in
+// either arm: each measured delta moves by 11 read and 2 write bytes; calls unchanged.
 // Item 168e4ed8: the stored CHECK_FAILED text names the retry form (about 120 more bytes per failed
 // check): red writes 30 bytes more against its retire; the other arms are unchanged.
 // Item ced8e98f (recheck none): every attempt write stamps the causes on the replay it already
 // writes, adding 251 read/40 write bytes to carry, 375 read/122 write bytes to scoped recheck and
 // moves red by -233 read/-122 write bytes. No call is added.
 export const WIRED = {
-  carry: { calls: 5, readBytes: 373_344, writeBytes: 57_246 },
-  'scoped-recheck': { calls: 15, readBytes: 511_605, writeBytes: 128_185 },
-  red: { calls: -17, readBytes: -388_314, writeBytes: -145_360 },
+  carry: { calls: 5, readBytes: 373_355, writeBytes: 57_248 },
+  'scoped-recheck': { calls: 15, readBytes: 511_616, writeBytes: 128_187 },
+  red: { calls: -17, readBytes: -388_303, writeBytes: -145_358 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */
