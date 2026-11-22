@@ -139,7 +139,7 @@ type DependencyCachePrune = {
   installedBytes?: number | null;
   removed: { entry: string; bytes: number }[];
   wouldRemove: { entry: string; bytes: number }[];
-  kept: { entry: string; reason: string }[];
+  kept: { entry: string; reason: string; bytes?: number | null; idleLaneIds?: string[] }[];
   apply: boolean;
 };
 /** Local, nonblocking LRU sweep. The budget is soft when live links or running installs need more.
@@ -193,7 +193,11 @@ export function pruneDependencyCache(
   let installedBytes = 0;
   let disk: ReturnType<typeof dependencyCacheDiskUsage> | undefined;
   try {
-    const referenced = dependencyRoots(options.roots ?? [], dirname(dirname(fileURLToPath(import.meta.url))));
+    const { referenced, idleLaneLinks } = dependencyRoots(
+      options.roots ?? [],
+      dirname(dirname(fileURLToPath(import.meta.url))),
+    );
+    const retainedLinks = options.remeasure ? new Set<string>() : undefined;
     const entries = readdirSync(cache)
       .filter(name => ENTRY.test(name) && stat(join(cache, name))?.isDirectory())
       .map(name => ({ entry: join(cache, name), ...usage(join(cache, name)) }));
@@ -311,15 +315,18 @@ export function pruneDependencyCache(
         } else {
           // Re-read under the lock: a concurrent cache hit may have added a new root or refreshed LRU.
           const current = usage(item.entry);
-          if (
-            current.used !== item.used ||
-            retained(directory, result.apply) ||
-            referenced(item.entry, current.roots)
-          ) {
+          if (current.used !== item.used || retained(directory, result.apply)) {
             result.kept.push({
               entry: item.entry,
-              reason:
-                'Linked from an existing checkout, retained for a running relink, or used during this sweep.',
+              reason: 'Retained for a running relink or used during this sweep.',
+            });
+            continue;
+          }
+          if (referenced(item.entry, current.roots)) {
+            retainedLinks?.add(item.entry);
+            result.kept.push({
+              entry: item.entry,
+              reason: 'Linked from an existing checkout or checkout links could not be verified.',
             });
             continue;
           }
@@ -334,19 +341,29 @@ export function pruneDependencyCache(
         // The lock directory persists: removing it could race a new slot claim.
       }
     }
+    if (retainedLinks) {
+      const blockers = idleLaneLinks(cache, retainedLinks);
+      for (const kept of result.kept) {
+        const ids = blockers.get(kept.entry);
+        if (ids?.size) kept.idleLaneIds = [...ids].sort();
+      }
+    }
   } finally {
     rmSync(sweep, { recursive: true, force: true });
   }
   if (!options.remeasure) return { ...result, bytes: installedBytes };
-  if (!disk) return { ...result, installedBytes, status: 'unavailable', bytes: null, downloadBytes: null };
   // The separate disk report is observational. A slow or unreadable cache must not
   // hold the sweep lock or hide the removal receipt for changes already applied.
   try {
-    const { bytes, downloadBytes } = !result.removed.length ? disk : dependencyCacheDiskUsage(cache, sweep);
-    return { ...result, installedBytes, bytes, downloadBytes };
+    if (disk && result.removed.length) disk = dependencyCacheDiskUsage(cache, sweep);
   } catch {
-    return { ...result, installedBytes, status: 'unavailable', bytes: null, downloadBytes: null };
+    disk = undefined;
   }
+  for (const kept of result.kept)
+    if (ENTRY.test(basename(kept.entry))) kept.bytes = disk?.entries.get(kept.entry)?.bytes ?? null;
+  return disk
+    ? { ...result, installedBytes, bytes: disk.bytes, downloadBytes: disk.downloadBytes }
+    : { ...result, installedBytes, status: 'unavailable', bytes: null, downloadBytes: null };
 }
 /** Automatic sweeps are advisory; an unavailable cache never prevents a Lane from opening. */
 export function sweepDependencyCache(cache: string, root: string) {

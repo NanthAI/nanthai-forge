@@ -197,6 +197,106 @@ test('nforge prune previews dependency eviction and --apply removes the same unu
   assert.equal(existsSync(entry), false);
 });
 
+test('prune names each idle Lane once per retained install while protecting active and unknown roots', t => {
+  const f = fixture(t);
+  const settings = join(f.directory, 'client.json');
+  const previousSettings = process.env.FORGE_CLIENT_SETTINGS;
+  process.env.FORGE_CLIENT_SETTINGS = settings;
+  t.after(() => {
+    if (previousSettings === undefined) delete process.env.FORGE_CLIENT_SETTINGS;
+    else process.env.FORGE_CLIENT_SETTINGS = previousSettings;
+  });
+  const hour = 3_600_000;
+  const now = Date.parse('2026-01-02T00:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const shared = f.entry(1);
+  const other = f.entry(2);
+  const expired = f.entry(3);
+  const idleIds = [];
+  for (const [index, [entry, kind, hours]] of [
+    [shared, 'idle', 2],
+    [shared, 'overlay', 3],
+    [shared, 'recent', 0],
+    [other, 'running', 2],
+    [other, 'pinned', 2],
+    [other, 'unregistered', 2],
+    [other, 'missing-marker', 2],
+    [other, 'replaced', 2],
+    [expired, 'expired', 25],
+  ].entries()) {
+    const root = join(f.directory, kind);
+    const laneId = `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+    const modules = join(entry, 'node_modules');
+    mkdirSync(root);
+    if (kind === 'overlay') {
+      const overlay = join(root, 'node_modules');
+      mkdirSync(overlay);
+      linkDirectory(join(modules, 'dep'), join(overlay, 'dep'));
+      linkDirectory(join(modules, 'dep'), join(overlay, 'alias'));
+    } else {
+      linkDirectory(modules, join(root, 'node_modules'));
+    }
+    if (kind === 'unregistered') {
+      touchDependencyEntry(entry, root);
+      continue;
+    }
+    const url = 'https://example.invalid';
+    const projectId = 'fixture';
+    if (kind !== 'missing-marker') {
+      mkdirSync(join(root, '.forge'));
+      writeFileSync(
+        join(root, '.forge', 'hosted-lane.json'),
+        JSON.stringify({
+          url,
+          selection: {
+            projectId,
+            laneId: kind === 'replaced' ? '00000000-0000-4000-8000-000000000099' : laneId,
+          },
+        }),
+      );
+    }
+    recordLane({
+      laneId,
+      root,
+      url,
+      projectId,
+      lastActionAt: now - hours * hour,
+      ...(kind === 'running' ? { running: { action: 'sync', pid: process.pid, since: now } } : {}),
+      ...(kind === 'pinned' ? { pinned: true } : {}),
+    });
+    if (kind === 'idle' || kind === 'overlay') idleIds.push(laneId);
+  }
+  const unsaved = join(f.directory, 'idle', 'unsaved.txt');
+  writeFileSync(unsaved, 'keep my edits');
+
+  const baseline = f.sweep({ apply: false });
+  const preview = f.sweep({ apply: false, remeasure: true });
+  assert.deepEqual(
+    preview.kept.map(({ entry }) => entry),
+    baseline.kept.map(({ entry }) => entry),
+  );
+  assert.deepEqual(
+    preview.wouldRemove.map(({ entry }) => entry),
+    [expired],
+  );
+  assert.equal(preview.kept.length, 2);
+  assert.deepEqual(preview.kept[0].idleLaneIds, idleIds);
+  assert(preview.kept[0].bytes >= lstatSync(join(shared, 'node_modules', 'dep', 'index.js')).blocks * 512);
+  assert.match(preview.kept[1].reason, /Linked from an existing checkout/);
+  assert.equal(preview.kept[1].idleLaneIds, undefined);
+  assert(existsSync(expired));
+  assert.equal(readFileSync(unsaved, 'utf8'), 'keep my edits');
+  assert.equal(readlinkSync(join(f.directory, 'idle', 'node_modules')), join(shared, 'node_modules'));
+
+  writeFileSync(settings, JSON.stringify({ idleLaneHours: 0 }));
+  const unlisted = f.sweep({ apply: false, remeasure: true });
+  assert.deepEqual(
+    unlisted.kept.map(({ entry }) => entry),
+    preview.kept.map(({ entry }) => entry),
+  );
+  assert(unlisted.kept.every(({ idleLaneIds }) => idleLaneIds === undefined));
+});
+
 test('prune distinguishes a busy dependency sweep from an empty cache', async t => {
   const f = fixture(t);
   const readStates = async () => new Map();
@@ -585,6 +685,34 @@ test('prune does not count shared blocks as reclaimed while a retained install s
   const applied = f.sweep({ budgetBytes, remeasure: true });
   assert(applied.bytes <= budgetBytes);
   assert.equal(readFileSync(surviving).length, 128 * 1024);
+});
+
+test('prune apply charges a retained install for shared blocks after their download store is removed', t => {
+  const f = fixture(t);
+  const now = Date.parse('2026-01-02T00:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const store = retainDownloadCache(f.cache, { name: 'pnpm' }, 'unused');
+  const archive = join(store.directory, 'archive');
+  writeFileSync(archive, Buffer.alloc(32 * 1024, 1));
+  const old = new Date(now - 48 * 3_600_000);
+  utimesSync(archive, old, old);
+  utimesSync(store.directory, old, old);
+  store.release();
+
+  const entry = f.entry(1);
+  const shared = join(entry, 'node_modules', 'shared');
+  linkSync(archive, shared);
+  const root = join(f.directory, 'checkout');
+  mkdirSync(root);
+  linkDirectory(join(entry, 'node_modules'), join(root, 'node_modules'));
+  const options = { remeasure: true, roots: [root] };
+  const dry = f.sweep({ ...options, apply: false });
+  const applied = f.sweep(options);
+
+  assert.deepEqual(applied.removed, dry.wouldRemove);
+  assert.equal(applied.removed[0].entry, store.directory);
+  assert.equal(applied.kept[0].entry, entry);
+  assert.equal(applied.kept[0].bytes, dry.kept[0].bytes + lstatSync(shared).blocks * 512);
 });
 
 test('writable tool-cache growth is counted without rewalking sealed packages or an explicit prune', t => {

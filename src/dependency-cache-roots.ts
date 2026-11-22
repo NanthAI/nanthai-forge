@@ -2,6 +2,7 @@
 import { lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { canonicalRoot } from './root-paths.js';
+import { markerIdentity } from './hosted-lane-directory.js';
 import { laneCommandRunning, listLanes, readLaneEntry, type LaneRegistryEntry } from './lane-registry.js';
 import { readClientSettings } from './client-settings.js';
 import { readLink } from './dependency-relink.js';
@@ -91,7 +92,9 @@ function runtimeRoots(builds: string, now: number) {
 
 /** Resolve registry and CLI roots once per sweep. References are still checked under the entry lock. */
 export function dependencyRoots(extra: string[], runtime: string, now = Date.now()) {
-  const maxAge = readClientSettings().clientCacheMaxAgeHours * 3_600_000;
+  const settings = readClientSettings();
+  const maxAge = settings.clientCacheMaxAgeHours * 3_600_000;
+  const idleAge = settings.idleLaneHours * 3_600_000;
   const known = new Set([...extra, runtime]);
   const lanes = new Map<string, LaneRegistryEntry>();
   const canonical = new Map<string, string>();
@@ -127,7 +130,12 @@ export function dependencyRoots(extra: string[], runtime: string, now = Date.now
     }
     return Boolean(processBlocker(root, (processes ??= workingProcesses())));
   };
-  return (entry: string, roots: string[], accepts?: (root: string) => boolean) => {
+  const targetsFor = (root: string) => {
+    const targets = linked.get(root) ?? dependencyTargets(root);
+    linked.set(root, targets);
+    return targets;
+  };
+  const referenced = (entry: string, roots: string[], accepts?: (root: string) => boolean) => {
     try {
       const checked = new Set<string>();
       const checkedBuilds = new Set<string>();
@@ -143,10 +151,8 @@ export function dependencyRoots(extra: string[], runtime: string, now = Date.now
         for (const root of builds ? runtimeRoots(builds, now) : [physical]) {
           if (checked.has(root)) continue;
           checked.add(root);
-          const targets = linked.get(root) ?? dependencyTargets(root);
-          linked.set(root, targets);
           if (
-            targets.some(target => target === entry || target.startsWith(entry + sep)) &&
+            targetsFor(root).some(target => target === entry || target.startsWith(entry + sep)) &&
             (builds || live(root)) &&
             (!accepts || accepts(root))
           )
@@ -159,6 +165,47 @@ export function dependencyRoots(extra: string[], runtime: string, now = Date.now
       return true;
     }
   };
+  // Report after the eviction decisions. Completing the link inventory for the
+  // preview must not change which references the sweep observes under its locks.
+  const idleLaneLinks = (cache: string, retained: ReadonlySet<string>) => {
+    const blockers = new Map<string, Set<string>>();
+    if (!idleAge || !retained.size) return blockers;
+    const prefix = cache.endsWith(sep) ? cache : cache + sep;
+    for (const [root, snapshot] of lanes) {
+      if (now - snapshot.lastActionAt < idleAge) continue;
+      const lane = readLaneEntry(snapshot.laneId);
+      if (!lane || lane.root !== snapshot.root || lane.state || lane.pinned || lane.landing || lane.hold)
+        continue;
+      const idleFor = now - lane.lastActionAt;
+      if (idleFor < idleAge || (maxAge && idleFor > maxAge) || laneCommandRunning(lane)) continue;
+      try {
+        let verified = false;
+        for (const target of targetsFor(root)) {
+          if (!target.startsWith(prefix)) continue;
+          const entry = join(cache, target.slice(prefix.length).split(sep, 1)[0]!);
+          if (!retained.has(entry)) continue;
+          if (!verified) {
+            const identity = markerIdentity(root);
+            if (
+              identity?.laneId !== lane.laneId ||
+              identity.projectId !== lane.projectId ||
+              identity.url !== lane.url ||
+              processBlocker(root, (processes ??= workingProcesses()))
+            )
+              break;
+            verified = true;
+          }
+          const ids = blockers.get(entry) ?? new Set<string>();
+          ids.add(lane.laneId);
+          blockers.set(entry, ids);
+        }
+      } catch {
+        // Attribution is advisory. Keep the generic reason when coverage is incomplete.
+      }
+    }
+    return blockers;
+  };
+  return { referenced, idleLaneLinks };
 }
 
 function dependencyTargets(root: string): string[] {

@@ -317,8 +317,13 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   reports `status: "measured"` and zero bytes. If a directory moves during inspection or the
   disk walk fails, prune reports `status: "unavailable"` with null disk totals and retains its
   eviction receipt.
-  The receipt lists removed or retained entries; automatic removals print the reclaimed size. Opening
-  a Lane again reinstalls an evicted dependency tree when needed.
+  Each retained installed set in `dependencies.kept` reports its measured allocated `bytes` from the
+  same disk walk as the total, or null when unavailable. A shared set appears once. Its `idleLaneIds`
+  name registered Lanes with matching checkout markers whose links retain that set, using
+  `idleLaneHours` and local activity evidence. Other links, including
+  active Lanes, CLI builds and unregistered checkouts, may also retain it. Use the IDs to find Lanes
+  to finish or abandon. Automatic removals print the reclaimed size. Opening a Lane again reinstalls
+  an evicted dependency tree when needed.
 - A finished install's packages are read-only; its root, each `node_modules` root and tool-cache folders
   stay writable. A hosted Lane's install is keyed by its project too, so a fork never shares one.
   Cross-lockfile installed-file deduplication is not performed: hardlinks would share mutable inode
