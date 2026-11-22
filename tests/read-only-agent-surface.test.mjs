@@ -21,6 +21,7 @@ import { hostedAgentHelp } from '../dist/hosted-agent-help.js';
 import { agentCli } from '../dist/agent-cli.js';
 import { laneHousekeeping, pruneCli } from '../dist/lane-prune.js';
 import { listLanes, recordLane } from '../dist/lane-registry.js';
+import { digest } from '../dist/hash.js';
 
 const hour = 3_600_000;
 const address = { url: 'https://fixture.invalid', projectId: 'project' };
@@ -76,8 +77,41 @@ function laneRoot(directory, name, laneId, ageHours, now) {
   const root = join(directory, name);
   mkdirSync(join(root, '.forge'), { recursive: true });
   const marker = join(root, '.forge', 'hosted-lane.json');
-  writeFileSync(marker, JSON.stringify({ url: address.url, selection: { laneId, projectId: 'project' } }));
-  writeFileSync(join(root, 'a.txt'), 'synthetic\n');
+  const source = 'synthetic\n';
+  const state = {
+    schema: 1,
+    kind: 'forge-source-state',
+    parents: [],
+    files: [{ path: 'a.txt', blob: digest(Buffer.from(source)), mode: 'file' }],
+    message: 'synthetic',
+    at: new Date(now).toISOString(),
+  };
+  writeFileSync(
+    marker,
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-hosted-lane-checkout',
+      url: address.url,
+      operationId: randomUUID(),
+      selection: {
+        schema: 2,
+        projectId: address.projectId,
+        laneId,
+        intentId: randomUUID(),
+        head: digest(Buffer.from(JSON.stringify(state))),
+        version: 0,
+        sourceVersion: 0,
+        lifecycleVersion: 0,
+        state: 'active',
+        base: { head: 'a'.repeat(64), receiptId: 'base' },
+        authority: { mode: 'server', epoch: 1 },
+      },
+      state,
+      scope: null,
+      materialized: ['a.txt'],
+    }),
+  );
+  writeFileSync(join(root, 'a.txt'), source);
   const old = new Date(now - ageHours * hour);
   for (const path of [marker, join(root, 'a.txt'), join(root, '.forge'), root]) utimesSync(path, old, old);
   return root;

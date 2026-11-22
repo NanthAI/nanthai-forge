@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-import { removeCachePreservingKept, sweepKeptApplyCache } from './hosted-apply-kept.js';
+import { removeCachePreservingKept } from './hosted-apply-kept.js';
 import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
-import { lstatSync, readdirSync, readlinkSync, rmSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
-import { isLaneDirectoryName, isNestedLaneCopy, markerIdentity } from './hosted-lane-directory.js';
+import { lstatSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve, sep } from 'node:path';
+import {
+  isLaneDirectoryName,
+  isNestedLaneCopy,
+  markerIdentity,
+  nestedLaneParent,
+} from './hosted-lane-directory.js';
 import { makeFunctionReference } from 'convex/server';
 import {
   forgetLane,
   laneCommandRunning,
+  laneRegistryDirectory,
   listLanes,
   readLaneEntry,
   recordLane,
@@ -17,6 +23,9 @@ import { logLanePrune } from './lane-prune-log.js';
 import { readClientSettings, type ClientSettings } from './client-settings.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { invariant } from './errors.js';
+import { digest } from './hash.js';
+import { readCacheUse, cacheUsePath } from './client-cache-use.js';
+import type { PruneFolder } from './lane-prune-inventory.js';
 import { processBlocker, workingProcesses } from './clean-processes.js';
 
 const hour = 3_600_000;
@@ -30,15 +39,16 @@ const SNAPSHOT_LAUNCH_MS = 60_000;
 const terminal = new Set(['completed', 'abandoned']);
 export { markerIdentity };
 export type LaneAddress = { url: string; projectId: string };
-type LaneState = string | { state: string; pinned?: boolean; reason?: string };
+type LaneState = string | { state: string; pinned?: boolean; reason?: string; landedHead?: string };
 type LaneStateGroup = { address: LaneAddress; laneIds: string[] };
 /** Legacy single-project readers use 100-Lane pages; hosted prune uses 250 identities
  * across projects per deployment. Unavailable data never authorizes removal. */
 export type LaneStateReader = ((
   address: LaneAddress,
   laneIds: string[],
+  finishedOnly?: boolean,
 ) => Promise<Map<string, LaneState> | null>) & {
-  batch?: (groups: LaneStateGroup[]) => Promise<Map<string, LaneState> | null>;
+  batch?: (groups: LaneStateGroup[], finishedOnly?: boolean) => Promise<Map<string, LaneState> | null>;
 };
 export type IdleLane = { laneId: string; outcome?: string; idleHours: number; root: string };
 /** An idle Lane on this machine that another agent run (or an unknown, older run) of the account
@@ -53,8 +63,9 @@ export type LaneHousekeeping = {
   pruned: { laneId: string; root: string; bytes: number }[];
   /** Roots a dry run would remove; they still exist. Empty when applying. */
   wouldPrune: { laneId: string; root: string; bytes: number }[];
-  kept: { laneId: string; reason: string }[];
+  kept: { laneId: string; reason: string; root?: string }[];
   apply: boolean;
+  folders?: PruneFolder[];
 };
 
 const exists = (path: string) => {
@@ -65,31 +76,45 @@ const exists = (path: string) => {
   }
 };
 /** Newest change and allocated bytes; symlinks (node_modules) are never followed. */
-function scanTree(paths: string[], snapshots: string | null) {
+function scanTree(root: string, snapshots: string | null, deadline = Infinity, countNested = false) {
+  const cache = clientCacheRoot(root);
+  const use = snapshots && readCacheUse(root, false) ? exists(cacheUsePath(root)) : null;
+  const scratch = join(root, '.forge', 'scratch');
   let newest = 0,
-    snapshotNewest = 0,
-    bytes = 0;
+    bytes = 0,
+    scratchBytes = 0,
+    nested = false;
   const snapshotPrefix = snapshots === null ? null : snapshots + sep;
-  const stack = [...paths];
+  const stack = siblings(root);
   while (stack.length) {
+    if (Date.now() >= deadline) return null;
     const path = stack.pop()!;
-    const stat = exists(path);
+    const stat = lstatSync(path, { throwIfNoEntry: false });
     if (!stat) continue;
     // The worker replaces the stat index and creates/removes its lock, touching the directory
     // as well. Keep counting those bytes and the age of other entries, including recovery data.
-    if (
+    const snapshotBookkeeping =
       (path === snapshots && stat.isDirectory()) ||
       (snapshotPrefix &&
         stat.isFile() &&
         path.startsWith(snapshotPrefix) &&
-        /^(?:stat\.json(?:\.\d+\.tmp)?|worker|lock)$/.test(path.slice(snapshotPrefix.length)))
-    )
-      snapshotNewest = Math.max(snapshotNewest, stat.mtimeMs);
-    else newest = Math.max(newest, stat.mtimeMs);
+        /^(?:stat\.json(?:\.\d+\.tmp)?|worker|lock)$/.test(path.slice(snapshotPrefix.length)));
+    // An atomic cache-use replacement changes its parent's mtime even when the record
+    // preserves the last actual use. The record and other cache entries keep their own ages.
+    const cacheUseReplacement =
+      path === cache && use?.isFile() && Math.abs(stat.mtimeMs - use.ctimeMs) < 1_000;
+    if (!snapshotBookkeeping && !cacheUseReplacement) newest = Math.max(newest, stat.mtimeMs);
     bytes += stat.blocks * 512;
-    if (stat.isDirectory()) for (const name of readdirSync(path)) stack.push(join(path, name));
+    if (inside(path, scratch)) scratchBytes += stat.blocks * 512;
+    if (stat.isDirectory()) {
+      if (path !== root && isLaneDirectoryName(basename(path)) && nestedLaneParent(dirname(path))) {
+        nested = true;
+        if (!countNested) continue;
+      }
+      for (const name of readdirSync(path)) stack.push(join(path, name));
+    }
   }
-  return { newest, snapshotNewest, bytes };
+  return { newest, bytes, scratchBytes, nested };
 }
 const siblings = (root: string) => [root, clientCacheRoot(root), rootSibling(root, '.forge-metrics.jsonl')];
 const nestedLanes = (root: string) => {
@@ -100,51 +125,6 @@ const nestedLanes = (root: string) => {
   }
 };
 const inside = (path: string, root: string) => path === root || path.startsWith(root + sep);
-
-/** Register hosted Lane checkouts found directly in DIRECTORY or under its ROOT.forge-client/lanes.
- * With `write` false nothing is recorded; `found` lists the unregistered checkouts instead. */
-export function adoptLaneCheckouts(directory: string, now = Date.now(), write = true) {
-  const links = new Map<string, string[]>();
-  const found: LaneRegistryEntry[] = [];
-  let adopted = 0;
-  const adopt = (root: string) => {
-    const identity = markerIdentity(root);
-    if (!identity || listed.has(identity.laneId)) return;
-    const stat = exists(join(root, '.forge', 'hosted-lane.json')),
-      lastActionAt = Math.min(now, stat?.mtimeMs ?? now);
-    if (!write) found.push({ ...identity, root, openedAt: now, lastActionAt });
-    else if (recordLane({ ...identity, root, lastActionAt }, now)) adopted++;
-    listed.add(identity.laneId);
-  };
-  const listed = new Set(listLanes().map(entry => entry.laneId));
-  directory = canonicalRoot(directory);
-  for (const name of readdirSync(directory)) {
-    const path = join(directory, name),
-      stat = exists(path);
-    if (stat?.isSymbolicLink()) {
-      const target = canonicalRoot(resolve(directory, readlinkSync(path)));
-      links.set(target, [...(links.get(target) ?? []), path]);
-    } else if (stat?.isDirectory() && name.endsWith('.forge-client')) {
-      if (write) {
-        try {
-          sweepKeptApplyCache(path);
-        } catch {
-          /* Expiry bookkeeping never fails a scan. */
-        }
-      }
-      let lanes: string[] = [];
-      try {
-        lanes = readdirSync(join(path, 'lanes'));
-      } catch {}
-      for (const lane of lanes) {
-        if (!isLaneDirectoryName(lane)) continue;
-        const copy = join(path, 'lanes', lane);
-        if (exists(copy)?.isDirectory()) adopt(copy);
-      }
-    } else if (stat?.isDirectory()) adopt(path);
-  }
-  return { adopted, links, found };
-}
 
 /** Idle listing plus prune of finished Lane roots, from the local registry and one batched read. */
 export async function laneHousekeeping(input: {
@@ -159,6 +139,12 @@ export async function laneHousekeeping(input: {
   /** Never removed: the caller's own root and Lane. */
   exclude?: { roots?: string[]; laneIds?: string[] };
   scan?: string;
+  /** An explicit cleanup scoped to landed and abandoned Lanes. */
+  finishedOnly?: boolean;
+  /** The caller's automatic housekeeping time budget, including lifecycle reads. */
+  budgetMs?: number;
+  /** Report large scratch using the existing cache size budget as a reference. */
+  scratchBudgetBytes?: number;
   /** Permanently deleted projects are eligible only in the explicit prune command. */
   deletedProjects?: boolean;
   now?: number;
@@ -166,16 +152,27 @@ export async function laneHousekeeping(input: {
   isDirty?: (root: string) => boolean;
   processes?: () => ReturnType<typeof workingProcesses>;
 }): Promise<LaneHousekeeping> {
+  const budget = input.budgetMs ?? Infinity;
+  const deadline = Date.now() + budget;
+  const scanDeadline = deadline - Math.min(3_000, budget / 4);
   const now = input.now ?? Date.now(),
     settings = input.settings ?? readClientSettings();
   const pruneMs = settings.autoPruneHours * hour,
     idleMs = settings.idleLaneHours * hour,
     activeMs = (settings.activeLanePruneHours ?? DEFAULT_ACTIVE_PRUNE_HOURS) * hour;
   // A dry run (no apply) changes no registry file, pin mirror, link or checkout.
-  const scanned = input.scan ? adoptLaneCheckouts(input.scan, now, input.apply) : null;
+  const registered = listLanes();
+  const registeredById = new Map(registered.map(entry => [entry.laneId, entry]));
+  const scanned = input.scan
+    ? (
+        (await import(
+          /* @vite-ignore */ new URL('./lane-prune-inventory.js', import.meta.url).href
+        )) as typeof import('./lane-prune-inventory.js')
+      ).scanLaneDirectory(input.scan, registered, now, input.apply && !input.finishedOnly)
+    : null;
   const links = scanned?.links ?? new Map<string, string[]>();
   // A link whose Lane copy is gone (removed by GC or by hand) is only clutter; remove it with its target.
-  if (input.apply)
+  if (input.apply && !input.finishedOnly)
     for (const [target, paths] of links)
       if (!exists(target) && target.includes(`.forge-client${sep}lanes${sep}`))
         for (const path of paths) rmSync(path, { force: true });
@@ -190,27 +187,82 @@ export async function laneHousekeeping(input: {
     wouldPrune: [],
     kept: [],
     apply: input.apply,
+    ...(scanned ? { folders: scanned.folders } : {}),
   };
   const entries: LaneRegistryEntry[] = [];
-  for (const entry of [...listLanes(), ...(scanned?.found ?? [])]) {
+  const found = new Map((scanned?.found ?? []).map(entry => [entry.laneId, entry]));
+  const kept = (entry: LaneRegistryEntry, reason: string) => {
+    result.kept.push({ laneId: entry.laneId, reason, ...(input.scan ? { root: entry.root } : {}) });
+    const folder = scanned?.byRoot.get(entry.root);
+    if (folder) folder.reason = reason;
+  };
+  for (const entry of [...registered.filter(entry => !found.has(entry.laneId)), ...found.values()]) {
     if (input.address && (entry.url !== input.address.url || entry.projectId !== input.address.projectId))
       continue;
-    // A removed checkout leaves nothing to prune or list.
-    if (!exists(entry.root)) {
-      if (input.apply) forgetLane(entry.laneId);
-    } else if (!excludedLanes.has(entry.laneId)) entries.push(entry);
+    // A missing checkout may be a start that has reserved its path but not installed
+    // the tree yet. Unreadable paths are not evidence that a root went away.
+    try {
+      if (!lstatSync(entry.root, { throwIfNoEntry: false })) {
+        if (input.apply && !input.finishedOnly && now - entry.lastActionAt >= hour) {
+          const latest = readLaneEntry(entry.laneId);
+          if (
+            latest?.root === entry.root &&
+            latest.lastActionAt === entry.lastActionAt &&
+            !laneCommandRunning(latest) &&
+            !latest.landing &&
+            !latest.hold &&
+            !latest.pinned
+          )
+            forgetLane(entry.laneId);
+        }
+        continue;
+      }
+    } catch {
+      kept(entry, 'checkout path could not be inspected');
+      continue;
+    }
+    if (excludedLanes.has(entry.laneId)) kept(entry, 'in use by this command');
+    else entries.push(entry);
   }
   const thresholds = [pruneMs, idleMs].filter(value => value > 0);
   // An open Lane's root is removed only past its own, longer age, and never when pruning is off.
-  const activeLimit = pruneMs > 0 && activeMs > 0 ? Math.max(pruneMs, activeMs) : 0;
+  const activeLimit = !input.finishedOnly && pruneMs > 0 && activeMs > 0 ? Math.max(pruneMs, activeMs) : 0;
   if (!thresholds.length) return result;
-  const due = entries.filter(entry => now - entry.lastActionAt >= Math.min(...thresholds));
+  let due = entries.filter(entry => {
+    if (now - entry.lastActionAt >= Math.min(...thresholds)) return true;
+    const folder = scanned?.byRoot.get(entry.root);
+    if (folder) folder.reason = 'recent Forge action';
+    return false;
+  });
+  // Large local inventories continue from the previous bounded start instead
+  // of repeatedly inspecting the same dirty or very large folders first.
+  const cursor =
+    input.apply && input.budgetMs !== undefined && input.address && due.length
+      ? join(dirname(laneRegistryDirectory()), `prune-${digest(JSON.stringify(input.address))}.cursor`)
+      : null;
+  let resumed = false;
+  if (cursor) {
+    due.sort((a, b) => a.laneId.localeCompare(b.laneId));
+    try {
+      const last = readFileSync(cursor, 'utf8');
+      const offset = due.findIndex(entry => entry.laneId > last);
+      if (offset > 0) {
+        due = due.slice(offset);
+        resumed = true;
+      }
+    } catch {
+      // A missing cursor starts at the first Lane.
+    }
+  }
   const states = new Map<string, string | null>();
+  const landedHeads = new Map<string, string>();
   const pins = new Map<string, boolean>();
   const groups = new Map<string, LaneRegistryEntry[]>();
   for (const entry of due) {
     const key = JSON.stringify([entry.url, entry.projectId]);
-    groups.set(key, [...(groups.get(key) ?? []), entry]);
+    const group = groups.get(key) ?? [];
+    group.push(entry);
+    groups.set(key, group);
   }
   const reasons = new Map<string, string>();
   const pages: LaneStateGroup[][] = [];
@@ -227,7 +279,7 @@ export async function laneHousekeeping(input: {
       size = 0;
     for (const group of deployment) {
       for (const laneId of group.laneIds) {
-        const limit = input.readStates.batch ? 250 : 100;
+        const limit = input.finishedOnly ? 48 : input.readStates.batch ? 250 : 100;
         if (
           size === limit ||
           (!input.readStates.batch && page.length > 0 && page[0]?.address !== group.address)
@@ -248,13 +300,14 @@ export async function laneHousekeeping(input: {
     if (page.length) pages.push(page);
   }
   for (const page of pages) {
+    if (Date.now() >= scanDeadline) break;
     let read: Map<string, LaneState> | null = null;
     let failure =
       'State read unavailable: check sign-in and deployment/CLI compatibility, then rerun nforge prune; copy retained.';
     try {
       read = input.readStates.batch
-        ? await input.readStates.batch(page)
-        : await input.readStates(page[0]!.address, page[0]!.laneIds);
+        ? await input.readStates.batch(page, input.finishedOnly)
+        : await input.readStates(page[0]!.address, page[0]!.laneIds, input.finishedOnly);
     } catch (error) {
       const code =
         (error as { code?: string; data?: { code?: string } } | null)?.data?.code ??
@@ -267,6 +320,7 @@ export async function laneHousekeeping(input: {
         const row = read?.get(laneId);
         const state = row === undefined ? null : typeof row === 'string' ? row : row.state;
         states.set(laneId, state);
+        if (typeof row === 'object' && row.landedHead) landedHeads.set(laneId, row.landedHead);
         // An inaccessible/missing record contains no current pin evidence. Keep the local
         // mirror so offline cache GC cannot evict a previously pinned copy.
         if (read && row !== undefined && state && (state === 'active' || terminal.has(state)))
@@ -274,20 +328,51 @@ export async function laneHousekeeping(input: {
         reasons.set(laneId, typeof row === 'object' && row.reason ? row.reason : failure);
       }
   }
-  const isDirty = input.isDirty ?? hostedLaneDirty;
+  const isDirty = input.isDirty ?? (root => hostedLaneDirty(root, { preserveMaterializedSubmodules: true }));
   let dirtyChecks = 0;
   let snapshotHelpers: typeof import('./lane-snapshot-hint.js') | undefined;
-  const checkUnsaved = (root: string) =>
-    dirtyChecks++ >= DIRTY_CHECKS ? 'unsaved-edit check deferred' : isDirty(root) ? 'unsaved edits' : null;
+  const checkUnsaved = (root: string, bounded: boolean) =>
+    bounded && dirtyChecks++ >= DIRTY_CHECKS
+      ? 'unsaved-edit check deferred'
+      : isDirty(root)
+        ? 'unsaved edits'
+        : null;
+  const measure = (entry: LaneRegistryEntry, tree: NonNullable<ReturnType<typeof scanTree>>) => {
+    const folder = scanned?.byRoot.get(entry.root);
+    if (!folder) return;
+    folder.bytes = tree.bytes;
+    folder.scratchBytes = tree.scratchBytes;
+    if (input.scratchBudgetBytes && tree.scratchBytes > input.scratchBudgetBytes) folder.largeScratch = true;
+  };
+  const observe = input.processes ?? (() => workingProcesses(true));
+  const runningProcess = (root: string, observed: ReturnType<typeof workingProcesses>) => {
+    for (const path of siblings(root)) {
+      const reason = processBlocker(path, observed);
+      if (reason) return reason;
+    }
+    return null;
+  };
+  // Observe again after potentially expensive source inspection, in small batches
+  // so this check remains close to removal without one process census per Lane.
+  const pending: ((observed: ReturnType<typeof workingProcesses>) => void)[] = [];
+  const flush = () => {
+    if (!pending.length) return;
+    processes = observe();
+    for (const remove of pending.splice(0)) remove(processes);
+  };
+  let lastInspected: string | undefined;
   for (const entry of due) {
+    if (Date.now() >= scanDeadline) break;
+    lastInspected = entry.laneId;
     const state = states.get(entry.laneId) ?? null,
       idleFor = now - entry.lastActionAt;
     // The server flag wins and refreshes this client's mirror; an unreadable server keeps the last known pin.
     const pinned = pins.get(entry.laneId) ?? Boolean(entry.pinned);
-    if (input.apply && pins.has(entry.laneId) && pinned !== Boolean(entry.pinned))
-      recordLane({ laneId: entry.laneId, pinned, lastActionAt: entry.lastActionAt }, now);
     if (pinned) {
-      result.kept.push({ laneId: entry.laneId, reason: 'pinned' });
+      const latest = input.apply && !found.has(entry.laneId) && !entry.pinned && readLaneEntry(entry.laneId);
+      if (latest && latest.root === entry.root && latest.lastActionAt === entry.lastActionAt)
+        recordLane({ laneId: entry.laneId, pinned: true, lastActionAt: latest.lastActionAt }, now);
+      kept(entry, 'pinned');
       continue;
     }
     const idleHours = Math.round((idleFor / hour) * 10) / 10;
@@ -309,44 +394,69 @@ export async function laneHousekeeping(input: {
           });
     // An active Lane idle past the active prune age loses its root only when nothing in it is unsaved
     // and no command runs in it; `open` restores it from the saved head.
-    const deleted = input.deletedProjects === true && state === 'project-deleted';
+    const deleted = !input.finishedOnly && input.deletedProjects === true && state === 'project-deleted';
     const activeIdle = state === 'active' && activeLimit > 0 && idleFor >= activeLimit;
     const limit = activeIdle ? activeLimit : pruneMs;
     if (state === 'active' && !activeIdle) {
       if (idleMs > 0 && idleFor >= idleMs) listIdle();
+      const folder = scanned?.byRoot.get(entry.root);
+      if (folder) folder.reason = 'active Lane';
+      continue;
+    }
+    if (input.finishedOnly && state === 'project-deleted') {
+      kept(entry, 'project deleted; finished Lane state unavailable');
       continue;
     }
     if (!state || (!activeIdle && !deleted && !terminal.has(state)) || limit === 0 || idleFor < limit) {
-      if (!state || (!terminal.has(state) && state !== 'active'))
-        result.kept.push({ laneId: entry.laneId, reason: reasons.get(entry.laneId)! });
+      const reason = reasons.get(entry.laneId);
+      if (!state || !terminal.has(state)) kept(entry, reason ?? 'Lane state unavailable');
+      else if (scanned?.byRoot.has(entry.root))
+        kept(entry, limit ? `Forge action within ${limit / hour}h` : 'automatic pruning disabled');
       continue;
     }
-    const root = canonicalRoot(entry.root);
+    let root: string;
+    try {
+      root = canonicalRoot(entry.root);
+    } catch {
+      kept(entry, 'checkout path could not be inspected');
+      continue;
+    }
     const identity = markerIdentity(root);
     if (
-      deleted &&
-      (root !== resolve(entry.root) ||
-        !isNestedLaneCopy(root) ||
-        exists(clientCacheRoot(root))?.isSymbolicLink())
+      input.finishedOnly &&
+      state === 'completed' &&
+      (!identity?.head || landedHeads.get(entry.laneId) !== identity.head)
     ) {
-      result.kept.push({ laneId: entry.laneId, reason: 'outside the Lane checkout cache' });
+      kept(entry, 'no verified landing for this checkout head');
       continue;
     }
+    const marker = join(root, '.forge', 'hosted-lane.json');
+    const before = exists(marker);
+    if (deleted && (root !== resolve(entry.root) || !isNestedLaneCopy(root))) {
+      kept(entry, 'outside the Lane checkout cache');
+      continue;
+    }
+    const unsafeLink = () =>
+      exists(entry.root)?.isSymbolicLink() || exists(clientCacheRoot(root))?.isSymbolicLink();
     let reason =
       excludedRoots.some(path => inside(path, root) || inside(root, path)) || inside(workingRoot, root)
         ? 'in use by this command'
         : identity?.laneId !== entry.laneId ||
-            (deleted && (identity.projectId !== entry.projectId || identity.url !== entry.url))
+            identity.projectId !== entry.projectId ||
+            identity.url !== entry.url ||
+            !before?.isFile() ||
+            unsafeLink()
           ? 'not this Lane checkout'
-          : laneCommandRunning(entry) || (deleted && (entry.landing || entry.hold))
+          : laneCommandRunning(entry) ||
+              (deleted && (entry.landing || entry.hold)) ||
+              exists(join(clientCacheRoot(root), 'lock'))
             ? 'command running'
             : nestedLanes(root)
               ? 'contains other Lane roots'
-              : (processBlocker(root, (processes ??= (input.processes ?? workingProcesses)())) ?? null);
-    if (!reason && (activeIdle || deleted)) reason = checkUnsaved(root);
+              : runningProcess(root, (processes ??= observe()));
     if (reason) {
       if (activeIdle && idleMs > 0 && idleFor >= idleMs) listIdle();
-      result.kept.push({ laneId: entry.laneId, reason });
+      kept(entry, reason);
       continue;
     }
     if (!activeIdle)
@@ -354,48 +464,93 @@ export async function laneHousekeeping(input: {
         /* @vite-ignore */ new URL('./lane-snapshot-hint.js', import.meta.url).href
       )) as typeof import('./lane-snapshot-hint.js');
     const snapshots = activeIdle ? null : (snapshotHelpers?.snapshotDirectory(root) ?? null);
-    const tree = scanTree(siblings(root), snapshots);
-    if (now - tree.newest < limit) {
-      result.kept.push({ laneId: entry.laneId, reason: `modified within ${limit / hour}h` });
+    let tree: ReturnType<typeof scanTree>;
+    try {
+      tree = scanTree(root, snapshots, scanDeadline, Boolean(scanned?.byRoot.has(entry.root)));
+    } catch {
+      kept(entry, 'checkout could not be fully inspected');
       continue;
     }
-    if (snapshots && snapshotHelpers && now - tree.snapshotNewest < limit) {
-      // Where maintenance was the last age blocker, verify the working files against the saved
-      // baseline, including edits whose mtime was preserved.
-      const { snapshotLockHeld } = snapshotHelpers;
-      const busy = (time: number) => {
-        const worker = exists(join(snapshots, 'worker'));
-        return (worker !== null && time - worker.mtimeMs < SNAPSHOT_LAUNCH_MS) || snapshotLockHeld(root);
-      };
-      reason = busy(now) ? 'snapshot running' : deleted ? null : checkUnsaved(root);
-      // A worker may start while the synchronous dirty scan reads the checkout.
-      if (!reason && input.apply && busy(input.now ?? Date.now())) reason = 'snapshot running';
-      if (reason) {
-        result.kept.push({ laneId: entry.laneId, reason });
-        continue;
-      }
+    if (!tree) break;
+    measure(entry, tree);
+    const snapshotBusy = (time: number) => {
+      if (!snapshots || !snapshotHelpers) return false;
+      const worker = exists(join(snapshots, 'worker'));
+      return (
+        (worker !== null && time - worker.mtimeMs < SNAPSHOT_LAUNCH_MS) ||
+        snapshotHelpers.snapshotLockHeld(root)
+      );
+    };
+    reason = tree.nested
+      ? 'contains other Lane roots'
+      : now - tree.newest < limit
+        ? `modified within ${limit / hour}h`
+        : snapshotBusy(now)
+          ? 'snapshot running'
+          : checkUnsaved(root, activeIdle || deleted);
+    if (reason) {
+      if (activeIdle && idleMs > 0 && idleFor >= idleMs) listIdle();
+      kept(entry, reason);
+      continue;
     }
-    if (input.apply) {
-      const latest = deleted ? readLaneEntry(entry.laneId) : null;
+    const recordResult = () => {
+      const companion = scanned?.byRoot.get(clientCacheRoot(root));
+      if (companion)
+        companion.reason = input.apply
+          ? exists(companion.root)
+            ? 'retained checkout recovery'
+            : 'removed with Lane checkout'
+          : 'would be pruned with Lane checkout, retaining any recovery';
+      const folder = scanned?.byRoot.get(entry.root);
+      if (folder) folder.reason = input.apply ? `${state} Lane pruned` : `${state} Lane eligible for prune`;
+      (input.apply ? result.pruned : result.wouldPrune).push({
+        laneId: entry.laneId,
+        root,
+        bytes: tree.bytes,
+      });
+    };
+    if (!input.apply) {
+      recordResult();
+      continue;
+    }
+    pending.push(observed => {
+      if (Date.now() >= deadline) return;
+      const blocked = runningProcess(root, observed);
+      if (blocked) {
+        kept(entry, blocked);
+        return;
+      }
+      if (snapshotBusy(input.now ?? Date.now())) {
+        kept(entry, 'snapshot running');
+        return;
+      }
+      const latest = readLaneEntry(entry.laneId);
+      const original = registeredById.get(entry.laneId);
+      const after = exists(marker);
       if (
-        latest &&
-        (latest.pinned ||
-          latest.landing ||
-          latest.hold ||
-          laneCommandRunning(latest) ||
-          latest.lastActionAt !== entry.lastActionAt ||
-          latest.root !== entry.root)
+        !after ||
+        before!.ino !== after.ino ||
+        before!.ctimeMs !== after.ctimeMs ||
+        unsafeLink() ||
+        exists(join(clientCacheRoot(root), 'lock')) ||
+        nestedLanes(root) ||
+        latest?.lastActionAt !== original?.lastActionAt ||
+        latest?.root !== original?.root ||
+        (latest &&
+          ((latest.pinned && !original?.pinned) ||
+            laneCommandRunning(latest) ||
+            (!terminal.has(state) && (latest.hold || latest.landing))))
       ) {
-        result.kept.push({ laneId: entry.laneId, reason: 'Lane use changed during prune' });
-        continue;
+        kept(entry, 'Lane use changed during prune');
+        return;
       }
       logLanePrune(
         {
           laneId: entry.laneId,
           root,
           state,
-          reason: `${state} Lane idle ${Math.round((idleFor / hour) * 10) / 10}h, threshold ${limit / hour}h`,
-          idleHours: Math.round((idleFor / hour) * 10) / 10,
+          reason: `${state} Lane idle ${idleHours}h, threshold ${limit / hour}h`,
+          idleHours,
           bytes: tree.bytes,
         },
         now,
@@ -405,9 +560,44 @@ export async function laneHousekeeping(input: {
         else rmSync(path, { recursive: true, force: true });
       if (!deleted) for (const link of links.get(root) ?? []) rmSync(link, { force: true });
       forgetLane(entry.laneId);
-    }
-    (input.apply ? result.pruned : result.wouldPrune).push({ laneId: entry.laneId, root, bytes: tree.bytes });
+      recordResult();
+    });
+    if (pending.length === 16) flush();
   }
+  flush();
+  if (cursor && lastInspected && (resumed || Date.now() >= scanDeadline)) {
+    try {
+      writeFileSync(cursor, lastInspected, { mode: 0o600 });
+    } catch {
+      // Cursor bookkeeping is advisory.
+    }
+  }
+  if (input.apply)
+    for (const entry of entries) {
+      if (!entry.pinned || pins.get(entry.laneId) !== false || found.has(entry.laneId)) continue;
+      const latest = readLaneEntry(entry.laneId);
+      if (latest?.pinned && latest.root === entry.root && latest.lastActionAt === entry.lastActionAt)
+        recordLane({ laneId: entry.laneId, pinned: false, lastActionAt: latest.lastActionAt }, now);
+    }
+  if (input.apply && !input.finishedOnly)
+    for (const entry of found.values()) {
+      if (!exists(entry.root)) continue;
+      const original = registeredById.get(entry.laneId);
+      const latest = readLaneEntry(entry.laneId);
+      if (latest?.root === original?.root && latest?.lastActionAt === original?.lastActionAt)
+        recordLane({ ...entry, pinned: pins.get(entry.laneId) ?? entry.pinned }, now);
+    }
+  if (scanned)
+    for (const entry of entries) {
+      const folder = scanned.byRoot.get(entry.root);
+      if (!folder || folder.bytes !== undefined || !exists(entry.root)) continue;
+      try {
+        const tree = scanTree(entry.root, null, deadline, true);
+        if (tree) measure(entry, tree);
+      } catch {
+        // Keep the lifecycle reason and omit an incomplete size.
+      }
+    }
   return result;
 }
 
@@ -417,7 +607,7 @@ export function convexLaneStates(
     query: (name: unknown, args: Record<string, unknown>) => Promise<unknown>;
   },
 ): LaneStateReader {
-  const read = async (groups: LaneStateGroup[], batched: boolean) => {
+  const read = async (groups: LaneStateGroup[], batched: boolean, finishedOnly?: boolean) => {
     const { address, laneIds } = groups[0]!;
     const rest = groups.slice(1);
     let value: unknown;
@@ -425,6 +615,7 @@ export function convexLaneStates(
       value = await client(address).query(makeFunctionReference<'query'>('projectHostedLanes:states'), {
         projectId: address.projectId,
         laneIds,
+        ...(finishedOnly ? { checkoutReceipts: 1 } : {}),
         ...(batched
           ? {
               additionalProjects: rest.map(group => ({
@@ -447,6 +638,7 @@ export function convexLaneStates(
       state: string;
       pinned?: boolean;
       reason?: string;
+      landedHead?: string;
     }[];
     return new Map(
       rows.map(row => [
@@ -454,14 +646,17 @@ export function convexLaneStates(
         {
           state: row.state,
           pinned: row.pinned === true,
+          ...(row.landedHead ? { landedHead: row.landedHead } : {}),
           ...(row.reason ? { reason: row.reason } : {}),
         },
       ]),
     );
   };
-  return Object.assign((address: LaneAddress, laneIds: string[]) => read([{ address, laneIds }], false), {
-    batch: (groups: LaneStateGroup[]) => read(groups, true),
-  });
+  return Object.assign(
+    (address: LaneAddress, laneIds: string[], finishedOnly?: boolean) =>
+      read([{ address, laneIds }], false, finishedOnly),
+    { batch: (groups: LaneStateGroup[], finishedOnly?: boolean) => read(groups, true, finishedOnly) },
+  );
 }
 
 /** Terse agent-facing lines; nothing when there is nothing to say. */
@@ -499,22 +694,28 @@ export function housekeepingLines(
   return lines;
 }
 
-/** nforge prune [--apply] [--scan DIRECTORY] */
+/** nforge prune [--apply] [--finished-only] [--scan DIRECTORY] */
 export async function pruneCli(args: string[], readStates: LaneStateReader) {
   let apply = false,
+    finishedOnly = false,
     scan: string | undefined;
   for (let index = 0; index < args.length; index++) {
     if (args[index] === '--apply') apply = true;
+    else if (args[index] === '--finished-only') finishedOnly = true;
     else if (args[index] === '--scan' && args[index + 1]) scan = args[++index];
-    else invariant(false, 'BAD_ARGUMENT', 'Use prune [--apply] [--scan DIRECTORY].');
+    else invariant(false, 'BAD_ARGUMENT', 'Use prune [--apply] [--finished-only] [--scan DIRECTORY].');
   }
   const settings = readClientSettings();
+  const localLanes = join(clientCacheRoot(process.cwd()), 'lanes');
+  if (!scan && exists(localLanes)?.isDirectory()) scan = localLanes;
   // An explicit prune uses the configured age even when automatic prune is off.
   const hours = settings.autoPruneHours || 3;
   const result = await laneHousekeeping({
     readStates,
     apply,
     deletedProjects: true,
+    finishedOnly,
+    scratchBudgetBytes: settings.clientCacheMaxGB * 1e9,
     settings: {
       autoPruneHours: hours,
       idleLaneHours: settings.idleLaneHours,
@@ -525,6 +726,6 @@ export async function pruneCli(args: string[], readStates: LaneStateReader) {
   const { pruneDependencyCache } = (await import(
     /* @vite-ignore */ new URL('./dependency-cache.js', import.meta.url).href
   )) as typeof import('./dependency-cache.js');
-  const dependencies = pruneDependencyCache({ apply, remeasure: true });
+  const dependencies = pruneDependencyCache({ apply: apply && !finishedOnly, remeasure: true });
   return { ...result, olderThanHours: hours, dependencies };
 }

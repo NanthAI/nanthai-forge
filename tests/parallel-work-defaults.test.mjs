@@ -50,12 +50,12 @@ function isolated(t) {
   return directory;
 }
 /** A hosted Lane checkout: marker, a file, client cache and metrics siblings. */
-function checkout(directory, name, laneId, old = true) {
+function checkout(directory, name, laneId, old = true, projectId = address.projectId) {
   const root = join(directory, name);
   mkdirSync(join(root, '.forge'), { recursive: true });
   writeFileSync(
     join(root, '.forge', 'hosted-lane.json'),
-    JSON.stringify({ url: address.url, selection: { laneId, projectId: address.projectId } }),
+    JSON.stringify({ url: address.url, selection: { laneId, projectId } }),
   );
   writeFileSync(join(root, 'file.txt'), 'x'.repeat(4096));
   mkdirSync(`${root}.forge-client/agent`, { recursive: true });
@@ -138,8 +138,8 @@ test('start lists idle open Lanes and prunes finished roots after one batched re
     return new Map(laneIds.map(laneId => [laneId, state(lanes.indexOf(laneId))]));
   };
   const memory = process.memoryUsage().heapUsed;
-  // These Lanes stand for unsaved work: idle active Lanes with edits are listed, never removed.
-  const result = await laneHousekeeping({ readStates, address, apply: true, now, isDirty: () => true });
+  // The synthetic checkout markers stand in for clean saved baselines.
+  const result = await laneHousekeeping({ readStates, address, apply: true, now, isDirty: () => false });
   // Dogfood budget: 250 due Lanes -> 3 calls, never one per Lane.
   assert.deepEqual(reads, [100, 100, 50]);
   assert(process.memoryUsage().heapUsed - memory < 64 * 2 ** 20);
@@ -200,6 +200,7 @@ test('prune keeps unknown, recent, in-use and parent roots, and an old server pr
     apply: true,
     now,
     exclude: { roots: [used.root] },
+    isDirty: () => false,
   });
   const kept = Object.fromEntries(result.kept.map(item => [item.laneId, item.reason]));
   assert.equal(kept[recent.laneId], 'modified within 3h');
@@ -232,6 +233,7 @@ test('prune --scan adopts existing checkouts, including nested Lane roots and re
     readStates: async (_address, laneIds) => new Map(laneIds.map(laneId => [laneId, 'abandoned'])),
     apply: false,
     scan: hosted,
+    isDirty: () => false,
   });
   // A dry scan finds both checkouts but registers nothing (41a24da0).
   assert.deepEqual(listLanes(), []);
@@ -242,6 +244,7 @@ test('prune --scan adopts existing checkouts, including nested Lane roots and re
     readStates: async (_address, laneIds) => new Map(laneIds.map(laneId => [laneId, 'abandoned'])),
     apply: true,
     scan: hosted,
+    isDirty: () => false,
   });
   assert.deepEqual(readdirSync(hosted).sort(), ['lane-bbbbbbbb', 'lane-bbbbbbbb.forge-client']);
 });
@@ -386,14 +389,15 @@ test('92f4bf04: 99 roots use one cross-project read; dry/apply reclaim terminal 
   const directory = isolated(t),
     now = Date.now();
   const lanes = Array.from({ length: 99 }, () => randomUUID());
-  const roots = lanes.map((laneId, i) => checkout(directory, `fixture-${i}`, laneId));
+  const projectFor = i => (i < 50 ? 'project' : 'other-project');
+  const roots = lanes.map((laneId, i) => checkout(directory, `fixture-${i}`, laneId, true, projectFor(i)));
   for (const [i, laneId] of lanes.entries())
     recordLane(
       {
         laneId,
         root: roots[i],
         ...address,
-        projectId: i < 50 ? 'project' : 'other-project',
+        projectId: projectFor(i),
         lastActionAt: now - 5 * hour,
       },
       now,
@@ -423,7 +427,12 @@ test('92f4bf04: 99 roots use one cross-project read; dry/apply reclaim terminal 
       });
     },
   }));
-  const input = { readStates, now, processes: () => ({ paths: [realpathSync(roots[0])], unknown: false }) };
+  const input = {
+    readStates,
+    now,
+    isDirty: () => false,
+    processes: () => ({ paths: [realpathSync(roots[0])], unknown: false }),
+  };
   const dry = await laneHousekeeping({ ...input, apply: false });
   assert.equal(calls, 1);
   assert.equal(dry.wouldPrune.length, 71);

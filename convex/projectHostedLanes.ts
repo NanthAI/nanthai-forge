@@ -171,6 +171,7 @@ export const states = query({
     projectId: v.id('hostedProjects'),
     laneIds: v.array(v.string()),
     sourcePins: v.optional(v.literal(1)),
+    checkoutReceipts: v.optional(v.literal(1)),
     additionalProjects: v.optional(
       v.array(
         v.object({
@@ -187,6 +188,7 @@ export const states = query({
       version: v.number(),
       pinned: v.optional(v.boolean()),
       source: v.optional(v.object({ head: v.string(), intentId: v.string() })),
+      landedHead: v.optional(v.string()),
       reason: v.optional(v.string()),
     }),
   ),
@@ -195,7 +197,8 @@ export const states = query({
       const groups = [input, ...(input.additionalProjects ?? [])];
       invariant(
         groups.length <= 250 &&
-          groups.reduce((n, group) => n + group.laneIds.length, 0) <= (input.additionalProjects ? 250 : 100),
+          groups.reduce((n, group) => n + group.laneIds.length, 0) <=
+            (input.checkoutReceipts ? 48 : input.additionalProjects ? 250 : 100),
         'BAD_ARGUMENT',
         'Read one bounded Lane state page.',
       );
@@ -237,11 +240,27 @@ export const states = query({
             input.sourcePins && effective
               ? hostedLaneSchema.parse(JSON.parse(await hostedRecordBody(ctx, effective)))
               : null;
+          // The operator-only finished sweep needs to distinguish manual completion
+          // from an accepted head. This projection can carry up to 128 KiB of changes;
+          // receipt pages are capped at 48 even for a cross-project read.
+          const overlap =
+            input.checkoutReceipts && effective?.status === 'completed'
+              ? await ctx.db
+                  .query('projectHostedOverlapLanes')
+                  .withIndex('by_project_and_lane', q =>
+                    q.eq('projectId', group.projectId).eq('laneId', laneId),
+                  )
+                  .unique()
+              : null;
+          const landed = overlap?.landed;
+          const landedHead =
+            landed && !landed.revertedBy && landed.laneHead === overlap?.head ? landed.laneHead : null;
           result.push(
             effective
               ? {
                   laneId,
                   ...(source ? { source: { head: source.head, intentId: source.intentId } } : {}),
+                  ...(landedHead ? { landedHead } : {}),
                   state: String(effective.status),
                   version: effective.version,
                   ...(effective.pinned ? { pinned: true } : {}),

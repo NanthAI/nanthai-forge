@@ -131,6 +131,46 @@ test('92f4bf04: one bounded prune read classifies retained terminal/open headers
   assert.equal(count.writes, 0);
   assert.equal(count.readDocumentsByTable.projectHostedRecordBodies ?? 0, 0);
   assert(count.documents < 4 * 167 + 10, `bounded header reads: ${count.documents}`);
+  const [landed, closed, changed] = laneIds;
+  for (const [laneId, laneHead] of [
+    [landed, head],
+    [changed, 'b'.repeat(64)],
+  ]) {
+    s.insert('projectHostedOverlapLanes', {
+      projectId,
+      laneId,
+      intentId: 'intent',
+      actor: 'owner',
+      intent: 'Synthetic receipt',
+      head,
+      baseHead: head,
+      baseReceiptId: 'main-0',
+      baseSequence: null,
+      recordVersion: 1,
+      open: false,
+      changes: '[]',
+      complete: true,
+      landed: { receiptId: 'accepted', commit: head, laneHead, at: '2026-01-01' },
+    });
+  }
+  const receiptRows = await s.call('pruneReceipts', reads.states, {
+    projectId,
+    laneIds: [landed, closed, changed, laneIds[72]],
+    checkoutReceipts: 1,
+  });
+  assert.deepEqual(
+    receiptRows.map(row => row.landedHead),
+    [head, undefined, undefined, undefined],
+  );
+  assert.equal(s.counts.at(-1).readDocumentsByTable.projectHostedOverlapLanes, 3);
+  await assert.rejects(
+    s.call('receiptPageTooLarge', reads.states, {
+      projectId,
+      laneIds: laneIds.slice(0, 49),
+      checkoutReceipts: 1,
+    }),
+    error => (error.data?.code ?? error.code) === 'BAD_ARGUMENT',
+  );
   await assert.rejects(
     s.call('unauthorized', reads.states, { projectId: inaccessible, laneIds: [hidden] }),
     error => (error.data?.code ?? error.code) === 'PROJECT_UNAVAILABLE',

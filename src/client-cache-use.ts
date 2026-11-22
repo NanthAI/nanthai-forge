@@ -38,8 +38,8 @@ function readUse(path: string): CacheUse | null {
     return null;
   }
 }
-export function readCacheUse(copy: string): CacheUse | null {
-  return readUse(cacheUsePath(copy)) ?? readUse(legacyPath(copy));
+export function readCacheUse(copy: string, withLegacy = true): CacheUse | null {
+  return readUse(cacheUsePath(copy)) ?? (withLegacy ? readUse(legacyPath(copy)) : null);
 }
 export function writeCacheUse(copy: string, record: CacheUse, durable = false) {
   const file = cacheUsePath(copy),

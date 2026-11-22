@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, mkdirSync, readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { hostedLaneMarkerName } from './forge-cache-paths.js';
 import { canonicalRoot, unfollowedClientCacheRoot } from './root-paths.js';
@@ -21,19 +21,36 @@ export function isNestedLaneCopy(copy: string) {
 }
 
 /** Reads the Lane identity without validating or rehashing the checkout's source baseline. */
-export function markerIdentity(root: string): { laneId: string; url: string; projectId: string } | null {
+export function markerIdentity(
+  root: string,
+): { laneId: string; url: string; projectId: string; head?: string } | null {
+  let descriptor: number | undefined;
   try {
-    const marker = JSON.parse(readFileSync(join(root, '.forge', hostedLaneMarkerName), 'utf8')) as {
+    const forge = join(root, '.forge');
+    if (!lstatSync(forge).isDirectory()) return null;
+    descriptor = openSync(
+      join(forge, hostedLaneMarkerName),
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    if (!fstatSync(descriptor).isFile()) return null;
+    const marker = JSON.parse(readFileSync(descriptor, 'utf8')) as {
       url?: unknown;
-      selection?: { laneId?: unknown; projectId?: unknown };
+      selection?: { laneId?: unknown; projectId?: unknown; head?: unknown };
     };
     const laneId = marker.selection?.laneId,
       projectId = marker.selection?.projectId;
     return typeof laneId === 'string' && uuid.test(laneId) && typeof projectId === 'string'
-      ? { laneId, projectId, url: typeof marker.url === 'string' ? marker.url : '' }
+      ? {
+          laneId,
+          projectId,
+          url: typeof marker.url === 'string' ? marker.url : '',
+          ...(typeof marker.selection?.head === 'string' ? { head: marker.selection.head } : {}),
+        }
       : null;
   } catch {
     return null;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
   }
 }
 

@@ -133,7 +133,8 @@ export function gcNestedLanes(input: {
       result.finished = false;
       break;
     }
-    item.bytes ??= treeBytes(item.copy);
+    if (item.bytes !== undefined) continue;
+    item.bytes = treeBytes(item.copy);
     try {
       writeCacheUse(item.copy, { bytes: item.bytes, used: item.used });
     } catch {

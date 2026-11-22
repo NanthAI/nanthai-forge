@@ -2080,6 +2080,7 @@ export class HostedAgentTransport {
         })),
         address: this.address,
         apply: settings.autoPruneHours > 0,
+        budgetMs: Math.min(12_000, this.startBoundMs),
         settings,
         exclude: { roots, laneIds },
         run: this.agentSlug() ?? null,

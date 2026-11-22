@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { readdirSync, readlinkSync, statSync } from 'node:fs';
 import { sep } from 'node:path';
 /** Observe local working directories once per cleanup. Unknown coverage retains copies. */
-export function workingProcesses(): { paths: string[]; unknown: boolean } {
+export function workingProcesses(openFiles = false): { paths: string[]; unknown: boolean } {
   try {
     if (process.platform === 'linux') {
       const paths: string[] = [];
@@ -13,6 +13,18 @@ export function workingProcesses(): { paths: string[]; unknown: boolean } {
         try {
           if (statSync(`/proc/${entry}`).uid !== process.getuid?.()) continue;
           paths.push(readlinkSync(`/proc/${entry}/cwd`));
+          if (openFiles) {
+            const fd = `/proc/${entry}/fd`;
+            for (const name of readdirSync(fd)) {
+              try {
+                const path = readlinkSync(`${fd}/${name}`);
+                if (path.startsWith('/')) paths.push(path);
+              } catch (error) {
+                if (!['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? ''))
+                  return { paths, unknown: true };
+              }
+            }
+          }
         } catch (error) {
           if (!['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? ''))
             return { paths, unknown: true };
@@ -23,7 +35,7 @@ export function workingProcesses(): { paths: string[]; unknown: boolean } {
     if (process.platform === 'darwin') {
       const output = execFileSync(
         '/usr/sbin/lsof',
-        ['-a', '-u', String(process.getuid!()), '-d', 'cwd', '-Fn'],
+        ['-nP', '-a', '-u', String(process.getuid!()), '-d', openFiles ? 'cwd,txt,0-1048576' : 'cwd', '-Fn'],
         {
           env: childEnv(),
           encoding: 'utf8',
@@ -35,7 +47,7 @@ export function workingProcesses(): { paths: string[]; unknown: boolean } {
       return {
         paths: output
           .split('\n')
-          .filter(line => line.startsWith('n'))
+          .filter(line => line.startsWith('n/'))
           .map(line => line.slice(1)),
         unknown: false,
       };

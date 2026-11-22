@@ -77,6 +77,7 @@ for (const platform of ['linux', 'darwin']) {
               now,
               apply: true,
               settings: { autoPruneHours: 1, idleLaneHours: 1 },
+              isDirty: () => false,
               readStates: async () => new Map([[laneId, 'completed']]),
             });
       scan.paths = [join(root, 'nested')];

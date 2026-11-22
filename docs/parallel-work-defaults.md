@@ -49,15 +49,18 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   - the root is not where the command runs;
   - the root holds no other Lane roots;
   - the checkout marker still names that Lane.
-  A finished Lane's snapshot stat index and worker bookkeeping still count toward its size.
-  If those are the only recent writes, prune checks that no snapshot is running and that
-  the checkout matches its saved baseline. Fresh source changes and snapshot recovery data
-  still count as activity.
+  Prune verifies that the checkout matches its saved baseline and that no checkout command,
+  local process or snapshot worker is using it. A finished Lane's snapshot worker and cache
+  inventory bookkeeping still count toward its size. The timestamp from replacing an
+  unchanged inventory record does not count as use. Recent source and recovery changes
+  still count as activity. A Lane containing another Lane root is retained.
 - An `active` Lane with no Forge action for `activeLanePruneHours` (7 days) is also removed, but only when no
   Forge command of this machine runs in it and its
-  checkout has no unsaved edits: every file is hashed in place against the Lane's baseline
-  State and nothing is written. At most 8 unsaved-edit checks run per pass across both cases;
-  an edited active root stays and is listed as idle. `open` restores a removed root from the saved head.
+  checkout has no unsaved edits. The read-only check compares files against the saved State.
+  At most eight checks per pass cover active or deleted-project copies. Finished Lane checks
+  during `start` share its bounded housekeeping time and resume on a later start if the
+  pass uses its time budget. An edited active root stays and is
+  listed as idle. `open` restores a removed root from the saved head.
 - Every removal appends one JSON line (time, Lane, root, server state, reason, idle hours, bytes) to
   `$XDG_STATE_HOME/forge/lane-prune.jsonl` (default `~/.local/state/forge/lane-prune.jsonl`) before the
   root is deleted; the file rotates to `lane-prune.jsonl.1` past 1 MB.
@@ -73,10 +76,16 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   started, and older entries with no run recorded ("unknown run"), get one line naming them, with
   no abandon offer. `nforge prune` (the operator asking) still lists every idle Lane.
 - `nforge prune` is a dry run (it lists `wouldPrune` and changes no registry, pin, link or checkout);
-  `--apply` removes and lists `pruned`. `--scan DIRECTORY` with `--apply` first registers existing
-  checkouts in DIRECTORY and in its `*.forge-client/lanes/`; a dry scan only reads them. With `--apply` it also removes links
-  in DIRECTORY whose target was a `*.forge-client/lanes/` copy that no longer exists. An explicit
-  prune with `autoPruneHours` set to 0 uses 3 hours.
+  `--apply` removes and lists `pruned`. From a project checkout, prune inventories its local
+  `ROOT.forge-client/lanes` directory. `--scan DIRECTORY` selects a different directory.
+  The `folders` report includes unregistered checkouts, markerless directories, cache companions,
+  and allocated checkout and scratch sizes where they can be measured. `largeScratch` flags
+  scratch above the configured client cache size budget. A standard apply also registers
+  discovered checkouts that remain and removes dangling links to missing nested copies.
+  Use `--finished-only` to reclaim abandoned Lanes and completed Lanes whose checkout head
+  has a current landing receipt. It previews dependency eviction after releasing their links.
+  Receipt reads use pages of up to 48 Lane identities. An explicit prune with
+  `autoPruneHours` set to 0 uses 3 hours.
 - One root per Lane: `open` at a new path moves the copy `start` made under
   `ROOT.forge-client/lanes/` there instead of downloading a second tree. It reports
   `movedFrom`. A copy whose client lock is held, or one on another volume, is left alone.

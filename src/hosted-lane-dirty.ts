@@ -30,8 +30,10 @@ export function hostedLaneDirty(
   {
     refresh,
     selection,
+    preserveMaterializedSubmodules,
   }: {
     refresh?: boolean;
+    preserveMaterializedSubmodules?: boolean;
     selection?: Pick<HostedLaneCheckoutMarker['selection'], 'laneId' | 'head'>;
   } = {},
 ): boolean {
@@ -44,7 +46,13 @@ export function hostedLaneDirty(
         (marker.selection.laneId !== selection.laneId || marker.selection.head !== selection.head))
     )
       return true;
-    return laneChanges(root, marker, { ...(refresh === undefined ? {} : { refresh }), limit: 1 }).length > 0;
+    return (
+      laneChanges(root, marker, {
+        ...(refresh === undefined ? {} : { refresh }),
+        ...(preserveMaterializedSubmodules ? { preserveMaterializedSubmodules } : {}),
+        limit: 1,
+      }).length > 0
+    );
   } catch {
     return true;
   }
@@ -62,6 +70,7 @@ export function laneChanges(
   marker: HostedLaneCheckoutMarker,
   options: {
     refresh?: boolean;
+    preserveMaterializedSubmodules?: boolean;
     record?: boolean;
     limit?: number;
     scan?: () => string[];
@@ -94,7 +103,11 @@ export function laneChanges(
       stat = lstatSync(absolute);
     // A submodule checkout (the scanner returns a directory only for one) stands for its HEAD.
     if (stat.isDirectory()) {
-      if (old.mode !== 'gitlink' || digest(gitlinkDirectoryPointer(root, path)) !== old.blob)
+      if (
+        options.preserveMaterializedSubmodules ||
+        old.mode !== 'gitlink' ||
+        digest(gitlinkDirectoryPointer(root, path)) !== old.blob
+      )
         changed.push(path);
       continue;
     }

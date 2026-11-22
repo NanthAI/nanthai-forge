@@ -50,7 +50,7 @@ Usage:
   nforge exchange <root> pull|open|restore|receive-proposal|pull-proposal|migrate-archive --command-file FILE
   nforge agent <root> start|save|land|ask|hand-back [--mode] [json | --command-file FILE|-] [--message-file FILE|-] [--no-wait]   # nforge agent --help
   nforge heavy [--] CMD [ARGS...]   # run a heavy local command under the machine-wide slot limit
-  nforge prune [--apply] [--scan DIRECTORY]   # remove local roots of landed/abandoned Lanes
+  nforge prune [--apply] [--finished-only] [--scan DIRECTORY]   # remove local roots of landed/abandoned Lanes
   nforge settings [KEY [VALUE | --reset]]   # client parallel-work defaults (docs/parallel-work-defaults.md)
   nforge agent <root> <read> [json | --command-file FILE]
   nforge agent <root> abandon|revert|cancel [json | --command-file FILE|-]
