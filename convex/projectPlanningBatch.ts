@@ -11,15 +11,15 @@ import { mutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { report } from './errors';
 import { executeCommand } from './projectWorkCommand';
-import { activeProject, activeOwnedProject } from './projectAuthority';
-import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
-import { commandPayloadRows, commandValues } from './projectWorkCommandRows';
+import { activeOwnedProject } from './projectAuthority';
+import { selectedGeneration } from './projectWorkIndexStore';
 import { liveCloseChildren } from './projectPlanningCloseRows';
 import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import { ForgeError, invariant } from '../src/errors';
 import { digest } from '../src/state/hash';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { hostedOperationSchema, hostedPayloadHash } from '../src/hosted-source-operation';
+import type { PlanningItem } from '../src/work-planning-types';
 import {
   batchUndo,
   detachAfterClose,
@@ -39,34 +39,6 @@ export function batchWriteOperationId(operationId: string, index: number) {
 }
 /** Refusals that happen before a write touches the database, so the batch can report them and go on. */
 const ownRefusals = new Set(['ITEM_CHANGED', 'NOT_FOUND', 'BAD_ARGUMENT', 'INTENT_CLOSED']);
-
-/** Whether this write's operation already ran (a replay): two indexed lookups, no journal read. */
-async function written(ctx: MutationCtx, projectId: Id<'hostedProjects'>, operationId: string) {
-  for (const table of ['projectWorkEvents', 'projectHostedRecordBodies'] as const)
-    if (
-      await ctx.db
-        .query(table)
-        .withIndex('by_project_and_operation', q =>
-          q.eq('projectId', projectId).eq('operationId', operationId),
-        )
-        .unique()
-    )
-      return true;
-  return false;
-}
-
-async function storedItem(ctx: MutationCtx, projectId: Id<'hostedProjects'>, user: string, itemId: string) {
-  const project = await activeProject(ctx, projectId, user);
-  const generation = await selectedGeneration(ctx, project);
-  if (!generation) return null;
-  const partition = recordPartition(generation);
-  const rows = [await record(ctx, partition, 'planningItems', itemId)];
-  if (!rows[0]) return null;
-  await commandPayloadRows(rows, keys =>
-    Promise.all(keys.map(key => record(ctx, partition, key.collection, key.key))),
-  );
-  return (commandValues(rows, 'planningItems')[0] as Record<string, unknown> | undefined) ?? null;
-}
 
 type BatchInput = {
   projectId: Id<'hostedProjects'>;
@@ -97,17 +69,23 @@ async function applyWrites(
     const index = offset + position;
     const operationId = batchWriteOperationId(input.operationId, index);
     const base = { index, itemId: write.itemId, action: write.action } as const;
-    const replayed = await written(ctx, input.projectId, operationId);
-    const before =
-      !replayed && write.action === 'put-planning-item' && write.expectedVersion > 0
-        ? await storedItem(ctx, input.projectId, actor, write.itemId)
-        : null;
+    const prior: { item?: PlanningItem | null; replayed?: true } = {};
     try {
-      await executeCommand(ctx, {
-        projectId: input.projectId,
-        operationId,
-        command: JSON.stringify({ ...write, operationId }),
-      });
+      await executeCommand(
+        ctx,
+        {
+          projectId: input.projectId,
+          operationId,
+          command: JSON.stringify({ ...write, operationId }),
+        },
+        actor,
+        {
+          onPlanningBatchState: state => {
+            if ('replayed' in state) prior.replayed = true;
+            else prior.item = state.before;
+          },
+        },
+      );
     } catch (error) {
       if (atomic || !(error instanceof ForgeError) || !ownRefusals.has(error.code)) throw error;
       results.push({
@@ -122,19 +100,19 @@ async function applyWrites(
       continue;
     }
     if (write.action === 'comment-planning-item') {
-      results.push({ ...base, outcome: replayed ? 'replayed' : 'applied' });
+      results.push({ ...base, outcome: prior.replayed ? 'replayed' : 'applied' });
       continue;
     }
     const version = write.expectedVersion + 1;
-    if (replayed) {
+    if (prior.replayed) {
       results.push({ ...base, outcome: 'replayed', version });
       continue;
     }
     const kept: BatchBefore = {};
-    if (before)
+    if (prior.item)
       for (const field of undoableFields)
         if (field in write && (write as Record<string, unknown>)[field] !== undefined)
-          (kept as Record<string, unknown>)[field] = before[field] ?? null;
+          (kept as Record<string, unknown>)[field] = prior.item[field] ?? null;
     results.push({ ...base, outcome: 'applied', version, before: kept });
   }
   return results;
@@ -242,10 +220,10 @@ async function closeBatch(ctx: MutationCtx, input: BatchInput, actor: string, wr
       'PROJECT_WORK_INDEX_MISSING',
       'Prepare the hosted Work index before closing Items.',
     );
-    const children = await liveCloseChildren(ctx, generation, selected);
     result.results = await applyWrites(ctx, input, actor, writes);
     requireFresh(result.results);
     const closed = new Set(result.results.filter(row => row.outcome !== 'refused').map(row => row.itemId));
+    const children = await liveCloseChildren(ctx, generation, closed);
     const detach = detachAfterClose(closed, children);
     const detached = await applyPages(detach, writes.length);
     result.detached = detached.length;

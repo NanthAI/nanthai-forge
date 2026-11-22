@@ -17,9 +17,11 @@ import {
 } from '../dist/planning-batch.js';
 import { planFilterMatch } from '../dist/planning-filter.js';
 import { planningSearchEntry } from '../dist/planning-search.js';
+import { indexedRecord, intentHeader } from '../dist/work-hosted-index.js';
 import { setup } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { meterReads } from './hosted-read-set.mjs';
+import { meterReads, meterWorkIO } from './hosted-read-set.mjs';
+import { planFixture } from './plan-read-fixture.mjs';
 
 const batch = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
 const { planView, PLAN_LIVE_LIMIT } = await import(moduleUrl('../convex/projectPlanView.ts'));
@@ -255,6 +257,189 @@ test('close finds a stored sub-item beyond the live Plan window through bounded 
   const history = (await s.read()).data.planningItems;
   assert.equal(history.filter(item => item.id === child.itemId).at(-1).parentId, undefined);
 });
+
+async function closeBudgetFixture(t, scale, compact) {
+  const s = await planFixture(t, scale);
+  const items = () =>
+    new Map(
+      [...s.tables.projectPlanningRecords.values()]
+        .filter(row => row.generationId === s.generationId && row.collection === 'planningItems')
+        .map(row => [row.key, JSON.parse(row.value)]),
+    );
+  const live = [...items().values()].filter(
+    row => row.kind === 'issue' && ['open', 'in-progress', 'proposed'].includes(row.status),
+  );
+  assert.equal(live.length, 271 * scale);
+  const [parent, keptParent, ...rest] = live;
+  const children = rest.slice(-Math.floor((101 * scale) / 2));
+  const selectedChild = rest[0];
+  const settled = [...items().values()].find(row => row.kind === 'issue' && row.status === 'closed');
+  for (const [child, owner] of [
+    ...[...children, settled, selectedChild].map(child => [child, parent]),
+    [rest[1], keptParent],
+  ]) {
+    for (const [id, row] of s.tables.projectPlanningRecords)
+      if (row.generationId === s.generationId && row.key === child.id)
+        await s.ctx.db.patch(id, { value: JSON.stringify({ ...JSON.parse(row.value), parentId: owner.id }) });
+  }
+  for (const [position, initiative] of [...items().values()]
+    .filter(row => row.kind === 'initiative')
+    .entries())
+    for (const entry of indexedRecord('initiatives', initiative.id, '', position, initiative))
+      await s.ctx.db.insert('projectWorkRecords', {
+        ...entry,
+        projectId: s.projectId,
+        generationId: s.generationId,
+      });
+  for (const [position, row] of [parent, keptParent, selectedChild, ...children].entries()) {
+    const intent = {
+      id: row.id,
+      title: row.title,
+      outcome: row.title,
+      description: row.body,
+      constraints: '',
+      status: row.status === 'proposed' ? 'proposed' : 'active',
+      createdAt: row.at,
+      notes: [],
+      memberships: [{ initiativeId: row.initiativeId, sourceId: row.id, order: position }],
+      relatedIntentIds: [],
+      historyRefs: [{ itemId: row.id, version: row.version }],
+      conversation: [],
+    };
+    for (const entry of indexedRecord('intents', row.id, '', position, intent, intentHeader(intent)))
+      await s.ctx.db.insert(
+        entry.collection === 'intents' ? 'projectWorkRecords' : 'projectWorkDataRecords',
+        {
+          ...entry,
+          projectId: s.projectId,
+          generationId: s.generationId,
+        },
+      );
+  }
+  if (compact) await s.project();
+  else await useSearchRoots(s, 1);
+  const writes = closeMany(
+    [
+      parent,
+      { ...keptParent, version: keptParent.version - 1 },
+      selectedChild,
+      { ...children[0], version: children[0].version - 1 },
+    ],
+    'Synthetic close',
+  ).writes;
+  return { s, items, parent, children, settled, selectedChild, writes };
+}
+
+// Convex counts empty point lookups and queries as index ranges too.
+const convexIndexRanges = 4_096;
+async function transactionCost(s, run, failAfterVersions = Infinity) {
+  const meter = meterWorkIO(s.ctx, s.tables);
+  const { query, get } = s.ctx.db;
+  let indexRanges = 0;
+  const events = s.tables.projectWorkEvents.size;
+  const readRange = () => {
+    indexRanges++;
+    if (s.tables.projectWorkEvents.size - events >= failAfterVersions)
+      throw new Error(
+        'Documents read from or written to the fixture exceeded the simulated transaction budget.',
+      );
+  };
+  s.ctx.db.query = (...args) => {
+    readRange();
+    return query(...args);
+  };
+  s.ctx.db.get = (...args) => {
+    readRange();
+    return get(...args);
+  };
+  const start = performance.now();
+  try {
+    const cost = await meter.cost(run);
+    return { ...cost, indexRanges, wallMs: Math.round(performance.now() - start) };
+  } finally {
+    meter.restore();
+  }
+}
+
+async function pressureRollsBack(s, run) {
+  const before = structuredClone(s.tables);
+  const scheduled = s.scheduled.slice();
+  const tasks = structuredClone(s.tasks);
+  await assert.rejects(
+    transactionCost(s, run, planningBatchLimit),
+    error => error.data?.code === 'HOSTED_CONFLICT',
+  );
+  assert.deepEqual(s.tables, before, 'versions, projections and operation receipts roll back together');
+  assert.deepEqual(s.scheduled, scheduled);
+  assert.deepEqual(s.tasks, tasks);
+}
+
+for (const compact of [true, false])
+  for (const scale of [2, 4])
+    test(`close and Undo preserve all links and transaction atomicity at ${271 * scale} live Items with ${compact ? 'compact' : 'legacy'} coverage`, async t => {
+      const { s, items, parent, children, settled, selectedChild, writes } = await closeBudgetFixture(
+        t,
+        scale,
+        compact,
+      );
+      const initial = items();
+      const closeId = id();
+      const undoId = id();
+      let close, undo;
+      const closeRequest = () => planBatch(s, writes, { close: true }, closeId);
+      const undoRequest = () => planBatch(s, [], { undoClose: closeId }, undoId);
+      // Fail after a page of staged writes, independent of the measured range count.
+      // Replay the same IDs to verify the failure left no receipt or partial update.
+      const rangeCeiling = scale === 2 ? convexIndexRanges : 7_600;
+      if (scale === 4) await pressureRollsBack(s, closeRequest);
+      const closeCost = await transactionCost(s, async () => {
+        close = await closeRequest();
+      });
+      const afterClose = items();
+      assert.deepEqual(
+        close.results.map(row => row.outcome),
+        ['applied', 'refused', 'applied', 'refused'],
+        JSON.stringify(close.results),
+      );
+      assert.equal(close.detached, children.length);
+      assert.equal(afterClose.get(parent.id).status, 'closed');
+      assert.equal(afterClose.get(selectedChild.id).status, 'closed');
+      assert.equal(afterClose.get(selectedChild.id).parentId, parent.id);
+      assert.deepEqual(afterClose.get(settled.id), initial.get(settled.id));
+      for (const child of children) {
+        const { parentId, status, title, body, initiativeId, version } = afterClose.get(child.id);
+        assert.deepEqual(
+          [parentId, status, title, body, initiativeId, version],
+          [undefined, child.status, child.title, child.body, child.initiativeId, child.version + 1],
+        );
+      }
+      if (scale === 4) await pressureRollsBack(s, undoRequest);
+      const undoCost = await transactionCost(s, async () => {
+        undo = await undoRequest();
+      });
+      assert.equal(undo.results.length, children.length + 2);
+      const restored = items();
+      const changed = new Set([parent.id, selectedChild.id, ...children.map(child => child.id)]);
+      for (const [id, row] of initial) {
+        const item = restored.get(id);
+        if (!changed.has(id)) assert.deepEqual(item, row);
+        else {
+          assert.equal(item.version, row.version + 2);
+          assert.equal(item.parentId, row.parentId);
+          assert.equal(item.status, row.status);
+        }
+      }
+      assert.deepEqual(await undoRequest(), undo);
+      assert.deepEqual(items(), restored);
+      t.diagnostic(JSON.stringify({ closeCost, undoCost, peakRssKiB: process.resourceUsage().maxRSS }));
+      for (const cost of [closeCost, undoCost]) {
+        assert(cost.indexRanges <= rangeCeiling, JSON.stringify(cost));
+        assert(cost.readBytes < 16 * 1024 * 1024, JSON.stringify(cost));
+        assert(cost.writeBytes < 16 * 1024 * 1024, JSON.stringify(cost));
+        assert(cost.readDocuments < 32_000, JSON.stringify(cost));
+        assert(cost.writeDocuments < 16_000, JSON.stringify(cost));
+      }
+    });
 
 test('batch Undo writes back exactly the fields the batch named, abandons creations and keeps comments', () => {
   const writes = [

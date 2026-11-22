@@ -8,7 +8,7 @@ import { mutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { hostedWorkEventDocument } from './schema';
 import { metadataCommandSchema } from '../src/work-intent-types';
-import { planningPurgeSchema } from '../src/work-planning-types';
+import { planningPurgeSchema, type PlanningItem } from '../src/work-planning-types';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { metadataRequest, validateMetadataSource } from '../src/work-metadata';
 import { invariant } from '../src/errors';
@@ -31,7 +31,10 @@ export async function executeCommand(
   ctx: MutationCtx,
   input: { projectId: Id<'hostedProjects'>; operationId: string; command: string },
   actor?: string,
-  options: { purge?: true } = {},
+  options: {
+    purge?: true;
+    onPlanningBatchState?: (state: { replayed: true } | { before: PlanningItem | null }) => void;
+  } = {},
 ) {
   // Only trusted internal actions supply actor (scheduled budget Issues have no user session).
   const user = actor ? { subject: actor } : await ctx.auth.getUserIdentity();
@@ -91,6 +94,7 @@ export async function executeCommand(
       'WORK_OPERATION_CHANGED',
       'Reconcile this operation’s original command.',
     );
+    options.onPlanningBatchState?.({ replayed: true });
     return original;
   }
   // Recovery notices belong to canonical hosted Intents, while this endpoint also updates Work.
@@ -127,17 +131,25 @@ export async function executeCommand(
     'PROJECT_UNAVAILABLE',
     'Select this project’s stored source.',
   );
-  const rows = await Promise.all(
-    commandKeys(command, input).map(key => record(ctx, recordPartition(generation), key.collection, key.key)),
-  );
+  const lookup = (keys: { collection: string; key: string }[]) =>
+    Promise.all(keys.map(key => record(ctx, recordPartition(generation), key.collection, key.key)));
+  const rows = await lookup(commandKeys(command, input));
   await commandAliasRows(rows, (collection, key) =>
     record(ctx, recordPartition(generation), collection, key),
   );
-  if ([16, 18, 20, 22, 24].includes(JSON.parse(generation.metadata).schema)) {
-    const lookup = (keys: { collection: string; key: string }[]) =>
-      Promise.all(keys.map(key => record(ctx, recordPartition(generation), key.collection, key.key)));
+  const unified = [16, 18, 20, 22, 24].includes(JSON.parse(generation.metadata).schema);
+  if (unified) {
     await commandPayloadRows(rows, lookup);
     await commandPlanningRows(rows, command, lookup);
+  }
+  if (options.onPlanningBatchState && command.action === 'put-planning-item' && command.expectedVersion > 0) {
+    // Undo captures the exact previous Item the versioned command already loaded.
+    const previous = rows.filter(
+      row =>
+        row?.key === command.itemId && ['planningItems', 'planningItems:attributes'].includes(row.collection),
+    );
+    if (!unified) await commandPayloadRows(previous, lookup);
+    options.onPlanningBatchState({ before: commandValues(previous, 'planningItems')[0] ?? null });
   }
   if (
     command.action === 'put-planning-item' &&

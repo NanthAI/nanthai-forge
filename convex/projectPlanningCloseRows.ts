@@ -46,6 +46,7 @@ export async function liveCloseChildren(
   generation: Doc<'projectWorkGenerations'>,
   parents: ReadonlySet<string>,
 ) {
+  if (!parents.size) return [];
   const generationId = recordPartition(generation);
   const partition = generationId === generation._id ? generation : await ctx.db.get(generationId);
   if (partition?.planningSearchVersion !== 2 || generation.planningSearchVersion !== 2)
