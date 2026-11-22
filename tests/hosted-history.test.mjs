@@ -1933,6 +1933,60 @@ test('history metadata log checks current membership before returning a cold or 
   assert.equal(s.tables.projectHistoryPacks.size, 1);
 });
 
+test('a file log is the Git commit log on an imported project and the landing log on a Forge-made one', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  const imported = await importedProject(f, source.head);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId: imported, attempt: 1 });
+  const made = await s.ctx.db.insert('hostedProjects', {
+    key: 'made-on-forge',
+    name: 'Made on Forge',
+    currentBackup: null,
+    revision: 0,
+    owner: 'owner',
+    visibility: 'private',
+    sourceAuthority: { mode: 'server', epoch: 1 },
+  });
+  const projectCode = await import(moduleUrl('../convex/projectCode.ts'));
+  const io = projectId => {
+    const base = transport(s, projectId);
+    return {
+      ...base,
+      query: async (name, args) => {
+        base.calls.push(name);
+        assert.equal(name, 'projectCode:fileHistory');
+        return JSON.parse(await projectCode.fileHistory._handler(s.ctx, { ...args, projectId }));
+      },
+    };
+  };
+  const git = io(imported);
+  const commits = await hostedHistory(address(imported), { op: 'log', path: 'src/app.go' }, git, () =>
+    assert.fail('a metadata log cannot download client packs'),
+  );
+  assert.equal(commits.readMode, 'metadata');
+  assert.ok(
+    commits.entries.length > 0 && commits.entries.every(entry => /^[0-9a-f]{40}$/.test(entry.commit)),
+  );
+  assert.deepEqual(
+    git.calls,
+    ['projectHistoryRead:open'],
+    'an imported project never reads the landing window',
+  );
+  // A landing cursor from elsewhere never switches an imported project out of its Git log.
+  await assert.rejects(
+    hostedHistory(address(imported), { op: 'log', path: 'src/app.go', cursor: '17.00000000' }, git),
+    error => error.code === 'BAD_ARGUMENT',
+  );
+  const forge = io(made);
+  const landings = await hostedHistory(address(made), { op: 'log', path: 'src/app.go' }, forge);
+  assert.deepEqual(
+    [landings.readMode, landings.entries, landings.examined, landings.nextCursor],
+    ['landings', [], 0, null],
+  );
+  assert.deepEqual(forge.calls, ['projectHistoryRead:open', 'projectCode:fileHistory']);
+});
+
 test('history log preserves the existing Git reader for commit encodings the metadata scanner cannot decode', async t => {
   const source = sourceRepository(t);
   const tree = git(source.repo, ['rev-parse', 'HEAD^{tree}']).toString().trim();

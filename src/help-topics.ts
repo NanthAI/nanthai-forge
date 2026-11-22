@@ -118,6 +118,7 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
 - Saved Lane bytes exclude unsaved edits; show and diff never substitute another revision.
 - peers {laneId?,path?,detail?} reads saved overlap evidence (help overlap).
 - history {op:"log",path?,limit?,skip?,commit?} reads commit history; history {op:"blame",path,start?,end?,commit?} answers who changed lines; history {op:"show",commit,path} reads that version's exact bytes. Compare saved States with diff; history has no compare operation.
+- No imported Git history (made on Forge): history {op:"log",path} lists the landings that changed the file, as the web does (at, title, by, receiptId, state; matched of examined; up to 8 per page, limit is for Git logs). Continue with cursor:nextCursor; an empty page can continue.
 - MCP: forge_review exposes history (status/log/blame/show), show/diff/peers/queue.`,
   },
   queue: {

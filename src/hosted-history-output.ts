@@ -26,7 +26,7 @@ export async function hostedHistoryCli(
     if (error instanceof z.ZodError)
       throw new ForgeError(
         'BAD_ARGUMENT',
-        `history takes {"op":"status"|"log"|"blame"|"show"|"limit"|"retry"} with commit?, path (blame/show), limit?, skip?, start?, end?, force?, bytes (limit). ${error.issues
+        `history takes {"op":"status"|"log"|"blame"|"show"|"limit"|"retry"} with commit?, path (blame/show), limit?, skip?, cursor? (landing log), start?, end?, force?, bytes (limit). ${error.issues
           .map(issue => issue.message)
           .join('; ')}`,
       );

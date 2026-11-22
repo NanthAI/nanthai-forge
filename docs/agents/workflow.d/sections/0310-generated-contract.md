@@ -62,5 +62,5 @@
 | `board --resolve` | `id, text?` |
 | `ask` | `operationId?, to, text, choices, laneId?, planningItemId?, holdsWork?` |
 | `hand-back` | `operationId?, to, laneId?, head, tried, left` |
-| `history` | `action?, op?, commit?, path?, limit?, skip?, start?, end?, bytes?, force?, laneId?` |
+| `history` | `action?, op?, commit?, path?, limit?, skip?, cursor?, start?, end?, bytes?, force?, laneId?` |
 <!-- hosted-agent-contract:end -->

@@ -64,8 +64,9 @@ export function History(props: CodeProps) {
       <pre className="cli-out mono" id="history-cli" hidden={!cli}>
         <b>$ {command}</b>
         {'\n'}
-        {path ? "This file's Git history, newest first" : "Main's Git history, newest first"}: one commit per
-        landing since the import. Kept for projects imported from GitHub.
+        {path
+          ? "This file's history, newest first: Git commits on a project imported from GitHub, otherwise these landings."
+          : "Main's Git history, newest first: one commit per landing since the import. Kept for projects imported from GitHub."}
       </pre>
       {path ? <PathNotice file={file} /> : null}
       <div className="panes code-h">

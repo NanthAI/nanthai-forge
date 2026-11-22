@@ -17,6 +17,7 @@ import {
 import { PackTrees } from './git-pack-trees.js';
 import { historyLogPage, loadHistoryMetadata } from './history-log-page.js';
 import type { HostedAgentAddress } from './hosted-address.js';
+import { landingHistory, noImportedHistory } from './hosted-history-landings.js';
 
 export { hostedHistorySchema } from './hosted-history-schema.js';
 import { hostedHistorySchema } from './hosted-history-schema.js';
@@ -48,6 +49,7 @@ type Opened = {
 export type HistoryTransport = {
   readonly advertisedFeatures?: readonly string[] | undefined;
   action<T>(name: string, args: Record<string, unknown>): Promise<T>;
+  query<T>(name: string, args: Record<string, unknown>): Promise<T>;
   mutation<T>(name: string, args: Record<string, unknown>): Promise<T>;
 };
 
@@ -72,7 +74,8 @@ async function* download(chunks: Opened['packs'][number]['chunks'], request: typ
 /** `history` for hosted projects: log, blame and file-at-commit over the project's
  * imported Git history. One server action per read checks current access and lists
  * metadata (or explicit legacy pack links). Verified metadata is reused after current access
- * checks, without downloading file bodies or rereading cached packs on R2. */
+ * checks, without downloading file bodies or rereading cached packs on R2. A project with no
+ * imported history answers a file log from its landings (hosted-history-landings.ts). */
 export async function hostedHistory(
   address: HostedAgentAddress,
   input: unknown,
@@ -83,6 +86,9 @@ export async function hostedHistory(
   if (command.op === 'limit')
     return transport.mutation('projectHistoryStore:setLimit', { limitBytes: command.bytes! });
   if (command.op === 'retry') return transport.mutation('projectHistoryStore:retry', {});
+  // A landing log's continuation is one query: only that log hands out a cursor.
+  if (command.op === 'log' && command.cursor !== undefined)
+    return landingHistory(transport, address.projectId, command);
   const repo = historyCacheDirectory(address);
   const cached = cachedPacks(repo);
   const metadata = command.op === 'log' ? cachedHistoryMetadata(repo) : new Map<string, Buffer>();
@@ -105,6 +111,8 @@ export async function hostedHistory(
         : { cached },
     );
   } catch (error) {
+    if (command.op === 'log' && noImportedHistory(error))
+      return landingHistory(transport, address.projectId, command);
     const message = error instanceof Error ? error.message : '';
     if (
       command.op !== 'log' ||

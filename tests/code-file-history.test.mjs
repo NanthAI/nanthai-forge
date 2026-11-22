@@ -2,99 +2,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { getFunctionName } from 'convex/server';
-import { digest } from '../dist/hash.js';
 import { moduleUrl } from './convex-module.mjs';
-import { state } from './hosted-fixture.mjs';
+import { before, landingFixture, path } from './code-file-history-fixture.mjs';
 import { meterWorkIO } from './hosted-read-set.mjs';
 
 const member = await import(moduleUrl('../convex/projectCode.ts'));
 const publicCode = await import(moduleUrl('../convex/publicCode.ts'));
 const publicHttp = await import(moduleUrl('../convex/publicHttp.ts'));
-const path = 'src/entry.ts';
-const before = 'a'.repeat(64);
-const after = 'b'.repeat(64);
 const fileHistoryUrl = '/public/v1/code/ada/example/file-history/' + Buffer.from(path).toString('hex');
 
 function fixture(visibility = 'public') {
-  const f = state([]);
-  const query = f.ctx.db.query;
-  f.ctx.db.query = table => {
-    const builder = query(table);
-    if (table === 'projectHostedAcceptances') {
-      // The shared fixture caps rows. Model the provider's separate pagination byte boundary here.
-      const paginate = builder.paginate;
-      builder.paginate = async opts => {
-        const result = await paginate(opts);
-        let bytes = 0;
-        const page = [];
-        for (const row of result.page) {
-          bytes += Buffer.byteLength(JSON.stringify(row));
-          if (page.length && bytes > (opts.maximumBytesRead ?? Infinity)) break;
-          page.push(row);
-        }
-        return { ...result, page, isDone: result.isDone && page.length === result.page.length };
-      };
-    }
-    return builder;
-  };
-  const put = (table, id, fields) =>
-    f.tables[table].set(id, { _id: id, _creationTime: 1, projectId: 'project', ...fields });
-  put('hostedProjects', 'project', { owner: 'owner', name: 'Example', slug: 'example', visibility });
-  put('forgeAccounts', 'account', { owner: 'owner', handle: 'ada' });
-  put('accountHandles', 'handle', { owner: 'owner', handle: 'ada' });
-  put('projectSlugs', 'slug', { owner: 'owner', slug: 'example' });
-  function add(
-    sequence,
-    paths,
-    {
-      candidateId = `candidate-${sequence}`,
-      head = after,
-      recordHead = head,
-      actor = 'owner',
-      wrongDigest = false,
-      docsResolution,
-    } = {},
-  ) {
-    const receiptId = `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`;
-    const value = JSON.stringify({
-      kind: 'candidate',
-      id: candidateId,
-      base: { head: before },
-      result: { status: 'clean', head: recordHead },
-      governance: { paths },
-    });
-    const pinned =
-      paths === undefined
-        ? f.tables.projectHostedRecords.get(`record-${candidateId}`)?.digest
-        : digest(value);
-    if (actor !== 'owner') put('forgeAccounts', `account-${actor}`, { owner: actor, handle: actor });
-    put('projectHostedAcceptances', receiptId, {
-      _creationTime: sequence,
-      sequence,
-      receiptId,
-      value: JSON.stringify({
-        id: receiptId,
-        at: '2026-11-01T00:00:00.000Z',
-        actor: { id: actor, kind: 'person' },
-        message: `Landing ${sequence}`,
-        previous: { head: before },
-        candidate: { id: candidateId, head, digest: wrongDigest ? '0'.repeat(64) : pinned },
-        automatic: false,
-        docsResolution,
-      }),
-    });
-    if (paths === undefined) return;
-    const bodyId = `body-${candidateId}`;
-    put('projectHostedRecordBodies', bodyId, { value });
-    put('projectHostedRecords', `record-${candidateId}`, {
-      kind: 'candidate',
-      key: candidateId,
-      version: 0,
-      bodyId,
-      digest: digest(value),
-      bytes: Buffer.byteLength(value),
-    });
-  }
+  const f = landingFixture(visibility);
   const read = async (cursor = null) =>
     JSON.parse(await member.fileHistory._handler(f.ctx, { projectId: 'project', path, before: cursor }));
   const visit = (cursor = '-', url = fileHistoryUrl) =>
@@ -104,7 +22,7 @@ function fixture(visibility = 'public') {
         headers: { 'x-forge-public-key': 'synthetic-site-key' },
       }),
     );
-  return { ...f, add, read, visit };
+  return { ...f, read, visit };
 }
 
 test('file history preserves newest-first matches through a shared Candidate and missing exact evidence', async () => {

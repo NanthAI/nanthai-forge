@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Code place's words for times, people, States and addresses. Pure, so the screens and their tests share them.
 import type { CodeHistoryRow } from '../../../../src/code-history';
+export { landedBy } from '../../../../src/code-history';
 
 /** `?at=` pins an exact State (a landing's, a Lane's or a Candidate's); without it the files follow main. */
 export function pinnedState(search: string): string | null {
@@ -8,11 +9,6 @@ export function pinnedState(search: string): string | null {
   return at && /^[a-f0-9]{64}$/.test(at) ? at : null;
 }
 
-/** The handle a landing shows: `@person`, `person/agent` for an agent run, or "an agent" when people are hidden. */
-export function landedBy(row: Pick<CodeHistoryRow, 'actor' | 'agent' | 'agentRun'>): string | null {
-  if (!row.actor) return row.agent ? 'an agent' : null;
-  return row.agent && row.agentRun ? `${row.actor}/${row.agentRun}` : `@${row.actor}`;
-}
 export const titleOf = (row: Pick<CodeHistoryRow, 'title' | 'head'>) =>
   row.title ?? `Landing ${short(row.head)}`;
 

@@ -47,6 +47,13 @@ export type CodeFileHistoryPage = {
   nextBefore: number | null;
 };
 
+/** The handle a landing shows: `@person`, `person/agent` for an agent run, or "an agent" when people are hidden.
+ * The web (code-words.ts) and the CLI file log share it. */
+export function landedBy(row: Pick<CodeHistoryRow, 'actor' | 'agent' | 'agentRun'>): string | null {
+  if (!row.actor) return row.agent ? 'an agent' : null;
+  return row.agent && row.agentRun ? `${row.actor}/${row.agentRun}` : `@${row.actor}`;
+}
+
 export const CODE_RECEIPT_ID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 
 export function codeHistoryRow(receipt: HostedAcceptance, sequence: number, visitor = false): CodeHistoryRow {

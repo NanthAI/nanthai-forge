@@ -15,6 +15,11 @@ export const hostedHistorySchema = z
     path: z.string().refine(safeRelative).optional(),
     limit: z.number().int().min(1).max(1000).default(50),
     skip: z.number().int().min(0).default(0),
+    /** `nextCursor` of a file's landing log (projects with no imported Git history). */
+    cursor: z
+      .string()
+      .regex(/^[1-9]\d{0,15}\.[0-9a-f]{8}$/)
+      .optional(),
     start: z.number().int().positive().optional(),
     end: z.number().int().positive().optional(),
     bytes: z.number().int().min(0).optional(),
@@ -25,4 +30,8 @@ export const hostedHistorySchema = z
   .strict()
   .refine(input => !['blame', 'show'].includes(input.op) || input.path, 'blame and show need path.')
   .refine(input => input.op !== 'limit' || input.bytes !== undefined, 'limit needs bytes.')
+  .refine(
+    input => input.cursor === undefined || (input.op === 'log' && input.path),
+    'cursor continues a file log: pass op "log" with path.',
+  )
   .refine(input => input.end === undefined || (input.start ?? 1) <= input.end, 'start must not exceed end.');

@@ -135,7 +135,17 @@ MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
   per-project limit with `op:"limit"` (`bytes`, default 1 GiB, at most 8 GiB) and
   re-run a failed or over-limit import with `op:"retry"`; above the limit no history
   is stored and reads return `HISTORY_OVER_LIMIT`. A project with no stored history
-  returns `HISTORY_UNAVAILABLE` with its message (on `status` too), never `INTERNAL_ERROR`.
+  returns `HISTORY_UNAVAILABLE` with its message (on `status`, blame, show and a log
+  without `path` too, which names the path form), never `INTERNAL_ERROR`. There,
+  `op:"log"` with `path` lists the landings on main that changed the file
+  (`readMode:"landings"`): the web's file history window (`projectCode:fileHistory`,
+  up to 8 matches per page; `limit` applies to Git logs only), each entry `at`,
+  `title`, `by`, `receiptId` and `state`, with `matched`, `examined` (receipts checked
+  for the page) and `unknown` (changed paths not kept). An empty page can still
+  continue: pass `cursor` (the page's `nextCursor`, bound to its project and path; any
+  other project or path refuses it with `BAD_ARGUMENT`).
+  The first page is the refused history action plus that one query; each continuation
+  is the query alone. `commit` and `skip` are refused there.
 
 - Forge has one client mode: hosted. A folder without a hosted marker is refused
   with `FORGE_ROOT_UNAVAILABLE` and the next step `nforge host ROOT`.
