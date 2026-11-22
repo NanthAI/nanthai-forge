@@ -9,8 +9,11 @@
 // Served under the app's own address (/-/…/lanes), it renders the real Lanes place on the same data plus one Lane whose
 // check failed, over a fake Convex client that counts reads, and names the screen the real route registry gives the
 // current address, so the links the overview draws, browser Back and unknown addresses are all followed for real
-// (Item e317b6ea). `?double` doubles the open Lanes for the scale measurement.
-import { ConvexProvider } from 'convex/react';
+// (Item e317b6ea). `?double` doubles the open Lanes for the scale measurement. The fixture's frame subscribes Needs
+// me's read as App.tsx does, so the page's Needs you is seen to share it. `?state=` draws the overview empty, loading
+// (the Lane page never answers), failed (the Lane page read fails) or worst (long, non-Latin and extreme values).
+import { ConvexProvider, useQuery } from 'convex/react';
+import { needsRead } from '../../web/src/app/needs/count';
 import { createRoot } from 'react-dom/client';
 import type { Id } from '../../convex/_generated/dataModel';
 import { Region } from '../../web/src/ds';
@@ -204,13 +207,130 @@ const twin = (laneId: string) => `d${laneId.slice(1)}`;
 const scale = params.has('double') ? 2 : 1;
 const openMarks = [...feed.lanes, failedMark];
 const openMeta = [...lanes, failedMeta];
+const state = params.get('state');
+// Worst case (break-ui): a 200-character title, a long handle and run, a 1,284th place, Japanese and Arabic titles,
+// markup in a title, an emoji handle, and a run that declared no app.
+const worst = {
+  long: 'b0000000-0000-4000-8000-000000000001',
+  ja: 'b0000000-0000-4000-8000-000000000002',
+  ar: 'b0000000-0000-4000-8000-000000000003',
+  tag: 'b0000000-0000-4000-8000-000000000004',
+  emoji: 'b0000000-0000-4000-8000-000000000005',
+};
+const worstMarks = [
+  mark(worst.long, 'saved', 5200, true),
+  mark(worst.ja, 'checking', 1),
+  mark(worst.ar, 'queued', 3),
+  mark(worst.tag, 'editing', 2),
+  mark(worst.emoji, 'saved', 4320),
+];
+const worstMeta: LaneMeta[] = [
+  {
+    ...meta(
+      worst.long,
+      'long',
+      'Rewrite the chunked transfer decoder so that trailers, zero-length chunks and a missing final CRLF are all accepted without buffering the whole body in memory (fixes #1284, follow-up to the surrogate-pair revert)',
+      'bartholomew-fitzgerald',
+      5200,
+    ),
+    agentRun: 'incandescent-mantis-shrimp',
+    agentClient: 'an-agent-app-with-a-very-long-name:model-with-a-very-long-identifier-12',
+  },
+  {
+    ...meta(
+      worst.ja,
+      'ja',
+      'ストリームパーサー：チャンク境界で分割されたUTF-8シーケンスを処理する',
+      'mara/amber-fox',
+      1,
+    ),
+    agentClient: 'claude-code:claude-opus-5-5',
+  },
+  {
+    ...meta(worst.ar, 'ar', 'إصلاح تسرب الذاكرة في محوّل الجلب عند إلغاء الطلب', 'mara/still-heron', 3),
+    agentClient: 'codex',
+  },
+  meta(worst.tag, 'tag', '<b>prod</b> &amp; staging hotfix', 'jo', 2),
+  { ...meta(worst.emoji, 'emoji', 'Fix tests', '🦊/owl', 4320), agent: true },
+];
+const worstEntries: QueueEntry[] = [
+  {
+    position: 1,
+    laneId: worst.ja,
+    phase: 'checking',
+    landingState: { state: 'checking' },
+    submittedAt: at(1),
+    lastProgressAt: at(1),
+  },
+  {
+    position: 1284,
+    laneId: worst.ar,
+    phase: 'queued',
+    landingState: { state: 'waiting-for-order' },
+    submittedAt: at(3),
+    lastProgressAt: at(3),
+  },
+  {
+    position: null,
+    laneId: worst.long,
+    phase: 'conflict',
+    landingState: { state: 'conflict' },
+    error: 'CONFLICT',
+    submittedAt: at(5200),
+    lastProgressAt: at(5200),
+  },
+];
+const readyMarks =
+  scale === 2 ? [...openMarks, ...openMarks.map(m => ({ ...m, laneId: twin(m.laneId) }))] : openMarks;
 const overviewFeed: LineFeed = {
   ...feed,
-  lanes: scale === 2 ? [...openMarks, ...openMarks.map(m => ({ ...m, laneId: twin(m.laneId) }))] : openMarks,
+  lanes: state === 'empty' ? [] : state === 'worst' ? [...openMarks, ...worstMarks] : readyMarks,
+  ...(state === 'worst' ? { more: 1283, moreIsLowerBound: true } : {}),
 };
 const overviewMeta =
-  scale === 2 ? [...openMeta, ...openMeta.map(l => ({ ...l, laneId: twin(l.laneId) }))] : openMeta;
-const overviewQueue = { total: 2, held: 2, listed: 4, more: false, entries: [...entries, failedEntry] };
+  state === 'empty'
+    ? []
+    : state === 'worst'
+      ? [...openMeta, ...worstMeta]
+      : scale === 2
+        ? [...openMeta, ...openMeta.map(l => ({ ...l, laneId: twin(l.laneId) }))]
+        : openMeta;
+const overviewQueue =
+  state === 'empty'
+    ? { total: 0, held: 0, listed: 0, more: false, entries: [] }
+    : {
+        total: state === 'worst' ? 1286 : 2,
+        held: state === 'worst' ? 3 : 2,
+        listed: 4,
+        more: state === 'worst',
+        entries: [...entries, failedEntry, ...(state === 'worst' ? worstEntries : [])],
+      };
+// Needs me's read: the approval waits on this reader; the failed check is its agent's next step (48049998).
+const heldLane = (laneId: string, why: 'review' | 'check-failed' | 'conflict') => ({
+  laneId,
+  title: titles.get(laneId) ?? null,
+  actor: 'mara',
+  agent: null,
+  why,
+  note: null,
+  submissionId: `s-${laneId}`,
+  since: NOW,
+});
+const overviewNeeds = {
+  held:
+    state === 'empty'
+      ? []
+      : [
+          heldLane(ids.held, 'review'),
+          heldLane(ids.failed, 'check-failed'),
+          ...(state === 'worst' ? [heldLane(worst.long, 'conflict')] : []),
+        ],
+  more: 0,
+  moreIsLowerBound: false,
+  approvals: '{}',
+  canDecide: true,
+  parked: [],
+};
 const overlap = {
   lanes: [{ laneId: ids.acct1 }, { laneId: ids.acct2 }, { laneId: ids.acct3 }],
   paths: ['web/src/app/account/Projects.tsx', 'web/src/app/account/account.css'],
@@ -223,15 +343,23 @@ const overlap = {
 };
 const fake = fakeConvex({
   resolve: (name: string) =>
-    name === 'projectHostedLiveLanes:list'
-      ? JSON.stringify({ page: overviewMeta, isDone: true })
-      : name === 'projectHostedQueueView:read'
-        ? JSON.stringify(overviewQueue)
-        : name === 'projectNowOverlaps:now'
-          ? JSON.stringify({ signals: overlap })
-          : null,
+    name === 'projectNeedsMe:read'
+      ? overviewNeeds
+      : name === 'projectHostedLiveLanes:list'
+        ? state === 'loading'
+          ? undefined
+          : state === 'failed'
+            ? (() => {
+                throw new Error('the Lane page could not be read');
+              })()
+            : JSON.stringify({ page: overviewMeta, isDone: true })
+        : name === 'projectHostedQueueView:read'
+          ? JSON.stringify(overviewQueue)
+          : name === 'projectNowOverlaps:now'
+            ? JSON.stringify({ signals: overlap })
+            : null,
 });
-(window as unknown as { forgeReads: unknown }).forgeReads = fake.stats;
+Object.assign(window, { forgeReads: fake.stats, forgeLive: (name: string) => fake.count(name) });
 // The real registry, collected the way screens.tsx collects it; each entry is named by its folder and index.
 const registry = Object.entries(
   import.meta.glob<ScreenRoutes>('../../web/src/app/*/route.ts', { eager: true, import: 'default' }),
@@ -245,6 +373,8 @@ const folderOf = new Map(
 
 function Routed() {
   const route = useRoute();
+  // The frame's own subscription for the top bar's Needs you count (App.tsx).
+  useQuery(needsRead, { projectId: 'sample' as Id<'hostedProjects'> });
   if (route.frame !== 'project') return <main data-screen="none" />;
   const entry = projectScreenFor(entriesOfAll, route);
   const screen = (entry && folderOf.get(entry)) ?? 'placeholder';

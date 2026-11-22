@@ -122,7 +122,13 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
           [
             board,
             'On the way to main',
-            ['projectHostedLiveLanes:list', 'projectHostedQueueView:read', 'projectNowOverlaps:now'],
+            // Needs you is the frame's own Needs me read (same query, same args: one subscription in the app, e317b6ea).
+            [
+              'projectHostedLiveLanes:list',
+              'projectHostedQueueView:read',
+              'projectNeedsMe:read',
+              'projectNowOverlaps:now',
+            ],
           ],
           [`${board}/${laneId}`, 'Changed files', ['projectLaneReview:read']],
         ]) {

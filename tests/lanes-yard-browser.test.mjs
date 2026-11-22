@@ -8,7 +8,11 @@
 // names who it waits on and why (Item e1633718); a row that shares saved files says how many with how many Lanes, in
 // a link of its own to Who is touching what, never nested in the row's link (Item f787005c). On the app's own address
 // the real Lanes place draws each link to the one screen the real route registry gives it, a failed row to its check,
-// and phone Back returns to the same view (Item e317b6ea). Set
+// and phone Back returns to the same view (Item e317b6ea). The overview matches the approved flow lanes.html (lead mock
+// check 2026-11-22): the four stops and main head the yard with the top bar's counts, a row starts with who holds it
+// and says its app and when it was seen, Needs you holds only what this reader decides (48049998) with Review at the
+// right and Return opening it, a failed check opens its check screen (Open check: whether Retry is offered is that
+// screen's to say), and the agent's `nforge agent . queue` reply opens from its chip. Set
 // FORGE_LANE_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -128,7 +132,9 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
         ],
       );
       assert.equal(new Set(pages.map(row => row.meta)).size, 3, 'three rows of one Item never look the same');
-      assert.match(pages[0].meta, /^9e8e8826 · 3 Lanes$/);
+      assert.match(pages[0].meta, /^9e8e8826 · 3 Lanes · Codex, seen .+$/);
+      const alone = all.find(row => row.title.startsWith('Stamp every save'));
+      assert.match(alone.meta, /^seen [^·]+$/, 'a Lane alone needs no Lane mark');
       assert.ok(!all.some(row => row.word === 'Check failed'), 'nothing here failed a check');
       const waiting = all.find(row => row.title.startsWith('Stamp every save'));
       assert.deepEqual(
@@ -291,8 +297,13 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
           assert.equal(await screen(), 'lanes#0', 'the overview is the Lanes place itself');
           assert.equal(
             await page.evaluate(() => window.forgeReads.adds),
-            3,
-            'Lanes, queue and shared files: one read each, none per row or per link',
+            4,
+            "the frame's Needs me read, then Lanes, queue and shared files: one read each, none per row or per link",
+          );
+          assert.equal(
+            await page.evaluate(() => window.forgeLive('projectNeedsMe:read')),
+            1,
+            "Needs you shares the frame's Needs me subscription",
           );
           const failed = page.locator('.yard .ln').filter({ hasText: 'Stream parser' });
           assert.equal(await failed.locator('.actn .st').textContent(), 'Check failed');
@@ -328,8 +339,83 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
               links.map(link => link.getAttribute('href')).filter(href => href.endsWith('/check')),
             );
           assert.deepEqual(checks, [`${LANES}/${FAILED}/check`]);
+          // 48049998: the approval waits on this reader; the failed check is its agent's next step.
+          const needs = page.getByRole('list', { name: 'Needs you' });
           const held = page.getByRole('list', { name: 'Held' });
-          assert.equal(await held.locator('[role="listitem"]').count(), 2);
+          assert.equal(await needs.locator('[role="listitem"]').count(), 1);
+          assert.equal(await held.locator('[role="listitem"]').count(), 1);
+          assert.match(
+            await page.locator('.head .sit').textContent(),
+            /^1 Lane needs you\. 1 more is held\./,
+          );
+        }
+      },
+    );
+
+    await t.test(
+      'e317b6ea mock check: stops head the yard, rows act at the right, keys open them, the queue chip',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          const page = await open(t, viewport, '', LANES);
+          const stops = await page.locator('.yard .zones .zs span').allTextContents();
+          assert.deepEqual(
+            stops.map(text => text.replace(/\s+/g, ' ').trim()),
+            ['Editing 1', 'Saved 6', 'In queue 0', 'Checking 1 · 2 passed', 'main'],
+            'the top bar counts per stop (a failed check apart, passed said), then main',
+          );
+          const review = page.locator('.yard .ln').filter({ hasText: 'Public pages' }).first();
+          const action = review.locator('.actn a.btn');
+          assert.equal(await action.locator('span').first().textContent(), 'Review');
+          assert.equal(await action.locator('kbd').textContent(), '↵', 'the row Return opens shows the key');
+          assert.equal(await action.getAttribute('href'), `${LANES}/9e8e8826-db5d-40d1-9199-328383d25641`);
+          const retry = page.locator('.yard .ln').filter({ hasText: 'Stream parser' }).locator('.actn a.btn');
+          assert.equal(await retry.locator('span').first().textContent(), 'Open check');
+          assert.equal(await retry.locator('kbd').count(), 0, 'no key of its own');
+          assert.equal(await retry.getAttribute('href'), `${LANES}/${FAILED}/check`);
+          assert.equal(
+            await page.locator('.yard .actn a.btn').count(),
+            2,
+            'only rows a reader can move on act',
+          );
+          assert.equal(await review.locator('.lab > .av').count(), 1, 'who holds it is the mark at left');
+          // The keys: Return on the page itself opens the first Review; on a control it is that control's.
+          await page.locator('body').press('r');
+          assert.match(page.url(), /\/lanes$/, 'r is not a yard key');
+          const chipKey = page.locator('button.cli');
+          await chipKey.focus();
+          await chipKey.press('Enter');
+          assert.match(page.url(), /\/lanes$/, 'Return on the chip toggles the chip');
+          assert.equal(await chipKey.getAttribute('aria-expanded'), 'true');
+          await chipKey.press('Enter');
+          await page.evaluate(() => document.activeElement?.blur());
+          await page.locator('body').press('Enter');
+          await page.waitForURL(`**${LANES}/9e8e8826-db5d-40d1-9199-328383d25641`);
+          await page.goBack();
+          await page.waitForURL(`**${LANES}`);
+          await page.locator('.yard .ln').first().waitFor();
+          // The command chip shows what an agent gets, from the queue read already here.
+          const reads = await page.evaluate(() => window.forgeReads.adds);
+          const chip = page.locator('button.cli');
+          assert.equal(await chip.getAttribute('aria-expanded'), 'false');
+          assert.equal(await page.locator('#lanes-cli').isVisible(), false);
+          await chip.click();
+          assert.equal(await chip.getAttribute('aria-expanded'), 'true');
+          const reply = await page.locator('#lanes-cli').textContent();
+          assert.match(reply, /^\$ nforge agent \. queue\n2 in the queue, 2 held\n/);
+          assert.match(reply, /\n1 {5}Hosted CLI and agent workflow papercuts {6}Checking\n/);
+          assert.match(
+            reply,
+            /\nheld  Public pages: share cards, sitemap and page… Needs you, waiting for approval\n/,
+          );
+          // Where the project stands: Item counts are not in these reads, so they say so.
+          const stands = page.getByRole('navigation', { name: 'Where the project stands' });
+          assert.deepEqual(await stands.locator('.nr').allTextContents(), Array(3).fill('not reported'));
+          assert.match(await stands.textContent(), /11 Lanes open, 1 needs you/);
+          assert.equal(
+            await page.evaluate(() => window.forgeReads.adds),
+            reads,
+            'the chip and the strip add no read',
+          );
         }
       },
     );
@@ -357,15 +443,30 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
     );
 
     await t.test('axe and widths: both themes, desk and phone, plain and dense', async t => {
-      for (const [viewport, query, path] of [
+      const states = [
+        ['', '.yard .ln'],
+        ['?state=empty', '.empty'],
+        ['?state=loading', '.sk-rows'],
+        ['?state=failed', '.yard .ln'],
+        ['?state=worst', '.yard .ln'],
+      ];
+      for (const [viewport, query, path, ready] of [
         [DESK, ''],
         [PHONE, ''],
         [DESK, '?dense=1'],
         [PHONE, '?dense=1'],
-        [DESK, '', LANES],
-        [PHONE, '', LANES],
+        ...states.flatMap(([q, r]) => [
+          [DESK, q, LANES, r],
+          [PHONE, q, LANES, r],
+        ]),
       ]) {
-        const page = await open(t, viewport, query, path);
+        const page = await open(t, viewport, query, path, ready);
+        // Keyboard: every link and control is reached by Tab and shows a focus ring.
+        if (path) {
+          await page.keyboard.press('Tab');
+          const focused = await page.evaluate(() => document.activeElement?.tagName);
+          assert.ok(['A', 'BUTTON'].includes(focused), `Tab reaches a control at ${viewport.width} ${query}`);
+        }
         await page.addScriptTag({ path: axePath });
         for (const theme of ['dark', 'light']) {
           await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
@@ -391,7 +492,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
             await page.screenshot({
               path: join(
                 shots,
-                `lanes-${path ? 'overview' : 'yard'}-${viewport.width}-${theme}${query ? '-dense' : ''}.png`,
+                `lanes-${path ? `overview${query ? `-${query.split('=')[1]}` : ''}` : 'yard'}-${viewport.width}-${theme}${!path && query ? '-dense' : ''}.png`,
               ),
               fullPage: true,
             });

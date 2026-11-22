@@ -8,7 +8,7 @@ import type { StateKind, StateWord } from '../../ds';
 import type { SaveFailure } from '../SaveFailureNotice';
 import { QUIET_MS } from '../../../../src/lane-quiet';
 import { currentEntries, landingOf, laneState, notLandedWhy, stopWords, waitLine } from '../lane-state';
-import { parkWords, type Park } from '../needs/count';
+import { laneRequests, parkShown, parkWords, waitsOnPerson, type NeedsRead, type Park } from '../needs/count';
 
 /** One open Lane from `projectHostedLiveLanes:list` (the agent `lanes` page). */
 export type LaneMeta = {
@@ -73,14 +73,18 @@ export type SharedFiles = {
   complete: boolean;
 };
 
-export type Band = 'needs' | 'queue' | 'work' | 'quiet';
+export type Band = 'needs' | 'held' | 'queue' | 'work' | 'quiet';
 export const bandTitles: Record<Band, { title: string; hint: string }> = {
-  // Every held Lane, an agent's too; Needs me counts only those that wait on a person (needs/count.ts).
-  needs: { title: 'Held', hint: 'stopped until someone acts; what waits on you is in Needs me' },
+  // Needs you is what waits on the reader, by Needs me's own rule (Item 48049998, needs/count.ts), so the band, the
+  // head and the top bar's count agree. Every other held Lane is its agent's or holder's next step: Held.
+  needs: { title: 'Needs you', hint: 'held until you decide' },
+  held: { title: 'Held', hint: 'stopped until its agent or holder acts' },
   queue: { title: 'In the landing queue', hint: 'in landing order' },
   work: { title: 'Being worked on', hint: 'latest change first' },
   quiet: { title: 'Quiet', hint: 'no save for a while' },
 };
+/** The Held hint when Needs me's read was capped or failed: some of these may wait on the reader. */
+export const heldUnsure = 'some may wait on you; Needs me lists them';
 
 export { stopWords };
 
@@ -108,6 +112,8 @@ export type YardRow = {
   position: number | null;
   /** When it last changed stop (ms), for ordering the work band. */
   changedAt: number;
+  /** The Lane's last activity or save (ms), from the Lane page; null when that read does not list it. */
+  seenAt: number | null;
   overlap: boolean;
   /** The Lane page did not list it (beyond its window): the title is not known. */
   untitled: boolean;
@@ -190,6 +196,12 @@ export type Yard = {
   rows: YardRow[];
   counts: Record<Band, number>;
   checking: ReturnType<typeof lineStopCounts>;
+  /** Each of the line's four stops as the top bar counts it (Line.tsx `lineStopCounts`): `count` at the stop and,
+   * at Checking, `passed` waiting to land; `atLeast` when the feed lists fewer Lanes than are open. */
+  stops: { count: number; passed: number; atLeast: boolean }[];
+  /** Whether every held Lane was checked against the reader ('all'), only those in Needs me's capped read
+   * ('partial'), or none because that read failed ('unknown'). Only 'all' may say no Lane needs the reader. */
+  needsKnown: NeedsYou['known'];
   /** Lanes open beyond the feed's window (`more`), and whether that is a lower bound. */
   beyond: number;
   beyondIsLowerBound: boolean;
@@ -197,7 +209,7 @@ export type Yard = {
   next: YardRow | null;
 };
 
-const ago = (ms: number) => {
+export const ago = (ms: number) => {
   const minutes = Math.max(0, Math.round(ms / 60_000));
   if (minutes < 1) return 'just now';
   if (minutes < 60) return `${minutes} min ago`;
@@ -226,6 +238,11 @@ export function yardReady(reads: {
   );
 }
 
+const seenOf = (lane: LaneMeta) => {
+  const at = [lane.lastActivityAt, lane.lastSaveAt].map(t => Date.parse(t ?? '')).filter(Number.isFinite);
+  return at.length ? Math.max(...at) : null;
+};
+
 type Sibling = { laneId: string; intentId: string; lastAt: number; inFlight: boolean; resolves?: string };
 /** Several open Lanes for one Item (Item d9e1ac62): one that has been quiet for QUIET_MS with no landing in flight is
  * replaced by the busiest other Lane of that Item (a landing in flight first, then the latest save). An open resolution
@@ -252,14 +269,33 @@ export function replacedBy(lanes: readonly Sibling[], now: number) {
   return out;
 }
 
+/** The open Lanes that wait on the reader, by Needs me's one rule (needs/count.ts): held for a decision this reader
+ * makes, or parked for them and shown now. From the read the top bar's count already holds (projectNeedsMe:read, one
+ * subscription shared with the frame), so the yard adds no read. Undefined while that read is out. */
+export type NeedsYou = { lanes: ReadonlySet<string>; known: 'all' | 'partial' | 'unknown' };
+export function needsYouLanes(read: NeedsRead | undefined, now: number): NeedsYou | undefined {
+  if (!read) return undefined;
+  const asked = laneRequests(read.approvals);
+  const out = new Set<string>();
+  for (const lane of read.held)
+    if (lane.laneId && waitsOnPerson(lane, asked.has(lane.laneId), read.canDecide)) out.add(lane.laneId);
+  for (const row of read.parked ?? []) if (parkShown(row, now)) out.add(row.laneId);
+  return { lanes: out, known: read.more > 0 || read.parkedMore === true ? 'partial' : 'all' };
+}
+/** Needs me's read failed: no held Lane is known to wait on the reader, and the page says it could not tell. */
+export const NEEDS_UNKNOWN: NeedsYou = { lanes: new Set(), known: 'unknown' };
+
 /** The yard: every Lane the feed shows, in its band, stuck work first; Lanes of one Item sit together, a replaced one
- * below the one that replaced it. `now` is the render time, never a query arg. */
+ * below the one that replaced it. `now` is the render time, never a query arg. `needsYou` (needsYouLanes) puts the
+ * Lanes that wait on the reader under Needs you; without it every held Lane is Held. */
 export function buildYard(
   feed: LineFeed,
   lanes: readonly LaneMeta[],
   queue: QueueView | undefined,
   now: number,
+  needsYou: NeedsYou = NEEDS_UNKNOWN,
 ): Yard {
+  const waitsOnYou = needsYou.lanes;
   const meta = new Map(lanes.map(lane => [lane.laneId, lane]));
   const entries = currentEntries(queue?.entries ?? []);
   const perItem = new Map<string, number>();
@@ -292,7 +328,7 @@ export function buildYard(
     now,
   );
   const short = (laneId: string) => laneId.slice(0, 8);
-  const rows = feed.lanes.map((mark): YardRow => {
+  const placed = feed.lanes.map((mark): YardRow => {
     const lane = meta.get(mark.laneId);
     const entry = entries.get(mark.laneId);
     // A Lane with no save is never "Saved" (owner 2026-11-19, Item 6ebb58ab): the line marks a Lane saved once its
@@ -314,6 +350,7 @@ export function buildYard(
       ...(lane?.agentRun ? { agentRun: lane.agentRun } : {}),
       ...(lane?.agentClient ? { agentClient: lane.agentClient } : {}),
       changedAt: mark.changedAt,
+      seenAt: lane ? seenOf(lane) : null,
       overlap: mark.overlap,
       untitled: !lane?.intent && !entry?.intentTitle,
       position: null,
@@ -344,7 +381,8 @@ export function buildYard(
     const parked = lane?.park
       ? { why: `${parkWords(lane.park)} ${ago(now - lane.park.at)}`, detail: lane.park.reason }
       : {};
-    if (mark.held) return { ...base, band: 'needs', ...after, ...left };
+    if (mark.held)
+      return { ...base, band: waitsOnYou.has(mark.laneId) ? 'needs' : 'held', ...after, ...left };
     // A running check counts from its reservation, as the usual check time does (Item ecd6e610).
     const started =
       mark.stage === 'checking' && entry?.phase === 'checking' ? Date.parse(entry.checkStartedAt ?? '') : NaN;
@@ -391,15 +429,19 @@ export function buildYard(
       ...left,
     };
   });
-  const order: Record<Band, number> = { needs: 0, queue: 1, work: 2, quiet: 3 };
+  // A Lane parked for the reader waits on them too, wherever its stop is.
+  const rows = placed.map(row =>
+    row.band !== 'needs' && waitsOnYou.has(row.laneId) ? { ...row, band: 'needs' as const } : row,
+  );
+  const order: Record<Band, number> = { needs: 0, held: 1, queue: 2, work: 3, quiet: 4 };
   rows.sort(
     (a, b) =>
       order[a.band] - order[b.band] ||
-      (a.band === 'needs' ? a.changedAt - b.changedAt : 0) ||
+      (a.band === 'needs' || a.band === 'held' ? a.changedAt - b.changedAt : 0) ||
       (a.position ?? Infinity) - (b.position ?? Infinity) ||
       b.changedAt - a.changedAt,
   );
-  const counts = { needs: 0, queue: 0, work: 0, quiet: 0 };
+  const counts = { needs: 0, held: 0, queue: 0, work: 0, quiet: 0 };
   for (const row of rows) counts[row.band]++;
   return {
     rows: byItem(rows),
@@ -408,6 +450,11 @@ export function buildYard(
       feed,
       lineStops.find(stop => stop.stage === 'checking')!,
     ),
+    stops: lineStops.map(stop => {
+      const { count, passed } = lineStopCounts(feed, stop);
+      return { count, passed, atLeast: feed.more > 0 };
+    }),
+    needsKnown: needsYou.known,
     beyond: feed.more,
     beyondIsLowerBound: feed.moreIsLowerBound,
     open: rows.length + feed.more,
@@ -440,16 +487,26 @@ function byItem(rows: readonly YardRow[]) {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
-/** The head's sentence: what needs the reader, what is not listed, and what lands next. Counts per stop are the shell
- * strip's alone: a second grouping of the same Lanes here read as a disagreement (owner dogfood 2026-11-17). */
+/** The head's sentence: what needs the reader, what else is held, what is not listed, and what lands next. Counts per
+ * stop are the shell strip's alone: a second grouping of the same Lanes here read as a disagreement (owner dogfood
+ * 2026-11-17), so the sentence never counts the queue or the work bands. */
 export function situation(yard: Yard): { lead: string; rest: string } {
   const needs = yard.counts.needs;
+  const known = yard.needsKnown === 'all';
+  const held = yard.counts.held;
+  // A capped or failed Needs me read never says nobody needs the reader (rule 15: not known is said, never guessed).
   const lead = !yard.open
     ? 'No Lanes are open.'
     : needs
-      ? `${plural(needs, 'Lane')} ${needs === 1 ? 'is' : 'are'} held.`
-      : 'No Lane is held.';
+      ? `${needs.toLocaleString()}${known ? '' : ' or more'} ${needs === 1 && known ? 'Lane needs' : 'Lanes need'} you.`
+      : known || !held
+        ? 'No Lane needs you.'
+        : yard.needsKnown === 'partial'
+          ? 'Not every held Lane was checked for you.'
+          : 'Which held Lanes need you could not be read.';
   const parts = [
+    held &&
+      `${needs ? `${held.toLocaleString()} more` : plural(held, 'Lane')} ${held === 1 ? 'is' : 'are'} held`,
     yard.beyond &&
       `${yard.beyond.toLocaleString()}${yard.beyondIsLowerBound ? ' or more' : ''} more not shown`,
   ].filter(Boolean) as string[];

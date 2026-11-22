@@ -70,6 +70,9 @@ const { client } = fakeConvex({
         return JSON.stringify({ total: 0, held: 0, listed: 0, more: false, entries: [] });
       case 'projectNowOverlaps:now':
         return JSON.stringify({ signals: { lanes: [], paths: [], edits: [], complete: true } });
+      // Lanes' Needs you shares the frame's Needs me read (e317b6ea).
+      case 'projectNeedsMe:read':
+        return { held: [], more: 0, moreIsLowerBound: false, approvals: '{}', canDecide: false };
       case 'projectPlanView:read':
         return {
           rows: JSON.stringify(rows),

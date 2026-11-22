@@ -9,22 +9,35 @@
 // never past the usual slowest check, none while live reads sleep (hidden or idle tab), when the mark rests in place.
 // A Lane that saved a file another open Lane also saved says so under its row, "shares 3 files with 2 Lanes", linked to
 // Who is touching what for that Lane (Item f787005c); a link of its own, beside the row's link, never inside it.
-import { useEffect, useState, type CSSProperties } from 'react';
-import { Band, State } from '../../ds';
+// Above the bands, the four stops and main with the Lanes at each (the approved flow lanes.html): the top bar's own
+// counts when every Lane is shown (count, and passed at Checking, as the top bar says them), the shown rows' otherwise.
+// Each row starts with who holds it (the Lane's mark at left), then its title, then who (Item 41514fee: run · model ·
+// for @person), then the agent app and when it was last seen. A row the reader can move on has its one action at the
+// right: Review a Lane that needs you, View conflict on a held conflict, Open check on a failed check (whether Retry is
+// offered is the check screen's to say: its read's `recovery`, Item b030c3c5). Each is a link to the screen that owns
+// it; the yard writes nothing. Return opens the first Review or View conflict, only with focus on the yard or the page
+// itself, never while typing or on a control.
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Avatar, Band, State } from '../../ds';
 import { useReadsAsleep } from '../../live-reads';
 import { A } from '../frames';
+import { navigate } from '../router';
+import { agentAppLabels, type AgentApp } from '../start/agent-apps';
 import { RecordedWho } from '../RecordedWho';
 import { declaredModel, recordedIdentity, type WhoProject } from '../who-links';
-import { passedWaiting, type lineStopCounts, type LineStage } from '../Line';
+import { lineStops, passedWaiting, type lineStopCounts, type LineStage } from '../Line';
 import {
+  ago,
   CHECK_FROM,
   CHECK_TO,
   bandTitles,
   checkProgress,
+  heldUnsure,
   sharesWords,
   stopWords,
   type Band as BandName,
   type LaneShares,
+  type Yard as YardModel,
   type YardRow,
 } from './model';
 
@@ -37,7 +50,59 @@ const place: Record<LineStage, number> = {
   checking: 3.4,
   ready: 3.85,
 };
-const order: readonly BandName[] = ['needs', 'queue', 'work', 'quiet'];
+const order: readonly BandName[] = ['needs', 'held', 'queue', 'work', 'quiet'];
+
+/** The agent app a run declared (`claude-code:model`), by its name; "app not reported" for an agent run that sent
+ * none; nothing for a person. */
+function harnessOf(row: Pick<YardRow, 'agent' | 'agentRun' | 'agentClient'>) {
+  const app = row.agentClient?.split(':')[0];
+  if (app) return agentAppLabels[app as AgentApp] ?? app;
+  return row.agent || row.agentRun ? 'app not reported' : undefined;
+}
+
+/** The one thing a reader can do next on a row, as a link to the screen that owns it; null for none. */
+type RowAction = { label: string; href: string; enter: boolean; rec: boolean };
+function rowAction(row: YardRow, href: string, checkHref: string | undefined): RowAction | null {
+  // The yard cannot know whether this check can be retried (the check read's `recovery`), so it opens the check.
+  if (row.state === 'failed' && checkHref)
+    return { label: 'Open check', href: checkHref, enter: false, rec: row.band === 'needs' };
+  if (row.band === 'needs') return { label: 'Review', href, enter: true, rec: true };
+  if (row.band === 'held' && row.state === 'conflict')
+    return { label: 'View conflict', href, enter: true, rec: false };
+  return null;
+}
+
+/** Whether Return is the yard's: focus on the yard or on the page itself (body, main), no modifier, not typing, not in
+ * a dialog and not on a control of its own. */
+function yardEnter(event: KeyboardEvent, yard: HTMLElement | null) {
+  if (event.key !== 'Enter' || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false;
+  if (event.defaultPrevented || !yard) return false;
+  const target = event.target as HTMLElement | null;
+  const page = target === document.body || target === document.documentElement || target?.tagName === 'MAIN';
+  if (!page && !(target && yard.contains(target))) return false;
+  return !target?.closest?.(
+    'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="dialog"], a, button, summary, [role="button"], [tabindex]:not([tabindex="-1"])',
+  );
+}
+
+/** A stop as the top bar says it: the count, "+" when the feed lists fewer Lanes than are open, passed at Checking. */
+function stopCount(stop: YardModel['stops'][number]) {
+  const n = `${stop.count.toLocaleString()}${stop.atLeast ? '+' : ''}`;
+  return stop.passed ? `${n} · ${stop.passed.toLocaleString()} passed` : n;
+}
+/** The shown rows at each stop, by the top bar's rule: a held Lane at Checking is not counted, a passed one is apart. */
+function rowStops(rows: readonly YardRow[]): YardModel['stops'] {
+  return lineStops.map(stop => {
+    let count = 0;
+    let passed = 0;
+    for (const row of rows) {
+      if (!stop.of.includes(row.stage)) continue;
+      if (row.stage === 'ready') passed++;
+      else if (row.stage !== 'checking' || (row.band !== 'needs' && row.band !== 'held')) count++;
+    }
+    return { count, passed, atLeast: false };
+  });
+}
 
 export function Yard({
   rows,
@@ -48,6 +113,8 @@ export function Yard({
   dense,
   sharesOf,
   sharesHref,
+  stops,
+  needsKnown = 'all',
 }: {
   rows: readonly YardRow[];
   project?: WhoProject | undefined;
@@ -59,10 +126,45 @@ export function Yard({
   /** What a Lane shares with other open Lanes, from the one overlap read; absent when it shares nothing. */
   sharesOf?: (laneId: string) => LaneShares | undefined;
   sharesHref?: (laneId: string) => string;
+  /** The four stops when the yard shows every Lane (the top bar's counts); else counted from the shown rows. */
+  stops?: YardModel['stops'] | undefined;
+  /** Whether every held Lane was checked against the reader; else Held says some may still wait on them. */
+  needsKnown?: YardModel['needsKnown'];
 }) {
   const { now, asleep } = useCheckClock(rows);
+  const checkOf = (row: YardRow) => (row.state === 'failed' ? checkHrefOf?.(row.laneId) : undefined);
+  const actions = rows.map(row => rowAction(row, hrefOf(row.laneId), checkOf(row)));
+  // Return opens the first Review or View conflict; only that row shows the key.
+  const firstEnter = actions.findIndex(action => action?.enter);
+  const enter = firstEnter >= 0 ? actions[firstEnter]!.href : undefined;
+  const yard = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!enter) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!yardEnter(event, yard.current)) return;
+      event.preventDefault();
+      navigate(enter);
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [enter]);
+  const counts = stops ?? rowStops(rows);
   return (
-    <div className={dense ? 'yard dense' : 'yard'}>
+    <div ref={yard} className={dense ? 'yard dense' : 'yard'}>
+      <div className="zones" aria-hidden="true">
+        <div className="zl" />
+        <div className="zs">
+          {lineStops.map((stop, i) => (
+            <span key={stop.stage}>
+              {stop.label} <b>{counts[i] ? stopCount(counts[i]) : '0'}</b>
+            </span>
+          ))}
+          <span className="zm" title="main">
+            main
+          </span>
+        </div>
+        <div className="zl" />
+      </div>
       {order.map(band => {
         const inBand = rows.filter(row => row.band === band);
         if (!inBand.length) return null;
@@ -74,7 +176,9 @@ export function Yard({
               hint={
                 band === 'queue' && checking?.passed
                   ? `Checking ${checking.count.toLocaleString('en')} · ${passedWaiting(checking.passed)}`
-                  : bandTitles[band].hint
+                  : band === 'held' && needsKnown !== 'all'
+                    ? heldUnsure
+                    : bandTitles[band].hint
               }
               needs={band === 'needs'}
             />
@@ -86,7 +190,9 @@ export function Yard({
                     row={row}
                     project={project}
                     href={hrefOf(row.laneId)}
-                    checkHref={row.state === 'failed' ? checkHrefOf?.(row.laneId) : undefined}
+                    checkHref={checkOf(row)}
+                    action={actions[rows.indexOf(row)] ?? null}
+                    keyHint={rows.indexOf(row) === firstEnter}
                     dense={dense}
                     now={now}
                     glide={!asleep}
@@ -138,11 +244,15 @@ function LaneLine({
   dense,
   now,
   glide,
+  action,
+  keyHint,
 }: {
   row: YardRow;
   project?: WhoProject | undefined;
   href: string;
   checkHref?: string | undefined;
+  action: RowAction | null;
+  keyHint: boolean;
   dense: boolean;
   now: number;
   glide: boolean;
@@ -175,6 +285,7 @@ function LaneLine({
   return (
     <div className="ln" data-st={state}>
       <div className="lab">
+        <Avatar handle={who ?? '?'} />
         <A
           className={dense ? 'ttl ln-open' : 'ttl ln-open wrap2'}
           href={checkHref ?? href}
@@ -183,18 +294,6 @@ function LaneLine({
         >
           {row.title}
         </A>
-        {/* The mark and count stay whole even in a dense row (Item 1dd4e095). */}
-        <div className="meta cut">
-          {mark ? (
-            <>
-              <span className="mono mk" translate="no" title={`Lane ${row.laneId}`}>
-                {mark}
-              </span>
-              {row.lanes > 1 ? ' · ' : null}
-            </>
-          ) : null}
-          {row.lanes > 1 ? `${row.lanes.toLocaleString()} Lanes` : null}
-        </div>
         <RecordedWho
           handle={who}
           agentAuthored={row.agent}
@@ -202,6 +301,21 @@ function LaneLine({
           project={project}
           layout="line"
         />
+        {/* Two open Lanes of one Item never look the same: the short Lane mark and the count stay whole even in a
+            dense row (Items d9e1ac62, 1dd4e095), so they come first; a Lane alone needs neither. */}
+        <div className="meta cut">
+          {mark && row.lanes > 1 ? (
+            <>
+              <span className="mono mk" translate="no" title={`Lane ${row.laneId}`}>
+                {mark}
+              </span>
+              {` · ${row.lanes.toLocaleString()} Lanes · `}
+            </>
+          ) : null}
+          {[harnessOf(row), row.seenAt === null ? 'last seen not reported' : `seen ${ago(now - row.seenAt)}`]
+            .filter(Boolean)
+            .join(', ')}
+        </div>
       </div>
       <div className={going ? 'trk going' : 'trk'} style={track} aria-hidden="true">
         <div className="rl">
@@ -222,6 +336,13 @@ function LaneLine({
           {detail ? <> {detail}</> : null}
         </span>
         <span className="sr">. {where}</span>
+        {action ? (
+          <A className={action.rec ? 'btn sm rec' : 'btn sm'} href={action.href}>
+            <span>{action.label}</span>
+            {keyHint ? <kbd aria-hidden="true">↵</kbd> : null}
+            <span className="sr">: {row.title}</span>
+          </A>
+        ) : null}
       </div>
     </div>
   );

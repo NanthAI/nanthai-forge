@@ -379,6 +379,14 @@ void reply().then(data => {
       'projectHostedQueueView:read',
       JSON.stringify({ total: 0, listed: 0, more: false, entries: [] }),
     );
+    // Lanes' Needs you shares the frame's Needs me read (e317b6ea): nothing waits on this reader.
+    reads.set('projectNeedsMe:read', {
+      held: [],
+      more: 0,
+      moreIsLowerBound: false,
+      approvals: '{}',
+      canDecide: false,
+    });
     reads.set(
       'projectNowOverlaps:now',
       JSON.stringify({

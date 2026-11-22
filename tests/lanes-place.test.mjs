@@ -38,7 +38,7 @@ const meta = (laneId, intent, actor = 'mara') => ({
   landing: null,
 });
 
-test('the yard puts every held Lane under Needs you, so its count equals the shell line count', () => {
+test('48049998: Needs you holds the held Lanes this reader decides, Held the rest, together the shell line count', () => {
   const lanes = [
     mark('a', 'ready', { held: true }),
     mark('b', 'checking', { held: true }),
@@ -80,14 +80,52 @@ test('the yard puts every held Lane under Needs you, so its count equals the she
       },
     ],
   };
-  const yard = model.buildYard(feed(lanes), [meta('a', 'Approve me'), meta('c', 'Check me')], queue, 0);
+  // Needs me's own read (shared with the top bar's count): the review hold waits on this owner, the failed check is
+  // its agent's next step.
+  const needsRead = {
+    held: [
+      {
+        laneId: 'a',
+        title: 'Approve me',
+        actor: 'mara',
+        agent: null,
+        why: 'review',
+        note: null,
+        submissionId: 's-a',
+        since: 0,
+      },
+      {
+        laneId: 'b',
+        title: null,
+        actor: 'mara',
+        agent: null,
+        why: 'check-failed',
+        note: null,
+        submissionId: 's-b',
+        since: 0,
+      },
+    ],
+    more: 0,
+    moreIsLowerBound: false,
+    approvals: '{}',
+    canDecide: true,
+  };
+  const needsYou = model.needsYouLanes(needsRead, 0);
+  const yard = model.buildYard(
+    feed(lanes),
+    [meta('a', 'Approve me'), meta('c', 'Check me')],
+    queue,
+    0,
+    needsYou,
+  );
   const shellHeld = lanes.filter(lane => lane.held).length;
-  assert.equal(yard.counts.needs, shellHeld);
+  assert.equal(yard.counts.needs + yard.counts.held, shellHeld);
+  assert.equal(yard.counts.needs, 1);
   assert.deepEqual(
     yard.rows.map(row => [row.laneId, row.band, row.word]),
     [
       ['a', 'needs', 'Needs you'],
-      ['b', 'needs', 'Check failed'],
+      ['b', 'held', 'Check failed'],
       ['c', 'queue', 'Checking'],
       ['d', 'work', 'Saved'],
       ['e', 'work', 'Conflict'],
@@ -96,9 +134,56 @@ test('the yard puts every held Lane under Needs you, so its count equals the she
   assert.equal(yard.rows[1].why, 't1 and 1 more');
   assert.equal(yard.next.laneId, 'c', 'next is the queue position 1, never a held Lane');
   assert.deepEqual(model.situation(yard), {
-    lead: '2 Lanes are held.',
-    rest: 'Check me lands next.',
+    lead: '1 Lane needs you.',
+    rest: '1 more is held. Check me lands next.',
   });
+  // The yard's stop counts are the top bar's (Line.tsx lineStopCounts): Editing, Saved, In queue, Checking, where a
+  // failed check is not counted and a passed one is said apart.
+  assert.deepEqual(yard.stops, [
+    { count: 1, passed: 0, atLeast: false },
+    { count: 1, passed: 0, atLeast: false },
+    { count: 0, passed: 0, atLeast: false },
+    { count: 1, passed: 1, atLeast: false },
+  ]);
+  assert.equal(yard.needsKnown, 'all');
+  // A reader who decides nothing here: no Lane needs them, and every held Lane is Held.
+  const viewer = model.buildYard(
+    feed(lanes),
+    [meta('c', 'Check me')],
+    queue,
+    0,
+    model.needsYouLanes({ ...needsRead, canDecide: false }, 0),
+  );
+  assert.deepEqual([viewer.counts.needs, viewer.counts.held], [0, 2]);
+  assert.deepEqual(model.situation(viewer), {
+    lead: 'No Lane needs you.',
+    rest: '2 Lanes are held. Check me lands next.',
+  });
+  // Needs me's read is capped (more held than it lists): never "No Lane needs you", and the count is a floor.
+  const capped = model.buildYard(
+    feed(lanes),
+    [meta('a', 'Approve me'), meta('c', 'Check me')],
+    queue,
+    0,
+    model.needsYouLanes({ ...needsRead, more: 3 }, 0),
+  );
+  assert.equal(capped.needsKnown, 'partial');
+  assert.equal(model.situation(capped).lead, '1 or more Lanes need you.');
+  const cappedNone = model.buildYard(
+    feed(lanes),
+    [meta('c', 'Check me')],
+    queue,
+    0,
+    model.needsYouLanes({ ...needsRead, held: [], more: 2 }, 0),
+  );
+  assert.equal(model.situation(cappedNone).lead, 'Not every held Lane was checked for you.');
+  // Needs me's read failed: the yard still shows, every held Lane is Held, and it says it could not tell.
+  const failed = model.buildYard(feed(lanes), [meta('c', 'Check me')], queue, 0, model.NEEDS_UNKNOWN);
+  assert.deepEqual([failed.needsKnown, failed.counts.needs, failed.counts.held], ['unknown', 0, 2]);
+  assert.equal(model.situation(failed).lead, 'Which held Lanes need you could not be read.');
+  // The feed lists fewer Lanes than are open: each stop is a floor.
+  const more = model.buildYard({ ...feed(lanes), more: 4 }, [], queue, 0, needsYou);
+  assert.ok(more.stops.every(stop => stop.atLeast));
 });
 
 test('a Lane with no save is never "Saved": its row says editing, no save yet (owner 2026-11-19, 6ebb58ab)', () => {
@@ -238,6 +323,7 @@ test('filters and a stop picked on the top bar narrow the yard by address alone'
     [meta('a', 'A', 'mara'), meta('b', 'B', 'jun')],
     undefined,
     0,
+    { lanes: new Set(['b']), known: 'all' },
   );
   assert.deepEqual(
     model.filterRows(yard.rows, 'needs').map(row => row.laneId),
@@ -494,7 +580,8 @@ test('the yard names the Lane a dependency-held Lane lands after, from the queue
   };
   const yard = model.buildYard(feed(lanes), [meta('p', 'Parent work'), meta('d', 'Child work')], queue, 0);
   const row = id => yard.rows.find(r => r.laneId === id);
-  assert.equal(row('d').band, 'needs');
+  // A dependency hold asks nobody (48049998): Held, never Needs you.
+  assert.equal(row('d').band, 'held');
   assert.equal(row('d').why, 'waits for Parent work to land');
   // The landing it depends on is not listed: the shared words, never a guessed Lane.
   assert.equal(row('g').why, 'waits for the Lane it depends on');
