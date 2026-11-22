@@ -315,16 +315,23 @@ for (const status of ['timeout', 'changed', 'message', 'cancelled', 'IN_PROGRESS
     assert.equal(f.pauses.length, 0);
   });
 
-test('pending CLI wait without submission entries follows its exact printed continuation', async () => {
+test('a landed wait summary without its submission follows the original operation to its receipt', async () => {
   const f = await fixture(
     [
       submitted,
-      response({ status: 'IN_PROGRESS', reason: 'budget', next: waitNext, command: waitCommand }),
+      response({
+        status: 'IN_PROGRESS',
+        phase: 'landed',
+        reason: 'budget',
+        next: waitNext,
+        command: waitCommand,
+      }),
       observed([entry(operationId, 'landed')]),
     ],
     { maxLandAttempts: 1 },
   );
   assert.deepEqual(f.calls[1], f.calls[2]);
+  assert.equal(f.result.submission.acceptance.receiptId, operationId + '-receipt');
 });
 
 test('pending wait cannot replace the original operation with another advertised landing', async () => {

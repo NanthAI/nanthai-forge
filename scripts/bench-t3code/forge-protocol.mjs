@@ -147,7 +147,9 @@ export async function driveForge({
     const response = await call(command);
     const result = selectedResult(response, command);
     const state = result.submission?.observation?.state ?? result.submission?.phase ?? result.phase;
-    if (state === 'landed') return { root: command.root, landAttempts, submission: result.submission };
+    // A budget reply can report a landed phase before it returns the requested submission.
+    if (state === 'landed' && result.submission)
+      return { root: command.root, landAttempts, submission: result.submission };
     const code = response.error?.code;
     const failedState =
       ['terminal-failed', 'cancelled', 'superseded'].includes(state) ||
