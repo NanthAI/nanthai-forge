@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { internalMutation } from './server';
-import { lineSummary } from './projectLiveLineStore';
+import { changeLineMark, lineSummary } from './projectLiveLineStore';
 import { readFlowLandings, retainedMainVerdict } from './projectLiveLineRecovery';
 import { flowDay, flowToday, utcDayStart } from '../src/flow-day';
 
@@ -49,5 +49,34 @@ export const backfill = internalMutation({
       landed,
       partial,
     };
+  },
+});
+
+/** Holds a supersede left behind (Issue f5c4d136): before the fix a superseded Lane kept the hold its ended
+ * submission set (stage Saved), so the project list and top bar counted a hold nobody acts on. The operator lifts each
+ * such hold as the supersede patch now does, 100 marks a page in the stable project-and-Lane order, with one point
+ * read of the overlap row per held mark and one patch per lifted hold. Idempotent; `dryRun` names the marks without
+ * writing. Follow `cursor` until it is null. */
+export const supersededHolds = internalMutation({
+  args: { projectId: v.id('hostedProjects'), cursor: v.union(v.string(), v.null()), dryRun: v.boolean() },
+  returns: v.object({
+    checked: v.number(),
+    lifted: v.array(v.string()),
+    cursor: v.union(v.string(), v.null()),
+  }),
+  handler: async (ctx, { projectId, cursor, dryRun }) => {
+    const page = await ctx.db
+      .query('projectLiveLineLanes')
+      .withIndex('by_project_and_lane', q => q.eq('projectId', projectId))
+      .paginate({ cursor, numItems: 100 });
+    const lifted = [];
+    for (const mark of page.page) {
+      if (!mark.held || mark.stage !== 'saved') continue;
+      const row = await ctx.db.get(mark.sourceId);
+      if (!row?.open || row.superseded?.laneHead !== row.head) continue;
+      if (!dryRun) await changeLineMark(ctx.db, mark, { held: false });
+      lifted.push(mark.laneId);
+    }
+    return { checked: page.page.length, lifted, cursor: page.isDone ? null : page.continueCursor };
   },
 });

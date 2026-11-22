@@ -198,20 +198,25 @@ export async function trackLineLane(
     value: JSON.stringify({ markId, head: lane.head }),
   });
 }
-/** Existing point patches (conflicts, lifecycle overlays, landed stamps) stay atomic. */
+/** Existing point patches (conflicts, lifecycle overlays, landed stamps, supersession) stay atomic. */
 export async function patchLineLane(
   db: Db,
   sourceId: Id<'projectHostedOverlapLanes'>,
   patch: Record<string, unknown>,
 ) {
-  if (!['open', 'conflicted'].some(key => key in patch)) return;
+  if (!['open', 'conflicted', 'superseded'].some(key => key in patch)) return;
   const old = await db
     .query('projectLiveLineLanes')
     .withIndex('by_source', q => q.eq('sourceId', sourceId))
     .unique();
   if (!old) return;
   if (patch.open === false) await removeLineMark(db, old, patch.landed ? 'landed' : 'set-aside');
-  else if ('conflicted' in patch) await changeLineMark(db, old, { overlap: Boolean(patch.conflicted) });
+  // Superseded (its work landed through another Lane, Issue f5c4d136): the hold an ended submission left (stage
+  // Saved) waits on nobody, so it lifts in the patch that leaves presence. A live submission's hold (queued, checking
+  // or ready) stays its own, and the mark keeps its binding and `retried`.
+  else if (patch.superseded) {
+    if (old.held && old.stage === 'saved') await changeLineMark(db, old, { held: false });
+  } else if ('conflicted' in patch) await changeLineMark(db, old, { overlap: Boolean(patch.conflicted) });
 }
 /** Main's small display snapshot shares the exit row; no Work revision is copied. With a scheduler (acceptance), a
  * landing in a new hour bucket also records `hour` and schedules the person-order update once (Item 3d5d8839): no

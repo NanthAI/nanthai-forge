@@ -11348,6 +11348,15 @@
         "src/scoped-recheck-policy.ts"
       ],
       "test": "incident replay c6b81429: independent landings never wait behind a dependent pair"
+    },
+    {
+      "incident": "f5c4d136",
+      "what": "A superseded Lane kept the hold of its ended landing: the project list and top bar said a Lane needed the owner when nothing waited",
+      "file": "tests/superseded-held-mark.test.mjs",
+      "paths": [
+        "convex/projectHostedSuperseded.ts"
+      ],
+      "test": "incident replay f5c4d136: a Lane held at save, then superseded, leaves no held or needs-you item on any surface"
     }
   ]
 }

@@ -2361,8 +2361,10 @@ by `flowStops` in `src/flow-text.ts`), so a stop's count is the same everywhere.
 Existing writes update changed marks atomically, including main-red holds.
 Heartbeat/holder/name/device changes leave marks alone. Holds and overlaps keep
 stage time; resolving the last conflict clears both flags. Closed/landed marks
-are deleted; the summary keeps main and the latest explicit exit. Starts write
-no shared counter.
+are deleted; the summary keeps main and the latest explicit exit. A superseded
+Lane (its work landed through another Lane) stays open on the line; the patch
+that removes its presence also lifts a hold its ended submission left (stage
+Saved), while a live submission's hold stays. Starts write no shared counter.
 
 The Flow view's fields ride the same writes. A mark carries a short check key
 while it is checked (Lanes checked together share it). Needs me requests check
@@ -2417,6 +2419,9 @@ publication installs its summary.
 Publication seeds a missing legacy UTC day from the same receipt window as
 `landings`. The operator can also run `projectLiveLineRepair:backfill` with
 `{projectId, dayStart}` (UTC midnight in milliseconds) once per project/day.
+`projectLiveLineRepair:supersededHolds` with `{projectId, cursor, dryRun}`
+lifts, 100 marks a page, the Saved holds of Lanes superseded at their head
+before Issue f5c4d136; follow `cursor` until it is null.
 The replay reads up to three pages of 100 receipts with a 1 MiB read limit
 per page. It replaces only that day's landing buckets. A capped replay
 preserves larger live counts and marks landings partial unless the current
