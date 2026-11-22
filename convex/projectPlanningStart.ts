@@ -57,6 +57,7 @@ export const move = internalAction({
               itemId,
               expectedVersion: item.version,
               status: 'in-progress',
+              reason: 'Lane started',
             }
           : null,
       itemId,

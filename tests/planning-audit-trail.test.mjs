@@ -1,0 +1,894 @@
+// SPDX-License-Identifier: Apache-2.0
+// Item 1d51c91f: Item audit trail (timeline, backlog window, agent attribution on puts, access & identity rules).
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
+import { setup } from './hosted-planning-fixture.mjs';
+import { installPlanningSearch } from './planning-search-fixture.mjs';
+import { moduleUrl } from './convex-module.mjs';
+import { executeHostedPlanning } from '../dist/hosted-agent-planning.js';
+import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
+import { capabilityOptions } from '../dist/hosted-capabilities-early.js';
+import {
+  hostedContractFeatures,
+  MAX_CONTRACT_FEATURES,
+  planningAuditFeature,
+  planningHistoryFeature,
+  planningInitiativeCountsFeature,
+  planningWaitingFeature,
+} from '../dist/hosted-contract-features.js';
+import { diffDoneWhen, bodyDiffSummary, parseAuditInstant } from '../dist/planning-audit.js';
+import { cliReplyLines } from '../dist/cli-reply-lines.js';
+import { isAgentSlug } from '../dist/agent-slug.js';
+
+const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
+const hostedPlanning = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
+const workCommand = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+const planningBatch = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
+const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+const notes = await import(moduleUrl('../convex/projectIntentLandingNotes.ts'));
+const itemWork = await import(moduleUrl('../convex/projectItemWork.ts'));
+const { move: startMove } = await import(moduleUrl('../convex/projectPlanningStart.ts'));
+
+const code = expected => error => (error.data?.code ?? error.code) === expected;
+
+function makePort(s, options = {}) {
+  installPlanningSearch(s);
+  const calls = [];
+  const invoke = async (name, args) => {
+    calls.push(name);
+    const [mod, fn] = name.split(':');
+    const handler = {
+      projectWorkIndex: index,
+      projectHostedPlanning: hostedPlanning,
+      projectWorkCommand: workCommand,
+      projectPlanningBatch: planningBatch,
+      projectItemWork: itemWork,
+    }[mod][fn];
+    return handler._handler(s.ctx, args);
+  };
+  return {
+    calls,
+    root: s.directory,
+    address: { url: 'https://fixture.invalid', projectId: s.projectId },
+    exchange: { client: { query: (ref, args) => invoke(getFunctionName(ref), args) } },
+    query: async (name, args) => {
+      const value = await invoke(name, { ...args, projectId: s.projectId });
+      return typeof value === 'string' ? JSON.parse(value) : value;
+    },
+    mutation: async (name, args) => {
+      const value = await invoke(name, { ...args, projectId: s.projectId });
+      return typeof value === 'string' ? JSON.parse(value) : value;
+    },
+    serverFeatures: options.features ?? [
+      ...hostedContractFeatures,
+      planningInitiativeCountsFeature,
+      planningHistoryFeature,
+      planningWaitingFeature,
+      planningAuditFeature,
+    ],
+    commentAgent: options.commentAgent,
+  };
+}
+
+function addDeviceAndAccounts(s) {
+  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
+  s.tables.cliCredentials.set('device', {
+    _id: 'device',
+    credentialId: 'cred-1',
+    owner: 'owner',
+    name: 'agent-box',
+    tokenHash: 'synthetic-hash',
+    issuedAt: Date.parse('2026-11-01T00:00:00.000Z'),
+    expiresAt: Date.parse('2027-01-01T00:00:00.000Z'),
+    revoked: false,
+    scope: 'cli',
+  });
+  s.tables.forgeAccounts.set('acct-owner', {
+    _id: 'acct-owner',
+    _creationTime: 1,
+    owner: 'owner',
+    handle: 'ada',
+  });
+  s.tables.accountHandles.set('alias-owner', {
+    _id: 'alias-owner',
+    owner: 'owner',
+    handle: 'ada',
+  });
+  s.tables.projectContributors.set('member-writer', {
+    _id: 'member-writer',
+    projectId: s.projectId,
+    contributor: 'writer',
+  });
+  s.tables.projectReaders.set('member-reader', {
+    _id: 'member-reader',
+    projectId: s.projectId,
+    reader: 'reader',
+  });
+}
+
+const runPlanning = (p, input) =>
+  executeHostedPlanning(p, 'owner', 'planning', input, undefined).then(r => r.result);
+const runPut = (p, input) =>
+  executeHostedPlanning(p, 'owner', 'put-planning-item', input, undefined).then(r => r.result);
+const runComment = (p, input) =>
+  executeHostedPlanning(p, 'owner', 'comment-planning-item', input, undefined).then(r => r.result);
+
+test('capability negotiation fits planning-audit inside MAX_CONTRACT_FEATURES for all actions', () => {
+  for (const [action, status, startWithIntent, input] of [
+    ['status', true, false, {}],
+    ['planning', false, false, {}],
+    ['planning', false, false, { counts: true, initiativeId: randomUUID() }],
+    ['put-planning-item', false, false, {}],
+    ['start', false, false, {}],
+    ['start', false, true, {}],
+    ['finish', false, false, {}],
+  ]) {
+    const { features } = capabilityOptions('.', status, startWithIntent, action, input);
+    assert.ok(
+      features.length <= MAX_CONTRACT_FEATURES,
+      `${action} (${startWithIntent}): ${features.length} > ${MAX_CONTRACT_FEATURES}`,
+    );
+    if (['planning', 'put-planning-item', 'start'].includes(action))
+      assert.ok(features.includes(planningAuditFeature), `${action} requests planning-audit`);
+  }
+});
+
+test('pure audit diff helpers handle Done-when ticks, bounded body excerpts and strict calendar dates', () => {
+  const dw = diffDoneWhen(
+    '## Done when\n- [ ] First check\n- [x] Second check\n- [ ] Old line\n',
+    '## Done when\n- [x] First check\n- [ ] Second check\n- [ ] Added line\n',
+  );
+  assert.deepEqual(dw, {
+    ticked: ['First check'],
+    unticked: ['Second check'],
+    added: [{ checked: false, text: 'Added line' }],
+    removed: [{ checked: false, text: 'Old line' }],
+  });
+  const body = bodyDiffSummary(
+    Array.from({ length: 10 }, (_, i) => `old line ${i}`).join('\n'),
+    Array.from({ length: 10 }, (_, i) => `new line ${i}`).join('\n'),
+  );
+  assert.equal(body.addedLines, 10);
+  assert.equal(body.removedLines, 10);
+  assert.equal(body.excerpt.length, 6);
+  assert.equal(body.truncated, true);
+  assert.ok(Number.isFinite(parseAuditInstant('2026-11-22')));
+  assert.ok(Number.isNaN(parseAuditInstant('2026-02-30')));
+  assert.ok(Number.isNaN(parseAuditInstant('2026-11-22T25:00:00Z')));
+});
+
+test('Item audit timeline records who, when and what changed across versions, comments, Lanes and landings with exact paging', async t => {
+  const baseTime = Date.parse('2026-11-18T10:00:00.000Z');
+  t.mock.timers.enable({ apis: ['Date'], now: baseTime });
+  const s = await setup(t);
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  addDeviceAndAccounts(s);
+
+  const as = identity => {
+    s.ctx.auth.getUserIdentity = async () => identity;
+  };
+  const agentPort = makePort(s, {
+    commentAgent: () => ({ agent: 'lucky-hornet', agentClient: 'claude-code:claude-opus-5-5' }),
+  });
+  const humanPort = makePort(s);
+
+  // Create Initiatives and a parent Issue as the owner in the browser.
+  as({ subject: 'owner' });
+  const initA = (await runPut(humanPort, { kind: 'initiative', title: 'Init A' })).itemId;
+  const initB = (await runPut(humanPort, { kind: 'initiative', title: 'Init B' })).itemId;
+  const parentId = (await runPut(humanPort, { kind: 'issue', title: 'Parent Item', initiativeId: initA }))
+    .itemId;
+
+  // v1: created in browser.
+  t.mock.timers.setTime(Date.parse('2026-11-18T11:00:00.000Z'));
+  const itemId = (
+    await runPut(humanPort, {
+      kind: 'issue',
+      title: 'Audit target',
+      body: 'Intro paragraph.\n\n## Done when\n- [ ] Ship timeline\n- [ ] Add tests\n',
+      initiativeId: initA,
+    })
+  ).itemId;
+
+  // v2: agent edits title, body prose, sets waitingOn, owner, type and moves to initB + parentId + order.
+  as({ subject: 'owner', forgeCredential: 'cred-1' });
+  t.mock.timers.setTime(Date.parse('2026-11-18T12:00:00.000Z'));
+  await runPut(agentPort, {
+    planningItemId: itemId,
+    expectedVersion: 1,
+    title: 'Audit target v2',
+    body: 'Updated intro paragraph.\n\n## Done when\n- [ ] Ship timeline\n- [ ] Add tests\n',
+    initiativeId: initB,
+    fields: {
+      parentId,
+      order: 'L000001V',
+      owner: '@ada/lucky-hornet',
+      type: 'task',
+      waitingOn: { kind: 'evidence', reason: 'Need live counts' },
+    },
+  });
+
+  // v3: agent ticks one Done-when checkbox only and clears waitingOn.
+  t.mock.timers.setTime(Date.parse('2026-11-18T13:00:00.000Z'));
+  await runPut(agentPort, {
+    planningItemId: itemId,
+    expectedVersion: 2,
+    body: 'Updated intro paragraph.\n\n## Done when\n- [x] Ship timeline\n- [ ] Add tests\n',
+    fields: { waitingOn: null },
+  });
+
+  // Comment (agent) + decision comment (browser, creating derived v4).
+  t.mock.timers.setTime(Date.parse('2026-11-18T13:30:00.000Z'));
+  const firstComment = await runComment(agentPort, { planningItemId: itemId, text: 'Started work.' });
+  as({ subject: 'owner' });
+  t.mock.timers.setTime(Date.parse('2026-11-18T14:00:00.000Z'));
+  const decComment = await runComment(humanPort, {
+    planningItemId: itemId,
+    text: 'Keep timeline newest first.',
+    decision: true,
+    replyTo: firstComment.commentId,
+  });
+
+  // Lane + Landing + Revert on the Item's Intent (the Issue's planned Intent is already stored by create).
+  const laneId = randomUUID();
+  const receiptId = randomUUID();
+  const revertReceiptId = randomUUID();
+  await records.writeHostedRecord(s.ctx, {
+    projectId: s.projectId,
+    actor: 'owner',
+    authorityEpoch: 1,
+    expectedVersion: null,
+    record: {
+      kind: 'lane',
+      id: laneId,
+      version: 0,
+      at: '2026-11-18T14:15:00.000Z',
+      intentId: itemId,
+      actor: 'owner',
+      agentRun: 'lucky-hornet',
+      agentClient: 'claude-code:claude-opus-5-5',
+      base: { head: 'a'.repeat(64), receiptId: 'seed' },
+      head: 'b'.repeat(64),
+      sourceVersion: 0,
+      lifecycleVersion: 0,
+      state: 'completed',
+      authorityEpoch: 1,
+    },
+  });
+  await notes.postIntentLandingNote(s.ctx, s.projectId, {
+    intentId: itemId,
+    receiptId,
+    kind: 'landed',
+    at: '2026-11-18T14:30:00.000Z',
+    laneIds: [laneId],
+    commit: 'c'.repeat(64),
+    sequence: 10,
+    actor: 'owner',
+    agentRun: 'lucky-hornet',
+    agentClient: 'claude-code:claude-opus-5-5',
+    landedBy: { by: 'agent', review: 'none' },
+  });
+  await notes.postIntentLandingNote(s.ctx, s.projectId, {
+    intentId: itemId,
+    receiptId: revertReceiptId,
+    kind: 'reverted',
+    at: '2026-11-18T14:45:00.000Z',
+    laneIds: [laneId],
+    commit: 'd'.repeat(64),
+    sequence: 11,
+    actor: 'owner',
+    revertOf: receiptId,
+    landedBy: { by: 'person', review: 'person' },
+  });
+
+  // v5: close with reason, v6: reopen, v7: archive, v8: restore.
+  as({ subject: 'owner', forgeCredential: 'cred-1' });
+  t.mock.timers.setTime(Date.parse('2026-11-18T15:00:00.000Z'));
+  await runPut(agentPort, {
+    planningItemId: itemId,
+    expectedVersion: 4,
+    status: 'closed',
+    reason: 'Done-when met',
+  });
+  as({ subject: 'owner' });
+  t.mock.timers.setTime(Date.parse('2026-11-18T16:00:00.000Z'));
+  await runPut(humanPort, {
+    planningItemId: itemId,
+    expectedVersion: 5,
+    status: 'open',
+    reason: 'Follow-up needed',
+  });
+  t.mock.timers.setTime(Date.parse('2026-11-18T17:00:00.000Z'));
+  await runPut(humanPort, { planningItemId: itemId, expectedVersion: 6, status: 'archived' });
+  t.mock.timers.setTime(Date.parse('2026-11-18T18:00:00.000Z'));
+  await runPut(humanPort, { planningItemId: itemId, expectedVersion: 7, status: 'open' });
+
+  // Single-call full timeline read (supports short 8-hex prefix too!).
+  agentPort.calls.length = 0;
+  const full = await runPlanning(agentPort, { planningItemId: itemId, history: true, limit: 100 });
+  assert.deepEqual(agentPort.calls, ['projectHostedPlanning:itemHistory'], 'one bounded query call');
+  assert.equal(full.itemId, itemId);
+  assert.equal(full.historyStartsAt, '2026-11-18T11:00:00.000Z');
+  assert.equal(full.firstVersion, 1);
+  assert.equal(full.completeFromCreation, true);
+  assert.equal(full.coverage, 'complete');
+  assert.equal(full.nextCursor, null);
+  assert.equal(full.events.length, 13, '8 versions + 2 comments + 1 lane + 1 landing + 1 revert');
+  // Strictly newest first.
+  for (let i = 1; i < full.events.length; i++)
+    assert.ok(full.events[i - 1].at >= full.events[i].at, 'newest first ordering');
+
+  const byVersion = new Map(full.events.filter(e => e.kind === 'version').map(e => [e.version, e]));
+  assert.equal(byVersion.get(1).actor, 'ada');
+  assert.equal(byVersion.get(1).actorKind, 'person');
+  assert.equal(byVersion.get(1).changes[0].kind, 'created');
+
+  const v2 = byVersion.get(2);
+  assert.equal(v2.actor, 'ada/lucky-hornet');
+  assert.equal(v2.actorKind, 'agent');
+  assert.equal(v2.model, 'claude-opus-5-5');
+  assert.deepEqual(v2.changes.map(c => c.kind).sort(), [
+    'body',
+    'move',
+    'move',
+    'move',
+    'owner',
+    'title',
+    'type',
+    'waiting-on',
+  ]);
+
+  const v3 = byVersion.get(3);
+  assert.equal(v3.actor, 'ada/lucky-hornet');
+  assert.deepEqual(
+    v3.changes.map(c => c.kind),
+    ['done-when', 'waiting-on'],
+    'pure Done-when tick omits redundant body diff',
+  );
+  assert.deepEqual(v3.changes[0].ticked, ['Ship timeline']);
+  assert.equal(v3.changes[1].action, 'cleared');
+
+  assert.equal(byVersion.get(4).decisionCommentId, decComment.commentId);
+  assert.equal(byVersion.get(5).changes[0].transition, 'closed');
+  assert.equal(byVersion.get(5).changes[0].reason, 'Done-when met');
+  assert.equal(byVersion.get(5).actor, 'ada/lucky-hornet');
+  assert.equal(byVersion.get(6).changes[0].transition, 'reopened');
+  assert.equal(byVersion.get(6).actor, 'ada');
+  assert.equal(byVersion.get(6).actorKind, 'person');
+  assert.equal(byVersion.get(7).changes[0].transition, 'archived');
+  assert.equal(byVersion.get(7).changes[0].was, 'open');
+  assert.equal(byVersion.get(8).changes[0].transition, 'restored');
+
+  assert.ok(
+    full.events.some(
+      e => e.kind === 'comment' && e.decision === true && e.replyTo === firstComment.commentId,
+    ),
+  );
+  assert.ok(full.events.some(e => e.kind === 'lane' && e.id === laneId && e.actor === 'ada/lucky-hornet'));
+  assert.ok(full.events.some(e => e.kind === 'landing' && e.id === receiptId));
+  assert.ok(
+    full.events.some(e => e.kind === 'revert' && e.id === revertReceiptId && e.revertOf === receiptId),
+  );
+
+  // Page through with limit=3: exact match with full timeline, zero duplicates, zero skips.
+  const paged = [];
+  let cursor = null;
+  for (let guard = 0; guard < 20; guard++) {
+    const page = await runPlanning(agentPort, {
+      planningItemId: itemId,
+      history: true,
+      limit: 3,
+      cursor,
+    });
+    assert.ok(page.events.length <= 3);
+    paged.push(...page.events);
+    cursor = page.nextCursor;
+    if (!cursor) break;
+  }
+  assert.equal(cursor, null);
+  assert.deepEqual(
+    paged.map(e => `${e.kind}:${e.id}`),
+    full.events.map(e => `${e.kind}:${e.id}`),
+    'k-way paged timeline matches single-page timeline exactly',
+  );
+
+  // Terminal formatting helper produces readable lines.
+  const lines = cliReplyLines(['agent', '.', 'planning'], { action: 'planning', result: full });
+  assert.match(lines[0], /Audit target v2/);
+  assert.ok(lines.length >= 14);
+
+  // Older server without planning-audit refuses cleanly.
+  const oldPort = makePort(s, { features: [...hostedContractFeatures, planningHistoryFeature] });
+  await assert.rejects(
+    runPlanning(oldPort, { planningItemId: itemId, history: true }),
+    code('HOSTED_ACTION_UNSUPPORTED'),
+  );
+});
+
+test('backlog window view lists closed, reopened and changed Items per Initiative with shelf-restore exclusion and paging', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-10T10:00:00.000Z') });
+  const s = await setup(t);
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  addDeviceAndAccounts(s);
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: 'cred-1' });
+  const p = makePort(s, {
+    commentAgent: () => ({ agent: 'amber-fox', agentClient: 'codex:gpt-5' }),
+  });
+
+  const initA = (await runPut(p, { kind: 'initiative', title: 'Alpha' })).itemId;
+  const initB = (await runPut(p, { kind: 'initiative', title: 'Beta' })).itemId;
+
+  // Before window (Nov 10): create closedItem, reopenItem, shelvedClosedItem, otherInitItem.
+  const closedItem = (await runPut(p, { kind: 'issue', title: 'Will close', initiativeId: initA })).itemId;
+  const reopenItem = (
+    await runPut(p, { kind: 'issue', title: 'Will reopen', initiativeId: initA, status: 'closed' })
+  ).itemId;
+  const shelvedItem = (
+    await runPut(p, { kind: 'issue', title: 'Shelved close', initiativeId: initA, status: 'closed' })
+  ).itemId;
+  await runPut(p, { planningItemId: shelvedItem, expectedVersion: 1, status: 'archived' });
+  const otherItem = (await runPut(p, { kind: 'issue', title: 'In Beta', initiativeId: initB })).itemId;
+
+  // Inside window (Nov 15 - Nov 18):
+  t.mock.timers.setTime(Date.parse('2026-11-15T12:00:00.000Z'));
+  await runPut(p, {
+    planningItemId: closedItem,
+    expectedVersion: 1,
+    status: 'closed',
+    reason: 'Shipped',
+  });
+  t.mock.timers.setTime(Date.parse('2026-11-16T12:00:00.000Z'));
+  await runPut(p, {
+    planningItemId: reopenItem,
+    expectedVersion: 1,
+    status: 'open',
+    reason: 'Regressed',
+  });
+  // Restoring a shelved closed Item must NOT count as a new close.
+  t.mock.timers.setTime(Date.parse('2026-11-17T12:00:00.000Z'));
+  await runPut(p, { planningItemId: shelvedItem, expectedVersion: 2, status: 'closed' });
+  // Edit in Beta.
+  t.mock.timers.setTime(Date.parse('2026-11-18T12:00:00.000Z'));
+  await runPut(p, { planningItemId: otherItem, expectedVersion: 1, title: 'In Beta edited' });
+
+  // Outside window (Nov 20).
+  t.mock.timers.setTime(Date.parse('2026-11-20T12:00:00.000Z'));
+  const lateItem = (await runPut(p, { kind: 'issue', title: 'After window', initiativeId: initA })).itemId;
+  void lateItem;
+
+  // One bounded indexed read for initA [Nov 15..Nov 18].
+  p.calls.length = 0;
+  const allA = await runPlanning(p, {
+    initiativeId: initA,
+    history: { from: '2026-11-15', to: '2026-11-18' },
+  });
+  assert.deepEqual(p.calls, ['projectHostedPlanning:windowHistory']);
+  assert.equal(allA.coverage, 'complete');
+  assert.deepEqual(allA.counts, { total: 3, closed: 1, reopened: 1, created: 0, changed: 1 });
+  const byId = new Map(allA.items.map(row => [row.itemId, row]));
+  assert.deepEqual(byId.get(closedItem).events, ['closed']);
+  assert.equal(byId.get(closedItem).closedAt, '2026-11-15T12:00:00.000Z');
+  assert.equal(byId.get(closedItem).actor, 'ada/amber-fox');
+  assert.deepEqual(byId.get(reopenItem).events, ['reopened']);
+  assert.equal(byId.get(reopenItem).reopenedAt, '2026-11-16T12:00:00.000Z');
+  assert.deepEqual(byId.get(shelvedItem).events, ['changed'], 'shelf restore is changed, not a new close');
+  assert.equal(byId.get(shelvedItem).closedAt, null);
+
+  // Filter change:'closed' and change:'reopened'.
+  const onlyClosed = await runPlanning(p, {
+    initiativeId: initA,
+    history: { from: '2026-11-15', to: '2026-11-18', change: 'closed' },
+  });
+  assert.deepEqual(
+    onlyClosed.items.map(i => i.itemId),
+    [closedItem],
+  );
+  const onlyReopened = await runPlanning(p, {
+    initiativeId: initA,
+    history: { from: '2026-11-15', to: '2026-11-18', change: 'reopened' },
+  });
+  assert.deepEqual(
+    onlyReopened.items.map(i => i.itemId),
+    [reopenItem],
+  );
+
+  // Project-wide window read (no initiativeId) with paging (limit=2).
+  const page1 = await runPlanning(p, {
+    history: { from: '2026-11-15', to: '2026-11-18' },
+    limit: 2,
+  });
+  assert.equal(page1.items.length, 2);
+  assert.ok(page1.nextCursor);
+  const page2 = await runPlanning(p, {
+    history: { from: '2026-11-15', to: '2026-11-18' },
+    limit: 2,
+    cursor: page1.nextCursor,
+  });
+  assert.equal(page2.items.length, 2);
+  assert.equal(page2.nextCursor, null);
+  assert.deepEqual(
+    [...page1.items, ...page2.items].map(i => i.itemId).sort(),
+    [closedItem, reopenItem, shelvedItem, otherItem].sort(),
+  );
+
+  // Invalid window args refused.
+  await assert.rejects(
+    runPlanning(p, { history: { from: '2026-11-20', to: '2026-11-15' } }),
+    code('BAD_ARGUMENT'),
+  );
+  assert.equal(
+    hostedAgentCommandSchemas.planning.safeParse({
+      planningItemId: closedItem,
+      history: { from: '2026-11-15' },
+    }).success,
+    false,
+  );
+  assert.equal(
+    hostedAgentCommandSchemas.planning.safeParse({ kind: 'issue', history: { from: '2026-11-15' } }).success,
+    false,
+    'kind is refused on a window read instead of ignored',
+  );
+});
+
+test('window read lists each Item once across scan pages, keeps its older close and ignores versions after `to`', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-10T10:00:00.000Z') });
+  const s = await setup(t);
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  addDeviceAndAccounts(s);
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
+  const p = makePort(s);
+  const initiative = (await runPut(p, { kind: 'initiative', title: 'Gamma' })).itemId;
+  const closer = (await runPut(p, { kind: 'issue', title: 'Closes then edits', initiativeId: initiative }))
+    .itemId;
+  const editor = (await runPut(p, { kind: 'issue', title: 'Edited once', initiativeId: initiative })).itemId;
+  const at = iso => t.mock.timers.setTime(Date.parse(iso));
+  at('2026-11-15T09:00:00.000Z');
+  await runPut(p, { planningItemId: closer, expectedVersion: 1, status: 'closed', reason: 'Shipped' });
+  at('2026-11-15T12:00:00.000Z');
+  await runPut(p, { planningItemId: editor, expectedVersion: 1, title: 'Edited once!' });
+  at('2026-11-16T09:00:00.000Z');
+  await runPut(p, { planningItemId: closer, expectedVersion: 2, title: 'Closed and retitled' });
+  // After the window: never listed, never spends the scan.
+  at('2026-11-20T09:00:00.000Z');
+  await runPut(p, { planningItemId: closer, expectedVersion: 3, status: 'open', reason: 'Later' });
+  at('2026-11-21T09:00:00.000Z');
+
+  const { readBacklogWindowAudit } = await import(moduleUrl('../convex/projectPlanningWindow.ts'));
+  const project = await s.ctx.db.get(s.projectId);
+  for (const initiativeId of [initiative, undefined]) {
+    const seen = [];
+    let cursor = null;
+    let pages = 0;
+    do {
+      const page = await readBacklogWindowAudit(s.ctx, project, null, {
+        ...(initiativeId ? { initiativeId } : {}),
+        from: '2026-11-15',
+        until: '2026-11-18',
+        cursor,
+        scanRows: 1,
+      });
+      assert.equal(page.window.until, '2026-11-18T23:59:59.999Z');
+      seen.push(...page.items);
+      cursor = page.nextCursor;
+      assert.ok(++pages < 10, 'paging ends');
+    } while (cursor);
+    assert.deepEqual(seen.map(item => item.itemId).sort(), [closer, editor].sort(), 'each Item exactly once');
+    const closed = seen.find(item => item.itemId === closer);
+    assert.deepEqual(closed.events, ['closed', 'changed'], 'the older close survives the scan-page split');
+    assert.equal(closed.closedAt, '2026-11-15T09:00:00.000Z');
+    assert.equal(closed.reason, 'Shipped');
+    assert.equal(closed.title, 'Closed and retitled', 'the newest in-window version, not the later reopen');
+    assert.equal(closed.versionsInWindow, 2);
+  }
+});
+
+test('Item timeline pages every version past lifecycle-plan rows that share its key and version', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-18T10:00:00.000Z') });
+  const s = await setup(t);
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  addDeviceAndAccounts(s);
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
+  const p = makePort(s);
+  const itemId = (await runPut(p, { kind: 'issue', title: 'Many versions' })).itemId;
+  for (let version = 1; version < 6; version++) {
+    t.mock.timers.setTime(Date.parse(`2026-11-18T1${version}:00:00.000Z`));
+    await runPut(p, { planningItemId: itemId, expectedVersion: version, title: `Many versions ${version}` });
+  }
+  // A purge plan's copies of versions 5 and 4 sit beside the real rows in the version index.
+  for (const { _id, _creationTime, ...row } of [...s.tables.projectHostedRecords.values()].filter(
+    r => r.kind === 'issue' && r.key === itemId && (r.version === 5 || r.version === 4),
+  ))
+    await s.ctx.db.insert('projectHostedRecords', { ...row, lifecyclePlanId: 'plan-1' });
+  const versions = [];
+  let cursor = null;
+  for (let guard = 0; guard < 20; guard++) {
+    const page = await runPlanning(p, { planningItemId: itemId, history: true, limit: 2, cursor });
+    versions.push(...page.events.filter(e => e.kind === 'version').map(e => e.version));
+    cursor = page.nextCursor;
+    if (!cursor) break;
+  }
+  assert.deepEqual(versions, [6, 5, 4, 3, 2, 1], 'every version once, newest first');
+});
+
+test('serverPutWriter enforces credential-based agent attribution, pre-deploy retry safety and bounded byte delta', async t => {
+  const s = await setup(t);
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  addDeviceAndAccounts(s);
+  const as = identity => {
+    s.ctx.auth.getUserIdentity = async () => identity;
+  };
+  const sendCmd = async (command, identity) => {
+    as(identity);
+    return workCommand.command._handler(s.ctx, {
+      projectId: s.projectId,
+      operationId: command.operationId,
+      command: JSON.stringify(command),
+    });
+  };
+
+  // Browser sign-in strips forged agent/agentClient (0 extra bytes).
+  const itemId = randomUUID();
+  await sendCmd(
+    {
+      action: 'put-planning-item',
+      operationId: randomUUID(),
+      itemId,
+      expectedVersion: 0,
+      kind: 'issue',
+      title: 'Writer rules',
+      agent: 'forged-slug',
+      agentClient: 'claude-code:forged',
+    },
+    { subject: 'owner' },
+  );
+  const browserRows = [...s.tables.projectHostedRecords.values()].filter(
+    r => r.kind === 'issue' && r.key === itemId,
+  );
+  const v1Item = JSON.parse(browserRows[0].inline).item;
+  assert.equal(v1Item.agent, undefined);
+  assert.equal(v1Item.agentClient, undefined);
+  const browserBytes = browserRows[0].bytes;
+
+  // Device credential without slug gets deterministic fallback slug; with slug+model keeps both.
+  await sendCmd(
+    {
+      action: 'put-planning-item',
+      operationId: randomUUID(),
+      itemId,
+      expectedVersion: 1,
+      status: 'in-progress',
+    },
+    { subject: 'owner', forgeCredential: 'cred-1' },
+  );
+  const v2Row = [...s.tables.projectHostedRecords.values()].find(
+    r => r.kind === 'issue' && r.key === itemId && r.version === 2,
+  );
+  const v2Item = JSON.parse(v2Row.inline).item;
+  assert.ok(isAgentSlug(v2Item.agent), 'device without slug gets deterministic word-pair slug');
+  assert.equal(v2Item.agentClient, undefined);
+
+  await sendCmd(
+    {
+      action: 'put-planning-item',
+      operationId: randomUUID(),
+      itemId,
+      expectedVersion: 2,
+      status: 'closed',
+      agent: 'lucky-hornet',
+      agentClient: 'antigravity:gemini-4-neon',
+    },
+    { subject: 'owner', forgeCredential: 'cred-1' },
+  );
+  const v3Row = [...s.tables.projectHostedRecords.values()].find(
+    r => r.kind === 'issue' && r.key === itemId && r.version === 3,
+  );
+  const v3Item = JSON.parse(v3Row.inline).item;
+  assert.equal(v3Item.agent, 'lucky-hornet');
+  assert.equal(v3Item.agentClient, 'antigravity:gemini-4-neon');
+
+  // Measure exact byte delta on canonical version record for identical payload with vs without agent attribution.
+  const withoutAgentBytes = Buffer.byteLength(
+    JSON.stringify({ ...v3Item, agent: undefined, agentClient: undefined }),
+  );
+  const withAgentBytes = Buffer.byteLength(JSON.stringify(v3Item));
+  const delta = withAgentBytes - withoutAgentBytes;
+  assert.ok(delta > 0 && delta <= 160, `bounded agent attribution delta: ${delta} bytes`);
+  t.diagnostic(
+    JSON.stringify({
+      browserRecordBytes: browserBytes,
+      versionWithoutAgentBytes: withoutAgentBytes,
+      versionWithAgentBytes: withAgentBytes,
+      agentDeltaBytes: delta,
+    }),
+  );
+
+  // Batch put from device also stamps agent & agentClient.
+  const batchPort = makePort(s, {
+    commentAgent: () => ({ agent: 'lucky-hornet', agentClient: 'claude-code:claude-opus-5-5' }),
+  });
+  as({ subject: 'owner', forgeCredential: 'cred-1' });
+  await runPut(batchPort, {
+    batch: [{ itemId, expectedVersion: 3, status: 'open', reason: 'Batch reopen' }],
+  });
+  const v4Row = [...s.tables.projectHostedRecords.values()].find(
+    r => r.kind === 'issue' && r.key === itemId && r.version === 4,
+  );
+  assert.equal(JSON.parse(v4Row.inline).item.agent, 'lucky-hornet');
+
+  // Pre-deploy retry compatibility: a put written before serverPutWriter (no agent) replays safely from a device.
+  const preDeployOp = randomUUID();
+  const preDeployPut = {
+    action: 'put-planning-item',
+    operationId: preDeployOp,
+    itemId,
+    expectedVersion: 4,
+    status: 'closed',
+  };
+  const first = await sendCmd(preDeployPut, { subject: 'owner' });
+  const replayed = await sendCmd(preDeployPut, { subject: 'owner', forgeCredential: 'cred-1' });
+  assert.equal(replayed.operationId, first.operationId);
+  assert.equal(replayed.revision, first.revision);
+  await assert.rejects(
+    sendCmd({ ...preDeployPut, status: 'abandoned' }, { subject: 'owner', forgeCredential: 'cred-1' }),
+    code('WORK_OPERATION_CHANGED'),
+  );
+
+  // Server-scheduled member start move records reason 'Lane started' without agent or raw actor.
+  const openId = randomUUID();
+  await sendCmd(
+    {
+      action: 'put-planning-item',
+      operationId: randomUUID(),
+      itemId: openId,
+      expectedVersion: 0,
+      kind: 'issue',
+      title: 'Member start',
+    },
+    { subject: 'owner' },
+  );
+  as(null);
+  await startMove._handler(s.ctx, {
+    projectId: s.projectId,
+    owner: 'owner',
+    itemId: openId,
+    actor: 'writer',
+    startOperationId: randomUUID(),
+  });
+  const movedRow = [...s.tables.projectHostedRecords.values()].find(
+    r => r.kind === 'issue' && r.key === openId && r.version === 2,
+  );
+  const moved = JSON.parse(movedRow.inline).item;
+  assert.equal(moved.status, 'in-progress');
+  assert.equal(moved.reason, 'Lane started');
+  assert.equal(moved.agent, undefined);
+});
+
+test('audit reads enforce membership and public-identity rules across signed-out, stranger, reader, writer and owner', async t => {
+  const s = await setup(t);
+  const project = s.tables.hostedProjects.get(s.projectId);
+  project.visibility = 'public';
+  project.workStore = 'records';
+  project.workStoreWriters = ['planning'];
+  addDeviceAndAccounts(s);
+  const as = identity => {
+    s.ctx.auth.getUserIdentity = async () => identity;
+  };
+  as({ subject: 'owner', forgeCredential: 'cred-1' });
+  const p = makePort(s, {
+    commentAgent: () => ({ agent: 'lucky-hornet', agentClient: 'claude-code:claude-opus-5-5' }),
+  });
+  const initId = (await runPut(p, { kind: 'initiative', title: 'Public Init' })).itemId;
+  const visibleId = (await runPut(p, { kind: 'issue', title: 'Visible Item', initiativeId: initId })).itemId;
+  const hiddenId = (
+    await runPut(p, { kind: 'issue', title: 'Secret Item', initiativeId: initId, fields: { hidden: true } })
+  ).itemId;
+  await runPut(p, { planningItemId: visibleId, expectedVersion: 1, fields: { owner: '@ada/lucky-hornet' } });
+
+  // Signed-out and signed-in stranger are refused identically on visible, hidden and absent Items.
+  for (const viewer of [null, { subject: 'stranger' }]) {
+    as(viewer);
+    for (const id of [visibleId, hiddenId, randomUUID()]) {
+      await assert.rejects(
+        hostedPlanning.itemHistory._handler(s.ctx, { projectId: s.projectId, itemId: id }),
+        code('PROJECT_UNAVAILABLE'),
+      );
+    }
+    await assert.rejects(
+      hostedPlanning.windowHistory._handler(s.ctx, {
+        projectId: s.projectId,
+        initiativeId: initId,
+        from: '2026-01-01',
+      }),
+      code('PROJECT_UNAVAILABLE'),
+    );
+  }
+
+  // Reader (project member, read-only): allowed, sees agent slug & model, NEVER sees owner's handle or raw id.
+  as({ subject: 'reader' });
+  const readerItem = JSON.parse(
+    await hostedPlanning.itemHistory._handler(s.ctx, { projectId: s.projectId, itemId: visibleId }),
+  );
+  const readerWindow = JSON.parse(
+    await hostedPlanning.windowHistory._handler(s.ctx, {
+      projectId: s.projectId,
+      initiativeId: initId,
+      from: '2020-01-01',
+    }),
+  );
+  for (const payload of [readerItem, readerWindow]) {
+    const serialized = JSON.stringify(payload);
+    assert.doesNotMatch(serialized, /\bada\b/, 'reader never sees person handle');
+    assert.match(serialized, /lucky-hornet/, 'reader still sees agent slug');
+    assert.match(serialized, /claude-opus-5-5/, 'reader still sees declared model');
+  }
+  assert.ok(
+    readerItem.events.every(e => e.actor === undefined),
+    'reader never sees actor handle or raw account id on timeline events',
+  );
+  assert.equal(
+    readerItem.events[0].changes[0].after.owner,
+    undefined,
+    'reader never sees owner handle inside owner change',
+  );
+  assert.ok(
+    readerWindow.items.every(i => i.actor === undefined),
+    'reader never sees actor handle or raw account id on window items',
+  );
+
+  // Writer & owner see public handle 'ada/lucky-hornet', never raw account id 'owner'.
+  for (const member of ['writer', 'owner']) {
+    as({ subject: member });
+    const reply = JSON.parse(
+      await hostedPlanning.itemHistory._handler(s.ctx, { projectId: s.projectId, itemId: visibleId }),
+    );
+    assert.equal(reply.events[0].actor, 'ada/lucky-hornet');
+    assert.doesNotMatch(JSON.stringify(reply.events.map(e => e.actor)), /"owner"/);
+  }
+});
+
+test('purged Items and legacy non-records projects read safely in itemHistory and windowHistory', async t => {
+  const s = await setup(t);
+  addDeviceAndAccounts(s);
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
+  const p = makePort(s);
+
+  // Legacy project (workStore !== 'records'): itemHistory works from planningVersions; windowHistory reports unavailable.
+  const legacyId = (await runPut(p, { kind: 'issue', title: 'Legacy tracked' })).itemId;
+  await runPut(p, { planningItemId: legacyId, expectedVersion: 1, status: 'closed', reason: 'Legacy close' });
+  const legacyHist = await runPlanning(p, { planningItemId: legacyId, history: true });
+  assert.equal(legacyHist.completeFromCreation, true);
+  assert.equal(legacyHist.events.length, 2);
+  assert.equal(legacyHist.events[0].changes[0].transition, 'closed');
+  const legacyWin = await runPlanning(p, { history: { from: '2020-01-01' } });
+  assert.equal(legacyWin.coverage, 'unavailable');
+  assert.deepEqual(legacyWin.items, []);
+
+  // Purged Item on records project: returns tombstone without throwing PLANNING_ITEM_PURGED.
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  const purgedId = (await runPut(p, { kind: 'issue', title: 'Will purge' })).itemId;
+  await runPut(p, { planningItemId: purgedId, expectedVersion: 1, status: 'deleted' });
+  const purgeOp = randomUUID();
+  const { purgeFromServer } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+  const { itemRows, purgeList } = await import('./planning-purge-fixture.mjs');
+  const allEvents = [...s.tables.projectHostedRecordBodies.values()].filter(b => b.operationId);
+  await purgeFromServer._handler(s.ctx, {
+    projectId: s.projectId,
+    operationId: purgeOp,
+    owner: 'owner',
+    command: JSON.stringify({
+      action: 'purge-planning-item',
+      operationId: purgeOp,
+      itemId: purgedId,
+      kind: 'issue',
+      expectedVersion: 2,
+      deletedAt: '2026-11-22T00:00:00.000Z',
+      rows: purgeList(itemRows(allEvents, [purgedId])),
+    }),
+  });
+  const purgedHist = await runPlanning(p, { planningItemId: purgedId, history: true });
+  assert.equal(purgedHist.coverage, 'purged');
+  assert.equal(purgedHist.events[0].changes[0].kind, 'purged');
+  assert.equal(purgedHist.events[0].actor, 'ada');
+});

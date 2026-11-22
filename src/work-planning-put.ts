@@ -94,6 +94,7 @@ export function resolvePlanningPut(
     initiativeId: command.initiativeId === null ? undefined : (command.initiativeId ?? current?.initiativeId),
     reason: command.reason,
     model: { ...resolveModelFields(command, current), ...shelfFrom(status, current) },
+    agent: putAgentFields(command),
   };
 }
 
@@ -154,6 +155,17 @@ type Discussed = {
   agentClient?: string | undefined;
 };
 
+/** Valid agent session slug and declared client/model on a planning write (shared by puts and comments). */
+export function putAgentFields(command: { agent?: string | undefined; agentClient?: string | undefined }) {
+  return {
+    ...(isAgentSlug(command.agent) ? { agent: command.agent } : {}),
+    // The declared model belongs to an agent session only; a person's write never carries one.
+    ...(isAgentSlug(command.agent) && command.agentClient && AGENT_CLIENT.test(command.agentClient)
+      ? { agentClient: command.agentClient }
+      : {}),
+  };
+}
+
 /** The optional fields a new comment stores. A reply must name a comment on the same Item. */
 export function discussionFields(comments: readonly Comment[], itemId: string, command: Discussed) {
   let replyTo: string | undefined;
@@ -164,11 +176,7 @@ export function discussionFields(comments: readonly Comment[], itemId: string, c
   }
   return {
     ...(replyTo ? { replyTo } : {}),
-    ...(isAgentSlug(command.agent) ? { agent: command.agent } : {}),
-    // The declared model belongs to an agent session only; a person's comment never carries one.
-    ...(isAgentSlug(command.agent) && command.agentClient && AGENT_CLIENT.test(command.agentClient)
-      ? { agentClient: command.agentClient }
-      : {}),
+    ...putAgentFields(command),
     ...(command.decision ? { decision: true as const } : {}),
   };
 }

@@ -228,6 +228,27 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
       return `Landed: ${text(landing.title) || `Lane ${short(landing.laneId) || 'unknown'} (title unavailable)`} · ${when(landing.committedAt)} · State ${short(landing.landedHead)} · ${attribution} · ${count(costs.runnerAccepted)} accepted runner-minutes, ${costs.runnerDiscardedPending === true ? 'pending' : count(costs.runnerDiscarded)} discarded runner-minutes${mirrorState ? ` · mirror ${mirrorState}${mirrorDetail}` : ''}.`;
     });
   if (action === 'lanes' || action === 'planning') {
+    if (action === 'planning' && Array.isArray(result.events)) {
+      const header = `Item ${short(result.itemId)}: ${text(result.title) || 'title unavailable'} · ${state(result.status)}${result.historyStartsAt ? ` · history from ${when(result.historyStartsAt)}` : ''}.`;
+      const events = rows(result.events).map(event => {
+        const who =
+          text(event.actor) ||
+          text(event.agent) ||
+          (event.actorKind === 'person' ? 'a person' : text(event.actorKind) || 'unknown');
+        return `  ${when(event.at)} · ${who}${text(event.model) ? ` (${text(event.model)})` : ''} · ${text(event.summary)}`;
+      });
+      return [header, ...(events.length ? events : ['  No events in this page.'])];
+    }
+    if (action === 'planning' && result.window && Array.isArray(result.items)) {
+      const win = row(result.window);
+      const totals = row(result.counts);
+      const header = `Backlog ${when(win.from)} to ${when(win.until)} · ${count(totals.total)} Items (${count(totals.closed)} closed, ${count(totals.reopened)} reopened).`;
+      const list = rows(result.items).map(
+        item =>
+          `Item ${short(item.itemId)}: ${text(item.title) || 'title unavailable'} · ${state(item.status)} · ${text(item.summary)}`,
+      );
+      return [header, ...(list.length ? list : ['No Items in this window.'])];
+    }
     if (!result.item && !Array.isArray(result.page ?? result.items)) return [];
     const list = result.item ? [row(result.item)] : rows(result.page ?? result.items);
     return list.length

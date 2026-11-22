@@ -6,6 +6,7 @@ import {
   feedCommitOrder,
   hostedContractFeatures,
   initiativeProgressRequested,
+  planningAuditFeature,
   planningHistoryFeature,
   planningInitiativeCountsFeature,
   planningWaitingFeature,
@@ -33,6 +34,7 @@ export function capabilityOptions(
     action === 'planning' && initiativeProgressRequested(input)
       ? planningInitiativeCountsFeature
       : planningWaitingFeature;
+  const planningAudit = action === 'planning' || action === 'put-planning-item' || action === 'start';
   return {
     // Named contract features (a83b6fd5): the reply lists the ones this server implements.
     features: status
@@ -43,13 +45,16 @@ export function capabilityOptions(
             feature =>
               feature !== 'main-today' &&
               feature !== 'check-report-detail' &&
-              // Planning uses that slot for Work history, not source history.
-              (action !== 'planning' || feature !== 'history-log'),
+              // Planning uses the history-log slot for Work history. Check reads name ci-status-check
+              // themselves, so audit-capable actions give its discovery slot to planning-audit.
+              (action !== 'planning' || feature !== 'history-log') &&
+              (!planningAudit || feature !== 'ci-status-check'),
           ),
           'metric-cli-provenance',
           ...(startWithIntent ? [startLaneTitle] : []),
           ...(action === 'planning' || action === 'put-planning-item' ? [planningFeature] : []),
           ...(action === 'planning' ? [planningHistoryFeature] : []),
+          ...(planningAudit ? [planningAuditFeature] : []),
         ],
     noticeVersion: 1,
     resolveVersion: 1,

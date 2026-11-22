@@ -151,6 +151,7 @@ export function indexedRecord(
         'authorLabel',
         'author',
         'agent',
+        'agentClient',
         'replyTo',
         'decision',
         'status',

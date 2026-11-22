@@ -149,6 +149,7 @@ function applyPlanningWrite(data: WorkData, command: PlanningWrite, at: string, 
     intentIds: put.intentIds,
     ...(put.initiativeId ? { initiativeId: put.initiativeId } : {}),
     ...put.model,
+    ...put.agent,
     at,
     provenance,
   };

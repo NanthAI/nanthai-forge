@@ -153,6 +153,7 @@ export function applyUnifiedPlanning(
     intentIds: put.intentIds,
     ...(put.initiativeId ? { initiativeId: put.initiativeId } : {}),
     ...put.model,
+    ...put.agent,
     at,
     provenance,
   };
@@ -160,10 +161,12 @@ export function applyUnifiedPlanning(
   if (put.kind === 'initiative') {
     // Update in place: selected-record callers track loaded records by identity.
     if (target.initiative) {
-      // A cleared model field must not survive on the record.
+      // A cleared model or per-version agent field must not survive on the record.
       for (const key of planningModelPutKeys)
         if (key !== 'parentId') delete (target.initiative as Partial<PlanningItem>)[key];
       delete (target.initiative as Partial<PlanningItem>).was;
+      delete (target.initiative as Partial<PlanningItem>).agent;
+      delete (target.initiative as Partial<PlanningItem>).agentClient;
       Object.assign(target.initiative, item, { kind: 'initiative' });
     } else data.initiatives.push({ ...item, kind: 'initiative' });
     placeMemberships(data, item.id, item.id, linked);

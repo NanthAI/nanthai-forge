@@ -80,6 +80,8 @@ export const purgeFieldClasses = {
       'parentId',
       'relations',
       'hidden',
+      'agent',
+      'agentClient',
     ],
     words: { title: PURGED_ITEM_TITLE, body: '' },
     drop: ['reason', 'type', 'owner', 'waitingOn', 'imported'],

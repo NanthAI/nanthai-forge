@@ -623,8 +623,19 @@ export const hostedAgentCommandSchemas = {
         .optional(),
       /** Return stored state counts in one bounded read; continue with the returned cursor. */
       counts: z.boolean().optional(),
-      /** Include 14 UTC days of closes with an Initiative's status breakdown. */
-      history: z.literal(true).optional(),
+      /** true: 14 UTC days of Initiative closes (with counts:true), or one Item's paged audit timeline (with planningItemId). {from,to?,change?}: Items closed, reopened or changed in a UTC window. */
+      history: z
+        .union([
+          z.literal(true),
+          z
+            .object({
+              from: z.union([z.iso.date(), z.iso.datetime({ offset: true })]),
+              to: z.union([z.iso.date(), z.iso.datetime({ offset: true })]).optional(),
+              change: z.enum(['all', 'closed', 'reopened', 'changed']).optional(),
+            })
+            .strict(),
+        ])
+        .optional(),
       limit: z.number().int().min(1).max(100).default(50),
       cursor: z.string().nullable().default(null),
       /** Close or abandon Issues whose Intent finished; reports what it changed. */
@@ -650,14 +661,47 @@ export const hostedAgentCommandSchemas = {
       'Use counts with a list read (kind, one stored status, initiativeId and waitingOn filters only).',
     )
     .refine(
-      input => !input.history || initiativeProgressRequested(input),
-      'Use history with counts:true and an unfiltered Initiative.',
+      input =>
+        input.history !== true ||
+        Boolean(
+          (input.id || input.planningItemId || input.itemId) &&
+          !input.counts &&
+          !input.search &&
+          !input.schedule &&
+          !input.waitingOn,
+        ) ||
+        initiativeProgressRequested(input),
+      'Use history:true with planningItemId for an Item timeline, or with counts:true and an unfiltered Initiative.',
+    )
+    .refine(
+      input =>
+        typeof input.history !== 'object' ||
+        (!input.id &&
+          !input.planningItemId &&
+          !input.itemId &&
+          !input.counts &&
+          !input.search &&
+          !input.schedule &&
+          !input.waitingOn &&
+          !input.status &&
+          !input.type &&
+          !input.owner &&
+          !input.relation &&
+          !input.kind),
+      'Use history:{from,to?,change?} with optional initiativeId, limit and cursor only.',
     )
     .refine(input => !(input.id && input.search), 'Use planningItemId or search, not both.')
     .refine(input => !(input.id && input.waitingOn), 'Use waitingOn with a list or search read.')
     .refine(input => !(input.schedule && (input.id || input.search)), 'Use schedule with a list read.'),
   'put-planning-item': planningPutSchema
-    .omit({ action: true, operationId: true, itemId: true, ...omitKeys(planningModelPutKeys) })
+    .omit({
+      action: true,
+      operationId: true,
+      itemId: true,
+      agent: true,
+      agentClient: true,
+      ...omitKeys(planningModelPutKeys),
+    })
     .extend({
       ...planningIssueFields,
       initiativeId: planningRef.nullable().optional(),

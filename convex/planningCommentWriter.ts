@@ -5,7 +5,7 @@
 // kind: a device credential is an agent session, a browser sign-in is the person.
 import type { MutationCtx } from './_generated/server';
 import { invariant } from '../src/errors';
-import { isAgentSlug, slugFromDigest } from '../src/agent-slug';
+import { AGENT_CLIENT, isAgentSlug, slugFromDigest } from '../src/agent-slug';
 import { digest } from '../src/state/hash';
 import { isDeviceIdentity } from './cliServer';
 import { publicActorLabel } from './publicPeople';
@@ -50,4 +50,24 @@ export async function serverCommentWriter(ctx: MutationCtx, command: CommentComm
     );
   // A decision's body line names the same writer, empty when the account has no handle.
   if (command.decision) command.decidedBy = await publicActorLabel(ctx, user.subject, command.agent);
+}
+
+/** Normalises a planning put's agent attribution from the credential kind (Item 1d51c91f): browser sign-ins
+ * and scheduled server jobs carry no agent slug or model; device credentials always carry one. */
+export async function serverPutWriter(
+  ctx: MutationCtx,
+  command: { agent?: string | undefined; agentClient?: string | undefined },
+) {
+  const user = await ctx.auth.getUserIdentity();
+  if (!user || !isDeviceIdentity(user)) {
+    delete command.agent;
+    delete command.agentClient;
+    return;
+  }
+  if (!isAgentSlug(command.agent))
+    command.agent = slugFromDigest(
+      digest(`planning-comment-agent:${String(user.forgeCredential ?? user.subject)}`),
+    );
+  if (command.agentClient !== undefined && !AGENT_CLIENT.test(command.agentClient))
+    delete command.agentClient;
 }

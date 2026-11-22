@@ -12,7 +12,7 @@ import { planningPurgeSchema, type PlanningItem } from '../src/work-planning-typ
 import { hostedRecordSchema } from '../src/hosted-records';
 import { metadataRequest, validateMetadataSource } from '../src/work-metadata';
 import { invariant } from '../src/errors';
-import { serverCommentWriter } from './planningCommentWriter';
+import { serverCommentWriter, serverPutWriter } from './planningCommentWriter';
 import { report } from './errors';
 import { activeProject } from './projectAuthority';
 import { intentAuthority } from './projectContributors';
@@ -61,6 +61,8 @@ export async function executeCommand(
     'BAD_ARGUMENT',
     'Use an original Work operation UUID.',
   );
+  let rawPutRequest: string | undefined;
+  let rawPutCommand: string | undefined;
   if (
     command.action === 'comment-planning-item' ||
     command.action === 'put-planning-item' ||
@@ -78,6 +80,13 @@ export async function executeCommand(
     );
     // The writer, its agent marker and a decision's body line come from the sign-in, never from client text.
     if (command.action === 'comment-planning-item') await serverCommentWriter(ctx, command);
+    if (command.action === 'put-planning-item') {
+      if (command.agent === undefined && command.agentClient === undefined) {
+        rawPutCommand = JSON.stringify(command);
+        rawPutRequest = metadataRequest(command);
+      }
+      await serverPutWriter(ctx, command);
+    }
   } else if (project.owner !== user.subject && command.action !== 'intent' && 'intentId' in command) {
     await intentAuthority(ctx, input.projectId, user.subject, command.intentId);
   }
@@ -89,12 +98,28 @@ export async function executeCommand(
       'The Deleted Item changed after this purge was selected.',
     );
   const request = metadataRequest(command);
-  const original = await findWorkEvent(ctx, input.projectId, input.operationId, {
-    command: JSON.stringify(command),
-  });
+  let original;
+  try {
+    original = await findWorkEvent(ctx, input.projectId, input.operationId, {
+      command: JSON.stringify(command),
+    });
+  } catch (error) {
+    if (
+      rawPutCommand === undefined ||
+      rawPutRequest === request ||
+      !(error instanceof Error) ||
+      ((error as { data?: { code?: string }; code?: string }).data?.code !== 'WORK_OPERATION_CHANGED' &&
+        (error as { code?: string }).code !== 'WORK_OPERATION_CHANGED')
+    )
+      throw error;
+    original = await findWorkEvent(ctx, input.projectId, input.operationId, {
+      command: rawPutCommand,
+    });
+  }
   if (original) {
     invariant(
-      original.actor === user.subject && original.request === request,
+      original.actor === user.subject &&
+        (original.request === request || (rawPutRequest !== undefined && original.request === rawPutRequest)),
       'WORK_OPERATION_CHANGED',
       'Reconcile this operation’s original command.',
     );

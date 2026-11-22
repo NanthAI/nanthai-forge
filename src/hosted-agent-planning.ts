@@ -20,6 +20,7 @@ import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { hostedActionError } from './hosted-action-error.js';
 import {
   initiativeProgressRequested,
+  planningAuditFeature,
   planningInitiativeCountsFeature,
   planningHistoryFeature,
   planningWaitingFeature,
@@ -361,7 +362,10 @@ async function writePlanning(
     }
   }
 }
+const putAgent = (port: PlanningPort) =>
+  port.serverFeatures?.includes(planningAuditFeature) ? port.commentAgent?.() : undefined;
 const putFrom = (
+  port: PlanningPort,
   item: PlanningItem,
   operationId: string,
   status: PlanningItem['status'],
@@ -375,6 +379,7 @@ const putFrom = (
   // stored fields from compatiblePut).
   status,
   ...(reason === undefined ? {} : { reason }),
+  ...putAgent(port),
 });
 
 /** A unique hex prefix of a planning id (8+ characters) becomes the full id in the same call. One
@@ -528,7 +533,7 @@ async function reconcile(
           );
           await writePlanning(
             port,
-            putFrom(item, uuidFrom(`${item.id}:${item.version}:held`), item.status, marker),
+            putFrom(port, item, uuidFrom(`${item.id}:${item.version}:held`), item.status, marker),
             undefined,
             undefined,
             item,
@@ -539,7 +544,7 @@ async function reconcile(
       const reason = `Intent ${states[entry.id]}`;
       const event = await writePlanning(
         port,
-        putFrom(item, uuidFrom(`${item.id}:${item.version}:${status}`), status, reason),
+        putFrom(port, item, uuidFrom(`${item.id}:${item.version}:${status}`), status, reason),
         undefined,
         undefined,
         item,
@@ -631,6 +636,35 @@ async function readPlanning(
 ) {
   if (input.initiativeId)
     input = { ...input, initiativeId: await resolvePlanningId(port, input.initiativeId) };
+  const planningAudit = port.serverFeatures?.includes(planningAuditFeature) ? true : undefined;
+  if (input.id && input.history === true) {
+    invariant(
+      planningAudit,
+      'HOSTED_ACTION_UNSUPPORTED',
+      'This server does not return planning Item audit history yet. Upgrade the deployment before retrying.',
+    );
+    const id = await resolvePlanningId(port, input.id);
+    return await port.query<Record<string, unknown>>('projectHostedPlanning:itemHistory', {
+      itemId: id,
+      limit: input.limit,
+      cursor: input.cursor,
+    });
+  }
+  if (typeof input.history === 'object') {
+    invariant(
+      planningAudit,
+      'HOSTED_ACTION_UNSUPPORTED',
+      'This server does not return backlog window audit history yet. Upgrade the deployment before retrying.',
+    );
+    return await port.query<Record<string, unknown>>('projectHostedPlanning:windowHistory', {
+      ...(input.initiativeId ? { initiativeId: input.initiativeId } : {}),
+      from: input.history.from,
+      ...(input.history.to ? { until: input.history.to } : {}),
+      ...(input.history.change ? { change: input.history.change } : {}),
+      limit: input.limit,
+      cursor: input.cursor,
+    });
+  }
   const planningHistory = port.serverFeatures?.includes(planningHistoryFeature) ? true : undefined;
   invariant(
     !input.history || planningHistory,
@@ -1210,7 +1244,7 @@ export async function executeHostedPlanning(
   const hints: { likelyDuplicates?: unknown } = {};
   const { revision } = await writePlanning(
     port,
-    { action, operationId: journal.operationId, ...put, itemId },
+    { action, operationId: journal.operationId, ...put, itemId, ...putAgent(port) },
     journal,
     hints,
   );
@@ -1314,7 +1348,7 @@ export async function markPlanningStarted(
       await writePlanning(
         port,
         {
-          ...putFrom(item, uuidFrom(`${startOperationId}:planning-start`), 'in-progress'),
+          ...putFrom(port, item, uuidFrom(`${startOperationId}:planning-start`), 'in-progress'),
           ...(claim ? { owner: claim } : {}),
         },
         undefined,

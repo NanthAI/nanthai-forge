@@ -6,11 +6,14 @@ import type { Id } from './_generated/dataModel';
 import { recordCaller } from './projectHostedFrictionStore';
 import { recordHead } from './projectHostedRecords';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
-import { isPlanningPrefix, planningIdMaxCandidates } from '../src/planning-id';
+import { isPlanningPrefix, isPlanningUuid, planningIdMaxCandidates } from '../src/planning-id';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import { report } from './errors';
+import { accessibleProject, readProjectRole } from './projectAuthority';
+import { readItemAuditHistory } from './projectPlanningAudit';
+import { readBacklogWindowAudit } from './projectPlanningWindow';
 
 /** Lane Intent status for planned Issues: one indexed head read per id (one more per follow-up Intent), no bodies. Ids without a
  * started Intent are absent. Lets a backlog read show which Issues are finished, without a scan. */
@@ -95,3 +98,80 @@ export async function planningRootsWithPrefix(
     )
     .take(limit);
 }
+
+/** Bounded, paged audit timeline for one planning Item (Item 1d51c91f). Members only; publicPeople maps actors. */
+export const itemHistory = query({
+  args: {
+    projectId: v.id('hostedProjects'),
+    itemId: v.string(),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  returns: v.string(),
+  handler: async (ctx, { projectId, itemId, limit, cursor }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
+      const project = await accessibleProject(ctx, projectId, user.subject);
+      invariant(
+        await readProjectRole(ctx, project, user.subject),
+        'PROJECT_UNAVAILABLE',
+        'Item history is available to project members.',
+      );
+      invariant(isPlanningUuid(itemId), 'BAD_ARGUMENT', 'itemId: expected the full Item UUID.');
+      const generation = await selectedGeneration(ctx, project);
+      const partition = generation ? recordPartition(generation) : null;
+      return canonicalPayload(await readItemAuditHistory(ctx, project, partition, { itemId, limit, cursor }));
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** Bounded backlog audit view: Items closed, reopened or changed in a UTC window, per Initiative or project-wide. */
+export const windowHistory = query({
+  args: {
+    projectId: v.id('hostedProjects'),
+    initiativeId: v.optional(v.string()),
+    from: v.string(),
+    until: v.optional(v.string()),
+    change: v.optional(
+      v.union(v.literal('all'), v.literal('closed'), v.literal('reopened'), v.literal('changed')),
+    ),
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+  },
+  returns: v.string(),
+  handler: async (ctx, { projectId, initiativeId, from, until, change, limit, cursor }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
+      const project = await accessibleProject(ctx, projectId, user.subject);
+      invariant(
+        await readProjectRole(ctx, project, user.subject),
+        'PROJECT_UNAVAILABLE',
+        'Backlog history is available to project members.',
+      );
+      if (initiativeId !== undefined)
+        invariant(
+          isPlanningUuid(initiativeId),
+          'BAD_ARGUMENT',
+          'initiativeId: expected the full Initiative UUID.',
+        );
+      const generation = await selectedGeneration(ctx, project);
+      const partition = generation ? recordPartition(generation) : null;
+      return canonicalPayload(
+        await readBacklogWindowAudit(ctx, project, partition, {
+          initiativeId,
+          from,
+          until,
+          change,
+          limit,
+          cursor,
+        }),
+      );
+    } catch (error) {
+      return report(error);
+    }
+  },
+});

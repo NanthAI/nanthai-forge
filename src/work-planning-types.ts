@@ -121,6 +121,10 @@ export const planningItemSchema = z.object({
   /** The account that last wrote this body, recorded by the hosted journal replay (S-17). Public reads
    * map it to a Forge handle (convex/publicPeople.ts); absent on local Work and on older rows. */
   author: z.string().min(1).max(200).optional(),
+  /** The writing agent session's slug for this version (Item 1d51c91f); absent for person edits and older rows. */
+  agent: z.string().regex(agentSlugShape).optional(),
+  /** The writing agent session's declared client and model (`tool:model`), only beside `agent`. */
+  agentClient: z.string().regex(AGENT_CLIENT).optional(),
   at: z.string(),
   provenance: z.literal('user-declared-local'),
   /** Only on the id-only tombstone a purge writes (src/work-planning-purge.ts): the purge operation, when the Item
@@ -156,6 +160,10 @@ export const planningPutSchema = z.object({
   itemId: id,
   expectedVersion: z.number().int().nonnegative().default(0),
   ...planningPutFields,
+  /** The writing agent session's slug (set by device session / server); dropped if off-shape. */
+  agent: z.string().max(40).optional(),
+  /** The writing agent session's declared client and model (`tool:model`); dropped without `agent` or off-shape. */
+  agentClient: z.string().max(100).optional(),
 });
 export const planningCommentCommandSchema = z.object({
   action: z.literal('comment-planning-item'),

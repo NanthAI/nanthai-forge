@@ -30,7 +30,7 @@ const pageBytes = 2 * 1024 * 1024;
 
 // Journal writes use UTC ISO timestamps. Require an exact calendar date so permissive
 // Date.parse normalization cannot turn retained malformed text into dated evidence.
-function instant(at: string | undefined) {
+export function instant(at: string | undefined) {
   if (!at || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(at)) return NaN;
   const time = Date.parse(at);
   return Number.isFinite(time) &&
@@ -60,7 +60,7 @@ export function planningHistoryBudget(byteLimit = pageBytes) {
   };
 }
 
-function legacyVersions(ctx: QueryCtx, partition: Id<'projectWorkGenerations'>, itemId: string) {
+export function legacyVersions(ctx: QueryCtx, partition: Id<'projectWorkGenerations'>, itemId: string) {
   return ctx.db
     .query('projectPlanningRecords')
     .withIndex('by_generation_and_collection_and_parent_and_position', q =>
@@ -69,7 +69,7 @@ function legacyVersions(ctx: QueryCtx, partition: Id<'projectWorkGenerations'>, 
     .order('desc');
 }
 
-async function recordSnapshot(
+export async function recordSnapshot(
   ctx: QueryCtx,
   partition: Id<'projectWorkGenerations'>,
   row: IssueRecord,
@@ -125,7 +125,7 @@ async function* earlierVersions(
 
 // A return to Closed from a shelf preserves the earlier close. A shelved version whose former status
 // is missing cannot prove whether this is a restore or a new close.
-async function restoredClosed(previous: VersionRead) {
+export async function restoredClosed(previous: VersionRead) {
   if (!isShelved(previous.status)) return false;
   const was = (await previous.snapshot())?.was;
   return was === undefined ? null : was === 'closed';

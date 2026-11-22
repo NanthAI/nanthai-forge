@@ -5,7 +5,7 @@
 // may omit itemId and gets one retained in the journal. One mutation, projectPlanningBatch:apply, runs them all.
 import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
-import { planningWaitingFeature } from './hosted-contract-features.js';
+import { planningAuditFeature, planningWaitingFeature } from './hosted-contract-features.js';
 import type { HostedAgentJournal } from './hosted-agent-journal.js';
 import type { PlanningPort } from './hosted-agent-planning.js';
 import {
@@ -28,7 +28,7 @@ const keys = ['planningItemId', 'id', 'itemId'] as const;
 const full = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const entrySchemas = (schemas: BatchSchemas) => ({
   putEntry: schemas.planningPutSchema
-    .omit({ action: true, operationId: true, itemId: true })
+    .omit({ action: true, operationId: true, itemId: true, agent: true, agentClient: true })
     .extend({ fields: schemas.planningPutAgentFields.optional() })
     .strict(),
   commentEntry: schemas.planningCommentCommandSchema
@@ -105,6 +105,7 @@ async function batchWrites(
       itemId: given ?? (await journal.id(`batch-item-${index}`)),
       ...put,
       ...fields,
+      ...(port.serverFeatures?.includes(planningAuditFeature) ? port.commentAgent?.() : undefined),
     } as BatchWrite);
   }
   return writes;

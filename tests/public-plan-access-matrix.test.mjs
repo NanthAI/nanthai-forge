@@ -14,7 +14,11 @@ import { installPlanningSearch } from './planning-search-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { executeHostedPlanning } from '../dist/hosted-agent-planning.js';
 import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
-import { hostedContractFeatures, planningInitiativeCountsFeature } from '../dist/hosted-contract-features.js';
+import {
+  hostedContractFeatures,
+  planningAuditFeature,
+  planningInitiativeCountsFeature,
+} from '../dist/hosted-contract-features.js';
 import { planningSearchTerms } from '../dist/planning-search.js';
 import { successorIntentId } from '../dist/hosted-intent-chain.js';
 import { v } from 'convex/values';
@@ -78,7 +82,7 @@ function port(s) {
       return typeof value === 'string' ? JSON.parse(value) : value;
     },
     mutation: () => assert.fail('a read made a write'),
-    serverFeatures: [...hostedContractFeatures, planningInitiativeCountsFeature],
+    serverFeatures: [...hostedContractFeatures, planningInitiativeCountsFeature, planningAuditFeature],
   };
 }
 
@@ -258,6 +262,7 @@ for (const policy of POLICIES)
       const surfaces = {
         'CLI planning list': await seen(() => cli(p, { status: 'all', limit: 50 })),
         'CLI planning counts': await seen(() => cli(p, { counts: true, status: 'all' })),
+        'CLI planning window audit': await seen(() => cli(p, { history: { from: '2020-01-01' }, limit: 50 })),
         'web Plan read': await seen(() => planView.read._handler(s.ctx, { projectId: s.projectId })),
         'People profile': await seen(() => people.profile._handler(s.ctx, { handle: 'ada' })),
         'Item work (absent Item)': await seen(() =>
@@ -345,6 +350,9 @@ for (const policy of POLICIES)
         surfaces[`web Item page lookup (${row})`] = await lookup(items[row].itemId);
         surfaces[`CLI planning id (${row}, comments and landing notes)`] = await seen(() =>
           cli(p, { id: items[row].itemId, reconcile: false }),
+        );
+        surfaces[`CLI planning item audit (${row})`] = await seen(() =>
+          cli(p, { id: items[row].itemId, history: true }),
         );
         surfaces[`CLI planning short id (${row})`] = await seen(() =>
           cli(p, { id: items[row].itemId.slice(0, 8), reconcile: false }),

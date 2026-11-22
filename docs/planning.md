@@ -197,6 +197,33 @@ as a new version (`reason: "Restored version N"`), with Undo. A restore at a sta
 `ITEM_CHANGED` and overwrites nothing. When a body edit clashes with someone else's save, the editor keeps your
 text: Keep both saves it as the next version over theirs (theirs stays in Versions), Take theirs drops it.
 
+### Audit trail
+
+Every planning version, comment, Lane and landing stays in the existing hosted journal (no extra table or index).
+Planning puts from device credentials also record the writing agent session slug (`agent`) and declared launcher/model
+(`agentClient`) in the same write mutation (0 extra Convex calls; browser sign-ins and scheduled server jobs carry
+neither).
+
+- **Item timeline**: `planning {"planningItemId":"ISSUE_ID","history":true,"limit":50}` (CLI or MCP `forge_planning`)
+  returns one bounded, newest-first page (at most 100 events) of who (public Forge handle or `handle/agent` + declared
+  model; never raw account IDs, display names or emails), when and what changed: status and close/abandon reasons,
+  archive/delete/restore, title and bounded body diff summaries, Done-when checkbox ticks/unticks/edits, `waitingOn`
+  set/changed/cleared, Initiative/parent/order moves, owner, type, visibility, relations, Intent links, comments
+  (including replies and decisions), Lanes and landings/reverts. The reply reports `historyStartsAt`, `firstVersion`,
+  `completeFromCreation`, `coverage` and `nextCursor`.
+- **Backlog window**: `planning {"initiativeId":"INITIATIVE_ID","history":{"from":"YYYY-MM-DD","to":"YYYY-MM-DD","change":"all|closed|reopened|changed"}}`
+  (omitting `initiativeId` scans the project; omitting `to` reads through now) lists Items closed, reopened, created or
+  changed in the UTC window in one bounded indexed read over `projectHostedRecords` (`by_project_and_kind_and_parent`
+  or `by_project_and_kind`, the same Initiative/time range as the 14-day close history). A version counts at its
+  record's creation time. Each page scans at most 4,096 version headers / 8 MiB between `from` and `to` (never past
+  now) and returns at most 100 Items; bodies are read only for the returned Items. A busy window continues on later
+  scan pages: each Item is listed once, on the page with its newest version in the window, and `countsScope` is
+  `scan-page` when the counts cover one page rather than the whole window. Restoring a shelved `closed` Item does
+  not count as a new close. `kind` is refused here, since version headers do not record it.
+- **Access and identity**: Audit reads require project membership (`readProjectRole`). Writers and the owner see public
+  handles; read-only members see agent slugs and models without person handles; signed-out viewers and non-members are
+  refused. Both reads make zero idle calls and run no polling.
+
 ## Hand order
 
 The list has one hand order. An Item that was never moved has no stored `order` and sorts by its creation position.

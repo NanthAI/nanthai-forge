@@ -25,6 +25,8 @@ export const planningWaitingFeature = 'planning-waiting-on';
 /** The unfiltered Initiative count uses the planning wait feature's discovery slot. */
 export const planningInitiativeCountsFeature = 'planning-initiative-counts';
 export const planningHistoryFeature = 'planning-history';
+/** Item audit timeline, backlog audit window and agent attribution on planning puts (Item 1d51c91f). */
+export const planningAuditFeature = 'planning-audit';
 export const initiativeProgressRequested = (input: Record<string, unknown>) =>
   input.counts === true &&
   typeof input.initiativeId === 'string' &&
@@ -254,6 +256,7 @@ export const advertisedFeatures = (asked: readonly string[]) => [
   ...(asked.includes(planningWaitingFeature) ? [planningWaitingFeature] : []),
   ...(asked.includes(planningInitiativeCountsFeature) ? [planningInitiativeCountsFeature] : []),
   ...(asked.includes(planningHistoryFeature) ? [planningHistoryFeature] : []),
+  ...(asked.includes(planningAuditFeature) ? [planningAuditFeature] : []),
   ...hostedContractFeatures.filter(feature => asked.includes(feature)),
   ...(asked.includes('feed') ? ['feed'] : []),
 ];
