@@ -37,6 +37,11 @@ export async function runFiles(
   const totals = Object.fromEntries(
     ['tests', 'pass', 'fail', 'cancelled', 'skipped', 'todo'].map(k => [k, 0]),
   );
+  const traceKey = process.env.FORGE_CLOSURE_TRACE_PROCESS
+    ? undefined
+    : process.env.FORGE_CLOSURE_TRACE_RECIPIENT;
+  const trace = traceKey ? await import('./closure-trace-output.mjs') : null;
+  const traceReplays = trace?.closureTraceReplays();
   const coverageHead = process.env.FORGE_TEST_COVERAGE_HEAD;
   let coverageFiles = null;
   if (coverageHead) {
@@ -97,6 +102,8 @@ export async function runFiles(
         }
       }
       if (coverageDirectory) childEnv.NODE_V8_COVERAGE = coverageDirectory;
+      const traceDirectory = trace?.closureTraceChild(temp.root, childEnv, traceReplays.has(file));
+      if (traceDirectory) delete childEnv.FORGE_CLOSURE_TRACE_RECIPIENT;
       const child = spawn(
         process.execPath,
         [
@@ -194,6 +201,14 @@ export async function runFiles(
             }
           }
         }
+        let traceRow;
+        if (traceDirectory) {
+          try {
+            traceRow = trace.collectClosureTrace(traceDirectory, file);
+          } catch {
+            traceRow = { test: file, complete: false };
+          }
+        }
         const leaks = temp.cleanup();
         if (leaks.length && !timedOut) {
           code = 1;
@@ -237,6 +252,10 @@ export async function runFiles(
             process.stdout.write(
               `# Flaky test file: ${file}; passed isolated retry; first error: ${previous.firstError ?? 'Process failed'}\n`,
             );
+        }
+        if (traceRow) {
+          traceRow.complete &&= report.complete && !report.failed && !report.skipped && !retrying;
+          trace.emitClosureTrace(traceKey, traceRow);
         }
         reports.set(file, report);
         if (code !== 0 || timedOut) {

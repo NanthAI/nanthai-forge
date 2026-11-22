@@ -65,6 +65,8 @@ console.log(
   `Verification: ${selection?.scope ?? 'full'}; ${selection?.reason ?? 'Direct verify runs the full suite'}`,
 );
 
+const traceKey = env.FORGE_CLOSURE_TRACE_RECIPIENT;
+const closureTrace = traceKey ? await import('./closure-trace-output.mjs') : null;
 const schedule = commandQueue(process.env.FORGE_STATIC_WORKERS);
 function run(name, command, args) {
   return schedule(() => runCommand(name, command, args));
@@ -135,6 +137,24 @@ function runCommand(name, command, args) {
       if (code === 137) outOfMemory = true;
       const seconds = ((Date.now() - begin) / 1000).toFixed(1);
       timings.push(`${code === 0 ? 'ok  ' : 'FAIL'} ${seconds.padStart(6)}s  ${name}`);
+      if (closureTrace && name.startsWith('typecheck:')) {
+        const compilerOutput = Buffer.concat(chunks).toString().split(/\r?\n/);
+        const projectFiles = compilerOutput.filter(line => line.startsWith(process.cwd() + '/'));
+        const files = projectFiles
+          .map(line => closureTrace.closureTracePath(process.cwd(), line))
+          .filter(Boolean);
+        // The compiler lists files even when it fails. Keep those paths in the encrypted row.
+        chunks.splice(
+          0,
+          chunks.length,
+          Buffer.from(compilerOutput.filter(line => !line.startsWith(process.cwd() + '/')).join('\n')),
+        );
+        closureTrace.emitClosureTrace(traceKey, {
+          typecheck: name,
+          complete: code === 0 && files.length > 0,
+          files: [...new Set(files)].sort(),
+        });
+      }
       // Keep the usual passing status and bounded summaries. A failing step prints all diagnostics.
       if (code === 0) {
         const lines = Buffer.concat(chunks).toString().split('\n');
@@ -174,6 +194,7 @@ const tsc = (name, ...args) => {
     join('node_modules', legacy ? 'typescript' : '@typescript/native', 'bin', 'tsc'),
     ...(legacy ? [] : ['--noUncheckedSideEffectImports', 'false']),
     ...args,
+    ...(closureTrace ? ['--listFiles'] : []),
   ]);
 };
 

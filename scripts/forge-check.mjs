@@ -98,7 +98,12 @@ if (process.env.FORGE_ACTIONS_PLAN) {
       ? definitionTrial
       : (await import('./github-actions-check.mjs')).runActionsCheck;
   try {
-    await check();
+    const traceDispatch =
+      process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' &&
+      process.env.GITHUB_EVENT_PATH &&
+      process.env.FORGE_ACTIONS_PLAN === '.github/forge-check-plan.json' &&
+      !existsSync(process.env.FORGE_ACTIONS_PLAN);
+    if (!traceDispatch || !(await import('./closure-trace-check.mjs')).traceDispatchedCheck()) await check();
   } catch (error) {
     // A failed child already printed its own output; anything else would otherwise exit silently.
     if (error.status == null && !error.signal) console.error(error);

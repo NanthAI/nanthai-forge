@@ -1024,6 +1024,25 @@ hour, because GitHub expires that view. The job log is still readable through th
 `gh api repos/OWNER/REPO/actions/jobs/JOB_ID/logs` (get `JOB_ID` from `gh run view RUN_ID --json jobs`). Do not
 print the redirect URL it follows. A job still in progress returns 404; that is not a lost log.
 
+### Input closure experiment
+
+Two manual `forge-check.yml` runs can collect test-file input traces from the same
+accepted Git mirror commit. Use the legacy dispatch jobs with empty `deployment`,
+a contiguous zero-based `plan` matrix, and run IDs of the form
+`closure-trace-<label>-<base64url X25519 public key>`. Both runs should use the
+same matrix and an immutable ref for the accepted commit. The checkout SHA is
+recorded in every job. Compare traces only when their checkout SHAs agree. The standard static
+commands and all test files, including browser files, still run. Ordinary runs
+keep their existing recipe and process settings.
+
+The test supervisor collects repository-relative filesystem observations and
+executed V8 function spans from the test and the Node children it can trace. Type
+checks report their compiler file lists. Native children and other coverage gaps
+remain explicit in the experimental data. No check or landing decision reads
+these traces. Trace records are compressed and encrypted before uploading them
+as job log lines. Keep the matching private key and decoded records in private
+scratch storage.
+
 ### Where a check's wall time goes (measured 2026-11-06)
 
 `node scripts/actions-cache-report.mjs NanthAI/nanthai-forge 40` also prints a `breakdown` of the successful

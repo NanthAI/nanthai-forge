@@ -22,7 +22,7 @@ export const hostedActionsCheck = (execute = execFileSync) => runActionsCheck(ex
 
 export function runActionsCheck(
   execute = execFileSync,
-  { install = true, build = true, coverage = true } = {},
+  { install = true, build = true, coverage = true, traceKey } = {},
 ) {
   // First, before install or build: the Candidate's scripts must not need more than this executor provides.
   assertCheckContract(
@@ -65,6 +65,7 @@ export function runActionsCheck(
       ],
     }),
     [CHECK_CONTRACT_ENV]: String(CHECK_CONTRACT_PROVIDED),
+    ...(traceKey && { FORGE_CLOSURE_TRACE_RECIPIENT: traceKey }),
     // Forge's own suite settings, for its standard check only (src/standard-check.ts
     // decides `plan.standard`). Any other command runs with the environment its project
     // gives it, as on plain GitHub Actions: no heap cap, no Forge worker variables.
