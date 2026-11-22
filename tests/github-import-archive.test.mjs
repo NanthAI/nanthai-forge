@@ -9,9 +9,14 @@ import { moduleUrl } from './convex-module.mjs';
 import { tarEntries } from '../dist/github-tar.js';
 import { readObjectRecipe } from '../dist/object-chunks.js';
 import { readFileSync } from 'node:fs';
-import { listGithubTree } from '../dist/github-archive-source.js';
+import { listGithubTree as streamListing } from '../dist/github-archive-source.js';
 import { wantedBlobResponse } from './github-blob-pack-fixture.mjs';
-import { ImportedPins, ListingBuilder, ListingTable } from '../dist/github-listing-codec.js';
+import {
+  decodeListingIndex,
+  ImportedPins,
+  ListingPageWriter,
+  ListingTable,
+} from '../dist/github-listing-codec.js';
 import { TreeRows, readTreeReply } from '../dist/github-tree-split.js';
 import { CatalogTable } from '../dist/import-catalog-table.js';
 import { importStateFiles } from '../dist/import-state-scan.js';
@@ -25,7 +30,26 @@ const start = await import(moduleUrl('../convex/projectHostedStart.ts'));
 const birth = await import(moduleUrl('../convex/projectHostedBirth.ts'));
 const { findObject } = await import(moduleUrl('../convex/projectObjectFind.ts'));
 const gitSha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
-const hex = n => n.toString(16).padStart(40, '0');
+const hex = (n, width = 40) => n.toString(16).padStart(width, '0');
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+
+function listingPages() {
+  const pages = new Map();
+  const writer = new ListingPageWriter(async page => {
+    const sha256 = createHash('sha256').update(page).digest('hex');
+    pages.set(sha256, Buffer.from(page));
+    return { sha256, size: page.length };
+  });
+  return { writer, read: async pin => pages.get(pin.sha256) ?? null };
+}
+
+async function listGithubTree(repository, tree, token, request) {
+  const { writer, read } = listingPages();
+  const totals = await streamListing(repository, tree, token, request, writer);
+  if (!totals) return null;
+  const index = await writer.finish(tree, totals);
+  return ListingTable.fromPages(index, read);
+}
 
 /** Minimal GitHub-shaped tarball: pax global comment, one root, pax paths when long. */
 function header(name, size, type, linkname = '') {
@@ -129,6 +153,11 @@ function splitTreeReply(repo, sha, recursive, truncatedChild) {
 }
 /** Synthetic GitHub plus a strict fake R2 bucket (create-only, checksummed PUTs). */
 async function serve(t, repo, counts, hooks = {}) {
+  const memoryUsage = process.memoryUsage;
+  t.mock.method(process, 'memoryUsage', () => {
+    const actual = memoryUsage();
+    return { ...actual, rss: hooks.rss ? hooks.rss(actual.rss) : Math.min(actual.rss, 379_999_999) };
+  });
   const saved = Object.fromEntries(Object.keys(r2Env).map(name => [name, process.env[name]]));
   Object.assign(process.env, r2Env);
   const native = globalThis.fetch,
@@ -168,11 +197,14 @@ async function serve(t, repo, counts, hooks = {}) {
       });
     if (path.includes('/commits/'))
       return Response.json({ sha: 'a'.repeat(40), commit: { tree: { sha: hex(1) } } });
-    if (repo.split && path.includes('/git/trees/')) {
+    if ((repo.split || repo.treeReply) && path.includes('/git/trees/')) {
       const recursive = u.searchParams.get('recursive') === '1';
       count(recursive ? 'treesRecursive' : 'treesFlat');
+      const sha = path.split('/').at(-1);
       return Response.json(
-        splitTreeReply(repo, path.split('/').at(-1), recursive, repo.split.truncatedChild),
+        repo.treeReply
+          ? repo.treeReply(sha, recursive)
+          : splitTreeReply(repo, sha, recursive, repo.split.truncatedChild),
       );
     }
     if (path.endsWith(`/git/trees/${hex(1)}`)) {
@@ -223,6 +255,12 @@ function startArchive(s, options) {
     url: 'fixture/arch',
     ...options,
   });
+}
+async function startAcquisition(s) {
+  const id = await startArchive(s);
+  await s.worker(id);
+  assert.ok(s.tables.projectGithubImports.get(id).listing);
+  return id;
 }
 async function importArchive(s, options = {}, expect = 'ready') {
   const id = await startArchive(s, options);
@@ -317,11 +355,11 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
   assert.equal(job.completed, repo.files);
   // Both omitted/rewritten files share one bounded Git pack fetch.
   assert.deepEqual(counts, { trees: 1, tarball: 1, archive: 1, blobPacks: 1 });
-  // Issue ed088358: the whole archive import is 6 REST requests (start: repository, commit,
-  // tree; run: repository, tarball; publication: repository). Git fetch consumes no REST quota. The run reads the tree
-  // listing start stored (Issue e5be6ef3). With no App or deployment token configured here,
+  // Start: repository and commit. Listing: repository and tree. Acquisition:
+  // repository and tarball. Publication: repository. Git fetch consumes no REST quota.
+  // With no App or deployment token configured here,
   // none of them uses an importer credential.
-  assert.deepEqual(job.githubRequests, { user: 0, app: 0, server: 0, anonymous: 6 });
+  assert.deepEqual(job.githubRequests, { user: 0, app: 0, server: 0, anonymous: 7 });
   // Issue 7cbb881c line 3: no per-file row survives ready; documents are O(pages).
   const catalogRows = [...s.tables.projectObjectCatalog.values()].filter(r => r.projectId === job.projectId);
   const catalogued = catalogRows.reduce((sum, row) => sum + row.sizes.length, 0);
@@ -353,7 +391,7 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
       r2Objects: bucket.objects.size,
       r2Puts: puts,
       ms: Math.round(performance.now() - started),
-      rss: process.memoryUsage().rss,
+      peakRssKiB: process.resourceUsage().maxRSS,
     }),
   );
   const project = s.tables.hostedProjects.get(job.projectId),
@@ -463,12 +501,12 @@ test('Issue c6426ee9: a root truncated by count imports through the archive stre
   assert.equal(job.protocol, 3, 'archive path, not protocol 2');
   assert.equal(job.completed, repo.files);
   // One listing: the truncated root, 3 directories recursive, the root and the still-truncated directory
-  // flat. Start lists it; the archive run reads the stored table (Issue e5be6ef3).
+  // flat. The listing step pins it; the archive run reads the stored table (Issue e5be6ef3).
   assert.deepEqual(counts, { treesRecursive: 4, treesFlat: 2, tarball: 1, archive: 1, blobPacks: 1 });
   assert.equal(
     job.githubRequests.anonymous,
-    2 + 6 + 2 + 1,
-    'start: repository and commit; 1 listing of 6; run: repository, tarball; publication: repository',
+    2 + 1 + 6 + 2 + 1,
+    'one repository read per step, one commit, one listing of 6, one tarball',
   );
 });
 
@@ -592,6 +630,16 @@ test('Issue 6a0dd2e8: a Git path that is not UTF-8 is refused by name at import,
       error.message.includes('src/caf\\uFFFD.py') &&
       error.message.includes('na\\uFFFDve.md') &&
       !error.message.includes('src/ok.py'),
+  );
+  const same = { path: 'same\uFFFD', mode: '100644', type: 'blob', sha: id(3), size: 1 };
+  await assert.rejects(
+    listGithubTree('fixture/arch', id(1), undefined, async () =>
+      Response.json({ sha: id(1), truncated: false, tree: [same, same] }),
+    ),
+    error =>
+      error.code === 'GITHUB_SOURCE_UNSUPPORTED' &&
+      error.message.includes('2 paths') &&
+      error.message.includes('same\\uFFFD, same\\uFFFD'),
   );
 });
 
@@ -792,7 +840,6 @@ function skewClock(t) {
 const listingKeys = bucket => [...bucket.objects.keys()].filter(key => key.includes('/import/'));
 const listingGets = bucket =>
   bucket.requests.filter(request => request.method === 'GET' && request.path.includes('/import/')).length;
-const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const packWants = init =>
   [
     ...Buffer.from(init.body)
@@ -852,7 +899,7 @@ test('Issue e165787c: the 1,001st archive member hits the deadline and blob pack
         };
       }
       const started = performance.now();
-      const id = await startArchive(s);
+      const id = await startAcquisition(s);
       await s.worker(id);
       let job = s.tables.projectGithubImports.get(id);
       const perFileInventory = () =>
@@ -861,13 +908,13 @@ test('Issue e165787c: the 1,001st archive member hits the deadline and blob pack
         );
       if (resume) {
         assert.equal(job.phase, 'importing', JSON.stringify(job.error));
-        assert.equal(job.step, 1);
+        assert.equal(job.step, 2);
         assert.equal(job.completed, 1_000);
         assert.equal(job.bytes, 4_096_000);
         assert.equal(s.tables.hostedProjects.get(job.projectId).currentBackup, null);
         assert.equal(counts.tarball, 1);
         assert.equal(counts.blobPacks, undefined);
-        assert.equal(listingKeys(bucket).length, 2, 'one listing and one pin checkpoint');
+        assert.equal(listingKeys(bucket).length, 3, 'one page, its index, and one pin checkpoint');
         assert.equal(perFileInventory().length, 0);
         await s.worker(id);
         job = s.tables.projectGithubImports.get(id);
@@ -929,7 +976,7 @@ for (const damage of ['missing', 'altered', 'wrong tree', 'wrong listing', 'miss
       blobPacks: (_n, init) => wants.push(...packWants(init)),
     });
     clock.bucket = bucket;
-    const id = await startArchive(s);
+    const id = await startAcquisition(s);
     await s.worker(id);
     let job = s.tables.projectGithubImports.get(id);
     assert.equal(job.phase, 'importing', JSON.stringify(job.error));
@@ -995,7 +1042,7 @@ test('Issue e165787c: LFS-only continuation imports object bytes after its sourc
   });
   clock.bucket = bucket;
   const job = await importArchive(s);
-  assert.equal(job.step, 1);
+  assert.equal(job.step, 2);
   assert.equal(counts.tarball, 1);
   assert.equal(counts.lfsDownload, 2);
   assert.deepEqual(packs[0], [repo.tree.find(row => row.path === '.gitattributes').sha]);
@@ -1024,13 +1071,13 @@ for (const kind of ['failed advance', 'lost advance reply'])
       if (kind === 'lost advance reply') await run(ref, input);
       throw Error('synthetic advance connection error');
     };
-    const id = await startArchive(s);
+    const id = await startAcquisition(s);
     await s.worker(id);
     let job = s.tables.projectGithubImports.get(id);
     assert.equal(job.phase, kind === 'failed advance' ? 'error' : 'importing');
     assert.equal(job.completed, 1);
     const pins = JSON.parse(job.cursor).pins;
-    assert.equal(listingKeys(bucket).length, 2);
+    assert.equal(listingKeys(bucket).length, 3);
     assert.ok(listingKeys(bucket).some(key => key.endsWith(pins.sha256)));
     if (job.phase === 'error')
       await s.modules.projectGithubImportStore.resume._handler(s.ctx, { id, actor: 'owner' });
@@ -1038,7 +1085,7 @@ for (const kind of ['failed advance', 'lost advance reply'])
     job = s.tables.projectGithubImports.get(id);
     if (kind === 'failed advance') {
       assert.equal(job.phase, 'importing', JSON.stringify(job.error));
-      assert.equal(listingKeys(bucket).length, 2, 'advance replaces the previous checkpoint');
+      assert.equal(listingKeys(bucket).length, 3, 'advance replaces the previous checkpoint');
       assert.ok(!listingKeys(bucket).some(key => key.endsWith(pins.sha256)));
       await s.worker(id);
       job = s.tables.projectGithubImports.get(id);
@@ -1057,14 +1104,14 @@ test('Issue e165787c: a failed first step leaves durable pins for retry without 
       if (n === 1) throw Error('synthetic Git pack disconnect');
     },
   });
-  const id = await startArchive(s);
+  const id = await startAcquisition(s);
   await s.worker(id);
   const failed = s.tables.projectGithubImports.get(id);
   assert.equal(failed.phase, 'error');
-  assert.equal(failed.step, 0);
+  assert.equal(failed.step, 1);
   assert.equal(failed.completed, repo.files - 2, 'verified archive members reached the durable catalog');
   assert.ok(JSON.parse(failed.cursor).pins);
-  assert.equal(listingKeys(bucket).length, 2);
+  assert.equal(listingKeys(bucket).length, 3);
   await s.modules.projectGithubImportStore.resume._handler(s.ctx, { id, actor: 'owner' });
   await s.worker(id);
   const job = s.tables.projectGithubImports.get(id);
@@ -1086,16 +1133,16 @@ test('Issue e5be6ef3: a multi-step archive import lists the tree once; every ste
   const bucket = await serve(t, repo, counts, { archive: n => n === 1 && clock.jump(7) });
   clock.bucket = bucket;
   const job = await importArchive(s);
-  assert.equal(job.step, 1, 'two archive runs');
+  assert.equal(job.step, 2, 'listing and two archive runs');
   assert.equal(job.completed, repo.files);
-  // 4 recursive + 2 flat reads are the one listing (start).
+  // 4 recursive + 2 flat reads complete the listing.
   assert.deepEqual(counts, { treesRecursive: 4, treesFlat: 2, tarball: 1, archive: 1, blobPacks: 2 });
   assert.equal(
     job.githubRequests.anonymous,
-    2 + 6 + 2 + 1 + 1,
-    'start: repository, commit, 1 listing of 6; run 1: repository, tarball; run 2: repository; publication: repository',
+    2 + 1 + 6 + 2 + 1 + 1,
+    'one repository read per step, one commit, one listing of 6, one tarball',
   );
-  assert.equal(listingGets(bucket), 3, 'each step reads the listing and continuation reads the pins');
+  assert.equal(listingGets(bucket), 5, 'each archive step reads index and page, continuation reads pins');
   assert.deepEqual(listingKeys(bucket), [], 'scratch is deleted once main is published');
 });
 
@@ -1107,35 +1154,226 @@ test('Issue e5be6ef3: a run that stored the last file at its time budget publish
   // The omitted and rewritten files are fetched after the stream ends; the budget passes during them.
   clock.bucket = await serve(t, repo, counts, { blobPacks: n => n === 1 && clock.jump(7) });
   const job = await importArchive(s);
-  assert.equal(job.step, 0, 'no continuation step');
+  assert.equal(job.step, 1, 'listing, then one archive step');
   assert.equal(job.completed, repo.files);
   assert.deepEqual(counts, { trees: 1, tarball: 1, archive: 1, blobPacks: 1 });
   assert.equal(JSON.parse(job.cursor).pins, undefined, 'one step writes no checkpoint');
 });
 
-for (const damage of ['gone', 'altered'])
-  test(`Issue e5be6ef3: a stored listing that is ${damage} is listed again, never trusted`, async t => {
+for (const legacy of [false, true])
+  test(`Issue e165787c: ${legacy ? 'a job stuck without a listing or task resumes' : 'start schedules listing without requesting it'}`, async t => {
+    const s = pagedFixture(),
+      counts = {};
+    const repo = repository({ files: 12 });
+    const bucket = await serve(t, repo, counts);
+    const operationId = randomUUID();
+    const id = await startArchive(s, { operationId });
+    const started = structuredClone(s.tables.projectGithubImports.get(id));
+    assert.ok(started.task);
+    assert.equal(started.listing, undefined);
+    assert.equal(started.totalKnown, false);
+    assert.deepEqual(counts, {});
+    assert.deepEqual(listingKeys(bucket), []);
+    if (legacy) {
+      await s.ctx.db.patch(id, { task: undefined, total: repo.files, totalKnown: true, phase: 'importing' });
+      assert.equal(await startArchive(s, { operationId }), id);
+      assert.notEqual(s.tables.projectGithubImports.get(id).task, started.task);
+      assert.equal(s.tables.hostedProjects.size, 1);
+      assert.deepEqual(counts, {});
+    }
+    await s.worker(id);
+    const listed = s.tables.projectGithubImports.get(id);
+    assert.ok(listed.listing && listed.task !== started.task);
+    assert.equal(listed.total, repo.files);
+    assert.equal(listed.completed, 0);
+    assert.deepEqual(counts, { trees: 1 });
+    const writes = bucket.requests.filter(request => request.method === 'PUT');
+    assert.equal(writes.length, 2, 'one page plus its index');
+    assert.equal(s.tables.projectGithubImportInventory.size, 0);
+  });
+
+test('Issue e165787c: a late unsplittable directory switches to paged discovery and drops partial listing pages', async t => {
+  const dir = (path, n) => ({ path, mode: '040000', type: 'tree', sha: hex(n) });
+  const repo = {
+    treeReply(sha, recursive) {
+      if (sha === hex(1))
+        return { sha, truncated: recursive, tree: recursive ? [] : [dir('a', 2), dir('b', 3), dir('c', 4)] };
+      if (sha === hex(4)) return { sha, truncated: true, tree: [] };
+      return {
+        sha,
+        truncated: false,
+        tree: Array.from({ length: 33_000 }, (_, i) => ({
+          path: 'file-' + String(i).padStart(5, '0'),
+          mode: '100644',
+          type: 'blob',
+          sha: hex(i + 5),
+          size: 3,
+        })),
+      };
+    },
+  };
+  const s = pagedFixture(),
+    counts = {};
+  const bucket = await serve(t, repo, counts);
+  const id = await startArchive(s, { lfsLimitBytes: 0 });
+  await s.worker(id);
+  const job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.protocol, 2);
+  assert.equal(job.phase, 'discovering');
+  assert.equal(JSON.parse(job.cursor).lfsLimitBytes, 0);
+  assert.equal(s.tables.projectGithubImportInventory.size, 1, 'one directory seeds paged discovery');
+  assert.equal(
+    bucket.requests.filter(request => request.method === 'PUT').length,
+    1,
+    'one page flushed before refusal',
+  );
+  assert.deepEqual(listingKeys(bucket), []);
+});
+
+test('Issue e165787c: tree lookahead stops at the existing request cap', async () => {
+  let requests = 0;
+  const count = 1501;
+  const totals = await streamListing(
+    'fixture/arch',
+    hex(1),
+    undefined,
+    async raw => {
+      requests++;
+      const url = new URL(raw);
+      const sha = url.pathname.split('/').at(-1);
+      const rec = url.searchParams.has('recursive');
+      const root = sha === hex(1);
+      const tree =
+        root && !rec
+          ? Array.from({ length: count }, (_, i) => ({
+              path: 'd-' + String(i).padStart(4, '0'),
+              mode: '040000',
+              type: 'tree',
+              sha: hex(i + 2),
+            }))
+          : [];
+      return Response.json({ sha, truncated: root && rec, tree });
+    },
+    { append() {} },
+  );
+  assert.equal(totals, null);
+  assert.equal(requests, 1500);
+});
+
+test('Issue e165787c: many names for one subtree take linear listing work', async t => {
+  const siblings = 4096;
+  let requests = 0,
+    probes = 0;
+  const isDirectory = TreeRows.prototype.isDirectory;
+  TreeRows.prototype.isDirectory = function (index) {
+    probes++;
+    return isDirectory.call(this, index);
+  };
+  t.after(() => {
+    TreeRows.prototype.isDirectory = isDirectory;
+  });
+  const totals = await streamListing(
+    'fixture/arch',
+    hex(1),
+    undefined,
+    async raw => {
+      requests++;
+      const url = new URL(raw);
+      const sha = url.pathname.split('/').at(-1);
+      const root = sha === hex(1);
+      const truncated = root && url.searchParams.has('recursive');
+      const tree = truncated
+        ? []
+        : root
+          ? Array.from({ length: siblings }, (_, i) => ({
+              path: String(i).padStart(4, '0'),
+              mode: '040000',
+              type: 'tree',
+              sha: hex(2),
+            }))
+          : [{ path: 'file', mode: '100644', type: 'blob', sha: hex(3), size: 1 }];
+      return Response.json({ sha, truncated, tree });
+    },
+    { append() {} },
+  );
+  assert.equal(totals.files, siblings);
+  assert.equal(requests, 3);
+  assert.ok(probes <= 8 * siblings, `${probes} directory probes for ${siblings} siblings`);
+});
+
+test('Issue e165787c: a complete high-memory step hands off fresh publication once', async t => {
+  const s = pagedFixture(),
+    counts = {};
+  const repo = repository({ files: 12, directories: 2 });
+  const bucket = await serve(t, repo, counts, { rss: () => 400_000_000 });
+  const id = await startAcquisition(s);
+  await s.worker(id);
+  const acquired = s.tables.projectGithubImports.get(id);
+  assert.equal(acquired.phase, 'importing');
+  assert.equal(acquired.completed, repo.files);
+  assert.equal(acquired.step, 2);
+  assert.ok(JSON.parse(acquired.cursor).pins);
+  assert.equal(s.tables.hostedProjects.get(acquired.projectId).currentBackup, null);
+  const before = { ...counts };
+  bucket.failDeletes = 1;
+  await s.worker(id);
+  const job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+  assert.equal(job.step, 2, 'publication does not hand off again at the same RSS');
+  assert.deepEqual(counts, before, 'publication downloads no GitHub trees, archives or blobs');
+  assert.deepEqual(listingKeys(bucket), []);
+  assert.equal((await mainFiles(s, bucket, job.projectId)).files.size, repo.files);
+});
+
+for (const damage of [
+  'missing index',
+  'altered index',
+  'missing page',
+  'altered page',
+  'other tree',
+  'schema 2',
+])
+  test(`Issue e165787c: ${damage} causes a verified replacement listing`, async t => {
     const repo = repository({ files: 12, directories: 2, submodules: 0 }),
       counts = {},
       s = pagedFixture();
     const bucket = await serve(t, repo, counts);
-    const id = await s.modules.projectGithubImport.start._handler(s.ctx, {
-      operationId: randomUUID(),
-      url: 'fixture/arch',
-    });
-    assert.equal(listingKeys(bucket).length, 1, 'start stored the table');
-    for (const key of listingKeys(bucket))
-      if (damage === 'gone') bucket.objects.delete(key);
-      else bucket.objects.set(key, Buffer.from('{"schema":1}'));
-    for (let i = 0; i < 5 && !['ready', 'error'].includes(s.tables.projectGithubImports.get(id).phase); i++)
-      await s.worker(id);
+    const id = await startAcquisition(s);
+    const before = structuredClone(s.tables.projectGithubImports.get(id));
+    const keys = listingKeys(bucket);
+    assert.equal(keys.length, 2, 'listing pins one page and its index');
+    const indexKey = keys.find(key => key.endsWith(before.listing.sha256));
+    const pageKey = keys.find(key => key !== indexKey);
+    const target = damage.endsWith('page') ? pageKey : indexKey;
+    if (damage.startsWith('missing')) bucket.objects.delete(target);
+    else if (damage.startsWith('altered')) {
+      const altered = Buffer.from(bucket.objects.get(target));
+      altered[altered.length - 1] ^= 255;
+      bucket.objects.set(target, altered);
+    } else {
+      const index = JSON.parse(bucket.objects.get(indexKey));
+      if (damage === 'other tree') index.tree = hex(2);
+      else index.schema = 2;
+      const bytes = Buffer.from(JSON.stringify(index));
+      const sha = sha256(bytes);
+      bucket.objects.set(indexKey.replace(before.listing.sha256, sha), bytes);
+      await s.ctx.db.patch(id, { listing: { sha256: sha, size: bytes.length } });
+    }
+    await s.worker(id);
+    assert.equal(counts.trees, 2, 'the bad listing forces a new walk before acquisition');
+    assert.equal(counts.tarball, undefined);
+    if (damage.startsWith('altered')) {
+      assert.notEqual(s.tables.projectGithubImports.get(id).listing.sha256, before.listing.sha256);
+      assert.ok(bucket.objects.has(target), 'the replacement preserves the create-only key until cleanup');
+    }
+    await s.worker(id);
     const job = s.tables.projectGithubImports.get(id);
     assert.equal(job.phase, 'ready', JSON.stringify(job.error));
-    assert.equal(counts.trees, 2, 'start listed, the run listed again');
     assert.equal(job.completed, repo.files);
+    assert.deepEqual(listingKeys(bucket), []);
   });
 
-test('Issue 96f164ce: the stored file table round-trips as columns; a lookup finds every listed path and nothing else', () => {
+test('Issue 96f164ce: the stored file table round-trips as columns; a lookup finds every listed path and nothing else', async () => {
   const files = [
     { path: '.gitattributes', sha: hex(1), size: 3, mode: '100644' },
     { path: 'a/b', sha: hex(2), size: 0, mode: '100755' },
@@ -1144,8 +1382,11 @@ test('Issue 96f164ce: the stored file table round-trips as columns; a lookup fin
     { path: 'vendor/sub', sha: hex(5), size: 0, mode: '160000' },
     { path: 'z/caf\u00e9/\u6587\u4ef6 "q".txt', sha: hex(6), size: 9, mode: '100644' },
   ];
-  const table = ListingTable.from({ files, totalBytes: 70_000_018, submodules: 1 });
-  const back = ListingTable.decode(table.encode(hex(9)), hex(9));
+  const { writer, read } = listingPages();
+  for (const file of files) await writer.append(file);
+  const index = await writer.finish(hex(9), { files: files.length, totalBytes: 70_000_018, submodules: 1 });
+  const encoded = Buffer.from(JSON.stringify(index));
+  const back = await ListingTable.fromPages(decodeListingIndex(encoded, hex(9)), read);
   assert.equal(back.length, files.length);
   assert.deepEqual([back.totalBytes, back.submodules], [70_000_018, 1]);
   files.forEach((file, index) => {
@@ -1153,88 +1394,106 @@ test('Issue 96f164ce: the stored file table round-trips as columns; a lookup fin
     assert.equal(back.index(file.path), index);
   });
   for (const absent of ['', 'a', 'a/b/', 'link2', 'zz']) assert.equal(back.index(absent), -1, absent);
-  assert.equal(ListingTable.decode(table.encode(hex(9)), hex(8)), null, 'another tree');
-  assert.equal(ListingTable.decode(table.encode(hex(9)).subarray(0, 80), hex(9)), null, 'truncated');
-  assert.equal(
-    ListingTable.decode(Buffer.from(JSON.stringify({ schema: 1, tree: hex(9), files })), hex(9)),
-    null,
-    'a schema-1 JSON table from an earlier deployment is listed again',
-  );
-  const sha256 = ListingTable.from({
-    files: [{ ...files[0], sha: 'b'.repeat(64) }],
-    totalBytes: 3,
-    submodules: 0,
-  });
-  assert.equal(ListingTable.decode(sha256.encode(hex(9)), hex(9)).sha(0), 'b'.repeat(64));
-  assert.equal(
-    ListingTable.from({ files: [files[1], files[0]], totalBytes: 3, submodules: 0 }),
-    null,
-    'unsorted',
-  );
-  assert.equal(
-    ListingTable.from({ files: [files[0], files[0]], totalBytes: 6, submodules: 0 }),
-    null,
-    'duplicate',
-  );
+  assert.equal(decodeListingIndex(encoded, hex(8)), null, 'another tree');
+  assert.equal(decodeListingIndex(encoded.subarray(0, 80), hex(9)), null, 'truncated');
+  assert.equal(decodeListingIndex(Buffer.from(JSON.stringify({ ...index, schema: 1 })), hex(9)), null);
+  assert.equal(await ListingTable.fromPages(index, async () => null), null, 'page unavailable');
+  for (const badPath of ['0', files.at(-1).path])
+    assert.throws(() => writer.append({ ...files[0], path: badPath }), { code: 'GITHUB_RESPONSE' });
 });
 
-test('Issue 96f164ce: a listing is built from reply columns in any order; malformed entries keep their own error', async () => {
-  const id = n => n.toString(16).padStart(40, '0');
-  const rows = TreeRows.from([
-    { path: 'b/two', mode: '100755', type: 'blob', sha: id(2), size: 9, url: 'https://api.github.com/x' },
-    { path: 'b', mode: '040000', type: 'tree', sha: id(3) },
-    { path: 'a', mode: '100755', type: 'blob', sha: 'not-a-sha', size: 1 },
-    { path: 'v', mode: '100666', type: 'blob', sha: id(4), size: 1 },
-  ]);
-  assert.deepEqual(rows.entry(0), { path: 'b/two', mode: '100755', type: 'blob', sha: id(2), size: 9 });
-  assert.deepEqual(rows.entry(1), { path: 'b', mode: '040000', type: 'tree', sha: id(3) });
-  assert.equal(rows.entry(2).sha, 'not-a-sha');
-  assert.equal(rows.entry(3).mode, '100666');
-  const builder = new ListingBuilder();
-  for (const [path, n] of [
-    ['é', 1],
-    ['b/two', 2],
-    ['B', 3],
-    ['a', 4],
+test('Issue e165787c: whole, nested and split 64-digit trees emit the same ordered rows and page digest', async () => {
+  const id = n => hex(n, 64);
+  const dir = (path, n) => ({ path, sha: id(n), mode: '040000', type: 'tree' });
+  const blob = (path, n, mode = '100644') => ({ path, sha: id(n), mode, type: 'blob', size: n });
+  const root = [
+    dir('a', 2),
+    blob('a-b', 3),
+    dir('z', 4),
+    dir('z-copy', 4),
+    blob('😀', 5, '120000'),
+    blob('＿', 6, '100755'),
+    { path: 'vendor', sha: id(7), mode: '160000', type: 'commit' },
+  ];
+  const a = [blob('＿', 6), dir('deep', 8), blob('😀', 5)];
+  const deep = [blob('leaf', 9)];
+  const z = [blob('file', 10)];
+  const prefixed = (prefix, rows) => rows.map(row => ({ ...row, path: `${prefix}/${row.path}` }));
+  const whole = [
+    ...root,
+    ...prefixed('a', a),
+    ...prefixed('a/deep', deep),
+    ...prefixed('z', z),
+    ...prefixed('z-copy', z),
+  ];
+  const reference = whole
+    .filter(row => row.type !== 'tree')
+    .sort((a, b) => (a.path < b.path ? -1 : 1))
+    .map(({ path, sha, size = 0, mode }) => ({ path, sha, size, mode }));
+  const results = [];
+  for (const split of [false, true]) {
+    const reads = [];
+    const request = async raw => {
+      const url = new URL(raw);
+      const sha = url.pathname.split('/').at(-1);
+      const rec = url.searchParams.has('recursive');
+      reads.push(sha);
+      const truncated = split && rec && (sha === id(1) || sha === id(2));
+      const tree = truncated
+        ? []
+        : sha === id(1)
+          ? split
+            ? root
+            : whole
+          : sha === id(2)
+            ? a
+            : sha === id(8)
+              ? deep
+              : z;
+      return Response.json({ sha, truncated, tree });
+    };
+    const { writer, read } = listingPages();
+    const totals = await streamListing('fixture/arch', id(1), undefined, request, writer);
+    const index = await writer.finish(id(1), totals);
+    const table = await ListingTable.fromPages(index, read);
+    assert.equal(index.shaBytes, 32);
+    assert.deepEqual(
+      Array.from({ length: table.length }, (_, i) => table.entry(i)),
+      reference,
+    );
+    if (split)
+      assert.equal(reads.filter(sha => sha === id(4)).length, 1, 'identical small tree reuses its reply');
+    results.push(sha256(JSON.stringify(index)));
+  }
+  assert.equal(results[0], results[1]);
+});
+
+test('Issue e165787c: malformed trees fail before a listing can be selected', async t => {
+  const blob = { path: 'x', mode: '100644', type: 'blob', sha: hex(4), size: 1 };
+  const dir = { path: 'x', mode: '040000', type: 'tree', sha: hex(3) };
+  for (const [label, rows, code, root = hex(1)] of [
+    ['duplicate file', [blob, blob], 'GITHUB_RESPONSE'],
+    ['duplicate directory', [dir, dir], 'GITHUB_RESPONSE'],
+    ['missing parent', [{ ...blob, path: 'undeclared/x' }], 'GITHUB_RESPONSE'],
+    ['file and directory', [dir, blob], 'GITHUB_RESPONSE'],
+    ['bad id', [{ ...blob, sha: 'bad' }], 'GITHUB_RESPONSE'],
+    ['bad mode', [{ ...blob, mode: '100666' }], 'GITHUB_SOURCE_UNSUPPORTED'],
+    ['negative size', [{ ...blob, size: -1 }], 'GITHUB_RESPONSE'],
+    ['fractional size', [{ ...blob, size: 1.2 }], 'GITHUB_RESPONSE'],
+    ['large blob', [{ ...blob, size: 100 * 1024 * 1024 + 1 }], 'GITHUB_BLOB_LIMIT'],
+    ['Git metadata', [{ ...dir, path: '.GIT' }], 'INVALID_NATIVE_SOURCE'],
+    ['Forge metadata', [{ ...dir, path: '.forge' }], 'INVALID_NATIVE_SOURCE'],
+    ['wrong tree', [blob], 'GITHUB_RESPONSE', hex(2)],
   ])
-    assert.equal(builder.push(path, id(n), n, '100644'), true);
-  assert.equal(builder.push('bad', 'xyz', 1, '100644'), false);
-  assert.equal(builder.push('bad', id(5), 1, '040000'), false);
-  const table = builder.finish(10, 0);
-  assert.deepEqual(
-    Array.from({ length: table.length }, (_, i) => table.path(i)),
-    ['B', 'a', 'b/two', 'é'],
-  );
-  assert.equal(table.sha(table.index('b/two')), id(2));
-  assert.equal(table.size(table.index('é')), 1);
-  const twice = new ListingBuilder();
-  twice.push('same', id(1), 1, '100644');
-  twice.push('same', id(2), 1, '100644');
-  assert.equal(twice.finish(2, 0), null);
-  const reply = tree => async () => Response.json({ sha: id(1), truncated: false, tree });
-  await assert.rejects(
-    listGithubTree(
-      'fixture/arch',
-      id(1),
-      undefined,
-      reply([{ path: 'v', mode: '100666', type: 'blob', sha: id(4), size: 1 }]),
-    ),
-    /GITHUB_SOURCE_UNSUPPORTED|mode 100666/,
-  );
-  await assert.rejects(
-    listGithubTree(
-      'fixture/arch',
-      id(1),
-      undefined,
-      reply([
-        { path: 'd', mode: '040000', type: 'tree', sha: id(3) },
-        { path: 'd', mode: '100644', type: 'blob', sha: id(4), size: 1 },
-      ]),
-    ),
-    /GITHUB_RESPONSE|outside its listed directories/,
-  );
+    await t.test(label, async () => {
+      await assert.rejects(
+        listGithubTree('fixture/arch', hex(1), undefined, async () =>
+          Response.json({ sha: root, truncated: false, tree: rows }),
+        ),
+        { code },
+      );
+    });
 });
-
 test('Issue 96f164ce: a tree reply is scanned into columns with the entries JSON.parse reads, and a truncated one is not read', () => {
   const id = (n, bytes = 20) => n.toString(16).padStart(bytes * 2, '0');
   const entries = reply => Array.from({ length: reply.rows.length }, (_, i) => reply.rows.entry(i));
@@ -1422,7 +1681,7 @@ test('import REST calls stay bounded by tree pages when every small archive memb
       assert.equal(job.completed, repo.files);
       assert.equal(counts.blobs ?? 0, 0, 'no per-member REST blob requests');
       assert.equal(counts.blobPacks, Math.ceil(repo.files / 100), 'one Git fetch per bounded blob page');
-      assert.equal(job.githubRequests.anonymous, 6, 'REST calls do not grow with omitted files');
+      assert.equal(job.githubRequests.anonymous, 7, 'REST calls do not grow with omitted files');
     });
   }
 });

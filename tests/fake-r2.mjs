@@ -109,7 +109,7 @@ export async function startFakeR2(config = fakeR2Config, { local = false, readTh
       if (bucket !== config.bucket) return send(404);
       if (req.method === 'GET' && q.get('list-type') === '2') {
         const prefix = q.get('prefix') ?? '',
-          after = q.get('continuation-token') ?? '';
+          after = q.get('continuation-token') ?? q.get('start-after') ?? '';
         const keys = [...objects.keys()]
           .filter(key => key.startsWith(bucket + '/' + prefix))
           .map(key => key.slice(bucket.length + 1))

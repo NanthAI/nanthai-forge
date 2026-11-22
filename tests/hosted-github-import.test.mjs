@@ -222,9 +222,13 @@ function fixture(
     }
     throw Error(url);
   };
-  const start = async (operationId = randomUUID()) =>
-    modules.projectGithubImport.start._handler(s.ctx, { operationId, url: 'example/repo' });
   const advance = async id => modules.projectGithubImportWorker.run._handler(s.ctx, { id, actor: 'owner' });
+  // These fixtures exercise the original paged flow after the scheduled tree probe.
+  const start = async (operationId = randomUUID()) => {
+    const id = await modules.projectGithubImport.start._handler(s.ctx, { operationId, url: 'example/repo' });
+    if (s.tables.projectGithubImports.get(id).protocol === 3) await advance(id);
+    return id;
+  };
   return {
     ...s,
     start,
@@ -547,7 +551,7 @@ test('unknown reply after a committed cursor step cannot mark newer progress fai
   };
   await s.advance(id);
   const job = s.tables.projectGithubImports.get(id);
-  assert.equal(job.step, 1);
+  assert.equal(job.step, 2);
   assert.equal(job.phase, 'importing');
   assert.equal(job.error, undefined);
   await s.advance(id);
@@ -896,7 +900,7 @@ test('a public repository imports private when chosen; a private one refuses pub
     url: 'example/repo',
     visibility: 'private',
   });
-  for (let i = 0; i < 3 && s.tables.projectGithubImports.get(id).phase !== 'ready'; i++) await s.advance(id);
+  await finish(s, id);
   const job = s.tables.projectGithubImports.get(id);
   assert.equal(job.phase, 'ready');
   assert.equal(s.tables.hostedProjects.get(job.projectId).visibility, 'private');

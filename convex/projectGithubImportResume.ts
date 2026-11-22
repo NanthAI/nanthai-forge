@@ -12,12 +12,11 @@ import { packHeaders, packRange, verifyPackRange } from '../src/object-pack-rang
 import { CatalogTable } from '../src/import-catalog-table';
 import { ImportedPins } from '../src/github-listing-codec';
 import { importStateFiles } from '../src/import-state-scan';
-import { archiveCursorSchema } from '../src/github-import-pages';
 import type { ImportRequestMeter } from '../src/github-import-meter';
 import { windowEntries } from './projectGithubImportCatalog';
 import type { CatalogEntry } from './projectGithubImportUpload';
 import { publishImport, type ImportRows } from './projectGithubImportPublish';
-import { dropImportScratch } from './projectGithubImportListing';
+import { dropListing } from './projectGithubImportListing';
 
 type Identity = { id: Id<'projectGithubImports'>; actor: string };
 
@@ -200,10 +199,6 @@ export async function resumePublication(
     });
   };
   await publishImport(ctx, job, rows, { stored, record }, meter);
-  const cursor = archiveCursorSchema.parse(JSON.parse(job.cursor));
-  await Promise.all([
-    dropImportScratch(job.projectId, job.listing),
-    dropImportScratch(job.projectId, cursor.pins),
-  ]);
+  await dropListing(job.projectId);
   return true;
 }

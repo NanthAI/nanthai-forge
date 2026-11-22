@@ -12,7 +12,7 @@ import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { isStored } from './projectObjectFields';
 import { findObject } from './projectObjectFind';
 import { invariant } from '../src/errors';
-import { initialImportProgress, initialArchiveCursor } from '../src/github-import-pages';
+import { archiveCursorSchema, initialImportProgress, initialArchiveCursor } from '../src/github-import-pages';
 import { completion, recipePin, completeObjects } from './projectGithubImportBatch';
 import { retain, retainBlob, inventoryEntry } from './projectGithubImportInventory';
 import { catalogEntry, recordWindow } from './projectGithubImportCatalog';
@@ -52,11 +52,8 @@ export const begin = internalMutation({
     repository: v.string(),
     commit: v.string(),
     at: v.string(),
-    cursor: v.string(),
-    rootTree: v.optional(v.string()),
+    rootTree: v.string(),
     lfsLimitBytes: v.optional(v.number()),
-    /** A complete recursive listing was seen: stream the commit archive. */
-    archive: v.optional(v.object({ total: v.number(), totalBytes: v.number(), submodules: v.number() })),
     visibility: v.union(v.literal('public'), v.literal('private')),
     githubRequests: v.optional(githubRequests),
     migration: v.optional(migrationCounts),
@@ -76,9 +73,7 @@ export const begin = internalMutation({
       'WORK_OPERATION_CHANGED',
       'This operation already identifies another project.',
     );
-    await ctx.db.patch(project._id, {
-      hostingRequest: input.request,
-    });
+    await ctx.db.patch(project._id, { hostingRequest: input.request });
     const id = await ctx.db.insert('projectGithubImports', {
       visibility: input.visibility,
       owner: input.actor,
@@ -88,68 +83,101 @@ export const begin = internalMutation({
       repository: input.repository,
       commit: input.commit,
       at: input.at,
-      cursor:
-        input.rootTree && input.archive
-          ? JSON.stringify(initialArchiveCursor(input.rootTree, input.lfsLimitBytes))
-          : input.rootTree
-            ? JSON.stringify(initialImportProgress(input.lfsLimitBytes))
-            : input.cursor,
-      ...(input.rootTree ? { protocol: input.archive ? (3 as const) : (2 as const) } : {}),
-      ...(input.rootTree && !input.archive ? { pagedCatalog: true as const } : {}),
+      cursor: JSON.stringify(initialArchiveCursor(input.rootTree, input.lfsLimitBytes)),
+      protocol: 3,
       step: 0,
-      phase: input.archive ? 'importing' : 'discovering',
-      totalKnown: Boolean(input.archive),
+      phase: 'discovering',
+      totalKnown: false,
       completed: 0,
-      total: input.archive?.total ?? 0,
+      total: 0,
       bytes: 0,
-      totalBytes: input.archive?.totalBytes ?? 0,
-      ...(input.archive ? { submodules: input.archive.submodules } : {}),
+      totalBytes: 0,
       ...(input.githubRequests ? { githubRequests: input.githubRequests } : {}),
       ...(input.migration ? { migration: input.migration } : {}),
     });
-    if (input.rootTree && !input.archive)
-      await ctx.db.insert('projectGithubImportInventory', {
-        projectId: project._id,
-        jobId: id,
-        part: 'directories',
-        key: '',
-        position: 0,
-        value: JSON.stringify({ path: '', sha: input.rootTree }),
-      });
-    // An archive import starts once its file table is stored (pinListing), so its first step reads it.
-    if (!input.archive) {
-      const task = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, {
-        id,
-        actor: input.actor,
-      });
-      await ctx.db.patch(id, { task });
-    }
+    const task = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, {
+      id,
+      actor: input.actor,
+    });
+    await ctx.db.patch(id, { task });
     return { id, projectId: project._id };
   },
 });
-/** Pins the stored file table to the job. The first pin of an archive import also starts its worker. */
+const identity = { id: v.id('projectGithubImports'), actor: v.string(), step: v.number() };
+
+/** Pin the finished index and schedule acquisition in the same transaction. */
 export const pinListing = internalMutation({
   args: {
-    id: v.id('projectGithubImports'),
-    actor: v.string(),
+    ...identity,
     listing: v.object({ sha256: v.string(), size: v.number() }),
+    total: v.number(),
+    totalBytes: v.number(),
+    submodules: v.number(),
+    githubRequests,
   },
   returns: v.null(),
   handler: async (ctx, input) => {
     const row = await readJob(ctx, input);
-    if (row.phase === 'ready') return null;
-    await ctx.db.patch(row._id, { listing: input.listing });
-    if (!row.task) {
-      const task = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, {
-        id: row._id,
-        actor: row.owner,
-      });
-      await ctx.db.patch(row._id, { task });
-    }
+    if (row.step !== input.step || row.phase === 'ready' || row.protocol !== 3) return null;
+    const task = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, {
+      id: row._id,
+      actor: row.owner,
+    });
+    await ctx.db.patch(row._id, {
+      listing: input.listing,
+      total: input.total,
+      totalBytes: Math.max(row.bytes, input.totalBytes),
+      submodules: input.submodules,
+      githubRequests: input.githubRequests,
+      totalKnown: true,
+      phase: 'importing',
+      step: row.step + 1,
+      task,
+    });
     return null;
   },
 });
-const identity = { id: v.id('projectGithubImports'), actor: v.string(), step: v.number() };
+
+/** A tree that cannot be split continues from its original root in protocol 2. */
+export const switchToPaged = internalMutation({
+  args: { ...identity, githubRequests },
+  returns: v.boolean(),
+  handler: async (ctx, input) => {
+    const row = await readJob(ctx, input);
+    if (row.step !== input.step || row.phase === 'ready' || row.protocol !== 3) return false;
+    const cursor = archiveCursorSchema.parse(JSON.parse(row.cursor));
+    await retain(ctx, row, [
+      {
+        part: 'directories',
+        key: '',
+        position: 0,
+        value: JSON.stringify({ path: '', sha: cursor.tree }),
+      },
+    ]);
+    const task = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, {
+      id: row._id,
+      actor: row.owner,
+    });
+    await ctx.db.patch(row._id, {
+      protocol: 2,
+      pagedCatalog: true,
+      cursor: JSON.stringify(initialImportProgress(cursor.lfsLimitBytes)),
+      listing: undefined,
+      stateObject: undefined,
+      completed: 0,
+      total: 0,
+      bytes: 0,
+      totalBytes: 0,
+      submodules: 0,
+      githubRequests: input.githubRequests,
+      totalKnown: false,
+      phase: 'discovering',
+      step: row.step + 1,
+      task,
+    });
+    return true;
+  },
+});
 export const advance = internalMutation({
   args: {
     ...identity,

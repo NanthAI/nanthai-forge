@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
-// The pre-import report (Item a488af2a): the same reads `projectGithubImport:start` makes before it creates
-// anything (repository access, the commit, one recursive listing), returned instead of acted on. No project,
+// The pre-import report (Item a488af2a): repository access, the commit and the
+// same listing the import worker uses, returned instead of acted on. No project,
 // job or row is written; refusals the listing finds (non-UTF-8 paths, unsupported modes, files GitHub cannot
 // return) arrive here, before any work begins.
 import { v } from 'convex/values';
@@ -15,6 +15,7 @@ import { networkFetch } from '../src/network-fetch';
 import { ImportRequestMeter } from '../src/github-import-meter';
 import { authorizeImportGithub } from './githubImportAccess';
 import { invariant } from '../src/errors';
+import { isGitattributesPath } from '../src/github-lfs';
 import { report } from './errors';
 import { githubRequests } from './projectGithubImportFields';
 import {
@@ -66,18 +67,18 @@ export const preview = accountAction('same')({
         token,
         meter.wrap(networkFetch),
       );
+      let attributes = 0;
       const listing = await listGithubTree(
         source.repository,
         source.pending[0]!.sha,
         token,
         meter.wrap(networkFetch),
+        {
+          append: entry => {
+            if (isGitattributesPath(entry.path)) attributes++;
+          },
+        },
       );
-      let attributes: number | null = null;
-      if (listing) {
-        attributes = 0;
-        for (let i = 0; i < listing.length; i++)
-          if (listing.path(i).split('/').at(-1) === '.gitattributes') attributes++;
-      }
       const origin = access.repository.private ? 'private' : 'public';
       const result: ImportPreview = {
         repository: access.repository.full_name,
@@ -85,12 +86,12 @@ export const preview = accountAction('same')({
         choices: importVisibilityChoices(origin),
         ref,
         commit: source.commit,
-        files: listing?.length ?? null,
+        files: listing?.files ?? null,
         bytes: listing?.totalBytes ?? null,
         submodules: listing?.submodules ?? null,
-        attributes,
-        lfs: importLfsLine(attributes),
-        warnings: importEnvelopeWarnings(listing?.length ?? null),
+        attributes: listing ? attributes : null,
+        lfs: importLfsLine(listing ? attributes : null),
+        warnings: importEnvelopeWarnings(listing?.files ?? null),
       };
       return { ...result, githubRequests: meter.counts };
     } catch (error) {

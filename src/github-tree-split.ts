@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { githubJson, type GithubFetch } from './github.js';
 import { invariant } from './errors.js';
+import { safeRelative } from './safe-relative.js';
 
 export type GithubTreeEntry = { path: string; mode: string; type: string; sha: string; size?: number };
-/** A listing as GitHub returned it: each reply's entries, relative to their directory, with
- * the replies of split child directories beside them (identical subtrees shared, never copied).
- * walkSplitTree visits every entry with its full path. */
-export type SplitTree = { rows: TreeRows; nested: { prefix: string; tree: SplitTree }[] };
 
 const modes = ['100644', '100755', '120000', '160000', '040000'],
   types = ['blob', 'tree', 'commit'];
 const modeCode = new Map(modes.map((mode, code) => [mode, code])),
   typeCode = new Map(types.map((type, code) => [type, code]));
+const directoryCode = modeCode.get('040000')! * 4 + typeCode.get('tree')!;
 const gitId = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 
 /** One tree reply's entries in columns: the paths in one string, binary object ids, sizes and
@@ -52,7 +50,25 @@ export class TreeRows {
     );
   }
   path(index: number) {
-    return this.odd.get(index)?.path ?? this.paths.slice(this.starts[index]!, this.starts[index + 1]!);
+    const odd = this.odd.get(index);
+    return odd ? odd.path : this.paths.slice(this.starts[index]!, this.starts[index + 1]!);
+  }
+  isDirectory(index: number) {
+    const odd = this.odd.get(index);
+    return odd ? isTree(odd) : this.codes[index] === directoryCode;
+  }
+  hasValidId(index: number) {
+    const odd = this.odd.get(index);
+    return !odd || (typeof odd.sha === 'string' && gitId.test(odd.sha));
+  }
+  get retainedBytes() {
+    return this.odd.size
+      ? Infinity
+      : this.paths.length * 2 +
+          this.starts.byteLength +
+          this.shas.byteLength +
+          this.sizes.byteLength +
+          this.codes.byteLength;
   }
   /** One entry as an object, made on demand. */
   entry(index: number): GithubTreeEntry {
@@ -114,7 +130,7 @@ class RowsBuilder {
       type !== undefined &&
       typeof entry.sha === 'string' &&
       gitId.test(entry.sha) &&
-      (entry.size === undefined || Number.isSafeInteger(entry.size))
+      (entry.size === undefined || (Number.isSafeInteger(entry.size) && entry.size >= 0))
     ) {
       const at = this.row(entry.path, mode * 4 + type, entry.size ?? -1, entry.sha.length);
       if (at >= 0) {
@@ -317,7 +333,7 @@ function scanTreeReply(b: Buffer): TreeReply | null {
       code !== undefined &&
       kind !== undefined &&
       (length === 40 || length === 64) &&
-      (!sized || (typeof size === 'number' && Number.isSafeInteger(size)))
+      (!sized || (typeof size === 'number' && Number.isSafeInteger(size) && size >= 0))
     ) {
       let valid = true;
       for (let i = id[0]; i < id[1] && valid; i++) valid = hexValue(b[i]!) >= 0;
@@ -376,91 +392,190 @@ function scanTreeReply(b: Buffer): TreeReply | null {
   return whole && tree && at === b.length ? { sha, truncated, rows: rows.finish() } : null;
 }
 
-/** Calls `visit` for every entry of `tree` with its path from the listed root. */
-export function walkSplitTree(
-  tree: SplitTree,
-  visit: (path: string, entry: GithubTreeEntry) => void,
-  prefix = '',
-) {
-  for (let i = 0; i < tree.rows.length; i++) {
-    const entry = tree.rows.entry(i);
-    visit(prefix ? `${prefix}/${entry.path}` : entry.path, entry);
-  }
-  for (const child of tree.nested)
-    walkSplitTree(child.tree, visit, prefix ? `${prefix}/${child.prefix}` : child.prefix);
-}
+const treeSplitConcurrency = 8;
+const treeSplitMaxRequests = 1_500;
+const cacheBudget = 16 * 1024 * 1024;
+// Flat ancestors and prefetched replies share the budget, with one slot for a current read.
+const flatSlots = 4;
 
-/** Reads in flight at once; a split listing of a 150k-file tree needs a few hundred. */
-export const treeSplitConcurrency = 8;
-/** Past this many tree reads the split is abandoned for paged acquisition, so one
- * listing can never spend a token's hourly budget (5,000) on a pathological tree. */
-export const treeSplitMaxRequests = 1_500;
-
-/** A tree GitHub cannot return in pieces: one directory above its own reply limit. */
+/** A tree GitHub cannot return in pieces. */
 export class TreeSplitUnavailable extends Error {
   constructor(readonly reason: 'directory-truncated' | 'request-cap') {
     super(`GitHub tree split unavailable: ${reason}`);
   }
 }
 
-/** GitHub truncates a recursive tree reply at 100,000 entries or about 7 MB. This
- * builds the same complete entry list from smaller replies: it reads a truncated
- * tree without recursion, then each child tree recursively, and splits again only
- * the children whose recursive reply is still truncated. Identical subtrees (same
- * object id) are read once. Paths in the result are relative to `tree`, whose
- * recursive reply the caller already found truncated. */
-export async function splitGithubTree(
+const isTree = (entry: GithubTreeEntry) => entry.type === 'tree' && entry.mode === '040000';
+const validPaths = (ok: unknown) =>
+  invariant(ok, 'GITHUB_RESPONSE', 'GitHub returned invalid or duplicate tree paths.');
+
+function ordered(rows: TreeRows, recursive: boolean) {
+  const directories = new Set(['']);
+  for (let index = 0; index < rows.length; index++) {
+    const path = rows.path(index);
+    validPaths(typeof path === 'string' && safeRelative(path) && (recursive || !path.includes('/')));
+    invariant(
+      !/(?:^|\/)(?:\.git|\.forge)(?:\/|$)/i.test(path),
+      'INVALID_NATIVE_SOURCE',
+      'Imported paths cannot overlap native metadata.',
+    );
+    validPaths(rows.hasValidId(index));
+    if (rows.isDirectory(index)) {
+      validPaths(!directories.has(path));
+      directories.add(path);
+    }
+  }
+  let last = '';
+  let needsSort = false;
+  for (let index = 0; index < rows.length; index++) {
+    const path = rows.path(index),
+      directory = rows.isDirectory(index);
+    const parent = path.slice(0, Math.max(0, path.lastIndexOf('/')));
+    validPaths(directories.has(parent) && (directory || !directories.has(path)));
+    const key = directory ? path + '/' : path;
+    needsSort ||= key <= last;
+    last = key;
+  }
+  const order = needsSort ? Uint32Array.from({ length: rows.length }, (_, index) => index) : null;
+  if (order) {
+    const key = (i: number) => (rows.isDirectory(i) ? rows.path(i) + '/' : rows.path(i));
+    order.sort((a, b) => {
+      const left = key(a),
+        right = key(b);
+      return left < right ? -1 : left > right ? 1 : 0;
+    });
+  }
+  return {
+    length: rows.length,
+    bytes: rows.retainedBytes + (order?.byteLength ?? 0),
+    entry: (index: number) => rows.entry(order?.[index] ?? index),
+    isDirectory: (index: number) => rows.isDirectory(order?.[index] ?? index),
+  };
+}
+type OrderedTree = ReturnType<typeof ordered>;
+type TreeBatch = { prefix: string; entries: Iterable<GithubTreeEntry> };
+
+function* entries(rows: OrderedTree, start = 0, end = rows.length) {
+  for (let index = start; index < end; index++) yield rows.entry(index);
+}
+
+/** Walk in State order. Cache small identical subtrees and look ahead only as
+ * far as the reply budget allows. A deeply nested split can evict a flat
+ * ancestor, which is read again by its exact ID if it is still needed. */
+export async function* streamGithubTree(
   repository: string,
-  tree: string,
+  root: string,
   token: string | undefined,
   request: GithubFetch,
-  stats: { requests: number; splits: number } = { requests: 0, splits: 0 },
-): Promise<SplitTree> {
-  let active = 0;
-  const waiting: (() => void)[] = [];
-  const read = async (sha: string, recursive: boolean): Promise<TreeReply> => {
-    while (active >= treeSplitConcurrency) await new Promise<void>(resume => waiting.push(resume));
+  stats: { requests: number; splits: number },
+): AsyncGenerator<TreeBatch> {
+  validPaths(gitId.test(root));
+  const cache = new Map<string, OrderedTree | null>();
+  let cachedBytes = 0;
+  const cost = (rows: OrderedTree | null) => 128 + (rows?.bytes ?? 0);
+  const read = async (tree: string, recursive: boolean) => {
+    const key = recursive ? tree + '?' : tree;
+    const hit = cache.get(key);
+    if (hit !== undefined) {
+      cache.delete(key);
+      cache.set(key, hit);
+      return hit;
+    }
     if (stats.requests >= treeSplitMaxRequests) throw new TreeSplitUnavailable('request-cap');
-    active++;
     stats.requests++;
-    try {
-      const reply = await githubJson(
-        `/repos/${repository}/git/trees/${sha}${recursive ? '?recursive=1' : ''}`,
-        token,
-        request,
-        readTreeReply,
-      );
-      invariant(reply.sha === sha, 'GITHUB_RESPONSE', 'GitHub returned another tree.');
-      return reply;
-    } finally {
-      active--;
-      waiting.shift()?.();
-    }
-  };
-  const done = new Map<string, Promise<SplitTree>>();
-  const collect = (sha: string, truncated = false): Promise<SplitTree> => {
-    let pending = done.get(sha);
-    if (!pending) done.set(sha, (pending = collectUncached(sha, truncated)));
-    return pending;
-  };
-  const collectUncached = async (sha: string, truncated: boolean): Promise<SplitTree> => {
-    if (!truncated) {
-      const whole = await read(sha, true);
-      if (!whole.truncated) return { rows: whole.rows, nested: [] };
-    }
-    stats.splits++;
-    const flat = await read(sha, false);
-    // One directory above the limit has no smaller reply to ask for.
-    if (flat.truncated) throw new TreeSplitUnavailable('directory-truncated');
-    const children: GithubTreeEntry[] = [];
-    for (let i = 0; i < flat.rows.length; i++) {
-      const entry = flat.rows.entry(i);
-      if (entry.type === 'tree' && entry.mode === '040000') children.push(entry);
-    }
-    const nested = await Promise.all(
-      children.map(async entry => ({ prefix: entry.path, tree: await collect(entry.sha) })),
+    const reply = await githubJson(
+      `/repos/${repository}/git/trees/${tree}${recursive ? '?recursive=1' : ''}`,
+      token,
+      request,
+      readTreeReply,
     );
-    return { rows: flat.rows, nested };
+    invariant(reply.sha === tree, 'GITHUB_RESPONSE', 'GitHub returned another tree.');
+    const rows = reply.truncated ? null : ordered(reply.rows, recursive);
+    const bytes = cost(rows);
+    if (bytes <= cacheBudget) {
+      while (cachedBytes + bytes > cacheBudget) {
+        const oldest = cache.keys().next().value!;
+        cachedBytes -= cost(cache.get(oldest)!);
+        cache.delete(oldest);
+      }
+      cache.set(key, rows);
+      cachedBytes += bytes;
+    }
+    return rows;
   };
-  return collect(tree, true);
+  // Prefetched failures are observed in emission order. Drain speculative reads
+  // if validation or the sink ends the walk early.
+  const pending = new Map<string, Promise<OrderedTree | null>>();
+  const flats = new Map<object, OrderedTree>();
+  const take = (tree: string) => {
+    const ready = pending.get(tree);
+    pending.delete(tree);
+    return ready ?? read(tree, true);
+  };
+  const whole = async function* (tree: string, prefix: string) {
+    const rows = await take(tree);
+    if (rows) yield { prefix, entries: entries(rows) };
+    return rows !== null;
+  };
+  const walk = async function* (tree: string, prefix: string): AsyncGenerator<TreeBatch> {
+    if (yield* whole(tree, prefix)) return;
+    stats.splits++;
+    const frame = {};
+    let lookAheadAt = 0;
+    const flat = async () => {
+      const hit = flats.get(frame);
+      flats.delete(frame);
+      const available = Math.min(flatSlots, treeSplitConcurrency - pending.size - 1);
+      if (!hit && flats.size >= available) flats.delete(flats.keys().next().value!);
+      const rows = hit ?? (await read(tree, false));
+      if (!rows) throw new TreeSplitUnavailable('directory-truncated');
+      flats.set(frame, rows);
+      return rows;
+    };
+    const segment = async (start: number) => {
+      const rows = await flat();
+      let end = start,
+        child: GithubTreeEntry | undefined;
+      while (end < rows.length) {
+        if (rows.isDirectory(end++)) {
+          child = rows.entry(end - 1);
+          break;
+        }
+      }
+      if (child) {
+        const lookAhead = treeSplitConcurrency - flats.size - 1;
+        // A wide fan-out can reuse one SHA, so pending.size alone cannot tell
+        // us what we have already scanned. Never scan those siblings again.
+        lookAheadAt = Math.max(lookAheadAt, end - 1);
+        for (; lookAheadAt < rows.length && pending.size < lookAhead; lookAheadAt++) {
+          if (!rows.isDirectory(lookAheadAt)) continue;
+          const entry = rows.entry(lookAheadAt);
+          if (pending.has(entry.sha)) continue;
+          const reading = read(entry.sha, true);
+          void reading.catch(() => {});
+          pending.set(entry.sha, reading);
+        }
+      }
+      return { batch: { prefix, entries: entries(rows, start, end) }, child, end, done: end === rows.length };
+    };
+    try {
+      for (let start = 0; ;) {
+        let part: Awaited<ReturnType<typeof segment>> | undefined = await segment(start);
+        yield part.batch;
+        const { child, done, end } = part;
+        part = undefined;
+        if (done) flats.delete(frame);
+        if (child) yield* walk(child.sha, prefix ? `${prefix}/${child.path}` : child.path);
+        if (done) break;
+        start = end;
+      }
+    } finally {
+      flats.delete(frame);
+    }
+  };
+  try {
+    yield* walk(root, '');
+  } finally {
+    await Promise.allSettled(pending.values());
+  }
 }

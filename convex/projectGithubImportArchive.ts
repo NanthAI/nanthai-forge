@@ -10,12 +10,7 @@ import { convexFetch } from './networkFetch';
 import { networkFetch } from '../src/network-fetch';
 import type { ImportRequestMeter } from '../src/github-import-meter';
 import { githubSourceMode, type GithubSourceEntry } from '../src/github-project-source';
-import {
-  listGithubTree,
-  openGithubArchive,
-  githubArchiveFiles,
-  gitBlobId,
-} from '../src/github-archive-source';
+import { openGithubArchive, githubArchiveFiles, gitBlobId } from '../src/github-archive-source';
 import { archiveCursorSchema, importPageFiles, lfsImportDefaultBytes } from '../src/github-import-pages';
 import { ImportedPins, type ListingTable } from '../src/github-listing-codec';
 import { ObjectRecipeBuilder, objectChunkBytes } from '../src/object-chunks';
@@ -26,7 +21,13 @@ import { isGitattributesPath } from '../src/github-lfs';
 import { LfsImport, lfsAttributeBytes } from '../src/github-lfs-import';
 import { ImportUpload, type CatalogEntry } from './projectGithubImportUpload';
 import { resumePublication, storedObjects } from './projectGithubImportResume';
-import { dropImportScratch, jobListing, readPins, storePins } from './projectGithubImportListing';
+import {
+  dropImportScratch,
+  dropListing,
+  jobListing,
+  readPins,
+  storePins,
+} from './projectGithubImportListing';
 import { publishImport, type ImportRows } from './projectGithubImportPublish';
 import { stageFallbackBlobs } from './projectGithubImportFallback';
 
@@ -34,6 +35,7 @@ import { stageFallbackBlobs } from './projectGithubImportFallback';
  * action limit is 10 minutes and publication needs headroom. */
 export const archiveRunMillis = 6 * 60_000;
 const packTimeoutMillis = 2 * 60_000;
+const archivePublicationRss = 380_000_000;
 /** Pack and empty-object PUTs may proceed independently within the bounded
  * source window and pack-copy memory. */
 export const archiveUploadConcurrency = 32;
@@ -53,6 +55,9 @@ export async function runArchiveImport(
   if (await resumePublication(ctx, job, input, meter)) return;
   const started = Date.now(),
     cursor = archiveCursorSchema.parse(JSON.parse(job.cursor));
+  console.log(
+    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-start', step: job.step, at: started, rssBytes: process.memoryUsage().rss })}`,
+  );
   const github = meter.wrap(networkFetch);
   const access = await authorizeImportGithub(job.repository, job.owner, github, ctx);
   invariant(
@@ -66,11 +71,9 @@ export async function runArchiveImport(
       (access.repository as { id?: unknown }).id,
       meter.wrap(convexFetch),
     )) ?? access.token;
-  // The file table is listed once per job (at start) and read back from R2 by every step.
-  const { listing, pin: listingPin } = await jobListing(ctx, job, input, cursor.tree, () =>
-    listGithubTree(job.repository, cursor.tree, token, github),
-  );
-  invariant(listing && listingPin, 'GITHUB_RESPONSE', 'GitHub no longer lists this commit tree completely.');
+  const ready = await jobListing(ctx, job, input, cursor.tree, token, github, meter);
+  if (!ready) return;
+  const { listing, pin: listingPin } = ready;
   console.log(
     `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing', at: Date.now(), elapsedMillis: Date.now() - started, files: listing.length, sourceBytes: listing.totalBytes, rssBytes: process.memoryUsage().rss })}`,
   );
@@ -87,7 +90,6 @@ export async function runArchiveImport(
     });
   };
   const catalog = { stored, record: saveWindow };
-  const upload = new ImportUpload(ctx, job.projectId, job.owner, archiveUploadConcurrency, catalog);
   // Pins by listing row: columns, not a path Map (memory per file bounds the import size).
   const imported =
     (cursor.pins && (await readPins(job.projectId, cursor.pins, cursor.tree, listingPin, listing.length))) ||
@@ -108,6 +110,34 @@ export async function runArchiveImport(
       return true;
     });
   const initialCount = imported.count;
+  const counters = () => ({
+    completed: imported.count,
+    total: listing.length,
+    bytes,
+    // LFS objects replace their pointers' listed bytes once resolved.
+    totalBytes: Math.max(listing.totalBytes, bytes),
+    submodules: listing.submodules,
+  });
+  const publish = async () => {
+    await publishImport(
+      ctx,
+      { ...job, ...counters(), totalKnown: true },
+      archiveRows(listing, imported),
+      catalog,
+      meter,
+    );
+    await dropListing(job.projectId);
+  };
+  // A complete checkpoint hands off directly to publication. If any pin was
+  // lost, continue the ordinary acquisition path and verify those rows again.
+  if (cursor.pins && initialCount === listing.length) {
+    console.log(
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'publication-handoff', step: job.step, at: Date.now(), files: initialCount, rssBytes: process.memoryUsage().rss })}`,
+    );
+    await publish();
+    return;
+  }
+  const upload = new ImportUpload(ctx, job.projectId, job.owner, archiveUploadConcurrency, catalog);
   const record = (
     entry: GithubSourceEntry,
     pin: { blob: string; size: number },
@@ -119,14 +149,6 @@ export async function runArchiveImport(
     imported.set(index, pin.blob, pin.size, lfs);
     if (entry.mode !== '160000') bytes += pin.size;
   };
-  const counters = () => ({
-    completed: imported.count,
-    total: listing.length,
-    bytes,
-    // LFS objects replace their pointers' listed bytes once resolved.
-    totalBytes: Math.max(listing.totalBytes, bytes),
-    submodules: listing.submodules,
-  });
   const pendingReceipts: CatalogEntry[][] = [];
   const flush = async () => {
     const receipt = upload.catalogReceipt();
@@ -248,7 +270,10 @@ export async function runArchiveImport(
       // Reconcile a lost advance reply or a superseded worker before touching
       // the attempted key. A newer cursor may already have selected it.
       const current = await ctx.runQuery(internal.projectGithubImportStore.get, input);
-      const selected = archiveCursorSchema.parse(JSON.parse(current.cursor)).pins?.sha256;
+      const selected =
+        current.protocol === 3
+          ? archiveCursorSchema.parse(JSON.parse(current.cursor)).pins?.sha256
+          : undefined;
       if (selected !== pins.sha256) await dropImportScratch(job.projectId, pins);
       if (selected !== cursor.pins?.sha256) await dropImportScratch(job.projectId, cursor.pins);
     }
@@ -306,8 +331,9 @@ export async function runArchiveImport(
       });
     await upload.drain(true);
     await flush();
+    const rssBytes = process.memoryUsage().rss;
     console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-complete', at: Date.now(), elapsedMillis: Date.now() - started, files: imported.count, lfsObjects: lfs.objects, lfsBytes: lfs.objectBytes, lfsFetched: lfs.fetched, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, peakBufferedBytes: upload.peakBufferedBytes, rssBytes: process.memoryUsage().rss })}`,
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-complete', step: job.step, at: Date.now(), elapsedMillis: Date.now() - started, files: imported.count, lfsObjects: lfs.objects, lfsBytes: lfs.objectBytes, lfsFetched: lfs.fetched, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, peakBufferedBytes: upload.peakBufferedBytes, rssBytes, peakRssBytes: process.resourceUsage().maxRSS * 1024 })}`,
     );
     if (imported.count < listing.length) {
       invariant(
@@ -318,13 +344,11 @@ export async function runArchiveImport(
       await checkpoint(true);
       return;
     }
-    await publishImport(
-      ctx,
-      { ...job, ...counters(), totalKnown: true },
-      archiveRows(listing, imported),
-      catalog,
-      meter,
-    );
+    if (rssBytes > archivePublicationRss && imported.count > 0) {
+      await checkpoint(true);
+      return;
+    }
+    await publish();
   } catch (error) {
     // Preserve the original failure. Only checkpoint after flushing receipts,
     // and drop pins from any upload window that did not finish.
@@ -341,10 +365,6 @@ export async function runArchiveImport(
       }
     throw error;
   }
-  await Promise.all([
-    dropImportScratch(job.projectId, listingPin),
-    dropImportScratch(job.projectId, cursor.pins),
-  ]);
 }
 
 function archiveRows(listing: ListingTable, imported: ImportedPins): ImportRows {

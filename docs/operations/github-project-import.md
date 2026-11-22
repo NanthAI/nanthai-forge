@@ -144,30 +144,31 @@ repository or claim ownership of it.
 
 ## Archive acquisition and packed storage
 
-A complete recursive Git tree selects archive transfer (protocol 3). The worker
+A complete Git tree selects archive transfer (protocol 3). The acquisition worker
 streams the selected commit's tarball, follows only the validated GitHub codeload
 redirect without forwarding credentials, and verifies every retained file against
 its Git object ID. Archive-omitted or rewritten members are fetched in Git protocol v2 blob packs;
 submodules remain commit pointers. GitHub truncates a recursive tree reply at 100,000
 entries or about 7 MB, whichever comes first. A truncated reply does not change the
-path: the listing is rebuilt from smaller tree reads (the root without recursion, each
-child recursively, and again non-recursively only for a child still truncated; equal
-trees are read once, 8 reads at a time), about one request per split directory rather
-than per directory or blob. Paged tree/Git-pack acquisition (protocol 2) is used only when
+path. The listing walks smaller tree replies in State order. It reads the root without
+recursion, each child recursively, and a child that is still truncated without recursion.
+It holds at most eight replies outside a 16 MiB cache for repeated subtrees. A reply
+that is already ordered passes through directly. Each unordered reply is sorted within
+its own bounds. Paged tree/Git-pack acquisition (protocol 2) is used only when
 a single directory is itself above the reply limit or the split would need more than
 1,500 tree reads; the reason is logged as `listing-split-unavailable`. No partial tree
 is published.
 
-The tree is listed once per import job. `start` stores the listing (path, Git object ID,
-size, mode per file; plus totals) as one scratch object under the project's R2 prefix, in
-columns (one paths string with offsets, binary object IDs, sizes and mode codes). It builds
-those columns as it reads: each tree reply is scanned from its bytes into the same column
-form (no object per entry, API URLs skipped; a reply GitHub truncated is not read, since it is
-read again in pieces) and the rows are sorted once at the end, so the listing holds no object
-per file. `start` pins the stored table on the job; every archive step reads that object back, verifies its digest and
-tree id, and makes no tree request. A missing or altered object is listed again, never
-trusted. Publication deletes it; project deletion removes it with the rest of the prefix.
-The listing holds no per-file Convex rows.
+`start` resolves the commit, creates the job and schedules a listing step in the
+same transaction. That step validates rows as it reads GitHub's replies and
+writes create-only, checksummed R2 pages of up to 65,536 files or 8 MiB. Each
+page stores UTF-8 paths, binary Git IDs, sizes and modes. A small index names
+the exact tree, totals and ordered page digests. The listing step pins the index
+and schedules acquisition. Every archive step verifies and loads the pages
+individually into its preallocated file table. A missing, altered or legacy listing
+triggers a fresh listing. Publication and a switch to protocol 2 clean the scratch
+prefix, including pages whose index was never pinned. The listing adds no per-file
+Convex rows. Project purge removes scratch left by persistent storage failures.
 
 Committed regular files, executable modes, symlink targets, binaries, empty files
 and committed ignored paths are retained. Source names cannot overlap the
@@ -197,7 +198,7 @@ project-authorized byte ranges with the exact Range header bound into the
 signature. They verify length, offsets and logical
 SHA-256 before use, including source workers, checks and GitHub mirrors.
 
-Progress retains one compact receipt per stored window. The first step reads the
+Progress retains one compact receipt per stored window. The first acquisition step reads the
 tarball for up to six minutes. If files remain, it stores one checksummed snapshot
 of the verified file pins in R2. The cursor binds that snapshot to the commit tree
 and exact listing. A continuation loads those pins, checks them against the stored
@@ -206,29 +207,32 @@ of up to 1,000 blobs. It also reloads the commit's Git LFS attributes. A missing
 or damaged checkpoint sends the affected reads back to Git without reopening the
 tarball. A catchable failure retains verified progress for retry.
 
-An import that finishes in one step writes no pin snapshot. Each successful
-advance retires the previous snapshot. Publication deletes the last snapshot and
-the listing. Create-only uploads reconcile existing keys by verifying size and
-checksum. Main is published only after all files are verified and stored. A
-continuation that verifies no new files reports a structured failure.
+Each successful advance retires the previous pin snapshot. A complete acquisition
+with RSS above 380 MB checkpoints its pins and schedules publication in a fresh
+action. The fresh action publishes from verified pins and the stored-object catalog
+without requesting GitHub blobs or opening the tarball. A complete acquisition
+below the threshold publishes in the same action. Main is published only after all
+files are verified and stored. A continuation that verifies no new files reports a
+structured failure.
 
-Memory per file bounds the import size: a Convex Node action has 512 MB, and a near-empty
-import action sits at about 190 to 200 MB. An archive step keeps its per-file state in
-columns rather than objects: the listing (about 150 bytes a file at real path lengths,
-looked up by binary search over its sorted paths), the verified pin of each listed row
+Convex Node actions have a 512 MB memory limit. A near-empty import action has
+measured about 190 to 200 MB. Start holds no file table and the listing step's
+memory follows the largest replies and a single write page. An archive step keeps
+its per-file state in columns: the listing (one UTF-8 path buffer, looked up by
+binary search over sorted paths), the verified pin of each listed row
 (a 32-byte blob digest and a size) and the stored-object catalog (binary digests, sizes and
 pack offsets in an open-addressing index, about 70 bytes an object). Publication sorts
-that catalog in place and writes it 32 pages at a time, and a publication retry reads the
-stored State one file at a time instead of parsing it whole. Before this, 150,612 files
+that catalog in place and writes it 32 pages at a time. A publication retry
+scans file entries from the stored State bytes. In the earlier archive implementation, 150,612 files
 (1.47 GB; `rssBytes` in the `FORGE_IMPORT_METRIC` records) read the listing at 292 MB,
 finished the archive at 448 MB and peaked at 494 MB during publication. Now the same
 150,612 files peak at 381 MB in the archive and 422 MB in publication (metadata; catalog
 392 MB, projection 389 MB), in 10.5 minutes instead of 13. Measured ceiling (2026-11-10,
 Firefox's 487,756 files and 3.67 GB): the start listing passes, and archive steps stayed at
 or under 418 MB through 419,111 files; publication at that size is not yet measured, so
-about 490,000 files is the tested bound for the archive and 150,612 for a full import.
-Continuations replace the repeated archive read with Git pack downloads. Hosted
-continuation throughput and publication memory at Firefox scale remain unmeasured.
+150,612 files is the measured bound for a full hosted import. A later Firefox-scale
+run hit 512 MB while storing the old one-object listing in start. Hosted throughput
+and publication memory for the paged listing and fresh-action handoff remain unmeasured.
 
 State, manifest and Work metadata use the same R2-backed object path. Catalog
 publication and source-index materialization use bounded pages. The ready

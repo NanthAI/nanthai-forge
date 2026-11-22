@@ -1,127 +1,96 @@
 // SPDX-License-Identifier: Apache-2.0
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import { createHash } from 'node:crypto';
-import { assertGithubRateLimit, githubJson, type GithubFetch } from './github.js';
+import { assertGithubRateLimit, type GithubFetch } from './github.js';
 import { githubBlobEndpointBytes, type GithubSourceEntry } from './github-project-source.js';
 import { tarEntries } from './github-tar.js';
 import { invariant } from './errors.js';
-import { safeRelative } from './files.js';
 import { refuseLossyGitPaths } from './git-path-bytes.js';
-import { ListingBuilder, type ListingTable } from './github-listing-codec.js';
-import {
-  splitGithubTree,
-  TreeSplitUnavailable,
-  readTreeReply,
-  walkSplitTree,
-  type SplitTree,
-} from './github-tree-split.js';
+import type { ListingTable } from './github-listing-codec.js';
+import { streamGithubTree, TreeSplitUnavailable } from './github-tree-split.js';
 
 const gitId = (value: unknown): value is string =>
   typeof value === 'string' && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(value);
-export type GithubListing = { files: GithubSourceEntry[]; totalBytes: number; submodules: number };
 
-/** One request for the whole committed tree. When GitHub truncates that reply
- * (100,000 entries or about 7 MB) the same listing is assembled from smaller tree
- * reads (see splitGithubTree). Only a tree that cannot be split (one directory above
- * the limit, or more than the request cap) returns null so the caller uses
- * directory-by-directory discovery; a partial tree is never imported. The rows go
- * straight into a column table: no object per file outlives GitHub's replies. */
+/** Validate and emit the committed files in State order. Null selects paged
+ * acquisition when a split cannot finish; the caller discards any partial listing. */
 export async function listGithubTree(
   repository: string,
   tree: string,
-  token?: string,
-  request: GithubFetch = networkFetch,
-): Promise<ListingTable | null> {
-  invariant(gitId(tree), 'GITHUB_RESPONSE', 'GitHub returned an invalid object identity.');
-  const reply = await githubJson(
-    `/repos/${repository}/git/trees/${tree}?recursive=1`,
-    token,
-    request,
-    readTreeReply,
-  );
-  invariant(reply.sha === tree, 'GITHUB_RESPONSE', 'GitHub returned another tree.');
-  let listed: SplitTree | null = null,
-    stats: { requests: number; splits: number } | null = null;
-  if (!reply.truncated) listed = { rows: reply.rows, nested: [] };
-  else {
-    stats = { requests: 1, splits: 0 };
-    try {
-      listed = await splitGithubTree(repository, tree, token, request, stats);
-    } catch (error) {
-      if (!(error instanceof TreeSplitUnavailable)) throw error;
-      console.log(
-        `FORGE_IMPORT_METRIC ${JSON.stringify({ phase: 'listing-split-unavailable', reason: error.reason, requests: stats.requests })}`,
-      );
-      return null;
-    }
-  }
-  const invalid = () =>
-    invariant(false, 'GITHUB_RESPONSE', 'GitHub returned invalid or duplicate tree paths.') as never;
-  const directories = new Set<string>(['']),
-    rows = new ListingBuilder();
-  let totalBytes = 0,
+  token: string | undefined,
+  request: GithubFetch,
+  sink: { append: (entry: GithubSourceEntry) => Promise<void> | void },
+) {
+  const stats = { requests: 0, splits: 0 };
+  let files = 0,
+    totalBytes = 0,
     submodules = 0,
     entries = 0;
+  let last = '';
+  let idWidth = 0;
+  let unordered = false;
+  let lossyCount = 0;
   const lossy: string[] = [];
-  walkSplitTree(listed!, (path, entry) => {
-    entries++;
-    if (typeof path !== 'string' || !safeRelative(path) || !gitId(entry.sha)) invalid();
-    if (path.includes('\uFFFD')) lossy.push(path);
-    invariant(
-      !path
-        .toLowerCase()
-        .split('/')
-        .some(part => ['.git', '.forge'].includes(part)),
-      'INVALID_NATIVE_SOURCE',
-      'Imported paths cannot overlap native metadata.',
-    );
-    if (entry.type === 'tree' && entry.mode === '040000') {
-      if (directories.has(path)) invalid();
-      directories.add(path);
-      return;
+  try {
+    for await (const batch of streamGithubTree(repository, tree, token, request, stats)) {
+      for (const entry of batch.entries) {
+        const path = batch.prefix ? `${batch.prefix}/${entry.path}` : entry.path;
+        entries++;
+        if (/[\uFFFD\uD800-\uDFFF]/u.test(path)) {
+          lossyCount++;
+          if (lossy.length < 100) lossy.push(path.replace(/[\uD800-\uDFFF]/gu, '\uFFFD'));
+        }
+        if (entry.type === 'tree' && entry.mode === '040000') continue;
+        const submodule = entry.type === 'commit' && entry.mode === '160000';
+        invariant(
+          submodule || (entry.type === 'blob' && ['100644', '100755', '120000'].includes(entry.mode)),
+          'GITHUB_SOURCE_UNSUPPORTED',
+          `Git object at ${path} cannot be represented as file bytes (mode ${entry.mode}); main was not published.`,
+        );
+        const size = submodule ? 0 : entry.size!;
+        invariant(
+          Number.isSafeInteger(size) && size >= 0 && size <= githubBlobEndpointBytes,
+          size > githubBlobEndpointBytes ? 'GITHUB_BLOB_LIMIT' : 'GITHUB_RESPONSE',
+          `GitHub cannot return ${path} (${size} bytes); files up to 100 MB are supported. Main was not published.`,
+        );
+        idWidth ||= entry.sha.length;
+        invariant(
+          entry.sha.length === idWidth,
+          'GITHUB_RESPONSE',
+          'GitHub returned invalid or duplicate tree paths.',
+        );
+        unordered ||= path <= last;
+        last = path;
+        files++;
+        totalBytes += size;
+        submodules += Number(submodule);
+        if (!lossyCount && !unordered) {
+          const writing = sink.append({
+            path,
+            sha: entry.sha,
+            size,
+            mode: entry.mode as GithubSourceEntry['mode'],
+          });
+          if (writing) await writing;
+        }
+      }
     }
-    if (entry.type === 'commit' && entry.mode === '160000') {
-      if (!rows.push(path, entry.sha, 0, '160000')) invalid();
-      submodules++;
-      return;
-    }
-    invariant(
-      entry.type === 'blob' && ['100644', '100755', '120000'].includes(entry.mode),
-      'GITHUB_SOURCE_UNSUPPORTED',
-      `Git object at ${path} cannot be represented as file bytes (mode ${entry.mode}); main was not published.`,
-    );
-    invariant(
-      Number.isSafeInteger(entry.size) && entry.size! >= 0 && entry.size! <= githubBlobEndpointBytes,
-      entry.size! > githubBlobEndpointBytes ? 'GITHUB_BLOB_LIMIT' : 'GITHUB_RESPONSE',
-      `GitHub cannot return ${path} (${entry.size} bytes); files up to 100 MB are supported. Main was not published.`,
-    );
-    if (!rows.push(path, entry.sha, entry.size!, entry.mode)) invalid();
-    totalBytes += entry.size!;
-  });
-  listed = null;
-  // One refusal names every path GitHub could not show as UTF-8 (Issue 6a0dd2e8).
-  if (lossy.length) refuseLossyGitPaths(lossy, 'This GitHub repository');
-  // Recursive replies list parents first; a file under an undeclared or file
-  // parent would be a tree GitHub never committed, and a path is a file or a directory.
-  for (let i = 0; i < rows.length; i++) {
-    const path = rows.path(i);
-    invariant(
-      directories.has(path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '') &&
-        !directories.has(path),
-      'GITHUB_RESPONSE',
-      'GitHub returned a file outside its listed directories.',
-    );
-  }
-  invariant(Number.isSafeInteger(totalBytes), 'GITHUB_RESPONSE', 'Repository size is invalid.');
-  // Portable State order (JS code units), identical to the paged inventory keys.
-  const table = rows.finish(totalBytes, submodules) ?? invalid();
-  if (stats)
+  } catch (error) {
+    if (!(error instanceof TreeSplitUnavailable)) throw error;
     console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ phase: 'listing-split', requests: stats.requests, splits: stats.splits, entries, rssBytes: process.memoryUsage().rss })}`,
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ phase: 'listing-split-unavailable', reason: error.reason, requests: stats.requests })}`,
     );
-  return table;
+    return null;
+  }
+  if (lossyCount) refuseLossyGitPaths(lossy, 'This GitHub repository', lossyCount, 100);
+  invariant(!unordered, 'GITHUB_RESPONSE', 'GitHub returned invalid or duplicate tree paths.');
+  invariant(Number.isSafeInteger(totalBytes), 'GITHUB_RESPONSE', 'Repository size is invalid.');
+  if (stats.splits)
+    console.log(
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ phase: 'listing-split', ...stats, entries, rssBytes: process.memoryUsage().rss })}`,
+    );
+  return { files, totalBytes, submodules };
 }
-
 /** The commit's tarball as one gzip stream. GitHub redirects to codeload with a
  * short-lived URL; the API credential is never sent to the redirect target. */
 export async function openGithubArchive(

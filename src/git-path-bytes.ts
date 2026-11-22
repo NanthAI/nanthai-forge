@@ -30,10 +30,10 @@ export function shownGitPath(bytes: Uint8Array): string {
   return out;
 }
 
-const refusal = (shown: readonly string[], source: string) =>
+const refusal = (shown: readonly string[], source: string, total = shown.length, names = 20) =>
   new ForgeError(
     'GITHUB_SOURCE_UNSUPPORTED',
-    `${source} has ${shown.length} path${shown.length === 1 ? '' : 's'} that ${shown.length === 1 ? 'is' : 'are'} not valid UTF-8: ${shown.slice(0, 20).join(', ')}${shown.length > 20 ? `, … (${shown.length - 20} more)` : ''}. Forge stores UTF-8 paths only and never renames a path silently. Rename ${shown.length === 1 ? 'it in Git to a UTF-8 name' : 'them in Git to UTF-8 names'} (git mv), push, then retry. Main was not changed.`,
+    `${source} has ${total} path${total === 1 ? '' : 's'} that ${total === 1 ? 'is' : 'are'} not valid UTF-8: ${shown.slice(0, names).join(', ')}${total > names ? `, … (${total - names} more)` : ''}. Forge stores UTF-8 paths only and never renames a path silently. Rename ${total === 1 ? 'it in Git to a UTF-8 name' : 'them in Git to UTF-8 names'} (git mv), push, then retry. Main was not changed.`,
   );
 
 /** A Git path's bytes as text, or a named refusal when they are not UTF-8. */
@@ -48,8 +48,13 @@ export function gitPathText(bytes: Uint8Array, source = 'This repository'): stri
 /** GitHub's API reports a path whose bytes are not UTF-8 with U+FFFD in their place, so such a
  * path cannot be told from its bytes there. Every listed path that holds U+FFFD is refused by
  * name, all at once (U+FFFD is shown as `�`). */
-export function refuseLossyGitPaths(paths: Iterable<string>, source = 'This repository') {
+export function refuseLossyGitPaths(
+  paths: Iterable<string>,
+  source = 'This repository',
+  total?: number,
+  names?: number,
+) {
   const lossy: string[] = [];
   for (const path of paths) if (path.includes('�')) lossy.push(path.replaceAll('�', '\\uFFFD'));
-  if (lossy.length) throw refusal(lossy, source);
+  if (lossy.length) throw refusal(lossy, source, total, names);
 }

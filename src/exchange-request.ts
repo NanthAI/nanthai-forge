@@ -12,6 +12,8 @@ export type ExchangeRequestOptions = {
   totalTimeoutMs?: number;
   onAttempt?: (() => void) | undefined;
   onBytes?: ((done: number, total?: number) => void) | undefined;
+  /** Streaming request bodies need fresh streams on each retry. */
+  makeBody?: () => BodyInit;
 };
 
 /** The class and system code of the last failure (for example `TypeError ECONNRESET`), never its text,
@@ -46,8 +48,10 @@ export async function exchangeRequest<T>(
       const result = await networkDeadline(
         async deadlineSignal => {
           options.onAttempt?.();
-          observeExchangeRequest(url, init);
-          response = await networkFetch(url, { ...init, signal: deadlineSignal }, { ...options, retries: 0 });
+          const request = { ...init, signal: deadlineSignal };
+          if (options.makeBody) request.body = options.makeBody();
+          observeExchangeRequest(url, request);
+          response = await networkFetch(url, request, { ...options, retries: 0 });
           if (
             (response.status === 429 || (response.status >= 500 && response.status !== 560)) &&
             attempt < attempts

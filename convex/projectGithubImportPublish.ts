@@ -62,7 +62,7 @@ async function publishRows(
   const started = Date.now();
   const metric = (phase: string) =>
     console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase, at: Date.now(), elapsedMillis: Date.now() - started, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, rssBytes: process.memoryUsage().rss })}`,
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase, step: job.step, at: Date.now(), elapsedMillis: Date.now() - started, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, rssBytes: process.memoryUsage().rss, peakRssBytes: process.resourceUsage().maxRSS * 1024 })}`,
     );
   const identity = { id: job._id, actor: job.owner };
   async function* pages(part: string) {

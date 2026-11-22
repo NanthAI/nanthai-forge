@@ -6,7 +6,6 @@ import { internal } from './_generated/api';
 import type { Id, Doc } from './_generated/dataModel';
 import { githubInput } from '../src/github';
 import { beginGithubSource } from '../src/github-project-source';
-import { listGithubTree } from '../src/github-archive-source';
 import { githubMigrationCounts } from '../src/github-migration-ledger';
 import { lfsImportMaxBytes } from '../src/github-import-pages';
 import { importReadToken } from './githubAppToken';
@@ -15,7 +14,6 @@ import { networkFetch } from '../src/network-fetch';
 import { ImportRequestMeter } from '../src/github-import-meter';
 import { authorizeImportGithub } from './githubImportAccess';
 import { invariant } from '../src/errors';
-import { storeListing } from './projectGithubImportListing';
 import { report } from './errors';
 import { githubImportError, githubRequests, migrationCounts } from './projectGithubImportFields';
 
@@ -104,41 +102,19 @@ export const start = accountAction('write')({
         token,
         meter.wrap(networkFetch),
       );
-      // One recursive listing decides the transfer: a complete tree streams the
-      // commit archive; a truncated one keeps directory-by-directory discovery.
-      const [listing, migration] = await Promise.all([
-        listGithubTree(source.repository, source.pending[0]!.sha, token, meter.wrap(networkFetch)),
-        migrationPending,
-      ]);
+      const migration = await migrationPending;
       const begun = await ctx.runMutation(internal.projectGithubImportStore.begin, {
-        ...(listing
-          ? {
-              archive: {
-                total: listing.length,
-                totalBytes: listing.totalBytes,
-                submodules: listing.submodules,
-              },
-            }
-          : {}),
         ...key,
         ...(input.lfsLimitBytes === undefined ? {} : { lfsLimitBytes: input.lfsLimitBytes }),
         name: input.name?.trim() || access.repository.full_name.split('/').at(-1)!,
         repository: source.repository,
         commit: source.commit,
         at: new Date().toISOString(),
-        cursor: '',
         rootTree: source.pending[0]!.sha,
         visibility: input.visibility ?? (access.repository.private ? 'private' : 'public'),
         githubRequests: meter.counts,
         ...(migration ? { migration } : {}),
       });
-      // The listing is paid for once: its file table is kept in R2 and every archive step reads it.
-      if (listing)
-        await ctx.runMutation(internal.projectGithubImportStore.pinListing, {
-          id: begun.id,
-          actor: user.subject,
-          listing: await storeListing(begun.projectId, source.pending[0]!.sha, listing),
-        });
       return begun.id;
     } catch (error) {
       return report(error);
