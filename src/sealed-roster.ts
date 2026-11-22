@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
-import { equalBytes, framedHash } from './sealed-format.js';
-import { agree, bindingBytes, recipientId, verifyBytes } from './sealed-keys.js';
-import { randomBytes } from 'node:crypto';
+import {
+  bindingBytes,
+  checkAgreementKey,
+  equalBytes,
+  framedHash,
+  hex,
+  recipientId,
+  verifyBytes,
+} from './sealed-portable.js';
 import {
   displayText,
   rosterBytes,
@@ -20,15 +26,9 @@ export const ownerDevice = (entry: Entry | undefined) => entry?.entryKind === 1 
 export const writeDevice = (entry: Entry | undefined, kind: Roster['setKind']) =>
   entry?.entryKind === 1 && (entry.role === 1 || (kind === 1 && entry.role === 2));
 const refuse = (condition: unknown, rule: string) => invariant(condition, 'SECRETS_ROSTER_REFUSED', rule);
-const unique = (ids: Uint8Array[]) =>
-  new Set(ids.map(id => Buffer.from(id).toString('hex'))).size === ids.length;
+const unique = (ids: Uint8Array[]) => new Set(ids.map(hex)).size === ids.length;
 export function checkEntry(entry: Entry) {
-  const scalar = randomBytes(32);
-  try {
-    agree(scalar, entry.encPub).fill(0);
-  } finally {
-    scalar.fill(0);
-  }
+  checkAgreementKey(entry.encPub);
   refuse([1, 2, 3].includes(entry.entryKind), 'Unknown recipient kind.');
   refuse(
     (entry.entryKind === 1 && [1, 2].includes(entry.role)) ||
@@ -178,8 +178,13 @@ function checkAdded(from: Roster, entry: Entry, signer: Entry, transition: Trans
       refuse(false, 'Genesis is valid only at version one.');
   }
 }
-/** Rebuild bytes only; walkTransition checks all authority before accepting this result. */
-export function rosterAfterDelta(from: Roster, d: Delta): Roster {
+/** Rebuild bytes only; walkTransition checks all authority before accepting this result. A reader
+ * passes the step's checked fromHash; the default is portable bytes (no Buffer), hashed and compared only. */
+export function rosterAfterDelta(
+  from: Roster,
+  d: Delta,
+  prevRosterHash = framedHash(rosterBytes(from)) as Roster['prevRosterHash'],
+): Roster {
   const created = from.entries
     .filter(e => e.entryKind === 1 && d.removed.some(id => sameId(id, e.id)))
     .map(e => ({ deviceId: e.id, signPub: e.signPub, lastEpoch: from.epoch }));
@@ -187,7 +192,7 @@ export function rosterAfterDelta(from: Roster, d: Delta): Roster {
     ...from,
     rosterVersion: from.rosterVersion + 1,
     epoch: from.epoch + d.epochBumped,
-    prevRosterHash: framedHash(rosterBytes(from)),
+    prevRosterHash,
     sharingMode: d.newSharingMode ?? from.sharingMode,
     checksPointer: d.newChecksPointer ?? from.checksPointer,
     entries: [
@@ -279,7 +284,7 @@ export function walkTransition(
         from.entries.some(e => e.entryKind === 1 && sameId(e.id, id) && d.removed.some(r => sameId(r, id))),
       'Dropped former signer is absent.',
     );
-  const next = rosterAfterDelta(from, d);
+  const next = rosterAfterDelta(from, d, t.fromHash);
   // The cross-set rule is the caller's: readers pass Development for the final roster only (GB-08 d2).
   checkRoster(next, development);
   invariant(

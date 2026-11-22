@@ -8,12 +8,12 @@ import {
   equalBytes,
   fixed,
   frame,
-  framedHash,
   octet,
   uint,
   requireFrame,
   type Framed,
 } from './sealed-format.js';
+import { bindingBytes, recipientId as portableRecipientId } from './sealed-portable.js';
 
 export type RandomBytes = (length: number) => Uint8Array;
 export type DeviceKeys = {
@@ -29,27 +29,9 @@ export function signBytes(bytes: Framed, key: Uint8Array): Buffer {
   requireFrame(bytes);
   return Buffer.from(ed25519.sign(bytes, fixed(key, 32)));
 }
-export function verifyBytes(bytes: Framed, signature: Uint8Array, publicKey: Uint8Array): boolean {
-  try {
-    requireFrame(bytes);
-    return ed25519.verify(fixed(signature, 64), bytes, fixed(publicKey, 32), { zip215: false });
-  } catch {
-    return false;
-  }
-}
-export function recipientId(kind: 1 | 2 | 3, signPub: Uint8Array, encPub: Uint8Array): Buffer {
-  return framedHash(
-    kind === 2
-      ? frame('machine', fixed(encPub, 32))
-      : frame(kind === 1 ? 'device' : 'person', fixed(signPub, 32), fixed(encPub, 32)),
-  ).subarray(0, 16);
-}
-export const bindingBytes = (
-  accountId: Uint8Array,
-  id: Uint8Array,
-  signPub: Uint8Array,
-  encPub: Uint8Array,
-) => frame('device-bind', fixed(accountId, 16), fixed(id, 16), fixed(signPub, 32), fixed(encPub, 32));
+export { bindingBytes, verifyBytes } from './sealed-portable.js';
+export const recipientId = (kind: 1 | 2 | 3, signPub: Uint8Array, encPub: Uint8Array) =>
+  fixed(portableRecipientId(kind, signPub, encPub), 16);
 export function deviceKeys(accountId: Uint8Array, random: RandomBytes = randomBytes): DeviceKeys {
   const sign = fixed(random(32), 32),
     enc = fixed(random(32), 32),

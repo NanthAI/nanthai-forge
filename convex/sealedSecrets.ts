@@ -6,14 +6,15 @@ import { currentCredential } from './deviceFields';
 import { sealedKind } from './sealedSecretFields';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { equalBytes } from '../src/sealed-portable';
+import { extendsStored, nextSealedState, sealedWriteFacts } from './sealedSecretGate';
 
 const history = v.object({
   genesis: v.bytes(),
   transitions: v.array(v.bytes()),
   rotateLists: v.array(v.bytes()),
 });
-const same = (a: ArrayBuffer, b: ArrayBuffer) =>
-  a.byteLength === b.byteLength && new Uint8Array(a).every((byte, i) => byte === new Uint8Array(b)[i]);
+const same = (a: ArrayBuffer, b: ArrayBuffer) => equalBytes(new Uint8Array(a), new Uint8Array(b));
 export const read = query({
   args: {
     projectId: v.id('hostedProjects'),
@@ -23,7 +24,12 @@ export const read = query({
   },
   returns: v.union(
     v.null(),
-    v.object({ payload: v.union(v.bytes(), v.null()), history: v.union(history, v.null()) }),
+    v.object({
+      payload: v.union(v.bytes(), v.null()),
+      history: v.union(history, v.null()),
+      revoked: v.optional(v.array(v.bytes())),
+      joinRequests: v.optional(v.array(v.bytes())),
+    }),
   ),
   handler: async (ctx, args) => {
     try {
@@ -37,7 +43,13 @@ export const read = query({
         )
         .unique();
       if (!set) return null;
-      if (args.headHash && same(args.headHash, set.headHash)) return { payload: null, history: null };
+      // Server-owned side records reach every reader, including a cache hit; absent when empty.
+      const sides = {
+        ...(set.revoked?.length ? { revoked: set.revoked } : {}),
+        ...(set.joinRequests?.length ? { joinRequests: set.joinRequests.map(j => j.request) } : {}),
+      };
+      if (args.headHash && same(args.headHash, set.headHash))
+        return { payload: null, history: null, ...sides };
       const row =
         args.rosterVersion === set.rosterVersion
           ? null
@@ -52,6 +64,7 @@ export const read = query({
         history: row
           ? { genesis: row.genesis, transitions: row.transitions, rotateLists: row.rotateLists }
           : null,
+        ...sides,
       };
     } catch (error) {
       return report(error);
@@ -63,13 +76,9 @@ export const write = mutation({
     projectId: v.id('hostedProjects'),
     kind: sealedKind,
     operationId: v.string(),
-    prevHeadHash: v.union(v.bytes(), v.null()),
-    setId: v.bytes(),
-    headHash: v.bytes(),
-    headVersion: v.number(),
-    rosterVersion: v.number(),
     payload: v.bytes(),
-    history: v.union(history, v.null()),
+    genesis: v.union(v.bytes(), v.null()),
+    transition: v.union(v.bytes(), v.null()),
   },
   returns: v.object({ accepted: v.boolean(), replay: v.boolean() }),
   handler: async (ctx, args) => {
@@ -87,6 +96,15 @@ export const write = mutation({
         'Sealed secret writes need an unrestricted stable owner device from nforge login.',
       );
       await activeOwnedProject(Object.assign(ctx, { forgeDevice }), args.projectId, user.subject);
+      invariant(
+        (args.genesis?.byteLength ?? 0) <= 128 * 1024 && (args.transition?.byteLength ?? 0) <= 128 * 1024,
+        'SECRETS_FORMAT_REFUSED',
+        'Sealed record exceeds format bounds.',
+      );
+      // Hash, versions and set id come from the signed payload, never from arguments.
+      const facts = sealedWriteFacts(args.projectId, args.kind, args.payload);
+      const setId = Uint8Array.from(facts.head.setId).buffer,
+        headHash = Uint8Array.from(facts.headHash).buffer;
       const set = await ctx.db
         .query('sealedSecretSets')
         .withIndex('by_project_and_kind_and_active', q =>
@@ -95,80 +113,58 @@ export const write = mutation({
         .unique();
       const previous = await ctx.db
         .query('sealedSecretHistory')
-        .withIndex('by_project_and_setId', q => q.eq('projectId', args.projectId).eq('setId', args.setId))
+        .withIndex('by_project_and_setId', q => q.eq('projectId', args.projectId).eq('setId', setId))
         .unique();
       const replay = previous?.events.find(e => e.operationId === args.operationId);
       if (replay) {
         invariant(
-          same(replay.headHash, args.headHash),
+          same(replay.headHash, headHash),
           'WORK_OPERATION_REUSED',
           'This operation already names a different signed head.',
         );
         return { accepted: true, replay: true };
       }
-      const matches = set
-        ? args.prevHeadHash && same(set.headHash, args.prevHeadHash)
-        : args.prevHeadHash === null;
-      if (!matches) return { accepted: false, replay: false };
-      invariant(
-        args.setId.byteLength === 16 &&
-          args.headHash.byteLength === 32 &&
-          args.headVersion === (set?.headVersion ?? 0) + 1 &&
-          args.rosterVersion >= (set?.rosterVersion ?? 1) &&
-          args.payload.byteLength <= 512 * 1024,
-        'SECRETS_FORMAT_REFUSED',
-        'Sealed record exceeds format bounds.',
-      );
-      if (set)
-        invariant(
-          same(args.setId, set.setId),
-          'SECRETS_SET_REPLACED',
-          'Replace a set through its signed replacement flow.',
-        );
-      const retained =
-        args.history ??
-        (previous
-          ? {
-              genesis: previous.genesis,
-              transitions: previous.transitions,
-              rotateLists: previous.rotateLists,
-            }
-          : null);
-      invariant(retained, 'SECRETS_FORMAT_REFUSED', 'Genesis history is required.');
+      if (!extendsStored(set, facts)) return { accepted: false, replay: false };
+      const state = nextSealedState({
+        set,
+        facts,
+        genesis: args.genesis,
+        transition: args.transition,
+        stored: previous ? { genesis: previous.genesis, transitions: previous.transitions } : null,
+      });
       const next = {
         projectId: args.projectId,
         kind: args.kind,
         v: 1 as const,
         active: true,
         supersededAt: null,
-        setId: args.setId,
-        headHash: args.headHash,
-        headVersion: args.headVersion,
-        rosterVersion: args.rosterVersion,
+        setId,
+        headHash,
+        headVersion: facts.head.headVersion,
+        rosterVersion: facts.roster.rosterVersion,
         payload: args.payload,
+        ...(state.revoked.length ? { revoked: state.revoked } : {}),
+        ...(state.joinRequests.length ? { joinRequests: state.joinRequests } : {}),
       };
       const events = [
         ...(previous?.events ?? []),
-        { operationId: args.operationId, headHash: args.headHash, at: Date.now() },
+        { operationId: args.operationId, headHash, at: Date.now() },
       ].slice(-50);
-      invariant(
-        !previous || same(retained.genesis, previous.genesis),
-        'SECRETS_FORMAT_REFUSED',
-        'A set keeps its first genesis permanently.',
-      );
       const nextHistory = {
         projectId: args.projectId,
         kind: args.kind,
-        setId: args.setId,
+        setId,
         v: 1 as const,
-        ...retained,
-        transitions: retained.transitions.slice(-64),
+        genesis: state.genesis,
+        transitions: state.transitions.slice(-64),
+        rotateLists: previous?.rotateLists ?? [],
         events,
       };
+      // The ring keeps the newest steps that fit its record; a reader past it needs a holder code.
+      while (nextHistory.transitions.length > 1 && getConvexSize(nextHistory) + 128 > 128 * 1024)
+        nextHistory.transitions.shift();
       invariant(
-        getConvexSize(next) + 128 <= 512 * 1024 &&
-          getConvexSize(nextHistory) + 128 <= 128 * 1024 &&
-          retained.rotateLists.length <= 20,
+        getConvexSize(next) + 128 <= 512 * 1024 && getConvexSize(nextHistory) + 128 <= 128 * 1024,
         'SECRETS_FORMAT_REFUSED',
         'Sealed set or history exceeds its record cap.',
       );

@@ -35,7 +35,7 @@ const random =
   length =>
     b(length, bytes.shift());
 const device = () => deviceKeys(b(16, 3), random(1, 2, 15));
-const hex = (name, bytes) => assert.equal(bytes.toString('hex'), vectors[name], name);
+const hex = (name, bytes) => assert.equal(Buffer.from(bytes).toString('hex'), vectors[name], name);
 
 test('T11 independent Node/OpenSSL known answers bind frame, IDs, device keys, set keys, value, author and wrap', () => {
   hex('frame', frame('commit', context.projectId, context.setId, uint(7)));
@@ -99,7 +99,7 @@ test('T11 code and reply known answers cover every purpose', () => {
       changedBy: d.id,
     },
   );
-  assert.deepEqual(input, bytes);
+  assert.deepEqual(Buffer.from(input), bytes);
   for (const purpose of [1, 2, 3, 4]) {
     hex(
       `code${purpose}`,

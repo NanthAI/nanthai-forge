@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
+import { equalBytes } from './sealed-portable.js';
 
 /** Portable record transport, deliberately independent of authenticated format frames.
  * JSON carries public structure; binary fields stay raw, without base64 expansion.
@@ -56,11 +57,14 @@ export function decodeSealedWire(
     offset += length;
   }
   bad(offset === bytes.length);
+  // A byte-exact round trip instead of { fatal: true }: one rule in Node and the Convex V8 runtime,
+  // refusing invalid UTF-8 and a leading BOM without relying on decoder options.
+  const header = bytes.subarray(12, 12 + headerLength),
+    text = new TextDecoder().decode(header);
+  bad(equalBytes(new TextEncoder().encode(text), header));
   let root: unknown;
   try {
-    root = JSON.parse(
-      new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(12, 12 + headerLength)),
-    );
+    root = JSON.parse(text);
   } catch {
     bad(false);
   }

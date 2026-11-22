@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { empty, fixed, frame, list, octet, textBytes, uint } from './sealed-format.js';
+import { compareBytes, empty, fixed, frame, list, octet, textBytes, uint } from './sealed-portable.js';
 
 export type SetKind = 1 | 2 | 3;
 export type Entry = {
@@ -110,8 +110,8 @@ export function displayText(value: string) {
     .join('');
 }
 const byId = <T>(items: readonly T[], id: (item: T) => Buffer) =>
-  [...items].sort((a, b) => Buffer.compare(id(a), id(b)));
-const optional = (bytes: Buffer, length: number) => (bytes.length ? fixed(bytes, length) : empty);
+  [...items].sort((a, b) => compareBytes(id(a), id(b)));
+const optional = (bytes: Uint8Array, length: number) => (bytes.length ? fixed(bytes, length) : empty);
 export const pointerBytes = (pointer: ChecksPointer | null) =>
   pointer
     ? frame('checks-pointer', fixed(pointer.checksSetId, 16), fixed(pointer.checksGenesisHash, 32))
@@ -204,7 +204,7 @@ export const headBytes = (h: Head) =>
     uint(h.versionFloor),
     uint(h.setFlags),
     list(h.proposers.map(proposerBytes)),
-    list([...h.names].sort((a, b) => Buffer.compare(textBytes(a.name), textBytes(b.name))).map(nameBytes)),
+    list([...h.names].sort((a, b) => compareBytes(textBytes(a.name), textBytes(b.name))).map(nameBytes)),
     fixed(h.signerId, 16),
     uint(h.signedAt),
   );

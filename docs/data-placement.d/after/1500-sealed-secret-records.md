@@ -9,9 +9,11 @@ why these bounded records stay in Convex. Existing Secret Objects are separate
 and remain until their approved retirement.
 
 The server enforces a complete set-row ceiling of 512 KiB and a complete history
-ceiling of 128 KiB, including metadata allowance. It retains at most 64
-transitions and 50 retry events, pruning in the same mutation. Genesis remains
-in the history row. The landing storage ledger charges zero bytes for both
+ceiling of 128 KiB, including metadata allowance. It appends each write's own
+transition, keeps at most 64 that fit the history ceiling and 50 retry events,
+pruning in the same mutation. Genesis remains in the history row. Removal markers
+and join requests are optional fields of the set row, absent when empty; reads
+return them only when present. The landing storage ledger charges zero bytes for both
 new tables: owner secret commands are outside the landing path. Standalone
 record-size and request tests account for configured sets separately.
 
@@ -26,11 +28,21 @@ web adapter must read a names-only projection, never these records.
 
 The synthetic 20/200-name fixture uses 128-byte values and measures complete
 Convex-value sizes, rather than JSON/base64 sizes. Set rows are 18,270/166,290 B;
-history rows are 1,047 B. Initial write requests are 19,096/167,116 B; complete
+history rows are 1,047 B. Initial write requests are 18,945/166,965 B; complete
 read replies are 18,880/166,900 B. A verified cache hit returns 20 B. This is
 logical fixture accounting, not provider-billed I/O; the server reads the whole
 bounded set document even for the small response. A steady-state history may
 include up to 50 events and 64 transitions within its unchanged 128 KiB cap.
+Later writes send only the payload and the transition they introduce, never
+genesis or the ring.
+
+At 100 recipients and 200 names (synthetic fixture), a write that adds 99 members
+sends a 237,438 B payload and a 50,159 B transition. The set row is 237,669 B and
+the history row 51,315 B. The mutation reads four documents (167,843 B) and replaces
+two. Its payload checks took about 9 ms (median of five) in a local V8 context with
+no Buffer or Node built-ins. A full public check of the same roster, run twice as a
+roster walk does, plus one head signature took about 333 ms there. That check is
+not on the write path yet. These are local observations, not Convex-billed time.
 
 For an existing pinned owner device, `secret set` and `rm` use one read and one
 CAS mutation: normally seven document reads (credential/project/set on the read,

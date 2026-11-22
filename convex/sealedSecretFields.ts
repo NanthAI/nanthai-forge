@@ -2,8 +2,9 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 export const sealedKind = v.union(v.literal(1), v.literal(2), v.literal(3));
-/** Opaque client records contain public signed metadata and ciphertext only.
- * The server never decodes values, checks signatures or receives a private key. */
+/** Client records contain public signed metadata and ciphertext only. The server never opens a value
+ * or holds a key; it checks the public binding of each write before storing it (sealedSecretGate).
+ * Clients rely on none of this. */
 export const sealedSetFields = {
   projectId: v.id('hostedProjects'),
   kind: sealedKind,
@@ -15,6 +16,10 @@ export const sealedSetFields = {
   headVersion: v.number(),
   rosterVersion: v.number(),
   payload: v.bytes(),
+  /** Server-owned side records, which a head write never sets: removal markers (device ids) and
+   * join requests. A removing or adding transition clears its own. Absent when empty. */
+  revoked: v.optional(v.array(v.bytes())),
+  joinRequests: v.optional(v.array(v.object({ deviceId: v.bytes(), request: v.bytes(), at: v.number() }))),
 };
 export const sealedHistoryFields = {
   projectId: v.id('hostedProjects'),

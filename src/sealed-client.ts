@@ -10,7 +10,7 @@ import { SealedJournal } from './sealed-journal.js';
 import { newSealedSet } from './sealed-genesis.js';
 import { headBytes, changeBytes, type NameRecord } from './sealed-records.js';
 import { verifySealedReply, type SealedReply, type VerifyRequest } from './sealed-verify.js';
-import { sealedRead, sealedWrite, type SealedTransport } from './sealed-transport.js';
+import { sealedRead, sealedWrite, sealedWriteArgs, type SealedTransport } from './sealed-transport.js';
 import { SecretPins } from './sealed-pins.js';
 import { sealValue } from './sealed-value.js';
 import { checkSecretWriteName } from './secret-names.js';
@@ -241,7 +241,15 @@ export class SealedClient {
           });
           check.key?.fill(0);
           for (const secret of check.secrets) secret.value.fill(0);
-          pending = { ...identity, state: 'unknown', wire: sealedWrite(reply, operationId, previous) };
+          pending = {
+            ...identity,
+            state: 'unknown',
+            wire: sealedWrite(
+              reply,
+              operationId,
+              state ? { headHash: previous!, rosterVersion: state.reply.roster.rosterVersion } : null,
+            ),
+          };
           const raced = await journal.retain(operationId, pending);
           if (raced) {
             pending = await journal.read(operationId, identity);
@@ -271,7 +279,7 @@ export class SealedClient {
       }
       let receipt: { accepted: boolean; replay: boolean };
       try {
-        receipt = await this.transport.write({ ...pending.wire, kind: 1 });
+        receipt = await this.transport.write({ ...sealedWriteArgs(pending.wire), kind: 1 });
       } catch (error) {
         const code =
           error instanceof ForgeError ? error.code : (error as { data?: { code?: unknown } })?.data?.code;

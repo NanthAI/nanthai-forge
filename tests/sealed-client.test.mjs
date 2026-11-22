@@ -22,108 +22,18 @@ import { state, projectRow } from './hosted-fixture.mjs';
 import { headBytes } from '../dist/sealed-records.js';
 import { forgeSecretId, framedHash } from '../dist/sealed-format.js';
 import { fixture } from './helpers/sealed-fixture.mjs';
+import { clone, server, setup } from './helpers/sealed-hosted.mjs';
 import { FileKeyStore } from '../dist/sealed-local.js';
 import { deviceKeys } from '../dist/sealed-keys.js';
 import { SealedJournal } from '../dist/sealed-journal.js';
 import { SecretPins } from '../dist/sealed-pins.js';
 import { NetworkTransportError } from '../dist/network-fetch.js';
 import { SealedClient } from '../dist/sealed-client.js';
-import { sealedWrite } from '../dist/sealed-transport.js';
+import { sealedWrite, sealedWriteArgs } from '../dist/sealed-transport.js';
 import { decodeSealedWire } from '../dist/sealed-wire.js';
 import { runWithSecrets } from '../dist/secret-run.js';
 import { Writable } from 'node:stream';
 import { writeFileSync } from 'node:fs';
-const server = await import(moduleUrl('../convex/sealedSecrets.ts'));
-const clone = x => deserialize(serialize(x));
-function setup(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'forge-sealed-client-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const s = state(),
-    f = fixture(),
-    project = f.request.forgeProjectId,
-    account = 'fixture-owner',
-    credentialId = 'sealed-device';
-  s.tables.hostedProjects.set(project, projectRow({ _id: project, owner: account }));
-  s.tables.cliCredentials.set('device-row', {
-    _id: 'device-row',
-    _creationTime: 1,
-    owner: account,
-    name: 'synthetic',
-    scope: 'cli',
-    credentialId,
-    tokenHash: 'synthetic-hash',
-    issuedAt: Date.now(),
-    expiresAt: Date.now() + 60000,
-    revoked: false,
-    deviceKey: 'synthetic-public-key',
-    deviceApprovedAt: Date.now(),
-    renewal: { operationId: 'sign-in', requestHash: 'synthetic', issuedAt: Date.now() },
-    settings: { source: 'write', projects: { kind: 'all' } },
-  });
-  const identity = { subject: account, forgeCredential: credentialId, forgeSignIn: 'sign-in' };
-  s.ctx.auth.getUserIdentity = async () => identity;
-  const io = { queries: 0, documents: 0, readBytes: 0, writes: 0 };
-  const countRead = value => {
-    io.queries++;
-    if (value) {
-      io.documents++;
-      io.readBytes += getConvexSize(value);
-    }
-    return value;
-  };
-  const db = s.ctx.db;
-  s.ctx.db = new Proxy(db, {
-    get(target, key) {
-      if (key === 'get') return async id => countRead(await target.get(id));
-      if (key === 'query')
-        return table => {
-          const query = target.query(table);
-          const wrapped = new Proxy(query, {
-            get(q, method) {
-              if (method === 'unique') return async () => countRead(await q.unique());
-              const member = q[method];
-              return typeof member === 'function'
-                ? (...args) => {
-                    const next = member.apply(q, args);
-                    return next === q ? wrapped : next;
-                  }
-                : member;
-            },
-          });
-          return wrapped;
-        };
-      if (['insert', 'replace', 'patch', 'delete'].includes(key))
-        return (...args) => {
-          io.writes++;
-          return target[key](...args);
-        };
-      const member = Reflect.get(target, key);
-      return typeof member === 'function' ? member.bind(target) : member;
-    },
-  });
-  const calls = [];
-  let writes = Promise.resolve();
-  const transport = {
-    read: async input => {
-      calls.push(clone({ action: 'read', input }));
-      return server.read._handler(s.ctx, { projectId: project, ...input });
-    },
-    write: async input => {
-      calls.push(clone({ action: 'write', input }));
-      const result = writes.then(() =>
-        s.transaction(() => server.write._handler(s.ctx, { projectId: project, ...input })),
-      );
-      writes = result.catch(() => {});
-      return result;
-    },
-  };
-  const store = new FileKeyStore(join(directory, 'device.bin'));
-  store.save({ ...f.keys, pinCounter: 0 });
-  const keys = store.load(),
-    pins = new SecretPins(directory, store),
-    client = new SealedClient(project, account, keys, pins, transport, false);
-  return { directory, s, f, project, account, identity, calls, transport, client, pins, keys, io };
-}
 function clear(result) {
   result?.key?.fill(0);
   for (const secret of result?.secrets ?? []) secret.value.fill(0);
@@ -203,7 +113,8 @@ test('a direct write advances a retained live version past the compacted floor',
   const { client, f, pins, project, transport } = setup(t);
   const publishFixture = async previous => {
     f.wrap();
-    await transport.write({ ...sealedWrite(f.reply, randomUUID(), previous), kind: 1 });
+    const base = previous && { headHash: previous, rosterVersion: f.reply.roster.rosterVersion };
+    await transport.write({ ...sealedWriteArgs(sealedWrite(f.reply, randomUUID(), base)), kind: 1 });
     return framedHash(headBytes(f.reply.head));
   };
   f.name('API_TOKEN');
@@ -379,7 +290,7 @@ test('T18 all slice-1 journey writes, reads, rm, retry, cached and child deliver
 });
 test('stable owner device gate refuses scoped/read-only devices, another account, browser and keyless agent credentials', async t => {
   const { s, f, identity, project } = setup(t),
-    wire = { ...sealedWrite(f.reply, randomUUID(), null), kind: 1, projectId: project };
+    wire = { ...sealedWriteArgs(sealedWrite(f.reply, randomUUID(), null)), kind: 1, projectId: project };
   const row = s.tables.cliCredentials.get('device-row'),
     original = clone(row);
   for (const patch of [
@@ -417,7 +328,7 @@ test('stable owner device gate refuses scoped/read-only devices, another account
 });
 test('sealed reads and writes refuse stable devices without a current approval', async t => {
   const { s, f, project, client } = setup(t),
-    wire = { ...sealedWrite(f.reply, randomUUID(), null), kind: 1, projectId: project },
+    wire = { ...sealedWriteArgs(sealedWrite(f.reply, randomUUID(), null)), kind: 1, projectId: project },
     row = s.tables.cliCredentials.get('device-row');
   for (const deviceApprovedAt of [undefined, Date.now() - 2 * 365 * 86400000]) {
     row.deviceApprovedAt = deviceApprovedAt;
@@ -574,29 +485,28 @@ test('confirmed refusals delete the sealed request; crash after accept before co
   assert.equal(receipt.wire, undefined);
   assert(readFileSync(path).length < 512);
 });
-test('set/history caps apply to complete documents and the same mutation prunes the transition ring', async t => {
+test('set/history caps apply to complete documents and the server prunes its own transition ring', async t => {
   const { s, f, project } = setup(t),
-    wire = { ...sealedWrite(f.reply, randomUUID(), null), kind: 1, projectId: project };
+    wire = { ...sealedWriteArgs(sealedWrite(f.reply, randomUUID(), null)), kind: 1, projectId: project };
   await assert.rejects(
     s.transaction(() => server.write._handler(s.ctx, { ...wire, payload: new ArrayBuffer(512 * 1024) })),
     code('SECRETS_FORMAT_REFUSED'),
   );
   await assert.rejects(
-    s.transaction(() =>
-      server.write._handler(s.ctx, {
-        ...wire,
-        history: { ...wire.history, genesis: new ArrayBuffer(128 * 1024) },
-      }),
-    ),
+    s.transaction(() => server.write._handler(s.ctx, { ...wire, genesis: new ArrayBuffer(128 * 1024) })),
     code('SECRETS_FORMAT_REFUSED'),
   );
-  await s.transaction(() =>
-    server.write._handler(s.ctx, {
-      ...wire,
-      history: { ...wire.history, transitions: Array.from({ length: 70 }, () => new ArrayBuffer(1)) },
-    }),
-  );
-  assert.equal([...s.tables.sealedSecretHistory.values()][0].transitions.length, 64);
+  await s.transaction(() => server.write._handler(s.ctx, wire));
+  const history = [...s.tables.sealedSecretHistory.values()][0];
+  // Opaque stored steps the server wrote earlier; it never re-reads them.
+  history.transitions = Array.from({ length: 64 }, () => new ArrayBuffer(1));
+  const base = { headHash: framedHash(headBytes(f.reply.head)), rosterVersion: 1 };
+  f.rekey();
+  const step = sealedWriteArgs(sealedWrite(f.reply, randomUUID(), base));
+  await s.transaction(() => server.write._handler(s.ctx, { ...step, kind: 1, projectId: project }));
+  const ring = [...s.tables.sealedSecretHistory.values()][0].transitions;
+  assert.equal(ring.length, 64);
+  assert.deepEqual(new Uint8Array(ring.at(-1)), new Uint8Array(step.transition));
   assert.equal(s.tables.sealedSecretSets.size, 1);
 });
 test('cache hits recheck access and only typed transport faults can use the verified offline cache', async t => {
@@ -659,12 +569,13 @@ test('20/200-name record and request budgets stay bounded with zero idle/landing
     const { s, f, project, transport } = setup(t),
       began = performance.now();
     for (let i = 0; i < names; i++) f.name(`TOKEN_${i}`, Buffer.alloc(128, 65 + (i % 20)));
-    const wire = { ...sealedWrite(f.reply, randomUUID(), null), kind: 1, projectId: project };
+    const sealed = sealedWrite(f.reply, randomUUID(), null),
+      wire = { ...sealedWriteArgs(sealed), kind: 1, projectId: project };
     await s.transaction(() => server.write._handler(s.ctx, wire));
     const set = [...s.tables.sealedSecretSets.values()][0],
       history = [...s.tables.sealedSecretHistory.values()][0];
     const full = await transport.read({ kind: 1 });
-    const hit = await transport.read({ kind: 1, headHash: wire.headHash });
+    const hit = await transport.read({ kind: 1, headHash: sealed.headHash });
     const metric = {
       names,
       setBytes: getConvexSize(set),
@@ -751,21 +662,22 @@ test('L6 resolve compacts a verified accepted change, preserves cancelled unknow
   assert(!existsSync(path));
 });
 test('L7 a valid CAS cannot replace the first stored genesis and changes neither row', async t => {
-  const { client, s, project } = setup(t);
-  await client.write('API_TOKEN', Buffer.from('first-genesis-value'));
-  const current = await client.read(),
-    wire = sealedWrite(current.reply, randomUUID(), framedHash(headBytes(current.reply.head)));
-  clear(current);
-  wire.headVersion++;
-  wire.history.genesis = Uint8Array.from([1, 2, 3]).buffer;
+  const { f, s, project } = setup(t);
+  const first = sealedWriteArgs(sealedWrite(f.reply, randomUUID(), null));
+  await s.transaction(() => server.write._handler(s.ctx, { ...first, projectId: project, kind: 1 }));
+  const base = { headHash: framedHash(headBytes(f.reply.head)), rosterVersion: 1 };
+  f.bump();
+  f.name('NEXT_TOKEN');
+  const wire = sealedWriteArgs(sealedWrite(f.reply, randomUUID(), base));
   const before = serialize({
     sets: [...s.tables.sealedSecretSets.values()],
     history: [...s.tables.sealedSecretHistory.values()],
   });
-  await assert.rejects(
-    s.transaction(() => server.write._handler(s.ctx, { ...wire, projectId: project, kind: 1 })),
-    code('SECRETS_FORMAT_REFUSED'),
-  );
+  for (const genesis of [Uint8Array.from([1, 2, 3]).buffer, first.genesis])
+    await assert.rejects(
+      s.transaction(() => server.write._handler(s.ctx, { ...wire, genesis, projectId: project, kind: 1 })),
+      code('SECRETS_FORMAT_REFUSED'),
+    );
   assert.deepEqual(
     serialize({
       sets: [...s.tables.sealedSecretSets.values()],
