@@ -383,6 +383,13 @@ test('a holder handoff records elapsed seconds on the same reads, writes and cal
   assert.equal(timed.handed.orderWaits[0].seconds, 13.25);
   assert.equal(timed.handed.orderWaits[0].at, undefined);
   assert.deepEqual(timed.after.orderWaits, timed.handed.orderWaits);
+  const [handoff] = timed.after.orderHandoffs;
+  assert.equal(handoff.handedFrom, timed.handed.orderWaits[0].submissionId);
+  assert.equal(handoff.submissionId, timed.Q.submissionId);
+  assert.equal(handoff.generation, overtakeMark(timed.Q));
+  assert.equal(handoff.holderPhase, 'queued');
+  assert.equal(timed.after.orderWaits[0].release, 'holder-exit');
+  assert.equal(handoff.release, 'new-run');
   assert.deepEqual(timed.counts, legacy.counts);
 });
 

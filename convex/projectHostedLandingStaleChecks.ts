@@ -172,7 +172,7 @@ export async function cancelStaleLandingChecks(
         now: Date.now(),
       });
       if (decided.action === 'keep') {
-        if (decided.holdOrder) await holdKeptOrder(ctx, row, state);
+        if (decided.holdOrder) await holdKeptOrder(ctx, row, state, input.receiptIds.at(-1));
         // Sticky: a running probe now answers on this main too; an idle one starts here.
         if (probing) await retargetKeptProbe(ctx, finish, paths, changed, main);
         else if (decided.probe) await probeKeptRun(ctx, finish, row, paths, changed, main);

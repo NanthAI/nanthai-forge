@@ -222,6 +222,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
   let phase: HostedLandingState['phase'] = 'ready',
     observation = landingObservation('queued');
   let error: HostedLandingState['error'] = null;
+  let passedAt: string | null = null;
   try {
     if (await prepareLandingCheck(ctx, claim, { row, state, attempt, queue: held }, now))
       return (await loadLanding(ctx, claim)).state;
@@ -333,6 +334,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
           },
           run,
         );
+        passedAt = run.endedAt;
       }
     }
   } catch (cause) {
@@ -356,7 +358,15 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
   if (phase === 'terminal-failed')
     state.timing = { submittedAt: state.at, ...state.timing, settledAt: new Date(now).toISOString() };
   const next = { ...state, version: state.version + 1, phase, observation, error };
-  await writeLanding(ctx, row, next, false);
+  await writeLanding(
+    ctx,
+    row,
+    next,
+    false,
+    true,
+    undefined,
+    passedAt ? { settlement: { passedAt, startedAt: now } } : undefined,
+  );
   if (phase === 'terminal-failed') await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, held, now);
   return next;
@@ -428,7 +438,13 @@ export async function claimReadyLanding(
       await ctx.db.patch(row._id, {
         orderWait: ahead.row.submissionId,
         alarm: null,
-        ...(parked ? { orderWaits: recordOrderWait(row, ahead, now), orderWaitHanded: undefined } : {}),
+        ...(parked
+          ? {
+              ...closeOrderWait(row, now, false, 'claim'),
+              orderWaits: recordOrderWait(row, ahead, now, queue.mainReceiptId),
+              orderWaitHanded: undefined,
+            }
+          : {}),
         ...(parked && 'ownRisk' in ahead && ahead.ownRisk && !row.ownGlobalRisk
           ? { ownGlobalRisk: true as const }
           : {}),
@@ -456,7 +472,7 @@ export async function claimReadyLanding(
     await ctx.db.patch(row._id, {
       orderWait: undefined,
       orderWaitHanded: undefined,
-      ...closeOrderWait(row, now),
+      ...closeOrderWait(row, now, false, 'claim'),
     });
   if (leased) return null;
   if (row.priority !== 'urgent') {

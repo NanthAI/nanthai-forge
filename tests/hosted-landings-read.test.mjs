@@ -265,6 +265,41 @@ test('landings reads short order waits and the client hold from existing receipt
   assert.deepEqual(timed.orderWaits, orderWaits);
 });
 
+test('landings exposes handed edges and kept-run evidence from the existing request row', async () => {
+  const f = fixture();
+  f.landing(1, { at: 60 });
+  const row = f.tables.projectHostedLandingRequests[0];
+  const keptRun = { at: iso(minute(59)), runId: 'run', moverReceiptId: 'mover' };
+  const handoff = {
+    submissionId: id('sub', 3),
+    handedFrom: id('sub', 2),
+    startedAt: minute(59),
+    seconds: 4,
+    holderPhase: 'checking',
+    generation: 'attempt:run',
+    release: 'new-run',
+  };
+  const {
+    landings: [before],
+  } = await f.read();
+  const queries = f.meter.queries;
+  Object.assign(row, {
+    keptRun,
+    orderHandoffs: [handoff],
+    passToSettlementSeconds: 0.25,
+    passedAt: minute(58),
+  });
+  const {
+    landings: [after],
+  } = await f.read();
+  assert.equal(before.orderWaits, null);
+  assert.deepEqual(after.orderWaits, [{ ...handoff, held: 'handed', footprints: 'unknown' }]);
+  assert.deepEqual(after.keptRun, keptRun);
+  assert.equal(after.passToSettlementSeconds, 0.25);
+  assert.equal(after.passToLandMinutes, 2, 'the receipt uses the same first-pass stamp as the alarm');
+  assert.equal(f.meter.queries - queries, queries);
+});
+
 test('landings: names the following main audit run and verdict, null when none is stored', async () => {
   const f = fixture();
   for (let n = 1; n <= 5; n++) f.landing(n, { at: n * 10 });

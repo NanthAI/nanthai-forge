@@ -221,9 +221,14 @@ export async function releaseLandingQueue(
   ctx: MutationCtx,
   queue: Doc<'projectHostedLandingQueues'>,
   now = Date.now(),
+  mainReceiptId?: string,
 ) {
   if (queue.wake) await cancelPendingTask(ctx, queue.wake.taskId);
-  await ctx.db.patch(queue._id, { lease: null, wake: null });
+  await ctx.db.patch(queue._id, {
+    lease: null,
+    wake: null,
+    ...(mainReceiptId === undefined ? {} : { mainReceiptId }),
+  });
   // Publication only needs a presence probe; the next claim applies priority.
   const held = { until: null as number | null };
   const pending = queue.train?.length

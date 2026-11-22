@@ -145,10 +145,20 @@ export async function keepDecision(
  * no queue order: it now holds it, as the retire it replaced would have, and still settles as the
  * admission. No attempt fork (its `main` stays the checked base and its accept id stays), no cancel,
  * no finish retry. A queue check already holds order: nothing to write. */
-export async function holdKeptOrder(ctx: MutationCtx, row: LandingRow, state: HostedLandingState) {
+export async function holdKeptOrder(
+  ctx: MutationCtx,
+  row: LandingRow,
+  state: HostedLandingState,
+  moverReceiptId: string | undefined,
+) {
   if (row.admission?.status !== 'checking' || row.admission.kept) return false;
   const admission = { ...row.admission, kept: true as const };
-  await ctx.db.patch(row._id, { admission });
+  await ctx.db.patch(row._id, {
+    admission,
+    ...(row.keptRun || !moverReceiptId
+      ? {}
+      : { keptRun: { at: new Date().toISOString(), runId: admission.runId, moverReceiptId } }),
+  });
   await writeLanding(
     ctx,
     { ...row, admission },

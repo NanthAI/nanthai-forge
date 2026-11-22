@@ -158,9 +158,12 @@ test('replay 19328518: a parked passed landing names the older submission it wai
     assert.equal(value.orderWait.held, last.held, `${name} names the hold reason`);
     assert.equal(value.orderWait.footprints, last.footprints, `${name} names the footprints`);
     assert(['overlap', 'disjoint', 'unknown'].includes(value.orderWait.footprints));
-    const { at, ...publicWait } = last;
-    assert(Number.isSafeInteger(at), 'the queue has a start clock');
-    assert.deepEqual(value.orderWait.waits, [publicWait], `${name} lists the waits without internal clocks`);
+    assert(Number.isSafeInteger(last.at), 'the queue has a start clock');
+    assert.deepEqual(
+      value.orderWait.waits,
+      [{ submissionId: last.submissionId, held: last.held, footprints: last.footprints }],
+      `${name} lists the waits without internal clocks`,
+    );
     assert(value.orderWait.waits.length <= 8, 'bounded');
   }
   assert.equal(seen.olderStatus.orderWait, undefined, 'an entry that is not parked shows no order wait');
@@ -198,6 +201,13 @@ test('replay 19328518: a parked passed landing names the older submission it wai
     assert.equal(final.attemptId, accepted.attemptId, 'the queue read the attempt that landed');
     assert.equal(final.count, recomposes, 'the queue counts distinct Candidates after the first');
     assert.equal(reply.landings[0].recomposeCount, recomposes, 'the receipt agrees');
+    if (submission.id === newer.id) {
+      const [wait] = reply.landings[0].orderWaits;
+      assert.equal(wait.holderPhase, 'checking');
+      assert.equal(wait.generation, seen.row.orderWaits[0].generation);
+      assert.equal(wait.release, 'holder-landed');
+      assert.equal(wait.seconds, PARKED_MS / 1000);
+    }
   }
   const olderChain = attempts(f, older.id);
   assert(

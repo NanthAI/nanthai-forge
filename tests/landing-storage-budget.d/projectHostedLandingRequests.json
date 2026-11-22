@@ -1,10 +1,10 @@
 {
   "fresh": {
-    "immediate": 2387,
-    "retained": 2387
+    "immediate": 2437,
+    "retained": 2437
   },
   "dogfood": {
-    "immediate": 2531,
-    "retained": 2531
+    "immediate": 2552,
+    "retained": 2559
   }
 }

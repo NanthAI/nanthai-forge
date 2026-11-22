@@ -105,6 +105,8 @@ for (const dogfood of [false, true])
     assert(fixedBytes <= journalBudget.bootstrapControls.bytes);
     assert(steadyControls.rows <= budget.perProject.retained.projectJournalControls.rows);
     assert(steadyControls.bytes <= budget.perProject.retained.projectJournalControls.bytes);
+    // 9064e885: the dogfood journal fixture retains 7 more request timing bytes than
+    // the corresponding no-journal guard. Both use the measured shared per-table ceiling.
     for (const [table, bytes] of Object.entries(measured.perLanding.retained))
       assert(bytes <= budget.retained[table], `${table}: ${bytes} > ${budget.retained[table]}`);
   });

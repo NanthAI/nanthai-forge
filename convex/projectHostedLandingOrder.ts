@@ -13,6 +13,7 @@ import { stackedBehind } from './projectHostedLandingSuffix';
 import { batchRow, batchSchema } from './projectHostedLandingBatchState';
 import {
   olderRiskOnly,
+  overtakeMark,
   overtakeOlder,
   overtakeRiskOnly,
   ownGlobalRisk,
@@ -323,29 +324,77 @@ export async function olderLandingAhead(
 }
 /** Order waits a receipt records; later ones are dropped (the first ones explain the wait). */
 export const HOSTED_ORDER_WAITS = 8;
+type ReleaseCause =
+  | 'claim'
+  | 'holder-landed'
+  | 'holder-exit'
+  | 'baton-park'
+  | 'baton-repin'
+  | 'baton-stale'
+  | 'waiter-exit'
+  | 'new-run';
+type WaitHistory = Pick<LandingRow, 'orderWait' | 'orderWaits' | 'orderHandoffs'>;
+type HolderEvidence = Pick<LandingRow, 'phase' | 'attemptId' | 'runId' | 'proofMainReceiptId' | 'unsealed'>;
+
+type HolderDetails = {
+  holderPhase: LandingRow['phase'];
+  generation: string;
+  baseStale?: boolean;
+  unsealed?: string;
+};
+function holderEvidence(holder: HolderEvidence, mainReceiptId?: string): HolderDetails;
+function holderEvidence(holder: Partial<HolderEvidence>, mainReceiptId?: string): Partial<HolderDetails>;
+function holderEvidence(holder: Partial<HolderEvidence>, mainReceiptId?: string) {
+  if (!holder.phase || !holder.attemptId || holder.runId === undefined) return {};
+  return {
+    holderPhase: holder.phase,
+    generation: overtakeMark({ attemptId: holder.attemptId, runId: holder.runId }),
+    ...(holder.proofMainReceiptId && mainReceiptId
+      ? { baseStale: holder.proofMainReceiptId !== mainReceiptId }
+      : {}),
+    ...(holder.unsealed === undefined ? {} : { unsealed: holder.unsealed }),
+  };
+}
 /** Finish the current recorded wait in the row update that releases it. Older waits have no clock. */
 export function closeOrderWait(
-  row: Pick<LandingRow, 'orderWait' | 'orderWaits'>,
+  row: WaitHistory,
   now = Date.now(),
   withdrawn = false,
+  release?: ReleaseCause,
 ) {
+  const result: Pick<LandingRow, 'orderWaits' | 'orderHandoffs'> = {};
   const waits = row.orderWaits;
   const last = waits?.at(-1);
-  if (!waits || last?.at === undefined) return {};
-  const { at, ...closed } = last;
-  if (!withdrawn && row.orderWait === last.submissionId)
-    closed.seconds = (closed.seconds ?? 0) + Math.max(0, now - at) / 1000;
-  return { orderWaits: [...waits.slice(0, -1), closed] };
+  if (waits && last?.at !== undefined) {
+    const { at, ...closed } = last;
+    if (!withdrawn && row.orderWait === last.submissionId)
+      closed.seconds = (closed.seconds ?? 0) + Math.max(0, now - at) / 1000;
+    if (release) closed.release = release;
+    result.orderWaits = [...waits.slice(0, -1), closed];
+  }
+  const handoffs = row.orderHandoffs;
+  const handoff = handoffs?.at(-1);
+  if (handoffs && handoff && handoff.seconds === undefined && row.orderWait === handoff.submissionId)
+    result.orderHandoffs = [
+      ...handoffs.slice(0, -1),
+      {
+        ...handoff,
+        ...(!withdrawn ? { seconds: Math.max(0, now - handoff.startedAt) / 1000 } : {}),
+        ...(release ? { release } : {}),
+      },
+    ];
+  return result;
 }
 /** Preserve the same bounded history and de-duplication as the queue's order evidence. */
 export function recordOrderWait(
-  row: Pick<LandingRow, 'orderWait' | 'orderWaits'>,
+  row: WaitHistory,
   ahead: {
-    row: Pick<LandingRow, 'submissionId'>;
+    row: Pick<LandingRow, 'submissionId'> & Partial<HolderEvidence>;
     held: OrderHeld;
     footprints: 'overlap' | 'disjoint' | 'unknown';
   },
   now: number,
+  mainReceiptId?: string,
 ) {
   const waits = row.orderWaits ?? [];
   const active = waits.at(-1);
@@ -356,15 +405,81 @@ export function recordOrderWait(
     active.held === ahead.held
   )
     return waits;
-  const list = closeOrderWait(row, now).orderWaits ?? waits;
+  const list = closeOrderWait(row, now, false, 'claim').orderWaits ?? waits;
   if (list.length >= HOSTED_ORDER_WAITS) return list;
   const last = list[list.length - 1];
-  if (last?.submissionId === ahead.row.submissionId && last.held === ahead.held)
-    return [...list.slice(0, -1), { ...last, at: now }];
+  const details = holderEvidence(ahead.row, mainReceiptId);
+  if (last?.submissionId === ahead.row.submissionId && last.held === ahead.held) {
+    const reopened = { ...last, at: now };
+    delete reopened.release;
+    // The queue coalesces repeats. Only describe a generation when it covers the whole interval.
+    if (
+      last.holderPhase !== details.holderPhase ||
+      last.generation !== details.generation ||
+      last.baseStale !== details.baseStale ||
+      last.unsealed !== details.unsealed
+    ) {
+      delete reopened.holderPhase;
+      delete reopened.generation;
+      delete reopened.baseStale;
+      delete reopened.unsealed;
+    }
+    return [...list.slice(0, -1), reopened];
+  }
   return [
     ...list,
-    { submissionId: ahead.row.submissionId, held: ahead.held, footprints: ahead.footprints, at: now },
+    {
+      submissionId: ahead.row.submissionId,
+      held: ahead.held,
+      footprints: ahead.footprints,
+      at: now,
+      ...(details.generation ? { startedAt: now, ...details } : {}),
+    },
   ];
+}
+
+/** Keep handed edges separate on the row so wake selection still sees only claim decisions. */
+export function handoffOrderWait(
+  row: WaitHistory,
+  next: LandingRow,
+  from: Pick<LandingRow, 'submissionId'>,
+  release: ReleaseCause,
+  mainReceiptId?: string,
+  now = Date.now(),
+) {
+  const closed = closeOrderWait(row, now, false, release);
+  const prior = closed.orderHandoffs ?? row.orderHandoffs ?? [];
+  if (prior.length >= HOSTED_ORDER_WAITS) return closed;
+  return {
+    ...closed,
+    orderHandoffs: [
+      ...prior,
+      {
+        submissionId: next.submissionId,
+        handedFrom: from.submissionId,
+        startedAt: now,
+        ...holderEvidence(next, mainReceiptId),
+      },
+    ],
+  };
+}
+
+/** Receipt view: old clients' canonical acceptance fields retain their existing wire shape. */
+export function landingOrderEvidence(
+  row: Pick<LandingRow, 'orderWaits' | 'orderHandoffs'> | null,
+  fallback: NonNullable<Parameters<typeof orderWaitsField>[0]> | undefined,
+) {
+  const waits =
+    row?.orderWaits?.map(({ at, ...wait }) => ({ at: wait.startedAt ?? at ?? 0, wait })) ??
+    fallback?.map(wait => ({ at: 0, wait })) ??
+    [];
+  const handed = (row?.orderHandoffs ?? []).map(handoff => ({
+    at: handoff.startedAt,
+    wait: { ...handoff, held: 'handed' as const, footprints: 'unknown' as const },
+  }));
+  // Preserve up to eight claim decisions and eight handoffs independently, sorted by start.
+  const all = [...waits, ...handed];
+  return all.length ? all.sort((a, b) => a.at - b.at).map(({ wait }) => wait) : null;
 }
 const footprintLabel = (independent: boolean | null | undefined) =>
   independent === true

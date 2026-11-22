@@ -12,7 +12,7 @@ import {
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
 import { overtakeOlder } from '../src/landing-overtake';
-import { closeOrderWait, HOSTED_ORDER_WAITS } from './projectHostedLandingOrder';
+import { closeOrderWait, handoffOrderWait, HOSTED_ORDER_WAITS } from './projectHostedLandingOrder';
 import {
   HOSTED_FINISH_COMPOSE_WATCHDOG_MS,
   HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
@@ -230,8 +230,8 @@ const heldByPaths = (
 /** A waiter handed to `next`, which takes main before it, is marked as handed to it
  * (`orderWaitHanded`), so the new-run wake finds it if `next` re-checks instead. Incident 43b51a5e
  * case 2: handed waiters kept a wait naming a former holder, the new-run wake never found them, and
- * disjoint passed landings waited out each head's whole re-check. The receipt list (`orderWaits`)
- * keeps only waits a claim decided; the waiter's next claim clears the mark. Whatever `next`'s
+ * disjoint passed landings waited out each head's whole re-check. Handoffs have a separate evidence
+ * list so they never affect wake eligibility. The waiter's next claim clears the mark. Whatever `next`'s
  * phase: a queued `next` (a conflict cohort or an early resolution) that then binds a run must
  * find it too (finding 4 of 120fcc09). No mark only when the holder `from` landed on the
  * waiter's files (`heldByPaths`): its pass cannot carry anyway. An urgent waiter that `from` did
@@ -242,8 +242,10 @@ const handedTo = (
   next: Doc<'projectHostedLandingRequests'>,
   from: Doc<'projectHostedLandingRequests'>,
   landed: boolean,
+  release: Parameters<typeof handoffOrderWait>[3],
+  mainReceiptId?: string,
 ) => ({
-  ...closeOrderWait(waiter),
+  ...handoffOrderWait(waiter, next, from, release, mainReceiptId),
   orderWait: next.submissionId,
   orderWaitHanded:
     waiter.phase === 'ready' && !(landed && heldByPaths(waiter, from)) ? next.submissionId : undefined,
@@ -276,7 +278,11 @@ const passedFollower = (
 /** Drive one parked Ready waiter: its own claim decides. Its stall alarm is armed in the same
  * transaction (c329d191: this one drive is its only wake). False when its finish has IO in flight
  * (`pending`): that finish claims again by itself. */
-export async function driveParkedWaiter(ctx: MutationCtx, waiter: Doc<'projectHostedLandingRequests'>) {
+export async function driveParkedWaiter(
+  ctx: MutationCtx,
+  waiter: Doc<'projectHostedLandingRequests'>,
+  release: 'claim' | 'new-run' = 'claim',
+) {
   const finish = await finishRow(ctx, { projectId: waiter.projectId, submissionId: waiter.submissionId });
   if (!finish || JSON.parse(finish.value).pending) return false;
   const alarm = waiter.alarm
@@ -289,7 +295,7 @@ export async function driveParkedWaiter(ctx: MutationCtx, waiter: Doc<'projectHo
   await ctx.db.patch(waiter._id, {
     orderWait: undefined,
     orderWaitHanded: undefined,
-    ...closeOrderWait(waiter),
+    ...closeOrderWait(waiter, Date.now(), false, release),
     ...(alarm ? { alarm } : {}),
   });
   // Review d4f55e9f F3: a parked finish has no IO in flight, so its wake is a mutation.
@@ -313,11 +319,11 @@ export async function wakeNewRunFollower(ctx: MutationCtx, row: Doc<'projectHost
   for (const waiter of waiters) {
     if (!passedFollower(waiter, row)) continue;
     if (woken) {
-      await ctx.db.patch(waiter._id, handedTo(waiter, woken, row, false));
+      await ctx.db.patch(waiter._id, handedTo(waiter, woken, row, false, 'new-run'));
       if (!woken.orderWaited) await ctx.db.patch(woken._id, { orderWaited: (woken.orderWaited = true) });
       continue;
     }
-    if (!(await driveParkedWaiter(ctx, waiter))) continue;
+    if (!(await driveParkedWaiter(ctx, waiter, 'new-run'))) continue;
     if (!waiter.orderLive) return;
     woken = waiter;
   }
@@ -333,7 +339,15 @@ export async function wakeLandingOrderWaiters(
   speculativeOnly = false,
   readyOnly = false,
   landed = false,
+  mainReceiptId?: string,
 ) {
+  const release = landed
+    ? 'holder-landed'
+    : speculativeOnly
+      ? 'baton-repin'
+      : readyOnly
+        ? 'baton-park'
+        : 'holder-exit';
   let next: Doc<'projectHostedLandingRequests'> | null = null;
   // A baton wakes only younger waiters: an older one waits here only for a live reservation
   // (`reservationAhead`), and waking it back could cycle (A -> reserved R -> B -> A) at 0 ms until
@@ -367,7 +381,7 @@ export async function wakeLandingOrderWaiters(
       )
         continue;
       if (next) {
-        await ctx.db.patch(waiter._id, handedTo(waiter, next, row, landed));
+        await ctx.db.patch(waiter._id, handedTo(waiter, next, row, landed, release, mainReceiptId));
         if (!next.orderWaited) await ctx.db.patch(next._id, { orderWaited: (next.orderWaited = true) });
         continue;
       }
@@ -394,7 +408,7 @@ export async function wakeLandingOrderWaiters(
       await ctx.db.patch(waiter._id, {
         orderWait: undefined,
         orderWaitHanded: undefined,
-        ...closeOrderWait(waiter),
+        ...closeOrderWait(waiter, Date.now(), false, release),
         ...(early ? { runnable: true } : {}),
         ...(alarm ? { alarm } : {}),
       });

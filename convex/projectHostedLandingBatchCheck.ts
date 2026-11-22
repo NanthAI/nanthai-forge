@@ -157,6 +157,9 @@ async function prepareLandingCheckOnce(
                 error: null,
               },
               false,
+              true,
+              undefined,
+              run.endedAt ? { settlement: { passedAt: run.endedAt, startedAt: now } } : undefined,
             );
           }
         } else {

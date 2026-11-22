@@ -157,6 +157,8 @@ export const hostedLandingTables = {
     projectId: v.id('hostedProjects'),
     channel: v.literal('main'),
     sequence: v.number(),
+    /** Written with the Channel publication and the existing queue release. */
+    mainReceiptId: v.optional(v.string()),
     train: v.optional(v.array(v.string())),
     status: v.optional(
       v.object({
@@ -322,6 +324,11 @@ export const hostedLandingTables = {
     /** When this submission first became ready (its check passed), in ms; set once and kept across
      * recompositions, so the landing's pass-to-land time starts at its first pass (42200ce4). */
     passedAt: v.optional(v.number()),
+    /** The exact main receipt targeted by the current run or its recomposed reuse proof. */
+    proofMainReceiptId: v.optional(v.string()),
+    passToSettlementSeconds: v.optional(v.number()),
+    passToLandMinutes: v.optional(v.number()),
+    keptRun: v.optional(v.object({ at: v.string(), runId: v.string(), moverReceiptId: v.string() })),
     /** Each older submission this passed entry waited for, why, and whether the two changes'
      * footprints overlapped (receipt `orderWaits`, Issue c6b81429). At most HOSTED_ORDER_WAITS. */
     orderWaits: v.optional(
@@ -332,6 +339,28 @@ export const hostedLandingTables = {
           footprints: v.union(v.literal('overlap'), v.literal('disjoint'), v.literal('unknown')),
           at: v.optional(v.number()),
           seconds: v.optional(v.number()),
+          startedAt: v.optional(v.number()),
+          holderPhase: v.optional(phase),
+          generation: v.optional(v.string()),
+          baseStale: v.optional(v.boolean()),
+          unsealed: v.optional(v.string()),
+          release: v.optional(v.string()),
+        }),
+      ),
+    ),
+    /** Handoffs are evidence only. They do not consume the claim history that drives wakes. */
+    orderHandoffs: v.optional(
+      v.array(
+        v.object({
+          submissionId: v.string(),
+          handedFrom: v.string(),
+          startedAt: v.number(),
+          seconds: v.optional(v.number()),
+          holderPhase: phase,
+          generation: v.string(),
+          baseStale: v.optional(v.boolean()),
+          unsealed: v.optional(v.string()),
+          release: v.optional(v.string()),
         }),
       ),
     ),

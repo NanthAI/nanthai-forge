@@ -48,7 +48,7 @@ const discarded = r => r.costs?.runnerDiscarded ?? r.runnerDiscarded ?? 0;
 function n1(receipts) {
   const bySubmission = new Map(receipts.map(r => [r.submissionId, r]));
   const parked = receipts.flatMap(r => {
-    const wait = (r.orderWaits ?? []).at(-1);
+    const wait = r.orderWaits?.findLast(edge => edge.held !== 'handed');
     const holder = wait && bySubmission.get(wait.submissionId);
     if (!r.heldAfterCheck?.length || !holder) return [];
     if (!['accepting', 'unsealed'].includes(wait.held) || wait.footprints === 'overlap') return [];

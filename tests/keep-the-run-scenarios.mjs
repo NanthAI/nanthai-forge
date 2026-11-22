@@ -20,86 +20,88 @@ import { scopedRecheckPays } from '../dist/stale-check-keep.js';
 const LANDED_FEED_ROW_BYTES = 490;
 
 /** Deterministic measurements from tests/keep-the-run-cost.test.mjs, excluding harness reads.
- * Each write total shows its landed feed rows separately. Red baselines include the failed row. */
+ * Each write total shows its landed feed rows separately. Red baselines include the failed row.
+ * Item 9064e885 stamps proof pins and verified wait facts on existing rows. The fixed-clock
+ * fixtures add 1,672 to 34,173 read bytes and 223 to 8,502 write bytes, with the same call and
+ * document counts. The two C1 follower cases also exercise the order-history fields. */
 export const MEASURED = {
   'global-risk mover, strict': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_168_625,
-    writeBytes: 441_011 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_174_924,
+    writeBytes: 442_497 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, fast': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_168_185,
-    writeBytes: 440_975 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_174_484,
+    writeBytes: 442_461 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'order-sensitive mover, strict': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_168_657,
-    writeBytes: 441_031 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_174_956,
+    writeBytes: 442_517 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'order-sensitive mover, fast': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_168_217,
-    writeBytes: 440_995 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_174_516,
+    writeBytes: 442_481 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, fast': {
     calls: 66,
     documents: 1457,
-    readBytes: 1_553_962,
-    writeBytes: 506_960 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_562_395,
+    writeBytes: 508_883 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, fast, carry off': {
     calls: 59,
     documents: 1194,
-    readBytes: 1_174_805,
-    writeBytes: 441_537 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_181_104,
+    writeBytes: 443_023 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, fast, carry off': {
     calls: 73,
     documents: 1542,
-    readBytes: 1_600_969,
-    writeBytes: 564_092 + 2 * LANDED_FEED_ROW_BYTES,
+    readBytes: 1_610_909,
+    writeBytes: 566_602 + 2 * LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, strict, red': {
     calls: 49,
     documents: 978,
-    readBytes: 977_944,
-    writeBytes: 381_425 + LANDED_FEED_ROW_BYTES,
+    readBytes: 981_801,
+    writeBytes: 382_608 + LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, strict, red': {
     calls: 32,
     documents: 556,
-    readBytes: 578_128,
-    writeBytes: 228_157 + LANDED_FEED_ROW_BYTES,
+    readBytes: 580_075,
+    writeBytes: 228_600 + LANDED_FEED_ROW_BYTES,
   },
   'global-risk mover, strict, C1 follower': {
     calls: 128,
     documents: 2605,
-    readBytes: 2_593_619,
-    writeBytes: 908_583 + 3 * LANDED_FEED_ROW_BYTES,
+    readBytes: 2_610_447,
+    writeBytes: 912_726 + 3 * LANDED_FEED_ROW_BYTES,
   },
   'unrelated mover, strict, C1 follower': {
     calls: 136,
     documents: 2924,
-    // Recording the Ready order wait adds 1,191 read bytes and 340 write bytes in this replay.
-    readBytes: 3_084_818 + 1_191,
-    writeBytes: 996_581 + 340 + 3 * LANDED_FEED_ROW_BYTES,
+    readBytes: 3_120_182,
+    writeBytes: 1_005_423 + 3 * LANDED_FEED_ROW_BYTES,
   },
   'no checking row, strict': {
     calls: 23,
     documents: 432,
-    readBytes: 440_203,
-    writeBytes: 169_602 + LANDED_FEED_ROW_BYTES,
+    readBytes: 441_875,
+    writeBytes: 169_825 + LANDED_FEED_ROW_BYTES,
   },
   'no checking row, fast': {
     calls: 23,
     documents: 432,
-    readBytes: 440_039,
-    writeBytes: 169_584 + LANDED_FEED_ROW_BYTES,
+    readBytes: 441_711,
+    writeBytes: 169_807 + LANDED_FEED_ROW_BYTES,
   },
 };
 
@@ -177,10 +179,12 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // replacement compose in the red retire arm, narrowing the keep's savings.
 // Item f65d8024 adds a bounded feed projection to terminal settlement and reuses the loaded
 // acceptance plan during publication. The arms settle different rows and calls stay unchanged.
+// Item 9064e885 adds receipt pins and the first kept transition on existing rows.
+// The keep and retire paths touch those rows a different number of times. Calls are unchanged.
 export const WIRED = {
-  carry: { calls: 7, readBytes: 405_020, writeBytes: 74_728 },
-  'scoped-recheck': { calls: 17, readBytes: 534_892, writeBytes: 143_345 },
-  red: { calls: -17, readBytes: -385_993, writeBytes: -144_697 },
+  carry: { calls: 7, readBytes: 419_707, writeBytes: 77_460 },
+  'scoped-recheck': { calls: 17, readBytes: 553_906, writeBytes: 147_252 },
+  red: { calls: -17, readBytes: -386_699, writeBytes: -144_612 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

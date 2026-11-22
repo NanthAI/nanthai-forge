@@ -361,10 +361,11 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // existing acceptance mutations. It reuses the loaded plan. Calls remain at 109.
   // Slice B adds 33 document bytes and 357 modeled index-key bytes per terminal
   // event (one per landing). This document-only cost row counts the 66 bytes.
+  // Item 9064e885 adds 6,660 read and 1,091 write bytes for receipt pins and order evidence on rows already used.
   const measured = canonicalReplayCost(pair);
   assert.deepEqual(
     measured,
-    { calls: 109, readBytes: 1_875_029, writeBytes: 610_221 },
+    { calls: 109, readBytes: 1_881_689, writeBytes: 611_312 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -411,10 +412,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item 0930a720: compose root prefetch removes two descriptor calls. The fixture reads 22,433 fewer bytes.
   // Item f65d8024: the bounded two-Lane feed projection adds the same 640 read bytes here.
   // Slice B adds the same 66 document bytes for the pair, excluding the modeled index keys.
+  // Item 9064e885 adds the same 6,660 read and 1,091 write bytes at 4,000 files.
   const measured = canonicalReplayCost(after);
   assert.deepEqual(
     measured,
-    { calls: 109, readBytes: 1_880_237, writeBytes: 612_726 },
+    { calls: 109, readBytes: 1_886_897, writeBytes: 613_817 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

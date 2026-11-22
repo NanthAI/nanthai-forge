@@ -460,6 +460,7 @@ export async function publishLandingBatch(
     const completionAlarm = member.plan.inputPages ? currentRow.alarm?.taskId : undefined;
     await writeLanding(ctx, currentRow, next, false, currentRow.runId !== run.id, completionAlarm, {
       feedLanes: member.plan.feedLanes,
+      publishedMainReceiptId: members.at(-1)!.attempt.operations.accept,
     });
     await settleLandingOperation(ctx, next);
     if (member.plan.inputPages)
@@ -529,7 +530,7 @@ export async function publishLandingBatch(
   }
   await endLandedApprovals(ctx, granted);
   await writeBatch(ctx, key, { ...batch, phase: 'landed' });
-  await releaseLandingQueue(ctx, queue, now);
+  await releaseLandingQueue(ctx, queue, now, last.id);
   await noteMainLanding(ctx, { project, receipt: last, run, paths: candidate.governance?.paths ?? null });
   await enqueueGithubMirror(ctx, project, last);
   await alertSecretAllowAdded(ctx, project, last);

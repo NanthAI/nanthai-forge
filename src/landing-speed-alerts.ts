@@ -533,6 +533,12 @@ function stampedPass(timing: LandingTiming): string | undefined {
  * passed (review 663e89b0). That wait is not queue health: such a landing gives no pass-to-land
  * sample, and the stamp stays this value through every later write. */
 export const PASS_HELD = 0;
+/** The receipt and the alarm use the same queue-health clock. */
+export function passToLandMinutes(timing: LandingTiming | undefined, passedAt?: number) {
+  if (!timing || passedAt === PASS_HELD) return null;
+  const firstPass = passedAt === undefined ? stampedPass(timing) : new Date(passedAt).toISOString();
+  return span(firstPass, timing.committedAt);
+}
 /** At landing the request row keeps its first-ready stamp only when that pass came over a minute
  * before what the landed state alone gives (it was held and re-checked after passing); a landing
  * that went straight in drops it, so its stored row does not grow (42200ce4). */
@@ -555,12 +561,6 @@ export function landingSpeedSample(
   const timing = state.timing;
   const at = Date.parse(timing?.committedAt ?? timing?.settledAt ?? '');
   if (!timing || !Number.isFinite(at)) return null;
-  const firstPass =
-    passedAt === PASS_HELD
-      ? undefined
-      : passedAt !== undefined
-        ? new Date(passedAt).toISOString()
-        : stampedPass(timing);
   return {
     at,
     saveMs: timing.ms?.[0] ?? null,
@@ -569,7 +569,7 @@ export function landingSpeedSample(
     toMain: span(timing.submittedAt, timing.committedAt),
     check: span(timing.checkReservedAt, timing.ciEndedAt),
     settle: span(timing.ciEndedAt, timing.committedAt, 1000),
-    passToLand: span(firstPass, timing.committedAt),
+    passToLand: passToLandMinutes(timing, passedAt),
     attempts,
     // The landing state starts at version 0 and every write adds one (projectHostedLandingStore).
     writes: Number.isSafeInteger(state.version) ? state.version + 1 : null,

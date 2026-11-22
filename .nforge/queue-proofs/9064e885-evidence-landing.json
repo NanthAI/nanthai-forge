@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingBatchCheck.ts": "e063c738ba7dad3f167c43ddba0deee38c7f7a8cd108fe44f92e6c49f6378b46",
+    "convex/projectHostedLandingWake.ts": "f9c16fe63a44b7174c25b4717a5aae64f46f3d0a037000f2886e326d19436de4",
+    "convex/projectHostedAcceptancePublish.ts": "a53d4b316a367513608f3eedd8da2102a98f28cb491ead219622c5c03ec4355b",
+    "convex/projectHostedLandingBatchPublish.ts": "23e5965fac21911b792a00844578910604b4f59dac209382e1579d3594c5416d",
+    "convex/projectHostedLandingStore.ts": "572abc16384c44a6f19cf6fa0c92b2953228e34cc70e973d695ad1f20081d4fa",
+    "convex/projectHostedLandingStaleChecks.ts": "0dfd6ad4667f28ca155bc64620cbc49831d6ddb0c772767dc38c5c46f1008275",
+    "convex/projectHostedLandingOrder.ts": "15ccdb0497d08007a42ca20bbd36b62763717aad6b021220904664b6c60e017c",
+    "convex/projectHostedLandingControl.ts": "07ec123cfd6d20eb5d3d9f7d2c6c5ebcaf1bd7d7a0b2d8c5211c43ff1aa97bde",
+    "convex/projectHostedFinishWake.ts": "301e9ee14c9ac79cfad2f0252cbdae741669b16a256c52fe6654127cbbfe38a5",
+    "src/landing-speed-alerts.ts": "b242f32bf717e8402d064257628e60e2f1b133e2d73c537d5c0a87d8f5fa78c6"
+  },
+  "replay": {
+    "incident": "a7de3a93",
+    "test": "incident a7de3a93 shape: a lost dispatch on ${name} is re-checked and every entry lands",
+    "receipt": "a3e0f7b3-9337-4408-96db-7336971fec01"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ae7a66abd-3825-4460-af5b-075493f791c4",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ae7a66abd-3825-4460-af5b-075493f791c4#/root/receipt_review",
+    "receipt": "bde9b44a-ac5e-4eeb-b7ec-f39dcfcfc23f"
+  }
+}

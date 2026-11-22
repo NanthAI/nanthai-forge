@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingKeep.ts": "2e22ff3f1ba3f4162ff7b1e11e48337f989728686783b6118f1fe14c8828a3e4"
+  },
+  "replay": {
+    "incident": "fa2c1383",
+    "test": "incident fa2c1383 wiring: the guards fail on the incident, stranded followers, a parked kept run, a stale-base restart and a dropped conflict",
+    "receipt": "e4e0a576-363f-4a2f-b0e3-0e388712a3ea"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ae7a66abd-3825-4460-af5b-075493f791c4",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ae7a66abd-3825-4460-af5b-075493f791c4#/root/receipt_review",
+    "receipt": "bde9b44a-ac5e-4eeb-b7ec-f39dcfcfc23f"
+  }
+}

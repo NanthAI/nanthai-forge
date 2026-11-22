@@ -336,7 +336,10 @@ test('N1 is reached only when a held, passed follower overtakes a holder that ch
     committedAt: at,
     checkRunIds: ['r3'],
     heldAfterCheck: [{ from: '2026-01-01T00:04:00Z', to: at }],
-    orderWaits: [{ submissionId: 'h', held: 'accepting', footprints: 'disjoint' }],
+    orderWaits: [
+      { submissionId: 'h', held: 'accepting', footprints: 'disjoint' },
+      { submissionId: 'another-holder', held: 'handed', footprints: 'unknown' },
+    ],
   });
   const woken = pathEvidence([holder, follower('2026-01-01T00:06:00Z')], allOn).N1;
   assert.deepEqual([woken.precondition, woken.reached, woken.label], [true, true, 'on path']);

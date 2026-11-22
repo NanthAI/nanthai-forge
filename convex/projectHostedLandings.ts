@@ -16,6 +16,8 @@ import { finishRow } from './projectHostedFinishWake';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
+import { passToLandMinutes } from '../src/landing-speed-alerts';
+import { landingOrderEvidence } from './projectHostedLandingOrder';
 import { nextCreationCursor, readCreationCursor } from './creationTimeCursor';
 import { landingAcceptedBySchema, receiptAcceptedBy } from '../src/landing-accepted-by';
 import { authorshipLabel } from './projectAuthorshipLabel';
@@ -88,6 +90,25 @@ async function evidence(
   const request = await landingRow(ctx, { projectId, submissionId: receipt.submissionId }, false);
   const state = request ? (JSON.parse(request.value) as HostedLandingState) : null;
   bytes += request?.value.length ?? 0;
+  if (request) {
+    const {
+      orderWaits,
+      orderHandoffs,
+      keptRun,
+      passToSettlementSeconds,
+      passToLandMinutes,
+      proofMainReceiptId,
+    } = request;
+    bytes +=
+      JSON.stringify({
+        orderWaits,
+        orderHandoffs,
+        keptRun,
+        passToSettlementSeconds,
+        passToLandMinutes,
+        proofMainReceiptId,
+      }).length - 2;
+  }
   // Use the existing attempt read first: ordinary landings add no pointer seek. A partial
   // removal has lost the immutable first attempt, so its complete archived chain wins.
   const liveChain = await landingAttemptPrefix(ctx, projectId, receipt.submissionId);
@@ -208,7 +229,10 @@ async function evidence(
       firstComposeStartedAt: progress[0]?.timing?.composeStartedAt ?? state?.timing?.composeStartedAt ?? null,
       heldAfterCheck: heldAfterCheck(attempts, progress),
       // Older submissions it waited for after its check passed, and whether footprints overlapped (c6b81429).
-      orderWaits: receipt.orderWaits ?? null,
+      orderWaits: landingOrderEvidence(request, receipt.orderWaits),
+      keptRun: request?.keptRun ?? null,
+      passToSettlementSeconds: request?.passToSettlementSeconds ?? null,
+      passToLandMinutes: request?.passToLandMinutes ?? passToLandMinutes(state?.timing, request?.passedAt),
       // Each main-red hold it waited under (held, released); this receipt is the re-landing (687d1eda).
       mainRedHolds: receipt.mainRedHolds ?? null,
       // A person's acceptance or an automatic one (fe5bea80); older rows fall back to the receipt actor.

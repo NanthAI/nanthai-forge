@@ -42,7 +42,7 @@ import {
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { recordLandingSpeed } from './projectLandingSpeed';
 import { recordGuardFailureOffMainRed } from './projectGuardMainRed';
-import { PASS_HELD, keepsPassStamp } from '../src/landing-speed-alerts';
+import { PASS_HELD, keepsPassStamp, passToLandMinutes } from '../src/landing-speed-alerts';
 import { failureDetail, recordFailure } from './projectFailureLog';
 import { bindRunnerAccounting, bindSupersededCheck } from './projectHostedLandingRunnerCosts';
 import { invariant } from '../src/errors';
@@ -174,6 +174,8 @@ export async function writeLanding(
     /** Fix D (Item 687d1eda): only parkLanding passes 'main-red'. Never inferred from the row. */
     hold?: 'main-red' | 'ci-down';
     feedLanes?: readonly { laneId: string; actor?: string }[];
+    settlement?: { passedAt: string; startedAt: number };
+    publishedMainReceiptId?: string;
   },
 ) {
   const hold = options?.hold;
@@ -386,10 +388,29 @@ export async function writeLanding(
     ? PASS_HELD
     : (row.passedAt ?? (state.phase === 'ready' ? Date.now() : undefined));
   const passedAt = state.phase === 'landed' && !keepsPassStamp(state, firstPass) ? undefined : firstPass;
+  const settlement = options?.settlement;
+  const passToSettlementSeconds = settlement
+    ? (settlement.startedAt - Date.parse(settlement.passedAt)) / 1000
+    : NaN;
+  const passToLand =
+    state.phase === 'landed' && firstPass !== passedAt ? passToLandMinutes(state.timing, firstPass) : null;
+  const proofMainReceiptId = runId && !ended ? attempt.main.receiptId : undefined;
+  // Queued advisory conflicts keep the existing settlement event on bookkeeping writes.
+  const orderWait =
+    state.phase === 'ready' ||
+    (state.phase === 'queued' && attempt.earlyResolutions?.length) ||
+    (speculative && !retireAdvice)
+      ? row.orderWait
+      : undefined;
   await ctx.db.patch(row._id, {
     ...(alarm && alarm.id === row._id ? { alarm: alarm.alarm } : {}),
     ...(unsealed ? { unsealed } : {}),
     ...(passedAt !== row.passedAt ? { passedAt } : {}),
+    ...(row.passToSettlementSeconds === undefined && passToSettlementSeconds >= 0
+      ? { passToSettlementSeconds }
+      : {}),
+    ...(passToLand === null ? {} : { passToLandMinutes: passToLand }),
+    ...(proofMainReceiptId === row.proofMainReceiptId ? {} : { proofMainReceiptId }),
     attemptId: state.attemptId,
     pipelineRetiredAttemptId:
       previous.attemptId === state.attemptId ? row.pipelineRetiredAttemptId : undefined,
@@ -423,26 +444,31 @@ export async function writeLanding(
     wouldConflict,
     orderLive: orderLive ? true : undefined,
     reservedUntil: reserving ? row.reservedUntil : undefined,
-    // Queued advisory conflicts also depend on an existing settlement event.
-    // A same-attempt diagnostic write must not silently discard that owner.
-    orderWait:
-      state.phase === 'ready' ||
-      (state.phase === 'queued' && attempt.earlyResolutions?.length) ||
-      (speculative && !retireAdvice)
-        ? row.orderWait
-        : undefined,
+    orderWait,
     // A handoff mark lasts only while the entry is a Ready waiter (43b51a5e case 2).
     orderWaitHanded: state.phase === 'ready' ? row.orderWaitHanded : undefined,
     ...(state.phase === 'ready'
       ? {}
-      : closeOrderWait(row, Date.now(), state.error?.code === 'LANDING_CANCELLED')),
+      : closeOrderWait(
+          orderWait ? { ...row, orderHandoffs: undefined } : row,
+          Date.now(),
+          state.error?.code === 'LANDING_CANCELLED',
+          ended ? 'waiter-exit' : undefined,
+        )),
     orderWaited: orderLive || reserving || admissionHolds ? row.orderWaited : undefined,
     value: semanticPayload(state),
   });
   if (row.admitting && !admitting) await releaseAdmissionWaiters(ctx, row.projectId);
   if (row.deciding !== undefined && deciding === undefined) await releaseCohortHolds(ctx, row.projectId);
   if (row.orderWaited && ((!orderLive && !reserving && !admissionHolds) || retiresSolo))
-    await wakeLandingOrderWaiters(ctx, row, orderLive, false, state.phase === 'landed');
+    await wakeLandingOrderWaiters(
+      ctx,
+      row,
+      orderLive,
+      false,
+      state.phase === 'landed',
+      options?.publishedMainReceiptId ?? state.acceptance?.receiptId,
+    );
   if (bindsNewRun(row, previous, state, runId, orderLive)) await wakeNewRunFollower(ctx, row);
   if (
     releaseRun &&

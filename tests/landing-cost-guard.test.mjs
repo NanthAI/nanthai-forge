@@ -1525,6 +1525,8 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
   // Stored entries do not grow: a completed task row is not retained.
   // f65d8024: each accepted event adds 33 retained document bytes and 357 modeled
   // index key bytes to the immediate and retained budgets in both scenarios.
+  // 9064e885: the existing queue row retains one 55-byte main-receipt pin per project.
+  // The acceptance timing evidence adds 50 B fresh and 21 B dogfood to each request.
   for (const [name, scenario] of Object.entries(scenarios)) {
     const indexBudget = storageBudgets[name].indexes;
     const aliasBudget = storageBudgets[name].metricAliases;

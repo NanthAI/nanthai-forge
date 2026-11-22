@@ -1993,6 +1993,14 @@ modules do not install or deploy those services or register an App.
 
 ### Hosted landing request queue
 
+The landing receipt view reports order waits as well as handoffs. A handoff
+names the former holder and its successor. Each edge includes the observed
+holder phase and check generation when available. Claims compare the holder's
+checked receipt with current main using receipt pins on the queue and request
+rows. The view retains up to eight claim decisions and eight handoffs. It also
+reports the admission keep that began holding order and the measured time from
+a check pass to the start of settlement when both clocks are available.
+
 Agent finish/land can register `projectHostedLandingDesired:submit` while its
 staged source job is still composing. This desired goal retains the original
 operation, check settings and stable submission handle before the requester exits.
