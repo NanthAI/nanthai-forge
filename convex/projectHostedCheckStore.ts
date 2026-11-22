@@ -17,6 +17,7 @@ import { hostedVerdictKey } from '../src/hosted-check-evidence';
 import { hostedCheckClock } from './projectHostedCheckClock';
 import { onGateRunTerminal } from './projectHostedMainAuditState';
 import { auditCoverageSchema } from '../src/landing-audit-cadence';
+import { noteMirrorCheck } from './projectGithubMirrorVerify';
 import { semanticPayload } from '../src/semantic-payload';
 import { wakeExpiredLogs } from './projectCheckLogRetention';
 import { checkReportHeader } from '../src/check-file-summary';
@@ -294,6 +295,7 @@ export async function completeHostedCheck(
     ...(audit ? { audit } : {}),
   });
   if (!operation.terminal) await recordCheckFeed(ctx, run, source?.cause);
+  await noteMirrorCheck(ctx, run);
 }
 
 /** Structured across internal function/HTTP boundaries; never includes source or credentials. */

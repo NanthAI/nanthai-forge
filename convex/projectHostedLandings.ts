@@ -2,7 +2,8 @@
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
+import { mirrorReceipt } from './projectGithubMirrorStatus.idle';
 import { accessibleProject, readProjectRole } from './projectAuthority';
 import { cohortHoldEvidence } from './projectHostedLandingFields';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
@@ -340,15 +341,13 @@ async function selectedRequest(ctx: QueryCtx, projectId: Id<'hostedProjects'>, s
   );
 }
 
-async function oneLanding(ctx: QueryCtx, projectId: Id<'hostedProjects'>, receiptId: string) {
-  const receipt = await selectedReceipt(ctx, projectId, receiptId);
-  const { row } = await evidence(
-    ctx,
-    projectId,
-    JSON.parse(receipt.value) as HostedAcceptance,
-    receipt.sequence,
-  );
-  return { schema: 1, landings: [row], nextCursor: null };
+async function oneLanding(ctx: QueryCtx, project: Doc<'hostedProjects'>, receiptId: string) {
+  const receipt = await selectedReceipt(ctx, project._id, receiptId);
+  const [{ row }, mirror] = await Promise.all([
+    evidence(ctx, project._id, JSON.parse(receipt.value) as HostedAcceptance, receipt.sequence),
+    mirrorReceipt(ctx, project, receipt.receiptId),
+  ]);
+  return { schema: 1, landings: [{ ...row, ...(mirror ? { mirror } : {}) }], nextCursor: null };
 }
 /** Accepted landings in [from,to) by commit time, oldest first, one query execution per page.
  * Reads the receipt index plus about four indexed rows per landing; no scan, no writes, no idle work.
@@ -406,7 +405,7 @@ export const read = query({
             { message: receipt.message ?? null, cohortMessages: receipt.cohortMessages ?? null },
           );
         }
-        return JSON.stringify(await oneLanding(ctx, input.projectId, input.receiptId));
+        return JSON.stringify(await oneLanding(ctx, project, input.receiptId));
       }
       const from = Date.parse(input.from ?? ''),
         to = Date.parse(input.to ?? '');

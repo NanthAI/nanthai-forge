@@ -2,7 +2,6 @@
 import { wakeCiMirrorWaiters } from './projectCiStatusMirror';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
-import type { Id } from './_generated/dataModel';
 import { mirrorJob, mirrorRow, scheduleMirror, resumeMirrorJob } from './projectGithubMirrorRows';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { readHostedRecord } from './projectHostedRecords';
@@ -19,17 +18,31 @@ import { finish, inboundOutcomeSchema, yieldToInbound } from './projectGithubInb
 import { projectLink, settlePull } from './projectGithubPullQueue';
 import { pusherNotice } from '../src/github-inbound-job';
 import { effectivePolicy } from '../src/autonomy-policy';
+import { beginMirrorBurst, mirrorAudit, startMirrorPublish } from './projectGithubMirrorCadence';
+import type { MirrorSeed } from '../src/hosted-github-mirror';
+import { mirrorVerifyAfterPush, retryMirrorVerification } from './projectGithubMirrorVerify';
 const identity = { jobId: v.id('projectGithubMirrorJobs'), step: v.number() };
-async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJobs'>; step: number }) {
-  const active = await mirrorJob(ctx, input);
-  if (!active) return null;
+async function seed(
+  ctx: MutationCtx,
+  active: NonNullable<Awaited<ReturnType<typeof mirrorJob>>>,
+  through: number | undefined,
+) {
   const { job, queue, project } = active;
-  if (job.cursor) return { cursor: job.cursor, repository: job.repository };
-  if (job.seed) return { cursor: null, repository: job.repository, seed: JSON.parse(job.seed) };
+  const verifyLink = job.verifyLink ?? null;
+  if (job.cursor) return { cursor: job.cursor, repository: job.repository, verifyLink };
+  if (job.seed) return { cursor: null, repository: job.repository, seed: JSON.parse(job.seed), verifyLink };
   const row = await acceptanceRow(ctx, { projectId: job.projectId, receiptId: job.receiptId });
   invariant(row, 'SOURCE_UNAVAILABLE', 'Mirror acceptance receipt is unavailable.');
   const receipt = hostedAcceptanceSchema.parse(JSON.parse(row.value));
-  let binding = queue.mapping ? githubSyncCommitSchema.parse(JSON.parse(queue.mapping)) : null;
+  const mapped = queue.staged ?? queue.mapping;
+  let binding = mapped ? githubSyncCommitSchema.parse(JSON.parse(mapped)) : null;
+  const publishedRef =
+    queue.staged && queue.mapping
+      ? githubSyncCommitSchema.parse(JSON.parse(queue.mapping)).commit
+      : queue.stagedRef;
+  const publish = through === undefined || job.sequence >= through;
+  const mergeParent =
+    publish && queue.staged && publishedRef && publishedRef !== queue.stagedRef ? publishedRef : undefined;
   if (!binding) {
     const generation = await selectedGeneration(ctx, project);
     const old = generation ? await record(ctx, recordPartition(generation), 'githubSync', 'github') : null;
@@ -119,7 +132,12 @@ async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJob
       message,
       at: receipt.at,
       binding,
-      verified: !!queue.mapping,
+      verified: !!mapped,
+      main: {
+        publish,
+        ...(publishedRef ? { expectedRef: publishedRef } : {}),
+        ...(mergeParent ? { mergeParent } : {}),
+      },
       identity: { name, email },
       ...(imported?.publication
         ? { import: { commit: imported.commit, state: imported.publication.head } }
@@ -129,30 +147,67 @@ async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJob
   };
   // Pin mutable Intent prose and configured identity before any GitHub IO.
   // A lost commit/ref reply must replay these exact commit bytes.
-  await ctx.db.patch(job._id, { seed: canonicalPayload(value.seed) });
-  return value;
+  const projectUrl = value.seed.main.publish ? await projectLink(ctx, project) : null;
+  const receiptLink = projectUrl ? new URL(`code/${job.receiptId}`, `${projectUrl}/`).href : null;
+  await ctx.db.patch(job._id, {
+    seed: canonicalPayload(value.seed),
+    ...(receiptLink ? { verifyLink: receiptLink } : {}),
+  });
+  return { ...value, verifyLink: receiptLink };
 }
 export const begin = internalMutation({
   args: identity,
   returns: v.union(v.string(), v.null()),
   handler: async (ctx, input) => {
-    if ((await ctx.db.get(input.jobId))?.inbound) {
+    const job = await ctx.db.get(input.jobId);
+    if (!job) return null;
+    if (job.inbound) {
       const inbound = await inboundBegin(ctx, input);
       return inbound && canonicalPayload(inbound);
     }
-    const value = await seed(ctx, input);
-    const job = value && (await ctx.db.get(input.jobId));
-    // The action binds its App token to the job's project.
-    return value && job ? canonicalPayload({ ...value, projectId: job.projectId }) : null;
+    const active = await mirrorJob(ctx, input, job);
+    if (!active) return null;
+    const { project, queue } = active;
+    const saved = job.seed ? (JSON.parse(job.seed) as MirrorSeed) : null;
+    // A window with over 100 outstanding blobs cannot move a ref. A pinned staged job never moves it.
+    const cannotPush = job.blobOnly || saved?.main?.publish === false;
+    const audit = cannotPush ? null : await mirrorAudit(ctx, project._id);
+    const burst = cannotPush
+      ? { ready: true, through: queue.batchThrough }
+      : await beginMirrorBurst(ctx, queue, job, !!audit?.red);
+    if (!burst.ready) return null;
+    const { verifyLink, ...value } = await seed(ctx, active, burst.through);
+    const pinned = saved ?? (value.seed as MirrorSeed);
+    const verify = pinned?.main?.publish !== false;
+    const headRed =
+      !!audit?.red && ((queue.revertThrough ?? -1) < job.sequence || audit.red.head === job.state);
+    const state = headRed
+      ? 'failure'
+      : job.exactCheck || (audit?.lastGreen?.sequence ?? -1) >= job.sequence
+        ? 'success'
+        : 'pending';
+    return canonicalPayload({
+      ...value,
+      projectId: job.projectId,
+      ...(verify ? { verification: { state, link: verifyLink } } : {}),
+    });
   },
 });
 export const commit = internalMutation({
-  args: { ...identity, cursor: v.union(v.string(), v.null()), mapping: v.union(v.string(), v.null()) },
+  args: {
+    ...identity,
+    cursor: v.union(v.string(), v.null()),
+    mapping: v.union(v.string(), v.null()),
+    verify: v.optional(v.union(v.literal('pending'), v.literal('success'), v.literal('failure'))),
+    verifyError: v.optional(v.string()),
+    verifyRetry: v.optional(v.literal(true)),
+    blobOnly: v.optional(v.literal(true)),
+  },
   returns: v.null(),
   handler: async (ctx, input) => {
     const active = await mirrorJob(ctx, input);
     if (!active) return null;
-    const { job, queue } = active;
+    const { job, queue, project } = active;
     if (input.mapping) {
       const mapping = githubSyncCommitSchema.parse(JSON.parse(input.mapping));
       invariant(
@@ -160,31 +215,78 @@ export const commit = internalMutation({
         'GITHUB_SYNC_HISTORY',
         'Retain the mirror acceptance mapping.',
       );
+      const staged = job.seed && (JSON.parse(job.seed) as MirrorSeed).main?.publish === false;
+      const burstJobId = queue.burstJobId ?? job._id;
       await ctx.db.patch(job._id, {
         status: 'done',
         mapping: canonicalPayload(mapping),
         step: job.step + 1,
         cursor: null,
+        blobOnly: undefined,
         failures: 0,
         nextAttemptAt: undefined,
         error: undefined,
         detail: undefined,
+        ...(input.verify ? { verify: input.verify } : {}),
+        ...(input.verify && !input.verifyError ? { verifySent: input.verify } : {}),
+        ...(input.verifyError ? { verifyError: input.verifyError } : {}),
+        ...(staged ? { burstJobId } : {}),
       });
       const next = await ctx.db
         .query('projectGithubMirrorJobs')
         .withIndex('by_project_and_status_and_sequence', q =>
-          q.eq('projectId', job.projectId).eq('status', 'queued'),
+          staged
+            ? q.eq('projectId', job.projectId).eq('status', 'queued').gt('sequence', job.sequence)
+            : q.eq('projectId', job.projectId).eq('status', 'queued'),
         )
         .order('asc')
         .take(1);
       const outcome = queue.inbound ? inboundOutcomeSchema.parse(JSON.parse(queue.inbound)) : null;
-      await ctx.db.patch(queue._id, {
-        mapping: canonicalPayload(mapping),
-        mirroredAt: Date.now(),
+      const now = Date.now();
+      const patch = {
         activeId: next[0]?._id ?? null,
-        ...(outcome?.note ? { inbound: canonicalPayload({ ...outcome, note: false }) } : {}),
-      });
-      if (next[0]) await scheduleMirror(ctx, next[0]);
+        ...(staged
+          ? {
+              staged: canonicalPayload(mapping),
+              stagedRef: queue.stagedRef ?? mapping.parent,
+              stagedCount: (queue.stagedCount ?? 0) + 1,
+              burstJobId,
+            }
+          : {
+              queuedPublishes: Math.max(0, (queue.queuedPublishes ?? 1) - 1 - (queue.stagedCount ?? 0)),
+              mapping: canonicalPayload(mapping),
+              mirroredAt: now,
+              pushedAt: now,
+              staged: undefined,
+              stagedCount: undefined,
+              stagedRef: undefined,
+              burstJobId: undefined,
+              hold: undefined,
+              batchThrough: undefined,
+              burstFirstAt: undefined,
+              ...(input.verifyError ? { verifyError: input.verifyError } : {}),
+              ...(input.verify === 'pending' ? { pendingVerify: (queue.pendingVerify ?? 0) + 1 } : {}),
+              ...((queue.flushThrough ?? -1) <= job.sequence ? { flushThrough: undefined } : {}),
+              ...((queue.revertThrough ?? -1) <= job.sequence ? { revertThrough: undefined } : {}),
+              ...(outcome?.note ? { inbound: canonicalPayload({ ...outcome, note: false }) } : {}),
+            }),
+      };
+      invariant(
+        !staged || next[0],
+        'GITHUB_SYNC_HISTORY',
+        'The retained mirror burst is missing its final State.',
+      );
+      await ctx.db.patch(queue._id, patch);
+      if (!staged && queue.burstJobId) await ctx.db.patch(queue.burstJobId, { burstPublished: true });
+      if (next[0]) await startMirrorPublish(ctx, project, { ...queue, ...patch }, next[0]);
+      const transitioned =
+        input.verify === 'pending' &&
+        (await mirrorVerifyAfterPush(
+          ctx,
+          { ...queue, ...patch },
+          { ...job, mapping: canonicalPayload(mapping) },
+        ));
+      if (input.verifyRetry && !transitioned) await retryMirrorVerification(ctx, queue, [job._id], 1);
       if (job.ciWaiters) await wakeCiMirrorWaiters(ctx, job._id);
     } else {
       invariant(input.cursor, 'SOURCE_UNAVAILABLE', 'Mirror continuation is unavailable.');
@@ -192,6 +294,7 @@ export const commit = internalMutation({
         status: 'running',
         step: job.step + 1,
         cursor: input.cursor,
+        blobOnly: input.blobOnly,
         failures: 0,
         nextAttemptAt: undefined,
         error: undefined,

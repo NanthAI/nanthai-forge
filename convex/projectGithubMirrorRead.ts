@@ -12,6 +12,7 @@ import { mirrorSummary } from '../src/github-mirror-sentence';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { mirrorResumeInbound } from './projectGithubMirrorDirection';
+import { mirrorCadenceView } from './projectGithubMirrorCadence';
 
 export const read = query({
   args: { projectId: v.id('hostedProjects') },
@@ -38,6 +39,9 @@ export const read = query({
     ),
     repoId: v.union(v.number(), v.null()),
     inbound: v.boolean(),
+    push: v.optional(mirrorCadenceView),
+    held: v.optional(v.object({ count: v.number(), until: v.number(), red: v.boolean() })),
+    verifyError: v.optional(v.string()),
     /** The owner may change the mirror; others read it. */
     owner: v.boolean(),
   }),
@@ -77,6 +81,9 @@ export const read = query({
         owner,
         repoId: binding?.repoId ?? null,
         inbound: await mirrorResumeInbound(ctx, project),
+        ...(status?.push ? { push: status.push } : {}),
+        ...(status?.held ? { held: status.held } : {}),
+        ...(status?.verifyError ? { verifyError: status.verifyError } : {}),
       };
     } catch (error) {
       return report(error);

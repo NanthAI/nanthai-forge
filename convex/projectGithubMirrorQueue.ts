@@ -2,15 +2,25 @@
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
-import { effectivePolicy } from '../src/autonomy-policy';
+import { effectivePolicy, globPattern } from '../src/autonomy-policy';
+import type { HostedCheckRun } from '../src/hosted-check';
+import { docsGate, fullGate } from '../src/main-audit';
 import { settleInbound } from './projectGithubInboundQueue';
-import { ensureMirrorRow, scheduleMirror } from './projectGithubMirrorRows';
+import { ensureMirrorRow } from './projectGithubMirrorRows';
+import { mirrorAudit, startMirrorPublish, wakeHeldMirror } from './projectGithubMirrorCadence';
+import { notifyMirrorCoverage } from './projectGithubMirrorVerify';
 export { ensureMirrorRow, mirrorJob, mirrorRow, scheduleMirror } from './projectGithubMirrorRows';
 /** Publication and wake are one transaction. No watcher, timer or idle job. */
 export async function enqueueGithubMirror(
   ctx: MutationCtx,
   project: Doc<'hostedProjects'>,
   receipt: HostedAcceptance,
+  evidence?: {
+    run?: HostedCheckRun | null;
+    revert?: boolean;
+    paths?: readonly string[] | null;
+    coverage?: boolean;
+  },
 ) {
   const policy = effectivePolicy(project).githubMirror;
   if (project.sourceAuthority?.mode !== 'server' || !policy?.autoPush) return;
@@ -28,22 +38,68 @@ export async function enqueueGithubMirror(
     await ctx.db.patch(queue._id, { repositoryKey: queue.repository.toLowerCase() });
   // Two-way sync: an inbound job holding the queue settles with the acceptance that landed it.
   if (queue.activeId && (await settleInbound(ctx, queue, receipt))) queue = (await ctx.db.get(queue._id))!;
+  const matching = queue.repository === policy.repo;
+  const acceptedAt = Date.parse(receipt.at);
+  const sequence = receipt.snapshot.revision;
+  const run = evidence?.run;
+  const exact =
+    run?.status === 'passed' &&
+    run.request.expectedHead === receipt.candidate.head &&
+    !receipt.crossHeadProof &&
+    !evidence?.coverage &&
+    fullGate(run) &&
+    !docsGate(run);
+  const flush = policy.pushNowPaths?.some(glob => {
+    const pattern = globPattern(glob);
+    return !evidence?.paths || evidence.paths.some(path => pattern.test(path));
+  });
   const jobId = await ctx.db.insert('projectGithubMirrorJobs', {
     projectId: project._id,
     receiptId: receipt.id,
-    sequence: receipt.snapshot.revision,
+    sequence,
     repository: policy.repo,
+    repositoryKey: policy.repo.toLowerCase(),
     authorityEpoch: receipt.authorityEpoch,
-    status: queue.repository === policy.repo ? 'queued' : 'failed',
+    status: matching ? 'queued' : 'failed',
     step: 0,
     cursor: null,
     state: receipt.candidate.head,
-    ...(queue.repository === policy.repo ? {} : { error: 'GITHUB_SYNC_BINDING' }),
+    ...(Number.isFinite(acceptedAt) ? { acceptedAt } : {}),
+    ...(exact ? { exactCheck: true } : {}),
+    ...(matching ? {} : { error: 'GITHUB_SYNC_BINDING' }),
   });
-  const scheduled = !queue.activeId && queue.repository === policy.repo;
+  const scheduled = !queue.activeId && matching;
+  if (!matching) return { jobId, scheduled };
+  if (exact && queue.pendingVerify && run.gate) {
+    const audit = await mirrorAudit(ctx, project._id);
+    if (audit?.lastGreen?.sequence === sequence && audit.lastGreen.head === receipt.candidate.head)
+      queue = await notifyMirrorCoverage(ctx, queue, sequence);
+  }
+  const changes = {
+    queuedPublishes: (queue.queuedPublishes ?? 0) + 1,
+    newestPublish: sequence,
+    ...(scheduled ? { activeId: jobId } : {}),
+    ...(flush ? { flushThrough: sequence } : {}),
+    ...(evidence?.revert ? { revertThrough: sequence } : {}),
+  };
+  await ctx.db.patch(queue._id, changes);
+  queue = { ...queue, ...changes };
   if (scheduled) {
-    await ctx.db.patch(queue._id, { activeId: jobId });
-    await scheduleMirror(ctx, { _id: jobId, step: 0 });
+    await startMirrorPublish(ctx, project, queue, {
+      _id: jobId,
+      step: 0,
+      sequence,
+      cursor: null,
+      ...(Number.isFinite(acceptedAt) ? { acceptedAt } : {}),
+    });
+  } else if (
+    evidence?.revert ||
+    (flush && !queue.hold?.red) ||
+    (queue.hold?.red && exact && !(await mirrorAudit(ctx, project._id))?.red)
+  ) {
+    await wakeHeldMirror(ctx, queue, Date.now());
+  } else if (queue.hold) {
+    await wakeHeldMirror(ctx, queue, Date.now(), 'stage');
   }
   return { jobId, scheduled };
 }

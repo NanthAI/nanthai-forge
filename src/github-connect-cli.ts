@@ -6,6 +6,11 @@ import { digest } from './hash.js';
 import { browserApproval } from './browser-approval.js';
 import { createInterface } from 'node:readline/promises';
 import { z } from 'zod';
+import {
+  mirrorCadenceSchema,
+  mirrorHeldSchema,
+  mirrorStatusesPermission,
+} from './hosted-github-mirror-status.js';
 import { makeFunctionReference } from 'convex/server';
 import { hostedAgentAddress } from './hosted-agent-address.js';
 import { hostedAgentAddressSchema } from './hosted-address.js';
@@ -31,6 +36,9 @@ const mirrorReadSchema = z.object({
   state: z.string(),
   sentence: z.string(),
   next: z.string().nullable(),
+  push: mirrorCadenceSchema.optional(),
+  held: mirrorHeldSchema.optional(),
+  verifyError: z.string().optional(),
 });
 /** One reactive observation of the existing connection operation, no polling or
  * scheduler. Closing the command closes the subscription and its connection. */
@@ -172,12 +180,21 @@ export async function githubConnectCli(
     const bindings = typeof listed === 'string' ? JSON.parse(listed) : listed;
     const mirror = mirrorReadSchema.parse(await transport.query<unknown>('projectGithubMirrorRead:read', {}));
     const summary = {
-      summary: mirror.sentence,
+      summary: [
+        mirror.sentence,
+        mirror.push?.reason,
+        mirror.verifyError === 'GITHUB_APP_PERMISSIONS' ? mirrorStatusesPermission : null,
+      ]
+        .filter(Boolean)
+        .join(' '),
       mirror: {
         state: mirror.state,
         direction: mirror.direction,
         repository: mirror.repository,
         next: mirror.next?.replace(/ \. /, ` ${project} `) ?? null,
+        ...(mirror.push ? { push: mirror.push } : {}),
+        ...(mirror.held ? { held: mirror.held } : {}),
+        ...(mirror.verifyError ? { verifyError: mirror.verifyError } : {}),
       },
     };
     // Two-way sync only: one read-only protection check of the mirrored repository.

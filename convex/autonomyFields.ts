@@ -130,6 +130,10 @@ export const autonomyPolicy = v.object({
       autoPush: v.boolean(),
       laneRefs: v.literal(false),
       inbound: v.optional(v.boolean()),
+      push: v.optional(
+        v.union(v.literal('automatic'), v.literal('every-landing'), v.literal('batch-quick-landings')),
+      ),
+      pushNowPaths: v.optional(v.array(v.string())),
     }),
   ),
 });

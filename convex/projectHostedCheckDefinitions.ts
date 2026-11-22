@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mainAuditStatus } from './projectHostedMainAuditState';
+import { mirrorCadenceRead } from './projectGithubMirrorCadence';
 import { bindingInstallation, requireStoredRepositoryBinding, runnerGrant } from './githubBindingAccess';
 import { refreshCheckEntries } from './projectHostedCheckEntries';
 import { ciStatusRunner } from './projectCiStatus';
@@ -245,7 +246,7 @@ export const current = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read check settings.');
-      await accessibleProject(ctx, input.projectId, user.subject);
+      const project = await accessibleProject(ctx, input.projectId, user.subject);
       const definition = await checkSetting(ctx, input.projectId, 'definition', input.checkId);
       const runner = await checkSetting(ctx, input.projectId, 'runner', 'runner');
       const bindings = input.includeGithubBindings
@@ -293,6 +294,7 @@ export const current = query({
         configuration,
         configurationDigest: runner?.digest ?? null,
         mainAudit: await mainAuditStatus(ctx, input.projectId),
+        ...(input.includeGithubBindings ? { mirror: { push: await mirrorCadenceRead(ctx, project) } } : {}),
       });
     } catch (error) {
       return report(error);

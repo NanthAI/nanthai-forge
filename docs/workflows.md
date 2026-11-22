@@ -640,6 +640,32 @@ Settings → GitHub mirror uses the same one-sentence status as `nforge github s
 At import, **Keep GitHub in sync both ways** starts ticked; unticking selects
 Forge-to-GitHub only. GitHub approval connects that choice after import.
 
+**Push cadence** defaults to **Automatic**. After a quiet period the next landing
+pushes immediately. During a burst, one scheduled wake pushes the newest held
+State in one fast-forward. Each State keeps its own commit. Automatic and
+**Batch quick landings** use the median wall time of the last 20 recorded full
+checks, clamped to one through ten minutes. Until a full check reports a wall
+time, the window is zero. **Every landing** sets the burst window to zero.
+All modes flush a revert immediately. A known red main holds a push until
+recovery or 15 minutes from the first held landing. `mirror.pushNowPaths` is a
+list of repository-relative globs that flush a regular burst on matching
+changes. It keeps the red-main hold.
+
+`nforge agent ROOT check-settings` reports the mode, observed median, sample
+count, bounds and effective window. To change the cadence, edit `githubMirror.push`
+in the existing `nforge x ROOT set-policy` owner command. `nforge github status`
+and agent status show a held burst
+and its deadline. `nforge agent ROOT landings '{"receiptId":"RECEIPT"}'` shows
+whether that State is still held or reached GitHub and whether it was the pushed
+tip.
+
+Each pushed tip gets a GitHub `forge/verify` status linking to the Forge landing
+receipt. Exact proof gives success, an own-check landing waits for audit coverage,
+and a failed audit or a push at the red hold cap reports failure. The repository
+can run its own on-push CI in every mode. A GitHub App installation needs
+**Commit statuses: Write** for this status. A missing grant appears in mirror
+status while source publication continues.
+
 The owner person can **Pause** the mirror, keeping the repository binding,
 recorded history and direction, then **Resume** it later. Pause sets
 `githubMirror.autoPush:false` and `inbound:false`, keeping that policy readable by

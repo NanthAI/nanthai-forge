@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { resolveUncheckedSelection } from './projectUncheckedLanding';
 import { requireStoredRepositoryBinding } from './githubBindingAccess';
-import { ensureMirrorRow } from './projectGithubMirrorRows';
+import { ensureMirrorRow, mirrorRow } from './projectGithubMirrorRows';
+import { wakeHeldMirror } from './projectGithubMirrorCadence';
 import { v } from 'convex/values';
 import {
   query,
@@ -153,6 +154,10 @@ async function writePolicy(
   // (one indexed read, only when this edit sets the mirror).
   if (command.githubMirror && policy.githubMirror?.autoPush)
     await retargetGithubMirror(ctx, project._id, policy.githubMirror.repo);
+  if (mirror?.autoPush && mirror.push === 'every-landing' && previous.githubMirror?.push !== mirror.push) {
+    const queue = await mirrorRow(ctx, project._id);
+    if (queue?.hold && !queue.hold.red) await wakeHeldMirror(ctx, queue, Date.now(), 'every');
+  }
   // Un-pause is atomic: a lost web reply cannot leave a retained job and catch-up asleep. An
   // un-pause that also changes the repository has just retargeted the queue (no mapping), so
   // the same call queues current main for the new repository.

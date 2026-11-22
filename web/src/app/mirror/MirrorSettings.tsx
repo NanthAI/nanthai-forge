@@ -6,6 +6,7 @@ import type { FunctionReturnType } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import type { AutonomyPolicy } from '../../../../src/autonomy-policy';
+import { mirrorPushMode, mirrorStatusesPermission } from '../../../../src/hosted-github-mirror-status';
 import { Key, Region, Row, Sheet } from '../../ds';
 import { hostedError, hostedErrorCode } from '../../snapshot';
 
@@ -30,7 +31,11 @@ export function MirrorSettings({ mirror, projectId }: { mirror: Mirror; projectI
       setBusy(false);
     }
   };
-  const policy = (change: { autoPush?: boolean; inbound?: boolean }) =>
+  const policy = (change: {
+    autoPush?: boolean;
+    inbound?: boolean;
+    push?: NonNullable<AutonomyPolicy['githubMirror']>['push'];
+  }) =>
     run(async () => {
       const key = JSON.stringify(change);
       let command = writes.current.get(key);
@@ -78,14 +83,31 @@ export function MirrorSettings({ mirror, projectId }: { mirror: Mirror; projectI
   return (
     <Region title="Settings" hint={mirror.owner ? 'owner only' : 'only the owner changes these'}>
       <Row cols="minmax(0, 1fr) auto">
-        <span>
-          Push each landing to GitHub
-          <span className="sub">
-            One commit to main, never a force push. Lanes and other branches are never written.
-          </span>
-        </span>
-        <span className="t2">{mirror.state === 'off' ? 'off' : paused ? 'paused' : 'on'}</span>
+        <label htmlFor="mr-cadence" title={mirror.push?.reason}>
+          Push cadence
+        </label>
+        <select
+          id="mr-cadence"
+          className="mr-cadence"
+          title={mirror.push?.reason}
+          value={mirror.push?.value ?? 'automatic'}
+          disabled={!mirror.repository || !mirror.owner || busy}
+          onChange={event => void policy({ push: mirrorPushMode.parse(event.target.value) })}
+        >
+          <option value="automatic">Automatic</option>
+          <option value="every-landing">Every landing</option>
+          <option value="batch-quick-landings">Batch quick landings</option>
+        </select>
       </Row>
+      {mirror.verifyError && (
+        <Row cols="minmax(0, 1fr)">
+          <span>
+            {mirror.verifyError === 'GITHUB_APP_PERMISSIONS'
+              ? `forge/verify needs ${mirrorStatusesPermission}`
+              : `forge/verify could not post (${mirror.verifyError}).`}
+          </span>
+        </Row>
+      )}
       <Row cols="minmax(0, 1fr) auto">
         <label htmlFor="mr-inbound">
           Take GitHub pushes back in

@@ -28,6 +28,71 @@ async function drain(f, initial) {
   }
   return plan;
 }
+test('a burst keeps every State commit and a lost final reply replays one ref move', async () => {
+  const f = mirrorFixture({ between: { 'hello.txt': 'middle' } });
+  const prepared = await prepareMirror(
+    {
+      ...f.seed,
+      state: f.seed.previous,
+      previous: f.root.state,
+      main: { publish: false },
+    },
+    f.io,
+  );
+  const staged = await drain(f, prepared);
+  assert.equal(f.remote(), f.root.commit);
+  assert.equal(staged.entry.parent, f.root.commit);
+  const final = await prepareMirror(
+    {
+      ...f.seed,
+      binding: staged.entry,
+      main: { publish: true, expectedRef: f.root.commit },
+    },
+    f.io,
+  );
+  f.lose('refs/heads/main');
+  await assert.rejects(stepMirror(structuredClone(final), f.io), /synthetic lost reply/);
+  const replay = await drain(f, final);
+  assert.equal(replay.entry.parent, staged.entry.commit);
+  assert.equal(replay.entry.commit, f.remote());
+  assert.equal(replay.refAlreadyPublished, true);
+  assert.equal(f.commits.size, 3);
+  assert.equal(f.calls.filter(call => call.method === 'PATCH').length, 1);
+});
+
+test('after inbound reconciliation the mirror tip preserves both the staged State and GitHub history', async () => {
+  const f = mirrorFixture({ between: { 'hello.txt': 'middle' } });
+  const staged = await drain(
+    f,
+    await prepareMirror(
+      {
+        ...f.seed,
+        state: f.seed.previous,
+        previous: f.root.state,
+        main: { publish: false },
+      },
+      f.io,
+    ),
+  );
+  const inbound = { ...f.root, parent: f.root.commit, message: 'Inbound change' };
+  inbound.commit = githubCommit(inbound);
+  f.commits.set(inbound.commit, inbound);
+  f.move(inbound.commit);
+  const tip = await drain(
+    f,
+    await prepareMirror(
+      {
+        ...f.seed,
+        binding: staged.entry,
+        main: { publish: true, expectedRef: inbound.commit, mergeParent: inbound.commit },
+      },
+      f.io,
+    ),
+  );
+  assert.deepEqual(f.commits.get(tip.entry.commit).parents, [staged.entry.commit, inbound.commit]);
+  assert.equal(f.remote(), tip.entry.commit);
+  assert.equal(tip.entry.tree, f.expected());
+});
 test('small diff creates only changed blobs, base tree, outcome commit and fast-forward ref', async () => {
   const f = mirrorFixture({
     before: { same: 'same', delete: 'gone', edit: 'old' },

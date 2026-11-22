@@ -9,6 +9,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { scheduleMirror } from './projectGithubMirrorRows';
+import { suspendHeldMirror } from './projectGithubMirrorCadence';
 import { parseInbound, twoWay } from './projectGithubInboundQueue';
 import { accountFor } from './urlIdentity';
 import { hasWriteRole } from './projectRole';
@@ -239,7 +240,7 @@ export const receive = internalMutation({
           pull: { number: input.number, head: input.head, fork: input.fork },
         } satisfies InboundJob),
       });
-      if (!queue.activeId) {
+      if (!queue.activeId || (await suspendHeldMirror(ctx, queue))) {
         await ctx.db.patch(queue._id, { activeId: id });
         await scheduleMirror(ctx, { _id: id, step: 0 });
       }

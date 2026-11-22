@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedAcceptancePublish.ts": "16a73599adf5b9ca7235a35dcc89b9247407027edba6ca997b203b06d11184dc",
+    "convex/projectHostedCheckClock.ts": "df8702c482c4cc28640cb8a4accdc4a3b301638715bd27acd19ea51a2973cc52",
+    "convex/projectHostedCheckDefinitions.ts": "cba66df3e6779bff42ef50104d197de06ccb23635543f646ef38308bc0e66a71",
+    "convex/projectHostedCheckStore.ts": "be1cf1231eff28261fe1a4c302940d26393edc83ca5f3f89c35ca8431e72668f",
+    "convex/projectHostedLandingBatchPublish.ts": "065ccc73869dc3bf371ce94b0d691704454188ece89390d5f86175a307d7744a"
+  },
+  "replay": {
+    "incident": "9064e885",
+    "test": "incident 9064e885: passed independent followers publish within one check of their pass",
+    "receipt": "e59d66db-6b9a-45df-b8c0-338080d27306"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "162b24e35fe4966d553fd0add762f99f02be02ea469f4a8000040f9d40119db5",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "/root/mirror_review",
+    "receipt": "6e2d5186-eb3c-4183-965b-1c716392b1f7"
+  }
+}

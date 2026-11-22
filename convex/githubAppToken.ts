@@ -289,7 +289,10 @@ export async function installationTokenMinter(
       });
     return token;
   };
-  return Object.assign(mint, { canReadPulls: () => pullRead });
+  return Object.assign(mint, {
+    canReadPulls: () => pullRead,
+    canWriteStatuses: installation.permissions?.statuses === 'write',
+  });
 }
 /** Metadata-read token for one named repository, used only inside the runner-grant proof
  * (`githubRunnerGrants.ts`) to read its numeric id and a user's role; never returned. */

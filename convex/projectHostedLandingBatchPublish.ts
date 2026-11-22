@@ -35,7 +35,7 @@ import { cohortRecheckBasis } from './projectHostedScopedRecheck';
 import { scopedRecheckPairs } from '../src/scoped-recheck-policy';
 import { scheduleAcceptanceCompletion } from './projectHostedAcceptanceCompletion';
 import { landingPublisher } from './projectIntentLandingNotes';
-import { noteMainLanding } from './projectHostedMainAuditState';
+import { coverageLanding, noteMainLanding } from './projectHostedMainAuditState';
 import { writeLineMain } from './projectLiveLineStore';
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
 import { hostedMainV2Schema } from '../src/hosted-main';
@@ -540,7 +540,8 @@ export async function publishLandingBatch(
     paths: candidate.governance?.paths ?? null,
     firstSequence: receipts[0]!.snapshot.revision,
   });
-  await enqueueGithubMirror(ctx, project, last);
+  const paths = candidate.governance?.paths ?? null;
+  await enqueueGithubMirror(ctx, project, last, { run, paths, coverage: coverageLanding(run, paths) });
   await alertSecretAllowAdded(ctx, project, last);
   const newlyPublished = members.filter(member => member.state.request.closes !== false).length;
   if (newlyPublished) console.log(`FORGE_ACCEPTED_LANDINGS ${newlyPublished}`);

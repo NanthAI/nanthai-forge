@@ -9,6 +9,7 @@
   .mr-gap { display: flex; gap: var(--s-2); align-items: center; min-width: 0; }
   .mr-rule { flex: 1 1 var(--s-5); min-width: var(--s-3); border-top: var(--rule) dashed var(--line-strong); }
   [data-st="passed"] .mr-rule { border-top-style: solid; }
+  .mr-cadence { min-height: var(--ctl-h); padding: 0 var(--s-2); border: var(--rule) solid var(--key-edge); border-radius: var(--r); background: var(--surface-2); color: var(--text); }
   @media (max-width: 860px) {
     .mr-ends { grid-template-columns: minmax(0, 1fr); padding: var(--gut); }
     .mr-end:last-child { text-align: left; justify-items: start; }

@@ -9,6 +9,26 @@ export const githubMirrorTables = {
     // githubSyncCommitSchema payload, shared with the native Mac pusher.
     mapping: v.union(v.string(), v.null()),
     mirroredAt: v.optional(v.number()),
+    /** Last actual ref move by this publisher, independent of inbound mapping updates. */
+    pushedAt: v.optional(v.number()),
+    /** Unpublished commits already created for the active burst. */
+    staged: v.optional(v.string()),
+    stagedCount: v.optional(v.number()),
+    stagedRef: v.optional(v.string()),
+    batchThrough: v.optional(v.number()),
+    burstFirstAt: v.optional(v.number()),
+    /** A bounded wait belongs to the oldest unpublished State. */
+    hold: v.optional(v.object({ firstAt: v.number(), until: v.number(), red: v.boolean() })),
+    checkWalls: v.optional(
+      v.array(v.object({ runId: v.string(), at: v.number(), milliseconds: v.number() })),
+    ),
+    queuedPublishes: v.optional(v.number()),
+    pendingVerify: v.optional(v.number()),
+    burstJobId: v.optional(v.id('projectGithubMirrorJobs')),
+    newestPublish: v.optional(v.number()),
+    flushThrough: v.optional(v.number()),
+    revertThrough: v.optional(v.number()),
+    verifyError: v.optional(v.string()),
     /** Lowercased repository name, so a signed push webhook finds its mirror (two-way sync). */
     repositoryKey: v.optional(v.string()),
     /** The last inbound landing's outcome (convex/projectGithubInbound.ts inboundOutcomeSchema). */
@@ -25,6 +45,7 @@ export const githubMirrorTables = {
     sequence: v.number(),
     repository: v.string(),
     authorityEpoch: v.number(),
+    repositoryKey: v.optional(v.string()),
     status: v.union(
       v.literal('queued'),
       v.literal('running'),
@@ -33,9 +54,18 @@ export const githubMirrorTables = {
       v.literal('done'),
     ),
     state: v.string(),
+    acceptedAt: v.optional(v.number()),
+    exactCheck: v.optional(v.literal(true)),
+    burstJobId: v.optional(v.id('projectGithubMirrorJobs')),
+    burstPublished: v.optional(v.literal(true)),
+    verify: v.optional(v.union(v.literal('pending'), v.literal('success'), v.literal('failure'))),
+    verifyError: v.optional(v.string()),
+    verifySent: v.optional(v.union(v.literal('pending'), v.literal('success'), v.literal('failure'))),
+    verifyLink: v.optional(v.string()),
     /** Only lagging CI checks add a wake on completion; healthy mirrors do no extra reads. */
     ciWaiters: v.optional(v.literal(true)),
     seed: v.optional(v.string()),
+    blobOnly: v.optional(v.literal(true)),
     step: v.number(),
     cursor: v.union(v.string(), v.null()),
     scheduledId: v.optional(v.id('_scheduled_functions')),
@@ -66,5 +96,12 @@ export const githubMirrorTables = {
     .index('by_project_and_pull_tree', ['projectId', 'pullTree'])
     .index('by_project_and_wait', ['projectId', 'waitKey'])
     .index('by_project_and_receipt', ['projectId', 'receiptId'])
+    .index('by_project_and_repository_and_verify_and_sequence', [
+      'projectId',
+      'repositoryKey',
+      'verify',
+      'sequence',
+    ])
+    .index('by_project_and_repository_and_verify_error', ['projectId', 'repositoryKey', 'verifyError'])
     .index('by_project_and_status_and_sequence', ['projectId', 'status', 'sequence']),
 };

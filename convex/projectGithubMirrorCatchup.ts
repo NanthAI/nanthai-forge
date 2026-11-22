@@ -10,6 +10,36 @@ import { hostedMainV2Schema } from '../src/hosted-main';
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { githubSyncCommitSchema } from '../src/github-sync-types';
 import { invariant } from '../src/errors';
+import { hostedCheckRunSchema } from '../src/hosted-check';
+import { readHostedRecord } from './projectHostedRecords';
+import { coverageLanding } from './projectHostedMainAuditState';
+
+async function catchupEvidence(
+  ctx: MutationCtx,
+  project: Doc<'hostedProjects'>,
+  receipt: ReturnType<typeof hostedAcceptanceSchema.parse>,
+) {
+  if (!receipt.check || receipt.crossHeadProof) return;
+  const stored = await ctx.db
+    .query('projectHostedCheckRuns')
+    .withIndex('by_project_and_run', q => q.eq('projectId', project._id).eq('runId', receipt.check!.runId))
+    .unique();
+  const proof = stored ? hostedCheckRunSchema.safeParse(JSON.parse(stored.value)) : null;
+  if (
+    !proof?.success ||
+    proof.data.status !== 'passed' ||
+    proof.data.terminalDigest !== receipt.check.terminalDigest
+  )
+    return;
+  const candidate = await readHostedRecord(ctx, {
+    projectId: project._id,
+    actor: project.owner,
+    kind: 'candidate',
+    key: receipt.candidate.id,
+  });
+  const paths: string[] | null = candidate ? (JSON.parse(candidate.value).governance?.paths ?? null) : null;
+  return { run: proof.data, paths, coverage: coverageLanding(proof.data, paths) };
+}
 
 export async function resumeMirrorQueue(
   ctx: MutationCtx,
@@ -46,7 +76,8 @@ export async function resumeMirrorQueue(
         'SOURCE_AUTHORITY_CHANGED',
         'Retain the current main receipt and mirror authority.',
       );
-      const enqueued = await enqueueGithubMirror(ctx, project, receipt);
+      const evidence = await catchupEvidence(ctx, project, receipt);
+      const enqueued = await enqueueGithubMirror(ctx, project, receipt, evidence);
       if (enqueued?.scheduled) return { status: 'scheduled' as const, jobId: enqueued.jobId, step: 0 };
       // An inbound acceptance may settle its active job while enqueuing the publish.
       queue = await mirrorRow(ctx, project._id);

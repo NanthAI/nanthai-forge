@@ -26,7 +26,8 @@ export function mirrorFixture({
     trees = new Map(),
     githubBlobs = new Map(),
     /** Commit comments by commit sha (Item c63c2171's notice to a dropped commit's author). */
-    comments = new Map();
+    comments = new Map(),
+    statuses = new Map();
   const calls = [],
     windows = [],
     reads = [],
@@ -106,7 +107,17 @@ export function mirrorFixture({
     const commented = path.match(
       /^\/repos\/synthetic\/mirror\/commits\/([0-9a-f]{40})(\/comments)?(\?per_page=\d+)?$/,
     );
-    if (commented && commented[2]) {
+    const statusSha = path.match(/\/statuses\/([a-f0-9]{40})$/)?.[1];
+    const combinedSha = path.match(/\/commits\/([a-f0-9]{40})\/status$/)?.[1];
+    if (statusSha && method === 'POST') {
+      assert(commits.has(statusSha));
+      const history = statuses.get(statusSha) ?? [];
+      history.unshift({ target_url: null, ...body });
+      statuses.set(statusSha, history);
+      result = history[0];
+    } else if (combinedSha) {
+      result = { statuses: statuses.get(combinedSha) ?? [] };
+    } else if (commented && commented[2]) {
       const list = comments.get(commented[1]) ?? [];
       if (method === 'POST') list.push({ body: body.body, beforeMain: remote });
       comments.set(commented[1], list);
@@ -175,12 +186,22 @@ export function mirrorFixture({
       const entry = { ...body, parent: body.parents[0], seconds: Date.parse(body.committer.date) / 1000 };
       assert.equal(body.message.at(-1), '\n');
       entry.message = body.message.slice(0, -1);
-      const sha = githubCommit(entry);
+      const sha = githubCommit(entry, body.parents[1]);
       commits.set(sha, entry);
       result = { sha };
     } else if (route === 'refs/heads/main') {
       assert.equal(body.force, false);
-      assert.equal(commits.get(body.sha).parent, remote, 'fast forward only');
+      const pending = [body.sha];
+      const ancestors = new Set();
+      while (pending.length) {
+        const ancestor = pending.pop();
+        if (ancestors.has(ancestor)) continue;
+        ancestors.add(ancestor);
+        const entry = commits.get(ancestor);
+        if (entry?.parents) pending.push(...entry.parents);
+        else if (entry?.parent) pending.push(entry.parent);
+      }
+      assert(ancestors.has(remote), 'fast forward only');
       remote = body.sha;
       result = { object: { sha: remote } };
     } else assert.fail(`${method} ${path}`);
@@ -221,6 +242,7 @@ export function mirrorFixture({
     trees,
     githubBlobs,
     comments,
+    statuses,
     root,
     head,
     remote: () => remote,

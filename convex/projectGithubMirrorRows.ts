@@ -40,8 +40,9 @@ export async function scheduleMirror(
 export async function mirrorJob(
   ctx: MutationCtx | QueryCtx,
   input: { jobId: Id<'projectGithubMirrorJobs'>; step: number },
+  job: Doc<'projectGithubMirrorJobs'> | null = null,
 ) {
-  const job = await ctx.db.get(input.jobId);
+  job ??= await ctx.db.get(input.jobId);
   if (!job || job.step !== input.step || ['done', 'failed'].includes(job.status)) return null;
   const queue = await mirrorRow(ctx, job.projectId);
   if (queue?.activeId !== job._id) return null;

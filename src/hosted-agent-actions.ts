@@ -232,6 +232,7 @@ const currentSettings = z.object({
     .nullable(),
   configurationDigest: z.string().nullable(),
   mainAudit: z.unknown().optional(),
+  mirror: z.unknown().optional(),
 });
 /** Definitions are a handful of rows, paged 100 at a time. */
 async function hostedDefinitions(query: HostedQuery) {
@@ -317,6 +318,7 @@ export async function hostedCheckSettings(query: HostedQuery, capabilities: Host
     githubBindings: current.githubBindings ?? null,
     ...(current.runnerGrant ? { runnerGrant: current.runnerGrant } : {}),
     ...(current.mainAudit === undefined ? {} : { mainAudit: current.mainAudit }),
+    ...(current.mirror === undefined ? {} : { mirror: current.mirror }),
     checkCallbackConfigured: capabilities.checkCallbackConfigured,
     policy: {
       preset: policy.preset,

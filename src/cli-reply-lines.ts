@@ -188,6 +188,7 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
           .map(def => text(def.name))
           .join(', ') || 'not configured'
       }; runner ${result.runner ? 'configured' : 'not configured'}; ${result.agentLandsOnPass ? 'lands on a pass' : 'held for review'}.`,
+      text(row(row(result.mirror).push).reason),
       ...(Array.isArray(result.blockers)
         ? result.blockers
             .filter(value => typeof value === 'string')
@@ -202,6 +203,9 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
       const approver = handle(accepted.actor) || 'a person';
       const builder = model === 'model not declared' ? 'an agent (model not declared)' : model;
       const autoBuilder = builder || (landing.builderModel === null ? handle(accepted.actor) : '');
+      const mirror = row(landing.mirror);
+      const mirrorState = text(mirror.status);
+      const mirrorDetail = mirrorState === 'held' ? ` (${count(row(mirror.held).count)} waiting)` : '';
       const attribution =
         accepted.kind === 'person'
           ? builder
@@ -210,7 +214,7 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
           : accepted.kind === 'auto'
             ? `${autoBuilder ? `built by ${autoBuilder}, ` : ''}accepted automatically`
             : 'acceptance unknown';
-      return `Landed: ${text(landing.title) || `Lane ${short(landing.laneId) || 'unknown'} (title unavailable)`} · ${when(landing.committedAt)} · State ${short(landing.landedHead)} · ${attribution} · ${count(costs.runnerAccepted)} accepted runner-minutes, ${costs.runnerDiscardedPending === true ? 'pending' : count(costs.runnerDiscarded)} discarded runner-minutes.`;
+      return `Landed: ${text(landing.title) || `Lane ${short(landing.laneId) || 'unknown'} (title unavailable)`} · ${when(landing.committedAt)} · State ${short(landing.landedHead)} · ${attribution} · ${count(costs.runnerAccepted)} accepted runner-minutes, ${costs.runnerDiscardedPending === true ? 'pending' : count(costs.runnerDiscarded)} discarded runner-minutes${mirrorState ? ` · mirror ${mirrorState}${mirrorDetail}` : ''}.`;
     });
   if (action === 'lanes' || action === 'planning') {
     if (!result.item && !Array.isArray(result.page ?? result.items)) return [];

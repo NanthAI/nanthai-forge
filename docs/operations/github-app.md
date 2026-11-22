@@ -31,7 +31,7 @@ These are manual steps for the GitHub App owner and deployment operator:
    `installation_repositories` when qualifying the setup.
 5. Install the App on the selected repositories and approve its permissions:
    Metadata read, Contents and Workflows write for mirroring, Actions write for
-   check dispatch, and for two-way sync Commit statuses write (post `forge/verify`)
+   check dispatch, and Commit statuses write (post `forge/verify` on mirrored main and pull request heads)
    and Pull requests read (receive the `pull_request` event). The App never needs
    Administration: Forge does not write rulesets (see [protection](#two-way-protection-the-ruleset-you-import-once)).
    The connecting GitHub user must have repository admin or maintain permission,
@@ -251,6 +251,7 @@ this repository, so the table shows what Forge asks of each token.
 | Two-way read | `contents: read` and installed `pull_requests: read`, one repository | A GitHub `push` webhook to `main` on a two-way project | `inboundReadPermissions`; `projectGithubInboundRun.ts` |
 | Two-way PR check | `contents: read`, `statuses: write`, one repository | A `pull_request` webhook (opened, synchronize, reopened) into `main` on a two-way project: reads the head, posts `forge/verify` pending | `pullCheckPermissions`; `projectGithubInboundRun.ts` |
 | PR check result | `statuses: write`, one repository | The PR head's check-only run ends, fails to start, or is superseded | `pullStatusPermissions`; `projectGithubPullStatus.ts` |
+| Mirrored main verification | `statuses: write` on the same mirror token, or a status-only audit update token | A Forge push moves GitHub main, or an audit covers a previously pending push | `projectGithubMirror.ts`; `projectGithubMirrorVerify.ts` |
 | Protection read | `metadata: read`, one repository | `nforge github connect` and `nforge github status` on a two-way project | `githubProtection.ts` |
 
 The mirror is the only operation that writes source to GitHub. Check dispatch

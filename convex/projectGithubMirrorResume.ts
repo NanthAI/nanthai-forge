@@ -13,6 +13,7 @@ import { repostPullStatus } from './projectGithubPullStatusStore';
 import { requireOwnerPerson } from './ownerPerson';
 import { mirrorRow } from './projectGithubMirrorRows';
 import { yieldToInbound } from './projectGithubInboundQueue';
+import { repostMainStatus } from './projectGithubMirrorVerify';
 
 /** Retry-safe by state: a second call finds the job running (`already-running`) or nothing left.
  * Reads the queue row and at most its active job; schedules at most one mirror step and one
@@ -43,9 +44,10 @@ export const resume = mutation({
         'GITHUB_SYNC_DISABLED',
         'This project has no automatic GitHub mirror to resume.',
       );
-      const statusReposted = await repostPullStatus(ctx, project._id);
+      const repostedPull = await repostPullStatus(ctx, project._id);
       const retargeted = await retargetGithubMirror(ctx, project._id, policy.repo);
       const resumed = await resumeMirrorQueue(ctx, project);
+      const statusReposted = (await repostMainStatus(ctx, project._id)) || repostedPull;
       return { ...resumed, ...(retargeted ? { status: 'retargeted' as const } : {}), statusReposted };
     } catch (error) {
       return report(error);

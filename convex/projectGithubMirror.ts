@@ -10,6 +10,7 @@ import { installationTokenMinter, mirrorPermissionsFor } from './githubAppToken'
 import { githubRequest, GithubMirrorApiError, type GithubRequest } from '../src/hosted-github-api';
 import {
   prepareMirror,
+  mirrorWindow,
   stepMirror,
   missingObjectError,
   type MirrorPlan,
@@ -25,6 +26,7 @@ import { lfsBatch, uploadLfsObject } from '../src/github-lfs';
 import { runInbound } from './projectGithubInboundRun';
 import { unexpectedMirrorFailure } from '../src/hosted-github-retry';
 import { networkFailure } from '../src/network-fetch';
+import { writeMirrorVerification } from './projectGithubMirrorVerifyStatus';
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Same recipe-aware verified reader as the fixed source worker, with one
  * logical-file cache. Descriptors and storage grants are per 100-object window. */
@@ -123,8 +125,21 @@ export const step = internalAction({
       // GitHub call of an unverified bootstrap, which needs GitHub main to diff.
       const mint = await installationTokenMinter(ctx, loaded.projectId, loaded.repository);
       let client: Promise<GithubRequest> | undefined;
+      let statusGrant = !!loaded.verification && mint.canWriteStatuses;
+      const mintForStep = async () => {
+        const permissions = mirrorPermissionsFor(plan);
+        if (!statusGrant) return mint(permissions);
+        try {
+          return await mint({ ...permissions, statuses: 'write' });
+        } catch (error) {
+          // The installation can lose the status grant after discovery. Keep publishing source.
+          if (!(error instanceof GithubMirrorApiError) || ![403, 422].includes(error.status)) throw error;
+          statusGrant = false;
+          return mint(permissions);
+        }
+      };
       const connect = () =>
-        (client ??= mint(mirrorPermissionsFor(plan)).then(minted => {
+        (client ??= mintForStep().then(minted => {
           token = minted;
           return githubRequest(minted);
         }));
@@ -149,11 +164,39 @@ export const step = internalAction({
       invariant(plan, 'SOURCE_UNAVAILABLE', 'Mirror continuation is unavailable.');
       started = { phase: plan.phase, index: plan.index };
       plan = await stepMirror(plan, io);
+      const verification =
+        plan.entry?.commit !== (plan.seed.main?.expectedRef ?? plan.parent) ? loaded.verification : null;
+      let verifyError: string | undefined;
+      let verifyRetry = false;
+      if (plan.entry && verification) {
+        try {
+          verifyError = statusGrant
+            ? await writeMirrorVerification(
+                api,
+                loaded.repository,
+                plan.entry.commit,
+                verification.state,
+                verification.link,
+                started.phase === 'done' || !!plan.refAlreadyPublished,
+              )
+            : 'GITHUB_APP_PERMISSIONS';
+        } catch {
+          // The ref already moved. A status outage has its own replay and never blocks the source queue.
+          verifyError = 'GITHUB_STATUS_POST_FAILED';
+          verifyRetry = true;
+        }
+      }
       const cursor = plan.phase === 'done' ? null : await durable!.store(Buffer.from(JSON.stringify(plan)));
       await ctx.runMutation(mutation('projectGithubMirrorStore:commit'), {
         ...input,
         cursor,
         mapping: plan.entry ? JSON.stringify(plan.entry) : null,
+        ...(plan.entry && verification ? { verify: verification.state } : {}),
+        ...(verifyError ? { verifyError } : {}),
+        ...(verifyRetry ? { verifyRetry: true } : {}),
+        ...(plan.phase === 'blobs' && plan.pending.length - plan.index > mirrorWindow
+          ? { blobOnly: true }
+          : {}),
       });
     } catch (error) {
       // A failed request must not discard earlier verified blob replies in this

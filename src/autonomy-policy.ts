@@ -6,6 +6,7 @@ import { invariant } from './errors.js';
 import { SNAPSHOT_INTERVAL_MINUTES } from './lane-snapshot-interval.js';
 import { legacyCheckCredentialsRefSchema } from './legacy-check-credentials.js';
 import { trustConfigSchema } from './agent-trust-config.js';
+import { mirrorCadencePolicy } from './hosted-github-mirror-status.js';
 import {
   agentDefaultsSchema,
   effectiveAgentDefaults,
@@ -30,6 +31,7 @@ export const autonomyPolicySchema = z.object({
       laneRefs: z.literal(false),
       /** Two-way sync: a push to GitHub main comes back in as a Forge landing (needs autoPush). */
       inbound: z.boolean().optional(),
+      ...mirrorCadencePolicy.shape,
     })
     .refine(value => !value.inbound || value.autoPush, 'Two-way sync needs autoPush.')
     .optional(),
@@ -328,13 +330,24 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     lifecycle: { ...base.lifecycle, ...command.lifecycle },
     notify: { ...base.notify, ...command.notify },
   });
+  if (policy.githubMirror) {
+    const old = previous.githubMirror;
+    if (old?.repo.toLowerCase() === policy.githubMirror.repo.toLowerCase()) {
+      if (old.push !== undefined) policy.githubMirror.push ??= old.push;
+      if (old.pushNowPaths !== undefined) policy.githubMirror.pushNowPaths ??= old.pushNowPaths;
+    }
+  }
   // Cleaning is part of autonomous behavior, never supervised acceptance.
   invariant(
     !policy.lifecycle.cleanRegenerableCopies || policy.acceptance.mode === 'auto-on-pass',
     'BAD_ARGUMENT',
     'Regenerable-copy cleanup requires auto-on-pass acceptance.',
   );
-  for (const glob of [...policy.acceptance.protectedPaths, ...(policy.acceptance.ownerApprovalPaths ?? [])])
+  for (const glob of [
+    ...policy.acceptance.protectedPaths,
+    ...(policy.acceptance.ownerApprovalPaths ?? []),
+    ...(policy.githubMirror?.pushNowPaths ?? []),
+  ])
     globPattern(glob);
   return policy;
 }

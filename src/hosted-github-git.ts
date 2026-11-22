@@ -44,12 +44,12 @@ export function gitTree(files: { path: string; mode: NativeFile['mode']; sha: st
   return hash(root);
 }
 /** Matches writeSyncCommit: UTC dates and a single terminating message newline. */
-export function githubCommit(entry: Omit<GithubSyncCommit, 'commit'>) {
+export function githubCommit(entry: Omit<GithubSyncCommit, 'commit'>, mergeParent?: string) {
   const person = (p: typeof entry.author) => `${p.name} <${p.email}> ${entry.seconds} +0000`;
   return gitHash(
     'commit',
     Buffer.from(
-      `tree ${entry.tree}\nparent ${entry.parent}\nauthor ${person(entry.author)}\ncommitter ${person(entry.committer)}\n\n${entry.message}\n`,
+      `tree ${entry.tree}\nparent ${entry.parent}\n${mergeParent ? `parent ${mergeParent}\n` : ''}author ${person(entry.author)}\ncommitter ${person(entry.committer)}\n\n${entry.message}\n`,
     ),
   );
 }

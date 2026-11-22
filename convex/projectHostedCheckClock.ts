@@ -38,3 +38,15 @@ export function observeCheckEnd(run: HostedCheckRun, end: unknown) {
   )
     hostedCheckClock(run, { ...clock, endedAt });
 }
+
+/** Completed full checks only. Provider timestamps take precedence over callback arrival. */
+export function fullCheckWall(run: HostedCheckRun) {
+  if (run.status !== 'passed' && run.status !== 'failed') return;
+  const gate = run.gate?.effective ?? run.gate?.mode;
+  if (gate !== undefined && gate !== 'full' && gate !== 'audit') return;
+  const clock = hostedCheckClock(run);
+  const startedAt = clock?.startedAt ?? NaN;
+  const endedAt = clock?.endedAt ?? Date.parse(run.endedAt ?? '');
+  if (Number.isFinite(startedAt) && Number.isFinite(endedAt) && endedAt > startedAt)
+    return endedAt - startedAt;
+}

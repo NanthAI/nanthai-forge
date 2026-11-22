@@ -8,7 +8,13 @@ import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 import { trackHostedOverlapMain } from './projectHostedOverlapStore';
 import { hostedAcceptGate, holdMainRed, skippedContractTests } from './projectHostedGate';
 import { protectedGatePaths, protectedPathMatches, reducedEvidenceActor } from '../src/contract-gate-policy';
-import { noteMainLanding, mainGate, fastLanding, auditRow } from './projectHostedMainAuditState';
+import {
+  noteMainLanding,
+  mainGate,
+  fastLanding,
+  auditRow,
+  coverageLanding,
+} from './projectHostedMainAuditState';
 import { noteTrustLanding, trustGateReader } from './projectHostedTrust';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
@@ -529,7 +535,12 @@ export async function publishAcceptance(
     paths: candidate.governance?.paths ?? null,
     run,
   });
-  await enqueueGithubMirror(ctx, project, receipt);
+  await enqueueGithubMirror(ctx, project, receipt, {
+    run,
+    coverage: run ? coverageLanding(run, candidate.governance?.paths ?? null) : false,
+    revert: Boolean(state.request.revertOf),
+    paths: candidate.governance?.paths ?? null,
+  });
   await alertSecretAllowAdded(ctx, project, receipt);
   // The completion tick also retires landed work from overlap, so it runs even when keepOpen or policy skips completion.
   const precompose = { receiptIds: [receipt.id] };

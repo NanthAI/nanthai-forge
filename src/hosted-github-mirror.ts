@@ -48,6 +48,8 @@ export type MirrorSeed = {
   /** A Candidate branch (src/ci-status.ts) instead of main: always from a verified binding, created
    * once and never moved; the same commit already there is a replay. */
   branch?: string;
+  /** Hosted main creates one commit per accepted State. A burst moves the ref only at its tip. */
+  main?: { publish: boolean; expectedRef?: string; mergeParent?: string };
   /** Item c63c2171: this publish takes a failed inbound GitHub commit out of main. Before main moves,
    * one comment on that commit tells its author what happened and why (pinned with the seed). */
   notice?: { commit: string; text: string };
@@ -89,6 +91,7 @@ export type MirrorPlan = {
    * GitHub tree that an older mirror wrote without them, used if GitHub's tree is that one. */
   legacy?: { changes: MirrorPlan['changes']; pending: NativeFile[] };
   entry: GithubSyncCommit | null;
+  refAlreadyPublished?: true;
   /** `filter=lfs` rules of the baseline and target States, present only when
    * either has any: those paths publish LFS pointers, as Git's clean filter would. */
   lfs?: { baseline: LfsRule[]; target: LfsRule[] };
@@ -486,29 +489,38 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
       committer: seed.identity,
       seconds: Math.floor(Date.parse(seed.at) / 1000),
     };
-    const commit = tree === plan.baseTree ? plan.parent : githubCommit(entry);
+    const sameState = seed.binding?.state === seed.state;
+    const mergeParent = seed.main?.mergeParent;
+    const commit =
+      tree === plan.baseTree && (!seed.main || (sameState && !mergeParent))
+        ? plan.parent
+        : githubCommit(entry, mergeParent);
     const branch = seed.branch;
+    const publish = seed.main?.publish !== false;
+    const expectedRef = seed.main?.expectedRef ?? plan.parent;
     const current = branch
       ? await io.api<{ object: { sha: string } }>(`${prefix}/ref/heads/${branch}`).catch(error => {
           if (error instanceof GithubMirrorApiError && error.status === 404) return null;
           throw error;
         })
-      : await io.api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`);
+      : publish
+        ? await io.api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`)
+        : null;
     invariant(
       branch
         ? !current || current.object.sha === commit
-        : [plan.parent, commit].includes(current!.object.sha),
+        : !publish || [expectedRef, commit].includes(current!.object.sha),
       'GITHUB_SYNC_CHANGED',
       branch
         ? `GitHub branch ${branch} already holds another commit. Forge never moves a Candidate branch.`
         : 'GitHub main moved unexpectedly. Mirror stopped without changing its ref.',
     );
     if (current?.object.sha !== commit) {
-      if (seed.notice && !branch) await tellPusher(seed.repository, seed.notice, io);
+      if (seed.notice && !branch && publish) await tellPusher(seed.repository, seed.notice, io);
       const date = new Date(entry.seconds * 1000).toISOString();
       const created = await io.api<{ sha: string }>(`${prefix}/commits`, 'POST', {
         tree,
-        parents: [plan.parent],
+        parents: mergeParent ? [plan.parent, mergeParent] : [plan.parent],
         message: `${entry.message}\n`,
         author: { ...entry.author, date },
         committer: { ...entry.committer, date },
@@ -519,12 +531,12 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
         'GitHub commit differs from the deterministic mirror commit.',
       );
       if (branch) await io.api(`${prefix}/refs`, 'POST', { ref: `refs/heads/${branch}`, sha: commit });
-      else
+      else if (publish)
         await io.api(`${prefix}/refs/heads/main`, 'PATCH', {
           sha: commit,
           force: false,
         });
-    }
+    } else if (!branch && seed.main) plan.refAlreadyPublished = true;
     plan.entry = { ...entry, commit };
     plan.phase = 'done';
   }

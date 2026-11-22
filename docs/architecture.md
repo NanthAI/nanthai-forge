@@ -53,8 +53,12 @@ in 100-object/8 MiB windows. Source recipes reuse the fixed source worker's
 hash-verifying reader; the cache holds one logical file at a time. Compact
 continuations live in storage, not growing Convex documents. Git Data tree
 creation uses the last mapped `base_tree`; commit dates and bytes are pinned to
-the acceptance so replay retains its SHA. Ref publication observes expected
-main and updates with `force:false`. Errors remain on the original job for
+the acceptance so replay retains its SHA. A scheduled burst keeps the newest
+unpublished mapping beside the last published mapping and creates a commit for
+each State in queue order. Only the final job observes and moves the ref, using
+the last published commit as its expectation and `force:false`. The pushed head
+gets `forge/verify` in the same worker step. Terminal main audits update pending
+statuses in bounded pages. Errors remain on the original job for
 explicit same-step recovery, with zero idle scheduling. GitHub App installation
 tokens are transient and scoped to the selected repository. See [mirror operation](workflows.md#automatic-main-mirror).
 

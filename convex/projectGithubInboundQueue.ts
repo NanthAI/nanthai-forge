@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { internalMutation, type MutationCtx, type QueryCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { mirrorRow, scheduleMirror } from './projectGithubMirrorRows';
+import { startMirrorPublish, suspendHeldMirror } from './projectGithubMirrorCadence';
 import { effectivePolicy } from '../src/autonomy-policy';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import { githubSyncCommitSchema, type GithubSyncCommit } from '../src/github-sync-types';
@@ -37,11 +38,16 @@ export async function finish(
     ...(mapping ? { mapping: canonicalPayload(mapping) } : {}),
   });
   const [next] = await queuedJobs(ctx, job.projectId, 1);
-  await ctx.db.patch(queue._id, {
+  const patch = {
     ...(mapping ? { mapping: canonicalPayload(mapping), mirroredAt: Date.now() } : {}),
     activeId: next?._id ?? null,
-  });
-  if (next) await scheduleMirror(ctx, next);
+  };
+  await ctx.db.patch(queue._id, patch);
+  if (next) {
+    const project = !next.inbound ? await ctx.db.get(job.projectId) : null;
+    if (!project || next.inbound) await scheduleMirror(ctx, next);
+    else await startMirrorPublish(ctx, project, { ...queue, ...patch }, next);
+  }
 }
 /** The inbound landing's settled phase, or null while it is still pending. */
 export async function inboundLanding(
@@ -107,14 +113,18 @@ export async function settleInbound(
     message: inbound.message ?? '',
     seconds: Math.floor(Date.now() / 1000),
   };
-  if (landed) {
-    for (const old of await queuedJobs(ctx, job.projectId, 100))
-      if (!old.inbound && old.sequence < receipt.snapshot.revision)
+  let folded = 0;
+  if (landed && !queue.staged && !queue.hold) {
+    for (const old of await queuedJobs(ctx, job.projectId, 100)) {
+      if (!old.inbound && old.sequence < receipt.snapshot.revision) {
         await ctx.db.patch(old._id, {
           status: 'done',
           step: old.step + 1,
           detail: `Published within State ${receipt.candidate.head.slice(0, 8)} after GitHub ${inbound.commit!.slice(0, 12)} landed.`,
         });
+        folded++;
+      }
+    }
   }
   const lane = inbound.laneId!.slice(0, 8);
   // Item c63c2171: the owner chose to keep this GitHub commit. If it fails to land, Forge never takes it out of
@@ -153,6 +163,8 @@ export async function settleInbound(
     },
   );
   await ctx.db.patch(queue._id, {
+    ...(landed && queue.staged ? { batchThrough: receipt.snapshot.revision } : {}),
+    ...(folded ? { queuedPublishes: Math.max(0, (queue.queuedPublishes ?? 0) - folded) } : {}),
     inbound: canonicalPayload({
       commit: inbound.commit,
       laneId: inbound.laneId,
@@ -218,7 +230,7 @@ export async function ensureInbound(
       ...(requested ? { requested: true } : {}),
     } satisfies InboundJob),
   });
-  if (!queue.activeId) {
+  if (!queue.activeId || (await suspendHeldMirror(ctx, queue))) {
     await ctx.db.patch(queue._id, { activeId: id });
     await scheduleMirror(ctx, { _id: id, step: 0 });
   }
@@ -260,6 +272,7 @@ export async function yieldToInbound(
     status: 'queued',
     step: job.step + 1,
     cursor: null,
+    blobOnly: undefined,
     seed: undefined,
     failures: 0,
     error: undefined,
@@ -269,7 +282,12 @@ export async function yieldToInbound(
     apiOperation: undefined,
     requestBytes: undefined,
   });
-  await ctx.db.patch(queue._id, { activeId: null });
+  await ctx.db.patch(queue._id, {
+    activeId: null,
+    batchThrough: undefined,
+    burstFirstAt: undefined,
+    hold: undefined,
+  });
   const inbound = await ensureInbound(ctx, project, { ...queue, activeId: null }, requested);
   const step = (await ctx.db.get(inbound))!.step;
   if ((await mirrorRow(ctx, project._id))?.activeId !== inbound) {

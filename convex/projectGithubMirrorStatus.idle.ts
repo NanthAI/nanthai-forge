@@ -10,6 +10,8 @@ import { missingObjectDelays } from '../src/hosted-github-retry';
 import { inboundJobSchema } from '../src/github-inbound-job';
 import { strandedMirrorJobs } from './projectGithubMirrorRetarget';
 import { inboundLanding, inboundOutcomeSchema } from './projectGithubInboundQueue';
+import { mirrorCadenceRead } from './projectGithubMirrorCadence';
+import { mirrorCadence } from '../src/hosted-github-mirror-status';
 
 /** Called only after project authorization. Three selected rows, no history scan,
  * timer or additional client request; retry/job writes invalidate existing reads. */
@@ -25,6 +27,8 @@ export async function githubMirrorStatus(
     channelRow(ctx, project._id),
     queue?.activeId ? ctx.db.get(queue.activeId) : null,
   ]);
+  const checked = queue?.checkWalls;
+  const push = mirrorCadence(policy, checked?.map(wall => wall.milliseconds) ?? []);
   const mapping = queue?.mapping ? githubSyncCommitSchema.parse(JSON.parse(queue.mapping)) : null;
   // Two-way sync: one more indexed read only while an inbound landing holds the queue.
   const inbound = job?.inbound ? inboundJobSchema.parse(JSON.parse(job.inbound)) : null;
@@ -103,9 +107,48 @@ export async function githubMirrorStatus(
             : `Job for State ${job.state.slice(0, 8)}: ${job.detail}`
           : inboundDetail,
     jobId: hold?._id ?? job?._id ?? null,
+    push,
+    ...(queue?.hold && policy.autoPush
+      ? { held: { count: queue.queuedPublishes ?? 1, until: queue.hold.until, red: queue.hold.red } }
+      : {}),
+    ...(queue?.verifyError ? { verifyError: queue.verifyError } : {}),
     ...(stranded.length ? { failedJobs: stranded.length } : {}),
     // Item c63c2171: the owner's chosen GitHub commit failed to land; Forge leaves it on GitHub (no extra read).
     ...(inbound?.requested && settled?.phase === 'terminal-failed' ? { kept: true as const } : {}),
   };
   return { ...result, nextStep: hostedMirrorNextStep(result) };
+}
+
+/** Only an explicit receipt read selects its mirror job. Reading a landing window stays batched. */
+export async function mirrorReceipt(ctx: QueryCtx, project: Doc<'hostedProjects'>, receiptId: string) {
+  const policy = effectivePolicy(project).githubMirror;
+  if (!policy) return;
+  const job = await ctx.db
+    .query('projectGithubMirrorJobs')
+    .withIndex('by_project_and_receipt', q => q.eq('projectId', project._id).eq('receiptId', receiptId))
+    .order('desc')
+    .first();
+  if (!job) return;
+  const queue = await mirrorRow(ctx, project._id);
+  const push = await mirrorCadenceRead(ctx, project, queue);
+  const burst = job.burstJobId ? await ctx.db.get(job.burstJobId) : null;
+  const mapping = job.mapping ? githubSyncCommitSchema.parse(JSON.parse(job.mapping)) : null;
+  const pushed = !!mapping && (job.burstJobId === undefined || burst?.burstPublished === true);
+  const held =
+    !pushed &&
+    queue?.repository.toLowerCase() === job.repository.toLowerCase() &&
+    (queue.hold || (queue.batchThrough !== undefined && job.sequence <= queue.batchThrough))
+      ? { count: queue.queuedPublishes ?? 1, until: queue.hold?.until ?? null, red: queue.hold?.red ?? false }
+      : null;
+  return {
+    status: pushed ? 'pushed' : job.status === 'failed' ? 'failed' : held ? 'held' : job.status,
+    repository: job.repository,
+    commit: pushed ? mapping.commit : null,
+    refTip: pushed && job.burstJobId === undefined,
+    verification: job.verify ?? null,
+    verificationError: job.verifyError ?? null,
+    postedVerification: job.verifySent ?? null,
+    held,
+    push,
+  };
 }

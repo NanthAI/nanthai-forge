@@ -7,6 +7,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { effectivePolicy, policyPreset } from '../dist/autonomy-policy.js';
 import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
+import { auditReason } from '../dist/main-audit.js';
 import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 const queue = await import(moduleUrl('../convex/projectGithubMirrorQueue.ts'));
 const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
@@ -17,6 +18,10 @@ const owner = await import(moduleUrl('../convex/projectGithubMirrorResume.ts'));
 const verifyStore = await import(moduleUrl('../convex/projectGithubPullStatusStore.ts'));
 const verifyPost = await import(moduleUrl('../convex/projectGithubPullStatus.ts'));
 const { githubMirrorStatus } = await import(moduleUrl('../convex/projectGithubMirrorStatus.idle.ts'));
+const cadence = await import(moduleUrl('../convex/projectGithubMirrorCadence.ts'));
+const mirrorVerify = await import(moduleUrl('../convex/projectGithubMirrorVerify.ts'));
+const { writeMirrorVerification } = await import(moduleUrl('../convex/projectGithubMirrorVerifyStatus.ts'));
+const { observeCheckStart } = await import(moduleUrl('../convex/projectHostedCheckClock.ts'));
 
 /** Owner-proven repository bindings are a deployment setting; tests bind their own synthetic project. */
 const bindRepository = (t, projectId, repo) => {
@@ -31,6 +36,8 @@ const bindRepository = (t, projectId, repo) => {
 function fixture() {
   const f = lanesFixture(),
     scheduled = [],
+    tasks = new Map(),
+    delays = [],
     blobs = new Map();
   const projectId = f.insert('hostedProjects', {
     key: 'synthetic',
@@ -45,12 +52,17 @@ function fixture() {
     },
   });
   f.decorateContext(ctx => {
-    ctx.db.system = { get: ctx.db.get };
+    ctx.db.system = { get: id => tasks.get(id) ?? ctx.db.get(id) };
+    ctx.meta = { ...ctx.meta, getRequestMetadata: async () => ({ scheduledFunctionId: null }) };
     ctx.scheduler = {
-      runAfter: async (_delay, ref, args) => {
+      runAfter: async (delay, ref, args) => {
         scheduled.push({ name: getFunctionName(ref), args });
-        return `scheduled-${scheduled.length}`;
+        delays.push(delay);
+        const id = `scheduled-${scheduled.length}`;
+        tasks.set(id, { _id: id, state: { kind: 'pending' }, scheduledTime: Date.UTC(2026, 0, 2) + delay });
+        return id;
       },
+      cancel: async id => tasks.set(id, { _id: id, state: { kind: 'canceled' } }),
     };
   });
   const run = (name, fn, input) => f.transaction(name, { _handler: fn }, input);
@@ -60,10 +72,334 @@ function fixture() {
     snapshot: { revision: scheduled.length + 1 },
     candidate: { head: 'a'.repeat(64) },
   });
-  const enqueue = r =>
-    run('enqueueMirror', async ctx => queue.enqueueGithubMirror(ctx, await ctx.db.get(projectId), r));
-  return { ...f, run, projectId, scheduled, blobs, receipt, enqueue };
+  const enqueue = (r, evidence) =>
+    run('enqueueMirror', async ctx =>
+      queue.enqueueGithubMirror(ctx, await ctx.db.get(projectId), r, evidence),
+    );
+  return { ...f, run, projectId, scheduled, delays, tasks, blobs, receipt, enqueue };
 }
+
+function timedMirror(f, push, pushedAt, durations) {
+  const project = f.tables.hostedProjects.get(f.projectId);
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...project.autonomyPolicy,
+      githubMirror: { ...project.autonomyPolicy.githubMirror, push },
+    },
+  });
+  const row = f.insert('projectGithubMirrors', {
+    projectId: f.projectId,
+    repository: 'synthetic/mirror',
+    activeId: null,
+    mapping: JSON.stringify(mirrorFixture().root),
+    pushedAt,
+    checkWalls: durations.map((milliseconds, index) => ({
+      runId: `check-${index}`,
+      at: pushedAt - index,
+      milliseconds,
+    })),
+  });
+  return row;
+}
+
+function mirrorLanding(f, now, revision) {
+  return { ...f.receipt(), at: new Date(now).toISOString(), snapshot: { revision } };
+}
+
+test('a mirror retains its last 20 full-check wall times without counting a duplicate or scoped run', async t => {
+  const now = Date.UTC(2026, 0, 2);
+  t.mock.method(Date, 'now', () => now);
+  const f = fixture();
+  const mirror = timedMirror(
+    f,
+    'automatic',
+    now - 10_000,
+    Array.from({ length: 20 }, () => 60_000),
+  );
+  const terminal = {
+    id: 'latest-full',
+    projectId: f.projectId,
+    status: 'passed',
+    endedAt: new Date(now).toISOString(),
+  };
+  observeCheckStart(terminal, new Date(now - 150_000).toISOString());
+  await f.run('recordFullMirrorTiming', ctx => mirrorVerify.noteMirrorCheck(ctx, terminal));
+  await f.run('replayFullMirrorTiming', ctx => mirrorVerify.noteMirrorCheck(ctx, terminal));
+  const reduced = { ...terminal, id: 'latest-reduced', gate: { mode: 'scoped' } };
+  observeCheckStart(reduced, new Date(now - 20_000).toISOString());
+  await f.run('ignoreReducedMirrorTiming', ctx => mirrorVerify.noteMirrorCheck(ctx, reduced));
+  const walls = f.tables.projectGithubMirrors.get(mirror).checkWalls;
+  assert.equal(walls.length, 20);
+  assert.deepEqual(walls[0], { runId: 'latest-full', at: now, milliseconds: 150_000 });
+  assert.equal(walls[1].runId, 'check-0');
+  assert.equal(walls.at(-1).runId, 'check-18');
+});
+
+for (const [mode, durations, wait] of [
+  ['automatic', [], 0],
+  ['automatic', [180_000, 300_000], 230_000],
+  ['every-landing', [240_000], 0],
+  ['batch-quick-landings', [], 0],
+  ['batch-quick-landings', [30_000], 50_000],
+  ['automatic', [20 * 60_000], 590_000],
+]) {
+  test(`mirror cadence ${mode} with ${durations.length} full checks uses its configured burst window`, async t => {
+    const now = Date.UTC(2026, 0, 2);
+    t.mock.method(Date, 'now', () => now);
+    const f = fixture();
+    const mirror = timedMirror(f, mode, now - 10_000, durations);
+    await f.enqueue(mirrorLanding(f, now, 2));
+    assert.equal(f.delays[0], wait);
+    assert.equal(f.tables.projectGithubMirrors.get(mirror).hold?.until, wait ? now + wait : undefined);
+  });
+}
+
+test('a burst owns one wake from the last push and a revert flushes through its own sequence', async t => {
+  let now = Date.UTC(2026, 0, 2);
+  t.mock.method(Date, 'now', () => now);
+  const f = fixture();
+  const mirror = timedMirror(f, 'batch-quick-landings', now - 10_000, [60_000]);
+  const first = await f.enqueue(mirrorLanding(f, now, 2));
+  const held = f.tables.projectGithubMirrorJobs.get(first.jobId);
+  now += 10_000;
+  await f.enqueue(mirrorLanding(f, now, 3));
+  assert.deepEqual(f.delays, [50_000, 0], 'the earlier State can stage before the ref deadline');
+  assert.equal(f.tables.projectGithubMirrors.get(mirror).hold.until, now + 40_000);
+  assert.deepEqual(
+    await f.run('prepareEarlierState', ctx =>
+      cadence.beginMirrorBurst(
+        ctx,
+        f.tables.projectGithubMirrors.get(mirror),
+        f.tables.projectGithubMirrorJobs.get(first.jobId),
+        false,
+      ),
+    ),
+    { ready: true, through: 3 },
+  );
+  now += 10_000;
+  await f.enqueue(mirrorLanding(f, now, 4), { revert: true });
+  assert.equal(f.tasks.get(held.scheduledId).state.kind, 'canceled');
+  assert.deepEqual(f.delays, [50_000, 0, 0]);
+  assert.equal(await f.run('staleMirrorWake', store.begin._handler, f.scheduled[0].args), null);
+  const burst = await f.run('beginMirrorBurst', ctx =>
+    cadence.beginMirrorBurst(
+      ctx,
+      f.tables.projectGithubMirrors.get(mirror),
+      f.tables.projectGithubMirrorJobs.get(first.jobId),
+      true,
+    ),
+  );
+  assert.deepEqual(burst, { ready: true, through: 4 });
+});
+
+test('an Automatic mirror publishes a landing outside the window and flushes configured deploy paths', async t => {
+  let now = Date.UTC(2026, 0, 2);
+  t.mock.method(Date, 'now', () => now);
+  const f = fixture();
+  const mirror = timedMirror(f, 'automatic', now - 120_000, [60_000]);
+  const project = f.tables.hostedProjects.get(f.projectId);
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...project.autonomyPolicy,
+      githubMirror: { ...project.autonomyPolicy.githubMirror, pushNowPaths: ['deploy/**'] },
+    },
+  });
+  const first = await f.enqueue(mirrorLanding(f, now, 2), { paths: ['source/main.ts'] });
+  assert.equal(f.delays[0], 0);
+  const root = mirrorFixture().root;
+  const job = f.tables.projectGithubMirrorJobs.get(first.jobId);
+  await f.run('publishQuietLanding', store.commit._handler, {
+    jobId: first.jobId,
+    step: 0,
+    cursor: null,
+    mapping: JSON.stringify({ ...root, acceptanceId: job.receiptId, state: job.state }),
+  });
+  now += 10_000;
+  await f.enqueue(mirrorLanding(f, now, 3), { paths: ['source/main.ts'] });
+  assert.equal(f.delays[1], 50_000);
+  await f.enqueue(mirrorLanding(f, now, 4), { paths: ['deploy/worker.ts'] });
+  assert.equal(f.delays[2], 0);
+  assert.equal(f.tables.projectGithubMirrors.get(mirror).hold.until, now);
+});
+
+test('Every landing keeps separate ref moves when a previous push completes after queued landings', async t => {
+  let now = Date.UTC(2026, 0, 2);
+  t.mock.method(Date, 'now', () => now);
+  const f = fixture();
+  const mirror = timedMirror(f, 'every-landing', now - 120_000, [180_000]);
+  const first = await f.enqueue(mirrorLanding(f, now, 2));
+  const second = await f.enqueue(mirrorLanding(f, now + 1000, 3));
+  await f.enqueue(mirrorLanding(f, now + 2000, 4));
+  now += 3000;
+  const root = mirrorFixture().root;
+  const job = f.tables.projectGithubMirrorJobs.get(first.jobId);
+  await f.run('publishFirst', store.commit._handler, {
+    jobId: first.jobId,
+    step: 0,
+    cursor: null,
+    mapping: JSON.stringify({ ...root, acceptanceId: job.receiptId, state: job.state }),
+  });
+  assert.equal(f.tables.projectGithubMirrors.get(mirror).activeId, second.jobId);
+  assert.equal(f.tables.projectGithubMirrors.get(mirror).hold, undefined);
+  assert.deepEqual(f.delays, [0, 0]);
+});
+
+test('a replayed commit status keeps one pending post before audit success', async () => {
+  const f = mirrorFixture();
+  const sha = f.root.commit;
+  const link = `https://forge.example/example/repo/code/${f.root.acceptanceId}`;
+  await writeMirrorVerification(f.io.api, f.seed.repository, sha, 'pending', link, false);
+  await writeMirrorVerification(f.io.api, f.seed.repository, sha, 'pending', link, true);
+  await writeMirrorVerification(f.io.api, f.seed.repository, sha, 'success', link, false);
+  assert.deepEqual(
+    f.statuses.get(sha).map(({ state, target_url }) => [state, target_url]),
+    [
+      ['success', link],
+      ['pending', link],
+    ],
+  );
+});
+
+test('known red holds the outbound ref to its cap while an inbound head runs', async t => {
+  let now = Date.UTC(2026, 0, 2);
+  t.mock.method(Date, 'now', () => now);
+  const f = fixture();
+  const mirror = timedMirror(f, 'every-landing', now - 10_000, []);
+  f.insert('projectHostedMainAudits', {
+    projectId: f.projectId,
+    red: { head: 'a'.repeat(64), since: new Date(now).toISOString(), runId: 'audit-red' },
+  });
+  const first = await f.enqueue(mirrorLanding(f, now, 2));
+  const inboundQueue = await import(moduleUrl('../convex/projectGithubInboundQueue.ts'));
+  const inbound = await f.run('inboundDuringHold', async ctx =>
+    inboundQueue.ensureInbound(ctx, await ctx.db.get(f.projectId), await ctx.db.get(mirror)),
+  );
+  assert.deepEqual(f.delays, [900_000, 0]);
+  assert.equal(f.tables.projectGithubMirrors.get(mirror).activeId, inbound);
+  await f.run('finishInboundDuringHold', async ctx =>
+    inboundQueue.finish(ctx, await ctx.db.get(inbound), await ctx.db.get(mirror), null, 'done'),
+  );
+  assert.equal(f.tables.projectGithubMirrors.get(mirror).activeId, first.jobId);
+  assert.deepEqual(f.delays, [900_000, 0, 900_000], 'handoff preserves the original red deadline');
+  now += 900_000;
+  const burst = await f.run('beginMirrorBurst', ctx =>
+    cadence.beginMirrorBurst(
+      ctx,
+      f.tables.projectGithubMirrors.get(mirror),
+      f.tables.projectGithubMirrorJobs.get(first.jobId),
+      true,
+    ),
+  );
+  assert.deepEqual(burst, { ready: true, through: 2 });
+  assert.equal(f.tables.projectGithubMirrors.get(mirror).hold, undefined);
+});
+
+test('a failed audit closes only the audited pending head and a later clean audit covers earlier pushes', async () => {
+  const f = fixture();
+  const git = mirrorFixture();
+  timedMirror(f, 'every-landing', 180_000, []);
+  const fields = {
+    projectId: f.projectId,
+    repository: 'synthetic/mirror',
+    repositoryKey: 'synthetic/mirror',
+    authorityEpoch: 1,
+    status: 'done',
+    cursor: null,
+    step: 3,
+    state: git.root.state,
+  };
+  const older = f.insert('projectGithubMirrorJobs', {
+    ...fields,
+    receiptId: git.root.acceptanceId,
+    sequence: 2,
+    verify: 'pending',
+    mapping: JSON.stringify(git.root),
+    verifyLink: 'https://forge.example/example/repo/code/older',
+  });
+  const latest = f.insert('projectGithubMirrorJobs', {
+    ...fields,
+    receiptId: randomUUID(),
+    sequence: 3,
+    verify: 'pending',
+    mapping: JSON.stringify({ ...git.root, commit: '7'.repeat(40) }),
+    verifyLink: 'https://forge.example/example/repo/code/latest',
+  });
+  const audit = f.insert('projectHostedMainAudits', {
+    projectId: f.projectId,
+    red: { head: git.root.state, since: '2026-01-02T00:00:00.000Z', runId: 'audit-red' },
+  });
+  await f.run('auditRedMirror', ctx =>
+    mirrorVerify.noteMirrorCheck(ctx, {
+      id: 'audit-red',
+      projectId: f.projectId,
+      status: 'failed',
+      gate: { mode: 'audit', reason: auditReason({ sequence: 3, count: 2, attempt: 0, key: 'synthetic' }) },
+    }),
+  );
+  assert.equal(f.tables.projectGithubMirrorJobs.get(older).verify, 'pending');
+  assert.equal(f.tables.projectGithubMirrorJobs.get(latest).verify, 'failure');
+  assert.deepEqual(f.scheduled[0].args.ids, [latest]);
+  const selection = await f.run('selectStatus', mirrorVerify.select._handler, {
+    projectId: f.projectId,
+    repository: 'SYNTHETIC/Mirror',
+    ids: [latest],
+  });
+  assert.deepEqual(selection, [
+    {
+      jobId: latest,
+      sha: '7'.repeat(40),
+      state: 'failure',
+      link: 'https://forge.example/example/repo/code/latest',
+    },
+  ]);
+  f.patch('projectHostedMainAudits', audit, {
+    red: undefined,
+    lastGreen: { runId: 'audit-green', sequence: 4, head: git.head },
+  });
+  await f.run('auditGreenMirror', ctx =>
+    mirrorVerify.noteMirrorCheck(ctx, {
+      id: 'audit-green',
+      projectId: f.projectId,
+      status: 'passed',
+      gate: { mode: 'audit' },
+    }),
+  );
+  assert.equal(f.tables.projectGithubMirrorJobs.get(older).verify, 'success');
+  assert.equal(f.tables.projectGithubMirrorJobs.get(latest).verify, 'failure');
+  assert.deepEqual(
+    f.scheduled.map(row => row.args.ids),
+    [[latest], [older]],
+  );
+});
+
+test('coverage changes wait for an audit and a later exact full landing settles older pending heads', async () => {
+  const f = fixture();
+  const git = mirrorFixture();
+  const now = Date.UTC(2026, 0, 2);
+  const mirror = timedMirror(f, 'every-landing', now - 600_000, []);
+  const receipt = mirrorLanding(f, now, 2);
+  const run = { status: 'passed', request: { expectedHead: receipt.candidate.head }, gate: { mode: 'full' } };
+  const coverage = await f.enqueue(receipt, { run, coverage: true });
+  assert.equal(f.tables.projectGithubMirrorJobs.get(coverage.jobId).exactCheck, undefined);
+  f.patch('projectGithubMirrorJobs', coverage.jobId, {
+    status: 'done',
+    verify: 'pending',
+    verifySent: 'pending',
+    mapping: JSON.stringify(git.root),
+  });
+  f.patch('projectGithubMirrors', mirror, { pendingVerify: 1, activeId: null });
+  const full = mirrorLanding(f, now, 3);
+  f.insert('projectHostedMainAudits', {
+    projectId: f.projectId,
+    lastGreen: { head: full.candidate.head, sequence: 3, runId: 'full-run' },
+  });
+  const accepted = await f.enqueue(full, { run });
+  const prior = f.tables.projectGithubMirrorJobs.get(coverage.jobId);
+  assert.equal(prior.verify, 'success');
+  assert.equal(prior.verifySent, 'pending');
+  assert.equal(f.tables.projectGithubMirrorJobs.get(accepted.jobId).exactCheck, true);
+  assert.equal(f.tables.projectGithubMirrors.get(mirror).pendingVerify, 0);
+});
 test('idle schedules zero; acceptance wakes once; retries and queued landings serialize', async () => {
   const f = fixture();
   assert.equal(f.scheduled.length, 0);
@@ -312,7 +648,10 @@ for (const { files, gitlinks = false } of [
         candidate: { ...accepted.receipt.candidate, head: github.head },
       }),
     });
-    f.patch('projectGithubMirrorJobs', input.jobId, { state: github.head });
+    f.patch('projectGithubMirrorJobs', input.jobId, {
+      state: github.head,
+      ...(files === 2 ? { exactCheck: true } : {}),
+    });
     const queueRow = [...f.tables.projectGithubMirrors.values()][0];
     f.patch('projectGithubMirrors', queueRow._id, { mapping: JSON.stringify(github.root) });
     const storage = new Map();
@@ -348,10 +687,18 @@ for (const { files, gitlinks = false } of [
       if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return previousFetch(url, init);
       if (url.endsWith('/installation')) {
         authCalls.push(url);
-        return new Response(JSON.stringify({ id: 42 }));
+        return new Response(
+          JSON.stringify({
+            id: 42,
+            ...(files === 2 ? { permissions: { statuses: 'write' } } : {}),
+          }),
+        );
       }
       if (url.includes('/access_tokens')) {
-        assert.deepEqual(JSON.parse(init.body).permissions, { contents: 'write' });
+        assert.deepEqual(JSON.parse(init.body).permissions, {
+          contents: 'write',
+          ...(files === 2 ? { statuses: 'write' } : {}),
+        });
         authCalls.push(url);
         return new Response(JSON.stringify({ token: 'synthetic-token' }));
       }
@@ -434,7 +781,16 @@ for (const { files, gitlinks = false } of [
     const metrics = f.counts.filter(c => c.name.startsWith('mirrorMutation') || c.name === 'mirrorQuery');
     assert(metrics.every(c => c.documents <= 105 && c.writes <= 3));
     assert(!metrics.some(c => c.touched.includes('projectWorkRecords')));
-    assert.equal(github.calls.length, files ? (gitlinks ? 4 : files + 4) : 1);
+    assert.equal(github.calls.length, files ? (gitlinks ? 4 : files + 4 + Number(files === 2)) : 1);
+    if (files === 2) {
+      const [status] = github.statuses.get(github.remote());
+      assert.equal(status.context, 'forge/verify');
+      assert.equal(status.state, 'success');
+      assert.equal(job.verify, 'success');
+    } else if (files) {
+      assert.equal(f.tables.projectGithubMirrors.get(queueRow._id).verifyError, 'GITHUB_APP_PERMISSIONS');
+      assert.equal(github.statuses.size, 0);
+    }
     const completedCalls = calls.length;
     await action.step._handler(ctx, input);
     assert.equal(github.commits.size, files ? 2 : 1, 'replay creates no second commit');

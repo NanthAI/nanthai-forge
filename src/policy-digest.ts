@@ -111,6 +111,8 @@ export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
   'githubMirror.autoPush': 'gated',
   'githubMirror.laneRefs': 'gated',
   'githubMirror.inbound': 'gated',
+  'githubMirror.push': 'gated',
+  'githubMirror.pushNowPaths': 'gated',
   'autoExchange.enabled': 'gated',
   'autoExchange.debounceMs': 'gated',
   'autoExchange.maxPendingAgeMs': 'gated',

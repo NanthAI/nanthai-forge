@@ -460,6 +460,89 @@
                     "null"
                   ]
                 },
+                "push": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "string",
+                      "enum": [
+                        "automatic",
+                        "every-landing",
+                        "batch-quick-landings"
+                      ]
+                    },
+                    "medianFullCheckMs": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "samples": {
+                      "type": "number"
+                    },
+                    "windowMs": {
+                      "type": "number"
+                    },
+                    "boundsMs": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ],
+                      "items": false,
+                      "minItems": 2,
+                      "maxItems": 2
+                    },
+                    "maxHoldMs": {
+                      "type": "number"
+                    },
+                    "pushNowPaths": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "medianFullCheckMs",
+                    "samples",
+                    "windowMs",
+                    "boundsMs",
+                    "maxHoldMs",
+                    "pushNowPaths",
+                    "reason"
+                  ]
+                },
+                "held": {
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "number"
+                    },
+                    "until": {
+                      "type": "number"
+                    },
+                    "red": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "count",
+                    "until",
+                    "red"
+                  ]
+                },
+                "verifyError": {
+                  "type": "string"
+                },
                 "failedJobs": {
                   "type": "number"
                 },
