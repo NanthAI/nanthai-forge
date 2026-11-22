@@ -132,6 +132,7 @@ function resolveModelFields(command: PlanningPut, current?: Partial<PlanningItem
     type: keep(command.type, current?.type),
     parentId,
     owner: keep(command.owner, current?.owner),
+    waitingOn: keep(command.waitingOn, current?.waitingOn),
     relations: relations.length ? relations : undefined,
     hidden: hidden ? (true as const) : undefined,
     imported,

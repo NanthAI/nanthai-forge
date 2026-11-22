@@ -1003,6 +1003,7 @@ export class HostedAgentTransport {
           this.root,
           bareStatus(action, input),
           action === 'start' && typeof input.intentId === 'string',
+          action,
         );
         // The project's learned preflight guard set (13ea93bf) rides on this read for the commands
         // that preflight a checkout a start may not have reached on this machine; fresh copies skip it.

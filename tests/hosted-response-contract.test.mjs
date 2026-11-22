@@ -16,7 +16,7 @@ import {
 import { hostedLandingStateSchema } from '../dist/hosted-landing.js';
 import { hostedAgentCapabilitiesSchema } from '../dist/hosted-agent-contract.js';
 import { effectiveAgentDefaultsSchema } from '../dist/agent-parallel-defaults.js';
-import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
+import { hostedContractFeatures, planningWaitingFeature } from '../dist/hosted-contract-features.js';
 import { capabilityOptions } from '../dist/hosted-capabilities-early.js';
 import {
   checkResponseCompatibility,
@@ -73,6 +73,17 @@ test('finish negotiates its client hold in the existing discovery budget', async
   assert(!finish.features.includes('main-today'));
   const general = await candidateCapabilities();
   assert(!general.features.includes('landing-client-hold'));
+});
+
+test('only planning reads and puts negotiate waiting reasons within the existing discovery budget', async () => {
+  for (const action of ['planning', 'put-planning-item']) {
+    const { features } = capabilityOptions('synthetic-root', false, false, action);
+    const reply = await candidateCapabilities(features);
+    assert.ok(reply.features.includes(planningWaitingFeature));
+    assert.ok(!reply.features.includes('main-today'));
+  }
+  const general = await candidateCapabilities();
+  assert.ok(!general.features.includes(planningWaitingFeature));
 });
 
 test('incident replay: a strict CLI rejects an added agentDefaults field; the reply boundary drops it', async () => {

@@ -19,7 +19,7 @@ import {
 } from '../dist/hosted-agent-planning.js';
 import { hostedAgentCommandSchemas, hostedAgentActions } from '../dist/hosted-agent-contract.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
-import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
+import { hostedContractFeatures, planningWaitingFeature } from '../dist/hosted-contract-features.js';
 import { printedReceipt } from '../dist/receipt-slim.js';
 import { planningIssueArguments } from '../dist/planning-issue-arguments.js';
 import { z } from 'zod';
@@ -2833,6 +2833,168 @@ test('the CLI refuses planning model fields, with zero calls, on a server that d
   assert.deepEqual(p.calls, []);
   // Writes without model fields still go through on that server.
   assert.equal((await put(p, { kind: 'issue', title: 'Plain' })).result.version, 1);
+});
+
+test('waiting reasons compose with planning selectors and page without text search or reading unrelated Items', async t => {
+  const s = await setup(t);
+  const p = port(s, new Map(), [...hostedContractFeatures, planningWaitingFeature]);
+  const initiativeId = (await put(p, { kind: 'initiative', title: 'Release' })).result.itemId;
+  const waitingOn = { kind: 'evidence', reason: 'Read live volume on Monday' };
+  const make = (title, fields = {}, group = initiativeId) =>
+    put(p, { kind: 'issue', title: `Synthetic ${title}`, initiativeId: group, fields }).then(
+      reply => reply.result.itemId,
+    );
+  const legacy = await make('legacy');
+  const fields = { waitingOn, type: 'bug', owner: 'mara/amber-fox' };
+  const first = await make('first', fields);
+  const second = await make('second', fields);
+  await make('other type', { ...fields, type: 'task' });
+  await make('other wait', { ...fields, waitingOn: { kind: 'owner', reason: 'Choose scope' } });
+  await make('ungrouped', fields, null);
+  const filter = {
+    kind: 'issue',
+    status: 'open',
+    initiativeId,
+    waitingOn: 'evidence',
+    type: 'bug',
+    owner: 'mara',
+    relation: 'none',
+    reconcile: false,
+    limit: 1,
+  };
+  const meter = meterReads(s.ctx);
+  const readBoth = async () => {
+    const result = await list(p, filter);
+    assert.ok(result.nextCursor);
+    assert.deepEqual(
+      result.items.map(item => item.waitingOn),
+      [waitingOn],
+    );
+    const next = await list(p, { ...filter, cursor: result.nextCursor });
+    assert.deepEqual(
+      new Set([...result.items, ...next.items].map(item => item.id)),
+      new Set([first, second]),
+    );
+    return result.nextCursor;
+  };
+  let cursor;
+  p.calls.length = 0;
+  const before = await meter.cost(async () => {
+    cursor = await readBoth();
+  });
+  const pageCalls = [...p.calls];
+  assert.ok(pageCalls.length <= 8);
+  assert.ok(
+    pageCalls.every(name =>
+      [
+        'projectWorkIndex:workspace',
+        'projectWorkIndex:records',
+        'projectHostedPlanning:intentStates',
+      ].includes(name),
+    ),
+  );
+  await assert.rejects(list(p, { ...filter, waitingOn: 'owner', cursor }), code('WORK_STALE'));
+  await assert.rejects(list(p, { ...filter, waitingOn: undefined, cursor }), code('WORK_STALE'));
+  await assert.rejects(list(p, { ...filter, owner: 'someone-else', cursor }), code('WORK_STALE'));
+
+  const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  for (let i = 0; i < 1500; i++)
+    await s.ctx.db.insert('projectPlanningRecords', {
+      generationId,
+      projectId: s.projectId,
+      collection: 'planningSearch',
+      key: randomUUID(),
+      parent: '',
+      position: i + 100,
+      value: '{}',
+      planning: { text: 'Unrelated', kind: 'issue', status: 'closed', initiativeId: '', open: false },
+    });
+  p.calls.length = 0;
+  assert.deepEqual(await meter.cost(readBoth), before);
+  assert.deepEqual(p.calls, pageCalls);
+  t.diagnostic(JSON.stringify({ waitingPages: 2, calls: pageCalls.length, ...before }));
+  meter.restore();
+
+  const search = await list(p, { search: 'synthetic', waitingOn: 'evidence', status: 'open' });
+  assert.ok(search.items.some(item => item.id === first));
+  assert.ok(search.items.every(item => item.waitingOn.kind === 'evidence'));
+  const count = await list(p, { counts: true, kind: 'issue', initiativeId, waitingOn: 'evidence' });
+  assert.equal(count.counts.open, 3);
+  assert.equal(count.coverage, 'complete');
+  const clear = { itemId: first, expectedVersion: 1, fields: { waitingOn: null } };
+  await put(p, { itemId: first, expectedVersion: 1, title: 'Synthetic renamed' });
+  assert.deepEqual((await list(p, { id: first, reconcile: false })).item.waitingOn, waitingOn);
+  await assert.rejects(put(p, clear), code('ITEM_CHANGED'));
+  await put(p, { ...clear, expectedVersion: 2 });
+  const free = await list(p, { kind: 'issue', initiativeId, waitingOn: 'none', reconcile: false });
+  assert.deepEqual(new Set(free.items.map(item => item.id)), new Set([first, legacy]));
+  assert.ok(free.items.every(item => !Object.hasOwn(item, 'waitingOn')));
+
+  s.tables.projectWorkGenerations.get(generationId).planningSearchVersion = 1;
+  await assert.rejects(list(p, { ...filter, cursor }), code('WORK_STALE'));
+  const beforePreparation = await list(p, {
+    kind: 'issue',
+    initiativeId,
+    waitingOn: 'none',
+    reconcile: false,
+  });
+  assert.deepEqual(new Set(beforePreparation.items.map(item => item.id)), new Set([first, legacy]));
+  const recordedWait = await list(p, filter);
+  assert.deepEqual(
+    recordedWait.items.map(item => item.id),
+    [second],
+  );
+});
+
+test('forge_planning sets and clears wait reasons, and old servers refuse them without a planning call', async t => {
+  const s = await setup(t);
+  const { transport: agent } = transport(s, {
+    planning: true,
+    features: [...hostedContractFeatures, planningWaitingFeature],
+  });
+  const tools = new Map();
+  t.after(
+    registerHostedAgentWorkflow(
+      {
+        registerTool(name, _config, call) {
+          tools.set(name, call);
+        },
+      },
+      agent,
+    ),
+  );
+  const mcp = async command => {
+    const result = await tools.get('forge_planning')({ command });
+    assert.ok(!result.isError, JSON.stringify(result.content));
+    return JSON.parse(result.content[0].text).result;
+  };
+  const waitingOn = { kind: 'item', reason: 'The related Item owns the prototype' };
+  const { itemId } = await mcp({
+    action: 'put-planning-item',
+    kind: 'issue',
+    title: 'Prototype user',
+    fields: { waitingOn },
+  });
+  const { items } = await mcp({ action: 'planning', waitingOn: 'item', reconcile: false });
+  assert.deepEqual(
+    items.map(item => [item.id, item.waitingOn]),
+    [[itemId, waitingOn]],
+  );
+  await mcp({
+    action: 'put-planning-item',
+    planningItemId: itemId,
+    expectedVersion: 1,
+    fields: { waitingOn: null },
+  });
+  assert.equal((await mcp({ action: 'planning', waitingOn: 'none', reconcile: false })).items[0].id, itemId);
+
+  const older = port(s);
+  await assert.rejects(list(older, { waitingOn: 'none' }), code('HOSTED_ACTION_UNSUPPORTED'));
+  await assert.rejects(
+    put(older, { itemId, expectedVersion: 2, fields: { waitingOn } }),
+    code('HOSTED_ACTION_UNSUPPORTED'),
+  );
+  assert.deepEqual(older.calls, []);
 });
 
 test('3fa3187d: the stored counter and the CLI count the same Issues past 1,000, live, mid-backfill and after it', async t => {

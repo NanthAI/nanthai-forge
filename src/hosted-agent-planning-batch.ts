@@ -5,6 +5,7 @@
 // may omit itemId and gets one retained in the journal. One mutation, projectPlanningBatch:apply, runs them all.
 import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
+import { planningWaitingFeature } from './hosted-contract-features.js';
 import type { HostedAgentJournal } from './hosted-agent-journal.js';
 import type { PlanningPort } from './hosted-agent-planning.js';
 import {
@@ -83,6 +84,12 @@ async function batchWrites(
     );
     if (entry.kind === 'item') entry.kind = 'issue';
     const { fields, ...put } = putEntry.parse(entry);
+    invariant(
+      (fields?.waitingOn === undefined && put.waitingOn === undefined) ||
+        port.serverFeatures?.includes(planningWaitingFeature),
+      'HOSTED_ACTION_UNSUPPORTED',
+      'This server does not store planning wait reasons yet.',
+    );
     invariant(
       put.expectedVersion > 0 || (put.kind && put.title),
       'BAD_ARGUMENT',

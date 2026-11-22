@@ -21,6 +21,7 @@ import { parkInputSchema } from './hosted-records.js';
 import {
   planningCommentCommandSchema,
   planningModelPutKeys,
+  planningWaitingKinds,
   planningPutAgentFields,
   planningPutSchema,
   relationKinds,
@@ -601,6 +602,13 @@ export const hostedAgentCommandSchemas = {
         .union([z.enum([...planningStatuses, 'active', 'all']), z.array(z.enum(planningStatuses)).nonempty()])
         .optional(),
       initiativeId: planningRef.optional(),
+      waitingOn: z
+        .string()
+        .refine(
+          value => value === 'none' || planningWaitingKinds.some(kind => kind === value),
+          'waitingOn: owner, design, evidence, item or none.',
+        )
+        .optional(),
       /** Same filters as the web Plan views (src/planning-filter.ts); owner/relation "none" = without one. */
       type: z.string().trim().min(1).max(32).optional(),
       owner: z.string().trim().min(1).max(200).optional(),
@@ -636,9 +644,10 @@ export const hostedAgentCommandSchemas = {
             input.status === 'active' ||
             Array.isArray(input.status))
         ),
-      'Use counts with a list read (kind, one stored status and initiativeId filters only).',
+      'Use counts with a list read (kind, one stored status, initiativeId and waitingOn filters only).',
     )
     .refine(input => !(input.id && input.search), 'Use planningItemId or search, not both.')
+    .refine(input => !(input.id && input.waitingOn), 'Use waitingOn with a list or search read.')
     .refine(input => !(input.schedule && (input.id || input.search)), 'Use schedule with a list read.'),
   'put-planning-item': planningPutSchema
     .omit({ action: true, operationId: true, itemId: true, ...omitKeys(planningModelPutKeys) })

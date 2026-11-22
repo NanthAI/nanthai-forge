@@ -30,6 +30,13 @@ const rank = z.string().regex(rankPattern, 'order: a rank from rankBetween (1 to
 const label = z.string().trim().min(1).max(32);
 const owner = z.string().trim().min(1).max(200);
 const relations = z.array(z.object({ kind: z.enum(relationKinds), id })).max(20);
+export const planningWaitingKinds = ['owner', 'design', 'evidence', 'item'] as const;
+const waitingOn = z
+  .object({
+    kind: z.enum(planningWaitingKinds),
+    reason: z.string().trim().min(1).max(200),
+  })
+  .strict();
 /** Original backlog facts are attribution, never Forge acceptance evidence. Reader expansion precedes the importer. */
 const planningImportSchema = z.object({
   source: z.string().trim().min(1),
@@ -51,6 +58,7 @@ const modelFields = {
   parentId: id.optional(),
   /** Who has the Item before a Lane: a Forge handle or handle/agent slug. */
   owner: owner.optional(),
+  waitingOn: waitingOn.optional(),
   relations: relations.optional(),
   /** Hidden from public reads of a public plan (with its sub-items, or an Initiative's Items). Stored only when true. */
   hidden: z.literal(true).optional(),
@@ -65,6 +73,7 @@ const modelPutFields = {
   type: label.nullable().optional(),
   parentId: id.nullable().optional(),
   owner: owner.nullable().optional(),
+  waitingOn: waitingOn.nullable().optional(),
   relations: relations.optional(),
   hidden: z.boolean().optional(),
   imported: planningImportSchema.nullable().optional(),
@@ -95,6 +104,7 @@ export const planningModelPutKeys = [
   'type',
   'parentId',
   'owner',
+  'waitingOn',
   'relations',
   'hidden',
   'imported',

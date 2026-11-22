@@ -219,6 +219,7 @@ All are optional and absent on older records. A put that omits a field keeps it;
 | `type` | Type label |
 | `parentId` | Parent Item (Items only) |
 | `owner` | Who has the Item: a Forge handle or `handle/agent`. A start from an Item with no owner sets it to the starter's public identity; a set owner is kept |
+| `waitingOn` | `{kind, reason}` records a wait for an owner decision (`owner`), design or placement verdict (`design`), live evidence or a date (`evidence`), or another Item (`item`). Give a short reason of up to 200 characters. Use `null` to clear it |
 | `relations` | Up to 20 of `{kind, id}`, kind `depends-on`, `duplicate-of` or `related`; the other side is derived (`depends-on` shows as Blocks on its target) |
 | `hidden` | Hidden from public reads of the plan |
 
@@ -229,6 +230,8 @@ discussions (Item `9a3d6f5f`).
 
 A server advertises the `planning-model` contract feature once it stores these fields. The CLI refuses to send them
 to a server that does not, since that server would drop them.
+The wait field uses the `planning-waiting-on` feature and the same Item version check as other fields.
+It describes the wait and leaves status, dispatch and access to their existing rules.
 
 ## Batches
 
@@ -263,6 +266,19 @@ An indexed search with multiple statuses filters each bounded search page, so co
 even when that page has no matching Items. The web Plan screen keeps the same fields in its address, and a
 saved view is a personal shortcut to them. Open Plan's views in the sidebar or from the page title on a phone.
 The Plan toolbar saves and removes views kept in the current browser.
+
+CLI and MCP list and count reads accept `waitingOn` with a kind from the table above or `"none"`.
+Older Items without a wait and Items whose wait was cleared both match `"none"`. For example:
+
+```sh
+nforge agent ROOT put-planning-item '{"planningItemId":"ISSUE_ID","expectedVersion":3,"fields":{"waitingOn":{"kind":"evidence","reason":"Read live volume on Monday"}}}'
+nforge agent ROOT planning '{"kind":"issue","status":"active","waitingOn":"none","reconcile":false}'
+```
+
+Use the same command fields with MCP `forge_planning`. Continue with `nextCursor` and the same filters,
+including after an empty page. A waiting list uses bounded existing index pages without text search.
+Projects with an older projection use the existing bounded Item pages until the projection is prepared.
+An explicit `search` also accepts the filter and keeps the usual text-search cost.
 
 ## Progress
 

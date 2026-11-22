@@ -26,6 +26,18 @@ instructions win. Briefs specialize scope and review; they never bypass policy.
 Use [workflow](workflow.md) for commands and [parallel-work defaults](../parallel-work-defaults.md)
 for configurable product behavior.
 
+### Planning-round brief
+
+Page `planning {"kind":"issue","status":"active","waitingOn":"none","reconcile":false}`
+for the next round. Follow `nextCursor` with the same filters, even after an empty
+page. Read `owner`, `design`, `evidence` or `item` in `waitingOn` to revisit a
+specific kind of wait. Update the Item's `fields.waitingOn` with its current version
+when the wait changes and set it to `null` when the wait ends.
+
+Read the candidate Item, its owner, Lanes and the queue before briefing a builder.
+An Item without a recorded wait still needs the usual assignment and dependency checks.
+See the [lead playbook](lead.md#the-board-is-the-work-list) for the live reads.
+
 ### Standard builder block
 
 Every brief includes this block by reference, keeps AGENTS.md safety rules intact

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { PlanningItem } from './work-planning-types.js';
 // Pure: also runs in the Convex non-Node runtime and in the web app. No I/O, no imports.
 //
 // Backlog batches (Item 65b0e706, docs/planning.md "Batches"): one person or agent action that changes many Items
@@ -32,6 +33,7 @@ export type BatchFields = {
   type?: string | null;
   parentId?: string | null;
   owner?: string | null;
+  waitingOn?: PlanningItem['waitingOn'] | null;
   relations?: BatchRelation[];
   hidden?: boolean;
 };
@@ -55,6 +57,7 @@ export const undoableFields = [
   'type',
   'parentId',
   'owner',
+  'waitingOn',
   'relations',
   'hidden',
 ] as const;

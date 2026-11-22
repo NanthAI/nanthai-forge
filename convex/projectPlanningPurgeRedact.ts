@@ -664,7 +664,8 @@ async function searchRow(
   if (!row) return 0;
   const value = JSON.stringify(purgedIndexValue('planningSearch', JSON.parse(row.value), ''));
   const planning = row.planning && { ...row.planning, text: `${PURGED_ITEM_TITLE}\n` };
-  if (value === row.value && JSON.stringify(planning) === JSON.stringify(row.planning)) return 0;
-  if (write) await write.patch(row._id, { value, ...(planning ? { planning } : {}) });
+  if (row.parent === '' && value === row.value && JSON.stringify(planning) === JSON.stringify(row.planning))
+    return 0;
+  if (write) await write.patch(row._id, { value, parent: '', ...(planning ? { planning } : {}) });
   return 1;
 }

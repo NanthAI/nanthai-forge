@@ -20,6 +20,8 @@ export const feedCommitOrder = 'feed-commit-order';
 export const startLaneTitle = 'start-lane-title';
 /** Undo asks for its mutation in the slot reserved for bare status. */
 export const laneUndo = 'lane-undo';
+/** Planning asks for versioned wait reasons in the slot reserved for bare status. */
+export const planningWaitingFeature = 'planning-waiting-on';
 export const hostedContractFeatures = [
   /** Reader expansion precedes this writer: start/save/land accept declared source authorship. */
   'source-authorship-v1',
@@ -240,6 +242,7 @@ export const advertisedFeatures = (asked: readonly string[]) => [
   ...(asked.includes(feedCommitOrder) ? [feedCommitOrder] : []),
   ...(asked.includes(startLaneTitle) ? [startLaneTitle] : []),
   ...(asked.includes(laneUndo) ? [laneUndo] : []),
+  ...(asked.includes(planningWaitingFeature) ? [planningWaitingFeature] : []),
   ...hostedContractFeatures.filter(feature => asked.includes(feature)),
   ...(asked.includes('feed') ? ['feed'] : []),
 ];

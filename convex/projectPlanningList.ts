@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { planningRecordTable } from './projectWorkRecordTables';
-import { v } from 'convex/values';
+import { v, type Infer } from 'convex/values';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { PaginationOptions } from 'convex/server';
 import { record, recordPartition } from './projectWorkIndexStore';
 import { hostedRecordValue } from './hostedRecordValue';
 import { readsStore, storeItem } from './projectWorkStoreReads';
+import { planningWaitingKinds } from '../src/work-planning-types';
 
 export const planningFilter = v.object({
   kind: v.optional(v.union(v.literal('issue'), v.literal('initiative'))),
@@ -22,12 +23,13 @@ export const planningFilter = v.object({
     ),
   ),
   initiativeId: v.optional(v.string()),
+  waitingOn: v.optional(v.union(v.literal('none'), ...planningWaitingKinds.map(kind => v.literal(kind)))),
 });
-type Filter = { kind?: 'issue' | 'initiative'; status?: string; initiativeId?: string };
+type Filter = Infer<typeof planningFilter>;
 
 /** Search roots already carry all three filters, including on pre-deploy rows. Ordinary indexes
  * read only matching roots, without text-search billing, fragments, a backfill or extra writes. */
-async function matching(ctx: QueryCtx, generationId: Id<'projectWorkGenerations'>, filter: Filter) {
+async function matchingSelectors(ctx: QueryCtx, generationId: Id<'projectWorkGenerations'>, filter: Filter) {
   const rows = ctx.db.query(await planningRecordTable(ctx, generationId));
   if (filter.initiativeId !== undefined && filter.kind !== undefined && filter.status !== undefined)
     return rows.withIndex('by_planning_initiativeId_and_kind_and_status', q =>
@@ -82,6 +84,34 @@ async function matching(ctx: QueryCtx, generationId: Id<'projectWorkGenerations'
     );
   return rows.withIndex('by_generation_and_collection_and_position', q =>
     q.eq('generationId', generationId).eq('collection', 'planningSearch'),
+  );
+}
+
+async function matching(ctx: QueryCtx, generationId: Id<'projectWorkGenerations'>, filter: Filter) {
+  const { waitingOn, kind, status, initiativeId } = filter;
+  if (waitingOn === undefined) return matchingSelectors(ctx, generationId, filter);
+  // When no wait reason is the common case, use a supplied selector's index before testing absence.
+  if (waitingOn === 'none' && (kind || status || initiativeId !== undefined))
+    return (await matchingSelectors(ctx, generationId, filter)).filter(q => q.eq(q.field('parent'), ''));
+  const rows = ctx.db
+    .query(await planningRecordTable(ctx, generationId))
+    .withIndex('by_generation_and_collection_and_parent_and_position', q =>
+      q
+        .eq('generationId', generationId)
+        .eq('collection', 'planningSearch')
+        .eq('parent', waitingOn === 'none' ? '' : waitingOn),
+    );
+  if (!kind && !status && initiativeId === undefined) return rows;
+  // These predicates refine only the selected bucket, within the existing per-page rows and bytes limits.
+  const selectors = [
+    ['planning.kind', kind],
+    ['planning.status', status],
+    ['planning.initiativeId', initiativeId],
+  ] as const;
+  return rows.filter(q =>
+    q.and(
+      ...selectors.flatMap(([field, value]) => (value === undefined ? [] : [q.eq(q.field(field), value)])),
+    ),
   );
 }
 

@@ -78,7 +78,8 @@ test('the hosted tool list stays inside its context budget', async t => {
   // 463 -> 442: shorter forge_task description fits notVerified:a into the same tool list ceiling.
   // 442 -> 423 (e7812d8f): forge_task drops the repeated wait hint to fit the undo action.
   // 423 -> 387 (b54a14c0): shorter summaries pay for the hand-back and question fields.
-  assert.equal(descriptionBytes, 387, 'per-session MCP description bytes');
+  // 387 -> 354 (7327bdff): the planning description leaves the start example to help and pays for waitingOn.
+  assert.equal(descriptionBytes, 354, 'per-session MCP description bytes');
   assert(listBytes <= LIST_CHARS, 'tool list UTF-8 byte budget');
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);

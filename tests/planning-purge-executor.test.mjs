@@ -144,7 +144,14 @@ async function deletedItem(t, { records = false, intentBorn = true, large = fals
   const body = large
     ? `Body ${SECRET} words, see src/${SECRET}/file.ts\n${'Planned work in ordinary words. '.repeat(1100)}`
     : `Body ${SECRET} words`;
-  await s.send(s.item({ itemId, title: `Title ${SECRET}`, body }));
+  await s.send(
+    s.item({
+      itemId,
+      title: `Title ${SECRET}`,
+      body,
+      waitingOn: { kind: 'evidence', reason: `Wait for ${SECRET}` },
+    }),
+  );
   await s.send({
     ...s.item({ itemId, expectedVersion: 1, ...(large ? { body } : {}) }),
     title: `Retitled ${SECRET}`,
@@ -220,6 +227,12 @@ test('a purge redacts every store, checks completeness before purgedAt, and no t
   assert.equal(typeof done.purgedAt, 'number', 'marked done only after the completeness check');
   assert.ok(done.rows >= 7, 'intent, puts, comments, note and the Deleted put are listed');
   assert.deepEqual(secretRows(s), [], 'no table holds the purged words');
+  assert.ok(
+    [...s.tables.projectPlanningRecords.values()]
+      .filter(row => row.collection === 'planningSearch' && row.key === itemId)
+      .every(row => row.parent === ''),
+    'the purged Item no longer belongs to a wait category',
+  );
   // Nothing comes back: not on a rebuild, not in a full load, not in an export.
   const project = s.tables.hostedProjects.get(s.projectId);
   s.tables.projectWorkGenerations.get(project.work.generationId).format = 3;

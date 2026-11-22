@@ -18,6 +18,7 @@ import { makeFunctionReference } from 'convex/server';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { hostedActionError } from './hosted-action-error.js';
+import { planningWaitingFeature } from './hosted-contract-features.js';
 import { retryableCodes } from './exchange-retry.js';
 import { readIndexedWorkDetail } from './hosted-work-client.js';
 import { ForgeError, invariant, itemChanged } from './errors.js';
@@ -162,11 +163,16 @@ const compact = (item: PlanningItem, intent?: string) =>
     ...planningSummary(item),
     ...(intent ? { intent } : {}),
   });
-function decode(cursor: string | null, ws: Workspace): string | null {
+function decode(cursor: string | null, ws: Workspace, waitingIndexed?: boolean): string | null {
   if (cursor === null) return null;
-  return decodeBound(cursor, ws).cursor;
+  const bound = decodeBound(cursor, ws);
+  invariant(waitingIndexed === bound.waitingIndexed, 'WORK_STALE', stale);
+  return bound.cursor;
 }
-function decodeBound(cursor: string, ws?: Workspace): { generationId: string; cursor: string | null } {
+function decodeBound(
+  cursor: string,
+  ws?: Workspace,
+): { generationId: string; cursor: string | null; waitingIndexed?: boolean } {
   invariant(cursor.startsWith(cursorPrefix), 'BAD_ARGUMENT', 'Use the returned planning cursor.');
   try {
     const bound = JSON.parse(Buffer.from(cursor.slice(cursorPrefix.length), 'base64url').toString());
@@ -182,8 +188,11 @@ function decodeBound(cursor: string, ws?: Workspace): { generationId: string; cu
     throw new ForgeError('BAD_ARGUMENT', 'Use the returned planning cursor.');
   }
 }
-const encode = (ws: Workspace, cursor: string) =>
-  cursorPrefix + Buffer.from(JSON.stringify({ generationId: ws.generationId, cursor })).toString('base64url');
+const encode = (ws: Workspace, cursor: string, waitingIndexed?: boolean) =>
+  cursorPrefix +
+  Buffer.from(JSON.stringify({ generationId: ws.generationId, cursor, waitingIndexed })).toString(
+    'base64url',
+  );
 
 /** A planning detail lists the newest 50 comments; older ones continue with `commentsCursor`, which
  * names its Item, so a list cursor or another Item's cursor is refused (f0d0fdd6). */
@@ -268,6 +277,13 @@ async function writePlanning(
   hints?: { likelyDuplicates?: unknown },
   stored?: PlanningItem,
 ) {
+  invariant(
+    request.action !== 'put-planning-item' ||
+      request.waitingOn === undefined ||
+      port.serverFeatures?.includes(planningWaitingFeature),
+    'HOSTED_ACTION_UNSUPPORTED',
+    'This server does not store planning wait reasons yet.',
+  );
   const command = await compatiblePut(port, request, journal, stored);
   const creation =
     command.action === 'put-planning-item' && command.kind === 'issue' && command.expectedVersion === 0;
@@ -585,14 +601,52 @@ async function readPlanning(
   const statuses = input.status;
   const status = Array.isArray(statuses) && statuses.length === 1 ? statuses[0] : statuses;
   const multiple = Array.isArray(status) ? new Set(status) : null;
-  // The old server only understands scalar filters. Pin the client-side union to each continuation.
-  const prefix = multiple ? `${[...multiple].sort().join(',')}:` : '';
+  const selectedStatuses = multiple ? [...multiple].sort() : status;
+  const waitingOn = input.waitingOn;
+  invariant(
+    waitingOn === undefined || port.serverFeatures?.includes(planningWaitingFeature),
+    'HOSTED_ACTION_UNSUPPORTED',
+    'This server does not filter planning wait reasons yet.',
+  );
+  const waitMatches = (item: Pick<PlanningItem, 'waitingOn'>) =>
+    waitingOn === undefined || (item.waitingOn?.kind ?? 'none') === waitingOn;
+  const waitingPrefix = 'forge-waiting-on:';
+  // Pin the waiting category and composed selection. Preserve cursors for reads without this filter.
+  const prefix =
+    waitingOn === undefined
+      ? multiple
+        ? `${[...multiple].sort().join(',')}:`
+        : ''
+      : waitingPrefix +
+        createHash('sha256')
+          .update(
+            JSON.stringify([
+              waitingOn,
+              selectedStatuses,
+              input.search,
+              input.kind,
+              input.initiativeId,
+              input.type,
+              input.owner,
+              input.relation,
+              input.counts === true,
+              input.schedule === true,
+            ]),
+          )
+          .digest('hex') +
+        ':';
   const readCursor = () => {
-    if (!prefix || input.cursor === null) return input.cursor;
+    if (input.cursor === null) return null;
+    invariant(
+      !input.cursor.startsWith(waitingPrefix) || waitingOn !== undefined,
+      'WORK_STALE',
+      'Waiting selection changed. Restart this planning read.',
+    );
+    if (!prefix) return input.cursor;
     invariant(
       input.cursor.startsWith(prefix),
       'WORK_STALE',
-      'Status selection changed. Restart this planning read.',
+      'Filter selection changed. Restart this planning read.',
     );
     return input.cursor.slice(prefix.length);
   };
@@ -600,7 +654,12 @@ async function readPlanning(
     const terms = planningSearchTerms(input.search);
     try {
       const found = await port.query<{
-        items?: { id: string; kind?: string; status: PlanningItem['status'] }[];
+        items?: {
+          id: string;
+          kind?: string;
+          status: PlanningItem['status'];
+          waitingOn?: PlanningItem['waitingOn'];
+        }[];
         nextCursor?: string | null;
       }>('projectHostedPlanningSearch:search', {
         ...terms,
@@ -616,7 +675,7 @@ async function readPlanning(
             ...found,
             ...(prefix && found.nextCursor ? { nextCursor: prefix + found.nextCursor } : {}),
             items: found.items
-              .filter(item => (!multiple || multiple.has(item.status)) && keep(item))
+              .filter(item => (!multiple || multiple.has(item.status)) && waitMatches(item) && keep(item))
               .map(withPlannedLink),
           }
         : found;
@@ -639,6 +698,7 @@ async function readPlanning(
     ...(input.kind ? { kind: input.kind } : {}),
     ...(typeof status === 'string' && status !== 'all' && status !== 'active' ? { status } : {}),
     ...(input.initiativeId ? { initiativeId: input.initiativeId } : {}),
+    ...(waitingOn === undefined ? {} : { waitingOn }),
   };
   if (input.counts) {
     invariant(
@@ -646,7 +706,8 @@ async function readPlanning(
       'HOSTED_ACTION_UNSUPPORTED',
       'This server needs indexed planning counts. Upgrade the deployment before retrying.',
     );
-    let bound = input.cursor === null ? null : decodeBound(input.cursor);
+    const supplied = readCursor();
+    let bound = supplied === null ? null : decodeBound(supplied);
     const counts: Record<string, number> = {};
     let done = false;
     let needsPreparation = false;
@@ -675,7 +736,7 @@ async function readPlanning(
     return {
       counts,
       coverage: needsPreparation ? 'partial-needs-preparation' : done ? 'complete' : 'partial',
-      nextCursor: done ? null : encode(bound!, bound!.cursor!),
+      nextCursor: done ? null : prefix + encode(bound!, bound!.cursor!),
       ...(!done
         ? {
             next: `These counts are incomplete after ${maxCountPages} pages. Run planning with counts:true, the same filters and nextCursor as cursor, then add the returned counts to these totals.`,
@@ -736,7 +797,10 @@ async function readPlanning(
     };
   }
   const keep = await rowFilter(input);
-  let cursor = decode(readCursor(), ws);
+  const indexed = Boolean(filtered && ws.planningFilteredReads && Object.keys(planningFilter).length);
+  // Older projections still page the canonical Item rows. A cursor pins its route until the next fresh read.
+  const waitingIndexed = waitingOn === undefined ? undefined : indexed;
+  let cursor = decode(readCursor(), ws, waitingIndexed);
   let scanned = 0;
   let done = false;
   let matches: PlanningItem[] = [];
@@ -748,7 +812,7 @@ async function readPlanning(
       'planningItems',
       cursor,
       input.limit,
-      filtered && ws.planningFilteredReads && Object.keys(planningFilter).length ? { planningFilter } : {},
+      indexed ? { planningFilter } : {},
     );
     scanned += result.page.length;
     done = result.isDone;
@@ -768,6 +832,7 @@ async function readPlanning(
                   ? multiple.has(item.status)
                   : item.status === status)) &&
           (!input.initiativeId || item.initiativeId === input.initiativeId) &&
+          waitMatches(item) &&
           keep(item),
       ),
     ];
@@ -823,7 +888,7 @@ async function readPlanning(
           },
         }
       : {}),
-    nextCursor: done ? null : prefix + encode(ws, cursor!),
+    nextCursor: done ? null : prefix + encode(ws, cursor!, waitingIndexed),
     ...(emptyPlan
       ? {
           next: 'The project owner can use nforge agent ROOT put-planning-item or MCP forge_planning (action put-planning-item) with {"kind":"issue","title":"TITLE","status":"proposed"}.',

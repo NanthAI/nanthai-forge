@@ -21,6 +21,7 @@ export const planningModelRow = (item: Partial<PlanningItem>) => ({
   ...(item.type ? { type: item.type } : {}),
   ...(item.parentId && item.kind === 'issue' ? { parentId: item.parentId } : {}),
   ...(item.owner ? { owner: item.owner } : {}),
+  ...(item.waitingOn ? { waitingOn: item.waitingOn } : {}),
   ...(item.relations?.length ? { relations: item.relations } : {}),
   ...(item.hidden ? { hidden: true as const } : {}),
   ...(item.imported ? { imported: item.imported } : {}),
@@ -109,7 +110,8 @@ export function planningSearchEntry(item: PlanningItem, position: number): Index
   return {
     collection: 'planningSearch',
     key: item.id,
-    parent: '',
+    // The root's existing parent index selects waiting reasons. Legacy roots already use the empty bucket.
+    parent: item.waitingOn?.kind ?? '',
     position,
     value: JSON.stringify({
       id: item.id,

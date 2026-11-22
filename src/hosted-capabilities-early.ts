@@ -2,7 +2,12 @@
 import { makeFunctionReference } from 'convex/server';
 import { ConvexExchange } from './exchange-client.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
-import { feedCommitOrder, hostedContractFeatures, startLaneTitle } from './hosted-contract-features.js';
+import {
+  feedCommitOrder,
+  hostedContractFeatures,
+  planningWaitingFeature,
+  startLaneTitle,
+} from './hosted-contract-features.js';
 import { hostedAgentPlanningActions, type HostedAgentAddress } from './hosted-agent-contract.js';
 import { backgroundSaveOperation } from './hosted-save-pending.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
@@ -17,6 +22,7 @@ export function capabilityOptions(
   root: string,
   status = false,
   startWithIntent = false,
+  action?: string,
 ): Record<string, unknown> {
   const settling = backgroundSaveOperation(root);
   return {
@@ -30,6 +36,7 @@ export function capabilityOptions(
           ),
           'metric-cli-provenance',
           ...(startWithIntent ? [startLaneTitle] : []),
+          ...(action === 'planning' || action === 'put-planning-item' ? [planningWaitingFeature] : []),
         ],
     noticeVersion: 1,
     resolveVersion: 1,
@@ -88,6 +95,7 @@ export function startEarlyCapabilities(
   address: HostedAgentAddress,
   status = false,
   startWithIntent = false,
+  action?: string,
 ) {
   let exchange: ConvexExchange;
   try {
@@ -95,7 +103,10 @@ export function startEarlyCapabilities(
   } catch {
     return; // No credential: the dispatch reports it in its own words.
   }
-  const args = { clientVersion: CUTOVER_CLI_VERSION, ...capabilityOptions(root, status, startWithIntent) };
+  const args = {
+    clientVersion: CUTOVER_CLI_VERSION,
+    ...capabilityOptions(root, status, startWithIntent, action),
+  };
   // Each command reads afresh: an earlier command's untaken read (it stopped at its gate) is replaced.
   const call = exchange.client
     .query(makeFunctionReference<'query'>('projectHostedAgent:capabilities'), {

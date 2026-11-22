@@ -134,6 +134,13 @@ what comes next; Forge planning is that list. Before every brief, relay, status
 reply or "what next", read live state: `planning {"planningItemId":"ID"}` (the Issue,
 every comment, and `work`: each of its Lanes in any state with its landing receipt;
 `lanes {"planningItemId":"ID","state":"all"}` pages past 20), then `queue`.
+For each [planning round](briefings.md#planning-round-brief), page
+`planning {"kind":"issue","status":"active","waitingOn":"none","reconcile":false}`
+for Items without a recorded wait. Read a specific waiting category with
+`waitingOn` set to `owner`, `design`, `evidence` or `item`. Keep reasons on the Item.
+Use the Item's `owner` field and the planning `owner` filter to see assignments before a Lane.
+Verify current activity in the assigned thread. The `decisions` read covers owner decision
+records across the project. Lead decisions in Item discussions are read per Item.
 `lane-history` gives one Lane's full record when you need it. A builder's last note,
 an earlier read or a session handoff is history, not state: the queue can land a
 parked Lane after its builder has stopped (2bf85ddf, 2026-11-17, landed
