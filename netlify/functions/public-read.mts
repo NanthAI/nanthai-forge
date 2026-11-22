@@ -265,14 +265,16 @@ export default async (request: Request) => {
 
 export const config: Config = {
   // Every one- or two-segment page address, with slash/case variants, so they reach canonicalization before any
-  // public read; a name with a dot is a file. The site's own files (docs, assets) are served before the function.
+  // public read; a name with a dot is a file. The site's own folders (docs, assets) are excluded, never preferStatic:
+  // with the netlify.toml "/*" -> /app.html rewrite, preferStatic served the app shell for every path, this one too
+  // (dev, receipt f1da4770: /-/public/v1/ returned HTML).
   path: [
     '/:page(\\/*[^\\/.]+(?:\\/+[^\\/.]+)?\\/*)',
     // The cached reads under /-/public/v1/, and the 301 for every other earlier /-/ address (netlify.toml has none).
     '/-/*',
     '/:sitemap(\\/*[sS][iI][tT][eE][mM][aA][pP][.][xX][mM][lL]\\/*)',
   ],
-  preferStatic: true,
+  excludedPath: ['/docs', '/docs/*', '/assets', '/assets/*'],
   // Native enforcement precedes handler redirects, but its distributed count can lag.
   // Keep it at the platform: no per-request shared counter or additional I/O.
   rateLimit: { windowLimit: 60, windowSize: 60, aggregateBy: ['ip', 'domain'] },

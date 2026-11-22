@@ -227,3 +227,33 @@ test('b0704959: an earlier /- address never redirects to another site', async t 
   assert.equal(earlierAppPath('/-/\\evil.example'), '/evil.example');
   assert.equal(earlierAppPath('/-//\\/evil.example'), '/evil.example');
 });
+
+test('b0704959: the function answers its paths itself and leaves the static files alone', async () => {
+  // preferStatic let the "/*" -> /app.html rewrite serve the app shell in place of the function (receipt f1da4770).
+  assert.equal(config.preferStatic, undefined);
+  const matches = list => href => list.some(pattern => new URLPattern({ pathname: pattern }).test(href));
+  const served = matches(config.path);
+  const excluded = matches(config.excludedPath);
+  for (const path of [
+    '/-/public/v1/explore/active.json',
+    '/sitemap.xml',
+    '/-/account',
+    '/explore',
+    '/ada',
+    '/ada/atlas',
+  ])
+    assert(served(`${ORIGIN}${path}`) && !excluded(`${ORIGIN}${path}`), `${path} reaches the function`);
+  for (const path of [
+    '/',
+    '/docs',
+    '/docs/',
+    '/docs/status',
+    '/docs/status/',
+    '/assets',
+    '/assets/app.js',
+    '/llms.txt',
+    '/robots.txt',
+    '/favicon.svg',
+  ])
+    assert(!served(`${ORIGIN}${path}`) || excluded(`${ORIGIN}${path}`), `${path} stays a static file`);
+});
