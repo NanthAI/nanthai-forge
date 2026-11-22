@@ -10,7 +10,7 @@ import { ConvexLaneTransport } from '../../dist/hosted-lane-transport.js';
 import { selectExactHostedSource, selectHostedMain } from '../../dist/mcp-hosted-source.js';
 import { parseNativeState } from '../../dist/state/format.js';
 import { readBenchJobs } from './sustained-capacity.mjs';
-import { certifyingSustainedCheck } from './sustained-score.mjs';
+import { certifyingSustainedCheck, failedSustainedRunId } from './sustained-score.mjs';
 
 const time = value => (typeof value === 'number' ? value : Date.parse(value));
 const unique = values => [...new Set(values.filter(Boolean))];
@@ -120,8 +120,8 @@ export async function collectSustained({
   }
   const submissions = release.submissions.map(submission => {
     if (submission.outcome !== 'terminal-failed') return submission;
-    const latest = attemptHistory.find(item => item.id === submission.submissionIds.at(-1))?.attempts[0];
-    const runId = latest?.runId;
+    const attempts = attemptHistory.find(item => item.id === submission.submissionIds.at(-1))?.attempts;
+    const runId = failedSustainedRunId(attempts, submission.failedAttemptId);
     return { ...submission, runId, outcome: runs.get(runId)?.status === 'failed' ? 'check-failed' : 'error' };
   });
   const expectedRedChecks = new Set(

@@ -118,6 +118,7 @@ async function runArm(config, setup, plan, arm) {
   };
   const submit = async (task, lane, signal) => {
     const ids = new Set();
+    const failedAttempts = new Map();
     let failed = false;
     try {
       const landed = await driveForge({
@@ -151,7 +152,10 @@ async function runArm(config, setup, plan, arm) {
           ];
           for (const row of rows.filter(Boolean)) {
             if (row.id) ids.add(row.id);
-            failed ||= (row.observation?.state ?? row.phase) === 'terminal-failed';
+            if ((row.observation?.state ?? row.phase) === 'terminal-failed') {
+              failed = true;
+              if (row.id && row.attemptId) failedAttempts.set(row.id, row.attemptId);
+            }
           }
           failed ||= reply.error?.code === 'CHECK_FAILED';
           traceEvent({ event: 'forge', taskId: task.id, action, operationId: body.operationId, atMs, reply });
@@ -165,11 +169,14 @@ async function runArm(config, setup, plan, arm) {
         acceptance: landed.submission.acceptance,
       };
     } catch (error) {
+      const submissionIds = [...ids];
       return {
         outcome: failed ? 'terminal-failed' : 'error',
         laneId: lane.laneId,
-        submissionIds: [...ids],
-        ...(failed ? {} : { error: String(error.message ?? error) }),
+        submissionIds,
+        ...(failed
+          ? { failedAttemptId: failedAttempts.get(submissionIds.at(-1)) }
+          : { error: String(error.message ?? error) }),
       };
     }
   };

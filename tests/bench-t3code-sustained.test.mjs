@@ -8,7 +8,11 @@ import test from 'node:test';
 import { replayDigest } from '../scripts/bench-t3code/replay-schedule.mjs';
 import { sustainedVerdict } from '../scripts/bench-t3code/sustained-oracle.mjs';
 import { fixtureFiles, releaseSustained, sustainedPlan } from '../scripts/bench-t3code/sustained-plan.mjs';
-import { certifyingSustainedCheck, scoreSustained } from '../scripts/bench-t3code/sustained-score.mjs';
+import {
+  certifyingSustainedCheck,
+  failedSustainedRunId,
+  scoreSustained,
+} from '../scripts/bench-t3code/sustained-score.mjs';
 import { sustainedWorkflow } from '../scripts/bench-t3code/sustained-workflow.mjs';
 import {
   sampleOrg,
@@ -131,6 +135,18 @@ test('fast-mode s02 joins the only passed recheck when the earlier attempt was c
     runs.set('cancelled', { status });
     assert.equal(certifyingSustainedCheck(receipt, runs), undefined);
   }
+});
+
+test('s36 uses the terminal response attempt when a recompose fails without running a new check', () => {
+  const attempts = [
+    { id: 'unrun-recompose' },
+    { id: 'failed-exact-attempt', runId: 'failed-exact-check' },
+    { id: 'earlier-attempt', runId: 'unrelated-check' },
+  ];
+  assert.equal(failedSustainedRunId(attempts, 'failed-exact-attempt'), 'failed-exact-check');
+  const withLatestCheck = [{ id: 'latest', runId: 'latest-check' }, ...attempts];
+  assert.equal(failedSustainedRunId(withLatestCheck, 'missing-attempt'), undefined);
+  assert.equal(failedSustainedRunId(withLatestCheck), 'latest-check');
 });
 
 test('scorer uses exact published States and keeps planted reds apart from discarded runner minutes', () => {

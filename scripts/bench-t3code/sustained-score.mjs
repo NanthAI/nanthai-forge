@@ -28,6 +28,12 @@ export function certifyingSustainedCheck(
   if (retained.length === 1) return retained[0];
 }
 
+// A recompose can fail on the previous exact check before dispatching another check.
+export function failedSustainedRunId(attempts, failedAttemptId) {
+  if (!failedAttemptId) return attempts?.[0]?.runId;
+  return attempts?.find(attempt => attempt.id === failedAttemptId)?.runId;
+}
+
 function scoreMain(plan, publications, missing) {
   const landed = new Map();
   const states = [];
