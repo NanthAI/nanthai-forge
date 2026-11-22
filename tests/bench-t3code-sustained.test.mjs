@@ -275,8 +275,9 @@ test('candidate-side check names a planted red on exactly one shard', t => {
   assert.match(failed.stdout, /^BENCH_SOLO_RED s04$/m);
 });
 
-test('org slot sampling reconciles a GitHub count and row race before using the sample', async () => {
+test('org slot sampling reconciles run and job counts across GitHub pages', async () => {
   let raced = false;
+  let jobsRead = false;
   const json = value => ({ stdout: JSON.stringify(value) });
   const snapshot = await sampleOrg(async (_command, args) => {
     const path = args.at(-1);
@@ -289,9 +290,17 @@ test('org slot sampling reconciles a GitHub count and row race before using the 
       return json([{ total_count: 1, workflow_runs: [{ id: 1 }] }]);
     }
     assert.match(path, /runs\/1\/jobs/);
-    return json({ total_count: 2, jobs: [{ status: 'in_progress' }, { status: 'queued' }] });
+    const first = { id: 1, status: 'in_progress' };
+    if (!jobsRead) {
+      jobsRead = true;
+      return json([{ total_count: 3, jobs: [first] }]);
+    }
+    return json([
+      { total_count: 3, jobs: [first, { id: 2, status: 'queued' }] },
+      { total_count: 3, jobs: [{ id: 3, status: 'in_progress' }] },
+    ]);
   });
-  assert.equal(snapshot.activeJobs, 1);
+  assert.equal(snapshot.activeJobs, 2);
 });
 
 test('a stale filtered count falls back to current Actions rows', async () => {
@@ -308,7 +317,7 @@ test('a stale filtered count falls back to current Actions rows', async () => {
         ],
       });
     assert.match(path, /runs\/2\/jobs/);
-    return json({ total_count: 1, jobs: [{ status: 'in_progress' }] });
+    return json([{ total_count: 1, jobs: [{ id: 1, status: 'in_progress' }] }]);
   });
   assert.equal(snapshot.activeJobs, 1);
 });
@@ -360,16 +369,19 @@ test('a transient jobs 404 still checks whether dogfood exceeded its runner wait
         jobsRead = true;
         throw Error('gh: Not Found (HTTP 404)');
       }
-      return json({
-        total_count: 1,
-        jobs: [
-          {
-            status: 'in_progress',
-            created_at: new Date(atMs - 601_000).toISOString(),
-            started_at: new Date(atMs).toISOString(),
-          },
-        ],
-      });
+      return json([
+        {
+          total_count: 1,
+          jobs: [
+            {
+              id: 1,
+              status: 'in_progress',
+              created_at: new Date(atMs - 601_000).toISOString(),
+              started_at: new Date(atMs).toISOString(),
+            },
+          ],
+        },
+      ]);
     },
   });
   assert.match(stopped, /Dogfood check waited more than 10 minutes/);
@@ -404,4 +416,24 @@ test('bench subprocess errors identify a terminating signal without stderr', asy
     message: /exited on SIGTERM/,
     signal: 'SIGTERM',
   });
+});
+
+test('org slot sampling rejects a job inventory still missing rows after reconciliation', async () => {
+  const json = value => ({ stdout: JSON.stringify(value) });
+  let jobsReads = 0;
+  await assert.rejects(
+    sampleOrg(async (_command, args) => {
+      const path = args.at(-1);
+      if (path.includes('orgs/')) return json([[{ full_name: 'NanthAI/scratch' }]]);
+      if (path.includes('status=in_progress')) return json([{ total_count: 1, workflow_runs: [{ id: 7 }] }]);
+      jobsReads++;
+      const sameJob = { id: 1, status: 'in_progress' };
+      return json([
+        { total_count: 2, jobs: [sameJob] },
+        { total_count: 2, jobs: [sameJob] },
+      ]);
+    }),
+    /job inventory incomplete .*\/runs\/7\/jobs\?.*expected 2, observed 1/,
+  );
+  assert.equal(jobsReads, 3);
 });

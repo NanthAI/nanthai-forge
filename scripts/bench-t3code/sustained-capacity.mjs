@@ -47,11 +47,20 @@ async function activeRuns(repo, status, exec) {
   }
   return [...reconciled.values()];
 }
-const listJobs = async (repo, runId, exec) => {
-  const page = await api(`repos/${repo}/actions/runs/${runId}/jobs?per_page=100`, exec);
-  if (page.total_count > page.jobs.length) throw Error('Actions job snapshot was truncated');
-  return page.jobs;
-};
+async function listJobs(repo, runId, exec) {
+  const path = `repos/${repo}/actions/runs/${runId}/jobs?per_page=100`;
+  let expected;
+  let jobs;
+  // Job counts and pages can change independently during a matrix rollout.
+  // Re-read the full list before treating an incomplete safety sample as fatal.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const pages = await api(path, exec, ['--paginate', '--slurp']);
+    expected = Math.max(...pages.map(page => page.total_count));
+    jobs = new Map(pages.flatMap(page => page.jobs).map(job => [job.id, job]));
+    if (Number.isSafeInteger(expected) && jobs.size >= expected) return [...jobs.values()];
+  }
+  throw Error(`GitHub job inventory incomplete at ${path}: expected ${expected}, observed ${jobs.size}`);
+}
 
 /** Read all non-archived visible org repos before a runner slot is taken. */
 export async function sampleOrg(exec = runCommand) {
