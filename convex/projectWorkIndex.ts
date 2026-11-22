@@ -23,6 +23,12 @@ import { invariant } from '../src/errors';
 import { hasWriteRole } from './projectRole';
 import { report } from './errors';
 import { actorSummary } from './projectActorNames';
+import {
+  initiativeCloseHistory,
+  planningHistoryBudget,
+  planningHistoryResult,
+  withPlanningTimes,
+} from './projectPlanningHistory';
 import { countedInitiative, planningFilter, planningPage } from './projectPlanningList';
 import { readsStore, storeItem, storePage } from './projectWorkStoreReads';
 import { linkedLandingCursor, withLandingNotes } from './projectWorkIndexLandingNotes';
@@ -108,6 +114,7 @@ export const records = query({
     planningFilter: v.optional(planningFilter),
     counts: v.optional(v.boolean()),
     initiativeProgress: v.optional(v.literal(true)),
+    planningHistory: v.optional(v.union(v.literal(true), v.number())),
     memberCommentsOnly: v.optional(v.literal(true)),
     newestFirst: v.optional(v.boolean()),
     parentId: v.optional(v.string()),
@@ -118,6 +125,7 @@ export const records = query({
     journalHistory: v.optional(v.literal(true)),
     viewVersion: v.optional(v.string()),
     coverage: v.optional(v.string()),
+    history: v.optional(planningHistoryResult),
     // State names are dynamic record keys: a literal object validator cannot name `in-progress`.
     counts: v.optional(v.record(v.string(), v.number())),
     ...paginationResultValidator(v.object({ id: v.string(), position: v.number(), value: v.string() }))
@@ -126,7 +134,12 @@ export const records = query({
   handler: journalWorkRecordsRead,
 });
 export const detail = query({
-  args: { ...selection, collection: v.string(), id: v.string() },
+  args: {
+    ...selection,
+    collection: v.string(),
+    id: v.string(),
+    planningHistory: v.optional(v.literal(true)),
+  },
   returns: v.object({
     ...identity,
     value: v.union(v.string(), v.null()),
@@ -141,12 +154,20 @@ export const detail = query({
         generation = await selectedGeneration(ctx, project);
       if (!generation || (input.generationId && input.generationId !== generation._id))
         return { generationId: null, revision: null, value: null, editable: false, intentPin: null };
+      const planningHistory =
+        input.planningHistory &&
+        input.collection === 'planningItems' &&
+        (await readProjectRole(ctx, project, user.subject));
+      const decorate = (value: string) =>
+        planningHistory
+          ? withPlanningTimes(ctx, project, recordPartition(generation), value, planningHistoryBudget())
+          : value;
       if (input.collection === 'planningItems' && readsStore(project, input.collection)) {
         const item = await storeItem(ctx, project._id, input.id);
         return {
           generationId: generation._id,
           revision: generation.initialRevision,
-          value: item ? await actorSummary(ctx, project._id, JSON.stringify(item)) : null,
+          value: item ? await decorate(await actorSummary(ctx, project._id, JSON.stringify(item))) : null,
           editable: project.owner === user.subject,
           intentPin: null,
         };
@@ -191,13 +212,15 @@ export const detail = query({
         generationId: generation._id,
         revision: generation.initialRevision,
         value: row
-          ? await cockpitSummary(
-              ctx,
-              project,
-              generation,
-              row.collection,
-              await hostedRecordValue(ctx, recordPartition(generation), row),
-              main,
+          ? await decorate(
+              await cockpitSummary(
+                ctx,
+                project,
+                generation,
+                row.collection,
+                await hostedRecordValue(ctx, recordPartition(generation), row),
+                main,
+              ),
             )
           : null,
         editable,
@@ -236,6 +259,7 @@ export async function journalWorkRecordsRead(
     planningFilter?: Infer<typeof planningFilter>;
     counts?: boolean;
     initiativeProgress?: true;
+    planningHistory?: true | number;
     memberCommentsOnly?: true;
     newestFirst?: boolean;
     parentId?: string;
@@ -257,6 +281,26 @@ export async function journalWorkRecordsRead(
     );
     if (!generation || (input.generationId && input.generationId !== generation._id))
       return { generationId: null, revision: null, page: [], isDone: true, continueCursor: '' };
+    const planningHistory =
+      input.planningHistory !== undefined &&
+      input.collection === 'planningItems' &&
+      (await readProjectRole(ctx, project, user.subject));
+    const initiativeId = input.planningFilter?.initiativeId;
+    const history =
+      planningHistory &&
+      input.counts &&
+      input.initiativeProgress &&
+      initiativeId &&
+      !input.paginationOpts.cursor
+        ? await initiativeCloseHistory(
+            ctx,
+            project,
+            recordPartition(generation),
+            initiativeId,
+            Date.now(),
+            typeof input.planningHistory === 'number' ? input.planningHistory : undefined,
+          )
+        : undefined;
     if (
       input.initiativeProgress &&
       input.counts &&
@@ -270,7 +314,13 @@ export async function journalWorkRecordsRead(
         input.planningFilter,
         input.paginationOpts.cursor,
       );
-      if (page) return { ...page, generationId: generation._id, revision: generation.initialRevision };
+      if (page)
+        return {
+          ...page,
+          ...(history ? { history } : {}),
+          generationId: generation._id,
+          revision: generation.initialRevision,
+        };
     }
     const numItems = Math.min(input.paginationOpts.numItems, 100);
     const store = readsStore(project, input.collection, input.parentId);
@@ -302,6 +352,12 @@ export async function journalWorkRecordsRead(
       numItems,
       ...(end ? { endCursor: end.recordsCursor } : {}),
     };
+    const decorateRows = async <T extends { value: string }>(rows: T[]) => {
+      if (!planningHistory || input.counts) return rows;
+      const charge = planningHistoryBudget();
+      for (const row of rows) row.value = await withPlanningTimes(ctx, project, partition, row.value, charge);
+      return rows;
+    };
     if ((input.collection === 'planningItems' && input.planningFilter) || store) {
       const actors = new Map<string, Promise<boolean>>();
       const page =
@@ -322,7 +378,16 @@ export async function journalWorkRecordsRead(
         ...page,
         generationId: generation._id,
         revision: generation.initialRevision,
-        ...(await withLandingNotes(ctx, project, input, { ...page, page: rows }, readItem, true, null)),
+        ...(history ? { history } : {}),
+        ...(await withLandingNotes(
+          ctx,
+          project,
+          input,
+          { ...page, page: await decorateRows(rows) },
+          readItem,
+          true,
+          null,
+        )),
       };
     }
     const rows =
@@ -362,7 +427,15 @@ export async function journalWorkRecordsRead(
       ...page,
       generationId: generation._id,
       revision: generation.initialRevision,
-      ...(await withLandingNotes(ctx, project, input, { ...page, page: values }, readItem, false, null)),
+      ...(await withLandingNotes(
+        ctx,
+        project,
+        input,
+        { ...page, page: await decorateRows(values) },
+        readItem,
+        false,
+        null,
+      )),
     };
   } catch (error) {
     if (error instanceof JournalNeeded)

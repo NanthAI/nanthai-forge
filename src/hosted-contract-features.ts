@@ -24,6 +24,7 @@ export const laneUndo = 'lane-undo';
 export const planningWaitingFeature = 'planning-waiting-on';
 /** The unfiltered Initiative count uses the planning wait feature's discovery slot. */
 export const planningInitiativeCountsFeature = 'planning-initiative-counts';
+export const planningHistoryFeature = 'planning-history';
 export const initiativeProgressRequested = (input: Record<string, unknown>) =>
   input.counts === true &&
   typeof input.initiativeId === 'string' &&
@@ -252,6 +253,7 @@ export const advertisedFeatures = (asked: readonly string[]) => [
   ...(asked.includes(laneUndo) ? [laneUndo] : []),
   ...(asked.includes(planningWaitingFeature) ? [planningWaitingFeature] : []),
   ...(asked.includes(planningInitiativeCountsFeature) ? [planningInitiativeCountsFeature] : []),
+  ...(asked.includes(planningHistoryFeature) ? [planningHistoryFeature] : []),
   ...hostedContractFeatures.filter(feature => asked.includes(feature)),
   ...(asked.includes('feed') ? ['feed'] : []),
 ];

@@ -17,11 +17,14 @@ import {
   markPlanningStarted,
   planningDataNotice,
 } from '../dist/hosted-agent-planning.js';
+import { capabilityOptions } from '../dist/hosted-capabilities-early.js';
 import { hostedAgentCommandSchemas, hostedAgentActions } from '../dist/hosted-agent-contract.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import {
   hostedContractFeatures,
+  MAX_CONTRACT_FEATURES,
   planningInitiativeCountsFeature,
+  planningHistoryFeature,
   planningWaitingFeature,
 } from '../dist/hosted-contract-features.js';
 import { printedReceipt } from '../dist/receipt-slim.js';
@@ -2869,6 +2872,106 @@ test('maintained Initiative counts use one bounded read at current and doubled b
     assert.ok(maintained.bytes < indexed.bytes);
     t.diagnostic(JSON.stringify({ scale, indexed, maintained }));
   }
+});
+
+test('planning detail, list and search distinguish the latest close from later edits, with one bounded Initiative read', async t => {
+  const { features } = capabilityOptions('.', false, false, 'planning', {});
+  assert.ok(features.includes(planningHistoryFeature));
+  assert.ok(features.length <= MAX_CONTRACT_FEATURES);
+  const first = Date.parse('2026-11-09T12:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now: first });
+  const s = await setup(t);
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  const p = port(s, new Map(), [
+    ...hostedContractFeatures,
+    planningInitiativeCountsFeature,
+    planningHistoryFeature,
+  ]);
+  const original = (await put(p, { kind: 'initiative', title: 'Original group' })).result.itemId;
+  const destination = (await put(p, { kind: 'initiative', title: 'Destination group' })).result.itemId;
+  const issue = (await put(p, { kind: 'issue', title: 'Reopenable test issue', initiativeId: original }))
+    .result.itemId;
+
+  t.mock.timers.setTime(Date.parse('2026-11-10T23:59:59Z'));
+  await put(p, { itemId: issue, expectedVersion: 1, status: 'closed' });
+  t.mock.timers.setTime(Date.parse('2026-11-11T00:00:01Z'));
+  await put(p, { itemId: issue, expectedVersion: 2, initiativeId: destination, status: 'closed' });
+  const reads = await Promise.all([
+    list(p, { id: issue, reconcile: false }).then(r => r.item),
+    list(p, { initiativeId: destination, reconcile: false }).then(r => r.items[0]),
+    list(p, { search: 'Reopenable', status: 'all', reconcile: false }).then(r => r.items[0]),
+  ]);
+  for (const item of reads.slice(0, 2)) assert.equal(item.at, '2026-11-11T00:00:01.000Z');
+  for (const item of reads) {
+    assert.equal(item.closedAt, '2026-11-10T23:59:59.000Z');
+    assert.equal(item.lastStatusChangeAt, item.closedAt);
+  }
+
+  t.mock.timers.setTime(Date.parse('2026-11-12T09:00:00Z'));
+  await put(p, { itemId: issue, expectedVersion: 3, status: 'open' });
+  const { item } = await list(p, { id: issue, reconcile: false });
+  assert.equal(item.closedAt, null);
+  assert.equal(item.lastStatusChangeAt, '2026-11-12T09:00:00.000Z');
+  await put(p, { itemId: issue, expectedVersion: 4, status: 'closed' });
+  const reclosed = (await list(p, { search: 'Reopenable', status: 'all', reconcile: false })).items[0];
+  assert.equal(reclosed.closedAt, '2026-11-12T09:00:00.000Z');
+  const reclosedAt = reclosed.closedAt;
+  t.mock.timers.setTime(Date.parse('2026-11-13T09:00:00Z'));
+  await put(p, { itemId: issue, expectedVersion: 5, status: 'archived' });
+  await put(p, { itemId: issue, expectedVersion: 6, status: 'deleted' });
+  await put(p, { itemId: issue, expectedVersion: 7, status: 'closed' });
+  const restored = (await list(p, { id: issue, reconcile: false })).item;
+  assert.equal(restored.closedAt, reclosedAt);
+  assert.equal(restored.lastStatusChangeAt, '2026-11-13T09:00:00.000Z');
+  t.mock.timers.setTime(Date.parse('2026-11-22T12:00:00Z'));
+  for (const [initiativeId, date] of [
+    [original, '2026-11-10'],
+    [destination, '2026-11-12'],
+  ]) {
+    p.calls.length = 0;
+    const { history } = await list(p, { initiativeId, counts: true, history: true });
+    assert.deepEqual(p.calls, ['projectWorkIndex:records']);
+    assert.equal(history.coverage, 'complete');
+    assert.equal(history.unresolved, 0);
+    assert.equal(history.closedByDay.length, 14);
+    assert.equal(history.closedByDay[0].day, '2026-11-09');
+    assert.equal(history.closedByDay.at(-1).day, '2026-11-22');
+    assert.deepEqual(
+      history.closedByDay.filter(row => row.count),
+      [{ day: date, count: 1 }],
+    );
+  }
+});
+
+test('planning history leaves missing legacy predecessors unknown and preserves ordinary legacy reads', async t => {
+  const s = await setup(t);
+  const p = port(s, new Map(), [
+    ...hostedContractFeatures,
+    planningInitiativeCountsFeature,
+    planningHistoryFeature,
+  ]);
+  const initiativeId = (await put(p, { kind: 'initiative', title: 'Legacy group' })).result.itemId;
+  const itemId = (await put(p, { kind: 'issue', title: 'Legacy issue', initiativeId })).result.itemId;
+  const initial = (await list(p, { id: itemId, reconcile: false })).item;
+  assert.equal(initial.lastStatusChangeAt, initial.at);
+  await put(p, { itemId, expectedVersion: 1, status: 'closed' });
+  const legacy = (await list(p, { id: itemId, reconcile: false })).item;
+  assert.equal(legacy.closedAt, legacy.at);
+  for (const [key, row] of s.tables.projectPlanningRecords) {
+    if (row.collection === 'planningVersions' && row.parent === itemId && JSON.parse(row.value).version === 1)
+      s.tables.projectPlanningRecords.delete(key);
+  }
+  const unknown = (await list(p, { id: itemId, reconcile: false })).item;
+  assert.equal(unknown.closedAt, null);
+  assert.equal(unknown.lastStatusChangeAt, null);
+  const result = await list(p, { initiativeId, counts: true, history: true });
+  assert.equal(result.counts.closed, 1);
+  assert.equal(result.history.coverage, 'unavailable');
+  assert.equal((await list(port(s), { id: itemId, reconcile: false })).item.closedAt, undefined);
+  await assert.rejects(
+    list(port(s), { initiativeId, counts: true, history: true }),
+    code('HOSTED_ACTION_UNSUPPORTED'),
+  );
 });
 
 test('planning counts sum every page and refuse stale generations, invalid cursors and old servers (5a85cb5f)', async t => {

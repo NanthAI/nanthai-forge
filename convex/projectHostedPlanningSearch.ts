@@ -11,6 +11,8 @@ import { planningIdPrefix, planningSearchTerms } from '../src/planning-search';
 import { workHead } from './projectWorkHead';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { readProjectRole } from './projectAuthority';
+import { planningHistoryBudget, withPlanningTimes } from './projectPlanningHistory';
 import type { Doc } from './_generated/dataModel';
 
 export const searchFields = {
@@ -49,6 +51,7 @@ export async function searchPlanning(
   input: Input,
   allowMissing = false,
   byId = false,
+  planningHistory = false,
 ) {
   invariant(
     Number.isInteger(input.limit) && input.limit >= 1 && input.limit <= 100,
@@ -163,6 +166,13 @@ export async function searchPlanning(
     const selected = representatives.get(identity)!;
     if (selected.best === row._id && !named.has(itemId)) items.push(selected.summary);
   }
+  if (planningHistory) {
+    const charge = planningHistoryBudget();
+    for (const [index, item] of items.entries())
+      items[index] = JSON.parse(
+        await withPlanningTimes(ctx, project, recordPartition(generation), JSON.stringify(item), charge),
+      );
+  }
   return {
     workRevision: (await workHead(ctx, project._id))?.revision ?? project.work?.revision,
     items,
@@ -177,12 +187,13 @@ export async function searchPlanning(
   };
 }
 export const search = query({
-  args: { projectId: v.id('hostedProjects'), ...searchFields },
+  args: { projectId: v.id('hostedProjects'), ...searchFields, planningHistory: v.optional(v.literal(true)) },
   returns: v.string(),
-  handler: async (ctx, { projectId, ...input }) => {
+  handler: async (ctx, { projectId, planningHistory, ...input }) => {
     try {
-      const { project } = await recordCaller(ctx, projectId);
-      return canonicalPayload(await searchPlanning(ctx, project, input, false, true));
+      const { project, actor } = await recordCaller(ctx, projectId);
+      const memberHistory = Boolean(planningHistory && (await readProjectRole(ctx, project, actor)));
+      return canonicalPayload(await searchPlanning(ctx, project, input, false, true, memberHistory));
     } catch (error) {
       return report(error);
     }

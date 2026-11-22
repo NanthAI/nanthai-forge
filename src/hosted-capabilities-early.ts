@@ -6,6 +6,7 @@ import {
   feedCommitOrder,
   hostedContractFeatures,
   initiativeProgressRequested,
+  planningHistoryFeature,
   planningInitiativeCountsFeature,
   planningWaitingFeature,
   startLaneTitle,
@@ -39,11 +40,16 @@ export function capabilityOptions(
       : [
           // Check detail is negotiated on the check reads that already ask for it.
           ...hostedContractFeatures.filter(
-            feature => feature !== 'main-today' && feature !== 'check-report-detail',
+            feature =>
+              feature !== 'main-today' &&
+              feature !== 'check-report-detail' &&
+              // Planning uses that slot for Work history, not source history.
+              (action !== 'planning' || feature !== 'history-log'),
           ),
           'metric-cli-provenance',
           ...(startWithIntent ? [startLaneTitle] : []),
           ...(action === 'planning' || action === 'put-planning-item' ? [planningFeature] : []),
+          ...(action === 'planning' ? [planningHistoryFeature] : []),
         ],
     noticeVersion: 1,
     resolveVersion: 1,

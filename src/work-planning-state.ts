@@ -15,6 +15,16 @@ import {
 } from './work-planning-put.js';
 import { applyUnifiedPlanning, type UnifiedPlanningData } from './work-planning-unified.js';
 
+/** Only adjacent versions prove a change. Version one records the initial status. */
+export function planningStatusTransition(
+  version: { version: number; status: string },
+  previous: typeof version | undefined,
+) {
+  if (version.version === 1) return true;
+  if (previous?.version !== version.version - 1) return null;
+  return previous.status !== version.status;
+}
+
 // ponytail: derive current versions from retained planning history; index here if measured reads warrant it.
 export const currentPlanning = (data: Pick<WorkData, 'planningItems'>) => [
   ...new Map(data.planningItems.map(item => [item.id, item])).values(),

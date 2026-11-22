@@ -52,6 +52,22 @@ page. When `nextCursor` is present, pass it back as `cursor` with the same filte
 the returned counts and totals. `partial-needs-preparation` identifies an older search
 projection whose counts can still be incomplete after the last page.
 
+Add `"history":true` to an Initiative counts read to return `history.closedByDay`,
+fourteen UTC dates through today with a count for each. It counts Issues entering
+stored `closed` status, including an initial closed status and later re-closes.
+Each event belongs to the Initiative on that version. Same-status edits and returns to Closed from Archive or Deleted do not add
+closes. `history.coverage` reports whether the bounded Work-store read was complete,
+partial, or unavailable, and `history.unresolved` counts candidate versions the
+read could not prove. Partial counts are lower bounds. The read returns one
+status-count page and supplies history on the first page. It writes nothing.
+
+On capable deployments, member Item detail, list and search results include
+`lastStatusChangeAt` and `closedAt`. The first stored status supplies the initial
+timestamp. `closedAt` is the timestamp of the current closed status and is null
+while another status is current. Restoring a closed Item preserves its close
+timestamp and records the restore as the latest status change. A missing predecessor or a bounded history read
+can leave the timestamps null. Item detail and list `at` still record the latest edit.
+
 Ordinary list reads keep reconciliation and the `forge-planning-v1:` cursor envelope.
 On a current projection, kind/status/initiative filters use ordinary database indexes,
 read only matching roots and hydrate only those items. They do not run a billed text search.

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { initiativeProgressRequested } from './hosted-contract-features.js';
 import { looseEndIntentBatchSchema } from './hosted-lifecycle.js';
 import { finishRetryReasonSchema, landingTokensSchema } from './hosted-landing.js';
 import { notVerifiedInput } from './agent-handoff-types.js';
@@ -622,6 +623,8 @@ export const hostedAgentCommandSchemas = {
         .optional(),
       /** Return stored state counts in one bounded read; continue with the returned cursor. */
       counts: z.boolean().optional(),
+      /** Include 14 UTC days of closes with an Initiative's status breakdown. */
+      history: z.literal(true).optional(),
       limit: z.number().int().min(1).max(100).default(50),
       cursor: z.string().nullable().default(null),
       /** Close or abandon Issues whose Intent finished; reports what it changed. */
@@ -645,6 +648,10 @@ export const hostedAgentCommandSchemas = {
             Array.isArray(input.status))
         ),
       'Use counts with a list read (kind, one stored status, initiativeId and waitingOn filters only).',
+    )
+    .refine(
+      input => !input.history || initiativeProgressRequested(input),
+      'Use history with counts:true and an unfiltered Initiative.',
     )
     .refine(input => !(input.id && input.search), 'Use planningItemId or search, not both.')
     .refine(input => !(input.id && input.waitingOn), 'Use waitingOn with a list or search read.')

@@ -117,7 +117,14 @@ async function workspace(client: HostedWorkTransport, projectId: string): Promis
 /** Hydrates this selected record only; Intent notes/lifecycle remain separately paged histories. */
 export async function readIndexedWorkDetail(
   client: Pick<HostedWorkTransport, 'query'>,
-  args: { projectId: string; generationId: string; collection: string; id: string; sourceRevision?: number },
+  args: {
+    projectId: string;
+    generationId: string;
+    collection: string;
+    id: string;
+    sourceRevision?: number;
+    planningHistory?: true;
+  },
 ) {
   const { sourceRevision, ...selection } = args;
   while (true) {

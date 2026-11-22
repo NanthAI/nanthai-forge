@@ -21,6 +21,7 @@ import { hostedActionError } from './hosted-action-error.js';
 import {
   initiativeProgressRequested,
   planningInitiativeCountsFeature,
+  planningHistoryFeature,
   planningWaitingFeature,
 } from './hosted-contract-features.js';
 import { retryableCodes } from './exchange-retry.js';
@@ -60,6 +61,13 @@ type Workspace = {
   sourceRevision?: number;
   likelyDuplicates?: unknown;
   planningFilteredReads?: boolean;
+};
+type PlanningTimes = { closedAt?: string | null; lastStatusChangeAt?: string | null };
+type PlanningReadItem = PlanningItem & PlanningTimes;
+type CloseHistory = {
+  closedByDay: { day: string; count: number }[];
+  coverage: 'complete' | 'partial' | 'unavailable';
+  unresolved: number;
 };
 type Page = {
   generationId: string | null;
@@ -131,8 +139,8 @@ async function page(
   invariant(result.generationId === ws.generationId, 'WORK_STALE', stale);
   return result;
 }
-const parseRow = (row: { value: string }) => JSON.parse(row.value) as PlanningItem;
-async function fullItem(port: PlanningPort, ws: Workspace, id: string) {
+const parseRow = (row: { value: string }) => JSON.parse(row.value) as PlanningReadItem;
+async function fullItem(port: PlanningPort, ws: Workspace, id: string, planningHistory?: true) {
   const detail = await readIndexedWorkDetail(
     { query: (reference, args) => port.exchange.client.query(reference, args) },
     {
@@ -141,9 +149,10 @@ async function fullItem(port: PlanningPort, ws: Workspace, id: string) {
       ...(ws.sourceRevision === undefined ? {} : { sourceRevision: ws.sourceRevision }),
       collection: 'planningItems',
       id,
+      ...(planningHistory ? { planningHistory } : {}),
     },
   );
-  return (detail.value as PlanningItem | null) ?? null;
+  return (detail.value as PlanningReadItem | null) ?? null;
 }
 /** The link every planning read shows for an Issue (30a4d75d). Starting an Issue opens the Intent that has the
  * Issue's own id and never fills the legacy `intentIds` array, so an empty array is not "no link". This is the
@@ -162,9 +171,15 @@ function shownAuthor<T extends { author?: string | undefined }>(item: T): T {
   delete rest.author;
   return rest;
 }
-const compact = (item: PlanningItem, intent?: string) =>
+const compact = (item: PlanningReadItem, intent?: string) =>
   withPlannedLink({
     ...planningSummary(item),
+    ...(item.lastStatusChangeAt === undefined
+      ? {}
+      : {
+          lastStatusChangeAt: item.lastStatusChangeAt,
+          closedAt: item.closedAt,
+        }),
     ...(intent ? { intent } : {}),
   });
 function decode(cursor: string | null, ws: Workspace, waitingIndexed?: boolean): string | null {
@@ -305,16 +320,14 @@ async function writePlanning(
       const observed = journal ? await journal.retain('planning-duplicates', observe) : await observe();
       if ('likelyDuplicates' in observed) hints.likelyDuplicates = observed.likelyDuplicates;
     }
-    return (
-      await port
-        .mutation<{ revision: number }>('projectWorkCommand:command', {
-          operationId: command.operationId,
-          command: JSON.stringify(command),
-        })
-        .catch(error => {
-          throw hostedActionError(error, 'planning write');
-        })
-    ).revision;
+    return await port
+      .mutation<{ revision: number; at?: string }>('projectWorkCommand:command', {
+        operationId: command.operationId,
+        command: JSON.stringify(command),
+      })
+      .catch(error => {
+        throw hostedActionError(error, 'planning write');
+      });
   }
   for (let attempt = 0; ; attempt++) {
     const retained = journal
@@ -333,13 +346,14 @@ async function writePlanning(
       const call = (name: string) =>
         port.exchange.client.action(makeFunctionReference<'action'>(name), args) as Promise<{
           revision: number;
+          at?: string;
         }>;
       // The 64 MiB V8 command (Issue 85801d6f); a server deployed before it has the Node one only.
       const event = await call('projectWorkActionsV8:command').catch(error => {
         if (!/Could not find public function/.test(error instanceof Error ? error.message : '')) throw error;
         return call('projectWorkActions:command');
       });
-      return event.revision;
+      return event;
     } catch (error) {
       const safe = hostedActionError(error, 'planning write');
       if (attempt >= 4 || !['WORK_STALE', 'WORK_OPERATION_CHANGED'].includes(safe.code)) throw safe;
@@ -444,6 +458,19 @@ async function intentStates(port: PlanningPort, ids: string[]) {
 }
 const holdMarker = (openLines: number) => `Intent completed; ${openLines} Done-when line(s) still open`;
 /** An Issue whose Intent finished is closed (or abandoned) in planning, and the read says so. */
+function reconciledStatus(item: PlanningReadItem, change?: { to: PlanningItem['status']; at?: string }) {
+  if (!change) return {};
+  return {
+    status: change.to,
+    ...(change.at ? { at: change.at } : {}),
+    ...(item.lastStatusChangeAt === undefined
+      ? {}
+      : {
+          lastStatusChangeAt: change.at ?? null,
+          closedAt: change.to === 'closed' ? (change.at ?? null) : null,
+        }),
+  };
+}
 async function reconcile(
   port: PlanningPort,
   ws: Workspace,
@@ -453,7 +480,7 @@ async function reconcile(
   const due = items.filter(
     item => open.includes(item.status) && ['completed', 'abandoned'].includes(states[item.id] ?? ''),
   );
-  const changed: unknown[] = [];
+  const changed: { id: string; from: string; to: PlanningItem['status']; at?: string; undo: string }[] = [];
   const failed: unknown[] = [];
   const held: unknown[] = [];
   for (const entry of due.slice(0, maxReconcile)) {
@@ -509,7 +536,7 @@ async function reconcile(
         continue;
       }
       const reason = `Intent ${states[entry.id]}`;
-      await writePlanning(
+      const event = await writePlanning(
         port,
         putFrom(item, uuidFrom(`${item.id}:${item.version}:${status}`), status, reason),
         undefined,
@@ -520,6 +547,7 @@ async function reconcile(
         id: item.id,
         from: item.status,
         to: status,
+        ...(port.serverFeatures?.includes(planningHistoryFeature) && event.at ? { at: event.at } : {}),
         undo: `put-planning-item with itemId ${item.id}, expectedVersion ${item.version + 1} and the earlier status`,
       });
     } catch (error) {
@@ -602,6 +630,12 @@ async function readPlanning(
 ) {
   if (input.initiativeId)
     input = { ...input, initiativeId: await resolvePlanningId(port, input.initiativeId) };
+  const planningHistory = port.serverFeatures?.includes(planningHistoryFeature) ? true : undefined;
+  invariant(
+    !input.history || planningHistory,
+    'HOSTED_ACTION_UNSUPPORTED',
+    'This server does not return Initiative close history. Upgrade the deployment before retrying.',
+  );
   const statuses = input.status;
   const status = Array.isArray(statuses) && statuses.length === 1 ? statuses[0] : statuses;
   const multiple = Array.isArray(status) ? new Set(status) : null;
@@ -672,6 +706,7 @@ async function readPlanning(
         ...(input.initiativeId ? { initiativeId: input.initiativeId } : {}),
         cursor: readCursor(),
         limit: input.limit,
+        ...(planningHistory ? { planningHistory } : {}),
       });
       const keep = await rowFilter(input);
       return Array.isArray(found?.items)
@@ -721,23 +756,27 @@ async function readPlanning(
       : {};
     let done = false;
     let needsPreparation = false;
-    for (let pages = 0; pages < maxCountPages && !done; pages++) {
-      const result = await port.query<Page & { counts: Record<string, number>; coverage?: string }>(
-        'projectWorkIndex:records',
-        {
-          ...(bound ? { generationId: bound.generationId } : {}),
-          collection: 'planningItems',
-          planningFilter,
-          counts: true,
-          ...(initiativeCounter && !bound ? { initiativeProgress: true } : {}),
-          paginationOpts: { cursor: bound?.cursor ?? null, numItems: 1000 },
-        },
-      );
+    let history: CloseHistory | undefined;
+    const countPages = input.history ? 1 : maxCountPages;
+    for (let pages = 0; pages < countPages && !done; pages++) {
+      const result = await port.query<
+        Page & { counts: Record<string, number>; coverage?: string; history?: CloseHistory }
+      >('projectWorkIndex:records', {
+        ...(bound ? { generationId: bound.generationId } : {}),
+        collection: 'planningItems',
+        planningFilter,
+        counts: true,
+        ...((initiativeCounter || input.history) && !bound ? { initiativeProgress: true } : {}),
+        // A CLI read on a new UTC day must select a fresh query even when Work did not change.
+        ...(input.history && !bound ? { planningHistory: Math.floor(Date.now() / 86_400_000) } : {}),
+        paginationOpts: { cursor: bound?.cursor ?? null, numItems: 1000 },
+      });
       invariant(
         result.generationId && (!bound || result.generationId === bound.generationId),
         'WORK_STALE',
         stale,
       );
+      history ??= result.history;
       for (const [state, count] of Object.entries(result.counts)) {
         if (initiativeProgress && (state === 'archived' || state === 'deleted')) continue;
         counts[state] = (counts[state] ?? 0) + count;
@@ -748,12 +787,13 @@ async function readPlanning(
     }
     return {
       counts,
+      ...(input.history && supplied === null ? { history: history ?? null } : {}),
       ...(initiativeProgress ? { total: Object.values(counts).reduce((sum, n) => sum + n, 0) } : {}),
       coverage: needsPreparation ? 'partial-needs-preparation' : done ? 'complete' : 'partial',
       nextCursor: done ? null : prefix + encode(bound!, bound!.cursor!),
       ...(!done
         ? {
-            next: `These counts are incomplete after ${maxCountPages} pages. Run planning with counts:true, the same filters and nextCursor as cursor, then add the returned counts to these totals.`,
+            next: `These counts are incomplete after ${countPages} ${countPages === 1 ? 'page' : 'pages'}. Run planning with counts:true, the same filters and nextCursor as cursor, then add the returned counts to these totals.`,
           }
         : {}),
     };
@@ -763,7 +803,7 @@ async function readPlanning(
     const id = await resolvePlanningId(port, input.id);
     // Older comments (f0d0fdd6): the detail's commentsCursor as cursor, one bounded page per call.
     if (input.cursor !== null) return await olderComments(port, ws, id, input.cursor);
-    const item = await fullItem(port, ws, id);
+    const item = await fullItem(port, ws, id, planningHistory);
     invariant(item, 'NOT_FOUND', 'Planning item not found.');
     const comments = await page(port, ws, 'planningComments', null, 50, {
       parentId: id,
@@ -785,14 +825,17 @@ async function readPlanning(
     const sync = input.reconcile ? await reconcile(port, ws, [item], states) : undefined;
     // The item shows what the reconcile just wrote (the list read does the same): a closed Issue reads closed at its
     // new version, and a held one carries the version the printed close command names.
-    const closed = (sync?.changed as { id: string; to: PlanningItem['status'] }[] | undefined)?.find(
-      change => change.id === item.id,
-    );
+    const closed = sync?.changed.find(change => change.id === item.id);
     const held = (sync?.held as { id: string; version: number; openLines: number }[] | undefined)?.find(
       entry => entry.id === item.id,
     );
     const settled = closed
-      ? { ...item, status: closed.to, version: item.version + 1, reason: `Intent ${states[item.id]}` }
+      ? {
+          ...item,
+          ...reconciledStatus(item, closed),
+          version: item.version + 1,
+          reason: `Intent ${states[item.id]}`,
+        }
       : held
         ? { ...item, version: held.version, reason: holdMarker(held.openLines) }
         : item;
@@ -817,17 +860,13 @@ async function readPlanning(
   let cursor = decode(readCursor(), ws, waitingIndexed);
   let scanned = 0;
   let done = false;
-  let matches: PlanningItem[] = [];
+  let matches: PlanningReadItem[] = [];
   // A schedule covers every open Issue it can reach in the bounded pages, not just the first match.
   for (let pages = 0; pages < maxPages && !done && (input.schedule || !matches.length); pages++) {
-    const result = await page(
-      port,
-      ws,
-      'planningItems',
-      cursor,
-      input.limit,
-      indexed ? { planningFilter } : {},
-    );
+    const result = await page(port, ws, 'planningItems', cursor, input.limit, {
+      ...(indexed ? { planningFilter } : {}),
+      ...(planningHistory ? { planningHistory } : {}),
+    });
     scanned += result.page.length;
     done = result.isDone;
     cursor = result.continueCursor;
@@ -857,9 +896,7 @@ async function readPlanning(
     issues.map(item => item.id),
   );
   const sync = input.reconcile ? await reconcile(port, ws, issues, states) : undefined;
-  const closed = new Map(
-    (sync?.changed as { id: string; to: string }[] | undefined)?.map(entry => [entry.id, entry.to]),
-  );
+  const closed = new Map(sync?.changed.map(entry => [entry.id, entry]));
   // An indexed filter can return zero rows even when the Plan has Items.
   const emptyPlan =
     !scanned &&
@@ -876,7 +913,7 @@ async function readPlanning(
       compact(
         {
           ...item,
-          status: (closed.get(item.id) as PlanningItem['status']) ?? item.status,
+          ...reconciledStatus(item, closed.get(item.id)),
         },
         states[item.id],
       ),
@@ -891,7 +928,7 @@ async function readPlanning(
                 .map(item => ({
                   id: item.id,
                   title: item.title,
-                  status: (closed.get(item.id) as string | undefined) ?? item.status,
+                  status: closed.get(item.id)?.to ?? item.status,
                   at: item.at,
                   paths: issuePaths(item),
                 })),
@@ -1107,7 +1144,7 @@ export async function executeHostedPlanning(
         });
     try {
       const itemId = await resolvePlanningId(port, comment.itemId!, journal);
-      const revision = await writePlanning(
+      const { revision } = await writePlanning(
         port,
         {
           action,
@@ -1170,7 +1207,7 @@ export async function executeHostedPlanning(
       put.relations.map(async relation => ({ ...relation, id: await ref(relation.id, 'relations') })),
     );
   const hints: { likelyDuplicates?: unknown } = {};
-  const revision = await writePlanning(
+  const { revision } = await writePlanning(
     port,
     { action, operationId: journal.operationId, ...put, itemId },
     journal,
