@@ -251,13 +251,14 @@ async function dispatchHostedAgentCli(
       }
     }
     const controller = new AbortController();
-    let signalled: 'SIGINT' | 'SIGTERM' | undefined;
-    const stop = (signal: 'SIGINT' | 'SIGTERM') => {
+    let signalled: 'SIGINT' | 'SIGTERM' | 'SIGHUP' | undefined;
+    const stop = (signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP') => {
       signalled = signal;
       controller.abort();
     };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
+    process.once('SIGHUP', stop);
     try {
       // The resume command repeats the caller's own selection (and budget, if chosen).
       const continuation = operationWait(root, { ...selectedWait, ...address });
@@ -565,6 +566,7 @@ async function dispatchHostedAgentCli(
     } finally {
       process.removeListener('SIGINT', stop);
       process.removeListener('SIGTERM', stop);
+      process.removeListener('SIGHUP', stop);
     }
   }
   const controller = new AbortController(),

@@ -1623,6 +1623,59 @@ test('12 concurrent calls during an update: reads and writes run on the current 
   assert.equal(JSON.parse(next.stdout).build, 'main');
   assert.ok(existsSync(f.old), 'replaced build stays during the retirement grace');
 });
+test('incident 203c1ce5: a wait running when the update switches and prunes keeps its build and finishes with its own result', async t => {
+  const f = fixture(t),
+    main = f.build(b);
+  await releaseFixture(t, f, b);
+  const flag = join(f.directory, 'go'),
+    startup = trustedDist().url('cli-version.js');
+  writeFileSync(
+    join(f.old, 'dist', 'late-module.js'),
+    "export const late = 'lazy bytes of the old build';\n",
+  );
+  writeFileSync(
+    join(f.old, 'dist', 'cli-entry.js'),
+    `import { existsSync } from 'node:fs';
+import { cliStartup } from ${JSON.stringify(startup)};
+if (await cliStartup(process.argv.slice(2), ${JSON.stringify(f.old)}, undefined, { validated: true })) {
+  process.stdout.write('waiting\\n');
+  while (!existsSync(${JSON.stringify(flag)})) await new Promise(done => setTimeout(done, 25)); // test-signal: allow the spawned old-build entry has no event to wait on but the test's go-ahead file
+  const { late } = await import('./late-module.js');
+  process.stdout.write(JSON.stringify({ status: 'terminal', late }) + '\\n');
+}
+`,
+  );
+  gatedEntry(main, 'main');
+  installLauncher(f, f.old);
+  // stdin closed, no TTY: how an agent harness starts a background wait.
+  const child = spawn(
+    process.execPath,
+    [join(f.installation, 'launcher.mjs'), 'agent', f.directory, 'wait', '{}'],
+    {
+      env: launcherEnv(f),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  t.after(() => child.kill('SIGKILL'));
+  let stdout = '';
+  child.stdout.on('data', chunk => (stdout += chunk));
+  const finished = new Promise(done => child.once('exit', (status, signal) => done({ status, signal })));
+  await until(() => stdout.includes('waiting'), 'the wait to start on the old build');
+  // The update switches to main and tries to retire the old build while the wait is still running.
+  publishCliBuild({
+    installation: f.installation,
+    address: readCliSourceFile(f),
+    head: b,
+    build: main,
+    expectedCurrent: a,
+    migrate: () => {},
+  });
+  permitCliRetirement(f.installation);
+  assert.deepEqual(pruneCliBuilds(f.installation), [], 'the running wait holds its build');
+  writeFileSync(flag, '');
+  assert.deepEqual(await finished, { status: 0, signal: null });
+  assert.match(stdout, /"status":"terminal","late":"lazy bytes of the old build"/);
+});
 function readCliSourceFile(f) {
   return JSON.parse(readFileSync(join(f.installation, 'source.json'), 'utf8'));
 }

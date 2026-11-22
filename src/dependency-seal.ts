@@ -30,11 +30,14 @@ function unseal(path: string): void {
 
 /** Delete an install, sealed or not. A failed plain delete is retried after unsealing. */
 export function removeInstall(path: string): void {
+  // A child still writing into the folder fails the first pass with ENOTEMPTY (a preflight lost
+  // ~30 min to it, Issue 203c1ce5): Node retries those with a growing delay before this gives up.
+  const retry = { recursive: true, force: true, maxRetries: 20, retryDelay: 100 } as const;
   try {
-    rmSync(path, { recursive: true, force: true });
+    rmSync(path, retry);
   } catch (error) {
     if (!['EACCES', 'EPERM', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
     unseal(path);
-    rmSync(path, { recursive: true, force: true });
+    rmSync(path, retry);
   }
 }

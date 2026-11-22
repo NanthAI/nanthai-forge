@@ -37,7 +37,15 @@ export function operationWait(root: string, parameters: Record<string, unknown>)
  * command reaches its time limit (Claude Code's default is 1,800 s, under the wake budget): the
  * work goes on, so that stop is an ordinary IN_PROGRESS (exit 3) whose note names the cause and the
  * same command, not a cancel. SIGINT is a person interrupting: exit 130 as before. No reads. */
-export function interruptedWait(signal: 'SIGINT' | 'SIGTERM' | undefined) {
+export function interruptedWait(signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP' | undefined) {
+  // SIGHUP: the terminal or parent shell closed (a harness tearing down its background shell).
+  // The work goes on; a silent signal death would read as a finished wait.
+  if (signal === 'SIGHUP')
+    return {
+      exitCode: 3,
+      reason: 'stopped' as const,
+      note: `Stopped by SIGHUP: the shell or terminal that ran this wait closed; the work goes on. Run the same command again.`,
+    };
   if (signal !== 'SIGTERM') return { exitCode: 130, reason: 'cancelled' as const };
   return {
     exitCode: 3,

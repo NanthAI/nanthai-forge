@@ -25,6 +25,7 @@ import {
   parseVerbForm,
 } from './agent-verbs.js';
 import { parseWaitBudget } from './agent-operation-wait.js';
+import { armWaitExitGuard, settleWaitExit } from './wait-exit-guard.js';
 import { recordTurnWait } from './agent-turn-work.js';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -156,12 +157,16 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
       .then(module => module.captureCliAnalytics(address, command, outcome))
       .catch(() => undefined);
   };
+  // A wait never ends silently or with exit 0 while the work is unfinished (Issue 203c1ce5).
+  if (options.process && args[1] === 'wait') armWaitExitGuard([options.operator ? 'x' : 'agent', ...args]);
   const result = await runAgentCli(args, options, notices, effective).catch(async caught => {
+    settleWaitExit();
     const error = fileRetry(caught, effective.inputs);
     if (effective.analytics) await capture({ error });
     throw error;
   });
   if (effective.analytics) await capture({ reply: result });
+  settleWaitExit(result);
   for (const notice of notices) process.stderr.write(notice);
   const pending = (
     result as

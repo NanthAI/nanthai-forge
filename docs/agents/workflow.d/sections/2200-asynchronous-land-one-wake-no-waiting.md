@@ -17,8 +17,12 @@ recovery. A note or a newly recorded exact-conflict notice to your Lane also end
 (`IN_PROGRESS`, reason `message`); read the notice and run the same command again. A shorter
 background limit (Claude Code's default is 1,800 s) stops the wait with SIGTERM; it then returns
 `IN_PROGRESS`, reason `stopped`, exit 3, with a note and the same command, and the landing goes on.
-Run that command again with the longer timeout. Do not run `status` or `wait` in
-between. Then:
+A closed shell (SIGHUP) does the same. A wait never exits 0 with unfinished work: an exit before its
+reply (a drained event loop, a stray exit) prints `nforge wait ended before the work settled` with the
+command to run again and exits non-zero, and a reply that says unfinished exits 3. An exit
+that is not a terminal landing receipt is never "landed": exit 3 or `IN_PROGRESS` means run the same
+command again; exit 2 (a failed landing, `SYNC_REQUIRED`) follows its printed recovery. Run that command again with the longer
+timeout. Do not run `status` or `wait` in between. Then:
 
 - If ending your turn ends your task (a delegated builder or sub-agent run), block on
   that background command with your harness's wait tool (for example T3 Code's
