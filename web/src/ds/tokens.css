@@ -10,7 +10,7 @@
 [data-ds] {
   /* surfaces: depth is a surface step and a seam, never a shadow */
   --bg: #0b0e13; --surface: #11151c; --surface-2: #161b24; --surface-3: #1c2230; --hover: #1a202b;
-  --line: #222a36; --line-strong: #2e3746; --key-edge: #3a4558; --rail-off: #2a3240;
+  --line: #222a36; --line-strong: #2e3746; --key-edge: #3a4558; --rail-off: #2a3240; --rail-left: #6f7a8a;
   --text: #e8ecf2; --text-2: #a3adbb; --text-3: #828d9d;
 
   /* brand: one orange action per view, the Needs-you count, the mark, Forge's measured series */
@@ -88,7 +88,7 @@
 
 [data-ds][data-theme="light"], [data-theme="light"] [data-ds] {
   --bg: #f4f6f9; --surface: #ffffff; --surface-2: #f8f9fb; --surface-3: #eef1f5; --hover: #f1f4f8;
-  --line: #e3e7ed; --line-strong: #cfd6df; --key-edge: #b9c2ce; --rail-off: #dde3ea;
+  --line: #e3e7ed; --line-strong: #cfd6df; --key-edge: #b9c2ce; --rail-off: #dde3ea; --rail-left: #7b8696;
   --text: #141a24; --text-2: #4f5b6b; --text-3: #606c7c;
   --accent: #b43a11; --accent-bg: #fff0e9; --focus: #b43a11; --series: #d4501c; --act: #d4501c;
   --active: #1a64c2; --active-bg: #e8f1fd; --waiting: #8a5800; --waiting-bg: #fff4dc;
@@ -103,7 +103,7 @@
 @media (prefers-color-scheme: light) {
   :root:not([data-theme])[data-ds], :root:not([data-theme]) [data-ds] {
     --bg: #f4f6f9; --surface: #ffffff; --surface-2: #f8f9fb; --surface-3: #eef1f5; --hover: #f1f4f8;
-    --line: #e3e7ed; --line-strong: #cfd6df; --key-edge: #b9c2ce; --rail-off: #dde3ea;
+    --line: #e3e7ed; --line-strong: #cfd6df; --key-edge: #b9c2ce; --rail-off: #dde3ea; --rail-left: #7b8696;
     --text: #141a24; --text-2: #4f5b6b; --text-3: #606c7c;
     --accent: #b43a11; --accent-bg: #fff0e9; --focus: #b43a11; --series: #d4501c; --act: #d4501c;
     --active: #1a64c2; --active-bg: #e8f1fd; --waiting: #8a5800; --waiting-bg: #fff4dc;

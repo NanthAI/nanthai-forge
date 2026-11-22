@@ -41,14 +41,15 @@
   .stats-readout { min-height: calc(var(--t-meta) * var(--lh-body)); padding: var(--s-2) var(--gut) var(--s-3); margin: 0; color: var(--text-2); font-size: var(--t-meta); font-variant-numeric: tabular-nums; }
   .stats-readout b { color: var(--text); font-weight: var(--w-strong); }
   /* Where work waited: each stop's name and value beside the split bar, in the bar's order, then the total. */
-  .split i.q { background: var(--text-3); }
-  .split i.c { background: var(--text); }
-  .split i.l { background: var(--text-2); }
+  /* The stops' live-line colours: In queue waiting, Checking active, Landing passed (DESIGN.md rule 12). */
+  .split i.q { background: var(--waiting); }
+  .split i.c { background: var(--active); }
+  .split i.l { background: var(--passed); }
   .stats-stops { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); list-style: none; margin: 0; padding: 6px var(--gut) var(--s-3); color: var(--text-2); font-size: var(--t-meta); }
   .stats-stops i { display: inline-block; width: 12px; height: 12px; margin-right: 7px; vertical-align: -2px; }
-  .stats-stops i.q { background: var(--text-3); }
-  .stats-stops i.c { background: var(--text); }
-  .stats-stops i.l { background: var(--text-2); }
+  .stats-stops i.q { background: var(--waiting); }
+  .stats-stops i.c { background: var(--active); }
+  .stats-stops i.l { background: var(--passed); }
   .stats-stops b { color: var(--text); font-family: var(--font-mono); font-weight: var(--w-strong); font-variant-numeric: tabular-nums; margin-left: 4px; }
   .stats-stops .sum { margin-left: auto; }
   /* By agent: four fixed buckets, a count on each bar and its landings under its name. */

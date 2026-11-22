@@ -12,6 +12,7 @@ colors:
   line-strong: "#2e3746"
   key-edge: "#3a4558"
   rail-off: "#2a3240"
+  rail-left: "#6f7a8a"
   text: "#e8ecf2"
   text-2: "#a3adbb"
   text-3: "#828d9d"
@@ -57,6 +58,7 @@ colors:
   light-line-strong: "#cfd6df"
   light-key-edge: "#b9c2ce"
   light-rail-off: "#dde3ea"
+  light-rail-left: "#7b8696"
   light-text: "#141a24"
   light-text-2: "#4f5b6b"
   light-text-3: "#606c7c"
@@ -183,7 +185,7 @@ Interactive components (menus, dialogs and sheets, the palette, reorderable list
 ## Colors
 
 ### Surfaces and text
-`--bg` the page behind regions and quiet regions · `--surface` regions, top bar, rail · `--surface-2` controls at rest, menus, command output · `--surface-3` the current nav item, counts, a pressed segment · `--line` the seam · `--line-strong` control edges · `--key-edge` the lower edge of a key · `--rail-off` the unreached part of a yardstick · `--text`, `--text-2`, `--text-3` three levels of ink. Depth is a surface step and a seam; `--shadow` exists only on things that float.
+`--bg` the page behind regions and quiet regions · `--surface` regions, top bar, rail · `--surface-2` controls at rest, menus, command output · `--surface-3` the current nav item, counts, a pressed segment · `--line` the seam · `--line-strong` control edges · `--key-edge` the lower edge of a key · `--rail-off` the unreached part of a yardstick · `--rail-left` the not-yet-started ticks of a roll-up (3:1 or more against the surface in both themes) · `--text`, `--text-2`, `--text-3` three levels of ink. Depth is a surface step and a seam; `--shadow` exists only on things that float.
 
 ### Brand
 - **`--brand`** is the F mark, the one primary action in a view, the Needs-you count, the edge of the current nav item, the drop line while moving a region or a row, and Forge's own measured series in a chart.
@@ -433,7 +435,7 @@ Each is a component or class in `web/src/ds/`; the class names below are what th
 ### Charts and yardsticks
 10. **Number, yardstick or chart?** One value: the number with its unit and what it is compared to. A position or an amount against a limit: a yardstick. Two to about thirty values of one kind: vertical bars, value on top, zero at the bottom, one scale. Parts of one total: one split bar. Many passes of one thing: a run strip, failures taller. Where two things touch: the overlap view. *Use* "286 of 300" over an amount stick. *Not* a pie, a gauge, a dual axis, a rounded progress bar, bars on their side, or a line through fewer than about twenty points.
 11. **Which yardstick for an amount.** One value against a limit, in a row or the rail: the amount stick. The month against the plan, once per page at full width, with named stops and the estimate hatched: the pool. Used, expected (lower bound hatched, upper bound dashed) and a limit on one line: the range stick. A limit across vertical bars: one dashed line, named in the legend. How far apart two copies are: the two ends. Who waits on whom: a line with two ends. Progress of a set of things: the roll-up, one tick per thing, never a percentage.
-12. **Colour in a chart.** Forge's measured figure is the series colour. An estimate is hatched grey; its upper bound is a dashed outline. Everything else is ink, the current one in full ink. Every chart prints its values, has a legend when there are two series, and offers the same figures as a table.
+12. **Colour in a chart.** Forge's measured figure is the series colour. An estimate is hatched grey; its upper bound is a dashed outline. Everything else is ink, the current one in full ink. A part-of-whole bar of the landing stops uses the stops' live-line colours (In queue waiting, Checking active, Landing passed), so a colour means the same stop everywhere. Every chart prints its values, has a legend when there are two series, and offers the same figures as a table.
 13. **A timeline** is a list, newest first, clock time first in mono, with a notch across it for a version or a day. A drawn horizontal timeline is used only for the five stops of one Lane.
 
 ### Status and state
@@ -486,7 +488,7 @@ Pointed at or focused, a reference row returns to full ink and its state word to
 41. **One first stop per screen.** What waits on the reader comes first in the reading order (top of the left column, first on a phone) and is the only thing with the act edge, one rule from the band's label to its last row. Its count is the orange count, the same number as Needs you in the top bar. Nothing waiting: no edge anywhere, and the page sentence says so. *Use* one edge for the whole group. *Not* an edge per region, a tinted block, a second orange thing beside it, or an edge on something the reader cannot act on.
 42. **One mark per kind.** Lane: a dot at the end of a rule. Item: a ring. Check: three shards. Session: a hollow square. Person: a solid square. A row about one of them starts with its mark; a region that lists one kind carries the mark once before its title. Marks are ink; colour stays with state. A thing that is none of the five has no mark. *Not* a hue per kind, a tag, or a mark as the only way to tell.
 43. **The fold.** A deep section may be one line: title, count, one sentence that is its answer, the turn mark. It opens in place and stays as the person left it, per person and per page. A new account lands with deep sections folded; the first stop is never folded and nothing that waits on the reader is ever inside a fold. A request asked ahead is one line that opens in place to the whole decision. An empty section's line says so. *Use* "While you were away · 14 landed, main did not break". *Not* a tour, a coach mark, a "show more" that leaves the page, a summary that repeats the title, or a line that explains what the section is for.
-44. **Where the project stands.** Needs me, Lanes, Plan and the public project page carry one line under the page sentence (the standing line): a roll-up with one tick per Item and three figures, Done, In progress, Left, each with its state glyph, one more fact and a link to where that work lives. In the app the figures are Items, with landings and Lanes as the one more fact; on the public page they are landings this week, open Lanes and open Items. No percentage. It is watch weight and reads second. *Use* it once per page, in the same place. *Not* a dashboard row of cards, or a different summary on each screen.
+44. **Where the project stands.** Needs me, Lanes, Plan and the public project page carry one line under the page sentence (the standing line): a roll-up with one tick per Item and three figures, Done, In progress, Left, each with its state glyph, one more fact and a link to where that work lives. In the app the figures are Items, with landings and Lanes as the one more fact; on the public page they are landings this week, open Lanes and open Items. No percentage. Left ticks use `--rail-left`, at least 3:1 against the surface in both themes, so they never read as empty. It is watch weight and reads second. *Use* it once per page, in the same place. *Not* a dashboard row of cards, or a different summary on each screen.
 45. **Order follows weight.** Inside a region: act, then watch, then reference. A list a person ordered by hand keeps its order; rows carry their weight in place. The page sentence is the answer and at most one more clause.
 46. **Detail is never removed to calm a page.** It is given a lower weight or folded, and stays one press away, in place.
 

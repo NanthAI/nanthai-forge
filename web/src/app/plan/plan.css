@@ -32,7 +32,7 @@
   .plan .roll i.proposed, .plan .plan-bp i.proposed { background: transparent; box-shadow: inset 0 0 0 1px var(--text-3); }
   .plan .roll i.gone, .plan .plan-bp i.gone { background: var(--text-3); }
   .plan .plan-bp { white-space: nowrap; }
-  .plan .plan-bp i { display: inline-block; width: 8px; height: 8px; margin-inline-end: 4px; border-radius: 1px; background: var(--rail-off); }
+  .plan .plan-bp i { display: inline-block; width: 8px; height: 8px; margin-inline-end: 4px; border-radius: 1px; background: var(--rail-left); }
   .plan .plan-bp i.ok { background: var(--passed); }
   .plan .plan-bp i.run { background: var(--active); }
   .plan .plan-bcompact { display: none; }
