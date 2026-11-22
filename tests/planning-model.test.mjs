@@ -118,6 +118,52 @@ test('next is the first Planned Item with no owner, no Lane and no open dependen
   assert.equal(nextItem([row('done', { status: 'closed' })]).next, null);
 });
 
+test('live direct sub-items block a Planned parent and an eligible sub-item can be Next in hand order', () => {
+  const parent = row('parent');
+  const fallback = row('fallback', { position: 1 });
+  const child = row('child', { parentId: parent.id, position: 2, order: 'a' });
+  const sibling = row('sibling', { parentId: parent.id, position: 3, order: 'b' });
+  const { next, skipped } = nextItem([fallback, sibling, parent, child]);
+  assert.equal(next.id, child.id);
+  assert.deepEqual(skipped, [{ id: parent.id, title: parent.title, reason: 'blocked', blockedBy: child.id }]);
+
+  for (const status of ['proposed', 'in-progress']) {
+    const result = nextItem([parent, fallback, { ...child, status }]);
+    assert.equal(result.next.id, fallback.id, status);
+    assert.equal(result.skipped[0].blockedBy, child.id, status);
+  }
+});
+
+test('Next ignores settled sub-items, missing parents and self-parent links in legacy rows', () => {
+  const parent = row('legacy-parent');
+  const settled = ['closed', 'abandoned', 'archived', 'deleted'].map((status, index) =>
+    row(status, { status, parentId: parent.id, position: index + 1 }),
+  );
+  const grandchild = row('grandchild', { parentId: settled[0].id, position: 5 });
+  assert.deepEqual(nextItem([grandchild, ...settled, parent]), { next: parent, skipped: [] });
+  for (const parentId of ['missing', parent.id]) {
+    const legacy = { ...parent, parentId };
+    assert.deepEqual(nextItem([legacy]), { next: legacy, skipped: [] });
+  }
+});
+
+test('a sub-item must satisfy its own dependencies and a parent keeps its explicit dependency reason', () => {
+  const blocker = row('dependency', { status: 'proposed', position: 3 });
+  const relations = [{ kind: 'depends-on', id: blocker.id }];
+  const parent = row('parent', { relations });
+  const child = row('child', { parentId: parent.id, relations, position: 1 });
+  const fallback = row('fallback', { position: 2 });
+  const { next, skipped } = nextItem([parent, child, fallback, blocker]);
+  assert.equal(next.id, fallback.id);
+  assert.deepEqual(
+    skipped.map(item => [item.id, item.reason, item.blockedBy]),
+    [
+      [parent.id, 'blocked', blocker.id],
+      [child.id, 'blocked', blocker.id],
+    ],
+  );
+});
+
 test('progress counts one tick per Item; Done-when counts come from task lines', () => {
   assert.deepEqual(
     progress(

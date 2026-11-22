@@ -160,6 +160,28 @@ test('the plan read lists live work and counts settled Items of live Initiatives
   assert(matches({ title: 'Stream parser: split UTF-8', id: 'abcd1234' }, 'utf-8 stream'));
 });
 
+test('the Plan names an eligible sub-item as Next even when the list filters it out', () => {
+  const parent = item({ title: 'Ship the parser' }, 0);
+  const later = item({ title: 'Update the guide' }, 1);
+  const child = item({ parentId: parent.id, title: 'Check split bytes' }, 2);
+  const read = { rows: JSON.stringify([parent, later, child]), more: false, settled: [], canEdit: true };
+  const view = planView(read);
+  assert.deepEqual(
+    view.groups[0].lines.map(line => [line.row.title, line.next]),
+    [
+      [parent.title, false],
+      [child.title, true],
+      [later.title, false],
+    ],
+  );
+  const filtered = planView(read, parent.title);
+  assert.deepEqual(
+    filtered.groups[0].lines.map(line => line.row.id),
+    [parent.id],
+  );
+  assert.equal(planSentence(filtered).bold, 'The next free Item is Check split bytes.');
+});
+
 test('a move takes one rank strictly between its new sibling neighbours', () => {
   const row = (id, position, extra = {}) => ({
     id,

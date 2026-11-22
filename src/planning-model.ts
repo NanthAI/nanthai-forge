@@ -199,19 +199,27 @@ export function planOrder(rows: readonly PlanRow[]) {
 
 export type SkipReason = 'owned' | 'in-lane' | 'blocked';
 /**
- * "Next" is derived, never stored: the first Planned Item in plan order with no owner, no Lane and no open
- * dependency. Earlier Planned Items are returned with the reason each was skipped. A dependency missing from `rows`
- * is not open (rows hold every live Item; anything else is done, abandoned or gone).
+ * "Next" is the first Planned Item in plan order with no owner, Lane, live dependency or live direct sub-item.
+ * Earlier Planned Items are returned with the reason each was skipped. Only Items in the loaded rows can block Next.
  */
 export function nextItem(rows: readonly PlanRow[], limitSkipped = 10) {
-  const open = new Set(rows.filter(row => row.kind === 'issue' && isLive(row)).map(row => row.id));
+  const open = new Set<string>();
+  const firstLiveChild = new Map<string, PlanRow>();
+  for (const row of rows) {
+    if (row.kind !== 'issue' || !isLive(row)) continue;
+    open.add(row.id);
+    if (!row.parentId || row.parentId === row.id) continue;
+    const first = firstLiveChild.get(row.parentId);
+    if (!first || byRank(row, first) < 0) firstLiveChild.set(row.parentId, row);
+  }
   const skipped: { id: string; title: string; reason: SkipReason; blockedBy?: string }[] = [];
   for (const { rows: group } of planOrder(rows))
     for (const { row } of group) {
       if (row.status !== 'open') continue;
-      const blockedBy = row.relations?.find(
+      const dependency = row.relations?.find(
         relation => relation.kind === 'depends-on' && relation.id !== row.id && open.has(relation.id),
-      )?.id;
+      );
+      const blockedBy = dependency?.id ?? firstLiveChild.get(row.id)?.id;
       const reason: SkipReason | null = row.owner
         ? 'owned'
         : row.inLane

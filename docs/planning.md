@@ -203,8 +203,9 @@ shown (the web Plan's group headers and the Initiatives overview).
 
 ## Next
 
-The web Plan derives "Next" from the current view. It selects the first Planned Item in plan order with no owner,
-no Lane and no open `depends-on` dependency.
+The web Plan derives "Next" from the loaded Plan rows. It selects the first Planned Item in plan order with no owner,
+Lane, live `depends-on` dependency or live direct sub-item. A Proposed, Planned or In progress sub-item keeps its
+parent out of Next. A Planned sub-item can itself be Next if it meets the same criteria.
 To choose the next Item with the CLI, [read the ordered active Plan](guides/plan.md#find-the-work) and
 check eligibility before starting.
 
