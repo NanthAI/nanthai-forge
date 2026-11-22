@@ -70,6 +70,4 @@ export function checkFailureDetail(
   return 'No failing test file or job step was reported; open the check run log.';
 }
 
-/** The exact next step after a failed check of this Lane's change. */
-export const CHECK_FAILED_NEXT =
-  'Fix it in this Lane, save, then run land --save again; do not abandon or re-create the Lane.';
+export { CHECK_FAILED_NEXT } from './client-error-text.js';

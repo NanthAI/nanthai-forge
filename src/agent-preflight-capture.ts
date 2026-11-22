@@ -67,6 +67,15 @@ function wrapperRunning(pid: number) {
   const text = state.stdout.trim();
   return text !== '' && !text.startsWith('Z');
 }
+/** The exit status the wrapper recorded, or null while it has recorded none. */
+function readStatus(file: string) {
+  try {
+    const text = readFileSync(file, 'utf8').trim();
+    return /^\d+$/.test(text) ? Number(text) : null;
+  } catch {
+    return null;
+  }
+}
 /** Signal every process left in a group this preflight started; a group already gone is fine. */
 function signalGroup(pgid: number, signal: NodeJS.Signals) {
   try {
@@ -126,25 +135,24 @@ function spawnStreaming(
   try {
     for (;;) {
       drain();
-      try {
-        const text = readFileSync(statusFile, 'utf8').trim();
-        if (/^\d+$/.test(text)) {
-          status = Number(text);
-          break;
-        }
-      } catch {
-        /* Still running. */
-      }
+      status = readStatus(statusFile);
+      if (status !== null) break;
       const now = Date.now();
       // No status and no wrapper (killed from outside): stop waiting instead of holding the slot.
       if (now - checked > LIVENESS_MS) {
         checked = now;
         if (!wrapperRunning(pgid)) {
+          // The wrapper writes its status and then exits: one that ended since the read above is not gone.
+          status = readStatus(statusFile);
+          if (status !== null) break;
           gone = true;
           break;
         }
       }
       if (timeout && !signalled && now - started > timeout) {
+        // A command that finished while this loop was away is not timed out.
+        status = readStatus(statusFile);
+        if (status !== null) break;
         signalled = now;
         signalGroup(pgid, 'SIGTERM');
       } else if (signalled && now - signalled > KILL_AFTER_MS) break;

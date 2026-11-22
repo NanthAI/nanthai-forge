@@ -5,15 +5,18 @@
 // Every wait here is on a socket event: the processes under test hold a connection to this test.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import childProcess, { spawn } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { once } from 'node:events';
-import { readdirSync } from 'node:fs';
+import { readdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { finishGates } from '../dist/agent-default-gates.js';
 import { readPreflightReceipt } from '../dist/agent-preflight.js';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
+import { spawnCaptured } from '../dist/agent-preflight-capture.js';
 
 /** A server the processes under test connect to; `closed()` settles when the first one goes away. */
 async function holder(t) {
@@ -139,3 +142,46 @@ spawnCaptured(process.execPath, ['-e', "require('node:net').connect(${hold.port}
   // Nor does the capture folder nobody is left to read (forge-preflight-err-*).
   assert.deepEqual(readdirSync(tmp), []);
 });
+
+test(
+  'Item 168e4ed8: a command that ends between the status poll and the liveness check keeps its exit status',
+  { skip: process.platform === 'win32' && 'no wrapper process on Windows' },
+  t => {
+    // Incident: tests/agent-inline-preflight.test.mjs failed a hosted check once (expected
+    // PREFLIGHT_BUDGET_EXCEEDED, got PREFLIGHT_REQUIRED). Its mocked clock made the 10 s liveness check
+    // run on every poll; a wrapper that had just written its status and exited (a zombie this blocked
+    // loop cannot reap) read as gone, and the passing command reported no status.
+    const tmp = temporaryDirectory(t, 'liveness-race-');
+    const gate = join(tmp, 'release');
+    const realSpawnSync = childProcess.spawnSync;
+    let checks = 0;
+    t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
+      if (command !== '/bin/ps') return realSpawnSync(command, args, options);
+      checks++;
+      // The command is released and the wrapper ends, status written, before the liveness answer.
+      writeFileSync(gate, 'go');
+      for (let attempt = 0; attempt < 5_000; attempt++) {
+        const state = realSpawnSync(command, args, options);
+        if (String(state.stdout).trim().startsWith('Z')) return state;
+      }
+      throw new Error('the wrapper never ended');
+    });
+    syncBuiltinESMExports();
+    t.after(() => {
+      childProcess.spawnSync = realSpawnSync;
+      syncBuiltinESMExports();
+    });
+    const fixed = Date.parse('2026-01-01T00:00:00.000Z');
+    let reads = 0;
+    t.mock.method(Date, 'now', () => fixed + 11_000 * reads++);
+    const run = spawnCaptured(
+      process.execPath,
+      ['-e', 'const fs = require("node:fs"); while (!fs.existsSync(process.argv[1]));', gate],
+      { cwd: tmp },
+      false,
+    );
+    assert(checks > 0, 'the liveness check ran');
+    assert.equal(run.status, 0);
+    assert.equal(run.errorCode, null);
+  },
+);

@@ -43,3 +43,7 @@ export function scrubText(value: string, max: number): string {
   for (const [pattern, replacement] of secretPatterns) text = text.replace(pattern, replacement);
   return clip(text, max);
 }
+
+/** The exact next step after a failed check of this Lane's change. */
+export const CHECK_FAILED_NEXT =
+  'Fix it in this Lane, save, then run land --save again; do not abandon or re-create the Lane. If it fails without your change too: land --save with "retry":true,"reason":"flake" (or main-moved, infra, other).';

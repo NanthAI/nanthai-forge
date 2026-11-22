@@ -327,10 +327,14 @@ test('incident a1a8505b: a timed-out first quick group stops new groups and repl
     },
   });
   files['quick-runner.mjs'] = `
-    import { appendFileSync, existsSync } from 'node:fs';
+    import { appendFileSync, existsSync, renameSync, writeFileSync } from 'node:fs';
     const log = '.forge/quick-starts';
     const first = !existsSync(log);
-    appendFileSync(log, JSON.stringify(process.argv.slice(2)) + '\\n');
+    const line = JSON.stringify(process.argv.slice(2)) + '\\n';
+    // The test's clock jumps when the log appears: it must appear with its line, never empty (the timeout
+    // would kill this runner between the file's creation and its first write).
+    if (first) { writeFileSync(log + '.tmp', line); renameSync(log + '.tmp', log); }
+    else appendFileSync(log, line);
     if (first) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0); // test-signal: allow this synthetic runner blocks until the quick timeout kills it under the injected clock
   `;
   const s = await fixture(t, 'require', undefined, files);

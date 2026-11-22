@@ -3,7 +3,7 @@ import { proofLine, type proofSummarySchema } from './landing-proof.js';
 import type { z } from 'zod';
 import { checkTerminal, checkUnsuccessful } from './check-run-state.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
-import { scrubText } from './client-error-text.js';
+import { CHECK_FAILED_NEXT, scrubText } from './client-error-text.js';
 import { shellQuote } from './shell-quote.js';
 import { failedErrorChars, failedErrors } from './check-file-summary.js';
 import { retryableFinishSource } from './hosted-agent-finish-result.js';
@@ -15,6 +15,15 @@ import type { CheckTime } from './hosted-check.js';
 import type { LandingStall } from './landing-stall.js';
 
 /** The self-review step a passed preflight names before land (593fc2d7): what will land, by path then hunk. */
+/** The failure line is cut at 900 characters; a failed check's next step ends the message and is kept whole. */
+const clipKeepingNext = (message: string) => {
+  const flat = message.replace(/\s+/g, ' ');
+  if (flat.length <= 900) return flat;
+  return flat.endsWith(CHECK_FAILED_NEXT)
+    ? `${flat.slice(0, 900 - CHECK_FAILED_NEXT.length - 2)}… ${CHECK_FAILED_NEXT}`
+    : flat.slice(0, 900);
+};
+
 export function selfReviewLine(root: string) {
   return `preflight: before land, review what will land: nforge agent ${shellQuote(root)} diff '{"summary":true}' (changed paths), diff '{}' (hunks against the Lane's base)`;
 }
@@ -199,7 +208,7 @@ function classifyLand(
   ) {
     failed = true;
     lines.push(
-      `FAILED${error ? ` ${error.code}: ${(recovery ? error.message.split(' Run nforge agent ')[0]! : error.message).replace(/\s+/g, ' ').slice(0, 900)}` : ''}`,
+      `FAILED${error ? ` ${error.code}: ${clipKeepingNext(recovery ? error.message.split(' Run nforge agent ')[0]! : error.message)}` : ''}`,
     );
   }
   if (result.phase === 'conflict') {

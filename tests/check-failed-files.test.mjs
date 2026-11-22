@@ -116,3 +116,22 @@ test('a bounded summary keeps its omitted count in compact receipts and names th
   assert.deepEqual(slim.result.submission.testFiles.omitted, testFiles.omitted);
   assert.match(landSummary(slim).at(-1), /; run details:/);
 });
+
+test('Item 168e4ed8: a failed check read on a replayed land names the retry form for a failure that is not the change', () => {
+  // Incident: a hosted check failed on a test file the Lane did not touch; the reply said only "fix it
+  // in this Lane", and the agent could not tell that land --save with retry and a reason was the way on.
+  const { response } = landing(1);
+  const [first] = landSummary(response);
+  assert.match(first, /^FAILED CHECK_FAILED: /);
+  assert.match(first, /"retry":true,"reason":"flake"/);
+  assert.match(first, /land --save again/, 'the fix-in-Lane path stays the first answer');
+});
+
+test('Item 168e4ed8: a long failure detail is cut before the next step, never through it', () => {
+  const { response } = landing(30);
+  const [first] = landSummary(response);
+  assert.match(first, /^FAILED CHECK_FAILED: /);
+  assert(first.length <= 'FAILED CHECK_FAILED: '.length + 900);
+  assert.match(first, /"retry":true,"reason":"flake".*\)\.$/);
+  assert.match(first, /land --save again/);
+});
