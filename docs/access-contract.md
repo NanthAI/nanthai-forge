@@ -119,6 +119,12 @@ can later be approved as a new device. The key on a lost device cannot be erased
 remotely. An old bearer or redirected Git sign-in generation cannot regain
 access when a later login succeeds.
 
+Stable device revoke receipts bind the credential and requested action. An
+omitted action means sign-out. The owning account or its original CLI device can
+retry the operation after sign-out or key removal without changing a later sign-in.
+Legacy receipts match the action recorded in their result. Reusing the operation
+ID with a different action returns `AUTH_OPERATION_CHANGED`.
+
 The existing credential read supplies settings to ordinary authorization.
 Current project membership still decides the person's rights; a device only
 narrows projects and source writes. Trusted nested source operations check the

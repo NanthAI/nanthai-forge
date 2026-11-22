@@ -58,30 +58,46 @@ export const revoke = revocationMutation({
       .withIndex('by_credentialId', q => q.eq('credentialId', args.credentialId))
       .unique();
     invariant(user && row?.owner === user.subject, 'AUTH_REQUIRED', 'Select your own device credential.');
+    const fromDevice = isDeviceIdentity(user);
     invariant(
-      !isDeviceIdentity(user) || user.forgeCredential === row.credentialId,
+      !fromDevice || user.forgeCredential === row.credentialId,
       'AUTH_SCOPE_DENIED',
       'A CLI device can revoke itself.',
     );
     const action = args.action ?? 'signout';
-    const receipt = row.deviceKey
-      ? await deviceOperation(ctx, row.owner, args.operationId, { credentialId: row.credentialId })
-      : null;
+    const { credentialId } = row;
+    // Removal clears the key but retains the approval timestamp and its receipt history.
+    const receipt =
+      row.deviceKey || row.deviceApprovedAt !== undefined
+        ? await deviceOperation(
+            ctx,
+            row.owner,
+            args.operationId,
+            { credentialId, action },
+            {
+              request: { credentialId },
+              matchesResult: result => result.ended === action,
+            },
+          )
+        : null;
     if (receipt?.result) return null;
+    const keyRemoved = row.removed && !row.deviceKey;
+    // Preserve the no-op reply without letting a removed CLI sign-in create a receipt.
+    if (receipt && keyRemoved && fromDevice) return null;
     invariant(
-      !row.deviceKey || !isDeviceIdentity(user) || currentCredential(row, user.subject, user.forgeSignIn),
+      !row.deviceKey || !fromDevice || currentCredential(row, user.subject, user.forgeSignIn),
       'AUTH_REVOKED',
       'This device sign-in ended. Retry the original sign-out operation or sign in again.',
     );
     const keep = keepsDeviceSettings(action);
-    await ctx.db.patch(row._id, {
-      revoked: true,
-      ...(!keep
-        ? { removed: true, name: '', settings: undefined, deviceKey: undefined, deviceCode: undefined }
-        : {}),
-    });
-    if (receipt)
-      await finishDeviceOperation(ctx, receipt, args.operationId, row.credentialId, { ended: action });
+    if (!receipt || !keyRemoved)
+      await ctx.db.patch(row._id, {
+        revoked: true,
+        ...(!keep
+          ? { removed: true, name: '', settings: undefined, deviceKey: undefined, deviceCode: undefined }
+          : {}),
+      });
+    if (receipt) await finishDeviceOperation(ctx, receipt, args.operationId, credentialId, { ended: action });
     return null;
   },
 });
