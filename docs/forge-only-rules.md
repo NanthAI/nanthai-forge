@@ -72,9 +72,11 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `scripts/check-browser-runtime.mjs` | `package-json-config` | 1 | the standard executor resolves Forge's installed Playwright from the Candidate package context before browser fixtures run | their own configured check command; this probe is not run |
 | `src/hosted-actions-job-plan.ts` | `npm-lockfile` | 2 | reads the exact Playwright version and names a missing pin only for a standard-check browser job | their own declared toolchains and check command |
 | `src/hosted-actions-job-run.ts` | `npm-lockfile` | 1 | the standard-check browser shard's one setup retry installs the same pinned Playwright version when the cache is missing | their own declared toolchains and check command; no retry runs |
-| `scripts/test-import-graph.mjs` | `forge-folders` | 4 | Forge's import graph: its folders, Convex names and loaders | the generic JS/TS import graph |
-| `scripts/test-import-graph.mjs` | `tests-folder` | 4 | Forge's import graph: test-to-test edges in `tests/` | the generic JS/TS import graph |
+| `scripts/test-import-graph.mjs` | `forge-folders` | 3 | Forge's import graph resolves its source domains and Convex names | the generic JS/TS import graph |
+| `scripts/test-import-graph.mjs` | `tests-folder` | 1 | Forge's import graph limits edges to a test file to other test files | the generic JS/TS import graph |
 | `scripts/test-import-graph.mjs` | `npm-lockfile` | 4 | Forge's import graph: external packages from its npm lockfile | declared dependencies of every manifest |
+| `scripts/test-import-facts.mjs` | `forge-folders` | 2 | Forge's selector extracts unresolved path facts for its own source domains | the generic JS/TS import graph |
+| `scripts/test-import-loaders.mjs` | `forge-folders` | 1 | Forge's selector extracts domains from its computed loader calls | the generic JS/TS import graph |
 | `scripts/test-directory-path.mjs` | `forge-folders` | 2 | Forge's selector: directory reads in its tests and scripts | the generic JS/TS import graph |
 | `scripts/check-path-scopes.mjs` | `docs-folder` | 1 | Forge's own repository path-scope check treats `docs/` as documentation | not run |
 | `scripts/check-path-scopes.mjs` | `js-extension` | 1 | Forge's own JSON asset readers are JS/TS modules; unknown or unobserved data stays full | each project's own test runner and generic import graph |
@@ -88,7 +90,8 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `scripts/test-directory-path.mjs` | `package-json-config` | 1 | Forge's selector reads its own package manifest | the generic JS/TS import graph |
 | `scripts/test-impact.mjs` | `js-extension` | 2 | Forge's selector names modules and test files by JS/TS extension | the project runner and the generic import graph |
 | `scripts/test-impact.mjs` | `package-json-config` | 2 | Forge's selector treats its own manifest as global | the project runner and the generic import graph |
-| `scripts/test-import-graph.mjs` | `build-folders` | 3 | Forge's import graph resolves its built `dist/` to `src/` | the generic JS/TS import graph |
+| `scripts/test-import-facts.mjs` | `build-folders` | 2 | Forge's selector recognizes literals and templates that name its build folders | the generic JS/TS import graph |
+| `scripts/test-import-loaders.mjs` | `build-folders` | 1 | Forge's selector records its build folder as a computed loader domain | the generic JS/TS import graph |
 | `scripts/test-name-watchers.mjs` | `js-extension` | 1 | Forge's selector: JS/TS modules a test names | named tests by module stem (`runnerSelection`) |
 | `scripts/test-tiebreak.mjs` | `js-extension` | 1 | Forge's preflight ranking strips JS/TS extensions from test names | changed, named and imported tests in that order |
 | `src/explicit-test-runner.ts` | `tests-folder` | 1 | an explicit test list for Forge's standard check names `tests/*.test.mjs` files | their runner's test files (`resolveTestRunner`) |

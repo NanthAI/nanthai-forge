@@ -687,6 +687,11 @@ Each tier answers a different question. None depends on a particular CI provider
    conservative loader coverage; an unsupported form never proves an empty match.
    No import edge reaches such a test, so before this a new literal in a scanned
    file could fail only the landing check.
+   Preflight reuses raw import and symbol facts by parser version, path and verified
+   source hash. The local cache lives alongside the project's Forge checkout.
+   Each invocation resolves imports and loaders against its current source inventory,
+   package manifest and lockfile. Missing pins or unreadable cache entries use the
+   source parser. The Actions planner shares raw facts within its trusted process.
 2. **Pre-queue Lane check (project runner, any CI): the complete consumer set,
    off the builder's machine.** It runs the project's configured check on the
    project's runner. Forge's `verify` selects either the full suite or every

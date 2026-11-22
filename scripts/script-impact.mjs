@@ -43,12 +43,14 @@ export function packageScriptGraph(files, edge) {
   }
   let error;
   const reference = (text, importer, command = false) => {
-    for (const path of scriptReferences(text)) {
-      if (files.has(path)) edge(path, importer);
-      else if (command) error = `Unresolved script reference ${path} in ${importer}`;
-    }
+    if (text.includes('scripts/'))
+      for (const path of scriptReferences(text)) {
+        if (files.has(path)) edge(path, importer);
+        else if (command) error = `Unresolved script reference ${path} in ${importer}`;
+      }
     // Runtime wrappers commonly pass the command name as its own literal argument.
     if (Object.hasOwn(scripts, text)) edge(commandNode(text), importer);
+    if (!command && !text.includes('npm')) return;
     let packageRuns = 0;
     for (const match of text.matchAll(
       /\bnpm(?:x)?\s+(?:--?[\w-]+\s+)*(?:run(?:-script)?\s+(?:--?[\w-]+\s+)*['"]?([\w:.-]+)|(test|start|stop|restart))\b/g,

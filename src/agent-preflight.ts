@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { durableReplace } from './state/durability.js';
 import { clientCacheRoot, retainedRootSibling } from './root-paths.js';
+import { pinImportFacts } from '../scripts/test-import-cache.mjs';
 import {
   existsSync,
   mkdirSync,
@@ -1101,6 +1102,13 @@ function planTests(
     const learnedForPaths = learnedTests(root, changed.paths, undefined, test =>
       runnerTestPath(resolved.runner, test),
     );
+    const saved = context && savedInventory(context.files, files);
+    if (context && saved)
+      pinImportFacts(
+        files,
+        new Map(context.files.map(file => [file.path, file.blob])),
+        join(retainedRootSibling(root, '.forge-client'), 'agent', 'preflight', 'selector-facts'),
+      );
     const selection = selectPreflightTests({
       files,
       paths: changed.paths,
@@ -1155,7 +1163,6 @@ function planTests(
     let reusedTests: string[] = [];
     let delta: string[] | undefined;
     let reusedFrom: z.infer<typeof reusedFromSchema> | undefined;
-    const saved = context && savedInventory(context.files, files);
     if (context && !saved) {
       // Sparse/mismatched local bytes cannot prove that an unseen consumer is independent.
       // Preserve local execution, put the complete manifest test inventory on the runner.

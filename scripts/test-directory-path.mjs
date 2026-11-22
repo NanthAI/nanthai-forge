@@ -8,17 +8,11 @@ import ts from 'typescript';
 // and unrelated calls as directory reads. Exported path values still escape.
 export function directoryDependency(literal, ast, requireComparison = false, readers, rootListings) {
   const { identifiers, functions, initializers, pathFunctions, declarations } = directoryBindings(ast);
-  const scope = name => {
-    let parent = name.parent;
-    if (ts.isFunctionDeclaration(parent)) parent = parent.parent;
-    while (parent && !ts.isSourceFile(parent) && !ts.isBlock(parent) && !ts.isFunctionLike(parent))
-      parent = parent.parent;
-    return parent;
-  };
   const binding = name => {
+    const scopes = declarations.get(name.text);
+    if (!scopes) return undefined;
     for (let parent = name.parent; parent; parent = parent.parent) {
-      const matches = declarations.filter(item => item.text === name.text && scope(item) === parent);
-      if (matches.length) return matches.length === 1 ? matches[0] : null;
+      if (scopes.has(parent)) return scopes.get(parent);
     }
     return undefined;
   };
@@ -228,16 +222,25 @@ function directoryBindings(ast) {
     functions = new Map(),
     initializers = new Map(),
     pathFunctions = new Set(),
-    declarations = [],
+    declarations = new Map(),
     writes = new Set();
+  const record = name => {
+    let scope = name.parent;
+    if (ts.isFunctionDeclaration(scope)) scope = scope.parent;
+    while (scope && !ts.isSourceFile(scope) && !ts.isBlock(scope) && !ts.isFunctionLike(scope))
+      scope = scope.parent;
+    if (!declarations.has(name.text)) declarations.set(name.text, new Map());
+    const scopes = declarations.get(name.text);
+    scopes.set(scope, scopes.has(scope) ? null : name);
+  };
   const declare = (name, initializer) => {
     if (!ts.isIdentifier(name)) return;
-    declarations.push(name);
+    record(name);
     initializers.set(name.text, initializers.has(name.text) ? null : initializer);
   };
   function scan(node) {
-    if (ts.isImportClause(node) && node.name) declarations.push(node.name);
-    if (ts.isImportSpecifier(node) || ts.isNamespaceImport(node)) declarations.push(node.name);
+    if (ts.isImportClause(node) && node.name) record(node.name);
+    if (ts.isImportSpecifier(node) || ts.isNamespaceImport(node)) record(node.name);
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       if (ts.isIdentifier(node.left)) writes.add(node.left.text);
       if (ts.isPropertyAccessExpression(node.left) && ts.isIdentifier(node.left.expression))
@@ -262,8 +265,7 @@ function directoryBindings(ast) {
       if (namespace) for (const method of methods) pathFunctions.add(`${namespace.text}.${method}`);
     }
     if (ts.isVariableDeclaration(node) || ts.isParameter(node)) declare(node.name, node.initializer);
-    if ((ts.isClassDeclaration(node) || ts.isFunctionDeclaration(node)) && node.name)
-      declarations.push(node.name);
+    if ((ts.isClassDeclaration(node) || ts.isFunctionDeclaration(node)) && node.name) record(node.name);
     if (ts.isIdentifier(node)) {
       if (!identifiers.has(node.text)) identifiers.set(node.text, []);
       identifiers.get(node.text).push(node);
@@ -347,18 +349,14 @@ export function shadowsRequire(ast) {
 
 // Tests and scripts that make this repository a workspace: they name its root,
 // or spawn children in the inherited working directory.
-export function repositoryWorkspaceUsers(files) {
-  return new Set(
-    [...files.keys()].filter(path => {
-      if (!/^(?:tests|scripts)\/.+\.[cm]?[jt]sx?$/.test(path)) return false;
-      const text = files.get(path);
-      return (
-        /process\.cwd\(\)|new URL\(\s*['"]\.\.?\/?['"]\s*,\s*import\.meta\.url|import\.meta\.dirname\s*,\s*['"]\.\.\/?['"]/.test(
-          text,
-        ) ||
-        (/\b(?:spawn|spawnSync|execFile|execFileSync|execSync|exec|fork)\s*\(/.test(text) &&
-          !/\bcwd\b/.test(text))
-      );
-    }),
+export function repositoryWorkspaceUser(path, read) {
+  if (!/^(?:tests|scripts)\/.+\.[cm]?[jt]sx?$/.test(path)) return false;
+  const text = read();
+  return (
+    /process\.cwd\(\)|new URL\(\s*['"]\.\.?\/?['"]\s*,\s*import\.meta\.url|import\.meta\.dirname\s*,\s*['"]\.\.\/?['"]/.test(
+      text,
+    ) ||
+    (/\b(?:spawn|spawnSync|execFile|execFileSync|execSync|exec|fork)\s*\(/.test(text) &&
+      !/\bcwd\b/.test(text))
   );
 }

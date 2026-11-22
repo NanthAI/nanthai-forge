@@ -9,6 +9,7 @@ import { standardTestPath } from './intent-test-contract.js';
 import { checkPin } from './hosted-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { guardedSelection, standardSelection } from '../scripts/test-impact.mjs';
+import { pinImportFacts } from '../scripts/test-import-cache.mjs';
 import { queueProofPaths } from '../scripts/core-queue-paths.mjs';
 import { describeShardPlan, timedShards } from '../scripts/test-shards.mjs';
 import { browserSelection, browserGroups, browserShard } from '../scripts/browser-test-policy.mjs';
@@ -134,7 +135,10 @@ export async function prepareActionsJob(
   const inventory = new Map(state.files.map(file => [file.path, file]));
   const paths = changedPaths(base, state);
   const standard = isStandardForgeCheck(run.check);
-  const files = new SourceFiles(new Map(state.files.map(file => [file.path, file.blob])), cache);
+  const blobs = new Map(state.files.map(file => [file.path, file.blob]));
+  const files = new SourceFiles(blobs, cache);
+  // Reuse facts within this trusted planning process. Candidate jobs never supply a disk cache.
+  pinImportFacts(files, blobs);
   const graphCache = {};
   const selected = actionsGateSelection(
     run,

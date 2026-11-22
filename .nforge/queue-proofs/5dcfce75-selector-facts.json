@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "src/hosted-actions-job-plan.ts": "3757e51c0de449aad1af290176f0b2e92c4c40d1b594da4602e1448b2244d64b"
+  },
+  "replay": {
+    "incident": "1018d0f8",
+    "test": "incident 1018d0f8: planning adds only placement evidence with no extra source or Convex requests",
+    "receipt": "34f934a9-df53-4934-915c-56325af2096b"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "01a2017b-2633-7f21-ab0c-5d14956f7447",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "01a2018d-75f4-72d1-9f38-a9e1a6d48952",
+    "receipt": "789a62e5-3d2b-4eef-9867-089a659424b9"
+  }
+}

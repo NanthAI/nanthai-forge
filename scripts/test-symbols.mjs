@@ -133,17 +133,12 @@ const bindingNames = (name, names = []) => {
 };
 const DEFAULT = '*default*';
 
-/** Per module: what each top-level statement declares, every reference to a top-level name (with
- * whether it runs at load), its exports, and its static imports keyed by the resolved module. */
-export function moduleSymbols(ast, resolve) {
+/** Unresolved symbol facts. A specifier can resolve to a different module in the next inventory. */
+export function moduleSymbols(ast) {
   const statements = [],
     exports = new Map(),
-    imports = new Map();
+    imports = [];
   let opaque = false;
-  const importOf = from => {
-    if (!imports.has(from)) imports.set(from, { bindings: [], reexports: [], star: false });
-    return imports.get(from);
-  };
   for (const statement of ast.statements) {
     const declares = [];
     const exported = hasModifier(statement, ts.SyntaxKind.ExportKeyword);
@@ -153,17 +148,17 @@ export function moduleSymbols(ast, resolve) {
       const from =
         !clause?.isTypeOnly &&
         ts.isStringLiteralLike(statement.moduleSpecifier) &&
-        resolve(statement.moduleSpecifier.text);
-      if (from) {
-        const entry = importOf(from);
-        if (clause?.name) entry.bindings.push([clause.name.text, 'default']);
+        statement.moduleSpecifier.text;
+      if (typeof from === 'string') {
+        const bindings = [];
+        if (clause?.name) bindings.push([clause.name.text, 'default']);
         const named = clause?.namedBindings;
-        if (named && ts.isNamespaceImport(named)) entry.bindings.push([named.name.text, '*']);
+        if (named && ts.isNamespaceImport(named)) bindings.push([named.name.text, '*']);
         else if (named)
           for (const item of named.elements)
-            if (!item.isTypeOnly)
-              entry.bindings.push([item.name.text, (item.propertyName ?? item.name).text]);
-        declares.push(...entry.bindings.map(([local]) => local));
+            if (!item.isTypeOnly) bindings.push([item.name.text, (item.propertyName ?? item.name).text]);
+        imports.push({ from, index: statements.length, bindings });
+        declares.push(...bindings.map(([local]) => local));
       }
     } else if (ts.isExportDeclaration(statement)) {
       if (
@@ -171,17 +166,14 @@ export function moduleSymbols(ast, resolve) {
         statement.moduleSpecifier &&
         ts.isStringLiteralLike(statement.moduleSpecifier)
       ) {
-        const from = resolve(statement.moduleSpecifier.text);
-        if (from) {
-          const entry = importOf(from);
-          const clause = statement.exportClause;
-          if (!clause) entry.star = true;
-          else if (ts.isNamespaceExport(clause)) entry.reexports.push(['*', clause.name.text]);
-          else
-            for (const item of clause.elements)
-              if (!item.isTypeOnly)
-                entry.reexports.push([(item.propertyName ?? item.name).text, item.name.text]);
-        }
+        const from = statement.moduleSpecifier.text;
+        const clause = statement.exportClause;
+        const reexports = [];
+        if (clause && ts.isNamespaceExport(clause)) reexports.push(['*', clause.name.text]);
+        else if (clause)
+          for (const item of clause.elements)
+            if (!item.isTypeOnly) reexports.push([(item.propertyName ?? item.name).text, item.name.text]);
+        imports.push({ from, star: !clause, reexports });
       } else if (!statement.isTypeOnly && statement.exportClause && ts.isNamedExports(statement.exportClause))
         for (const item of statement.exportClause.elements)
           if (!item.isTypeOnly) exports.set(item.name.text, (item.propertyName ?? item.name).text);
@@ -224,8 +216,11 @@ export function moduleSymbols(ast, resolve) {
       while (callee && ts.isParenthesizedExpression(callee)) callee = callee.expression;
       if (callee && ts.isIdentifier(callee) && ['eval', 'Function'].includes(callee.text)) opaque = true;
       if (ts.isIdentifier(node) && top.has(node.text) && reference(node)) {
-        if (!refs.has(node.text)) refs.set(node.text, []);
-        refs.get(node.text).push({ statement: index, run });
+        // A load-time read makes the whole module reachable. Otherwise each
+        // statement only needs one entry, even when it reads a binding repeatedly.
+        if (run) refs.set(node.text, null);
+        else if (!refs.has(node.text)) refs.set(node.text, new Set([index]));
+        else refs.get(node.text)?.add(index);
       }
       ts.forEachChild(node, child =>
         inside
@@ -238,6 +233,27 @@ export function moduleSymbols(ast, resolve) {
     visit(statement, false, false);
   });
   return { statements, refs, exports, imports, opaque };
+}
+
+/** Multiple declarations can resolve to the same target. Merge in source order. */
+export function resolveSymbols(facts, resolve) {
+  const statements = facts.statements.slice(),
+    imports = new Map();
+  for (const { from, index, bindings, reexports, star } of facts.imports) {
+    const target = resolve(from);
+    if (index !== undefined) statements[index] = [];
+    if (!target) continue;
+    if (!imports.has(target)) imports.set(target, { bindings: [], reexports: [], star: false });
+    const entry = imports.get(target);
+    if (bindings) {
+      entry.bindings.push(...bindings);
+      statements[index] = entry.bindings.map(([local]) => local);
+    } else {
+      entry.reexports.push(...reexports);
+      entry.star ||= star;
+    }
+  }
+  return { ...facts, statements, imports };
 }
 
 /** A name read, not a declaration, property name or export specifier (exports map those). */
@@ -276,10 +292,9 @@ export function moduleTaint(info, entries) {
   for (const index of entries.statements) taintStatement(index);
   for (const name of entries.locals) if (!locals.has(name)) (locals.add(name), queue.push(name));
   while (queue.length) {
-    for (const ref of info.refs.get(queue.pop()) ?? []) {
-      if (ref.run) return wholeTaint;
-      taintStatement(ref.statement);
-    }
+    const statements = info.refs.get(queue.pop());
+    if (statements === null) return wholeTaint;
+    for (const index of statements ?? []) taintStatement(index);
   }
   const names = new Set(entries.exports);
   for (const [name, local] of info.exports) if (locals.has(local)) names.add(name);

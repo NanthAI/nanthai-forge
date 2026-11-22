@@ -2,97 +2,104 @@
 // Parse repository bytes only: never import or execute the inspected modules.
 import { posix } from 'node:path';
 import { builtinModules } from 'node:module';
-import ts from 'typescript';
 import {
   builtNames,
-  directoryDependency,
   escape,
   packageSelf,
   pathKind,
-  repositoryWorkspaceUsers,
-  shadowsRequire,
+  repositoryWorkspaceUser,
 } from './test-directory-path.mjs';
 import { docsPackager, packageScriptGraph, recursiveJsonReader, scriptPath } from './script-impact.mjs';
-import {
-  byNameDispatch,
-  convexApiBindings,
-  declarationName,
-  functionNameArgument,
-  functionNameLoader,
-  makeReferenceArgument,
-  templateFunctionModules,
-  templateStrings,
-} from './convex-function-names.mjs';
-import { moduleSymbols, siteOf } from './test-symbols.mjs';
-import { recursiveRootListings } from './test-tree-readers.mjs';
+import { byNameDispatch } from './convex-function-names.mjs';
+import { resolveSymbols } from './test-symbols.mjs';
+import { importFacts } from './test-import-cache.mjs';
 
 export function testImportGraph(files, scriptsChanged = [], { typeImports = false } = {}) {
-  const reverse = new Map(),
-    evidence = new Map();
+  const evidence = new Map(),
+    rows = new Map();
+  const emptyStatements = new Set();
+  const wholeSite = { whole: true, statements: emptyStatements };
+  const declarationSite = { whole: false, statements: emptyStatements };
+  const byNameEvidence = { 'function-reference': new Map(), dynamic: new Map() };
   // `byName`: a by-name loader's closure edge (every module named anywhere the test's code can reach).
   // It keeps landing coverage but is weak closeness evidence: preflight never ranks it as direct.
   const edge = (dependency, importer, kind = 'package-command', detail, byName = false) => {
     // A runner naming behavior tests describes coverage, not its implementation.
     // Keep test-to-test imports, but never cycle coverage back into the pipeline.
     if (/^tests\/[^/]+\.test\.mjs$/.test(dependency) && !importer.startsWith('tests/')) return;
-    if (!reverse.has(dependency)) reverse.set(dependency, new Set());
-    if (!evidence.has(dependency)) evidence.set(dependency, new Map());
-    const previous = evidence.get(dependency).get(importer);
+    let row = rows.get(dependency);
+    if (!row) {
+      row = { evidence: new Map(), sites: sites ? new Map() : null };
+      rows.set(dependency, row);
+      evidence.set(dependency, row.evidence);
+      if (sites) sites.set(dependency, row.sites);
+    }
+    const previous = row.evidence.get(importer);
     // A workspace path is the narrowest evidence; dynamic is replaced by specific evidence.
     if (
       !previous ||
       (previous.detail === recursiveJsonReader && kind === 'import') ||
       previous.kind === 'workspace-path' ||
       (previous.kind === 'dynamic' && kind !== 'workspace-path')
-    )
-      evidence
-        .get(dependency)
-        .set(importer, { kind, ...(detail ? { detail } : {}), ...(byName ? { byName: true } : {}) });
-    reverse.get(dependency).add(importer);
+    ) {
+      if (byName) {
+        const cache = byNameEvidence[kind];
+        if (!cache.has(detail)) cache.set(detail, { kind, detail, byName: true });
+        row.evidence.set(importer, cache.get(detail));
+      } else row.evidence.set(importer, detail ? { kind, detail } : { kind });
+    }
     // Where the importer refers to the dependency (test-symbols.mjs). An import or re-export
     // declaration is read from the importer's symbols; an edge made outside a parse is whole.
-    if (!sites) return;
-    if (!sites.has(dependency)) sites.set(dependency, new Map());
-    const into = sites.get(dependency);
-    if (!into.has(importer)) into.set(importer, { whole: false, statements: new Set() });
-    const record = into.get(importer);
-    if (!site || sitePath !== importer) record.whole = true;
-    else if (!moduleSpecifier(site)) {
-      // A widening site makes many edges: classify it once.
-      if (siteAt?.node !== site) siteAt = { node: site, ...siteOf(site) };
-      const at = siteAt;
-      if (at.run || at.statement < 0) record.whole = true;
-      else record.statements.add(at.statement);
-    }
+    if (!row.sites) return;
+    const record = row.sites.get(importer);
+    if (site === false || sitePath !== importer) {
+      if (record?.statements.size) record.whole = true;
+      else if (record !== wholeSite) row.sites.set(importer, wholeSite);
+    } else if (site !== null) {
+      if (record?.statements.size) record.statements.add(site);
+      else row.sites.set(importer, { whole: record?.whole ?? false, statements: new Set([site]) });
+    } else if (!record) row.sites.set(importer, declarationSite);
   };
   // Symbol-level reach is for runtime selection; type-contract graphs keep whole-module edges.
   const symbols = typeImports ? null : new Map(),
     sites = typeImports ? null : new Map();
-  let site = null,
-    sitePath = null,
-    siteAt = null;
+  let site = false,
+    sitePath = null;
   const packageGraph = packageScriptGraph(files, edge);
   if (scriptsChanged.length && packageGraph.error) return { error: packageGraph.error };
   const self = packageSelf(files);
+  const bareResolutions = new Map();
+  const relativeResolutions = new Map();
   function resolve(from, value) {
     if (self && (value === self.name || value.startsWith(`${self.name}/`)))
       value = self.exports.get(`.${value.slice(self.name.length)}`)?.slice(2) ?? value;
-    let path = value.startsWith('.') ? posix.normalize(posix.join(posix.dirname(from), value)) : value;
-    path = path.replace(/^dist\//, 'src/').replace(/^(src\/.+)\.(?:js|d\.ts)$/, '$1.ts');
-    return [
-      path,
-      path.replace(/\.js$/, '.ts'),
-      path.replace(/\.mjs$/, '.mts'),
-      path.replace(/\.cjs$/, '.cts'),
-      path.replace(/\.js$/, '.tsx'),
-      `${path}.ts`,
-      `${path}.tsx`,
-      `${path}.js`,
-      `${path}/index.ts`,
-      `${path}/index.tsx`,
-      ...(typeImports ? [`${path}.d.ts`, `${path}/index.d.ts`] : []),
-    ].find(candidate => files.has(candidate));
+    const directory = value.startsWith('.') ? posix.dirname(from) : null;
+    let cached = bareResolutions;
+    if (directory !== null) {
+      if (!relativeResolutions.has(directory)) relativeResolutions.set(directory, new Map());
+      cached = relativeResolutions.get(directory);
+    }
+    if (!cached.has(value)) {
+      const path = directory !== null ? posix.join(directory, value) : value;
+      cached.set(value, resolvePath(path));
+    }
+    return cached.get(value);
   }
+  function resolvePath(path) {
+    path = path.replace(/^dist\//, 'src/').replace(/^(src\/.+)\.(?:js|d\.ts)$/, '$1.ts');
+    if (files.has(path)) return path;
+    if (path.endsWith('.js')) {
+      const stem = path.slice(0, -3);
+      if (files.has(`${stem}.ts`)) return `${stem}.ts`;
+      if (files.has(`${stem}.tsx`)) return `${stem}.tsx`;
+    } else if (path.endsWith('.mjs') || path.endsWith('.cjs')) {
+      const alternate = `${path.slice(0, -2)}ts`;
+      if (files.has(alternate)) return alternate;
+    }
+    for (const suffix of moduleSuffixes) if (files.has(path + suffix)) return path + suffix;
+  }
+  const moduleSuffixes = ['.ts', '.tsx', '.js', '/index.ts', '/index.tsx'];
+  if (typeImports) moduleSuffixes.push('.d.ts', '/index.d.ts');
   const packages = new Set(builtinModules);
   const packagePaths = [];
   if (files.has('package-lock.json')) {
@@ -115,8 +122,13 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
       return { error: 'Cannot classify locked external imports: package-lock.json' };
     }
   }
-  const external = value =>
-    value.startsWith('node:') || [...packages].some(name => value === name || value.startsWith(`${name}/`));
+  const external = value => {
+    if (value.startsWith('node:') || packages.has(value)) return true;
+    // Check specifier prefixes (including scoped packages and built-in subpaths).
+    for (let slash = value.indexOf('/'); slash >= 0; slash = value.indexOf('/', slash + 1))
+      if (packages.has(value.slice(0, slash))) return true;
+    return false;
+  };
   const installedImport = (from, value) => {
     if (!value.startsWith('.') || !installedPath(value)) return false;
     const path = posix.join(posix.dirname(from), value);
@@ -127,7 +139,6 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
   const jsonFiles = [...files.keys()].filter(
     file => file.endsWith('.json') && domains.some(dir => file.startsWith(dir)),
   );
-  const jsonReaders = new Set(['readdir', 'readdirSync', 'opendir', 'opendirSync', 'glob', 'globSync']);
   const jsonGlobs = new Map();
   const matchingJson = pattern => {
     if (!jsonGlobs.has(pattern)) {
@@ -152,10 +163,11 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
       jsonFolders.get(folder).add(file);
     }
 
-  const definedLoaders = new Map();
+  const raw = importFacts(files, !typeImports);
+  const loaderDefinitions = new Map();
   const definesLoader = home => {
-    if (!definedLoaders.has(home)) definedLoaders.set(home, definedLoaderNames(home, files.get(home) ?? ''));
-    return definedLoaders.get(home);
+    if (!loaderDefinitions.has(home)) loaderDefinitions.set(home, raw.get(home).defines);
+    return loaderDefinitions.get(home);
   };
   const convexModules = [...files.keys()]
     .map(file => file.match(/^convex\/(?!_generated\/)(.+)\.[jt]s$/)?.[1])
@@ -185,537 +197,227 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
     const matches = convexModules.filter(name => name.startsWith(prefix));
     functionReference(path, matches.length ? matches : convexModules, detail, 'dynamic');
   };
-  for (const path of [...files.keys()].sort()) {
-    if (!/\.(?:[cm]?js|[cm]?tsx?)$/.test(path) || (!typeImports && path.endsWith('.d.ts'))) continue;
-    const ast = ts.createSourceFile(path, files.get(path), ts.ScriptTarget.Latest, true);
-    if (ast.parseDiagnostics.length)
-      return { error: `Unparseable ${scriptPath(path) ? 'script' : 'module'}: ${path}` };
-    const rootListings = recursiveRootListings(ast);
-    symbols?.set(
-      path,
-      moduleSymbols(ast, value => resolve(path, value)),
-    );
-    const loaders = shadowsRequire(ast)
-      ? ['moduleUrl', 'moduleSource']
-      : ['require', 'moduleUrl', 'moduleSource'];
-    // The generated API is anyApi itself; its own changes widen to the namespace.
-    // moduleUrl/moduleSource imported from a helper resolve a relative path from the helper's folder
-    // (`new URL(path, import.meta.url)` there), not the caller's: tests/sub/x.mjs passing
-    // '../convex/a.ts' to the tests/ helper loads convex/a.ts. A locally defined one keeps this file.
-    // The helper must define the loader itself; a re-export, a namespace member we cannot follow or a
-    // local declaration shadowing the import has an unknown home, so its paths widen.
-    const loaderHome = new Map();
-    for (const statement of ast.statements) {
-      const bindings = ts.isImportDeclaration(statement) ? statement.importClause?.namedBindings : null;
-      const home = bindings && ts.isNamedImports(bindings) && resolve(path, statement.moduleSpecifier.text);
-      for (const item of home ? bindings.elements : [])
-        if (loaderNames.includes((item.propertyName ?? item.name).text))
-          loaderHome.set(
-            item.name.text,
-            definesLoader(home).has((item.propertyName ?? item.name).text) ? home : unknownHome,
-          );
+  const changedScripts = new Set(scriptsChanged.map(item => item.path));
+  const paths = [...files.keys()];
+  const domainPaths = new Map(domains.map(domain => [domain, []]));
+  const sourcePaths = [];
+  for (const path of paths) {
+    const domain = domains.find(prefix => path.startsWith(prefix));
+    if (domain) {
+      domainPaths.get(domain).push(path);
+      sourcePaths.push(path);
     }
-    if (loaderHome.size) for (const name of redeclared(ast, loaderHome)) loaderHome.set(name, unknownHome);
-    const loaderFrom = call => {
-      if (!ts.isCallExpression(call)) return null;
-      const callee = call.expression;
-      if (ts.isIdentifier(callee)) return loaderHome.get(callee.text) ?? null;
-      if (!ts.isPropertyAccessExpression(callee) || !loaderNames.includes(callee.name.text)) return null;
-      // `(await import('./convex-module.mjs')).moduleUrl(...)`: that module's own loader.
-      let object = callee.expression;
-      while (ts.isParenthesizedExpression(object) || ts.isAwaitExpression(object)) object = object.expression;
-      const specifier =
-        ts.isCallExpression(object) &&
-        object.expression.kind === ts.SyntaxKind.ImportKeyword &&
-        ts.isStringLiteralLike(object.arguments[0])
-          ? resolve(path, object.arguments[0].text)
-          : null;
-      return specifier && definesLoader(specifier).has(callee.name.text) ? specifier : unknownHome;
+  }
+  const built = new Map();
+  const namesAt = path => {
+    if (!built.has(path)) built.set(path, builtNames(path));
+    return built.get(path);
+  };
+  const workspaceUsers = new Set();
+  for (const path of paths.slice().sort()) {
+    if (!/\.(?:[cm]?js|[cm]?tsx?)$/.test(path) || (!typeImports && path.endsWith('.d.ts'))) {
+      if (repositoryWorkspaceUser(path, () => files.get(path))) workspaceUsers.add(path);
+      continue;
+    }
+    const facts = raw.get(path);
+    raw.release(path);
+    loaderDefinitions.set(path, facts.defines);
+    if (facts.invalid) {
+      raw.flush();
+      return { error: `Unparseable ${scriptPath(path) ? 'script' : 'module'}: ${path}` };
+    }
+    if (facts.workspaceUser) workspaceUsers.add(path);
+    const isScriptOrTest = /^(?:tests|scripts)\//.test(path);
+    site = false;
+    sitePath = path;
+    const resolved = new Map();
+    const resolveHere = specifier => {
+      if (!resolved.has(specifier)) resolved.set(specifier, resolve(path, specifier));
+      return resolved.get(specifier);
     };
-    const apiNames = path.startsWith('convex/_generated/')
-      ? new Set()
-      : convexApiBindings(ast, value => resolve(path, value));
-    // A template widens only to files its literal skeleton can name, as itself or as a
-    // folder: `src/file-${i}.ts` names no source file, `../dist/${name}.js` every module.
-    const widen = (prefix, detail = 'Computed module path', kind = 'dynamic') => {
-      if (prefix?.suffix) {
-        for (const candidate of files.keys())
-          if (
-            builtNames(candidate).some(name => name === prefix.suffix || name.endsWith(`/${prefix.suffix}`))
-          )
+    if (symbols) symbols.set(path, resolveSymbols(facts.symbols, resolveHere));
+    if (typeImports)
+      for (const specifier of facts.types) {
+        const target = resolveHere(specifier);
+        if (target) edge(target, path, 'import');
+      }
+    const loaderHome = new Map();
+    for (const [local, from, imported] of facts.loader.imports) {
+      const home = resolveHere(from);
+      if (home)
+        loaderHome.set(
+          local,
+          !facts.loader.shadows.has(local) && definesLoader(home).has(imported) ? home : unknownHome,
+        );
+    }
+    const homeOf = reference => {
+      if (!reference) return null;
+      if (typeof reference === 'string') return loaderHome.get(reference) ?? null;
+      const [specifier, name] = reference;
+      const home = specifier !== null && resolveHere(specifier);
+      return home && definesLoader(home).has(name) ? home : unknownHome;
+    };
+    const apiNames = new Set(
+      facts.api
+        .filter(
+          ([, from, anyApi]) =>
+            anyApi || /(?:^|\/)convex\/_generated\/api\.[jt]s$/.test(resolveHere(from) ?? ''),
+        )
+        .map(([name]) => name),
+    );
+    const widen = (prefix, detail = 'Computed module path', kind = 'dynamic', from = path) => {
+      if (prefix.suffix) {
+        for (const candidate of paths)
+          if (namesAt(candidate).some(name => name === prefix.suffix || name.endsWith(`/${prefix.suffix}`)))
             edge(candidate, path, kind, detail);
         return;
       }
-      // A template inside an imported loader's argument resolves from that loader's folder.
-      const from = prefix?.from ?? path;
-      const template = typeof prefix === 'string' ? null : (prefix.template ?? prefix);
-      if (template) prefix = template.head.text;
-      const normalized = prefix.startsWith('.')
-        ? posix.normalize(posix.join(posix.dirname(from), prefix))
-        : prefix;
+      const template = Array.isArray(prefix) ? prefix : null;
+      const head = template ? template[0] : prefix;
+      const normalized = head.startsWith('.') ? posix.normalize(posix.join(posix.dirname(from), head)) : head;
       const domain = normalized.startsWith('dist/')
         ? 'src/'
-        : normalized.startsWith('scripts/')
-          ? 'scripts/'
-          : domains.find(dir => normalized.startsWith(dir));
+        : domains.find(dir => normalized.startsWith(dir));
       const pattern =
         template && domain
-          ? new RegExp(
-              `^${[normalized, ...template.templateSpans.map(span => span.literal.text)].map(escape).join('.*')}(?:/.*)?$`,
-              's',
-            )
+          ? new RegExp(`^${[normalized, ...template.slice(1)].map(escape).join('.*')}(?:/.*)?$`, 's')
           : null;
-      for (const candidate of files.keys())
-        if (
-          (domain ? candidate.startsWith(domain) : domains.some(dir => candidate.startsWith(dir))) &&
-          (!pattern || builtNames(candidate).some(name => pattern.test(name)))
-        )
+      for (const candidate of domain ? domainPaths.get(domain) : sourcePaths)
+        if (!pattern || namesAt(candidate).some(name => pattern.test(name)))
           edge(candidate, path, kind, detail);
     };
-    let loaded = [];
-    // Type-aware browser selection also follows imports nested inside type aliases
-    // and interfaces. The runtime walk deliberately prunes those subtrees.
-    function visitTypeEdges(node) {
-      const value =
-        (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier
-          ? node.moduleSpecifier
-          : ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)
-            ? node.argument.literal
-            : undefined;
-      if (value && ts.isStringLiteralLike(value)) {
-        const target = resolve(path, value.text);
-        if (target) edge(target, path, 'import');
-      }
-      ts.forEachChild(node, visitTypeEdges);
-    }
-    function visit(node) {
-      site = node;
-      sitePath = path;
-      if (ts.isImportDeclaration(node) && node.importClause?.isTypeOnly) return;
-      if (ts.isExportDeclaration(node) && node.isTypeOnly) return;
-      if (ts.isImportEqualsDeclaration(node) && node.isTypeOnly) return;
-      if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) return;
-      // Type literals can look like source paths or computed runtime loaders. They
-      // disappear during compilation and belong to the always-on static checks.
-      // A class's `extends` is ExpressionWithTypeArguments too: its expression
-      // executes, so retain it (and only discard its nested type arguments).
-      if (ts.isTypeNode(node) && !ts.isExpressionWithTypeArguments(node)) return;
-      if (rootListings.has(node)) {
-        const suffix = rootListings.get(node);
-        for (const target of jsonFiles)
-          if (!suffix || target.endsWith(suffix)) edge(target, path, 'runtime-path', recursiveJsonReader);
-      }
-      if (ts.isIdentifier(node) && apiNames.has(node.text) && !declarationName(node)) {
-        if (!ts.isPropertyAccessExpression(node.parent) && !ts.isElementAccessExpression(node.parent))
-          widenFunctions(path, '', `Whole Convex API object: ${node.text}`);
-        else {
-          let chain = node;
-          const segments = [];
-          while (
-            (ts.isPropertyAccessExpression(chain.parent) || ts.isElementAccessExpression(chain.parent)) &&
-            chain.parent.expression === chain
-          ) {
-            chain = chain.parent;
-            const segment = ts.isPropertyAccessExpression(chain)
-              ? chain.name.text
-              : ts.isStringLiteralLike(chain.argumentExpression)
-                ? chain.argumentExpression.text
-                : null;
-            if (segment === null) break;
-            segments.push(segment);
-          }
-          // api.a.b.fn: the longest prefix naming a module file is the module.
-          const length = segments.findLastIndex((_, i) => convexModule(segments.slice(0, i + 1).join('/')));
-          if (length >= 0)
-            functionReference(path, [segments.slice(0, length + 1).join('/')], 'Convex API reference');
+    const loadStack = [];
+    for (const fact of facts.events) {
+      site = fact.site;
+      switch (fact.kind) {
+        case 'root':
+          for (const target of jsonFiles)
+            if (!fact.suffix || target.endsWith(fact.suffix))
+              edge(target, path, 'runtime-path', recursiveJsonReader);
+          break;
+        case 'api': {
+          const { name, segments } = fact;
+          if (!apiNames.has(name)) break;
+          if (!segments) widenFunctions(path, '', `Whole Convex API object: ${name}`);
           else {
-            const folder = segments.join('/');
-            widenFunctions(path, folder ? `${folder}/` : '', `Unresolved Convex API reference: ${folder}`);
+            const length = segments.findLastIndex((_, i) => convexModule(segments.slice(0, i + 1).join('/')));
+            if (length >= 0)
+              functionReference(path, [segments.slice(0, length + 1).join('/')], 'Convex API reference');
+            else {
+              const folder = segments.join('/');
+              widenFunctions(path, folder ? `${folder}/` : '', `Unresolved Convex API reference: ${folder}`);
+            }
           }
+          break;
         }
+        case 'literal': {
+          const { value, name } = fact;
+          if (fact.json) {
+            const locations = [
+              posix.normalize(value),
+              ...(!fact.parameter && !posix.isAbsolute(value)
+                ? [posix.join(posix.dirname(path), value)]
+                : []),
+            ];
+            for (const location of locations)
+              for (const target of jsonFolders.get(location.replace(/\/$/, '')) ?? [])
+                edge(target, path, 'runtime-path', 'JSON directory reader');
+            if (fact.glob)
+              for (const pattern of locations)
+                for (const target of matchingJson(pattern))
+                  edge(target, path, 'runtime-path', 'Matching JSON glob');
+          }
+          if (name && convexModule(name)) functionReference(path, [name], 'Convex function name');
+          else if (fact.unknownName) widenFunctions(path, '', `Unknown Convex function name: ${value}`);
+          if (fact.importing || fact.runtime) {
+            const from = homeOf(fact.home);
+            const target =
+              from === unknownHome ? undefined : from ? resolve(from, value) : resolveHere(value);
+            if (fact.specifier && !target && !external(value) && !installedImport(path, value))
+              uncertain = `Unresolved import ${value} in ${path}`;
+            if (target) edge(target, path, fact.importing ? 'import' : pathKind(path, value));
+          }
+          if (fact.runtime && isScriptOrTest) packageGraph.reference?.(value, path);
+          if (fact.widen) widen(fact.widen);
+          break;
+        }
+        case 'template': {
+          const { names, literal, enumerated, parts } = fact;
+          if (names) {
+            const matches = convexModules.filter(name => names.pattern.test(name));
+            if (names.exact) functionReference(path, matches, 'Convex function name from literal values');
+            else if (matches.length)
+              functionReference(path, matches, `Computed Convex function name: ${fact.source}`, 'dynamic');
+            else if (fact.reference) widenFunctions(path, '', `Unknown Convex function name: ${fact.source}`);
+          }
+          const file = literal && resolveHere(literal);
+          if (file && file.endsWith(literal.replace(/^(?:\.\.?\/)+/, '')))
+            edge(file, path, pathKind(path, literal));
+          else if (fact.nameLoader) nameLoaders.add(path);
+          else if (parts) {
+            const targets = enumerated?.map(resolveHere);
+            if (targets?.every(Boolean))
+              for (const [i, target] of targets.entries()) edge(target, path, pathKind(path, enumerated[i]));
+            else
+              widen(
+                parts,
+                undefined,
+                pathKind(path, parts[0]) === 'workspace-path' ? 'workspace-path' : 'dynamic',
+              );
+          }
+          break;
+        }
+        case 'glob':
+          for (const target of paths)
+            if (fact.matchers.some(matcher => matcher.test(target))) edge(target, path, 'import');
+          break;
+        case 'load': {
+          const loaded = [];
+          if (!fact.unprovenGlob) loadStack.push(loaded);
+          for (const { values, homes, knownBare, template, prefixes, suffix } of fact.alternatives) {
+            const home = homes?.map(homeOf).find(Boolean);
+            const known = value => {
+              if (home === unknownHome) return false;
+              const target = home ? resolve(home, value) : resolveHere(value);
+              if (target) loaded.push(target);
+              return target || external(value) || installedPath(value);
+            };
+            if (values?.every(known) || knownBare) continue;
+            if (suffix) widen({ suffix }, `Computed loader path ending: ${suffix}`);
+            else {
+              if (changedScripts.has(path) && !docsPackager(path))
+                uncertain = `Unknown module loading in changed script: ${path}`;
+              for (const prefix of template ? [home === unknownHome ? '' : template] : prefixes) {
+                const domain = Array.isArray(prefix) ? prefix[0] : prefix;
+                widen(
+                  prefix,
+                  Array.isArray(prefix) || prefix
+                    ? `Computed loader domain: ${domain}`
+                    : 'Unknown module loader',
+                  'dynamic',
+                  Array.isArray(prefix) && home ? home : path,
+                );
+              }
+            }
+          }
+          break;
+        }
+        case 'loaded':
+          for (const target of loadStack.pop()) edge(target, path, 'import');
+          break;
       }
-      if (ts.isStringLiteralLike(node)) {
-        const value = node.text;
-        // Folder arguments can be repo- or module-relative. Keep JSON readers
-        // even when another importer already resolves the changed data file.
-        // A default argument has caller-relative cwd, not this module's folder.
-        const locations = [
-          posix.normalize(value),
-          ...(!ts.isParameter(node.parent) && !posix.isAbsolute(value)
-            ? [posix.join(posix.dirname(path), value)]
-            : []),
-        ];
-        const folders = locations.map(value => jsonFolders.get(value.replace(/\/$/, ''))).filter(Boolean);
-        const glob = /[*?{[(]/.test(value);
-        if (
-          value &&
-          (folders.length || glob) &&
-          directoryDependency(node, ast, false, jsonReaders, rootListings)
-        ) {
-          for (const folder of folders)
-            for (const target of folder) edge(target, path, 'runtime-path', 'JSON directory reader');
-          if (glob)
-            for (const pattern of locations)
-              for (const target of matchingJson(pattern))
-                edge(target, path, 'runtime-path', 'Matching JSON glob');
-        }
-        const name = value.match(/^([A-Za-z_][\w-]*(?:\/[A-Za-z_][\w-]*)*):[A-Za-z_]\w*$/)?.[1];
-        // A well-formed name of a module absent from this inventory loads no module.
-        if (name && convexModule(name)) functionReference(path, [name], 'Convex function name');
-        else if (makeReferenceArgument(node) && !name)
-          widenFunctions(path, '', `Unknown Convex function name: ${value}`);
-        const from = loaderFrom(node.parent);
-        const target = from === unknownHome ? undefined : resolve(from ?? path, value);
-        if (
-          (ts.isImportDeclaration(node.parent) ||
-            ts.isExportDeclaration(node.parent) ||
-            ts.isExternalModuleReference(node.parent)) &&
-          !target &&
-          !external(value) &&
-          !installedImport(path, value)
-        ) {
-          uncertain = `Unresolved import ${value} in ${path}`;
-        }
-        if (target) {
-          const parent = node.parent;
-          const importing =
-            ts.isImportDeclaration(parent) ||
-            ts.isExportDeclaration(parent) ||
-            ts.isExternalModuleReference(parent) ||
-            (ts.isCallExpression(parent) &&
-              (parent.expression.kind === ts.SyntaxKind.ImportKeyword ||
-                (ts.isIdentifier(parent.expression) && loaders.includes(parent.expression.text))));
-          // A path used only for comparison observes its name, not source bytes.
-          // Reuse the same escape/data-flow proof as directory comparisons.
-          if (importing || directoryDependency(node, ast, true))
-            edge(target, path, importing ? 'import' : pathKind(path, value));
-        }
-        // A script path or command name that is only compared (`path === 'scripts/x.mjs'`) runs nothing.
-        if (
-          (path.startsWith('tests/') || path.startsWith('scripts/')) &&
-          directoryDependency(node, ast, true)
-        )
-          packageGraph.reference?.(value, path);
-        // Built web bundles, directory enumeration and generated CLI module paths.
-        if (
-          /^(?:\.\.\/)?web-dist(?:\/|$)/.test(value) &&
-          (path.startsWith('tests/') || path.startsWith('scripts/')) &&
-          directoryDependency(node, ast)
-        )
-          widen('web/src/');
-        if (
-          (path.startsWith('tests/') || path.startsWith('scripts/')) &&
-          ['../dist', 'dist', '../src', '../web/src', 'web/src', '../convex'].includes(
-            value.replace(/^(\.\.\/.+)\/$/, '$1'),
-          ) &&
-          directoryDependency(node, ast)
-        )
-          widen(`${value.replace(/\/$/, '')}/`);
-      }
-      if (ts.isTemplateExpression(node)) {
-        const reference = makeReferenceArgument(node) || functionNameArgument(node);
-        const names = templateFunctionModules(node, ast, reference);
-        const matches = names ? convexModules.filter(name => names.test(name)) : [];
-        // Enumerated names are exact; a wildcard's matches are every module it could name.
-        if (names?.exact) functionReference(path, matches, 'Convex function name from literal values');
-        else if (names && matches.length)
-          functionReference(path, matches, `Computed Convex function name: ${node.getText()}`, 'dynamic');
-        else if (names && reference)
-          widenFunctions(path, '', `Unknown Convex function name: ${node.getText()}`);
-        const prefix = node.head.text;
-        // `convex/schema.ts:${line}` names one file, not its folder.
-        const literal = prefix.match(/^((?:\.\.\/|\.\/)?[\w./-]+)[^\w./-]/)?.[1];
-        const file = literal && resolve(path, literal);
-        const enumerated = templateStrings(node);
-        if (file && file.endsWith(literal.replace(/^(?:\.\.?\/)+/, '')))
-          edge(file, path, pathKind(path, literal));
-        else if (functionNameLoader(node, path)) nameLoaders.add(path);
-        else if (/^(?:\.\.\/|\.\/)?(?:dist|src|web|convex|netlify|scripts)\//.test(prefix)) {
-          // `../convex/${name}.ts` over a literal list names exactly those files.
-          const targets = enumerated?.map(value => resolve(path, value));
-          if (targets?.every(Boolean))
-            for (const [i, target] of targets.entries()) edge(target, path, pathKind(path, enumerated[i]));
-          // Not a loader call: a computed path names files the way a literal does. In product code a
-          // non-relative one is a path in the user's workspace (`pathKind`), not a load of this
-          // repository (5dcfce75: `dist/${built[1]}.js` in a list of failure-text aliases made every
-          // src file reach the tests of every module that imports it).
-          else
-            widen(
-              node,
-              undefined,
-              pathKind(path, prefix) === 'workspace-path' ? 'workspace-path' : 'dynamic',
-            );
-        }
-      }
-      // A literal Vite glob (`import.meta.glob('./*/route.ts')`) loads exactly the files it matches.
-      const viteGlob =
-        ts.isCallExpression(node) &&
-        ts.isPropertyAccessExpression(node.expression) &&
-        node.expression.name.text === 'glob' &&
-        ts.isMetaProperty(node.expression.expression);
-      const globbed = viteGlob ? literalGlobTargets(path, node.arguments, files) : null;
-      // Vite compiles an eager glob into static imports: it loads with the module wherever it stands
-      // (even inside a function), so its edges are whole. An unproven glob may be eager too.
-      if (viteGlob && (!globbed || eagerGlob(node.arguments[1]))) site = null;
-      if (globbed) {
-        for (const target of globbed) edge(target, path, 'import');
-        return;
-      }
-      // Unknown module loading widens coverage, including wrapper calls such as moduleUrl().
-      if (
-        ts.isCallExpression(node) &&
-        (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-          (ts.isIdentifier(node.expression) && loaders.includes(node.expression.text)) ||
-          (ts.isPropertyAccessExpression(node.expression) &&
-            node.expression.name.text === 'glob' &&
-            ts.isMetaProperty(node.expression.expression)))
-      ) {
-        const home = loaderFrom(node);
-        // Every value the loader is proven to load becomes an edge (below, after the literals' own
-        // edges), so a branch, cast or enumerated template that loadingPrefixes accepts can never be
-        // missing from the graph.
-        const known = (value, from = home) => {
-          if (from === unknownHome) return false;
-          const target = resolve(from ?? path, value);
-          if (target) loaded.push(target);
-          return target || external(value) || installedPath(value);
-        };
-        // Node internals are bare only straight inside require or a dynamic import; a wrapper's argument
-        // (`moduleUrl('internal/x')`) is a name the wrapper turns into a path.
-        const direct =
-          node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-          (ts.isIdentifier(node.expression) && node.expression.text === 'require');
-        const prefixes = viteGlob
-          ? ['']
-          : loadingPrefixes(node.arguments[0], known, loaderFrom, direct ? nodeInternal : null, home);
-        if (prefixes.length) {
-          // Packagers load installed artifacts, not repository sources. A literal ending is bounded.
-          if (
-            prefixes.some(prefix => !prefix.suffix) &&
-            scriptsChanged.some(item => item.path === path) &&
-            !docsPackager(path)
-          )
-            uncertain = `Unknown module loading in changed script: ${path}`;
-          for (const prefix of prefixes)
-            widen(
-              prefix,
-              prefix.suffix
-                ? `Computed loader path ending: ${prefix.suffix}`
-                : typeof prefix !== 'string' || prefix
-                  ? `Computed loader domain: ${typeof prefix === 'string' ? prefix : (prefix.template ?? prefix).head.text}`
-                  : 'Unknown module loader',
-            );
-        }
-      }
-      const proven = loaded;
-      loaded = [];
-      ts.forEachChild(node, visit);
-      // After the children: a literal's own (narrower) evidence kind is recorded first and kept.
-      // The loader call is the site (the children moved it).
-      if (proven.length) ((site = node), (sitePath = path));
-      for (const target of proven) edge(target, path, 'import');
     }
-    // convex-module is a known test loader: its moduleUrl callers contribute literal
-    // edges above; its recursive resolver is represented by transitive source imports.
-    if (typeImports) visitTypeEdges(ast);
-    visit(ast);
-    site = null;
+    site = false;
   }
+  raw.flush();
   if (uncertain) return { error: uncertain };
-  const workspaceUsers = repositoryWorkspaceUsers(files);
   if (scriptsChanged.length && packageGraph.error) return { error: packageGraph.error };
-  byNameDispatch(files, reverse, evidence, edge, named, nameLoaders);
+  byNameDispatch(files, evidence, edge, named, nameLoaders);
+  const reverse = new Map();
+  for (const [dependency, importers] of evidence) reverse.set(dependency, new Set(importers.keys()));
   return { reverse, evidence, packageGraph, workspaceUsers, symbols, sites };
 }
 
-const moduleSpecifier = node =>
-  ts.isStringLiteralLike(node) &&
-  (ts.isImportDeclaration(node.parent) || ts.isExportDeclaration(node.parent)) &&
-  node.parent.moduleSpecifier === node;
-
-const eagerGlob = options =>
-  !!options &&
-  ts.isObjectLiteralExpression(options) &&
-  options.properties.some(
-    item =>
-      ts.isPropertyAssignment(item) &&
-      (ts.isIdentifier(item.name) || ts.isStringLiteralLike(item.name)) &&
-      item.name.text === 'eager' &&
-      item.initializer.kind === ts.SyntaxKind.TrueKeyword,
-  );
-
-// A resolved literal in one branch must never hide an unknown alternative.
-/** Only proven literal Vite forms narrow coverage. Unknown patterns/options use the broad loader. */
-function literalGlobTargets(path, args, files) {
-  const [node, options] = args;
-  let base = posix.dirname(path);
-  if (args.length > 2) return null;
-  if (options) {
-    if (!ts.isObjectLiteralExpression(options)) return null;
-    for (const property of options.properties) {
-      if (!ts.isPropertyAssignment(property)) return null;
-      const name =
-        ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name) ? property.name.text : null;
-      const value = property.initializer;
-      if (name === 'base') {
-        if (!ts.isStringLiteralLike(value) || !/^\.\.?\/[\w./-]*$/.test(value.text)) return null;
-        base = posix.join(posix.dirname(path), value.text);
-      } else if (name === 'eager') {
-        if (![ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword].includes(value.kind)) return null;
-      } else if (name !== 'import' || !ts.isStringLiteralLike(value)) return null;
-    }
-  }
-  const patterns = node && ts.isArrayLiteralExpression(node) ? [...node.elements] : [node];
-  if (!patterns.every(item => item && ts.isStringLiteralLike(item) && /^\.\/[\w./*-]*$/.test(item.text)))
-    return null;
-  // A globstar is recursive only as a complete segment. Other syntax stays conservative.
-  if (patterns.some(item => item.text.split('/').some(part => part.includes('**') && part !== '**')))
-    return null;
-  const matchers = patterns.map(
-    item =>
-      new RegExp(
-        `^${posix
-          .join(base, item.text)
-          .split(/(\*\*\/|\*\*|\*)/)
-          .map(part =>
-            part === '**/' ? '(?:.*/)?' : part === '**' ? '.*' : part === '*' ? '[^/]*' : escape(part),
-          )
-          .join('')}$`,
-      ),
-  );
-  return [...files.keys()].filter(candidate => matchers.some(matcher => matcher.test(candidate)));
-}
-
-const loaderNames = ['moduleUrl', 'moduleSource'];
 const unknownHome = Symbol('unknown loader home');
-/** The loader names a module defines and exports itself (not a re-export or an imported binding). */
-function definedLoaderNames(path, text) {
-  const names = new Set();
-  if (text && loaderNames.some(name => text.includes(name))) {
-    const ast = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
-    const local = new Set();
-    const exported = node => node.modifiers?.some(item => item.kind === ts.SyntaxKind.ExportKeyword);
-    for (const statement of ast.statements) {
-      if (ts.isFunctionDeclaration(statement) && statement.name) {
-        local.add(statement.name.text);
-        if (exported(statement)) names.add(statement.name.text);
-      }
-      if (ts.isVariableStatement(statement))
-        for (const item of statement.declarationList.declarations)
-          if (ts.isIdentifier(item.name)) {
-            local.add(item.name.text);
-            if (exported(statement)) names.add(item.name.text);
-          }
-    }
-    for (const statement of ast.statements)
-      if (ts.isExportDeclaration(statement) && !statement.moduleSpecifier && statement.exportClause)
-        for (const item of ts.isNamedExports(statement.exportClause) ? statement.exportClause.elements : [])
-          if (local.has((item.propertyName ?? item.name).text)) names.add(item.name.text);
-    for (const name of [...names]) if (!loaderNames.includes(name)) names.delete(name);
-  }
-  return names;
-}
-/** Names declared anywhere in a file other than by an import: a local `moduleUrl` may shadow the
- * imported one at some call sites, and scope is not worth proving here, so every call widens. */
-function redeclared(ast, names) {
-  const found = new Set();
-  const visit = node => {
-    if (
-      (ts.isVariableDeclaration(node) ||
-        ts.isParameter(node) ||
-        ts.isBindingElement(node) ||
-        ts.isFunctionDeclaration(node) ||
-        ts.isFunctionExpression(node) ||
-        ts.isClassDeclaration(node) ||
-        ts.isClassExpression(node)) &&
-      node.name &&
-      ts.isIdentifier(node.name) &&
-      names.has(node.name.text)
-    )
-      found.add(node.name.text);
-    ts.forEachChild(node, visit);
-  };
-  visit(ast);
-  return found;
-}
-
 /** A path into an installed package's folder loads no repository source: the lockfile owns it. */
 const installedPath = value => /(?:^|\/)node_modules\//.test(value);
-/** A Node internal given straight to require or a dynamic import loads no repository source (for
- * example 'internal/fs/watchers', only loadable under --expose-internals). Only there: a wrapper's argument
- * (`moduleUrl('file-mode')`) is a name the wrapper turns into a path. Any other unlocked bare
- * specifier may be a local alias (`@local/leaf`), so it still widens. */
-const nodeInternal = value => /^internal\/[\w/-]+$/.test(value);
-
-function loadingPrefixes(node, known, loaderFrom = () => null, bare = null, home = null) {
-  if (!node) return [''];
-  if (ts.isStringLiteralLike(node)) return known(node.text) || bare?.(node.text) ? [] : [''];
-  if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node))
-    return loadingPrefixes(node.expression, known, loaderFrom, bare, home);
-  if (ts.isConditionalExpression(node))
-    return [
-      ...loadingPrefixes(node.whenTrue, known, loaderFrom, bare, home),
-      ...loadingPrefixes(node.whenFalse, known, loaderFrom, bare, home),
-    ];
-  if (ts.isTemplateExpression(node)) {
-    const values = templateStrings(node);
-    // A by-name loader's modules are added from dispatched names (byNameDispatch).
-    if (values?.every(value => known(value)) || functionNameLoader(node, node.getSourceFile().fileName))
-      return [];
-    return home === unknownHome ? [''] : home ? [{ template: node, from: home }] : [node];
-  }
-  if (ts.isPropertyAccessExpression(node) && node.name.text === 'href')
-    return loadingPrefixes(node.expression, known, loaderFrom, null, home);
-  if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
-    const expression = node.expression;
-    const name = ts.isIdentifier(expression)
-      ? expression.text
-      : ts.isPropertyAccessExpression(expression)
-        ? expression.name.text
-        : '';
-    if (['moduleUrl', 'moduleSource', 'URL', 'pathToFileURL', 'fileURLToPath'].includes(name)) {
-      const inner = loaderFrom(node);
-      return loadingPrefixes(
-        node.arguments?.[0],
-        inner ? value => known(value, inner) : known,
-        loaderFrom,
-        null,
-        inner ?? home,
-      );
-    }
-    // createRequire(...).resolve('pkg'), import.meta.resolve('pkg'): a literal specifier.
-    if (
-      name === 'resolve' &&
-      node.arguments?.length === 1 &&
-      ts.isStringLiteralLike(node.arguments[0]) &&
-      known(node.arguments[0].text)
-    )
-      return [];
-    if (['join', 'resolve'].includes(name)) {
-      // `join(dir, 'dist/a.js')` loads a file whose path ends with its trailing literal segments,
-      // whatever `dir` is: those name one module (or none in this repository), never every file.
-      const args = node.arguments ?? [];
-      let tail = args.length;
-      while (tail > 0 && ts.isStringLiteralLike(args[tail - 1])) tail--;
-      const suffix = args
-        .slice(tail)
-        .map(arg => arg.text)
-        .join('/');
-      if (
-        tail > 0 &&
-        /\.(?:[cm]?js|[cm]?tsx?|json)$/.test(suffix) &&
-        !/^\/|[\\:]/.test(suffix) &&
-        suffix.split('/').every(part => part && part !== '.' && part !== '..')
-      )
-        return [{ suffix }];
-      const dirs = (node.arguments ?? [])
-        .filter(ts.isStringLiteralLike)
-        .map(arg => arg.text)
-        .filter(value =>
-          ['dist', 'src', 'web/src', 'convex', 'netlify', 'scripts', '../scripts'].includes(value),
-        );
-      if (dirs.length) return dirs.map(dir => `${dir}/`);
-    }
-  }
-  return [''];
-}

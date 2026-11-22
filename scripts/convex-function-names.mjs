@@ -6,21 +6,20 @@ import ts from 'typescript';
 
 // Local names for the generated Convex API objects (api, internal, components) and
 // convex/server's anyApi. Only these bindings carry function references.
-export function convexApiBindings(ast, resolve) {
-  const names = new Set();
+export function convexApiBindings(ast) {
+  const bindingsByName = [];
   for (const statement of ast.statements) {
     if (!ts.isImportDeclaration(statement) || statement.importClause?.isTypeOnly) continue;
     const from = statement.moduleSpecifier.text;
-    const generated = /(?:^|\/)convex\/_generated\/api\.[jt]s$/.test(resolve(from) ?? '');
     const bindings = statement.importClause?.namedBindings;
-    if (generated && bindings && ts.isNamespaceImport(bindings)) names.add(bindings.name.text);
+    if (bindings && ts.isNamespaceImport(bindings)) bindingsByName.push([bindings.name.text, from, false]);
     for (const specifier of bindings && ts.isNamedImports(bindings) ? bindings.elements : []) {
       if (specifier.isTypeOnly) continue;
       const imported = (specifier.propertyName ?? specifier.name).text;
-      if (generated || (from === 'convex/server' && imported === 'anyApi')) names.add(specifier.name.text);
+      bindingsByName.push([specifier.name.text, from, from === 'convex/server' && imported === 'anyApi']);
     }
   }
-  return names;
+  return bindingsByName;
 }
 // Binding and member names are not reads of the API object; every other use is.
 export const declarationName = node => {
@@ -45,32 +44,41 @@ export const declarationName = node => {
 // whatever reference reaches it, so a test reaching one depends on every module
 // named by any code it runs: imports, loaded and spawned files, and the named
 // modules themselves, transitively. Names in src/ and web/ count here.
-export function byNameDispatch(files, reverse, evidence, edge, named, nameLoaders) {
+export function byNameDispatch(files, evidence, edge, named, nameLoaders) {
   if (!nameLoaders.size) return;
   // Code a process runs: imports, loaders and names everywhere; literal paths only
   // from test code (spawned children, fixtures). A path string in product code is data.
-  const runs = (dependency, importer) => {
-    const kind = evidence.get(dependency).get(importer).kind;
-    return (
-      !dependency.startsWith('package-script:') &&
-      !importer.startsWith('package-script:') &&
-      kind !== 'package-command' &&
-      kind !== 'workspace-path' &&
-      (kind !== 'runtime-path' || importer.startsWith('tests/'))
-    );
+  const runs = (dependency, importer, kind) =>
+    !dependency.startsWith('package-script:') &&
+    !importer.startsWith('package-script:') &&
+    kind !== 'package-command' &&
+    kind !== 'workspace-path' &&
+    (kind !== 'runtime-path' || importer.startsWith('tests/'));
+  // Tests can reach the same broad loader closures. Index paths once so their
+  // repeated breadth-first walks use a shared queue and visitation stamps.
+  const ids = new Map();
+  const paths = [];
+  const id = path => {
+    if (!ids.has(path)) {
+      ids.set(path, paths.length);
+      paths.push(path);
+    }
+    return ids.get(path);
   };
-  const forward = new Map();
-  for (const [dependency, importers] of reverse)
-    for (const importer of importers)
-      if (runs(dependency, importer)) {
-        if (!forward.has(importer)) forward.set(importer, []);
-        forward.get(importer).push(dependency);
+  const forward = [];
+  for (const [dependency, importers] of evidence) {
+    const target = id(dependency);
+    for (const [importer, item] of importers)
+      if (runs(dependency, importer, item.kind)) {
+        const from = id(importer);
+        (forward[from] ??= []).push(target);
       }
+  }
   const reaching = new Set(nameLoaders),
     queue = [...nameLoaders];
   for (let i = 0; i < queue.length; i++)
-    for (const importer of reverse.get(queue[i]) ?? [])
-      if (!reaching.has(importer) && runs(queue[i], importer)) {
+    for (const [importer, item] of evidence.get(queue[i]) ?? [])
+      if (!reaching.has(importer) && runs(queue[i], importer, item.kind)) {
         reaching.add(importer);
         queue.push(importer);
       }
@@ -81,25 +89,50 @@ export function byNameDispatch(files, reverse, evidence, edge, named, nameLoader
       details.set(current, `By-name loader runs Convex functions named in ${current}`);
     return details.get(current);
   };
-  for (const test of [...reaching].filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).sort()) {
-    const seen = new Set([test]),
-      visit = [test],
-      names = new Map();
-    for (let i = 0; i < visit.length; i++) {
+  const tests = [...reaching]
+    .filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path))
+    .sort()
+    .map(id);
+  const namedById = [];
+  for (const [from, references] of named)
+    namedById[id(from)] = [...references].map(([module, item]) => [
+      id(module),
+      item.kind === 'function-reference',
+    ]);
+  const seen = new Uint32Array(paths.length);
+  const visit = new Uint32Array(paths.length);
+  let stamp = 0;
+  for (const test of tests) {
+    stamp++;
+    seen[test] = stamp;
+    visit[0] = test;
+    let end = 1;
+    const names = new Map();
+    for (let i = 0; i < end; i++) {
       const current = visit[i];
-      for (const [module, item] of named.get(current) ?? []) {
-        if (
-          !names.has(module) ||
-          (item.kind === 'function-reference' && names.get(module).kind !== item.kind)
-        )
-          names.set(module, { kind: item.kind, current });
-        if (!seen.has(module)) seen.add(module) && visit.push(module);
+      for (const [module, exact] of namedById[current] ?? []) {
+        const previous = names.get(module);
+        if (!previous || (exact && !previous.exact)) names.set(module, { exact, current });
+        if (seen[module] !== stamp) {
+          seen[module] = stamp;
+          visit[end++] = module;
+        }
       }
-      for (const dependency of forward.get(current) ?? [])
-        if (!seen.has(dependency)) seen.add(dependency) && visit.push(dependency);
+      for (const dependency of forward[current] ?? [])
+        if (seen[dependency] !== stamp) {
+          seen[dependency] = stamp;
+          visit[end++] = dependency;
+        }
     }
     for (const [module, item] of names)
-      if (module !== test && files.has(module)) edge(module, test, item.kind, detail(item.current), true);
+      if (module !== test && files.has(paths[module]))
+        edge(
+          paths[module],
+          paths[test],
+          item.exact ? 'function-reference' : 'dynamic',
+          detail(paths[item.current]),
+          true,
+        );
   }
 }
 // `../convex/${module}.ts` where module is the first part of name.split(':'): the
@@ -152,8 +185,7 @@ export function templateFunctionModules(node, ast, reference) {
           : `(?:${piece.map(escape).join('|')})`,
     )
     .join('');
-  const regex = new RegExp(`^${pattern}$`);
-  return { test: name => regex.test(name), exact };
+  return { pattern: new RegExp(`^${pattern}$`), exact };
 }
 // Every string a template can produce, when each span has literal values (≤ 256).
 export function templateStrings(node) {
