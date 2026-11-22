@@ -32,6 +32,26 @@ export async function resolveProjectId(
   }
   return id;
 }
+/** A project the caller can read, with its current address; null for anything else, so a missing and an unreadable
+ * project look the same. */
+export async function readableProject(
+  ctx: QueryCtx,
+  input: { handle?: string; slug?: string; projectId?: string },
+) {
+  const id = await resolveProjectId(ctx, input);
+  if (!id) return null;
+  const user = await ctx.auth.getUserIdentity();
+  let project;
+  try {
+    project = await accessibleProject(ctx, id, user?.subject ?? '');
+  } catch (error) {
+    if (error instanceof ForgeError && error.code === 'PROJECT_UNAVAILABLE') return null;
+    throw error;
+  }
+  const account = await accountFor(ctx, project.owner);
+  if (!account || !project.slug) return null;
+  return { id, handle: account.handle, slug: project.slug, name: project.name, project };
+}
 export const resolve = query({
   args: { handle: v.optional(v.string()), slug: v.optional(v.string()), projectId: v.optional(v.string()) },
   returns: v.union(
@@ -39,18 +59,7 @@ export const resolve = query({
     v.null(),
   ),
   handler: async (ctx, input) => {
-    const id = await resolveProjectId(ctx, input);
-    if (!id) return null;
-    const user = await ctx.auth.getUserIdentity();
-    let project;
-    try {
-      project = await accessibleProject(ctx, id, user?.subject ?? '');
-    } catch (error) {
-      if (error instanceof ForgeError && error.code === 'PROJECT_UNAVAILABLE') return null;
-      throw error;
-    }
-    const account = await accountFor(ctx, project.owner);
-    if (!account || !project.slug) return null;
-    return { id, handle: account.handle, slug: project.slug, name: project.name };
+    const found = await readableProject(ctx, input);
+    return found && { id: found.id, handle: found.handle, slug: found.slug, name: found.name };
   },
 });

@@ -14,6 +14,7 @@ import { createRoot } from 'react-dom/client';
 import './ui/tokens.css';
 import './ui/components.css';
 import { isAppPath, normalizeAccountPathname } from './app/paths';
+import { oldAddress } from './app/old-address';
 import { applyMotion } from './motion-pref';
 class AppBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -52,7 +53,12 @@ const pathname = normalizeAccountPathname(location.pathname);
 if (pathname !== location.pathname)
   history.replaceState(history.state, '', pathname + location.search + location.hash);
 // The rebuilt app (Item 84125787) serves every address under /-; everything else is the old app until stage C.
-if (isAppPath(pathname)) {
+// An old address the rebuilt app has a place for goes there: a plain path with no read (old-address.ts), an id-only
+// link through the app, which resolves it with one access-checked read (OldAddress.tsx).
+const old = oldAddress(pathname, location.search);
+if (old?.kind === 'go') {
+  location.replace(old.to + location.hash);
+} else if (old || isAppPath(pathname)) {
   root.render(
     <AppBoundary>
       <AppLoader />

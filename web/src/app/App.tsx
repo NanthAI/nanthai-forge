@@ -25,6 +25,7 @@ import { Device } from './Device';
 import { AccountFrame, BareFrame, ProjectFrame, PublicFrame, type FrameControls } from './frames';
 import { needsCount, needsRead } from './needs/count';
 import { Keys, useFrameKeys, type Go } from './keys';
+import { oldAddress, type OldAddress } from './old-address';
 import { hrefFor, isPublicProjectView, parseAppPath, type AppRoute } from './paths';
 import { Head } from './Place';
 import { AccountScreen, PlaceScreen } from './screens';
@@ -34,6 +35,7 @@ import { FirstPasskey, SignIn } from './SignIn';
 import './app.css';
 const Legal = lazy(() => import('./Legal'));
 const ExistingDeleteRequest = lazy(() => import('./requests/ExistingDeleteRequest'));
+const OldAddressPage = lazy(() => import('./OldAddress'));
 const loadingPlace = (
   <p className="quietline" aria-busy="true">
     Loading…
@@ -135,8 +137,12 @@ function Pages() {
   const viewer = useQuery(api.urlAccounts.current, isAuthenticated ? {} : 'skip');
   // Anyone can browse signed out: explore, profiles, a project's front page (owner decision 2026-11-16) and its code
   // and history, read only (Item 4c164732). A private or missing project answers "No public project" alike.
+  // An old id-only address (old-address.ts) is neither: it needs the reader's own access to resolve it.
+  const look = oldAddress(location.pathname, location.search);
+  const resolving = look?.kind === 'look' ? look : null;
   const discovering =
-    route.frame === 'discover' || isPublicProjectView(route, isAuthenticated, search.get('view'));
+    !resolving &&
+    (route.frame === 'discover' || isPublicProjectView(route, isAuthenticated, search.get('view')));
   const needsSignIn =
     !isLoading &&
     !isAuthenticated &&
@@ -194,7 +200,7 @@ function Pages() {
       throw error;
     });
   };
-  return <SignedIn route={route} viewerHandle={viewer?.handle} leave={leave} />;
+  return <SignedIn route={route} resolving={resolving} viewerHandle={viewer?.handle} leave={leave} />;
 }
 
 /** Signed in on the sign-in page: name the account once, then go on (or offer a first passkey after GitHub). */
@@ -233,10 +239,12 @@ function AfterSignIn() {
 
 function SignedIn({
   route,
+  resolving,
   viewerHandle,
   leave,
 }: {
   route: Exclude<AppRoute, { frame: 'public' }>;
+  resolving: Extract<OldAddress, { kind: 'look' }> | null;
   viewerHandle: string | undefined;
   leave: (next?: string) => void;
 }) {
@@ -261,6 +269,15 @@ function SignedIn({
       projectId={projectId}
     />
   );
+  if (resolving)
+    return (
+      <BareFrame controls={controls}>
+        <Suspense fallback={null}>
+          <OldAddressPage look={resolving} />
+        </Suspense>
+        {overlays()}
+      </BareFrame>
+    );
   if (route.frame === 'project') return <ProjectView route={route} controls={controls} overlays={overlays} />;
   if (route.frame === 'account')
     return (

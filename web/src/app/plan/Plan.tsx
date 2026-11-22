@@ -24,7 +24,7 @@ import { planningBatchLimit } from '../../../../src/planning-batch';
 import { useSafePaginatedQuery, useSafeQuery } from '../../safe-query';
 import { usePageCritical } from '../../ui/page-critical';
 import { A } from '../frames';
-import { currentScreenHref, hrefFor } from '../paths';
+import { hrefFor } from '../paths';
 import { Head, crumbsFor } from '../Place';
 import { progressCells, progressOf, type PlanCountsRead } from '../progress';
 import { navigate, useSearch } from '../router';
@@ -1127,8 +1127,7 @@ function SettledPager({
 }
 
 /** An Item from the plan's own read: status, place in its Initiative, owner, done-when and relations, then its
- * comments (their own reads). Versions compare and restore in a sheet; the body opens on the current Item screen
- * until the Item page is rebuilt. */
+ * comments (their own reads). Versions compare and restore in a sheet. */
 function ItemPage({
   route,
   row,
@@ -1174,9 +1173,7 @@ function ItemPage({
   split?: ReactNode;
   toast?: ReactNode;
 }) {
-  const legacy = currentScreenHref(route);
   const workItem = row?.id ?? (row === null ? shelved?.row.id : undefined);
-  const full = legacy && row ? `${legacy}?planningItem=${encodeURIComponent(row.id)}` : legacy;
   const group = row
     ? view?.groups.find(entry => entry.lines.some(line => line.row.id === row.id))
     : undefined;
@@ -1232,11 +1229,6 @@ function ItemPage({
           <Key size="sm" onClick={onSplit}>
             Split into several…
           </Key>
-        ) : null}
-        {full ? (
-          <a className="btn sm" href={full}>
-            Open the full Item
-          </a>
         ) : null}
         {row === null && shelved && onBack ? (
           <Menu

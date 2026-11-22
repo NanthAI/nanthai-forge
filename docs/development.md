@@ -679,6 +679,24 @@ layer out of both first paints.
   account places `/-/account/{projects|billing|people|devices|data}`, public
   pages `/-/signin`, `/-/signin/passkey` and `/-/device`. Until a place is
   rebuilt it links to the screen that serves it today (`currentScreenHref`).
+- Old addresses: `web/src/app/old-address.ts` maps every old address to its new
+  one, built from `paths.ts`, so it holds under any `ROOT`: `/projects`,
+  `/settings`, project `activity`, `intents[/id]`, `planning`, `views`,
+  `decisions`, `settings/{section}` and short `lanes/l-…` ids. A plain path
+  redirects before any screen starts, with no read. A link that names only ids
+  (`/?project=<id>&lane=…`, `decisions/<id>`, `review/<id>`) opens
+  `OldAddress.tsx` in the rebuilt app, which asks `urlLegacy:resolve` once: the
+  server checks access, then answers the current handle and slug plus the Lane
+  or Item the id belongs to (a decision opens its Intent's Item, a review view
+  its first Lane); only people with a role on the project learn those ids, and
+  an Intent that is not an Issue's own (a reopened Issue's successor) opens no
+  Item. A project the reader cannot see answers like a missing one, and never
+  names its handle. An old `head=<State>` pin on a file link is the rebuilt
+  `?at=`. Settings pages with no rebuilt screen
+  (`general`, `backups`, `transfer`) stay on the old screen until `ROOT` is `""`;
+  guidance, contributions, zones and codescape wait for their keep/drop
+  decision. A saved view's id has no address of its own, so `views/<id>` opens
+  the Plan.
 - Evidence: `/-/{handle}/{project}/lanes/{laneId}/checked` loads its proof screen lazily.
   Optional `save` and `run` query parameters select exact retained records; the read
   never substitutes another supplied run. One bounded read gives the header and

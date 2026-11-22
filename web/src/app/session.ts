@@ -2,6 +2,7 @@
 // What the rebuilt app keeps between a sign-in redirect and the page it returns to. Session storage only: it never
 // leaves this tab, holds no token (the auth library keeps those) and is cleared once used.
 import { ConvexError } from 'convex/values';
+import { oldAddress } from './old-address';
 import { ROOT, isAppPath } from './paths';
 
 const KEY = 'forge.signin';
@@ -11,8 +12,11 @@ export type Pending = { next: string; method: 'github' | 'passkey'; handle?: str
 export function safeNext(value: string | null | undefined): string {
   if (!value || !value.startsWith('/') || value.startsWith('//')) return `${ROOT}/account`;
   const url = new URL(value, 'https://forge.invalid');
+  // An old id-only link (`?project=<id>`) is resolved after sign-in, so it comes back unchanged (old-address.ts).
+  // `/.//host/…` normalizes to a pathname the router would read as another origin.
   return url.origin === 'https://forge.invalid' &&
-    isAppPath(url.pathname) &&
+    !url.pathname.startsWith('//') &&
+    (isAppPath(url.pathname) || oldAddress(url.pathname, url.search)?.kind === 'look') &&
     !url.pathname.startsWith(`${ROOT}/signin`)
     ? url.pathname + url.search
     : `${ROOT}/account`;
