@@ -28,6 +28,8 @@ import { STANDARD_CHECK_INPUTS } from '../dist/standard-check.js';
 import { checkedPackagePlacement } from '../dist/package-placement-pin.js';
 const { revertMessage } = await import(moduleUrl('../convex/projectHostedCulprit.ts'));
 const audit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
+const attemptHistory = await import(moduleUrl('../convex/projectHostedLandingAttemptHistory.ts'));
+const { retainCheckProgress } = await import(moduleUrl('../convex/projectHostedLandingCheckProgress.ts'));
 const env = {
   ...synthetic,
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
@@ -176,6 +178,47 @@ test('a change whose composition is clean and path-disjoint from what main gaine
   const wakes = f.pending().filter(t => t.name === 'projectHostedMainAudit:start');
   assert.equal(wakes.length, 1);
   assert(wakes[0].scheduledTime <= Date.now());
+});
+
+test('Item 5b4b5918: a lone admitted change binds its admission run and is judged in the same queue tick', async t => {
+  const f = await wave(t, { ...disjoint, count: 1 });
+  const [state] = states(f);
+  assert.equal(state.phase, 'landed');
+  assert.deepEqual(receipts(f)[0].firstCheck, { landedOn: 'admission-run', mainMoved: false });
+  // Landing-state writes are the state version plus one: submit, admission settles, claim,
+  // bind-and-judge, publish. Binding in its own tick added a queued write and a second claim (7).
+  assert.equal(state.version + 1, 5);
+  const ticks = f.counts.filter(c => c.name === 'finishLandingAdvance').length;
+  assert.equal(ticks, 1, 'one queue tick between the admission and publication');
+  const [sample] = JSON.parse([...f.tables.projectLandingSpeed.values()][0].value).samples;
+  assert.deepEqual(sample.slice(5, 7), [2, 5], 'the speed row records 2 attempts and 5 writes');
+  // The ledger stays truthful: the admission attempt is replaced by the bound one on the same run.
+  const history = JSON.parse(
+    await f.tx('attempt-history', attemptHistory.read, { projectId: f.projectId, submissionId: state.id }),
+  ).attempts.map(attempt => attempt.replay);
+  assert.equal(history.length, 2);
+  const [bound, admitted] = history;
+  assert.equal(admitted.censorReason, 'ATTEMPT_REPLACED');
+  assert.deepEqual(admitted.replacementCause, { kind: 'check-binding', link: receipts(f)[0].check.runId });
+  assert.equal(bound.outcome, 'landed');
+  assert.equal(runCount(f), 1, 'no new run');
+});
+
+test('Item 5b4b5918 review: progress the admission run reported while running stays on the bound attempt', async t => {
+  const admitted = f =>
+    [...f.tables.projectHostedLandingRequests.values()].some(row => row.admission?.status === 'passed');
+  const f = await wave(t, { ...disjoint, count: 1, until: admitted });
+  // Live admissions store the running run's progress on the admission attempt (the check wake).
+  const [row] = [...f.tables.projectHostedLandingRequests.values()];
+  const [run] = f.runs();
+  const seeded = JSON.parse(row.value);
+  retainCheckProgress(seeded, run, 1_767_225_600_000); // a fixed instant: it only stamps ciProgressAt
+  f.patch('projectHostedLandingRequests', row._id, { value: JSON.stringify(seeded) });
+  await drive(f);
+  const [state] = states(f);
+  assert.equal(state.phase, 'landed');
+  assert.equal(typeof seeded.checkProgress, 'string');
+  assert.equal(state.checkProgress, seeded.checkProgress, 'the bound run progress is kept');
 });
 
 test('first-check landing costs no more Convex calls or DB IO than the recheck it replaces', async t => {

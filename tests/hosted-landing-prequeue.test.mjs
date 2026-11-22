@@ -387,9 +387,10 @@ test('own-command 5-change wave: clean overtakes keep their passed Lane run; the
   // Calls 64 -> 70.2 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): every finish wake with no IO in flight is a settle mutation,
   // and a step that needs IO hands it to one drive action.
   // Item 0930a720: compose root prefetch removes seven descriptor calls across the five landings.
+  // Item 5b4b5918: a bound admission proof is judged in the tick that binds it: 68.8 -> 66.4.
   assert.deepEqual(
     { runs: after.runs, proofs: after.proofs, calls: after.convexCallsPerLanding },
-    { runs: 6, proofs: 7, calls: 68.8 },
+    { runs: 6, proofs: 7, calls: 66.4 },
     'new-run wake: same work on carry re-pins',
   );
 });

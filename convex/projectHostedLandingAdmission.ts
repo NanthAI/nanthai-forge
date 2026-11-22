@@ -337,8 +337,8 @@ export async function admissionProof(
 }
 /** Selection of one admitted member without enough peers for a cohort.
  * `held`: an earlier peer is still admitting, so it waits (not runnable) for
- * that settle to form a cohort. `adopted`: alone, it lands on its own admission
- * run. Null: today's individual path (recompose on a moved main, or its own check). */
+ * that settle to form a cohort. Adopted (the bound attempt, unwritten): alone, it lands on its
+ * own admission run. Null: today's individual path (recompose on a moved main, or its own check). */
 export async function loneAdmission(ctx: MutationCtx, claim: LandingClaim, selected: Selected) {
   const { row, attempt } = selected;
   // Pre-queue members already tried their own run (admittedReuseFirst); a 22-minute
@@ -362,18 +362,17 @@ export async function loneAdmission(ctx: MutationCtx, claim: LandingClaim, selec
     return 'held' as const;
   }
   const proof = await admissionProof(ctx, claim.projectId, row, attempt);
-  if (proof) {
-    await bindAdmissionProof(ctx, selected, attempt, proof);
-    return 'adopted' as const;
-  }
-  return null;
+  // Adopted: bound unwritten, judged by the caller in this tick (5b4b5918).
+  return proof ? { row, ...(await bindAdmissionAttempt(ctx, selected, attempt, proof)) } : null;
 }
 /** Pre-queue reuse first, once per admission: an admitted change lands on its own
  * Lane run before any cohort forms. On unchanged main that run is exact evidence.
  * On a moved main the bound run is refused at publication (CHANNEL_CHANGED), and
  * the existing finish retry either carries it by the conservative-impact proof
  * or recomposes on current main with a deferred check, which joins a cohort for
- * one combined check. No new run or provider call here. */
+ * one combined check. No new run or provider call here. The bound attempt is
+ * returned unwritten: the caller judges it in this same queue tick, so its one
+ * state write carries both the binding and the verdict (5b4b5918). */
 export async function admittedReuseFirst(ctx: MutationCtx, selected: Selected) {
   const { row, attempt } = selected;
   if (
@@ -382,14 +381,13 @@ export async function admittedReuseFirst(ctx: MutationCtx, selected: Selected) {
     row.admission.status !== 'passed' ||
     row.admission.reuse
   )
-    return false;
+    return null;
   const admission = { ...row.admission, reuse: 'tried' as const };
   await ctx.db.patch(row._id, { admission });
   const tried = { ...selected, row: { ...row, admission } };
   const proof = await admissionProof(ctx, row.projectId, tried.row, attempt, true);
-  if (!proof) return false;
-  await bindAdmissionProof(ctx, tried, attempt, proof);
-  return true;
+  if (!proof) return null;
+  return { row: tried.row, ...(await bindAdmissionAttempt(ctx, tried, attempt, proof)) };
 }
 /** Bind a held admission proof as the exact check of a new attempt pinned to
  * the member's own Candidate; the next queue tick evaluates it like any passed
@@ -400,7 +398,17 @@ export async function bindAdmissionProof(
   original: HostedLandingAttempt,
   check: NonNullable<HostedLandingAttempt['check']>,
 ) {
-  const { row, state, attempt } = selected;
+  const { state } = await bindAdmissionAttempt(ctx, selected, original, check);
+  return writeLanding(ctx, selected.row, { ...state, version: state.version + 1 }, true);
+}
+/** The bound attempt (inserted) and the queued state that selects it, at the stored version. */
+async function bindAdmissionAttempt(
+  ctx: MutationCtx,
+  selected: Pick<Selected, 'state' | 'attempt'>,
+  original: HostedLandingAttempt,
+  check: NonNullable<HostedLandingAttempt['check']>,
+) {
+  const { state, attempt } = selected;
   const {
     deferredCheck: _deferred,
     memberCandidate: _member,
@@ -422,17 +430,17 @@ export async function bindAdmissionProof(
     check,
   };
   await insertLandingAttempt(ctx, next);
-  return writeLanding(
-    ctx,
-    row,
-    {
-      ...state,
-      version: state.version + 1,
+  // The bound attempt starts with no check progress of its own; its run's progress is observed fresh.
+  const { checkProgress: _progress, testFiles: _files, ranInFull: _full, ...fresh } = state;
+  void [_progress, _files, _full];
+  return {
+    attempt: next,
+    state: {
+      ...fresh,
       attemptId: next.id,
-      phase: 'queued',
+      phase: 'queued' as const,
       observation: landingObservation('queued'),
       error: null,
     },
-    true,
-  );
+  };
 }

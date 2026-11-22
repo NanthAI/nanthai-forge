@@ -216,7 +216,9 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
     queue?.lease?.submissionId !== claim.submissionId
   )
     return selected.state;
-  const { row, state, attempt, queue: held } = await requireLandingLease(ctx, claim, now);
+  const leased = await requireLandingLease(ctx, claim, now);
+  const held = leased.queue;
+  let { row, state, attempt } = leased;
   if (state.request.finish) {
     const finish = await finishRow(ctx, claim);
     if (finish) await claimFinishPrecompose(ctx, finish);
@@ -227,9 +229,15 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
   let error: HostedLandingState['error'] = reviewing ? state.error : null;
   let passedAt: string | null = null;
   let replay: LandingReplay | undefined;
+  let bound = false;
   try {
-    if (await prepareLandingCheck(ctx, claim, { row, state, attempt, queue: held }, now))
-      return (await loadLanding(ctx, claim)).state;
+    const prepared = await prepareLandingCheck(ctx, claim, { row, state, attempt, queue: held }, now);
+    if (prepared === true) return (await loadLanding(ctx, claim)).state;
+    // A bound admission proof is judged now: one write carries the binding and its verdict (5b4b5918).
+    if (prepared) {
+      ({ row, state, attempt } = prepared);
+      bound = true;
+    }
     await hostedWriteProject(ctx, claim.projectId, attempt.actor.id, attempt.authorityEpoch);
     const candidate = await readHostedRecord(ctx, {
       projectId: claim.projectId,
@@ -389,6 +397,7 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
   await writeLanding(ctx, row, next, false, true, undefined, {
     replay,
     ...(passedAt ? { settlement: { passedAt, startedAt: now } } : {}),
+    ...(bound ? { freshProgress: true as const } : {}),
   });
   if (phase === 'terminal-failed') await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, held, now);

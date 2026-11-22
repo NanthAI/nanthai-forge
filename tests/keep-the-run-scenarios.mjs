@@ -197,9 +197,11 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // write bytes to scoped recheck. The red delta and call counts are unchanged.
 // Item 10b0a94b: a main-race recheck reads the queue row to see whether a check slot is free
 // (option B), adding 724 read bytes to scoped recheck. Writes, red, carry and calls are unchanged.
+// Item 5b4b5918: the keep arms judge their bound admission proof in the binding tick, so a claim and
+// an advance go: carry and scoped recheck each 2 fewer calls, about 51 KB fewer reads and 21 KB fewer writes.
 export const WIRED = {
-  carry: { calls: 7, readBytes: 424_173, writeBytes: 78_283 },
-  'scoped-recheck': { calls: 17, readBytes: 562_309, writeBytes: 149_148 },
+  carry: { calls: 5, readBytes: 373_093, writeBytes: 57_206 },
+  'scoped-recheck': { calls: 15, readBytes: 511_230, writeBytes: 128_063 },
   red: { calls: -17, readBytes: -388_081, writeBytes: -145_208 },
 };
 

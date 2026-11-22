@@ -339,9 +339,10 @@ async function prepareLandingCheckOnce(
       return true;
     }
   }
-  if (!protectedReview && !state.batchSolo && (await admittedReuseFirst(ctx, selected))) {
-    await releaseLandingQueue(ctx, queue, now);
-    return true;
+  // The bound admission proof is judged by the caller in this tick (5b4b5918).
+  if (!protectedReview && !state.batchSolo) {
+    const bound = await admittedReuseFirst(ctx, selected);
+    if (bound) return bound;
   }
   // A refused admitted member waits for peers still deciding their own Lane proof,
   // so they form one cohort (10b0a94b). Bounded, holds no order, armed wake.
@@ -357,7 +358,9 @@ async function prepareLandingCheckOnce(
     await releaseLandingQueue(ctx, queue, now);
     return true;
   }
-  if (!protectedReview && !state.batchSolo && (await loneAdmission(ctx, claim, selected))) {
+  const lone = !protectedReview && !state.batchSolo ? await loneAdmission(ctx, claim, selected) : null;
+  if (lone && lone !== 'held') return lone;
+  if (lone) {
     await releaseLandingQueue(ctx, queue, now);
     return true;
   }

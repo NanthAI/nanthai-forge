@@ -190,6 +190,8 @@ export async function writeLanding(
     replacementReplay?: LandingReplay;
     /** A cancel's cause, kept on the request row it already writes (a reserved recompose). */
     reservedCause?: ReplayCause;
+    /** The new attempt's check progress was observed in this write (a bound proof judged at once). */
+    freshProgress?: true;
   },
 ) {
   const hold = options?.hold;
@@ -206,7 +208,7 @@ export async function writeLanding(
   // A new attempt starts with empty check progress: counts and the progress
   // digest belong to the attempt that observed them (9f94c28a). Fresh values
   // written with this transition differ from the previous attempt's and stay.
-  if (state.attemptId !== previous.attemptId) {
+  if (state.attemptId !== previous.attemptId && !options?.freshProgress) {
     if (state.checkProgress === previous.checkProgress) delete state.checkProgress;
     if (
       state.testFiles &&

@@ -156,7 +156,9 @@ is enabled; the measured comparison below explains the default.
    - A pass enters the queue. Queue order is the time a change entered the queue,
      not its submission time: an older submission still checking, or one that
      re-entered after a refused proof, never holds back a change that entered
-     before it.
+     before it. When its turn comes, the queue step that binds the passed Lane
+     run as the change's check also judges it. That one state write carries both,
+     with no new run and no second queue step.
    - With cross-head reuse enabled, a passed one-member group can overtake
      independent work outside its exact predecessor chain. An earlier,
      independent pass can also clear a spent order hold when the holder
