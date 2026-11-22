@@ -4,22 +4,53 @@ import { digest } from '../src/state/hash';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import type { JournalRunInput } from './projectJournalMaintenance';
+import { receiptRow, type JournalRunInput } from './projectJournalMaintenance';
+import { cancelPendingTask } from './schedulerCancel';
 export function journalEligibilityKey(operationId: string) {
   const at = /^eligibility:.*:(\d+)$/.exec(operationId)?.[1];
   return at ? `journal-wake:${at.padStart(16, '0')}:${digest(operationId)}` : null;
 }
 export const journalGraceMs = 7 * 86_400_000;
+/** Live wakes coalesce into one drain per project per hour: the grace is a minimum age, so an hour
+ * later costs nothing, and a burst of writes leaves one scheduled pack, not one per write. */
+export const journalDrainBucketMs = 3_600_000;
+const drainPointer = 'journal-next';
 export async function wakeJournal(ctx: MutationCtx, input: JournalRunInput, dueAt: number) {
   if (process.env.FORGE_JOURNAL_SEGMENTS !== '1') return;
+  const pack = makeFunctionReference<'action'>('projectJournalRun:pack');
+  if (!input.laneId && !input.existing) {
+    // A live drain reaches every non-Lane family by its ready index or cursor and reschedules only
+    // for eligibility it finds, so one pending pack covers this wake and every later one.
+    const now = Date.now();
+    const row = await receiptRow(ctx, input.projectId, drainPointer);
+    const pending = row
+      ? (JSON.parse(row.envelope) as { at: number; jobId: Id<'_scheduled_functions'> })
+      : null;
+    let at = Math.ceil(Math.max(dueAt, now) / journalDrainBucketMs) * journalDrainBucketMs;
+    // A started drain owns its bucket's operation id; a later drain never replays its pages.
+    if (pending && pending.at <= now && at <= pending.at) at = pending.at + journalDrainBucketMs;
+    if (pending && pending.at > now && pending.at <= at) return;
+    // Only a still-pending drain is cancelled; a running one (this drain's own capture) keeps going.
+    if (pending && pending.at > now) await cancelPendingTask(ctx, pending.jobId);
+    const jobId = await ctx.scheduler.runAfter(at - now, pack, {
+      projectId: input.projectId,
+      operationId: `drain:${at}`,
+    });
+    const envelope = canonicalPayload({ at, jobId });
+    const fields = {
+      projectId: input.projectId,
+      operationId: drainPointer,
+      hash: digest(envelope),
+      envelope,
+    };
+    if (row) await ctx.db.replace(row._id, fields);
+    else await ctx.db.insert('projectJournalReceipts', fields);
+    return;
+  }
+  // A closed Lane's save pages and operator runs name their own frontier.
   const operationId = journalEligibilityKey(input.operationId);
   if (operationId) {
-    const old = await ctx.db
-      .query('projectJournalReceipts')
-      .withIndex('by_project_and_operation', q =>
-        q.eq('projectId', input.projectId).eq('operationId', operationId),
-      )
-      .unique();
+    const old = await receiptRow(ctx, input.projectId, operationId);
     if (old) return;
     const envelope = canonicalPayload(input);
     await ctx.db.insert('projectJournalReceipts', {
@@ -29,11 +60,7 @@ export async function wakeJournal(ctx: MutationCtx, input: JournalRunInput, dueA
       envelope,
     });
   }
-  await ctx.scheduler.runAfter(
-    Math.max(0, dueAt - Date.now()),
-    makeFunctionReference<'action'>('projectJournalRun:pack'),
-    input,
-  );
+  await ctx.scheduler.runAfter(Math.max(0, dueAt - Date.now()), pack, input);
 }
 /** Attached to the existing supersession write; no added RPC and no idle wake. */
 /** Planning versions stay hot; superseded Intent versions can be rewritten by an Item purge. */

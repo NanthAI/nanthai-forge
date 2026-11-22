@@ -1,9 +1,11 @@
 ## Work journal segment readers
 
 Journal history uses S1's digest/size/table verification and server transport.
-Its segments stay on the Node zlib gzip codec (`encodeArchiveBytes`) in Node
-actions; landing capsules moved to the portable V8 codec (Item b149b16b), and both
-are standard gzip. `projectJournalSegments` holds one compact
+The journal packer follows the S1 pattern (Item b149b16b): one body runs as a V8
+action (`projectJournalRun:pack`) and continues in Node (`projectJournalRunNode:pack`)
+only for a page whose captured text exceeds 1 MiB. New segments use the portable
+fflate codec with a zero mtime; objects written by the earlier Node zlib writer
+are standard gzip and decode unchanged. `projectJournalSegments` holds one compact
 range index per segment, separate from hot finish projections so its range indexes
 do not multiply every landing row's storage. Current heads and versions remain
 transaction-readable. `projectJournalReceipts` keeps compact deduplication facts
@@ -23,17 +25,25 @@ The separate writer is installed behind the default-off server setting
 `FORGE_JOURNAL_SEGMENTS=1`; the setting is not enabled by a deployment. Existing
 readers continue to resolve retained objects when the setting is off.
 
-Terminal source operations and primary Work commands schedule finite archive
-continuations after seven days; closed Lanes schedule their save-page drain and
-coordination detail schedules its fourteen-day drain. No cron or periodic poll is
-added. One internal operator invocation of `projectJournalRun:pack` with
+Terminal source operations and primary Work commands become eligible after seven
+days and coordination detail after fourteen. Their writes do not each schedule a
+pack: each project keeps one pending live drain, recorded in one
+`projectJournalReceipts` pointer row and aligned to the hour after the earliest
+known eligibility. A later wake is already covered and writes nothing; an earlier
+one cancels and replaces the pending drain. A drain reaches every non-Lane family
+by its ready index or cursor and reschedules only for eligibility it finds, so a
+project with nothing due has nothing scheduled. Only a still-pending drain is
+cancelled, and a started drain's hour is never reused. A drain that fails after its
+retries leaves its later rows hot, not lost: the next waking write after its hour,
+or an operator run, schedules a fresh drain that finds them. Closed Lanes still schedule their
+own save-page drain, one per Lane completion. No cron or periodic poll is added. One internal operator invocation of `projectJournalRun:pack` with
 `{projectId, operationId, existing:true}` also walks settled existing rows. Its
 per-project cursors and page receipts resume interrupted work; another invocation
 with the same operation id reconciles published pages. A failed in-flight capture
 can be resumed after its ten-minute internal claim lease. This is an operator
 maintenance entry point, not a new user action or confirmation.
 
-Each Node page uses one capture and one publication mutation, at most 100 original
+Each page uses one capture and one publication mutation, at most 100 original
 rows, and at most 500 KiB of capture transport. Capture budgets include related
 head/body reads; an individual existing provider row can exceed the transport
 page and is re-read and framed without truncation. Publication revalidates source
@@ -107,8 +117,9 @@ create no pending-project pointer and call neither publication nor R2. A replay 
 the control's last page returns before loading the project or selecting source rows.
 This also applies to already scheduled wakes with the original arguments. Empty
 metadata-cleanup pages still advance, and an empty Lane frontier removes its control.
-There is no scheduling-format change, coalescing lookup on supersession, new timer,
-periodic wake or change to the seven/fourteen-day eligibility rules.
+Supersession writes add no scheduling reads; a waking write adds one point read of
+the project pointer. There is no new timer, periodic wake or change to the
+seven/fourteen-day eligibility rules.
 
 Healthy nonempty pages keep one action and at most two mutations. Point reads of the claim
 replace redundant control-row lookups; its capture/publication adds two small

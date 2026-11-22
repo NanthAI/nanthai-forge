@@ -24,7 +24,8 @@ import {
 import { metadataRequest } from '../src/work-metadata';
 import { PURGE_ROW_LIMIT } from '../src/work-planning-types';
 import { digest } from '../src/state/hash';
-import { getJournalSegment, journalObjectKey } from './projectJournalObject';
+import { getJournalSegment } from './projectJournalObject';
+import { journalObjectKey } from './projectJournalArchivePlan';
 import { putArchiveObject } from './projectLandingCapsuleObject';
 import { deleteR2Object } from './r2Operations';
 import { r2Config } from './r2';

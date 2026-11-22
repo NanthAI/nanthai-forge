@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { journalMaintenanceFixture } from './journal-maintenance-fixture.mjs';
+import { moduleUrl } from './convex-module.mjs';
 
 for (const dogfood of [false, true])
   test(`journal ${dogfood ? 'dogfood' : 'fresh'} deferred 60-wake mix archives 17 frontiers and skips 43 empty captures`, async t => {
@@ -101,4 +102,85 @@ test('legacy no-op wakes skip capture leases, source reloads, publication and ar
   const replay = w.io.length;
   await w.pack({ projectId: w.f.projectId, operationId: results[0].next.operationId });
   assert(w.io[replay].documents <= 2, 'a taken page replays before project, source and archive reads');
+});
+
+test('journal idle project schedules no pack, and a burst of writes leaves one pending pack per project (686ecdde Fix 2)', async t => {
+  const w = await journalMaintenanceFixture(t);
+  const wake = await import(moduleUrl('../convex/projectJournalWake.ts'));
+  const pending = () =>
+    [...w.f.tables._scheduled_functions.values()].filter(
+      row => row.name === 'projectJournalRun:pack' && row.state.kind === 'pending',
+    );
+  // Run each scheduled drain at its time, as the scheduler would; return how many ran.
+  const runScheduled = async () => {
+    let runs = 0;
+    for (; pending().length; runs++) {
+      assert(runs < 10, 'finite frontier drains in a few scheduled packs');
+      const [job] = pending().sort((a, b) => a.scheduledTime - b.scheduledTime);
+      w.f.advanceClock(Math.max(0, job.scheduledTime - w.f.now()));
+      await w.mutate(ctx => ctx.db.patch(job._id, { state: { kind: 'success' } }));
+      await w.drain(job.args[0]);
+    }
+    return runs;
+  };
+  await w.drain();
+  await runScheduled();
+  // Nothing lands for 30 days: no pack is pending and an idle drain schedules none.
+  w.f.advanceClock(30 * 86_400_000);
+  assert.equal(pending().length, 0, 'an idle project has no scheduled journal pack');
+  const scheduled = w.f.tables._scheduled_functions.size;
+  const idle = await w.drain({ projectId: w.f.projectId, operationId: randomUUID() });
+  assert(idle.every(result => result.archived === 0));
+  assert.equal(w.f.tables._scheduled_functions.size, scheduled, 'an empty drain schedules nothing');
+  assert.equal(w.queue.length, 0);
+
+  // A burst of 20 writes, each with the wake its write path sends.
+  const events = [];
+  for (let n = 0; n < 20; n++) {
+    events.push(
+      await w.insert('projectCoordinationEvents', {
+        projectId: w.f.projectId,
+        actor: 'owner',
+        operationId: randomUUID(),
+        at: w.f.now(),
+        command: { kind: 'change', source: 'work' },
+      }),
+    );
+    await w.mutate(ctx =>
+      wake.wakeJournal(
+        ctx,
+        { projectId: w.f.projectId, operationId: randomUUID(), phase: 4 },
+        w.f.now() + 14 * 86_400_000 + 1,
+      ),
+    );
+    await w.mutate(ctx =>
+      wake.wakeJournal(
+        ctx,
+        { projectId: w.f.projectId, operationId: `work:${randomUUID()}` },
+        w.f.now() + wake.journalGraceMs,
+      ),
+    );
+    w.f.advanceClock(60_000);
+  }
+  assert.equal(pending().length, 1, '40 wakes leave one pending pack');
+  const [later] = pending();
+  // An earlier wake replaces the pending pack rather than adding one.
+  await w.mutate(ctx =>
+    wake.wakeJournal(
+      ctx,
+      { projectId: w.f.projectId, operationId: `recovery:${randomUUID()}`, phase: 1 },
+      w.f.now(),
+    ),
+  );
+  assert.equal(pending().length, 1);
+  assert(pending()[0].scheduledTime <= w.f.now() + wake.journalDrainBucketMs);
+  assert.equal(w.f.tables._scheduled_functions.get(later._id).state.kind, 'canceled');
+  const runs = await runScheduled();
+  assert(runs <= 4, `the burst drains in ${runs} scheduled packs, not one per write`);
+  assert(
+    events.every(id => !w.f.tables.projectCoordinationEvents.has(id)),
+    'every aged event archives',
+  );
+  assert.equal(pending().length, 0, 'nothing stays scheduled after the frontier drains');
+  t.diagnostic(JSON.stringify({ wakes: 41, scheduledPacks: runs }));
 });

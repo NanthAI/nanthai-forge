@@ -180,9 +180,9 @@ The journal capture mutation commits an empty selection directly, including its
 cursor and future eligibility wakes. It removes the empty publication call and
 both writes of the transient project claim. Last-page retries return before the
 project/source reads. Nonempty captures retain the verified-object publication
-and recovery path. Coalescing was considered, but it adds a receipt lookup on every
-supersession; this change adds **zero reads or calls to landing writers** and keeps
-existing scheduled arguments. No format, retention, wake time or idle path changes.
+and recovery path. It adds **zero reads or calls to landing writers** and keeps
+existing scheduled arguments; [one pending drain](#journal-packer-on-the-s1-pattern)
+later coalesced the wakes themselves.
 
 `tests/journal-wake-cost.test.mjs` models the observed 60-wake mix: 17 productive
 batches of 1–54 rows (253 total) and 43 empty frontiers. It exercises the shared
@@ -232,6 +232,39 @@ post-deploy function-name capture and actual rollout/billing attribution belong
 to Issue b149b16b. A one-mutation empty frontier still costs a scheduled action and
 its indexed capture reads; this change removes the redundant publication rather
 than claiming that delayed maintenance is free.
+
+### Journal packer on the S1 pattern
+
+Item 686ecdde Fix 2. Before, every waking write (terminal source operation, retained
+Work command, coordination change, expiry, recovery update) scheduled its own Node
+`projectJournalRun:pack`, and each pack chained one more Node action per phase.
+Spend-meter ledger, dogfood `dev` deployment, whole UTC days 2026-11-19 to 11-21
+(519 project landings):
+
+| Day | Landings | Packs | Pack GB-h | Mean / median GB-s per pack | Capture + publish calls | Journal I/O |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 11-19 | 153 | 6,040 | 0.535 | 0.319 / 0.119 | 8,092 | 122 MB |
+| 11-20 | 126 | 4,333 | 0.362 | 0.301 / 0.111 | 5,721 | 99 MB |
+| 11-21 | 240 | 2,990 | 0.309 | 0.372 / 0.125 | 4,220 | 57 MB |
+
+The bench deployment ran 18,110 packs on 11-20 with 0 landings: packs followed
+writes from a week earlier. At list rates the window's journal line is
+$0.70/1,000 landings compute, $0.12 calls and $0.11 I/O ($0.93 list); billed on
+Professional it is the I/O margin only (**$0.11/1,000**), since calls and compute
+sit inside the allowance.
+
+Now the same body runs as a V8 action and continues in Node only for a page over
+1 MiB of captured text (pages are bounded near 48 KB plus one fragment of at most
+384 KB, so dogfood pages stay in V8). Live wakes coalesce into one pending drain per
+project, aligned to the hour after the earliest eligibility: a burst of 41 wakes
+leaves one pending pack and drains in 3 scheduled packs, and an idle project has
+nothing scheduled (`tests/journal-wake-cost.test.mjs`). A waking write adds one
+point read of the pointer and writes only when the drain time moves earlier.
+Closed-Lane save drains stay one per Lane completion. Expected steady state is at
+most 24 drains a day per project (five phase actions each, more only for pages
+with rows) plus one pack per closed Lane, with V8 compute per pack. These are
+estimates: the after-figures need one dogfood day from the ledger once
+already-scheduled legacy packs (up to fourteen days old, now run in V8) have drained.
 
 ### Retained storage and weekly maintenance allocation
 

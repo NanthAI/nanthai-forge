@@ -232,6 +232,29 @@ test('journal uses the S1 complete-object codec and rejects corrupt bytes, table
   );
 });
 
+test('V8 journal packer codec decodes objects from the earlier Node zlib writer and rejects corrupt bytes (686ecdde Fix 2)', async t => {
+  const plan = await import(moduleUrl('../convex/projectJournalArchivePlan.ts'));
+  const h = await fixture(t),
+    text = decodeArchiveBytes(h.encoded.body, h.encoded.pointer);
+  assert.equal(plan.decodeJournalBytes(h.encoded.body, h.encoded.pointer), text);
+  const portable = plan.encodePlannedJournal(text, h.segment);
+  assert.equal(plan.decodeJournalBytes(portable.body, portable.pointer), text);
+  assert.equal(decodeArchiveBytes(portable.body, portable.pointer), text, 'Node readers decode new objects');
+  assert.equal(
+    plan.encodePlannedJournal(text, h.segment).pointer.sha256,
+    portable.pointer.sha256,
+    'equal text keeps one content pin, so a replay finds its stored object',
+  );
+  const flipped = Uint8Array.from(portable.body);
+  flipped[flipped.length - 1] ^= 1;
+  assert.throws(() => plan.decodeJournalBytes(flipped, portable.pointer), code('EVIDENCE_CHANGED'));
+  assert.throws(
+    () =>
+      plan.decodeJournalBytes(portable.body, { ...portable.pointer, rawSize: portable.pointer.rawSize - 1 }),
+    code('EVIDENCE_CHANGED'),
+  );
+});
+
 test('exact archived versions match live replies through one server action and GET; current versions and immutable retry stay transactional', async t => {
   const h = await fixture(t);
   await h.relocate();

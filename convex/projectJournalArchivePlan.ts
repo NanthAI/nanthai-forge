@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-import { gzipSync } from 'fflate';
+import { gzipSync, gunzipSync } from 'fflate';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { journalTablePins, type JournalSegment } from '../src/journal-segment';
 import { digest } from '../src/state/hash';
+import { ForgeError, invariant } from '../src/errors';
+import type { LandingCapsulePointer } from '../src/hosted-landing';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { phaseKey, receiptRow, type Control } from './projectJournalMaintenance';
 
-/** The capture can pin Intent archive bytes before its action uploads them, without a separate transaction. */
+export const journalObjectKey = (projectId: string, sha256: string) =>
+  `v1/p/${projectId}/journal-segments/${sha256}`;
+
+/** Runtime-portable journal codec (Convex V8 and Node). Standard gzip with a zero mtime, so equal text
+ * keeps one content pin, and the capture can pin Intent archive bytes before its action uploads them. */
 export function encodePlannedJournal(text: string, segment: JournalSegment) {
   const plain = new TextEncoder().encode(text);
   const body = gzipSync(plain, { level: 9, mtime: 0 });
@@ -20,6 +26,37 @@ export function encodePlannedJournal(text: string, segment: JournalSegment) {
     tables: canonicalPayload(journalTablePins(segment.tables)),
   };
   return { body, pointer };
+}
+
+/** Verified decode bounded by the content pin; objects from the earlier Node zlib writer decode unchanged. */
+export function decodeJournalBytes(body: Uint8Array, pointer: LandingCapsulePointer) {
+  invariant(
+    body.length === pointer.size && digest(body) === pointer.sha256,
+    'EVIDENCE_CHANGED',
+    'Stored journal segment differs from its verified content pin.',
+  );
+  invariant(
+    Number.isSafeInteger(pointer.rawSize) && pointer.rawSize >= 0 && body.length >= 18,
+    'EVIDENCE_CHANGED',
+    'Journal segment decoded size is invalid.',
+  );
+  const trailer = new DataView(body.buffer, body.byteOffset, body.length).getUint32(body.length - 4, true);
+  invariant(
+    trailer === pointer.rawSize % 2 ** 32,
+    'EVIDENCE_CHANGED',
+    'Journal segment decoded size differs.',
+  );
+  let plain: Uint8Array;
+  try {
+    plain = gunzipSync(body, { out: new Uint8Array(pointer.rawSize) });
+  } catch {
+    throw new ForgeError(
+      'EVIDENCE_CHANGED',
+      'Stored journal segment cannot be decoded at its verified size.',
+    );
+  }
+  invariant(plain.length === pointer.rawSize, 'EVIDENCE_CHANGED', 'Journal segment decoded size differs.');
+  return new TextDecoder().decode(plain);
 }
 
 export async function pendingIntentArchives(
