@@ -9,7 +9,7 @@
 // provisional close of today, which the server runs at most hourly and only after a landing today.
 import './stats.css';
 import '../../ds/figures.css';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import { Region, useFold } from '../../ds';
@@ -26,6 +26,7 @@ import { Head } from '../Place';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { navigate, useSearch } from '../router';
+import { errorCode } from '../session';
 import type { PlaceProps } from '../screens';
 import { ByMonth, ByWho, PerDay, Trend, Waited } from './Charts';
 import { Compare, Measured } from './Compare';
@@ -54,7 +55,54 @@ type FoldPart = Exclude<StatsPart, 'head'>;
 /** Reads one fold's part of the chosen period; called only inside an opened fold. */
 export type UsePart = (part: FoldPart) => unknown;
 
+/** A refused Stats read (a reader or a signed-out visitor) is a notice inside the frame, never a blank app. */
 export default function Stats(props: PlaceProps) {
+  const [attempt, setAttempt] = useState(0);
+  return (
+    <StatsBoundary key={attempt} retry={() => setAttempt(n => n + 1)}>
+      <StatsRead {...props} />
+    </StatsBoundary>
+  );
+}
+
+class StatsBoundary extends Component<{ retry: () => void; children: ReactNode }, { error: unknown }> {
+  override state: { error: unknown } = { error: null };
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
+  }
+  override render() {
+    const { error } = this.state;
+    if (!error) return this.props.children;
+    const code = errorCode(error);
+    const refused = code === 'PROJECT_UNAVAILABLE' || code === 'AUTH_REQUIRED';
+    const message = (error as { data?: { message?: string } }).data?.message;
+    return (
+      <>
+        <Head
+          trail={[{ label: 'Stats' }]}
+          sentence={<b>{refused ? 'Stats is for project members.' : 'Stats could not be read.'}</b>}
+        />
+        <div className="notice" data-st={refused ? 'waiting' : 'failed'} role={refused ? 'status' : 'alert'}>
+          <span className="st" data-st={refused ? 'waiting' : 'failed'}>
+            {refused ? 'No access' : 'Could not load'}
+          </span>
+          <p>
+            {refused
+              ? 'Only signed-in project members with write access can see Stats.'
+              : (message ?? 'The connection dropped before Stats loaded.')}
+          </p>
+          {refused ? null : (
+            <button type="button" className="btn sm" onClick={this.props.retry}>
+              Retry
+            </button>
+          )}
+        </div>
+      </>
+    );
+  }
+}
+
+function StatsRead(props: PlaceProps) {
   const now = Date.now();
   const period = periodOf(useSearch(), now);
   const all = period.kind === 'all';
