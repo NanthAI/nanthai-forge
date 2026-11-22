@@ -121,3 +121,111 @@ test('a docs-only change selects the guards that scan the documents folder, and 
   });
   assert.deepEqual(selectPreflightTests({ files, paths: ['README.md'] }).tests, []);
 });
+
+test('a package manifest binds the guard to shipped paths and respects a folder filter', () => {
+  const guard = 'tests/rules.test.mjs';
+  const files = new Map([
+    ['package.json', JSON.stringify({ files: ['tools/live.mjs', 'tools/plugins/*.mjs', 'docs'] })],
+    [
+      guard,
+      header +
+        `
+      const root = new URL('..', import.meta.url).pathname;
+      const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+      const shipped = pkg['files'];
+      test('shipped source', () => {
+        for (const file of shipped.filter(file => file.startsWith('tools/')))
+          readFileSync(join(root, file), 'utf8');
+        { const shipped = { files: ['local'] }; assert.ok(shipped.files.length); }
+      });
+    `,
+    ],
+  ]);
+  assert.deepEqual(scanReaders(files, ['tools/live.mjs']).get(guard), {
+    path: 'tools/live.mjs',
+    folder: 'tools',
+    manifest: 'package.json',
+  });
+  assert.ok(scanReaders(files, ['tools/plugins/new.mjs']).has(guard));
+  assert.ok(!scanReaders(files, ['tools/unshipped.mjs', 'docs/guide.md']).has(guard));
+});
+
+test('relative glob scopes use their own lexical pattern and working directory', () => {
+  const testPath = 'tests/glob.test.mjs';
+  const files = new Map([
+    [
+      testPath,
+      `
+      import { globSync as glob } from 'node:fs';
+      import { mkdtempSync } from 'node:fs';
+      import { tmpdir } from 'node:os';
+      import { join } from 'node:path';
+      const pattern = './lib/**/*.js';
+      glob(pattern);
+      {
+        const pattern = './nested/*.json';
+        const root = new URL('../', import.meta.url);
+        const cwd = new URL('app/', root);
+        glob(pattern, { cwd });
+        const temp = mkdtempSync(join(tmpdir(), 'fixture-'));
+        { const cwd = temp; glob('./other/**/*.ts', { cwd }); }
+      }
+    `,
+    ],
+  ]);
+  assert.ok(scanReaders(files, ['lib/new/module.js']).has(testPath));
+  assert.ok(scanReaders(files, ['app/nested/new.json']).has(testPath));
+  assert.ok(!scanReaders(files, ['nested/new.json', 'other/new/module.ts']).has(testPath));
+});
+
+test('scoped reads in anonymous callbacks keep the containing folder of an unknown path piece', () => {
+  const testPath = 'tests/reads.test.mjs';
+  const files = new Map([
+    ['lib/rules/nested/one.ts', ''],
+    [
+      testPath,
+      header +
+        `
+      const root = new URL('..', import.meta.url).pathname;
+      const part = 'other';
+      test('read rules', function () {
+        const folder = 'lib';
+        ['a', 'b'].forEach(function (part) {
+          const path = join(root, folder, 'rules', lookup(part), 'entry.ts');
+          readFileSync(path, 'utf8');
+        });
+      });
+      test('temporary data', () => {
+        const root = outsideRepository();
+        ['payload.txt'].map(name => readFileSync(join(root, name)));
+      });
+    `,
+    ],
+  ]);
+  assert.ok(scanReaders(files, ['lib/rules/nested/one.ts']).has(testPath));
+  assert.ok(!scanReaders(files, ['lib/elsewhere.ts', 'other/entry.ts', 'payload.txt']).has(testPath));
+});
+
+test('recursion through a URL base alias or a computed URL suffix keeps its repository folder', () => {
+  const testPath = 'tests/read.test.mjs';
+  const files = new Map([
+    [
+      testPath,
+      header +
+        `
+      const root = new URL('../', import.meta.url);
+      function walk(dir) {
+        for (const entry of readdirSync(dir)) walk(join(dir.pathname, entry));
+      }
+      for (const dir of ['lib/', 'app/']) walk(new URL(dir, root));
+      readdirSync(new URL('../services/' + unknown(), import.meta.url));
+    `,
+    ],
+    ['lib/a/b.ts', ''],
+    ['app/a/b.ts', ''],
+    ['services/a/b.ts', ''],
+  ]);
+  for (const folder of ['lib', 'app', 'services'])
+    assert.ok(scanReaders(files, [folder + '/a/b.ts']).has(testPath));
+  assert.ok(!scanReaders(files, ['tmp/toy.ts']).has(testPath));
+});

@@ -95,6 +95,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/project-test-runner.ts` | `tests-folder` | 1 | `FORGE_TEST_GLOB`, the glob of Forge's Node test layout | a declared runner or inferred vitest, jest and pytest globs |
 | `scripts/docs-readers.mjs` | `forge-folders` | 1 | Forge's tested-docs reader scan over its tests and scripts | declared `docsPaths` on their check definition |
 | `scripts/docs-readers.mjs` | `tests-folder` | 1 | Forge's tested-docs reader scan | declared `docsPaths` on their check definition |
+| `scripts/test-tree-readers.mjs` | `package-json-config` | 2 | The selector follows file lists from the repository's own package manifests | No manifest scope unless the test reads a package manifest |
 | `scripts/test-tree-scanners.mjs` | `tests-folder` | 1 | Forge's node selector: which of its test files scan a repository folder | changed, named and imported tests (`runnerSelection`); no folder-scan detection yet |
 | `scripts/selection-guard.mjs` | `tests-folder` | 1 | Forge's selection guard over its test layout | their command's own selection |
 | `scripts/test-closeness.mjs` | `tests-folder` | 4 | Forge's preflight ranking over its test layout | changed, named and imported tests in that order |

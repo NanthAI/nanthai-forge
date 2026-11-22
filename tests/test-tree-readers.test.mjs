@@ -147,3 +147,53 @@ test('a comment-only edit keeps the guards that read the file in the local plan 
   assert.deepEqual(plan.treeGuards, ['tests/runtime-deps.test.mjs']);
   assert.ok(!plan.deferredTests.includes('tests/runtime-deps.test.mjs'));
 });
+
+test('an unresolved recursive read keeps the repository root, but a shadowed cwd does not', () => {
+  const walk = `function walk(file) {
+    const data = readFileSync(file);
+    if (data) walk(data);
+  }`;
+  assert.deepEqual(folders(walk + 'walk(`./${getStart(process.cwd())}`);'), ['/** (code)']);
+  assert.deepEqual(
+    folders(
+      "const process = { cwd: () => '/tmp/fixture' }; " + 'readdirSync(process.cwd(), { recursive: true });',
+    ),
+    [],
+  );
+});
+
+test('an aliased read inside a for-of follows array entries under the known base', () => {
+  const guard = 'tests/guard.test.mjs';
+  const files = repository({
+    [guard]:
+      header +
+      `
+    const read = readFileSync;
+    for (const part of ['a', 'b']) read(join('src', part, 'manifest.ts'));
+  `,
+  });
+  assert.ok(scanReaders(files, ['src/a/manifest.ts']).has(guard));
+  assert.ok(!scanReaders(files, ['src/c/manifest.ts']).has(guard));
+});
+
+test('a joined directory helper keeps a recursive file reader inside its starting folder', () => {
+  const guard = 'tests/guard.test.mjs';
+  const files = repository({
+    [guard]:
+      header +
+      `
+    const root = new URL('..', import.meta.url).pathname;
+    const at = relative => join(root, relative);
+    const walk = dir => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const file = join(dir, entry.name);
+        if (entry.isDirectory()) walk(file);
+        else readFileSync(file, 'utf8');
+      }
+    };
+    walk(at('src'));
+  `,
+  });
+  assert.ok(scanReaders(files, ['src/new/module.ts']).has(guard));
+  assert.ok(!scanReaders(files, ['convex/store.ts']).has(guard));
+});

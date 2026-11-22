@@ -80,3 +80,26 @@ test('replay: a docs-only change to the brief rules selects the check-brief fixt
   assert.deepEqual(lonely.tests, [...scanReaders(files, [unnamed]).keys()].sort());
   for (const test of lonely.tests) assert.match(lonely.reasons[test].detail, /^Scans docs\//);
 });
+
+test('an extensionless document link read inside a test covers the corresponding split document', () => {
+  const reader = at('tests', 'guide-links.test.mjs');
+  const linkOnly = at('tests', 'guide-label.test.mjs');
+  const files = new Map([
+    ...fixture(),
+    [
+      reader,
+      `test('linked heading', () => {
+      // The guide is assembled from docs/workflow.md. See also docs/other.md.
+      const links = ['/docs/workflow/#start'];
+      for (const href of links) readDocument(root, href.split('#')[0].slice(1, -1) + '.md');
+    });`,
+    ],
+    [linkOnly, "test('label', () => assert.ok('/docs/workflow/#start'));"],
+  ]);
+  const section = at('docs', 'workflow.d', 'sections', 'start.md');
+  assert.deepEqual([...docsReaders(files, [section]).keys()], [reader]);
+  assert.deepEqual([...docsReaders(files, [at('docs', 'unrelated.md')]).keys()], []);
+  const mixed = selectPreflightTests({ files, paths: ['src/a.ts', at('docs', 'other.md'), section] });
+  assert.ok(mixed.treeGuards.includes(reader));
+  assert.ok(!mixed.tests.includes(linkOnly));
+});

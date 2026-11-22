@@ -163,13 +163,16 @@ export function selectPreflightTests(input, graphCache = {}) {
   const guards = new Set((input.guards ?? []).filter(test => input.files.has(test)));
   const covered = new Set(selection.tests);
   // Repo-wide guards (a test that scans a folder holding a changed file) read every file there,
-  // comments included, so a comment-only edit keeps them local too (Item 5dcfce75 fix 4).
+  // comments included. A linked-heading guard reads the document even in a mixed change
+  // whose code loads a much larger set (Item 5dcfce75 fix 4).
+  const documentReaders = docsReaders(input.files, input.paths.filter(documentation));
   const scanning = new Set(
     [
       ...scanReaders(
         input.files,
         input.paths.filter(path => !documentation(path)),
       ).keys(),
+      ...[...documentReaders].filter(([, reader]) => reader.linked).map(([test]) => test),
     ].filter(test => covered.has(test)),
   );
   const mandatory = test =>
@@ -661,7 +664,14 @@ function selectWithGraph(
         const reader = readers.get(test);
         // Reading a changed document is direct evidence, stronger than any import chain to code.
         if (reader && affected.get(test)?.kind !== 'changed')
-          return [test, { kind: 'explicit', changedPath: reader.doc, detail: readerDetail(reader, test) }];
+          return [
+            test,
+            {
+              kind: 'explicit',
+              changedPath: reader.doc,
+              detail: readerDetail(reader, test),
+            },
+          ];
         const scan = scans.get(test);
         if (scan && affected.get(test)?.kind !== 'changed')
           return [test, { kind: 'explicit', changedPath: scan.path, detail: scanDetail(scan) }];
@@ -767,7 +777,14 @@ function withDocsReaders(selection, files, paths) {
   selection.reasons = Object.fromEntries(
     selection.tests.map(test => {
       const reader = readers.get(test);
-      return [test, { kind: 'explicit', changedPath: reader.doc, detail: readerDetail(reader, test) }];
+      return [
+        test,
+        {
+          kind: 'explicit',
+          changedPath: reader.doc,
+          detail: readerDetail(reader, test),
+        },
+      ];
     }),
   );
   selection.reason = `${selection.reason}; plus the ${selection.tests.length} test file(s) that read a changed document`;

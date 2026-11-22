@@ -9,4 +9,4 @@ export function docsReaders(
         get(path: string): string | undefined;
       },
   docs: string[],
-): Map<string, { doc: string; via: string }>;
+): Map<string, { doc: string; via: string; linked?: true }>;

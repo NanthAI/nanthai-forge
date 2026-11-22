@@ -6,8 +6,9 @@
   shared hub), files that failed before (the learned tier, or failed for these paths or in the last
   run here), named tests, then files by learned saving per second, smoke
   and explicit coverage last, so a long plan's time budget stops the files least likely to fail; a
-  test that walks a relative folder or reads every file an import walk reaches is a consumer of that
-  folder ([pre-queue checks](../../pre-queue-checks.md)).
+  guard can get its scope from a directory walk, a relative glob, a callback that reads a list
+  of paths, or the file list in a package manifest. When part of the path is computed, the
+  selector can keep its known containing folder ([pre-queue checks](../../pre-queue-checks.md)).
 - Changes to packaged runtime inputs run the MCP/CLI module and chunk ceilings on preflight's
   existing core build. Changes to any packaged file trigger the installed-byte check. It uses matching
   local package-smoke evidence for exact installed bytes and a lower bound on a cold run. Full archive,
