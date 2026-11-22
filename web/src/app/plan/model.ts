@@ -26,6 +26,7 @@ export type PlanRead = {
     live?: LiveCounts;
   }[];
   canEdit: boolean;
+  closeReceipt?: string | undefined;
 };
 
 export type PlanLine = {

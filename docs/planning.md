@@ -254,9 +254,11 @@ that changed after it was read is refused with its current version and is never 
   note, or with the one-press close-anyway reason; the reply names those Items so a follow-up can be offered.
 - When you confirm a close in Plan, direct sub-items that are still Proposed, Planned or In progress become
   top-level Items in their own stored Initiatives. A sub-item you close in the same selection stays under its
-  parent, as do settled sub-items. Closing and detaching shares one transaction and reads past the visible Plan
-  window. One Undo restores the prior statuses and links if those versions are still current. If any changed
-  meanwhile, Undo leaves the whole change in place and reports the conflict. Every edit adds a retained version.
+  parent, as do settled sub-items. Plan promotes the children together when the parent closes, including children
+  outside the visible window. Larger closes keep applying the stored links in the background. One Undo restores
+  matching child links before it reopens the parent, so Plan shows the restored hierarchy together. Undo skips
+  children edited after detachment and reports those edits. An ordinary reopen leaves detached Items in their
+  Initiatives. Every edit adds a retained version.
 - Split gives each Done-when line to one part. The Item keeps its prose and the lines it keeps; each new part is a
   Planned Item in the same Initiative and parent, related both ways to the Item.
 - Merge carries each duplicate's Lane links (its planned Intent and linked Intents) and a copy of each comment to the

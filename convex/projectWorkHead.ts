@@ -26,13 +26,19 @@ export async function setWorkHead(
   backupId: Id<'projectBackups'>,
   revision: number,
   metadata?: string,
+  batch?: { head: Awaited<ReturnType<typeof workHead>>; project: Doc<'hostedProjects'> },
 ) {
-  const old = await workHead(ctx, projectId);
+  const old = batch ? batch.head : await workHead(ctx, projectId);
   const value = { projectId, backupId, revision, ...(metadata === undefined ? {} : { metadata }) };
-  if (old) await ctx.db.replace(old._id, value);
-  else await ctx.db.insert('projectWorkHeads', value);
+  if (old) {
+    await ctx.db.replace(old._id, value);
+    if (batch) batch.head = { _id: old._id, _creationTime: old._creationTime, ...value };
+  } else {
+    const id = await ctx.db.insert('projectWorkHeads', value);
+    if (batch) batch.head = { _id: id, _creationTime: Date.now(), ...value };
+  }
   if (metadata && JSON.parse(metadata).sourceKind === 'native') {
-    const project = await ctx.db.get(projectId);
+    const project = batch?.project ?? (await ctx.db.get(projectId));
     if (project?.sourceAuthority?.mode !== 'server' && project?.work?.generationId)
       await publishLegacyLineMain(ctx.db, projectId, project.work.generationId);
   }

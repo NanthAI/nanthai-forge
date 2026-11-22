@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { PublicPlanRoot } from './publicWorkPlan';
+import { publicPlanRoot } from './projectPlanningCloseProgress';
 import type { QueryCtx } from './_generated/server';
 import { mapFinishReadPort } from './projectFinishReadReader';
 import { mapLandingRequestPort } from './projectLandingRequestBody';
@@ -36,7 +37,11 @@ export function publicWorkReadContext(ctx: QueryCtx) {
     if (typeof value.collection === 'string' && value.collection.startsWith('_workStorePlan'))
       internalPlan = true;
     if (value.collection === 'planningSearch' && typeof value.value === 'string') {
-      const root = JSON.parse(value.value) as PublicPlanRoot;
+      const root = publicPlanRoot<PublicPlanRoot>({
+        value: value.value,
+        ...(typeof value.planningClose === 'string' ? { planningClose: value.planningClose } : {}),
+        ...(typeof value.planningRestored === 'string' ? { planningRestored: value.planningRestored } : {}),
+      });
       if (typeof root.id === 'string' && typeof root.kind === 'string') roots.set(root.id, root);
     }
     if (

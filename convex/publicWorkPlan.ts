@@ -5,6 +5,8 @@ import { record, recordPartition, selectedGeneration } from './projectWorkIndexS
 import { publicPlanVisible, type PlanRow } from './publicVisibility';
 import { maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import { getDocumentSize } from 'convex/values';
+import { hostedOperationRow } from './projectHostedOperationLookup';
+import { pendingPlanningApply, publicPlanRoot } from './projectPlanningCloseProgress';
 export type PublicPlanRoot = PlanRow & Record<string, unknown>;
 type LookupBudget = { take: () => boolean; refund: (size: number) => void };
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
@@ -29,7 +31,7 @@ export function publicWorkPlan(
         const selected = await (generation ??= selectedGeneration(ctx, project));
         const row = selected ? await record(ctx, recordPartition(selected), 'planningSearch', id) : null;
         if (budget) budget.refund(row ? getDocumentSize(row) : 0);
-        const root = row ? (JSON.parse(row.value) as PublicPlanRoot) : null;
+        const root = row ? publicPlanRoot<PublicPlanRoot>(row) : null;
         known.set(id, root);
         return root;
       })();
@@ -37,21 +39,63 @@ export function publicWorkPlan(
     }
     return read;
   };
-  type Row = Pick<PublicPlanRoot, 'hidden' | 'initiativeId' | 'parentId'> & { status?: string | undefined };
+  const promotion = new Map<
+    string,
+    Promise<{ untouched: Map<string, string>; restored: Map<string, string> }>
+  >();
+  const applying = (operationId: string) => {
+    let read = promotion.get(operationId);
+    if (!read) {
+      read = (async () => {
+        const operation = await hostedOperationRow(ctx, project._id, project.owner, operationId);
+        const progress = operation && pendingPlanningApply(operation);
+        const untouched = new Map(
+          progress?.kind === 'close'
+            ? progress.children.slice(progress.offset)
+            : progress?.kind === 'undo'
+              ? progress.untouched
+              : undefined,
+        );
+        const restored = new Map<string, string>();
+        if (progress?.kind === 'undo')
+          for (const child of progress.children.slice(0, progress.offset))
+            if (child.parentId) restored.set(child.itemId, child.parentId);
+        return { untouched, restored };
+      })();
+      promotion.set(operationId, read);
+    }
+    return read;
+  };
+  type Row = Pick<PublicPlanRoot, 'hidden' | 'initiativeId' | 'parentId'> & {
+    id?: string;
+    status?: string | undefined;
+    planningRestored?: unknown;
+  };
+  const live = (item: Row) =>
+    item.status === 'open' || item.status === 'proposed' || item.status === 'in-progress';
+  const covering = (parent: PublicPlanRoot | null) =>
+    parent?.status === 'closed' && typeof parent.planningClose === 'string'
+      ? parent.planningClose
+      : undefined;
   /** The one rule for a row this read holds, its Initiative and parent looked up (cached). */
   const rowAllowed = async (item: Row | null, related = lookup) => {
     if (project.visibility !== 'public' || project.planVisibility === 'members') return false;
     if (!item) return false;
     const [initiative, parent] = await Promise.all([related(item.initiativeId), related(item.parentId)]);
     const parentInitiative = await related(parent?.initiativeId);
-    return publicPlanVisible({
-      projectVisibility: 'public',
+    const input = {
+      projectVisibility: 'public' as const,
       item,
-      ...(project.planVisibility ? { planVisibility: project.planVisibility } : {}),
       initiative: initiative ?? undefined,
       parent: parent ?? undefined,
       parentInitiative: parentInitiative ?? undefined,
-    });
+    };
+    const ordinary = publicPlanVisible(input);
+    const operationId = covering(parent);
+    if (ordinary || !operationId || !item.id || !live(item)) return ordinary;
+    const { untouched } = await applying(operationId);
+    const promoted = untouched.get(item.id) === item.parentId || item.planningRestored === operationId;
+    return promoted && publicPlanVisible({ ...input, promoted: true });
   };
   const allowed = async (id: unknown) => {
     if (project.visibility !== 'public' || project.planVisibility === 'members') return false;
@@ -102,6 +146,17 @@ export function publicWorkPlan(
     intentHidden,
     workHidden,
     selectionVisible,
+    async promotedChildren(parentId: string) {
+      const parent = await lookup(parentId);
+      const operationId = covering(parent);
+      if (!operationId) return [];
+      const { untouched, restored } = await applying(operationId);
+      const ids = [...untouched, ...restored].filter(([, id]) => id === parentId).map(([id]) => id);
+      const children = await Promise.all(ids.map(id => lookup(id)));
+      const selected = children.filter(child => child?.parentId === parentId && live(child));
+      const shown = await Promise.all(selected.map(child => rowAllowed(child)));
+      return selected.filter((child, index): child is PublicPlanRoot => !!child && shown[index] === true);
+    },
     async *visibleLoaded(keep: (row: PublicPlanRoot) => boolean) {
       // Only history counts may omit an unproved row. Reuse resolved relations and leave space for
       // the generation lookup and response projection. Concurrent lookups reserve a full document first.

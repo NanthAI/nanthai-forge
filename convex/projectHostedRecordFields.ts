@@ -131,6 +131,8 @@ export const hostedRecordTables = {
     .index('by_project_and_kind_and_parent_and_status', ['projectId', 'kind', 'parent', 'status'])
     .index('by_project_and_kind_and_status', ['projectId', 'kind', 'status']),
   projectHostedOperations: defineTable({
+    planningApply: v.optional(v.string()),
+    planningUndoneBy: v.optional(v.string()),
     recovery: v.optional(v.string()),
     journalDigest: v.optional(v.string()),
     journalReady: v.optional(v.boolean()),

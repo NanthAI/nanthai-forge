@@ -18,6 +18,7 @@ import { activeProject } from './projectAuthority';
 import { intentAuthority } from './projectContributors';
 import { selectedGeneration, record, recordPartition } from './projectWorkIndexStore';
 import { generationHead } from './projectWorkHead';
+import type { PlanningWriteContext } from './projectWorkCommandContext';
 import { commandKeys, commandProjection, commandAliasRows } from './projectWorkProjection';
 import { appendWork } from './projectWork';
 import { commutativeCommand } from './projectWorkCommandRun';
@@ -33,13 +34,16 @@ export async function executeCommand(
   actor?: string,
   options: {
     purge?: true;
+    planning?: PlanningWriteContext | undefined;
+    planningClose?: string | undefined;
+    planningRestore?: string | undefined;
     onPlanningBatchState?: (state: { replayed: true } | { before: PlanningItem | null }) => void;
   } = {},
 ) {
   // Only trusted internal actions supply actor (scheduled budget Issues have no user session).
   const user = actor ? { subject: actor } : await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to use your Forge project.');
-  const project = await activeProject(ctx, input.projectId, user.subject);
+  const project = options.planning?.project ?? (await activeProject(ctx, input.projectId, user.subject));
   let parsed;
   try {
     // The server's purge step sends only a purge; every other caller only client commands, never a purge.
@@ -122,21 +126,21 @@ export async function executeCommand(
       record: { ...intent, version: intent.version + 1, status: command.status },
     });
   }
-  const selected = await selectedGeneration(ctx, project);
+  const selected = options.planning?.selected ?? (await selectedGeneration(ctx, project));
   invariant(selected, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before writing.');
-  const generation = await generationHead(ctx, selected);
-  const backup = await ctx.db.get(generation.backupId);
+  const generation = options.planning?.generation ?? (await generationHead(ctx, selected));
+  const backup = options.planning?.backup ?? (await ctx.db.get(generation.backupId));
   invariant(
     backup?.projectId === project._id && backup.status === 'stored',
     'PROJECT_UNAVAILABLE',
     'Select this project’s stored source.',
   );
+  const load = (collection: string, key: string) =>
+    options.planning?.record(collection, key) ?? record(ctx, recordPartition(generation), collection, key);
   const lookup = (keys: { collection: string; key: string }[]) =>
-    Promise.all(keys.map(key => record(ctx, recordPartition(generation), key.collection, key.key)));
+    Promise.all(keys.map(key => load(key.collection, key.key)));
   const rows = await lookup(commandKeys(command, input));
-  await commandAliasRows(rows, (collection, key) =>
-    record(ctx, recordPartition(generation), collection, key),
-  );
+  await commandAliasRows(rows, load);
   const unified = [16, 18, 20, 22, 24].includes(JSON.parse(generation.metadata).schema);
   if (unified) {
     await commandPayloadRows(rows, lookup);
@@ -230,6 +234,24 @@ export async function executeCommand(
     request,
     rows,
   );
+  if (command.action === 'put-planning-item' && command.status !== undefined) {
+    // The reducer can redirect an alias to its current Item. Check the row it
+    // actually plans to publish, using the header this command already read.
+    const target = projection.entries.find(entry => entry.collection === 'planningItems');
+    const locked = rows.find(
+      row =>
+        row?.collection === 'planningItems' &&
+        row.key === target?.key &&
+        'planningClose' in row &&
+        row.planningClose !== undefined &&
+        row.planningClose !== options.planningClose,
+    );
+    invariant(
+      !locked,
+      'HOSTED_CONFLICT',
+      'The parent close or Undo is still applying. Retry this change after it finishes.',
+    );
+  }
   return appendWork(ctx, {
     ...input,
     owner: user.subject,
@@ -237,6 +259,8 @@ export async function executeCommand(
     previousRevision: revision,
     command: JSON.stringify(command),
     projection,
+    planning: options.planning,
+    planningRestore: options.planningRestore,
   });
 }
 export const command = mutation({

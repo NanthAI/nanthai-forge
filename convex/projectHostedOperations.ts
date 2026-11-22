@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { chargeMemberWork } from './abuseLimits';
-import { expandOperationReceipt } from '../src/compact-operation-receipt';
+import { hostedOperationRow } from './projectHostedOperationLookup';
+export { hostedOperationRow } from './projectHostedOperationLookup';
 import { digest } from '../src/state/hash';
 import { wakeJournal, journalGraceMs } from './projectJournalWake';
 import { semanticPayload } from '../src/semantic-payload';
 import { requireSourceAuthority, type SourceAuthority } from '../src/hosted-source-authority';
-import type { MutationCtx, QueryCtx } from './_generated/server';
+import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { activeProject } from './projectAuthority';
@@ -25,23 +26,6 @@ import {
   HOSTED_OPERATION_RETENTION_MS,
   type HostedTerminalReceipt,
 } from '../src/hosted-source-operation';
-
-export async function hostedOperationRow(
-  ctx: QueryCtx | MutationCtx,
-  projectId: Id<'hostedProjects'>,
-  actor: string,
-  operationId: string,
-) {
-  const [row] = await ctx.db
-    .query('projectHostedOperations')
-    .withIndex('by_project_and_actor_and_operation', q =>
-      q.eq('projectId', projectId).eq('actor', actor).eq('operationId', operationId),
-    )
-    .order('desc')
-    .take(1);
-  if (!row?.journalSegment) return row ?? null;
-  return { ...row, value: canonicalPayload(expandOperationReceipt(row)) };
-}
 
 /** Remove this project's receipts past the retention value, oldest first, at most one batch per call.
  * Runs only inside the write that adds a new receipt, so an idle project does nothing and no timer

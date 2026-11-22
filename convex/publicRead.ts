@@ -20,6 +20,7 @@ import { planningRecordTable } from './projectWorkRecordTables';
 import { ensurePublicRow, publicRow } from './publicListing';
 import { readProfile } from './personDays';
 import { publicWorkPlan, type PublicPlanRoot } from './publicWorkPlan';
+import { publicPlanRoot } from './projectPlanningCloseProgress';
 import {
   isPublicProject,
   visibleLanes,
@@ -64,9 +65,9 @@ async function weekOf(ctx: QueryCtx, project: Doc<'hostedProjects'>, now: number
 }
 
 const OPEN = ['proposed', 'open', 'in-progress'] as const;
-type PlanRoot = PlanRow & { status: string; title: string };
-const planRoot = (value: string): PlanRoot => {
-  const row = JSON.parse(value) as PlanRoot & { initiativeId?: string | null; parentId?: string | null };
+type PlanRoot = PlanRow & { status: string; title: string; planningRestored?: string };
+const planRoot = (doc: Doc<'projectPlanningRecords'>): PlanRoot => {
+  const row = publicPlanRoot<PlanRoot>(doc);
   return {
     id: row.id,
     kind: row.kind,
@@ -75,6 +76,7 @@ const planRoot = (value: string): PlanRoot => {
     ...(row.initiativeId ? { initiativeId: row.initiativeId } : {}),
     ...(row.parentId ? { parentId: row.parentId } : {}),
     ...(row.hidden ? { hidden: true } : {}),
+    ...(row.planningRestored ? { planningRestored: row.planningRestored } : {}),
   };
 };
 /** The project's plan setting from the planning contract (d3357f40); absent means public. */
@@ -97,15 +99,22 @@ async function planOf(ctx: QueryCtx, project: Doc<'hostedProjects'>, read: Map<s
       .take(limit);
   const roots: PlanRoot[] = [];
   for (const status of OPEN)
-    for (const row of await search('planning.status', status, 300)) roots.push(planRoot(row.value));
+    for (const row of await search('planning.status', status, 300)) roots.push(planRoot(row));
   // Every Initiative (open or closed) is looked up, so an Item's Initiative is known, never guessed.
   const known = new Map<string, PlanRow>(roots.map(row => [row.id, row]));
   for (const row of await search('planning.kind', 'initiative', 200)) {
-    const initiative = planRoot(row.value);
+    const initiative = planRoot(row);
     known.set(initiative.id, initiative);
   }
   for (const [id, row] of known) read.set(id, row as PublicPlanRoot);
-  const visible = visiblePlan(view, roots, known);
+  const alreadyVisible = new Set(visiblePlan(view, roots, known).map(row => row.id));
+  const plan = publicWorkPlan(ctx, project, read);
+  const shown = await Promise.all(
+    roots.map(
+      row => alreadyVisible.has(row.id) || (row.parentId && !known.has(row.parentId) && plan.rowAllowed(row)),
+    ),
+  );
+  const visible = roots.filter((_row, i) => shown[i]);
   const items = visible.filter(row => row.kind !== 'initiative');
   const initiatives = visible
     .filter(row => row.kind === 'initiative')

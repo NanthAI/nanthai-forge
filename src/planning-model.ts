@@ -159,17 +159,27 @@ const byRank = (left: PlanRow, right: PlanRow) => {
 /**
  * The one plan order: Initiatives by their own rank, then Items with no Initiative ("No Initiative", last). Within a
  * group Items by rank, each followed by its sub-items. A sub-item whose parent is absent sits in its own group as an
- * Item; deeper nesting is flattened under the first parent shown.
+ * Item. Live sub-items also sit in their own group when their parent is settled; deeper nesting is flattened.
  */
 export function planOrder(rows: readonly PlanRow[]) {
   const initiatives = rows.filter(row => row.kind === 'initiative').sort(byRank);
   const known = new Set(initiatives.map(row => row.id));
   const items = rows.filter(row => row.kind === 'issue');
-  const present = new Set(items.map(row => row.id));
+  const present = new Map(items.map(row => [row.id, row]));
+  const parentOf = (row: PlanRow) => {
+    if (!row.parentId || row.parentId === row.id) return undefined;
+    const parent = present.get(row.parentId);
+    return parent && (!isLive(row) || isLive(parent)) ? parent.id : undefined;
+  };
   const children = new Map<string, PlanRow[]>();
-  for (const row of items)
-    if (row.parentId && present.has(row.parentId) && row.parentId !== row.id)
-      children.set(row.parentId, [...(children.get(row.parentId) ?? []), row]);
+  for (const row of items) {
+    const parent = parentOf(row);
+    if (parent) {
+      const siblings = children.get(parent);
+      if (siblings) siblings.push(row);
+      else children.set(parent, [row]);
+    }
+  }
   const placed = new Set<string>();
   const walk = (row: PlanRow, depth: number, out: { row: PlanRow; depth: number }[]) => {
     if (placed.has(row.id)) return;
@@ -183,7 +193,7 @@ export function planOrder(rows: readonly PlanRow[]) {
       .filter(
         row => (row.initiativeId && known.has(row.initiativeId) ? row.initiativeId : null) === initiativeId,
       )
-      .filter(row => !row.parentId || !present.has(row.parentId) || row.parentId === row.id)
+      .filter(row => !parentOf(row))
       .sort(byRank))
       walk(row, 0, out);
     return out;
@@ -278,12 +288,13 @@ export function publicPlanVisible(input: {
   initiative?: (Pick<PlanRow, 'hidden'> & { status?: string | undefined }) | null;
   parent?: (Pick<PlanRow, 'hidden' | 'initiativeId'> & { status?: string | undefined }) | null;
   parentInitiative?: (Pick<PlanRow, 'hidden'> & { status?: string | undefined }) | null;
+  promoted?: true;
 }): boolean {
   if (input.projectVisibility !== 'public' || input.planVisibility === 'members') return false;
   if (concealed(input.item)) return false;
   if (input.item.initiativeId && (input.initiative === undefined || concealed(input.initiative)))
     return false;
-  if (input.item.parentId) {
+  if (input.item.parentId && !input.promoted) {
     if (input.parent === undefined || concealed(input.parent)) return false;
     if (
       input.parent?.initiativeId &&

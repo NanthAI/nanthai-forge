@@ -26,6 +26,7 @@ export type BatchOutcome = {
   undo: BatchPut[];
   undoClose?: string;
   detached?: number;
+  pendingOperation?: string;
   /** Comments copied by the batch stay when it is undone (a comment is never deleted). */
   kept: number;
 };
@@ -46,7 +47,7 @@ export async function runBatch(
 ): Promise<BatchOutcome> {
   const reply = JSON.parse(
     await apply({ projectId, operationId, writes: JSON.stringify(writes), ...options }),
-  ) as { results: BatchResult[]; undo?: BatchPut[]; detached?: number };
+  ) as { results: BatchResult[]; undo?: BatchPut[]; detached?: number; pending?: true };
   if (options.close || options.undoClose)
     return {
       results: reply.results,
@@ -54,6 +55,7 @@ export async function runBatch(
       kept: 0,
       ...(reply.undo?.length ? { undoClose: operationId } : {}),
       ...(reply.detached ? { detached: reply.detached } : {}),
+      ...(reply.pending ? { pendingOperation: operationId } : {}),
     };
   const { undo, kept } = batchUndo(writes, reply.results);
   return { results: reply.results, undo, kept };

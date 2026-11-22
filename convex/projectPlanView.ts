@@ -12,6 +12,8 @@ import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { planningRecordTable } from './projectWorkRecordTables';
 import { report } from './errors';
 import { invariant } from '../src/errors';
+import { hostedOperationRow } from './projectHostedOperationLookup';
+import { hostedOperationSchema } from '../src/hosted-source-operation';
 import { isLive, type PlanRow } from '../src/planning-model';
 export { planViewRow } from './projectPlanRows';
 import { markPlanPage } from './projectPlanLaneMarks';
@@ -44,6 +46,7 @@ export const planViewResult = v.object({
     }),
   ),
   canEdit: v.boolean(),
+  closeReceipt: v.optional(v.string()),
 });
 type Result = typeof planViewResult.type;
 const empty = (canEdit: boolean): Result => ({ rows: '[]', more: false, settled: [], canEdit });
@@ -212,11 +215,33 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
 }
 
 export const read = query({
-  args: { projectId: v.id('hostedProjects') },
+  args: { projectId: v.id('hostedProjects'), observeClose: v.optional(v.string()) },
   returns: planViewResult,
-  handler: async (ctx, { projectId }) => {
+  handler: async (ctx, { projectId, observeClose }) => {
     try {
-      return await planView(ctx, projectId);
+      const view = await planView(ctx, projectId);
+      if (!view.canEdit || !observeClose) return view;
+      const actor = (await ctx.auth.getUserIdentity())!.subject;
+      const operation = await hostedOperationRow(ctx, projectId, actor, observeClose);
+      if (operation?.planningApply) return view;
+      const terminal =
+        operation && hostedOperationSchema.parse(JSON.parse(operation.value)).terminal?.outcome;
+      if (terminal?.status !== 'completed') return view;
+      const result = terminal.result as {
+        kind?: string;
+        operationId: string;
+        results: unknown;
+        detached: number;
+      };
+      if (result.kind !== 'planning-close' && result.kind !== 'planning-undo-close') return view;
+      return {
+        ...view,
+        closeReceipt: JSON.stringify({
+          operationId: result.operationId,
+          results: result.results,
+          detached: result.detached,
+        }),
+      };
     } catch (error) {
       return report(error);
     }

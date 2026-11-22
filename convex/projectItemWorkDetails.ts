@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Optional Item-page facts. These reads share the Item Work transaction and its page; the CLI keeps its compact reply.
 import { getDocumentSize } from 'convex/values';
-import { inverseRelationLabel } from '../src/planning-model';
+import { inverseRelationLabel, isLive } from '../src/planning-model';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
@@ -200,7 +200,7 @@ export async function itemWorkRelated(
     const initiative = item.initiativeId && found.get(item.initiativeId);
     if (initiative) add('Initiative', initiative);
     const parent = item.parentId && found.get(item.parentId);
-    if (parent) add('Parent', parent);
+    if (parent && (!isLive(item) || isLive(parent))) add('Parent', parent);
     for (const relation of item.relations ?? []) {
       const other = found.get(relation.id);
       if (!other) continue;

@@ -122,6 +122,8 @@ export const indexTables = {
       'workSchema',
     ]),
   projectPlanningRecords: defineTable({
+    planningClose: v.optional(v.string()),
+    planningRestored: v.optional(v.string()),
     projectId: v.id('hostedProjects'),
     generationId: v.id('projectWorkGenerations'),
     ...indexEntry.fields,

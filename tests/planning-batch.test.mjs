@@ -4,6 +4,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
+import { getDocumentSize } from 'convex/values';
+import { nextItem, planOrder } from '../dist/planning-model.js';
 import {
   batchSentence,
   batchUndo,
@@ -24,11 +27,21 @@ import { meterReads, meterWorkIO } from './hosted-read-set.mjs';
 import { planFixture } from './plan-read-fixture.mjs';
 
 const batch = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
+const { continueApply } = await import(moduleUrl('../convex/projectPlanningClose.ts'));
+const { read: readPlan } = await import(moduleUrl('../convex/projectPlanView.ts'));
+const { planCounts } = await import(moduleUrl('../convex/projectPlanCounts.ts'));
+const { publicWorkPlan } = await import(moduleUrl('../convex/publicWorkPlan.ts'));
+const { emptyPlanCounts, planCountsBirth, planRootFacts, PLAN_COUNTS, tallyGroup } = await import(
+  moduleUrl('../convex/projectPlanCountsStore.ts')
+);
 const { planView, PLAN_LIVE_LIMIT } = await import(moduleUrl('../convex/projectPlanView.ts'));
 const { recordPartition } = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
 const { runBatch } = await import(moduleUrl('../web/src/app/plan/batch.ts'));
 const id = () => randomUUID();
+const closeTasks = s =>
+  s.scheduled.filter(task => getFunctionName(task.fn) === 'projectPlanningClose:continueApply');
+const runCloseTask = (s, task) => s.transaction(() => continueApply._handler(s.ctx, task.args));
 
 async function useSearchRoots(s, coverage) {
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
@@ -74,7 +87,10 @@ test('explicit close preserves live direct children in their stored Initiatives 
     'Shipped',
   ).writes;
   const operationId = id();
+  const scheduled = closeTasks(s).length;
   const receipt = await planBatch(s, writes, { close: true }, operationId);
+  assert.equal(receipt.pending, undefined);
+  assert.equal(closeTasks(s).length, scheduled);
   assert.equal(receipt.detached, 3);
   assert.deepEqual(
     receipt.results.map(row => row.outcome),
@@ -125,6 +141,7 @@ test('explicit close preserves live direct children in their stored Initiatives 
   const undoId = id();
   const undone = await runBatch(call, s.projectId, [], { undoClose: replay.undoClose, operationId: undoId });
   assert.equal(undone.results.length, 6);
+  assert.equal(closeTasks(s).length, scheduled);
   assert.deepEqual(
     await runBatch(call, s.projectId, [], { undoClose: replay.undoClose, operationId: undoId }),
     undone,
@@ -149,7 +166,7 @@ test('explicit close preserves live direct children in their stored Initiatives 
   );
 });
 
-test('a parent missed by a stale close keeps its children, and stale Undo cannot reopen other Items or reattach children partially', async t => {
+test('a parent missed by a stale close keeps its children, and Undo skips a child edited since detachment', async t => {
   const s = await setup(t);
   const stale = s.item({ title: 'Edited parent' });
   const parent = s.item({ title: 'Other parent' });
@@ -175,13 +192,17 @@ test('a parent missed by a stale close keeps its children, and stale Undo cannot
   );
   await s.send(s.item({ itemId: child.itemId, expectedVersion: 3, title: 'Edited after detaching' }));
 
-  await assert.rejects(
-    planBatch(s, [], { undoClose: operationId }),
-    error => error.data.code === 'ITEM_CHANGED',
+  const undo = await planBatch(s, [], { undoClose: operationId });
+  assert.deepEqual(
+    undo.results.map(row => [row.itemId, row.outcome, row.code]),
+    [
+      [parent.itemId, 'applied', undefined],
+      [child.itemId, 'refused', 'ITEM_CHANGED'],
+    ],
   );
   const history = (await s.read()).data.planningItems;
   const latest = itemId => history.filter(item => item.id === itemId).at(-1);
-  assert.equal(latest(parent.itemId).status, 'closed');
+  assert.equal(latest(parent.itemId).status, 'open');
   assert.equal(latest(staleChild.itemId).parentId, stale.itemId);
   assert.equal(latest(child.itemId).parentId, undefined);
   assert.equal(latest(child.itemId).title, 'Edited after detaching');
@@ -318,6 +339,24 @@ async function closeBudgetFixture(t, scale, compact) {
   }
   if (compact) await s.project();
   else await useSearchRoots(s, 1);
+  const counts = emptyPlanCounts(true);
+  for (const record of s.tables.projectPlanningRecords.values()) {
+    if (record.generationId !== s.generationId) continue;
+    const facts = planRootFacts(record);
+    if (!facts) continue;
+    counts[facts.kind][facts.status]++;
+    tallyGroup(counts, facts.group, facts.status, 1);
+  }
+  const counter = [...s.tables.projectWorkDataRecords.values()].find(
+    row => row.generationId === s.generationId && row.collection === PLAN_COUNTS,
+  );
+  const value = JSON.stringify(counts);
+  if (counter) await s.ctx.db.patch(counter._id, { value });
+  else
+    await s.ctx.db.insert('projectWorkDataRecords', {
+      ...planCountsBirth(s.projectId, s.generationId),
+      value,
+    });
   const writes = closeMany(
     [
       parent,
@@ -331,7 +370,7 @@ async function closeBudgetFixture(t, scale, compact) {
 }
 
 // Convex counts empty point lookups and queries as index ranges too.
-const convexIndexRanges = 4_096;
+const transactionRangeCeiling = 2_048;
 async function transactionCost(s, run, failAfterVersions = Infinity) {
   const meter = meterWorkIO(s.ctx, s.tables);
   const { query, get } = s.ctx.db;
@@ -355,7 +394,12 @@ async function transactionCost(s, run, failAfterVersions = Infinity) {
   const start = performance.now();
   try {
     const cost = await meter.cost(run);
-    return { ...cost, indexRanges, wallMs: Math.round(performance.now() - start) };
+    const wallMs = Math.round(performance.now() - start);
+    const operationBytes = Math.max(
+      0,
+      ...[...s.tables.projectHostedOperations.values()].map(getDocumentSize),
+    );
+    return { ...cost, indexRanges, wallMs, operationBytes };
   } finally {
     meter.restore();
   }
@@ -365,43 +409,104 @@ async function pressureRollsBack(s, run) {
   const before = structuredClone(s.tables);
   const scheduled = s.scheduled.slice();
   const tasks = structuredClone(s.tasks);
-  await assert.rejects(
-    transactionCost(s, run, planningBatchLimit),
-    error => error.data?.code === 'HOSTED_CONFLICT',
-  );
+  await assert.rejects(transactionCost(s, run, 4), error => error.data?.code === 'HOSTED_CONFLICT');
   assert.deepEqual(s.tables, before, 'versions, projections and operation receipts roll back together');
   assert.deepEqual(s.scheduled, scheduled);
   assert.deepEqual(s.tasks, tasks);
 }
 
+async function observedPlan(s) {
+  const view = await planView(s.ctx, s.projectId);
+  const rows = JSON.parse(view.rows);
+  return {
+    order: planOrder(rows).map(group => group.rows.map(({ row, depth }) => [row.id, depth])),
+    next: nextItem(rows).next?.id,
+    tallies: await planCounts(s.ctx, s.projectId),
+  };
+}
+
+async function runClosePages(s, from, costs, states, retryFailedPage) {
+  let cursor = from;
+  while (cursor < closeTasks(s).length) {
+    let task = closeTasks(s)[cursor++];
+    const run = () => runCloseTask(s, task);
+    if (retryFailedPage && cursor === from + 2) {
+      await pressureRollsBack(s, run);
+      s.tasks.set(task.id, { state: { kind: 'failed' } });
+      const count = closeTasks(s).length;
+      const receipt = await retryFailedPage();
+      assert(receipt.pending);
+      assert.deepEqual(await retryFailedPage(), receipt);
+      assert.equal(closeTasks(s).length, count + 1, 'retry re-arms exactly one failed cursor');
+      task = closeTasks(s)[cursor++];
+    }
+    const priorEvents = s.tables.projectWorkEvents.size;
+    const cost = await transactionCost(s, run);
+    costs.push(cost);
+    states.push(await observedPlan(s));
+    const events = s.tables.projectWorkEvents.size;
+    assert(cost.indexRanges <= 18 * (events - priorEvents) + 80, JSON.stringify(cost));
+    const count = closeTasks(s).length;
+    await run();
+    assert.equal(s.tables.projectWorkEvents.size, events, 'replayed cursor writes nothing');
+    assert.equal(closeTasks(s).length, count, 'replayed cursor starts no chain');
+  }
+  assert(cursor > from, 'the operation needed at least one continuation');
+}
+
 for (const compact of [true, false])
-  for (const scale of [2, 4])
-    test(`close and Undo preserve all links and transaction atomicity at ${271 * scale} live Items with ${compact ? 'compact' : 'legacy'} coverage`, async t => {
+  for (const scale of [4, 8])
+    test(`close and Undo publish atomically at ${271 * scale} live Items with ${compact ? 'compact' : 'legacy'} coverage`, async t => {
       const { s, items, parent, children, settled, selectedChild, writes } = await closeBudgetFixture(
         t,
         scale,
         compact,
       );
       const initial = items();
+      const before = await observedPlan(s);
       const closeId = id();
       const undoId = id();
-      let close, undo;
       const closeRequest = () => planBatch(s, writes, { close: true }, closeId);
       const undoRequest = () => planBatch(s, [], { undoClose: closeId }, undoId);
-      // Fail after a page of staged writes, independent of the measured range count.
-      // Replay the same IDs to verify the failure left no receipt or partial update.
-      const rangeCeiling = scale === 2 ? convexIndexRanges : 7_600;
-      if (scale === 4) await pressureRollsBack(s, closeRequest);
-      const closeCost = await transactionCost(s, async () => {
-        close = await closeRequest();
-      });
-      const afterClose = items();
+      const injectFailure = scale === 4 && compact;
+      const closeCosts = [],
+        undoCosts = [];
+      const closeStates = [],
+        undoStates = [];
+      const fromClose = closeTasks(s).length;
+      let close, undo;
+      if (injectFailure) await pressureRollsBack(s, closeRequest);
+      closeCosts.push(
+        await transactionCost(s, async () => {
+          close = await closeRequest();
+        }),
+      );
+      closeStates.push(await observedPlan(s));
+      assert(close.pending);
+      assert.deepEqual(await closeRequest(), close);
+      assert.equal(closeTasks(s).length, fromClose + 1, 'client replay schedules no duplicate continuation');
+      assert.equal(
+        (await readPlan._handler(s.ctx, { projectId: s.projectId, observeClose: closeId })).closeReceipt,
+        undefined,
+      );
+      await runClosePages(s, fromClose, closeCosts, closeStates, injectFailure && closeRequest);
+      close = await closeRequest();
+      assert.equal(close.pending, undefined);
+      assert.equal(close.detached, children.length);
       assert.deepEqual(
         close.results.map(row => row.outcome),
         ['applied', 'refused', 'applied', 'refused'],
-        JSON.stringify(close.results),
       );
-      assert.equal(close.detached, children.length);
+      assert.equal(
+        JSON.parse(
+          (await readPlan._handler(s.ctx, { projectId: s.projectId, observeClose: closeId })).closeReceipt,
+        ).operationId,
+        closeId,
+      );
+      s.caller('foreign');
+      await assert.rejects(closeRequest(), error => error.data?.code === 'PROJECT_UNAVAILABLE');
+      s.caller('owner');
+      const afterClose = items();
       assert.equal(afterClose.get(parent.id).status, 'closed');
       assert.equal(afterClose.get(selectedChild.id).status, 'closed');
       assert.equal(afterClose.get(selectedChild.id).parentId, parent.id);
@@ -413,33 +518,188 @@ for (const compact of [true, false])
           [undefined, child.status, child.title, child.body, child.initiativeId, child.version + 1],
         );
       }
-      if (scale === 4) await pressureRollsBack(s, undoRequest);
-      const undoCost = await transactionCost(s, async () => {
-        undo = await undoRequest();
-      });
+      const closedPlan = closeStates.at(-1);
+      for (const state of closeStates) assert.deepEqual(state, closedPlan);
+
+      const fromUndo = closeTasks(s).length;
+      undoCosts.push(
+        await transactionCost(s, async () => {
+          undo = await undoRequest();
+        }),
+      );
+      undoStates.push(await observedPlan(s));
+      assert(undo.pending);
+      assert.deepEqual(await undoRequest(), undo);
+      assert.equal(closeTasks(s).length, fromUndo + 1);
+      await runClosePages(s, fromUndo, undoCosts, undoStates, injectFailure && undoRequest);
+      for (const state of undoStates.slice(0, -1)) assert.deepEqual(state, closedPlan);
+      const restoredPlan = undoStates.at(-1);
+      assert.deepEqual(restoredPlan.order, before.order);
+      assert.equal(restoredPlan.next, before.next);
+      assert.deepEqual(restoredPlan.tallies.issue, before.tallies.issue);
+      undo = await undoRequest();
+      assert.equal(undo.pending, undefined);
       assert.equal(undo.results.length, children.length + 2);
       const restored = items();
       const changed = new Set([parent.id, selectedChild.id, ...children.map(child => child.id)]);
-      for (const [id, row] of initial) {
-        const item = restored.get(id);
-        if (!changed.has(id)) assert.deepEqual(item, row);
+      for (const [itemId, row] of initial) {
+        const item = restored.get(itemId);
+        if (!changed.has(itemId)) assert.deepEqual(item, row);
         else {
           assert.equal(item.version, row.version + 2);
           assert.equal(item.parentId, row.parentId);
           assert.equal(item.status, row.status);
         }
       }
+      assert.equal(s.tables.projectWorkEvents.size, changed.size * 2);
+      assert.equal(s.tables.projectHostedOperations.size, 2);
       assert.deepEqual(await undoRequest(), undo);
       assert.deepEqual(items(), restored);
-      t.diagnostic(JSON.stringify({ closeCost, undoCost, peakRssKiB: process.resourceUsage().maxRSS }));
-      for (const cost of [closeCost, undoCost]) {
-        assert(cost.indexRanges <= rangeCeiling, JSON.stringify(cost));
+      t.diagnostic(JSON.stringify({ closeCosts, undoCosts, peakRssKiB: process.resourceUsage().maxRSS }));
+      for (const cost of [...closeCosts, ...undoCosts]) {
+        assert(cost.indexRanges <= transactionRangeCeiling, JSON.stringify(cost));
         assert(cost.readBytes < 16 * 1024 * 1024, JSON.stringify(cost));
         assert(cost.writeBytes < 16 * 1024 * 1024, JSON.stringify(cost));
         assert(cost.readDocuments < 32_000, JSON.stringify(cost));
         assert(cost.writeDocuments < 16_000, JSON.stringify(cost));
       }
     });
+
+test('Undo cancels an applying close and leaves unmaterialized children at their original versions', async t => {
+  const { s, items, parent, children, writes } = await closeBudgetFixture(t, 2, true);
+  const initial = items();
+  const closeId = id(),
+    undoId = id();
+  const from = closeTasks(s).length;
+  const close = await planBatch(s, writes, { close: true }, closeId);
+  assert(close.pending);
+  const task = closeTasks(s).at(-1);
+  const partial = items();
+  assert(children.some(child => partial.get(child.id).parentId === parent.id));
+  assert(children.some(child => partial.get(child.id).parentId === undefined));
+  const undo = await planBatch(s, [], { undoClose: closeId }, undoId);
+  assert.equal(undo.pending, undefined);
+  assert.equal(s.tasks.get(task.id).state.kind, 'canceled');
+  await runCloseTask(s, task);
+  assert.equal(closeTasks(s).length, from + 1);
+  assert.equal(items().get(parent.id).status, initial.get(parent.id).status);
+  for (const child of children) {
+    const current = items().get(child.id);
+    assert.equal(current.parentId, parent.id);
+    assert.equal(current.version, child.version + (partial.get(child.id).parentId === undefined ? 2 : 0));
+  }
+});
+
+test('an applying parent refuses status writes and an edited child keeps its changes through close and Undo', async t => {
+  const { s, items, parent, children, writes } = await closeBudgetFixture(t, 2, true);
+  const closeId = id();
+  const from = closeTasks(s).length;
+  assert((await planBatch(s, writes, { close: true }, closeId)).pending);
+  const current = items();
+  const live = children.find(child => current.get(child.id).parentId === parent.id);
+  const detached = children.find(child => current.get(child.id).parentId === undefined);
+  assert(live && detached);
+  await assert.rejects(
+    planBatch(s, changeEach([current.get(parent.id)], { status: 'open' })),
+    error => error.data?.code === 'HOSTED_CONFLICT',
+  );
+  for (const child of [live, detached])
+    await planBatch(s, changeEach([current.get(child.id)], { title: `Edit ${child.id}` }));
+  await runClosePages(s, from, [], [], false);
+  for (const child of [live, detached]) assert.equal(items().get(child.id).title, `Edit ${child.id}`);
+  assert.equal(items().get(live.id).parentId, undefined);
+  const undoFrom = closeTasks(s).length;
+  const undoId = id();
+  const undo = () => planBatch(s, [], { undoClose: closeId }, undoId);
+  assert((await undo()).pending);
+  await runClosePages(s, undoFrom, [], [], false);
+  const receipt = await undo();
+  assert.equal(receipt.results.find(row => row.itemId === detached.id).code, 'ITEM_CHANGED');
+  assert.equal(items().get(detached.id).parentId, undefined);
+  assert.equal(items().get(live.id).parentId, parent.id);
+  assert.equal(items().get(live.id).title, `Edit ${live.id}`);
+});
+
+test('public Plan visibility and counts change at the parent boundary and give a later child no inherited promotion', async t => {
+  const { s, items, parent, children, settled, writes } = await closeBudgetFixture(t, 2, true);
+  let visible = children.find(child => !child.hidden);
+  const hidden = children.find(child => child.hidden);
+  assert(visible && hidden);
+  await planBatch(s, changeEach([parent], { hidden: true }));
+  writes[0].expectedVersion++;
+  await finishReadWriter(s.ctx).db.patch(s.projectId, { visibility: 'public' });
+  const project = s.tables.hostedProjects.get(s.projectId);
+  const counter = [...s.tables.projectWorkDataRecords.values()].find(
+    row => row.generationId === s.generationId && row.collection === PLAN_COUNTS,
+  );
+  const added = id();
+  const visibility = async () => {
+    const plan = publicWorkPlan(s.ctx, project, new Map());
+    return Promise.all([visible.id, hidden.id, settled.id, added].map(plan.allowed));
+  };
+  const counts = async fallback => {
+    const value = s.tables.projectWorkDataRecords.get(counter._id).value;
+    if (fallback)
+      await s.ctx.db.patch(counter._id, { value: JSON.stringify({ ...JSON.parse(value), done: false }) });
+    s.caller('visitor');
+    try {
+      return (await planCounts(s.ctx, s.projectId)).issue;
+    } finally {
+      s.caller('owner');
+      if (fallback) await s.ctx.db.patch(counter._id, { value });
+    }
+  };
+  assert.deepEqual(await visibility(), [false, false, false, false]);
+  const before = await counts(false);
+  const beforeFallback = await counts(true);
+  const closeId = id(),
+    undoId = id();
+  assert((await planBatch(s, writes, { close: true }, closeId)).pending);
+  const partial = items();
+  visible = children.find(child => !child.hidden && partial.get(child.id).parentId === parent.id);
+  assert(visible, 'a public live child has not physically detached');
+  assert.deepEqual(await visibility(), [true, false, false, false]);
+  await planBatch(s, [
+    {
+      action: 'put-planning-item',
+      itemId: added,
+      expectedVersion: 0,
+      kind: 'issue',
+      title: 'Attached under a hidden parent after close started',
+      status: 'open',
+      parentId: parent.id,
+    },
+  ]);
+  assert.deepEqual(await visibility(), [true, false, false, false]);
+  const closedCounts = await counts(false);
+  const closedFallback = await counts(true);
+  await runCloseTask(s, closeTasks(s).at(-1));
+  assert.deepEqual(await visibility(), [true, false, false, false]);
+  assert.deepEqual(await counts(false), closedCounts);
+  assert.deepEqual(await counts(true), closedFallback);
+  assert.equal(items().get(added).parentId, parent.id);
+
+  assert((await planBatch(s, [], { undoClose: closeId }, undoId)).pending);
+  assert.deepEqual(await visibility(), [true, false, false, false]);
+  assert.deepEqual(await counts(false), closedCounts);
+  assert.deepEqual(await counts(true), closedFallback);
+  await runCloseTask(s, closeTasks(s).at(-1));
+  assert.deepEqual(await visibility(), [false, false, false, false]);
+  assert.deepEqual(await counts(false), before);
+  assert.deepEqual(await counts(true), beforeFallback);
+});
+
+test('an ordinary reopen leaves the earlier close’s detached child in its Initiative', async t => {
+  const s = await setup(t);
+  const parent = s.item(),
+    child = s.item({ parentId: parent.itemId });
+  await s.send(parent);
+  await s.send(child);
+  await planBatch(s, closeMany([{ id: parent.itemId, version: 1 }], 'Closed').writes, { close: true });
+  await planBatch(s, changeEach([{ id: parent.itemId, version: 2 }], { status: 'open' }));
+  const history = (await s.read()).data.planningItems;
+  assert.equal(history.filter(item => item.id === child.itemId).at(-1).parentId, undefined);
+});
 
 test('batch Undo writes back exactly the fields the batch named, abandons creations and keeps comments', () => {
   const writes = [

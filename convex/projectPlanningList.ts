@@ -173,7 +173,16 @@ export async function planningPage(
     if (input.counts) {
       const status = root.planning!.status as keyof typeof counts;
       counts[status]++;
-      if (input.roots) roots.push(root.value);
+      if (input.roots)
+        roots.push(
+          root.planningClose || root.planningRestored
+            ? JSON.stringify({
+                ...JSON.parse(root.value),
+                planningClose: root.planningClose,
+                planningRestored: root.planningRestored,
+              })
+            : root.value,
+        );
       continue;
     }
     const stored = readsStore(project, 'planningItems');

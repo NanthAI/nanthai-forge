@@ -171,9 +171,27 @@ async function visitorCounts(
       return plan.rowAllowed({ initiativeId: initiativeId || null, parentId: parentId || null });
     }),
   );
-  counted.forEach(([, tally], index) => {
-    if (shown[index]) PLAN_STATUSES.forEach((status, i) => (issue[status] += tally[i] ?? 0));
+  const concealedGroups = new Set<string>();
+  const pendingParents = new Set<string>();
+  counted.forEach(([key, tally], index) => {
+    if (shown[index]) {
+      PLAN_STATUSES.forEach((status, i) => (issue[status] += tally[i] ?? 0));
+    } else {
+      const parentId = key.split('|')[1];
+      if (parentId) {
+        concealedGroups.add(key);
+        pendingParents.add(parentId);
+      }
+    }
   });
+  // Only an explicit close can make part of a concealed group visible. Confirm
+  // both the participation and present visibility for its still-linked children.
+  const promoted = await Promise.all([...pendingParents].map(plan.promotedChildren));
+  for (const children of promoted)
+    for (const child of children) {
+      const status = child.status as (typeof PLAN_STATUSES)[number];
+      if (concealedGroups.has(`${child.initiativeId ?? ''}|${child.parentId}`)) issue[status]++;
+    }
   return { exact, issue: reply(issue), initiative: null, closedToday: null };
 }
 

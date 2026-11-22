@@ -71,9 +71,11 @@ import { useProjectPages } from '../project-pages';
 import { ItemWork, type ReadItemWork } from './ItemWork';
 import './plan.css';
 
-const planRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, PlanRead>(
-  'projectPlanView:read',
-);
+const planRead = makeFunctionReference<
+  'query',
+  { projectId: Id<'hostedProjects'>; observeClose?: string },
+  PlanRead
+>('projectPlanView:read');
 /** Open Lanes active in the last 48 hours (convex/projectPlanWorkers.ts), read once, never subscribed. */
 const planWorkers = makeFunctionReference<
   'query',
@@ -138,7 +140,8 @@ export type Settled = ReturnType<typeof useSettled>;
 function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: PlaceProps) {
   const search = useSearch();
   const query = useMemo(() => readQuery(search), [search.toString()]);
-  const live = useSafeQuery(planRead, { projectId });
+  const [observeClose, setObserveClose] = useState<string>();
+  const live = useSafeQuery(planRead, { projectId, ...(observeClose ? { observeClose } : {}) });
   const counts = useSafeQuery(api.projectPlanCounts.read, { projectId });
   usePageCritical('Plan', {
     plan: live.value !== undefined,
@@ -195,7 +198,11 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       command: JSON.stringify({ action: 'put-planning-item', operationId, ...command }),
     });
   };
-  const run: RunBatch = (writes, options) => runBatch(apply, projectId, writes, options);
+  const run: RunBatch = async (writes, options) => {
+    const result = await runBatch(apply, projectId, writes, options);
+    setObserveClose(result.pendingOperation);
+    return result;
+  };
   const reads: Reads = {
     items: ids => readItems(client, projectId, ids),
     initiative: id => readInitiative(client, projectId, id),
@@ -238,6 +245,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       resolvedShortId={shortLink ? (linked.value?.id ?? null) : undefined}
       showDone={showDone}
       progress={counts.value}
+      clearCloseObservation={() => setObserveClose(undefined)}
     />
   );
 }
@@ -283,9 +291,11 @@ export function PlanScreenView({
   resolvedShortId,
   showDone = () => undefined,
   progress: progressRead,
+  clearCloseObservation,
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & {
   /** The project's progress counts (convex/projectPlanCounts.ts), the same read Needs me shows. */
   progress?: PlanCountsRead | undefined;
+  clearCloseObservation?: () => void;
   /** The Item resolved by a direct link outside the open Plan. */
   linkedItem?: PlanRow | null | 'loading';
   shelvedItem?: PlanRow | null | 'loading';
@@ -531,7 +541,12 @@ export function PlanScreenView({
               {...toast}
               run={run}
               byId={byId}
-              onGone={words => (setToast(null), words && announce(words))}
+              closeReceipt={read?.closeReceipt}
+              onGone={words => {
+                clearCloseObservation?.();
+                setToast(null);
+                if (words) announce(words);
+              }}
             />
           ) : null
         }
@@ -876,7 +891,9 @@ export function PlanScreenView({
           {...toast}
           run={run}
           byId={byId}
+          closeReceipt={read?.closeReceipt}
           onGone={words => {
+            clearCloseObservation?.();
             setToast(null);
             if (words) announce(words);
           }}

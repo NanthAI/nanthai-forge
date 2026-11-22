@@ -614,24 +614,44 @@ export function UndoToast({
   run,
   onGone,
   byId,
+  closeReceipt,
 }: {
   words: string;
   outcome: BatchOutcome;
   run: RunBatch;
   onGone: (words?: string) => void;
   byId: ReadonlyMap<string, PlanRow>;
+  closeReceipt?: string | undefined;
 }) {
   const [busy, setBusy] = useState(false);
   const [retryUndo, setRetryUndo] = useState(false);
   const undoOperationId = useRef<string | undefined>(undefined);
+  const [pendingUndo, setPendingUndo] = useState<string>();
+  const observed = useMemo(
+    () =>
+      closeReceipt
+        ? (JSON.parse(closeReceipt) as Pick<BatchOutcome, 'results' | 'detached'> & { operationId: string })
+        : undefined,
+    [closeReceipt],
+  );
+  const closePending = Boolean(
+    outcome.pendingOperation && observed?.operationId !== outcome.pendingOperation,
+  );
+  const undone = (back: BatchOutcome) =>
+    `Undone. ${outcomeWords(back, byId)}${outcome.kept ? ` ${outcome.kept.toLocaleString()} copied comments stay.` : ''}`;
+  useEffect(() => {
+    if (pendingUndo && observed?.operationId === pendingUndo)
+      onGone(undone({ ...observed, undo: [], kept: 0 }));
+  }, [observed, pendingUndo]);
   useEffect(() => {
     // A timer only while a toast is showing after an action; an idle screen has none.
-    if (busy && outcome.undoClose) return;
+    if ((busy && outcome.undoClose) || closePending) return;
     const timer = setTimeout(() => onGone(), 10_000);
     return () => clearTimeout(timer);
-  }, [busy, outcome]);
+  }, [busy, closePending, outcome]);
   const undo = async () => {
     setBusy(true);
+    setRetryUndo(false);
     try {
       if (outcome.undoClose) undoOperationId.current ??= crypto.randomUUID();
       const back = await run(
@@ -640,9 +660,8 @@ export function UndoToast({
           ? { undoClose: outcome.undoClose, operationId: undoOperationId.current! }
           : undefined,
       );
-      onGone(
-        `Undone. ${outcomeWords(back, byId)}${outcome.kept ? ` ${outcome.kept.toLocaleString()} copied comments stay.` : ''}`,
-      );
+      if (back.pendingOperation) setPendingUndo(back.pendingOperation);
+      else onGone(undone(back));
     } catch (error) {
       const code = hostedErrorCode(error);
       if (
@@ -659,7 +678,17 @@ export function UndoToast({
   return (
     <div className="toasts" role="status">
       <div className="toast">
-        <span>{retryUndo ? 'Forge could not confirm Undo. Retry to check what happened.' : words}</span>
+        <span>
+          {retryUndo
+            ? 'Forge could not confirm Undo. Retry to check what happened.'
+            : pendingUndo
+              ? 'Undo pending…'
+              : closePending
+                ? 'Close pending…'
+                : observed?.operationId === outcome.pendingOperation && observed
+                  ? outcomeWords({ ...outcome, ...observed }, byId)
+                  : words}
+        </span>
         {outcome.undo.length || outcome.undoClose ? (
           <button type="button" onClick={() => void undo()} disabled={busy}>
             {retryUndo ? 'Retry Undo' : 'Undo'}

@@ -13,6 +13,7 @@ import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { commandProjection } from './projectWorkProjection';
+import type { PlanningWriteContext } from './projectWorkCommandContext';
 import { workProject, setWorkHead } from './projectWorkHead';
 import { acceptanceEvidence } from './autonomyFields';
 import { acceptanceActor } from './projectAutonomy';
@@ -243,10 +244,14 @@ export async function appendWork(
     command: string;
     projection?: ReturnType<typeof commandProjection>;
     authorityEpoch?: number;
+    planning?: PlanningWriteContext | undefined;
+    planningRestore?: string | undefined;
   },
 ) {
+  const { planning } = input;
   try {
-    const project = await workProject(ctx, await activeProject(ctx, input.projectId, input.owner));
+    const project =
+      planning?.project ?? (await workProject(ctx, await activeProject(ctx, input.projectId, input.owner)));
     const channelCommand = hostedChannelCommandSchema.safeParse(JSON.parse(input.command));
     if (channelCommand.success)
       requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
@@ -294,7 +299,10 @@ export async function appendWork(
       if (command.action !== 'intent')
         await intentAuthority(ctx, input.projectId, input.owner, command.intentId);
     }
-    const original = await findWorkEvent(ctx, input.projectId, input.operationId, { command: input.command });
+    // The batch context comes from executeCommand after it checked this exact replay.
+    const original = planning
+      ? null
+      : await findWorkEvent(ctx, input.projectId, input.operationId, { command: input.command });
     if (original) {
       invariant(
         original.actor === input.owner &&
@@ -353,7 +361,7 @@ export async function appendWork(
       );
     }
     invariant(
-      project.work?.revision === input.previousRevision,
+      (planning ? planning.revision : project.work?.revision) === input.previousRevision,
       'WORK_STALE',
       'Hosted Work changed. Your request and existing work remain available.',
     );
@@ -373,14 +381,16 @@ export async function appendWork(
     };
     let retained: StoredWorkEvent | null = null;
     if (input.projection) {
-      const generation = await selectedGeneration(ctx, project);
+      const generation = planning?.selected ?? (await selectedGeneration(ctx, project));
       invariant(
         generation?._id === input.projection.generationId,
         'WORK_STALE',
         'Hosted source or Work changed.',
       );
       for (const entry of input.projection.entries) {
-        const old = await record(ctx, recordPartition(generation), entry.collection, entry.key);
+        const old = await (planning?.record(entry.collection, entry.key) ??
+          record(ctx, recordPartition(generation), entry.collection, entry.key));
+        planning?.invalidate(entry.collection, entry.key);
         if (
           entry.collection === 'planningItems' &&
           (action === 'put-planning-item' ||
@@ -392,6 +402,7 @@ export async function appendWork(
           await changeItemRetention(ctx, project._id, previous, next, entry.position);
           await movePlanLaneMark(ctx, project._id, previous, next);
         }
+        const restoresLink = entry.collection === 'planningSearch' && input.planningRestore;
         if (old) {
           if (!entry.collection.endsWith(':payload')) {
             const payloadKey = JSON.parse(old.value).payloadKey;
@@ -404,11 +415,20 @@ export async function appendWork(
                 payloadKey,
               });
           }
-          await ctx.db.patch(old._id, { ...entry, ...indexActivity(entry) });
+          const replacedLink =
+            entry.collection === 'planningSearch' &&
+            'planningRestored' in old &&
+            JSON.parse(old.value).parentId !== JSON.parse(entry.value).parentId;
+          await ctx.db.patch(old._id, {
+            ...entry,
+            ...indexActivity(entry),
+            ...(restoresLink || replacedLink ? { planningRestored: input.planningRestore } : {}),
+          });
         } else
           await ctx.db.insert('projectWorkRecords', {
             ...entry,
             ...indexActivity(entry),
+            ...(restoresLink ? { planningRestored: input.planningRestore } : {}),
             projectId: project._id,
             generationId: recordPartition(generation),
           });
@@ -465,6 +485,7 @@ export async function appendWork(
         project.work!.backupId,
         input.previousRevision + 1,
         JSON.stringify(metadata),
+        planning,
       );
     }
     invariant(
