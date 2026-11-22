@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
-import { identity, graphIdentity } from './hash.js';
+import { identity } from './hash.js';
+import { graphIdentity } from './graph-hash.js';
 import { safeRelative } from './files.js';
 import { codeMapLanguages } from './ecosystems.js';
 import type { GraphPack, Locator } from './types.js';

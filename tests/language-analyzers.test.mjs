@@ -5,7 +5,8 @@ import { existsSync, renameSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { indexRepository, capture, analyze, DEFAULT_LIMITS } from '../dist/index.js';
 import { validateArtifact } from '../dist/artifact-validation.js';
-import { identity, graphIdentity } from '../dist/hash.js';
+import { identity } from '../dist/hash.js';
+import { graphIdentity } from '../dist/graph-hash.js';
 import { RepositoryQuery } from '../dist/query.js';
 import { fixture, write, code } from './helpers.mjs';
 const sources = {

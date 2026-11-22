@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { validateArtifact } from './artifact-validation.js';
-import { graphIdentity, identity } from './hash.js';
+import { identity } from './hash.js';
+import { graphIdentity } from './graph-hash.js';
 import { hostedQuery } from './hosted-query.js';
 import { invariant } from './errors.js';
 import type { HostedArtifact } from './github.js';

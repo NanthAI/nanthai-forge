@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import ts from 'typescript';
 import { structuralAnalysis, STRUCTURAL_PROVIDERS } from './structural-analyze.js';
-import { identity, graphIdentity } from './hash.js';
+import { identity } from './hash.js';
+import { graphIdentity } from './graph-hash.js';
 import { makeProgram, local, resolveImport, type CompilerSession } from './compiler.js';
 import { ForgeError, invariant } from './errors.js';
 import type { GraphPack, Locator, Snapshot, SymbolNode } from './types.js';

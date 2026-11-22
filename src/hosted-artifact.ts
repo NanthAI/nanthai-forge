@@ -3,7 +3,7 @@ import { createGzip, createGunzip } from 'node:zlib';
 import { Readable } from 'node:stream';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedArtifact } from './github.js';
-import { graphJsonParts } from './hash.js';
+import { graphJsonParts } from './graph-hash.js';
 import type { GraphPack } from './types.js';
 
 const maxBytes = 128 * 1024 * 1024;
