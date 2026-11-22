@@ -459,7 +459,7 @@ const allCap = attachmentDownloadCaps.all;
 
 async function expectLimit(response, scope) {
   const { message } = await expectError(response, 429, 'ATTACHMENT_DOWNLOAD_LIMIT');
-  assert.match(message, scope === 'project' ? /this project \(2 GB\)/ : /all projects \(20 GB\)/);
+  assert.match(message, scope === 'project' ? /this project \(2 GB\)/ : /all projects \(5 GB\)/);
   assert.match(message, /00:00 UTC/);
 }
 

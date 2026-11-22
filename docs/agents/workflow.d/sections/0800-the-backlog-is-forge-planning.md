@@ -116,7 +116,7 @@ nforge agent ROOT start '{"planningItemId":"ISSUE_ID","model":"unknown"}' # your
 **Discussion attachment downloads.** The hosted server verifies a committed attachment against its project,
 Item and comment. It applies the current discussion visibility before reading from private R2 and checks
 access again before sending the verified bytes as a download. Permanent Item deletion ends access to its
-attachments. Downloads are capped per UTC day at 2 GB for one project and 20 GB for all projects
+attachments. Downloads are capped per UTC day at 2 GB for one project and 5 GB for all projects
 (`attachmentDownloadCaps` in `convex/gitServeWorkerStore.ts`). The bytes are reserved before R2 is read; past
 a cap the route answers 429 `ATTACHMENT_DOWNLOAD_LIMIT` with a message naming the cap and `Retry-After` until
 00:00 UTC. A read that fails or is revoked before any byte is sent gives its reservation back. Uploads and

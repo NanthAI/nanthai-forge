@@ -14,9 +14,9 @@ export const workerCaps = {
   all: { packs: 10_000, bytes: 100 * 1024 ** 3 },
 };
 /** Daily download caps for discussion attachments (Issue 9a3d6f5f, owner decision 2026-11-22), in
- * bytes served per UTC day: 2 GB for one project, 20 GB for all projects. They share the
+ * bytes served per UTC day: 2 GB for one project, 5 GB for all projects. They share the
  * `gitWorkerUsage` table under `attachments:`-prefixed scopes; see `discussionAttachmentCaps.ts`. */
-export const attachmentDownloadCaps = { project: 2_000_000_000, all: 20_000_000_000 };
+export const attachmentDownloadCaps = { project: 2_000_000_000, all: 5_000_000_000 };
 export const usageDay = (now = Date.now()) => new Date(now).toISOString().slice(0, 10);
 /** Rows older than this many days are deleted when their scope is next written. */
 export const keepDays = 7;

@@ -2,7 +2,7 @@ The hosted discussion download route verifies the bytes of an attachment bound t
 Item and comment. It applies current discussion access and returns a forced download with the stored
 media type. Item purge ends downloads at the durable Item tombstone and marks the Item's
 artifact bindings removed in pages, scheduling R2 cleanup. Downloads are capped at 2 GB per project
-and 20 GB for all projects per UTC day: one mutation reserves the bytes before R2 is read, a refused
+and 5 GB for all projects per UTC day: one mutation reserves the bytes before R2 is read, a refused
 download is a 429 `ATTACHMENT_DOWNLOAD_LIMIT` naming the cap and resetting at 00:00 UTC, and a read that
 fails or is revoked gives its reservation back. Uploads, client controls (including showing the limit
 message in the web view) and inline images are pending.
