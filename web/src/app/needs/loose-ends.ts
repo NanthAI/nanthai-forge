@@ -5,6 +5,7 @@
 // merged once per group. `setAsideWord` says what happened to each Lane the owner set aside, `trashWord` to each
 // project moved to the trash, and `handText` is the one prompt that hands Lanes to an agent. Pure.
 import { waited, whoOf } from './model';
+import type { IntentPin, IntentRow } from './loose-intents';
 
 export type LooseRow = {
   laneId: string;
@@ -77,10 +78,11 @@ export type LooseEndsRead = {
     checked?: Group;
     projects?: Group<ProjectRow>;
     dated?: Group<DatedRow>;
+    intents?: Group<IntentRow>;
     active?: Group;
   };
 };
-export type GroupKey = 'idle' | 'stopped' | 'checked' | 'projects' | 'dated';
+export type GroupKey = 'idle' | 'stopped' | 'checked' | 'projects' | 'dated' | 'intents';
 type LaneKey = 'idle' | 'stopped' | 'checked' | 'active';
 
 const LANE_META: { key: LaneKey; title: string; hint: string }[] = [
@@ -146,7 +148,7 @@ export function mergePage(pages: Pages, key: GroupKey, reply: LooseEndsRead): Pa
 /** What a row offers: the owner sets an idle Lane aside, anyone hands a stopped one to an agent, the owner of a
  * leftover project moves it to the trash, a dated check opens its Item. */
 export type ProjectTrash = { expectedRevision: number; expectedLastLanding?: string | null };
-export type RowAction = 'set-aside' | 'hand' | 'trash' | 'open';
+export type RowAction = 'set-aside' | 'tidy' | 'hand' | 'trash' | 'open';
 export type ScreenRow = {
   key: string;
   title: string;
@@ -165,6 +167,8 @@ export type ScreenRow = {
   trash: ProjectTrash | null;
   /** Dated checks: the Item is still proposed. */
   proposed: boolean;
+  /** Open Intents: what the reader pinned, for the batch set-aside. */
+  intent: IntentPin | null;
 };
 export type Section = {
   key: GroupKey | 'active';
@@ -177,6 +181,8 @@ export type Section = {
   cursor: string | null;
   /** Leftover projects only: open permanent-delete requests of the account. */
   deleteRequests: DeleteRequestRow[];
+  /** Open Intents only: not read yet; the reader asks for the first page. */
+  unread: boolean;
 };
 
 const SCREEN_META: { key: GroupKey | 'active'; title: string; hint: string }[] = [
@@ -187,6 +193,11 @@ const SCREEN_META: { key: GroupKey | 'active'; title: string; hint: string }[] =
     hint: 'the work passed and then nobody asked for the landing',
   },
   { key: 'stopped', title: 'Stopped mid-task', hint: 'no save, sync or start for over 90 minutes' },
+  {
+    key: 'intents',
+    title: 'Open Intents with no Item',
+    hint: 'left open with nothing to land against, oldest first',
+  },
   { key: 'projects', title: 'Leftover projects', hint: 'no landing for 30 days' },
   { key: 'dated', title: 'Waiting for a date', hint: 'nothing to do until then' },
   { key: 'active', title: 'Still active', hint: 'has a live landing or recent activity, left alone' },
@@ -254,7 +265,7 @@ function laneEvidence(row: LooseRow, key: GroupKey | 'active', now: number) {
     }${extra}. Why it stopped: not reported`;
   return `${[row.saves === undefined ? 'saves not recorded' : saves(row.saves), files(row.paths), landed].filter(Boolean).join(', ')}${extra}`;
 }
-const plain = { laneId: null, itemId: null, trash: null, proposed: false, pickable: false };
+const plain = { laneId: null, itemId: null, trash: null, proposed: false, pickable: false, intent: null };
 function laneRow(row: LooseRow, key: GroupKey | 'active', now: number, owner: boolean): ScreenRow {
   const age = since(row.at, now);
   const extra =
@@ -281,6 +292,32 @@ function laneRow(row: LooseRow, key: GroupKey | 'active', now: number, owner: bo
     pickable: owner && action !== null,
   };
 }
+/** An open Intent no Item links. The batch refuses one whose Item link is not reported or whose Lanes cannot be read in
+ * one bounded step, so those rows are listed for review and cannot be picked. */
+const intentRow = (row: IntentRow, now: number, owner: boolean): ScreenRow => {
+  const at = row.lastActivityAt === null ? null : Date.parse(row.lastActivityAt);
+  // Undo reopens an Intent as open, so only an open one is tidied here; a proposed or ready one is for review.
+  const review = row.reason !== 'No linked Item' || at === null || row.status !== 'active';
+  const status = row.status === 'proposed' ? 'proposed' : row.status === 'ready' ? 'ready' : 'open';
+  return {
+    ...plain,
+    key: row.selection.intentId,
+    title: row.title || 'Intent without an outcome',
+    who: null,
+    mono: false,
+    evidence:
+      `${row.reason}, ${status}` +
+      (row.reason !== 'No linked Item' || status !== 'open'
+        ? '; review it before tidying'
+        : at === null
+          ? '; more Lanes than one read covers, review them first'
+          : ''),
+    age: at === null ? 'activity not known' : since(at, now),
+    action: owner && !review ? 'tidy' : null,
+    pickable: owner && !review,
+    intent: row.selection,
+  };
+};
 const projectEvidence = (row: ProjectRow) => {
   const lanes =
     row.openLanes === undefined
@@ -330,13 +367,28 @@ export function looseEndsScreen(read: LooseEndsRead, pages: Pages, now: number, 
   let urgent = 0;
   const sections = SCREEN_META.flatMap((meta): Section[] => {
     const extra = pages[meta.key];
+    // Open Intents are read on request: until the first page is asked for, the group offers it.
+    if (meta.key === 'intents' && !extra)
+      return [
+        { ...meta, reported: true, why: null, rows: [], cursor: null, deleteRequests: [], unread: true },
+      ];
     // Lanes found held on a continued page form Still active even when the live first page held none.
     const group =
       read.groups[meta.key] ?? (extra ? { reported: true as const, rows: [], continueCursor: null } : null);
     if (!group) return [];
     if (!group.reported)
-      return [{ ...meta, reported: false, why: group.why, rows: [], cursor: null, deleteRequests: [] }];
-    const lanes = meta.key !== 'projects' && meta.key !== 'dated';
+      return [
+        {
+          ...meta,
+          reported: false,
+          why: group.why,
+          rows: [],
+          cursor: null,
+          deleteRequests: [],
+          unread: false,
+        },
+      ];
+    const lanes = meta.key !== 'projects' && meta.key !== 'dated' && meta.key !== 'intents';
     const continued = ((extra?.rows ?? []) as LooseRow[]).filter(
       row => !lanes || (!live.has(row.laneId) && (meta.key === 'active' || !heldLater.has(row.laneId))),
     );
@@ -344,6 +396,7 @@ export function looseEndsScreen(read: LooseEndsRead, pages: Pages, now: number, 
     const rows = [...group.rows, ...continued]
       .map(row => {
         if (meta.key === 'projects') return projectRow(row as ProjectRow, now, viewer);
+        if (meta.key === 'intents') return intentRow(row as IntentRow, now, owner);
         if (meta.key !== 'dated') return laneRow(row as LooseRow, meta.key, now, owner);
         if ((row as DatedRow).reason === 'Date passed') urgent++;
         return datedRow(row as DatedRow, now);
@@ -353,17 +406,23 @@ export function looseEndsScreen(read: LooseEndsRead, pages: Pages, now: number, 
       {
         ...meta,
         reported: true,
-        why: group.why ?? null,
+        // A page of open Intents read to its end with none left says so; it is not a coverage gap.
+        why:
+          group.why ??
+          (meta.key === 'intents' && !rows.length && !(extra ? extra.cursor : group.continueCursor)
+            ? 'None found. Every open Intent has an Item.'
+            : null),
         rows,
         cursor: extra ? (extra.cursor ?? null) : (group.continueCursor ?? null),
         deleteRequests: (group as { deleteRequests?: DeleteRequestRow[] }).deleteRequests ?? [],
+        unread: false,
       },
     ];
   });
   const loose = sections.filter(section => section.key !== 'active');
   const total = loose.reduce((sum, section) => sum + section.rows.length, 0);
   const more = loose.some(section => section.cursor);
-  const partial = loose.some(section => section.reported && section.why);
+  const partial = loose.some(section => section.reported && section.why && section.key !== 'intents');
   const oldest = sections.find(section => section.key === 'idle')?.rows[0];
   // "Nothing" only once every reported group is read to its end with full coverage. A group not reported says so
   // on its own band, never in this sentence.
@@ -373,6 +432,8 @@ export function looseEndsScreen(read: LooseEndsRead, pages: Pages, now: number, 
     sections,
     total,
     exhausted,
+    /** Open Intents have not been read, so "no loose ends" cannot speak for them. */
+    intentsUnread: sections.some(section => section.unread),
     sentence: total
       ? {
           bold: `${total.toLocaleString('en')}${more ? ' or more' : ''} loose ${one ? 'end' : 'ends'}, ${urgent ? `${urgent.toLocaleString('en')} urgent` : one ? 'not urgent' : 'none urgent'}.`,

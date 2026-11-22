@@ -42,6 +42,8 @@ import {
   type Sweep,
   type TrashResult,
 } from './loose-actions';
+import { INTENT_CURSOR, intentWord, type IntentReopen, type IntentTidy } from './loose-intents';
+import { useIntentTidy } from './use-intent-tidy';
 import { ResultNotice, ResultToast, type LeftAlone, type Toast } from './LooseResult';
 import './needs.css';
 
@@ -59,6 +61,13 @@ const trashRef = makeFunctionReference<'mutation', LifecycleCall, { applied: boo
   'projectLifecycle:trash',
 );
 const restoreRef = makeFunctionReference<'mutation', LifecycleCall, unknown>('projectLifecycle:restore');
+type IntentCall = { projectId: Id<'hostedProjects'>; operationId: string; request: string };
+const tidyRef = makeFunctionReference<'mutation', IntentCall, string>('projectLooseEndIntents:setAside');
+const transitionRef = makeFunctionReference<
+  'mutation',
+  { projectId: Id<'hostedProjects'>; request: string },
+  string
+>('projectHostedLifecycle:transition');
 /** Select all reads at most this many 25-row pages of one group (1,000 Lanes) before it stops and says more remain. */
 const SELECT_ALL_PAGES = 40;
 const AGENT_READ = `nforge agent . lanes '{"view":"loose-ends"}'`;
@@ -79,6 +88,8 @@ export default function LooseEnds({ route, projectId, projectName, viewerHandle 
   const sweep = useMutation(abandon);
   const trash = useMutation(trashRef);
   const restore = useMutation(restoreRef);
+  const tidy = useMutation(tidyRef);
+  const reopen = useMutation(transitionRef);
   const asProject = (args: LifecycleArgs) => ({ ...args, projectId: args.projectId as Id<'hostedProjects'> });
   return (
     <LooseEndsView
@@ -90,6 +101,8 @@ export default function LooseEnds({ route, projectId, projectName, viewerHandle 
       sweep={args => sweep({ projectId, ...args })}
       trash={args => trash(asProject(args))}
       restore={args => restore(asProject(args))}
+      tidy={args => tidy({ projectId, ...args })}
+      reopen={args => reopen({ projectId, ...args })}
       copy={text => navigator.clipboard.writeText(text)}
       itemHref={itemId => hrefFor({ ...route, place: 'plan', section: '', rest: itemId })}
       viewer={viewerHandle}
@@ -114,6 +127,8 @@ export function LooseEndsView({
   sweep,
   trash,
   restore,
+  tidy,
+  reopen,
   copy,
   itemHref,
   viewer,
@@ -127,6 +142,9 @@ export function LooseEndsView({
   sweep: Sweep;
   trash: Lifecycle;
   restore: Lifecycle;
+  /** Open Intents: one batch of up to 25 per call, and one reopen per Undo row. */
+  tidy: IntentTidy;
+  reopen: IntentReopen;
   copy: (text: string) => Promise<void>;
   itemHref: (itemId: string) => string;
   viewer?: string | undefined;
@@ -174,6 +192,34 @@ export function LooseEndsView({
     document.addEventListener('keydown', clear);
     return () => document.removeEventListener('keydown', clear);
   }, [picked.size]);
+  const toggle = (ids: string[], on: boolean) =>
+    setPicked(old => {
+      const next = new Set(old);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  const remember = (rows: ScreenRow[]) => {
+    setTitles(old => ({ ...old, ...Object.fromEntries(rows.map(row => [row.key, row.title])) }));
+    toggle(
+      rows.map(row => row.key),
+      false,
+    );
+    setToast(null);
+  };
+  const intents = useIntentTidy({
+    epoch: read?.setAside?.authorityEpoch,
+    tidy,
+    reopen,
+    outcome,
+    setOutcome,
+    setBusy,
+    announce,
+    setToast,
+    remember,
+  });
   const head = (sentence: ReactNode) => (
     <Head trail={trail} sentence={sentence}>
       <button
@@ -236,31 +282,16 @@ export function LooseEndsView({
   const eligible = (row: ScreenRow) =>
     row.pickable &&
     !here(row) &&
-    (!outcome[row.key] || outcome[row.key] === 'reopened') &&
+    // A reopened Intent carries a version the reopen moved on: it is picked again only after a fresh read.
+    (!outcome[row.key] || (outcome[row.key] === 'reopened' && !row.intent)) &&
     (!trashed[row.key] || trashed[row.key] === 'restored');
   const pickable = screen.sections.flatMap(section =>
     section.rows.filter(row => eligible(row) && picked.has(row.key)),
   );
   const pickedIdle = pickable.filter(row => row.action === 'set-aside');
+  const pickedIntents = pickable.filter(row => row.action === 'tidy');
   const pickedLanes = pickable.filter(row => row.laneId);
   const pickedProjects = pickable.filter(row => row.trash);
-  const toggle = (ids: string[], on: boolean) =>
-    setPicked(old => {
-      const next = new Set(old);
-      for (const id of ids) {
-        if (on) next.add(id);
-        else next.delete(id);
-      }
-      return next;
-    });
-  const remember = (rows: ScreenRow[]) => {
-    setTitles(old => ({ ...old, ...Object.fromEntries(rows.map(row => [row.key, row.title])) }));
-    toggle(
-      rows.map(row => row.key),
-      false,
-    );
-    setToast(null);
-  };
   const allRows = () => screen.sections.flatMap(section => section.rows);
   // Select all: the owner's Lanes nobody holds, every page of the group (the existing page read, one call per page).
   const idle = screen.sections.find(section => section.key === 'idle' && section.reported);
@@ -516,7 +547,7 @@ export function LooseEndsView({
     const lane = outcome[row.key];
     const project = trashed[row.key];
     if (lane) {
-      const word = setAsideWord(lane);
+      const word = row.intent ? intentWord(lane) : setAsideWord(lane);
       return (
         <State word={word.done ? 'Set aside' : word.retry ? 'Check failed' : 'Not seen'}>{word.word}</State>
       );
@@ -536,6 +567,12 @@ export function LooseEndsView({
     if (row.action === 'set-aside')
       return (
         <Key size="sm" disabled={busy} onClick={() => void setAsideNow([row.key])}>
+          Set aside
+        </Key>
+      );
+    if (row.action === 'tidy')
+      return (
+        <Key size="sm" disabled={busy} onClick={() => void intents.run([row])}>
           Set aside
         </Key>
       );
@@ -597,6 +634,15 @@ export function LooseEndsView({
           onUndo={undoProjects.length ? () => void restoreNow(undoProjects) : null}
         />
       ) : null}
+      {intents.left ? (
+        <ResultNotice
+          left={intents.left}
+          busy={busy}
+          onRetry={intents.retry}
+          onSeeLeft={intents.seeLeft}
+          onUndo={intents.undo}
+        />
+      ) : null}
       <section className="region" aria-label="Loose ends">
         {pickable.length ? (
           <div className="bulk" role="region" aria-label="Selected">
@@ -617,6 +663,13 @@ export function LooseEndsView({
                 onClick={() => void setAsideNow(pickedIdle.map(row => row.key))}
               >
                 Set aside {pickedIdle.length.toLocaleString('en')}
+                {pickedIntents.length ? ' Lanes' : ''}
+              </Key>
+            ) : null}
+            {pickedIntents.length ? (
+              <Key size="sm" kind="rec" disabled={busy} onClick={() => void intents.run(pickedIntents)}>
+                Set aside {pickedIntents.length.toLocaleString('en')}{' '}
+                {pickedIntents.length === 1 ? 'Intent' : 'Intents'}
               </Key>
             ) : null}
             {pickedLanes.length ? (
@@ -649,7 +702,9 @@ export function LooseEndsView({
         ) : null}
         {screen.total === 0 && screen.exhausted ? (
           <div className="quietline">
-            No loose ends. Forge looks again whenever a Lane or a project changes, not on a timer.
+            {screen.intentsUnread
+              ? 'No loose ends in Lanes or projects. Open Intents are read on request below.'
+              : 'No loose ends. Forge looks again whenever a Lane or a project changes, not on a timer.'}
           </div>
         ) : null}
         {screen.sections.map(section => {
@@ -658,6 +713,7 @@ export function LooseEndsView({
             !section.rows.length &&
             !section.cursor &&
             !section.why &&
+            !section.unread &&
             !section.deleteRequests.length
           )
             return null;
@@ -678,7 +734,7 @@ export function LooseEndsView({
                   </label>
                 ) : null}
                 <span>{section.title}</span>
-                {section.reported ? (
+                {section.reported && !section.unread ? (
                   <span className="cnt num">
                     {section.rows.length.toLocaleString('en')}
                     {section.cursor ? '+' : ''}
@@ -689,6 +745,22 @@ export function LooseEndsView({
               {section.why ? (
                 <div className="quietline">
                   {section.reported ? section.why : `Not reported. ${section.why}`}
+                </div>
+              ) : null}
+              {section.unread ? (
+                <div className="le-more">
+                  <span>
+                    {state === 'failed'
+                      ? 'Could not load them. Nothing changed.'
+                      : 'Read on request, 25 at a time'}
+                  </span>
+                  <Key
+                    size="sm"
+                    disabled={state === 'loading'}
+                    onClick={() => void more('intents', INTENT_CURSOR)}
+                  >
+                    {state === 'failed' ? 'Try again' : state === 'loading' ? 'Loading…' : 'Look for them'}
+                  </Key>
                 </div>
               ) : null}
               {section.rows.map(row => {

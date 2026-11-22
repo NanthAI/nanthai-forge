@@ -436,6 +436,10 @@ export const read = query({
                 dated:
                   extra?.[1] ??
                   notReported('Done-when lines carry no date yet; that needs the planning contract change.'),
+                // The compact read names the Intent group so a reader never takes it for empty; the page asks for it.
+                intents: notReported(
+                  'Open Intents with no linked Item are read on request: nforge agent ROOT lanes {"view":"loose-ends","intents":true}.',
+                ),
               },
           holders,
         ),

@@ -440,9 +440,13 @@ test('fc1831eb page: the details read renders the five groups, dated Item links 
   const screen = looseEndsScreen(first, {}, first.at);
   assert.deepEqual(
     screen.sections.map(section => section.key),
-    ['idle', 'checked', 'stopped', 'projects', 'dated'],
-    'the approved order; nothing is held meanwhile in this fixture',
+    ['idle', 'checked', 'stopped', 'intents', 'projects', 'dated'],
+    'the approved order, with open Intents offered on request; nothing is held meanwhile in this fixture',
   );
+  assert.equal(screen.sections.find(section => section.key === 'intents').unread, true);
+  // The CLI and MCP ask for the details read, so that is the read that names the Intent group.
+  assert.equal(first.groups.intents.reported, false, 'the read names the Intent group, never a silent gap');
+  assert.match(first.groups.intents.why, /"intents":true/);
   const byKey = Object.fromEntries(screen.sections.map(section => [section.key, section]));
   assert.equal(byKey.checked.reported, true, 'checked-never-landed reads the stamp the pass wrote');
   assert.deepEqual(

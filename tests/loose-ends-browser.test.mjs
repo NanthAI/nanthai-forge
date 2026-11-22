@@ -29,6 +29,9 @@ const READ = 'projectLooseEnds:read';
 const SET_ASIDE = 'projectHostedDormant:abandon';
 const TRASH = 'projectLifecycle:trash';
 const RESTORE = 'projectLifecycle:restore';
+const TIDY = 'projectLooseEndIntents:setAside';
+const REOPEN = 'projectHostedLifecycle:transition';
+const INTENTS = 'forge-loose-ends-intents-v1:';
 const laneId = n => `5d1c7a0e-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
 async function buildFixture(out) {
@@ -131,76 +134,80 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
       },
     );
 
-    await t.test('the five groups in order, with their evidence and dated Item links', async t => {
-      const page = await open(t, DESK);
-      const bands = await page.locator('.le-group > .band > span:first-of-type').allTextContents();
-      assert.deepEqual(bands, [
-        'Lanes nobody holds',
-        'Checked, never landed',
-        'Stopped mid-task',
-        'Leftover projects',
-        'Waiting for a date',
-      ]);
-      // Lead mock check (c): the row details come from fields stored on the rows, in the mock's words.
-      assert.match(
-        await group(page, 'Checked, never landed').locator('.row.le').textContent(),
-        /Docs: typo sweep.*mara\/still-heron.*passed its check 3 days ago; landing was never asked for.*3 days.*Hand to an agent/,
-      );
-      const idleRows = group(page, 'Lanes nobody holds').locator('.row.le');
-      assert.match(await idleRows.nth(0).textContent(), /3 saves, 2 files, never landed.*6 days/);
-      assert.match(await idleRows.nth(1).textContent(), /1 save, 7 files, never landed.*3 days/);
-      assert.match(await idleRows.nth(2).textContent(), /1 save, 1 file, landed before/);
-      const dated = group(page, 'Waiting for a date');
-      const link = dated.getByRole('link', { name: 'Open the Item' }).first();
-      assert.equal(
-        await link.getAttribute('href'),
-        '/-/sample-one/tidepool/plan/0e6c1f2a-0000-4000-8000-000000000001',
-      );
-      assert.match(
-        await dated.locator('.row.le').first().textContent(),
-        /Done-when line 3 on the Item “v3 release”.*due 1 December/,
-      );
-      assert.match(await dated.locator('.row.le').nth(1).textContent(), /was due 20 November/);
-      const projects = group(page, 'Leftover projects');
-      assert.match(
-        await projects.locator('.row.le').nth(1).textContent(),
-        /tidepool-import-test.*@sample-one.*310 MB, 0 open Lanes.*never landed.*Move to the trash/,
-      );
-      assert.match(
-        await projects.locator('.row.le').nth(0).textContent(),
-        /mara-scratch.*12 MB, 0 open Lanes/,
-      );
-      // Lead mock check (d): owner, Move to the trash, and the projects waiting for a permanent-delete approval.
-      const wait = projects.getByRole('link', { name: /40 projects in the trash wait for you/ });
-      assert.equal(await wait.getAttribute('href'), '/-/account?request=req-1');
-      assert.match(await wait.textContent(), /an agent or device asked to delete them for good/);
-      const stopped = group(page, 'Stopped mid-task');
-      assert.match(
-        await stopped.locator('.row.le').textContent(),
-        /jun\/copper-moth.*3 saves not landed\. Why it stopped: not reported.*not seen for 3 h.*Hand to an agent/,
-      );
-      // (b) identities read whole, as owner/lane; (f) a dated row names its Item's owner and says proposed.
-      assert.match(
-        await group(page, 'Lanes nobody holds').locator('.row.le').nth(1).textContent(),
-        /mara\/salt-wren/,
-      );
-      assert.match(
-        await dated.locator('.row.le').first().locator('.le-what').textContent(),
-        /@mara.*proposed/,
-      );
-      assert.equal(await dated.locator('.row.le').nth(1).locator('.prop').count(), 0);
-      // (e) every actionable group has its tick; dated checks only open their Item.
-      for (const name of ['Lanes nobody holds', 'Stopped mid-task', 'Leftover projects'])
-        assert.equal(await group(page, name).locator('.band input[type=checkbox]').count(), 1, name);
-      assert.equal(await dated.locator('input[type=checkbox]').count(), 0);
-      // (a) the mock sentence; a group not reported says so only on its band.
-      const head = await page.locator('.head').textContent();
-      assert.match(
-        head,
-        /9 or more loose ends, 1 urgent\. The oldest is a Lane with no save for 6 days\. Setting a Lane aside keeps every save; a project in the trash can be restored for 90 days\./,
-      );
-      assert.doesNotMatch(head, /not reported/);
-    });
+    await t.test(
+      'the groups in order (open Intents on request), with their evidence and dated Item links',
+      async t => {
+        const page = await open(t, DESK);
+        const bands = await page.locator('.le-group > .band > span:first-of-type').allTextContents();
+        assert.deepEqual(bands, [
+          'Lanes nobody holds',
+          'Checked, never landed',
+          'Stopped mid-task',
+          'Open Intents with no Item',
+          'Leftover projects',
+          'Waiting for a date',
+        ]);
+        // Lead mock check (c): the row details come from fields stored on the rows, in the mock's words.
+        assert.match(
+          await group(page, 'Checked, never landed').locator('.row.le').textContent(),
+          /Docs: typo sweep.*mara\/still-heron.*passed its check 3 days ago; landing was never asked for.*3 days.*Hand to an agent/,
+        );
+        const idleRows = group(page, 'Lanes nobody holds').locator('.row.le');
+        assert.match(await idleRows.nth(0).textContent(), /3 saves, 2 files, never landed.*6 days/);
+        assert.match(await idleRows.nth(1).textContent(), /1 save, 7 files, never landed.*3 days/);
+        assert.match(await idleRows.nth(2).textContent(), /1 save, 1 file, landed before/);
+        const dated = group(page, 'Waiting for a date');
+        const link = dated.getByRole('link', { name: 'Open the Item' }).first();
+        assert.equal(
+          await link.getAttribute('href'),
+          '/-/sample-one/tidepool/plan/0e6c1f2a-0000-4000-8000-000000000001',
+        );
+        assert.match(
+          await dated.locator('.row.le').first().textContent(),
+          /Done-when line 3 on the Item “v3 release”.*due 1 December/,
+        );
+        assert.match(await dated.locator('.row.le').nth(1).textContent(), /was due 20 November/);
+        const projects = group(page, 'Leftover projects');
+        assert.match(
+          await projects.locator('.row.le').nth(1).textContent(),
+          /tidepool-import-test.*@sample-one.*310 MB, 0 open Lanes.*never landed.*Move to the trash/,
+        );
+        assert.match(
+          await projects.locator('.row.le').nth(0).textContent(),
+          /mara-scratch.*12 MB, 0 open Lanes/,
+        );
+        // Lead mock check (d): owner, Move to the trash, and the projects waiting for a permanent-delete approval.
+        const wait = projects.getByRole('link', { name: /40 projects in the trash wait for you/ });
+        assert.equal(await wait.getAttribute('href'), '/-/account?request=req-1');
+        assert.match(await wait.textContent(), /an agent or device asked to delete them for good/);
+        const stopped = group(page, 'Stopped mid-task');
+        assert.match(
+          await stopped.locator('.row.le').textContent(),
+          /jun\/copper-moth.*3 saves not landed\. Why it stopped: not reported.*not seen for 3 h.*Hand to an agent/,
+        );
+        // (b) identities read whole, as owner/lane; (f) a dated row names its Item's owner and says proposed.
+        assert.match(
+          await group(page, 'Lanes nobody holds').locator('.row.le').nth(1).textContent(),
+          /mara\/salt-wren/,
+        );
+        assert.match(
+          await dated.locator('.row.le').first().locator('.le-what').textContent(),
+          /@mara.*proposed/,
+        );
+        assert.equal(await dated.locator('.row.le').nth(1).locator('.prop').count(), 0);
+        // (e) every actionable group has its tick; dated checks only open their Item.
+        for (const name of ['Lanes nobody holds', 'Stopped mid-task', 'Leftover projects'])
+          assert.equal(await group(page, name).locator('.band input[type=checkbox]').count(), 1, name);
+        assert.equal(await dated.locator('input[type=checkbox]').count(), 0);
+        // (a) the mock sentence; a group not reported says so only on its band.
+        const head = await page.locator('.head').textContent();
+        assert.match(
+          head,
+          /9 or more loose ends, 1 urgent\. The oldest is a Lane with no save for 6 days\. Setting a Lane aside keeps every save; a project in the trash can be restored for 90 days\./,
+        );
+        assert.doesNotMatch(head, /not reported/);
+      },
+    );
 
     await t.test(
       'Select all reads the rest of Lanes nobody holds, one call per page, and picks every one',
@@ -518,10 +525,152 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
       },
     );
 
+    const intents = page => group(page, 'Open Intents with no Item');
+    const lookFor = async page => {
+      await intents(page).getByRole('button', { name: 'Look for them' }).click();
+      await intents(page).locator('.row.le').first().waitFor();
+    };
+    await t.test(
+      'open Intents are read on request: no call at entry, one call per page, review rows cannot be picked',
+      async t => {
+        const page = await open(t, DESK);
+        assert.match(await intents(page).textContent(), /Read on request, 25 at a time/);
+        assert.deepEqual(
+          (await calls(page)).filter(call => call.includes(INTENTS)),
+          [],
+          'opening the page reads no Intents',
+        );
+        await lookFor(page);
+        assert.deepEqual((await calls(page)).slice(1), [`query ${READ} ${INTENTS}`]);
+        assert.equal(await intents(page).locator('.row.le').count(), 6);
+        assert.match(await intents(page).locator('.cnt').textContent(), /6\+/);
+        assert.equal(
+          await intents(page)
+            .getByRole('checkbox', { name: /^Select (?!the )/ })
+            .count(),
+          3,
+          'an Intent whose Item link is not reported, one with unknown activity and a proposed one are for review only',
+        );
+        assert.match(await intents(page).textContent(), /No linked Item, proposed; review it before tidying/);
+        assert.match(
+          await intents(page).textContent(),
+          /Item link not reported, open; review it before tidying/,
+        );
+        assert.match(await intents(page).textContent(), /activity not known/);
+        await intents(page).getByRole('button', { name: 'Show 25 more' }).click();
+        await page.waitForFunction(() =>
+          document.querySelector('[data-announce]')?.textContent.includes('more remain'),
+        );
+        await intents(page).getByRole('button', { name: 'Show 25 more' }).click();
+        await intents(page).getByText('Older experiment').waitFor();
+        assert.equal(await intents(page).getByRole('button', { name: 'Show 25 more' }).count(), 0);
+        const member = await open(t, DESK, { owner: '0' });
+        await lookFor(member);
+        assert.equal(
+          await intents(member).locator('input[type=checkbox]').count(),
+          0,
+          'a member cannot tidy',
+        );
+      },
+    );
+
+    await t.test(
+      'tidying Intents is one mutation per batch; a save meanwhile is skipped and named; Undo reopens the rest at their versions',
+      async t => {
+        const page = await open(t, DESK);
+        await lookFor(page);
+        await intents(page)
+          .getByRole('checkbox', { name: /^Select the 3 shown/ })
+          .check();
+        const bulk = page.getByRole('region', { name: 'Selected' });
+        assert.match(await bulk.textContent(), /3 selected.*Set aside 3 Intents/);
+        await bulk.getByRole('button', { name: 'Set aside 3 Intents' }).click();
+        await page
+          .getByRole('alert')
+          .getByText(/1 could not be set aside/)
+          .waitFor();
+        const alert = await page.getByRole('alert').textContent();
+        assert.match(alert, /2 Intents were set aside in your last try\./);
+        assert.match(alert, /“Investigate flaky retry timer” skipped: it was saved meanwhile/);
+        const mutations = (await calls(page)).filter(call => call.startsWith('mutation'));
+        assert.equal(mutations.length, 1, 'one mutation for the whole batch');
+        assert.match(mutations[0], new RegExp(`^mutation ${TIDY} [0-9a-f-]{36} 001,002,004$`));
+        await page.getByRole('alert').getByRole('button', { name: 'Undo' }).click();
+        await page.waitForFunction(() =>
+          document.querySelector('[data-announce]')?.textContent?.startsWith('Brought back 2 Intents.'),
+        );
+        assert.deepEqual(
+          (await calls(page)).filter(call => call.startsWith(`mutation ${REOPEN}`)),
+          [`mutation ${REOPEN} reopen 001 4`, `mutation ${REOPEN} reopen 004 4`],
+        );
+        // The reopen moved the Intents' versions on: they are picked again only after a fresh read.
+        assert.match(await intents(page).textContent(), /Brought back/);
+        assert.equal(
+          await intents(page)
+            .getByRole('checkbox', { name: 'Select Spike: try the streaming decoder on the old parser' })
+            .count(),
+          0,
+        );
+      },
+    );
+
+    await t.test('a failed batch is retried with the same operation id, and only that batch', async t => {
+      const page = await open(t, DESK, { fail: 'tidy' });
+      await lookFor(page);
+      await intents(page)
+        .getByRole('checkbox', { name: 'Select Spike: try the streaming decoder on the old parser' })
+        .check();
+      await page
+        .getByRole('region', { name: 'Selected' })
+        .getByRole('button', { name: 'Set aside 1 Intent' })
+        .click();
+      await page
+        .getByRole('alert')
+        .getByText(/1 could not be set aside/)
+        .waitFor();
+      await page.getByRole('alert').getByRole('button', { name: 'Retry 1 that failed' }).click();
+      await page
+        .getByRole('alert')
+        .waitFor({ state: 'detached' })
+        .catch(() => {});
+      const tidies = (await calls(page)).filter(call => call.startsWith(`mutation ${TIDY}`));
+      await page.locator('.toasts').getByRole('button', { name: 'Undo' }).waitFor();
+      assert.equal(tidies.length, 2);
+      assert.equal(tidies[0], tidies[1], 'the replay is the same request with the same operation id');
+      assert.match(await intents(page).textContent(), /Set aside/);
+    });
+
+    await t.test(
+      'an Undo that could not reach a row keeps Undo in reach and tries that row again',
+      async t => {
+        const page = await open(t, DESK, { fail: 'undo' });
+        await lookFor(page);
+        await intents(page)
+          .getByRole('checkbox', { name: 'Select Spike: try the streaming decoder on the old parser' })
+          .check();
+        await page
+          .getByRole('region', { name: 'Selected' })
+          .getByRole('button', { name: 'Set aside 1 Intent' })
+          .click();
+        const toast = page.locator('.toasts');
+        await toast.getByRole('button', { name: 'Undo' }).click();
+        await toast.getByText(/1 Intent could not be reached/).waitFor();
+        await toast.getByRole('button', { name: 'Undo' }).click();
+        await page.waitForFunction(() =>
+          document.querySelector('[data-announce]')?.textContent?.startsWith('Brought back 1 Intent.'),
+        );
+        const reopens = (await calls(page)).filter(call => call.startsWith(`mutation ${REOPEN}`));
+        assert.equal(reopens.length, 2, 'the failed reopen is tried again');
+      },
+    );
+
     await t.test('empty, loading and a failed read that retries', async t => {
       const empty = await open(t, PHONE, { data: 'empty' }, '.loose-ends .quietline');
       assert.match(await empty.locator('.head').textContent(), /Nothing is left lying around\./);
-      assert.match(await empty.locator('.quietline').first().textContent(), /^No loose ends\./);
+      assert.match(
+        await empty.locator('.quietline').first().textContent(),
+        /^No loose ends in Lanes or projects\. Open Intents are read on request below\./,
+      );
       assert.equal(
         await group(empty, 'Checked, never landed').count(),
         0,
@@ -558,10 +707,28 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
         ['loading', '.loose-ends [aria-busy=true]'],
         ['error', '.loose-ends .notice'],
         ['partial'],
+        ['intents'],
+        ['intents-partial'],
       ])
         for (const viewport of [DESK, PHONE]) {
-          const data = state === 'partial' ? 'demo' : state;
+          const data = state.startsWith('intents') || state === 'partial' ? 'demo' : state;
           const page = await open(t, viewport, { data }, ready);
+          if (state.startsWith('intents')) {
+            await lookFor(page);
+            await intents(page)
+              .getByRole('checkbox', { name: /^Select the 3 shown/ })
+              .check();
+            if (state === 'intents-partial') {
+              await page
+                .getByRole('region', { name: 'Selected' })
+                .getByRole('button', { name: 'Set aside 3 Intents' })
+                .click();
+              await page
+                .getByRole('alert')
+                .getByText(/could not be set aside/)
+                .waitFor();
+            }
+          }
           const idle = group(page, 'Lanes nobody holds');
           // As the approved page's "Some selected": the first two Lanes nobody holds are picked.
           if (data === 'demo') for (const n of [1, 2]) await idle.getByRole('checkbox').nth(n).check();

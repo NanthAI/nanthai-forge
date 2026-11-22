@@ -8,7 +8,10 @@
 // `&fail=page` fails the first next-page call; `&fail=stale` refuses the first dated cursor as WORK_STALE; `&fail=set`
 // fails the first set-aside call; `&fail=trash` fails the first trash call; `&owner=0` is a member. A Lane set aside or
 // saved meanwhile leaves the live read and comes back when Undo reopens it; a project in the trash leaves it and comes
-// back when restored. tidepool-import-test changed meanwhile, so its trash call is refused (WORK_STALE). The clipboard
+// back when restored. Open Intents with no Item are read on request (the Intent cursor): the first page has a long
+// right-to-left title, an Intent whose Item link is not reported and one whose activity is not known; its second page is
+// empty and continues, its third ends the group. `&fail=tidy` fails the first batch call; `&fail=undo` fails the first reopen; Intent ...0002 gained a save
+// meanwhile (skipped and named); Undo reopens through the lifecycle transition. tidepool-import-test changed meanwhile, so its trash call is refused (WORK_STALE). The clipboard
 // is recorded (window.copied).
 import { ConvexProvider, type ConvexReactClient } from 'convex/react';
 import { getFunctionName, type FunctionReference } from 'convex/server';
@@ -61,6 +64,22 @@ const dated = (n: number, text: string, date: string, reason: string, title = 'v
   line: 3,
   text,
   reason,
+  ...extra,
+});
+const INTENTS = 'forge-loose-ends-intents-v1:';
+const intentAt = (n: number) => ({
+  projectId: 'fixture-project',
+  intentId: `5d1c7a0e-0000-4000-8002-${String(n).padStart(12, '0')}`,
+  version: 3,
+  laneRevision: 0,
+  observedAt: NOW,
+});
+const intent = (n: number, title: string, days: number | null, extra = {}) => ({
+  selection: intentAt(n),
+  status: 'active',
+  title,
+  lastActivityAt: days === null ? null : new Date(ago(days * day)).toISOString(),
+  reason: 'No linked Item',
   ...extra,
 });
 const waiting = [{ id: 'req-1', selector: 'the trash', projects: 40, byDevice: true }];
@@ -253,6 +272,31 @@ function first(): LooseEndsRead {
   };
 }
 
+/** The Intent group's pages, as the Intent cursor of projectLooseEnds:read answers them. */
+function intentPage(cursor: string) {
+  const group = (rows: unknown[], continueCursor: string | null) => ({
+    at: NOW,
+    setAside: { authorityEpoch: 1 },
+    groups: { intents: { reported: true, rows, continueCursor } },
+  });
+  if (cursor === INTENTS)
+    return group(
+      [
+        intent(1, 'Spike: try the streaming decoder on the old parser', 40),
+        intent(2, 'Investigate flaky retry timer', 12),
+        intent(3, 'ストリームパーサー：チャンク境界で分割されたUTF-8シーケンスを処理する', 6, {
+          status: 'proposed',
+        }),
+        intent(4, 'تحديث مكتبة الاختبار لدعم البث المتقطع', 3),
+        intent(5, 'Imported work whose Item link is not reported', 2, { reason: 'Item link not reported' }),
+        intent(6, 'An Intent with more Lanes than one read covers', null),
+      ],
+      'intents-p2',
+    );
+  if (cursor === 'intents-p2') return group([], 'intents-p3');
+  return group([intent(7, 'Older experiment', 90)], null);
+}
+
 /** The next page for a cursor, as projectLooseEnds:read answers it. */
 function next(cursor: string): LooseEndsRead {
   if (cursor === 'idle-p2')
@@ -293,6 +337,8 @@ const calls: string[] = [];
 let pageFailures = fail === 'page' ? 1 : 0;
 let setFailures = fail === 'set' ? 1 : 0;
 let trashFailures = fail === 'trash' ? 1 : 0;
+let tidyFailures = fail === 'tidy' ? 1 : 0;
+let undoFailures = fail === 'undo' ? 1 : 0;
 let subscriptions = 0;
 let staleSeen = false;
 /** Lanes the live read no longer lists: set aside, or saved meanwhile (no longer idle). */
@@ -345,6 +391,8 @@ const fake = {
       });
     }
     if (args.cursor && pageFailures-- > 0) throw new Error('Synthetic page failure');
+    if (args.cursor && (args.cursor === INTENTS || args.cursor.startsWith('intents-')))
+      return JSON.stringify(intentPage(args.cursor));
     return JSON.stringify(args.cursor ? next(args.cursor) : first());
   },
   async mutation(
@@ -357,6 +405,30 @@ const fake = {
     },
   ) {
     const called = name(mutation);
+    if (called === 'projectLooseEndIntents:setAside') {
+      const { request, operationId } = args as unknown as { request: string; operationId: string };
+      const intents = (JSON.parse(request) as { intents: { intentId: string; version: number }[] }).intents;
+      calls.push(`mutation ${called} ${operationId} ${intents.map(row => row.intentId.slice(-3)).join(',')}`);
+      if (tidyFailures-- > 0) throw new Error('Synthetic tidy failure');
+      return JSON.stringify({
+        operationId,
+        receiptId: 'r1',
+        results: intents.map(row =>
+          row.intentId.endsWith('000000000002')
+            ? { intentId: row.intentId, result: 'saved-since-selection' }
+            : { intentId: row.intentId, result: 'set-aside', receiptId: 'r', version: row.version + 1 },
+        ),
+      });
+    }
+    if (called === 'projectHostedLifecycle:transition') {
+      const { target, action } = JSON.parse((args as unknown as { request: string }).request) as {
+        action: string;
+        target: { intentId: string; version: number };
+      };
+      calls.push(`mutation ${called} ${action} ${target.intentId.slice(-3)} ${target.version}`);
+      if (undoFailures-- > 0) throw new Error('Synthetic reopen failure');
+      return '{}';
+    }
     if (called === 'projectLifecycle:trash' || called === 'projectLifecycle:restore') {
       calls.push(`mutation ${called} ${args.projectId} ${args.expectedRevision}`);
       if (called === 'projectLifecycle:trash' && trashFailures-- > 0)

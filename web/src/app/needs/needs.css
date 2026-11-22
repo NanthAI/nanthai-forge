@@ -34,6 +34,8 @@
   /* Its own phone grid, like an access row: the shared phone rule would wrap it as flex (ds/parts.css). */
   .loose-ends .row.le { display: grid; grid-template-columns: 22px minmax(0, 1.5fr) minmax(0, 1.3fr) 176px 150px; }
   .loose-ends .row.le > .r { justify-self: end; }
+  /* A row's result word ("Skipped: it was saved meanwhile") wraps inside its column instead of running into the age. */
+  .loose-ends .row.le > .r .st { white-space: normal; text-align: right; max-width: 100%; }
   .loose-ends .le-what { min-width: 0; }
   .loose-ends .le-what > .meta { margin-top: 2px; }
   .loose-ends .band .ckhit { margin-left: -6px; margin-right: 0; }
