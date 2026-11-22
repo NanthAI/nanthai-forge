@@ -248,6 +248,7 @@ async function execute(
   const prepared = await beginHostedOperation(ctx, {
     projectId,
     actor,
+    accountChannel: 'start',
     payload,
     request: {
       schema: 1,

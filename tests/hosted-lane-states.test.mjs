@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
+import { establishedAccount } from './account-tier-fixture.mjs';
 const start = await import(moduleUrl('../convex/projectHostedStart.ts'));
 const reads = await import(moduleUrl('../convex/projectHostedLanes.ts'));
 const channels = await import(moduleUrl('../convex/projectHostedChannels.ts'));
@@ -11,6 +12,7 @@ const head = 'a'.repeat(64);
 
 test('Lane states: one call reads 100 Lane heads without bodies, bounded per Lane', async () => {
   const s = lanesFixture();
+  establishedAccount(s.tables, 'owner', ['start']);
   const projectId = s.insert('hostedProjects', {
     key: 'synthetic',
     name: 'Synthetic',

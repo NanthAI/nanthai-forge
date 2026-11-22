@@ -25,6 +25,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { recordHead } from './projectHostedRecords';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { chargeAccountChannel } from './accountLimits';
 import { cliProvenanceSchema } from '../src/self-metric-receipts';
 export const capture = mutation({
   args: { projectId: v.id('hostedProjects'), request: v.string() },
@@ -59,6 +60,7 @@ export const capture = mutation({
           ? old.value
           : canonicalPayload({ ...JSON.parse(old.value), likelyDuplicates: JSON.parse(savedHints) });
       }
+      await chargeAccountChannel(ctx, actor, 'friction');
       if (command.laneId)
         invariant(await recordHead(ctx, projectId, 'lane', command.laneId), 'NOT_FOUND', 'Lane not found.');
       // Build identity is evidence from the capturing CLI. A retry from another build
@@ -238,6 +240,7 @@ export const triage = mutation({
         replayRequest(old.request, request);
         return old.value;
       }
+      await chargeAccountChannel(ctx, actor, 'friction');
       const frictionIds: string[] = [];
       for (const ref of command.frictionIds)
         frictionIds.push((await resolveFriction(ctx, projectId, ref)).id);

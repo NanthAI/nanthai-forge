@@ -2,6 +2,7 @@
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { isPublicProject } from './publicVisibility';
+import { accountSuspended } from './accountLimits';
 
 /** A project's discovery row (stars, public settings), or null before anyone needed one. One indexed read. */
 export const publicRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
@@ -10,9 +11,10 @@ export const publicRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProj
     .withIndex('by_projectId', q => q.eq('projectId', projectId))
     .unique();
 
-/** The project's listing row, created on first need. `listed` follows the project's visibility. */
+/** The project's listing row, created on first need. `listed` follows the project's visibility, and stays
+ * off while the owner's account is suspended (convex/accountLimits.ts). */
 export async function ensurePublicRow(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
-  const listed = isPublicProject(project);
+  const listed = isPublicProject(project) && !(await accountSuspended(ctx, project.owner));
   const row = await publicRow(ctx, project._id);
   if (row) {
     if (row.listed !== listed) await ctx.db.patch(row._id, { listed });

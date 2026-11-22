@@ -314,8 +314,13 @@ function assertSaveWriteBudget(run, ceiling) {
     .flatMap(row => row.written)
     .filter(table => table === 'projectFeedEvents').length;
   assert.equal(feedWrites, 1, 'one feed event per changed save');
+  // Issue b6588425 line 3: one sharded account-limiter counter row per save (convex/accountLimits.ts).
+  const limitWrites = run.s.counts
+    .flatMap(row => row.written)
+    .filter(table => table === 'deviceAttempts').length;
+  assert.equal(limitWrites, 1, 'one account counter write per save');
   assert(
-    run.stats.writes - run.stats.overlapWrites - metricWrites - feedWrites <= ceiling,
+    run.stats.writes - run.stats.overlapWrites - metricWrites - feedWrites - limitWrites <= ceiling,
     JSON.stringify(run.stats),
   );
 }
@@ -976,8 +981,9 @@ test('a direct save prepare looks each upload row up once: the recipe check hand
   const run = await changedSave(t, false, true, 'convex', directContract);
   const [prepare] = run.s.counts.filter(row => row.name === 'projectHostedSaves:prepare');
   // 11 uploads (10 new blobs and the delta page) plus the input: on main each upload was looked up
-  // twice, by the recipe check and again by its target (91 range reads; now 69).
-  assert(prepare.ranges <= 69, `projectHostedSaves:prepare read ${prepare.ranges} ranges`);
+  // twice, by the recipe check and again by its target (91 range reads; now 69), plus the account
+  // suspend switch and limiter counter (Issue b6588425 line 3): 71.
+  assert(prepare.ranges <= 71, `projectHostedSaves:prepare read ${prepare.ranges} ranges`);
 });
 
 test('a described save retried after the CLI gains prepare-upload-targets stays described: no raw re-upload (review b1448b61 N5b)', async t => {

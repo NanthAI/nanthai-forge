@@ -38,6 +38,8 @@ export async function executeCommand(
     planningClose?: string | undefined;
     planningRestore?: string | undefined;
     onPlanningBatchState?: (state: { replayed: true } | { before: PlanningItem | null }) => void;
+    /** A server job writing as the owner, or a close cascade's derived child write: exempt from the account limiter (convex/accountLimits.ts). */
+    server?: true;
   } = {},
 ) {
   // Only trusted internal actions supply actor (scheduled budget Issues have no user session).
@@ -286,6 +288,7 @@ export async function executeCommand(
     projection,
     planning: options.planning,
     planningRestore: options.planningRestore,
+    ...(options.server ? { server: true as const } : {}),
   });
 }
 export const command = mutation({
@@ -327,11 +330,13 @@ export const commandFromAction = internalMutation({
     operationId: v.string(),
     command: v.string(),
     owner: v.string(),
+    /** Set only by server jobs writing as the owner (projectOwnerPlanning). */
+    server: v.optional(v.literal(true)),
   },
   returns: hostedWorkEventDocument,
-  handler: async (ctx, { owner, ...input }) => {
+  handler: async (ctx, { owner, server, ...input }) => {
     try {
-      return await executeCommand(ctx, input, owner);
+      return await executeCommand(ctx, input, owner, server ? { server } : {});
     } catch (error) {
       return report(error);
     }

@@ -16,6 +16,7 @@ import { metadataRequest, applyHostedEvent, workBytes, parseWorkBytes } from '..
 import { fixture, git, code } from './helpers.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
+import { establishedAccount } from './account-tier-fixture.mjs';
 import { readHosted } from './hosted-read.mjs';
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
@@ -26,6 +27,7 @@ const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.t
 function hosted(bytes, preview) {
   const s = state([]),
     native = s.ctx.runQuery;
+  establishedAccount(s.tables, 'owner', ['planning', 'start']);
   s.tables.hostedProjects = new Map();
   s.tables.projectBackups = new Map();
   s.tables.projectWorkEvents = new Map();

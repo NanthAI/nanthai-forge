@@ -5,6 +5,7 @@ import type { MutationCtx } from './_generated/server';
 import { activeOwnedProject } from './projectAuthority';
 import { ensurePublicRow } from './publicListing';
 import { syncPersonOrder } from './accountProjectOrder';
+import { chargeProjectCreation } from './accountLimits';
 
 /** Shared creation seam: archive upload and CLI hosting use the same owner/key identity. */
 export async function createProject(
@@ -16,6 +17,8 @@ export async function createProject(
     .withIndex('by_owner_and_key', q => q.eq('owner', input.owner).eq('key', input.key))
     .unique();
   if (!project) {
+    // A new project only: the owner's daily rate and active total (a retry of this key is free).
+    await chargeProjectCreation(ctx, input.owner);
     const id = await ctx.db.insert('hostedProjects', {
       ...input,
       sourceAuthority: { mode: 'native-owner', epoch: 0 },

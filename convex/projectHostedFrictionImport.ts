@@ -9,6 +9,7 @@ import { recordCaller, frictionRow, appendFriction } from './projectHostedFricti
 import { decisionRow, appendDecision } from './projectHostedDecisionsStore';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { assertAccountActive, chargeAccountChannel } from './accountLimits';
 async function inspect(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, input: string) {
   const parsed = hostedImportPageSchema.safeParse(JSON.parse(input));
   invariant(
@@ -17,7 +18,7 @@ async function inspect(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProject
     'Send at most 100 native friction/decision records per import page.',
   );
   const page = parsed.data;
-  const { actor } = await recordCaller(ctx, projectId, true, page.decisions.length > 0);
+  const { actor, project } = await recordCaller(ctx, projectId, true, page.decisions.length > 0);
   let existing = 0;
   for (const record of [...page.friction, ...page.decisions]) {
     const old =
@@ -35,6 +36,7 @@ async function inspect(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProject
   }
   return {
     actor,
+    owner: project.owner,
     page,
     result: {
       records: page.friction.length + page.decisions.length,
@@ -61,7 +63,13 @@ export const apply = mutation({
   returns: v.string(),
   handler: async (ctx, { projectId, request }) => {
     try {
-      const { actor, page, result } = await inspect(ctx, projectId, request);
+      const { actor, owner, page, result } = await inspect(ctx, projectId, request);
+      // An owner importing its own history only meets the suspend switch (a migration can be thousands
+      // of records). A contributor's new records count toward its friction limit, all or nothing;
+      // records already present replay for free.
+      if (actor !== owner && result.added > 0)
+        await chargeAccountChannel(ctx, actor, 'friction', { units: result.added });
+      else await assertAccountActive(ctx, actor);
       for (const record of page.friction) await appendFriction(ctx, projectId, actor, record);
       for (const record of page.decisions) await appendDecision(ctx, projectId, actor, record);
       return canonicalPayload({ ...result, dryRun: false });

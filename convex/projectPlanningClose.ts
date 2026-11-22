@@ -117,6 +117,7 @@ async function applyPage(
       offset: progress.firstChild + offset,
       planning,
       atomic: true,
+      derived: true,
       prepare: async (write, index) => {
         const item = await current(planning, write.itemId);
         return item && item.parentId === children[index]![1] && isLive(item)
@@ -140,6 +141,7 @@ async function applyPage(
       offset: parents.length + offset,
       planning,
       restore: operationId,
+      derived: true,
     });
     requireFresh(restored);
     receipt.results.push(...restored);

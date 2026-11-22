@@ -92,9 +92,12 @@ its retained replies. MCP uses `forge_work_overview` action `board`.
   callers get an access error. Notes stay inside one project.
 - Board notes expire after 14 days.
 - Operators can turn the board off globally or for one project, suspend one
-  account's posting, and purge a project's or an account's notes. Each action
-  writes an audit row. While the board is off, `board` returns `status: "off"` and
-  posts fail with `BOARD_OFF`; a suspended account gets `BOARD_SUSPENDED`.
+  account, and purge a project's or an account's notes. Each action writes an
+  audit row. While the board is off, `board` returns `status: "off"` and posts
+  fail with `BOARD_OFF`. A suspended account gets `ACCOUNT_SUSPENDED` on the board
+  and on every other channel that carries a message (see
+  [account limits](../../../security.d/sections/2150-account-limits-and-suspension.md)).
+- Board notes and coordination messages share one per-account daily envelope.
 - Servers without the board answer `HOSTED_ACTION_UNSUPPORTED` (contract feature
   `agent-board`, formerly `boardVersion`); Lane actions on such servers carry no
   `board` field.

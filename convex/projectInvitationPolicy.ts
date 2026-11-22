@@ -6,6 +6,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { invariant } from '../src/errors';
 import { digest } from '../src/state/hash';
+import { assertAccountActive } from './accountLimits';
 
 export const invitationPageSize = 25;
 
@@ -52,7 +53,8 @@ export const invitationByOperation = (
     .unique();
 
 /** Fixed-size counters in the existing rate store. All reads/refusals precede writes;
- * the returned commit runs in the same transaction that queues the send. */
+ * the returned commit runs in the same transaction that queues the send. A suspended inviter is
+ * refused first (the account switch, convex/accountLimits.ts). */
 export async function invitationBudget(
   ctx: MutationCtx,
   inviter: string,
@@ -60,6 +62,7 @@ export async function invitationBudget(
   resend?: string,
   now = Date.now(),
 ) {
+  await assertAccountActive(ctx, inviter);
   const day = 24 * 60 * 60_000,
     hour = 60 * 60_000;
   const scopes: [string, number, number][] = [

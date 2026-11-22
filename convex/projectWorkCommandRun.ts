@@ -39,6 +39,7 @@ export async function runWorkCommand(
     command: Exclude<HostedEvent['command'], { action: 'source-return' | 'purged-planning-row' }>,
     request: string,
   ) => Promise<Awaited<ReturnType<typeof indexedCommand>>>,
+  options: { server?: true } = {},
 ): Promise<StoredWorkEvent> {
   let parsed;
   try {
@@ -62,6 +63,7 @@ export async function runWorkCommand(
       operationId: input.operationId,
       command: input.command,
       owner,
+      ...(options.server ? { server: true as const } : {}),
     });
   const original: StoredWorkEvent | null = await ctx.runQuery(internal.projectWork.find, {
     projectId: input.projectId,
@@ -86,5 +88,6 @@ export async function runWorkCommand(
     previousRevision: input.revision,
     command: JSON.stringify(command),
     projection,
+    ...(options.server ? { server: true as const } : {}),
   });
 }

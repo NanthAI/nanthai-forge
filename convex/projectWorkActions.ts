@@ -64,9 +64,14 @@ const nodeCommand = (
   ctx: ActionCtx,
   input: { projectId: Id<'hostedProjects'>; operationId: string; revision: number; command: string },
   owner: string,
+  options: { server?: true } = {},
 ) =>
-  runWorkCommand(ctx, input, owner, (command, request) =>
-    indexedCommand(ctx, input, owner, command, request, nodeCommandHooks),
+  runWorkCommand(
+    ctx,
+    input,
+    owner,
+    (command, request) => indexedCommand(ctx, input, owner, command, request, nodeCommandHooks),
+    options,
   );
 /** Compatibility entry for older clients. Metadata delegates to the revision-free mutation;
  * anchored notes and Channel acceptance retain their pinned Node validation. */
@@ -83,9 +88,10 @@ export const command = action({
 });
 /** Node fallback of the V8 action: the owner was resolved there, from the same caller. */
 export const commandNode = internalAction({
-  args: { ...commandArgs, owner: v.string() },
+  args: { ...commandArgs, owner: v.string(), server: v.optional(v.literal(true)) },
   returns: hostedWorkEventDocument,
-  handler: async (ctx, { owner, ...input }): Promise<StoredWorkEvent> => nodeCommand(ctx, input, owner),
+  handler: async (ctx, { owner, server, ...input }): Promise<StoredWorkEvent> =>
+    nodeCommand(ctx, input, owner, server ? { server } : {}),
 });
 export const exportJournal = action({
   // purgedRows: 2 (contract feature planning-purge-v2): the caller replays purged rows, including an Intent's and

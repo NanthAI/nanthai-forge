@@ -42,6 +42,7 @@ import { indexEntry } from './projectWorkIndexFields';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { internal } from './_generated/api';
 import { report } from './errors';
+import { chargeAccountChannel } from './accountLimits';
 import { emitChange, workChange } from './coordinationWrite';
 import { movePlanLaneMark } from './projectPlanLaneMarks';
 import { storeProjection } from './projectWorkStore';
@@ -234,6 +235,8 @@ export const append = internalMutation({
         at: v.string(),
       }),
     ),
+    /** A server-scheduled write as the owner (not charged to the account limiter). */
+    server: v.optional(v.literal(true)),
   },
   returns: hostedWorkEventDocument,
   handler: appendWork,
@@ -252,6 +255,8 @@ export async function appendWork(
     authorityEpoch?: number;
     planning?: PlanningWriteContext | undefined;
     planningRestore?: string | undefined;
+    /** A server job writing as the owner (speed-budget Issues, a member's start): not charged. */
+    server?: true;
   },
 ) {
   const { planning } = input;
@@ -318,6 +323,14 @@ export async function appendWork(
         'Reconcile this operation’s original command and revision.',
       );
       return original;
+    }
+    // Comments, puts, notes and new Intents carry messages: one shared per-account daily limit and the
+    // suspend switch, charged only for a fresh operation (a replay returned above).
+    if (parsed.success && !input.server) {
+      const own = project.owner === input.owner;
+      if (parsed.data.action === 'intent') await chargeAccountChannel(ctx, input.owner, 'start');
+      else if (['put-planning-item', 'comment-planning-item', 'note'].includes(parsed.data.action))
+        await chargeAccountChannel(ctx, input.owner, own ? 'planning' : 'contributed');
     }
     if (channelCommand.success) {
       const actor = await acceptanceActor(ctx, channelCommand.data.agent),

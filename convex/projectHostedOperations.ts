@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { chargeMemberWork } from './abuseLimits';
+import { chargeAccountChannel } from './accountLimits';
 import { hostedOperationRow } from './projectHostedOperationLookup';
 export { hostedOperationRow } from './projectHostedOperationLookup';
 import { digest } from '../src/state/hash';
@@ -94,6 +95,9 @@ export async function beginHostedOperation(
     /** Owner command counted as an intervention once it completes. */
     metricAction?: MetricMutationAction;
     workKind?: 'checks' | 'composes' | 'submissions';
+    /** Message-carrying writes (Lane starts and names, save messages): the account limiter and
+     * suspend switch, charged with the member budget only for a fresh operation. */
+    accountChannel?: 'start' | 'save';
   },
 ) {
   const project = await activeProject(ctx, input.projectId, input.actor);
@@ -119,6 +123,7 @@ export async function beginHostedOperation(
     },
   );
   if (!old) {
+    if (input.accountChannel) await chargeAccountChannel(ctx, input.actor, input.accountChannel);
     if (input.workKind) await chargeMemberWork(ctx, project, input.actor, input.workKind);
     const metricAction =
       input.metricAction ??

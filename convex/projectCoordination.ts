@@ -14,6 +14,8 @@ import { applyCommand, canonical, denormalized, eventByOperation, session } from
 import { invariant } from '../src/errors';
 import { COORDINATION_TOUCH_MIN_MS, coordinationCommandSchema } from '../src/coordination-types';
 import { report } from './errors';
+import { chargeAccount, sendBoardAlerts } from './projectBoardLimits';
+import { assertAccountActive } from './accountLimits';
 import { sessionStructure, sessionView, sessionTree } from './coordinationSessions';
 import { ask, handBack } from './coordinationConversation';
 export { counts } from './coordinationCounts';
@@ -78,6 +80,20 @@ export const publish = mutation({
         'BAD_ARGUMENT',
         'Use an original operation UUID.',
       );
+      // Every kind honours the account suspend switch. Messages and handoffs (the text other agents
+      // read) also share the board's per-account daily envelope; status, acks and claims do not, so
+      // they never use up the note budget or touch its row. A replay above is free.
+      await assertAccountActive(ctx, actor);
+      if (parsed.kind === 'message' || parsed.kind === 'handoff') {
+        const { alerts } = await chargeAccount(ctx, {
+          author: actor,
+          projectId: input.projectId,
+          bytes: new TextEncoder().encode(JSON.stringify(parsed)).length,
+          youngProject: false,
+          now: Date.now(),
+        });
+        await sendBoardAlerts(ctx, alerts);
+      }
       const sessionId = parsed.sessionId;
       const current = sessionId ? await session(ctx, input.projectId, sessionId) : null;
       invariant(

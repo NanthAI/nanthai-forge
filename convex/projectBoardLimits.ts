@@ -7,6 +7,7 @@ import type { Id } from './_generated/dataModel';
 import { ForgeError, invariant } from '../src/errors';
 import { deliverStallAlert } from '../src/stall-alerts';
 import { budgetLeft, tightestBudget } from './abuseLimits';
+import { dailyLimitError, establishedAccount, suspendedError } from './accountLimits';
 
 const minute = 60_000,
   day = 24 * 60 * minute;
@@ -15,11 +16,10 @@ export const BOARD_RETENTION_MS = 14 * day;
 export const BOARD_PROJECT_LIVE_CAP = 5_000;
 export const BOARD_LANE_WINDOW = { ms: 10 * minute, posts: 10 };
 export const BOARD_MEMBER_DAY_POSTS = 300;
-/** Abuse controls, owner-approved 2026-11-06 (kept as proposed 2026-11-05). Change them only
- * with the owner's numbers. Accounts younger than `establishedAfterDays`
- * get the `new` caps. A linked GitHub login cannot raise the tier yet: accounts have no such field. */
+/** Abuse controls, owner-approved 2026-11-06 and kept 2026-11-22 for board notes and coordination
+ * messages combined. Change them only with the owner's numbers. The tier is the shared account tier
+ * (convex/accountLimits.ts: 7 days old or a linked GitHub login). */
 export const BOARD_ACCOUNT_CAPS = {
-  establishedAfterDays: 7,
   new: { posts: 100, bytes: 24_000 },
   established: { posts: 1_000, bytes: 240_000 },
 } as const;
@@ -101,22 +101,23 @@ export async function chargeAccount(
       .withIndex('by_owner', q => q.eq('owner', input.author))
       .unique(),
   ]);
-  const established =
-    account !== null && input.now - account._creationTime >= BOARD_ACCOUNT_CAPS.establishedAfterDays * day;
+  const established = await establishedAccount(ctx, input.author, input.now, account);
   const caps = established ? BOARD_ACCOUNT_CAPS.established : BOARD_ACCOUNT_CAPS.new;
   const today = dayStart(input.now);
   const fresh = !row || row.dayStart !== today;
   const posts = (fresh ? 0 : row.posts) + 1,
     bytes = (fresh ? 0 : row.bytes) + input.bytes;
   if (posts > caps.posts)
-    limited(
-      `This account reached its board limit of ${caps.posts} notes a day across projects.`,
+    throw dailyLimitError(
+      `This account reached its daily limit of ${caps.posts} board notes and coordination messages across projects.`,
       today + day,
+      input.now,
     );
   if (bytes > caps.bytes)
-    limited(
-      `This account reached its board limit of ${caps.bytes} bytes a day across projects.`,
+    throw dailyLimitError(
+      `This account reached its daily limit of ${caps.bytes} bytes of board notes and coordination messages across projects.`,
       today + day,
+      input.now,
     );
   const seen = fresh ? [] : row.projects;
   const projects =
@@ -213,5 +214,5 @@ export function assertBoardOpen(stopped: Awaited<ReturnType<typeof boardStopped>
     'BOARD_OFF',
     'The board is turned off for this project.',
   );
-  invariant(stopped !== 'account', 'BOARD_SUSPENDED', 'Board posting is suspended for this account.');
+  if (stopped === 'account') throw suspendedError();
 }

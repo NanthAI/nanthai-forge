@@ -48,12 +48,16 @@ export async function ownerPlanningCommand(
     };
     try {
       try {
-        await runWorkCommand(ctx, input, owner, (parsed, request) =>
-          indexedCommand(ctx, input, owner, parsed, request),
+        await runWorkCommand(
+          ctx,
+          input,
+          owner,
+          (parsed, request) => indexedCommand(ctx, input, owner, parsed, request),
+          { server: true },
         );
       } catch (error) {
         if (!(error instanceof NodeCommandRequired)) throw error;
-        await ctx.runAction(internal.projectWorkActions.commandNode, { ...input, owner });
+        await ctx.runAction(internal.projectWorkActions.commandNode, { ...input, owner, server: true });
       }
       return true;
     } catch (error) {

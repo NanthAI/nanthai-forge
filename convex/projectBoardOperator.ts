@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Operator stop switches for the agent board. Internal only: run with the deployment key, e.g.
 //   npx convex run projectBoardOperator:setSwitch '{"scope":"global","off":true,"reason":"..."}'
-// Every call writes a boardAudit row. Switches take effect on the next post or read.
+// Every call writes a boardAudit row. Switches take effect on the next post or read. The account
+// switch is the one suspend flag for every message channel (convex/accountLimits.ts).
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
+import { endAccountDevices } from './deviceEndAll';
+import { endSessions } from './accountCloseSignIn';
+import { isPublicProject } from './publicVisibility';
 
 const scope = v.union(v.literal('global'), v.literal('project'), v.literal('account'));
 const PURGE_PAGE = 200;
@@ -69,7 +73,50 @@ export const setSwitch = internalMutation({
       reason: input.reason,
       at: now,
     });
+    if ('owner' in target && target.owner) {
+      // The account switch stops every message channel at once (convex/accountLimits.ts). Suspending
+      // also signs out its CLI devices and browser sessions; either way its public listing follows.
+      if (input.off) {
+        await endAccountDevices(ctx, target.owner, now);
+        await endSessions(ctx, target.owner);
+      }
+      await relistAccount(ctx, target.owner, input.off, null);
+    }
     return { key: target.label, off: input.off };
+  },
+});
+
+const LISTING_PAGE = 100;
+/** Unlists (suspend) or relists (lift) the account's public projects, one bounded page per
+ * transaction; continues through the scheduler. Relisting re-applies each project's visibility. */
+async function relistAccount(ctx: MutationCtx, owner: string, suspended: boolean, cursor: string | null) {
+  const page = await ctx.db
+    .query('projectPublic')
+    .withIndex('by_owner_and_listed', q => q.eq('owner', owner).eq('listed', suspended))
+    .paginate({ cursor, numItems: LISTING_PAGE });
+  for (const row of page.page) {
+    if (suspended) await ctx.db.patch(row._id, { listed: false });
+    else if (isPublicProject(await ctx.db.get(row.projectId))) await ctx.db.patch(row._id, { listed: true });
+  }
+  if (!page.isDone)
+    await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectBoardOperator:relist'), {
+      owner,
+      suspended,
+      cursor: page.continueCursor,
+    });
+}
+export const relist = internalMutation({
+  args: { owner: v.string(), suspended: v.boolean(), cursor: v.string() },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    // A switch flipped again meanwhile wins: stop this continuation.
+    const row = await ctx.db
+      .query('boardSwitches')
+      .withIndex('by_key', q => q.eq('key', `account:${input.owner}`))
+      .unique();
+    if (Boolean(row?.off) === input.suspended)
+      await relistAccount(ctx, input.owner, input.suspended, input.cursor);
+    return null;
   },
 });
 

@@ -18,6 +18,7 @@ import {
 import { invariant } from '../src/errors';
 import { retainUploadCleanup, scheduleUploadSweep, retryRemovedUpload } from './projectLifecycle';
 import { report } from './errors';
+import { assertAccountActive } from './accountLimits';
 import { findObject } from './projectObjectFind';
 
 export const proposalArgs = {
@@ -91,6 +92,7 @@ export const register = internalMutation({
         );
         return old._id;
       }
+      await assertAccountActive(ctx, input.actor);
       const authority = await intentAuthority(ctx, input.projectId, input.actor, input.intentId),
         backup = await ctx.db.get(input.baseBackupId);
       invariant(

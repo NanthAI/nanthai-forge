@@ -75,6 +75,8 @@ export const deviceTables = {
     owner: v.string(),
     windowAt: v.number(),
     count: v.number(),
+    /** Account limiter rows (`limit:<channel>:<shard>:<subject>`, convex/accountLimits.ts) cache the tier for the day. */
+    established: v.optional(v.boolean()),
     /** Passkey budgets retain only handles charged within their fixed global allowance. */
     handles: v.optional(v.array(v.object({ handle: v.string(), count: v.number() }))),
     /** Per-visitor rows (convex/visitorBudget.ts): the device minute window, and when the row may be removed. */

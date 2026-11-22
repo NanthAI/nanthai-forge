@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { state } from './hosted-fixture.mjs';
+import { establishedAccount } from './account-tier-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { emptyHostedProject } from '../dist/hosted-bootstrap.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
@@ -32,6 +33,8 @@ const modules = Object.fromEntries(
 function setup() {
   const s = state([]),
     original = s.ctx.runQuery;
+  // An Established owner: its daily new-project limit (50) and active total (100) sit above these fixtures.
+  establishedAccount(s.tables, 'owner', ['project']);
   s.ctx.runQuery =
     s.ctx.runMutation =
     s.ctx.runAction =
@@ -138,7 +141,7 @@ test('signed-out creation and retries cannot access projects or allocate source'
   assert.equal(s.tables.hostedProjects.size, 1);
 });
 
-test('same-name creations retain existing slug collision rules and do not introduce a project quota', async () => {
+test("same-name creations retain existing slug collision rules within an Established account's project limits", async () => {
   const s = setup();
   for (let n = 0; n < 25; n++) await s.create(input('Same name'));
   assert.equal(s.tables.hostedProjects.size, 25);

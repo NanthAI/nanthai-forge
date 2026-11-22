@@ -10,6 +10,7 @@ import { fixture, git } from './helpers.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 import { readHosted } from './hosted-read.mjs';
+import { establishedAccount } from './account-tier-fixture.mjs';
 export const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 export const work = await import(moduleUrl('../convex/projectWork.ts'));
 const projectIntentLandingNotes = await import(moduleUrl('../convex/projectIntentLandingNotes.ts'));
@@ -34,6 +35,8 @@ export async function setup(t, native = true, prepare, prepareIndex = true) {
     preview = await previewWorkArchive(new File([bytes], 'source.tar.gz'));
   const s = state([]),
     originalQuery = s.ctx.runQuery;
+  // A long-standing owner: planning volume here is an Established account's, not a new sign-up's.
+  establishedAccount(s.tables, 'owner', ['planning', 'start']);
   s.ctx.runAction =
     s.ctx.runQuery =
     s.ctx.runMutation =

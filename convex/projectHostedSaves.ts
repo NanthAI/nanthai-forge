@@ -141,6 +141,7 @@ export const prepare = mutation({
       const semantic = withoutAuthorship(request);
       const prepared = await beginHostedOperation(ctx, {
         ...auth,
+        accountChannel: 'save',
         payload: semantic,
         request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(semantic, expected) },
         firstAttempt: {

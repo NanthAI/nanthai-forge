@@ -1,0 +1,4 @@
+{
+  "issue": "b6588425",
+  "reason": "Account suspend switch and shared per-account limiter (Item b6588425 line 3): every fresh save charges one sharded counter row inside the existing prepare mutation. Measured on the solo fixture: +2 document reads per save (the account switch row and the counter row), +1 write (the counter patch), +0 calls. The account tier is read only when a counter row reaches the New allowance. Replays charge nothing; idle cost unchanged."
+}

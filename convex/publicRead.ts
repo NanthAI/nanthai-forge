@@ -9,6 +9,7 @@
  * shown project; profile ≤ 100 listed rows + ≤ 366 person-day rows and ≤ 50 projects (public contributions,
  * convex/personDays.ts); sitemap ≤ 1,000 listed rows. */
 import { v } from 'convex/values';
+import { accountSuspended } from './accountLimits';
 import type { Doc } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { internalQuery, internalMutation } from './server';
@@ -327,7 +328,8 @@ export const profilePage = internalQuery({
       .unique();
     if (!alias) return null;
     const account = await accountFor(ctx, alias.owner);
-    if (!account?.handle) return null;
+    // A suspended account has no public profile (its listed projects are unlisted too).
+    if (!account?.handle || (await accountSuspended(ctx, alias.owner))) return null;
     const rows = await ctx.db
       .query('projectPublic')
       .withIndex('by_owner_and_listed', q => q.eq('owner', alias.owner).eq('listed', true))

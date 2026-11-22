@@ -279,7 +279,7 @@ test('operator switches stop posting and delivery at once, purge bodies, and aud
   const f = boardFixture();
   await f.post({ to: 'project', text: 'before' }, 'writer');
   await f.op('setSwitch', { scope: 'account', handle: 'writer-h', off: true, reason: 'abuse report' });
-  await assert.rejects(f.post({ to: 'project', text: 'blocked' }, 'writer'), code('BOARD_SUSPENDED'));
+  await assert.rejects(f.post({ to: 'project', text: 'blocked' }, 'writer'), code('ACCOUNT_SUSPENDED'));
   await f.post({ to: 'project', text: 'others still post' });
   await f.op('setSwitch', { scope: 'project', projectId: 'project', off: true, reason: 'owner request' });
   await assert.rejects(f.post({ to: 'project', text: 'off' }), code('BOARD_OFF'));
