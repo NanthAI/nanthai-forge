@@ -9,6 +9,7 @@ import { executeHostedFinish } from './hosted-agent-finish.js';
 import { executeHostedWithdraw } from './hosted-agent-withdraw.js';
 import { settleTurnWork } from './agent-turn-work.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
+import { isStandardForgeCheck } from './standard-check.js';
 import { isMachineRunner, machineRunnerDescription } from './hosted-machine-runner.js';
 import { checkLogsField, publicLogsNotice } from './runner-visibility.js';
 import { mergeSubmoduleAllowlist, submoduleAllowSchema } from './submodule-allowlist.js';
@@ -125,6 +126,7 @@ export function landingAdvice(mainAudit: unknown): string | null {
 export async function checkSelection(
   session: HostedAgentSession,
   command: z.infer<typeof hostedAgentCommandSchemas.finish>['check'],
+  onStandardCheck?: () => void,
 ) {
   if (!command) {
     let cursor: string | null = null;
@@ -152,7 +154,13 @@ export async function checkSelection(
   }
   const settings = z
     .object({
-      check: z.object({ definition: z.string() }).nullable(),
+      check: z
+        .object({
+          definition: z.string(),
+          executable: z.string().optional(),
+          args: z.array(z.string()).optional(),
+        })
+        .nullable(),
       configuration: z
         .object({
           environmentFingerprint: z.string(),
@@ -169,6 +177,18 @@ export async function checkSelection(
     'RUNNER_UNAVAILABLE',
     'Configure this hosted check and its runner first.',
   );
+  const { definition, executable, args } = settings.check;
+  if (
+    onStandardCheck &&
+    (command.expectedDefinition ?? definition) === definition &&
+    (command.expectedConfiguration ?? settings.configurationDigest) === settings.configurationDigest &&
+    (command.expectedEnvironment ?? settings.configuration.environmentFingerprint) ===
+      settings.configuration.environmentFingerprint &&
+    executable &&
+    args &&
+    isStandardForgeCheck({ executable, args })
+  )
+    onStandardCheck();
   // From the settings row this selection already read: the receipt names public logs plainly.
   const { checkLogs } = checkLogsField(settings.configuration);
   if (checkLogs) await session.journal.retain(checkLogsKey, () => checkLogs);
@@ -178,7 +198,7 @@ export async function checkSelection(
   return {
     kind: 'request' as const,
     checkId: command.checkId,
-    expectedDefinition: command.expectedDefinition ?? settings.check.definition,
+    expectedDefinition: command.expectedDefinition ?? definition,
     expectedConfiguration: command.expectedConfiguration ?? settings.configurationDigest,
     expectedEnvironment: command.expectedEnvironment ?? settings.configuration.environmentFingerprint,
   };

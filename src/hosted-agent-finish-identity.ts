@@ -52,6 +52,7 @@ export const FINISH_REFUSALS = new Set([
   'UNSAVED_LANE_EDITS',
   'PREFLIGHT_REQUIRED',
   'PREFLIGHT_BUDGET_EXCEEDED',
+  'QUEUE_PROOF_REQUIRED',
 ]);
 export type FinishContext = {
   command: Record<string, unknown>;

@@ -794,9 +794,13 @@ path, line, kind and fingerprint. Allow entries come from main. The hosted
 check scans the composed Candidate and decides the outcome.
 
 For the standard Forge check, the same local preview verifies queue proof from
-saved paths, digests and available proof and replay registry files. A missing or
-stale proof is reported as `QUEUE_PROOF_REQUIRED`. The hosted check verifies
-proof on the composed Candidate. When static verification is the reported
+saved paths, digests and available proof and replay registry files. With preflight
+enabled, `land --save` refuses a confirmed missing or stale proof for a single
+Lane before it composes, when the selected check runs the standard Forge recipe.
+`QUEUE_PROOF_REQUIRED` names the proof, where to attach it in the Lane and the
+command to retry after attaching it. The hosted check still verifies proof on
+the composed Candidate, including when the local comparison is inconclusive.
+When static verification is the reported
 cause, the compact landing receipt retains the first safe coded diagnostic line.
 
 - The landing carries `gates`: the CLI's preflight result for each Lane head it composed. The

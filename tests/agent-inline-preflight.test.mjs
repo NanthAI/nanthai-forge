@@ -5,7 +5,15 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { queueProofPaths, REGISTRY } from '../scripts/core-queue-paths.mjs';
@@ -456,48 +464,64 @@ test('preflight and land scan a saved resolution against the main it merged in a
   );
 });
 
-test('preflight and inline finish preview the same queue proof as the hosted check on saved inputs', async t => {
-  const source = 'convex/projectHostedFinishWake.ts';
-  const receipt = '.nforge/queue-proofs/wake.json';
-  const saved = 'Saved synthetic wake change';
-  const testName = 'synthetic incident replay for the saved wake';
+async function queueProofFixture(t, { attach, standard = true } = {}) {
+  const source = 'src/hosted-landing.ts';
+  const receipt = '.nforge/queue-proofs/landing-notes.json';
+  const saved = 'Saved synthetic landing change';
+  const testName = 'synthetic incident replay for landing notes';
   const proof = {
     version: 1,
     kind: 'replay',
     changes: { [source]: digest(Buffer.from(saved)) },
-    replay: { incident: '5e3c3a3c', test: testName, receipt: randomUUID() },
+    replay: { incident: '2bf85ddf', test: testName, receipt: randomUUID() },
     authorSession: randomUUID(),
     review: { session: randomUUID(), receipt: randomUUID() },
   };
   const base = {
     'scripts/forge-check.mjs': '',
-    [source]: 'Before the wake change',
-    [REGISTRY]: JSON.stringify({ replays: [{ incident: '5e3c3a3c', test: testName, paths: [source] }] }),
+    [source]: 'Before the landing change',
+    [REGISTRY]: JSON.stringify({ replays: [{ incident: '2bf85ddf', test: testName, paths: [source] }] }),
   };
-  const prepare = async proofBytes => {
-    const s = agentFixture(t, {
-      base,
-      lane: { ...base, [source]: saved, [receipt]: proofBytes },
-    });
-    s.caps.main = s.main;
-    s.caps.agentDefaults = effectiveAgentDefaults({ preflight: 'advise' });
-    await s.transport().dispatch('open', { laneId: s.lane.laneId });
-    const plan = join(s.root, '..', 'plan.json');
-    writeFileSync(
-      plan,
-      JSON.stringify({
-        standard: true,
-        selection: { queueProof: queueProofPaths([source, receipt]) },
-      }),
-    );
-    return { s, hosted: () => verifyQueueProof({ FORGE_ACTIONS_PLAN: plan }, s.root) };
+  const stale = JSON.stringify({ ...proof, changes: { [source]: digest(Buffer.from('Stale change')) } });
+  const proofBytes = attach === 'stale' ? stale : attach === 'valid' ? JSON.stringify(proof) : undefined;
+  const s = agentFixture(t, {
+    base,
+    lane: { ...base, [source]: saved, ...(proofBytes ? { [receipt]: proofBytes } : {}) },
+  });
+  s.caps.main = s.main;
+  s.caps.agentDefaults = effectiveAgentDefaults({ preflight: 'advise' });
+  const query = s.exchange.client.query;
+  s.exchange.client.query = async (ref, args) => {
+    const text = await query(ref, args);
+    if (getFunctionName(ref) !== 'projectHostedCheckDefinitions:current') return text;
+    const settings = JSON.parse(text);
+    settings.check.executable = 'node';
+    settings.check.args = [standard ? 'scripts/forge-check.mjs' : 'scripts/custom-check.mjs'];
+    return JSON.stringify(settings);
   };
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const plan = join(s.root, '..', 'plan.json');
+  writeFileSync(
+    plan,
+    JSON.stringify({
+      standard: true,
+      selection: { queueProof: queueProofPaths(proofBytes ? [source, receipt] : [source]) },
+    }),
+  );
+  return {
+    s,
+    source,
+    receipt,
+    proof,
+    hosted: () => verifyQueueProof({ FORGE_ACTIONS_PLAN: plan }, s.root),
+  };
+}
 
-  const stale = JSON.stringify({ ...proof, changes: { [source]: digest(Buffer.from('Stale wake')) } });
-  const { s, hosted } = await prepare(stale);
+test('preflight reports the same stale queue proof as the hosted check on saved inputs', async t => {
+  const { s, source, receipt, proof, hosted } = await queueProofFixture(t, { attach: 'stale' });
   let message;
   await assert.rejects(hosted, error => {
-    assert.match(error.message, /^QUEUE_PROOF_REQUIRED:.*projectHostedFinishWake/);
+    assert.match(error.message, /^QUEUE_PROOF_REQUIRED:.*src\/hosted-landing\.ts/);
     message = error.message;
     return true;
   });
@@ -509,14 +533,8 @@ test('preflight and inline finish preview the same queue proof as the hosted che
   assert.deepEqual(preflight.result.queueProof, expected);
   assert.deepEqual(slimReceipt(preflight).result.queueProof, expected);
   const preflightCalls = s.calls.slice(from).map(call => call.name);
-  writeFileSync(join(s.root, receipt), stale);
-  const beforeFinish = s.calls.length;
-  const finish = await s.transport().dispatch('finish', { message: 'Synthetic queue proof check' });
-  assert.deepEqual(slimReceipt(finish).result.defaults.queueProof, expected);
-  assert(s.calls.slice(beforeFinish).some(call => call.name === 'projectHostedCompose:prepare'));
-  const finishCalls = s.calls.slice(beforeFinish).map(call => call.name);
 
-  const good = await prepare(JSON.stringify(proof));
+  const good = await queueProofFixture(t, { attach: 'valid' });
   await good.hosted();
   const goodFrom = good.s.calls.length;
   const goodPreflight = await good.s.transport().dispatch('preflight', { run: false });
@@ -525,16 +543,8 @@ test('preflight and inline finish preview the same queue proof as the hosted che
     good.s.calls.slice(goodFrom).map(call => call.name),
     preflightCalls,
   );
-  const goodBeforeFinish = good.s.calls.length;
-  const goodFinish = await good.s.transport().dispatch('finish', { message: 'Synthetic queue proof check' });
-  assert.equal(goodFinish.result.defaults.queueProof, undefined);
-  assert.deepEqual(
-    good.s.calls.slice(goodBeforeFinish).map(call => call.name),
-    finishCalls,
-  );
 
-  const moved = await prepare(stale);
-  const f = moved.s;
+  const { s: f } = await queueProofFixture(t, { attach: 'stale' });
   // The fallback derives the change set against newer main than the capability read.
   f.caps.main = structuredClone(f.main);
   const before = JSON.parse(f.objects.get(f.main.head));
@@ -558,6 +568,109 @@ test('preflight and inline finish preview the same queue proof as the hosted che
   f.objects.set(peerBlob, peerBytes);
   const movedPreflight = await f.transport().dispatch('preflight', { run: false });
   assert.equal(movedPreflight.result.queueProof, undefined);
+});
+
+test('incident 7e5f0ad3: missing queue proof refuses land before any hosted job, and attached proof proceeds', async t => {
+  const { s, proof, receipt } = await queueProofFixture(t);
+  const operationId = randomUUID();
+  const message = 'Synthetic landing notes change';
+  const retry = { after: null, dependencies: [], message };
+  const from = s.calls.length;
+  t.mock.method(process.stderr, 'write', () => true);
+  const transport = s.transport();
+  await assert.rejects(submitHostedLand(s.root, { operationId, message }, s.address, transport), error => {
+    assert.equal(error.code, 'QUEUE_PROOF_REQUIRED');
+    assert.match(
+      error.message,
+      /registered incident replay with fresh-context review or an on-path bench cell for src\/hosted-landing\.ts/,
+    );
+    const command = `nforge agent '${realpathSync(s.root)}' land --save '${JSON.stringify(retry)}'`;
+    const attach = '.nforge/queue-proofs/<change>.json';
+    assert.deepEqual(error.recovery, { attach, command });
+    assert(error.message.includes(attach));
+    assert(error.message.includes(command));
+    return true;
+  });
+  assert(
+    !s.calls
+      .slice(from)
+      .some(call =>
+        /(?:Compose:prepare|Jobs:submit|SourceRun:submit|Landing.*:(?:enqueue|submit)|Checks:enqueue)$/.test(
+          call.name,
+        ),
+      ),
+    'no hosted compose or check job starts',
+  );
+  assert(
+    !process.stderr.write.mock.calls.some(call => String(call.arguments[0]).includes('QUEUE_PROOF_REQUIRED')),
+    'the structured refusal is the one proof diagnostic',
+  );
+
+  // Model a saved attachment on the same Lane. Reopening the new State keeps the original
+  // landing journal, so the suggested command must select a fresh operation on that Lane.
+  const proofBytes = Buffer.from(JSON.stringify(proof));
+  const blob = digest(proofBytes);
+  s.objects.set(blob, proofBytes);
+  const state = JSON.parse(s.objects.get(s.lane.head));
+  state.files.unshift({ path: receipt, blob, mode: 'file' });
+  const withProof = Buffer.from(JSON.stringify(state));
+  s.lane.head = digest(withProof);
+  s.lane.version++;
+  s.lane.sourceVersion++;
+  s.objects.set(s.lane.head, withProof);
+  await s.transport().dispatch('open', { operationId: randomUUID(), laneId: s.lane.laneId });
+
+  const retried = await submitHostedLand(s.root, retry, s.address, s.transport());
+  assert.notEqual(retried.operationId, operationId);
+  assert.equal(retried.result.phase, 'finish');
+  assert.equal(retried.result.defaults?.queueProof, undefined);
+
+  const calls = [];
+  for (const options of [{ attach: 'valid' }, { standard: false }]) {
+    const { s: next } = await queueProofFixture(t, options);
+    const before = next.calls.length;
+    const finish = await submitHostedLand(next.root, retry, next.address, next.transport());
+    assert.equal(finish.result.phase, 'finish');
+    assert(next.calls.slice(before).some(call => call.name === 'projectHostedLanding:enqueue'));
+    assert.equal(
+      finish.result.defaults?.queueProof?.code,
+      options.standard === false ? 'QUEUE_PROOF_REQUIRED' : undefined,
+    );
+    calls.push(
+      next.calls
+        .slice(before)
+        .map(call => call.name)
+        .sort(),
+    );
+  }
+  assert.deepEqual(calls[0], calls[1], 'the standard and custom normal paths use the same Convex calls');
+});
+
+test('a queue proof preview on older main does not refuse a newer compose pin', async t => {
+  const { s, source } = await queueProofFixture(t);
+  // The projected-path preview can only use main bytes already available locally.
+  await s.transport().dispatch('preflight', { run: false });
+  s.caps.main = structuredClone(s.main);
+  const query = s.exchange.client.query;
+  s.exchange.client.query = (ref, args) =>
+    getFunctionName(ref) === 'projectHostedOverlaps:read'
+      ? JSON.stringify({
+          behindMain: { commits: 0, conflictingPaths: [], more: 0, coverage: 'complete' },
+          changedPaths: { paths: [source], complete: true },
+        })
+      : query(ref, args);
+  // The check would no longer require proof for these bytes because main has already taken them.
+  s.main.head = s.lane.head;
+  s.main.receipt.id = randomUUID();
+  s.pinMain(true);
+  const finish = await submitHostedLand(
+    s.root,
+    { message: 'Main took the same change' },
+    s.address,
+    s.transport(),
+  );
+  assert.equal(finish.result.defaults?.queueProof?.main, s.caps.main.head);
+  assert.equal(finish.result.submission.request.expectedMain.head, s.main.head);
 });
 
 test('incident 229147a2: over-budget land with a format error refuses locally before any hosted check', async t => {

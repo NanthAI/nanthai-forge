@@ -18,7 +18,7 @@ import { saveContract, saveHostedLane } from './hosted-save-client.js';
 import { capturedNotSaved, type NotSaved } from './save-not-saved.js';
 import { assertSavedCheckout } from './hosted-save-receipt-state.js';
 import { composeAgentSource, composedRevertOf, selectAgentLane } from './hosted-agent-source.js';
-import { recoverHostedCandidate } from './hosted-agent-resolution.js';
+import { hostedRecoveryCommand, recoverHostedCandidate } from './hosted-agent-resolution.js';
 import { settleCheckOnlyCompose } from './hosted-check-only-compose.js';
 import { inPlaceResolution, refuseUnsavedResolution } from './hosted-conflict-precheck.js';
 import {
@@ -612,7 +612,12 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   const operationId = session.journal.operationId,
     epoch = session.capabilities.authority.epoch;
   const context = session.journal.get<FinishContext>('finish-context');
-  const command = hostedAgentCommandSchemas.finish.parse(context?.command ?? input);
+  const parameters = context?.command ?? (input as Record<string, unknown>);
+  const command = hostedAgentCommandSchemas.finish.parse(parameters);
+  // No early settings read for ordinary landings. When a proof is flagged, reuse the
+  // selection at submission so projects with custom checks still read it just once.
+  let selectedCheck: ReturnType<typeof checkSelection> | undefined;
+  let checkProof: ((mainHead: string) => Promise<void>) | undefined;
   // A Candidate the caller named is its pin; one this finish composed is rebuilt when main moves.
   const pinnedCandidate = command.candidateId !== undefined;
   if (command.tokens !== undefined && session.landingTokens)
@@ -789,6 +794,34 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         savedMarker?.selection.head === selection.head ? savedMarker.tree : undefined,
         command.message,
       );
+      const proof = advice.queueProof;
+      // An extra source input or a stacked parent can change the proof comparison.
+      if (proof && !command.dependencies.length && !command.after && !command.composeOperationId) {
+        checkProof = async mainHead => {
+          selectedCheck = undefined;
+          // Use the main compose already reads. A finding for a superseded comparison is advisory.
+          if (proof.main !== mainHead) return;
+          let standard = false;
+          selectedCheck = checkSelection(session, command.check, () => {
+            standard = true;
+          });
+          // Check-selection errors still surface after compose, so they cannot hide source conflicts.
+          await selectedCheck.catch(() => {
+            standard = false;
+          });
+          if (!standard) return;
+          const retry = { ...parameters };
+          delete retry.operationId;
+          const next = hostedRecoveryCommand(session.root, 'land --save', retry);
+          const attach = '.nforge/queue-proofs/<change>.json';
+          throw new ForgeError(
+            'QUEUE_PROOF_REQUIRED',
+            `${proof.message} Attach the proof at ${attach} in this Lane, then run ${next}.`,
+            undefined,
+            { attach, command: next },
+          );
+        };
+      }
       if (Object.keys(advice).length) await session.journal.retain('finish-defaults', () => advice);
     }
     markLandStep('gated');
@@ -821,6 +854,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         }),
         composeOperationId,
         false,
+        checkProof,
       );
     } catch (error) {
       if (!(error instanceof BeganAtOlderEpoch)) throw error;
@@ -856,7 +890,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           ...(session.capabilities.landingMessageVersion === 1 ? { message: command.message ?? null } : {}),
           after: command.after,
           ...(command.priority ? { priority: command.priority } : {}),
-          check: await checkSelection(session, command.check),
+          check: await (selectedCheck ?? checkSelection(session, command.check)),
           ...(command.reason ? { retryReason: command.reason } : {}),
           ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
           ...(command.closes === undefined ? {} : { closes: command.closes }),
@@ -908,7 +942,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     session.pathNotice?.(candidate.governance?.paths ?? null);
     if (command.accept === false) {
       invariant(candidate.result.status === 'clean', 'VIEW_CONFLICT', 'Check a clean hosted Candidate.');
-      const check = await checkSelection(session, command.check);
+      const check = await (selectedCheck ?? checkSelection(session, command.check));
       const { kind: _kind, ...selection } = check;
       void _kind;
       return hostedCheckRequestSchema.parse({
@@ -932,7 +966,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       expectedHead: candidate.result.status === 'clean' ? candidate.result.head : null,
       agent: true,
       ...(command.priority ? { priority: command.priority } : {}),
-      check: checked?.check ?? (await checkSelection(session, command.check)),
+      check: checked?.check ?? (await (selectedCheck ?? checkSelection(session, command.check))),
       ...(command.reason ? { retryReason: command.reason } : {}),
       finish: { composeOperationId, after: command.after },
       ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),

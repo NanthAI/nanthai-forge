@@ -2332,6 +2332,10 @@ export class HostedAgentTransport {
     );
     if (changed?.complete) this.protectedPaths(changed.paths);
     const hostedChecks = await this.preflightHostedChecks(root, marker, base, changed);
+    if (hostedChecks?.queueProof)
+      process.stderr.write(
+        `preflight: ${hostedChecks.queueProof.message} The hosted check judges the composed Candidate.\n`,
+      );
     const plan = preflightPlan(
       root,
       changed,
@@ -2751,7 +2755,9 @@ export type HostedAgentSession = {
     head: string,
     tree?: string,
     message?: string,
-  ) => Promise<Record<string, unknown>>;
+  ) => Promise<
+    Record<string, unknown> & ReturnType<typeof import('./preflight-hosted-checks.js').reportPreflightChecks>
+  >;
   /** The `gates` argument for this finish's landing (feature land-gates); undefined when not sent. */
   landGates?: (composeOperationId: string) => string | undefined;
 };

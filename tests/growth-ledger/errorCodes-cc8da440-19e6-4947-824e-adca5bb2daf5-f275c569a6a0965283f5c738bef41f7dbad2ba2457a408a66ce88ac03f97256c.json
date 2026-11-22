@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "07b4e0f8: promote the existing queue-proof finding to an actionable pre-submit error. Reusing the CI proof identifier preserves its meaning and removes the separate advisory output from refused landings.",
+  "date": "2026-11-22"
+}

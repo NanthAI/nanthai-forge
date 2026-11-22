@@ -113,8 +113,8 @@ function previewQueueProof(
   read: (file: NativeFile) => Buffer | undefined,
   deadline: number,
 ) {
-  // This is the checkout signature of the standard Forge recipe. Actual check
-  // selection is hosted; a custom command can ignore this advisory.
+  // This is the checkout signature of the standard Forge recipe. Finish checks
+  // the selected definition before turning a finding into a refusal.
   if (!after.has(STANDARD_CHECK_ENTRY)) return undefined;
   const changed = queueProofPaths(paths.filter(path => !equal(after.get(path), main.get(path))));
   if (!changed) return undefined;
@@ -145,9 +145,7 @@ function previewQueueProof(
   } catch (error) {
     const code = 'QUEUE_PROOF_REQUIRED';
     if (!(error instanceof Error) || !error.message.startsWith(code + ': ')) return undefined;
-    const message = scrubText(error.message.replace(/\s+/g, ' '), 500);
-    process.stderr.write(`preflight: ${message} The hosted check judges the composed Candidate.\n`);
-    return { code, message };
+    return { code, message: scrubText(error.message.replace(/\s+/g, ' '), 500) };
   }
   return undefined;
 }

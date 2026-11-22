@@ -197,6 +197,7 @@ export async function composeAgentSource(
   command: z.infer<typeof hostedAgentCommandSchemas.compose>,
   operationId: string,
   continuation: SourceContinuation = { action: 'compose', parameters: command },
+  beforePrepare?: (mainHead: string) => Promise<void>,
 ) {
   const build = async () => {
     const main = await session.main();
@@ -253,6 +254,7 @@ export async function composeAgentSource(
     );
     // One revert Lane alone is a compensating landing (Issue 8dbccdfb); the server checks the claim.
     const revertOf = reverts.length === 1 && !dependencies.length ? reverts[0] : undefined;
+    if (beforePrepare) await beforePrepare(main.head);
     return { request, pages, ...(revertOf ? { revertOf } : {}) };
   };
   // The request pins main and the authority epoch as observed now; a moved main or a newer epoch
