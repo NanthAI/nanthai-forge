@@ -263,7 +263,9 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
   // Lane holds a landing (request-approval, then wait), it holds nothing yet and is listed ahead (Item 0a99ab23).
   const heldLanes = new Set(read.held.map(lane => lane.laneId));
   const ahead = requests
-    .filter(request => request.kind !== 'lane' || !heldLanes.has(request.laneId))
+    // Only a request still waiting for the owner is listed: a granted or declined one is the Lane page's to show
+    // (Item 4f1f7984).
+    .filter(request => request.needsOwner && (request.kind !== 'lane' || !heldLanes.has(request.laneId)))
     .map(aheadRow);
   return {
     now: waiting,

@@ -257,20 +257,23 @@ async function reply(): Promise<Reply> {
           }
         : {}),
     },
-    ...(scenario === 'asked' || scenario === 'declined'
+    ...(scenario === 'asked' || scenario === 'declined' || scenario === 'granted'
       ? {
           request: {
             laneId: LANE,
             kind: 'lane' as const,
             status: scenario,
-            state: scenario === 'asked' ? 'requested' : 'declined',
+            state: scenario === 'asked' ? 'requested' : scenario,
             live: true,
             needsOwner: scenario === 'asked',
-            label: scenario === 'asked' ? 'Approval requested' : 'Declined',
+            label:
+              scenario === 'asked' ? 'Approval requested' : scenario === 'granted' ? 'Granted' : 'Declined',
             nextStep:
               scenario === 'asked'
                 ? 'Approve or decline it; landing waits for your answer.'
-                : 'The builder was told; you can still approve it.',
+                : scenario === 'granted'
+                  ? 'Nothing to do; the Lane can land.'
+                  : 'The builder was told; you can still approve it.',
             reason: 'Touches the billing migration; please look first.',
             requester: 'sample-two',
             agent: 'salt-wren',
@@ -333,7 +336,7 @@ const feed = {
           {
             laneId: LANE,
             stage: unattended ? ('editing' as const) : ('checking' as const),
-            held: !unattended && !['asked', 'declined', 'linked'].includes(scenario),
+            held: !unattended && !['asked', 'declined', 'granted', 'linked'].includes(scenario),
             overlap: !unattended,
             changedAt: Date.now(),
           },

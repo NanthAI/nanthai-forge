@@ -412,3 +412,24 @@ test('a capped Needs you read with no visible asks reports incomplete coverage',
   assert.equal(view.count, 0);
   assert.equal(needsSentence(view).bold, 'Some requests could not be listed.');
 });
+
+test('4f1f7984: Asked ahead lists only requests that still wait for the owner; a granted or declined one is not listed', () => {
+  const waiting = request('lane-asked', 'lane', { state: 'requested' });
+  const granted = request('lane-granted', 'lane', {
+    state: 'granted',
+    needsOwner: false,
+    label: 'Lane approval granted',
+    nextStep: 'Nothing to do; the Lane can land.',
+  });
+  const declined = request('lane-declined', 'lane', { state: 'declined', needsOwner: false });
+  const view = needsView(read([], [granted, waiting, declined]));
+  assert.deepEqual(
+    view.ahead.map(row => row.laneId),
+    ['lane-asked'],
+  );
+  assert.match(needsSentence(view).rest, /^1 request asked ahead holds nothing yet\.$/);
+  const none = needsView(read([], [granted, declined]));
+  assert.equal(none.ahead.length, 0);
+  assert.equal(needsSentence(none).bold, 'Nothing needs you.');
+  assert.doesNotMatch(needsSentence(none).rest, /asked ahead/);
+});

@@ -99,6 +99,36 @@ for (const phase of ['queued', 'checking'])
     assert.equal((await f.readLane(f.entries[0].lane.laneId)).head, f.entries[0].lane.head);
   });
 
+for (const status of ['requested', 'granted'])
+  test(`4f1f7984: abandoning a Lane settles its ${status} approval request with it, and only its own`, async t => {
+    const f = await batchesFixture(t, { count: 2 });
+    const [mine, other] = f.entries.map(entry => entry.lane.laneId);
+    const row = laneId => ({
+      projectId: f.projectId,
+      laneId,
+      operationId: randomUUID(),
+      requester: 'owner',
+      reason: 'Proof request',
+      head: 'a'.repeat(64),
+      at: 1,
+      status,
+      live: true,
+      version: 1,
+    });
+    f.insert('projectHostedApprovals', row(mine));
+    f.insert('projectHostedApprovals', row(other));
+    const rows = () => [...f.tables.projectHostedApprovals.values()];
+    await abandon(f, f.entries[0]);
+    const settled = rows().find(r => r.laneId === mine);
+    assert.equal(settled.live, false, 'it no longer holds a landing');
+    assert.equal(settled.ended.kind, 'settled');
+    assert.equal(settled.status, status, 'the decision stays as recorded');
+    assert.equal(settled.version, 2);
+    const kept = rows().find(r => r.laneId === other);
+    assert.equal(kept.live, true, 'a peer Lane keeps its request');
+    assert.equal(kept.ended, undefined);
+  });
+
 test('abandoning a member of a real hosted batch preserves its provider until the last live peer leaves', async t => {
   const f = await batchesFixture(t);
   await f.drain();

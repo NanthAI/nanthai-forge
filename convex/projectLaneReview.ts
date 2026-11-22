@@ -21,14 +21,16 @@ import { saveFailureForViewer } from './projectHostedSaveStore';
 import { approvalRow, approvalView } from './projectHostedApprovalStore';
 import { deriveApproval } from '../src/approval-state';
 
-/** The owner's open decision on a Lane's own request: asked, or declined while it still holds the Lane (the owner may
- * approve instead). A settings key is never a Lane; a fork run is decided once. The Needs me request shape. */
+/** The owner's open decision on a Lane's own request: asked, declined while it still holds the Lane (the owner may
+ * approve instead), or granted and not yet landed (shown, nothing to decide). A settings key is never a Lane; a fork run is decided once. The Needs me request shape. */
 function ownerRequest(row: Awaited<ReturnType<typeof approvalRow>>, laneId: string) {
   if (!row || row.setting) return null;
   const view = approvalView(row, laneId);
   const state = deriveApproval(view);
   const declined = state.state === 'declined' && view.live && row.pullRequest === undefined;
-  if (!state.needsOwner && !declined) return null;
+  // A granted request that has not ended is shown read-only (Item 4f1f7984): Needs me no longer lists it.
+  const granted = state.state === 'granted' && state.open && row.pullRequest === undefined;
+  if (!state.needsOwner && !declined && !granted) return null;
   return {
     ...view,
     kind: state.kind,

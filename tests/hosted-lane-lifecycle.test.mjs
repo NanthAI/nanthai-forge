@@ -145,6 +145,45 @@ test('cascade visibility is all-or-nothing before projection; exact historical v
   assert.equal((await f.begin(r)).status, 'applied');
   assert.equal(f.pending().length, 0);
 });
+test('4f1f7984: setting an Item aside settles its Lanes approval requests and leaves other Lanes alone', async () => {
+  const f = await lifecycleFixture();
+  const second = await f.addLane();
+  const unrelated = await f.addLane({ intentId: randomUUID() });
+  const ask = (laneId, status, at = 1) =>
+    f.insert('projectHostedApprovals', {
+      projectId: f.projectId,
+      laneId,
+      operationId: randomUUID(),
+      requester: 'owner',
+      reason: 'Proof request',
+      head: 'a'.repeat(64),
+      at,
+      status,
+      live: true,
+      version: 1,
+    });
+  ask(f.initial.id, 'granted');
+  ask(second.id, 'requested');
+  ask(unrelated.id, 'granted');
+  // Reopened and asked again after the Item was set aside, before a delayed cascade page ran: a new request stays.
+  const reopened = await f.addLane();
+  ask(reopened.id, 'requested', 9_000_000_000_000);
+  const r = f.request({ kind: 'intent', intentId: f.intentId, version: 0, cascade: true });
+  assert.equal((await f.begin(r)).status, 'pending');
+  await f.advance(r);
+  await f.advance(r);
+  await f.lifeRun('lifecycleFinal', cascade.advanceLifecycle, f.plan(r));
+  await f.drain();
+  const rows = new Map([...f.tables.projectHostedApprovals.values()].map(row => [row.laneId, row]));
+  for (const id of [f.initial.id, second.id]) {
+    assert.equal(rows.get(id).live, false);
+    assert.equal(rows.get(id).ended.kind, 'settled');
+  }
+  assert.equal(rows.get(unrelated.id).live, true);
+  assert.equal(rows.get(unrelated.id).ended, undefined);
+  assert.equal(rows.get(reopened.id).live, true, 'a request made after the abandon is not settled');
+  assert.equal(rows.get(reopened.id).ended, undefined);
+});
 test('a concurrent source save invalidates every staged child; saved bytes remain retained', async () => {
   const f = await lifecycleFixture();
   await f.addLane();

@@ -2,6 +2,7 @@
 import { v } from 'convex/values';
 import { mutation } from './cliServer';
 import { activeOwnedProject } from './projectAuthority';
+import { settleLaneApproval } from './projectHostedApprovalStore';
 import { abandonClass, dormantCutoff, landedByReceipt } from './projectHostedDormancy';
 import { hostedWriteProject, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
@@ -139,6 +140,7 @@ export const abandon = mutation({
                 at: new Date().toISOString(),
               },
             });
+            await settleLaneApproval(ctx, input.projectId, laneId, Date.now());
             skip('abandoned', lane.version + 1);
           }
         }

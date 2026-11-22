@@ -450,6 +450,58 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
     });
 
     await t.test(
+      '4f1f7984: Asked ahead lists a requested Lane request, never a granted or declined one; axe in both themes at 390 and 1440',
+      async t => {
+        for (const viewport of [PHONE, DESK]) {
+          const page = await open(t, viewport, 'conversation');
+          const needs = region(page, 'Needs you');
+          const ahead = needs.locator('.grp', { has: page.getByText('Asked ahead', { exact: true }) });
+          assert.equal(
+            await page.locator('details.sumdec', { hasText: 'Touches the billing migration' }).count(),
+            1,
+            `a requested one is listed at ${viewport.width}`,
+          );
+          assert.equal(await page.getByText('Granted two weeks ago', { exact: false }).count(), 0);
+          assert.equal(await page.getByText('Declined last week', { exact: false }).count(), 0);
+          assert.equal(await ahead.locator('details.sumdec').count(), 1, 'one request row, not three');
+          await page.addScriptTag({ path: axePath });
+          for (const theme of ['dark', 'light']) {
+            await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+            await page.evaluate(() =>
+              document
+                .getAnimations()
+                .filter(a => a.effect?.getTiming().iterations !== Infinity)
+                .forEach(a => a.finish()),
+            );
+            const [scroll, inner] = await page.evaluate(() => [
+              document.documentElement.scrollWidth,
+              innerWidth,
+            ]);
+            assert.ok(scroll <= inner, `no sideways scroll at ${viewport.width} ${theme}`);
+            await page.evaluate(() => scrollTo(0, 0));
+            const violations = await page.evaluate(async () => {
+              const result = await window.axe.run(document, {
+                runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
+              });
+              return result.violations
+                .filter(v => v.id !== 'label-content-name-mismatch')
+                .map(
+                  v =>
+                    `${v.id}: ${v.nodes.map(n => `${n.target.join(' ')} ${JSON.stringify(n.any[0]?.data ?? '')}`).join(', ')}`,
+                );
+            });
+            assert.deepEqual(violations, [], `axe at ${viewport.width} ${theme} asked ahead`);
+            if (shots)
+              await page.screenshot({
+                path: join(shots, `needs-me-asked-ahead-${viewport.width}-${theme}.png`),
+                fullPage: true,
+              });
+          }
+        }
+      },
+    );
+
+    await t.test(
       'filters, Dismiss and Clear all write once on the click; Loose ends is open by default',
       async t => {
         const page = await open(t, DESK);

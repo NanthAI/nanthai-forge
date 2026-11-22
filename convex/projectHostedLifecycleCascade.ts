@@ -7,6 +7,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { readHostedRecord, hostedWriteProject } from './projectHostedRecords';
 import { materializeLifecycleLane, lifecyclePointer } from './projectHostedLifecycleOverlay';
+import { settleLaneApproval } from './projectHostedApprovalStore';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { hostedRecordIndex, hostedRecordRef } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -127,6 +128,8 @@ export async function materializeLifecycle(ctx: MutationCtx, plan: LifecyclePlan
   for (const event of page.page)
     if (event.kind === 'lane') {
       await materializeLifecycleLane(ctx, plan.projectId, event.key);
+      // A Lane set aside with its Item takes its approval request with it (Item 4f1f7984).
+      await settleLaneApproval(ctx, plan.projectId, event.key, Date.parse(plan.at));
     }
   await cancelAbandonedLanesLandings(
     ctx,

@@ -4,6 +4,7 @@ import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
 import { changePlanLaneCascade } from './projectPlanLaneMarks';
 import { cancelAbandonedLaneLandings } from './projectHostedLifecycleCancel';
 import { landingQueue } from './projectHostedLandingEvents';
+import { settleLaneApproval } from './projectHostedApprovalStore';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
@@ -216,8 +217,10 @@ export async function applyLifecycleRecord(
     const landingSequence =
       (await landingQueue(ctx, { projectId: plan.projectId, channel: 'main' }))?.sequence ?? 0;
     await ctx.db.patch(plan._id, { landingSequence });
-    if (before.kind === 'lane')
+    if (before.kind === 'lane') {
       await cancelAbandonedLaneLandings(ctx, { ...plan, landingSequence }, before.id, null);
+      await settleLaneApproval(ctx, plan.projectId, before.id, Date.parse(plan.at));
+    }
   }
 }
 export async function lifecycleCaller(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {

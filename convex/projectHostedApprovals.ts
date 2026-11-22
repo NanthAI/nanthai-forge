@@ -157,10 +157,11 @@ export const decide = mutation({
         invariant(openSettingRequest(row), 'NOT_FOUND', 'This settings request is no longer open.');
         return canonicalPayload(await decideSetting(ctx, row, actor.id, input));
       }
+      // A retry of a decision already recorded answers the same, even when the Lane was set aside since (Item 4f1f7984).
+      if (row?.decision?.operationId === input.operationId)
+        return canonicalPayload({ approval: approvalView(row, row.laneId), landing: null });
       const fork = openForkRequest(row);
       invariant(row && (row.live || fork), 'NOT_FOUND', `Lane ${input.laneId} has no open approval request.`);
-      if (row.decision?.operationId === input.operationId)
-        return canonicalPayload({ approval: approvalView(row, row.laneId), landing: null });
       // A fork PR run is decided once: a grant starts the run, a decline settles the PR head.
       invariant(
         !fork || row.status === 'requested',

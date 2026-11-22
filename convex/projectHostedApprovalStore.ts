@@ -211,6 +211,22 @@ export async function endLandedApprovals(ctx: MutationCtx, matched: { row: Appro
     if (row.live) await writeApproval(ctx, row, { live: false, ended: { kind: 'landed', at: Date.now() } });
 }
 
+/** A Lane set aside or moved to the trash takes its own request with it (Item 4f1f7984), requested, granted or
+ * declined: one indexed read on the lifecycle write that already runs, so no row waits forever on a Lane that will
+ * never land. The decision stays as recorded; only a Lane request (never a fork or settings row) is ended. */
+export async function settleLaneApproval(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  laneId: string,
+  /** When the Lane was set aside: a request made after it (the Lane was reopened and asked again before a delayed
+   * cascade page ran) is a new request and stays. */
+  abandonedAt: number,
+) {
+  const row = await approvalRow(ctx, projectId, laneId);
+  if (row && !row.ended && !row.setting && row.pullRequest === undefined && row.at <= abandonedAt)
+    await writeApproval(ctx, row, { live: false, ended: { kind: 'settled', at: Date.now() } });
+}
+
 /** Board notes are one line of at most BOARD_TEXT_CHARS: the free-text reason is shortened to fit
  * around the fixed parts (a refused note would be skipped silently). */
 export function fitNote(before: string, reason: string, after: string) {

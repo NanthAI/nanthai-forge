@@ -441,7 +441,7 @@ Each is a component or class in `web/src/ds/`; the class names below are what th
 ### Status and state
 14. **Shape, word and colour together.** *Use* a glyph and a word in the state colour. *Not* a coloured dot alone, or a tinted pill.
 15. **Held work says where and why:** what holds it, for how long, and where on the five stops, in one line. An unknown fact is written **not reported**, never guessed and never blank.
-16. **Asked ahead is listed, not counted.** A request an agent makes before it is stuck sits in its own band under what holds work, says "holds nothing yet", and has a plain count. The Needs-you number counts only what holds work; a request joins it the moment it does.
+16. **Asked ahead is listed, not counted.** A request an agent makes before it is stuck sits in its own band under what holds work, says "holds nothing yet", and has a plain count. The band lists only requests still waiting for the owner: a granted or declined one is shown on its Lane's page, and a Lane set aside or moved to the trash takes its request with it. The Needs-you number counts only what holds work; a request joins it the moment it does.
 
 ### Actions
 17. **Which button?** Primary: at most one in a view, and only when the view exists to do that one thing. Recommended answer: the outlined key, first. Plain keys for other answers. Ghost for the way out. Destructive: red words on a plain key, never first, never the default. *Use* "Retry shard 5", "Abandon the landing", "Later". *Not* "Confirm", "Continue", "Cancel".

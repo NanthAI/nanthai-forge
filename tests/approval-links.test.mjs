@@ -162,6 +162,31 @@ test('0a99ab23: a Lane request links to its Lane page in the reply, the board no
   assert.equal(page.request.laneId, laneId);
   assert.equal(page.request.needsOwner, true);
   assert.equal(page.request.state, 'requested');
+  // Item 4f1f7984: once granted, Needs me stops listing it; the Lane page still shows it, read-only; settled, neither does.
+  const [rowId] = [...f.tables.projectHostedApprovals].find(([, r]) => r.laneId === laneId);
+  const decision = {
+    projectId: f.projectId,
+    operationId: randomUUID(),
+    laneId,
+    decision: 'grant',
+    head: f.lane.head,
+  };
+  await f.tx('decide', approvals.decide, decision, 'owner');
+  assert.deepEqual(
+    needsView(await f.tx('needs', needsMe.read, { projectId: f.projectId }, 'owner')).ahead,
+    [],
+    'a granted request is not asked ahead',
+  );
+  const granted = await pageRead('owner');
+  assert.equal(granted.request.state, 'granted');
+  assert.equal(granted.request.needsOwner, false);
+  f.patch('projectHostedApprovals', rowId, { live: false, ended: { kind: 'settled', at: 3 } });
+  assert.equal((await pageRead('owner')).request, undefined, 'a settled request is not shown');
+  // A retry of the recorded decision, after the Lane was set aside, answers the same instead of NOT_FOUND.
+  assert.equal(
+    JSON.parse(await f.tx('retry', approvals.decide, decision, 'owner')).approval.status,
+    'granted',
+  );
   f.patch('hostedProjects', f.projectId, { visibility: 'public' });
   assert.equal((await pageRead('reader')).request, undefined, 'a reader who cannot decide gets no request');
 });

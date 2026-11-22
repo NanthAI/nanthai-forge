@@ -461,6 +461,24 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
     );
 
     await t.test(
+      '4f1f7984: a granted request stays on its Lane page, read-only, with nothing to decide',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          const page = await open(t, viewport, 's=granted');
+          const decision = page.getByRole('region', { name: 'Your decision' });
+          await decision.waitFor();
+          assert.match(await decision.textContent(), /you granted it/);
+          assert.match(await decision.textContent(), /Touches the billing migration; please look first\./);
+          assert.equal(
+            await decision.getByRole('button').count(),
+            0,
+            `nothing to press at ${viewport.width}`,
+          );
+        }
+      },
+    );
+
+    await t.test(
       '0a99ab23: an approval link decides the landing it names, not another of the Lane',
       async t => {
         const page = await open(t, DESK, 's=linked&submission=a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d');
@@ -581,7 +599,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
 
     await t.test('axe and widths: both themes, desk and phone', async t => {
       for (const viewport of [DESK, PHONE])
-        for (const s of ['review', 'combined', 'parked', 'asked', 'declined']) {
+        for (const s of ['review', 'combined', 'parked', 'asked', 'declined', 'granted']) {
           const page = await open(t, viewport, `s=${s}`);
           await page.locator('.lr-file').first().locator('summary').click();
           await page.locator('.lr-file').first().locator('.code').first().waitFor();

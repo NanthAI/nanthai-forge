@@ -346,7 +346,24 @@ const conversationRead: NeedsRead = {
   moreIsLowerBound: false,
   // Item 0a99ab23: a Lane request asked before the Lane holds a landing is listed ahead, decided on its Lane page.
   approvals: JSON.stringify({
-    requests: [approval(uuid(9), 'Touches the billing migration; look first.', 5)],
+    requests: [
+      approval(uuid(9), 'Touches the billing migration; look first.', 5),
+      // Item 4f1f7984: decided requests are the Lane page's to show; Asked ahead lists only what waits.
+      {
+        ...approval(uuid(10), 'Granted two weeks ago, never landed.', 19_000),
+        needsOwner: false,
+        state: 'granted',
+        label: 'Lane approval granted',
+        nextStep: 'Nothing to do; the Lane can land.',
+      },
+      {
+        ...approval(uuid(11), 'Declined last week.', 9_000),
+        needsOwner: false,
+        state: 'declined',
+        label: 'Lane approval declined',
+        nextStep: 'The builder addresses it and asks again.',
+      },
+    ],
     complete: true,
   }),
   canDecide: true,

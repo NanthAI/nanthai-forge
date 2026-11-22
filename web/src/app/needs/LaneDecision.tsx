@@ -79,6 +79,23 @@ export function LaneDecision({
   if (!request) return said;
   const ahead = aheadRow(request);
   const declined = request.state === 'declined';
+  // Item 4f1f7984: a granted request is not listed in Needs me; this page says so, with nothing to decide.
+  if (request.state === 'granted')
+    return (
+      <section className="dec lane-decision" aria-label="Your decision">
+        <div className="dtop">
+          <State word="Done">Approved</State>
+          <span>you granted it</span>
+        </div>
+        <p className="why" dir="auto">
+          {ahead.question}
+        </p>
+        <p className="why" dir="auto">
+          {ahead.label}. {ahead.nextStep}
+        </p>
+        {said}
+      </section>
+    );
   return (
     <section className="dec lane-decision" aria-label="Your decision">
       <div className="dtop">
