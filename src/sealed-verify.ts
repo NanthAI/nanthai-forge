@@ -18,7 +18,16 @@ import { secretNameKind } from './secret-names.js';
 import { decodeSealedReply } from './sealed-decode.js';
 import { safeSecretName } from './sealed-display.js';
 import type { SealedProposal } from './sealed-future-records.js';
-import { checkpointAnchor, deviceHeadAnchor, type JourneyAnchor } from './sealed-anchors.js';
+import {
+  checkpointAnchor,
+  codeAnchor,
+  deviceHeadAnchor,
+  pinConfirmation,
+  type CodeAnchor,
+  type JourneyAnchor,
+  type PinConfirmation,
+  walkOnly,
+} from './sealed-anchors.js';
 
 export type SealedReply = {
   v: 1;
@@ -41,6 +50,8 @@ export type SecretPin = {
   head: Head;
   rosterHashes: { version: number; hash: Buffer }[];
   holder: boolean;
+  /** GB-08 d4. Absent only on pins written before the flag (read through pinConfirmation). */
+  confirmed?: PinConfirmation;
 };
 export type VerifyRequest = {
   forgeProjectId: string;
@@ -62,8 +73,35 @@ const rollback = (ok: unknown, rule: string) => invariant(ok, 'SECRETS_ROLLBACK'
 
 /** The only trust entry point, shared by online, cached, holder and public-only reads.
  * It has no IO and never changes its input pin. Callers commit the result under the pin lock. */
-export function verifySealedReply(reply: SealedReply, pin: SecretPin | null, request: VerifyRequest) {
-  const noPinAtEntry = !pin;
+export const verifySealedReply = (reply: SealedReply, pin: SecretPin | null, request: VerifyRequest) =>
+  verifyCore(reply, pin, request, null);
+
+/** GB-08 d5 repair mode (Gate B1 C9): every 4.9 check except the final cross-set rule, whose offending
+ * owner devices are returned instead. Never pinned and no values: the set key opens only to re-seal. */
+export function verifyRepair(reply: SealedReply, pin: SecretPin, request: VerifyRequest) {
+  invariant(
+    pin &&
+      request.recipient?.kind === 1 &&
+      request.setKind !== 1 &&
+      request.development &&
+      !request.machine &&
+      !request.machineAnchor,
+    'SECRETS_NOT_ALLOWED',
+    'Only a Checks or Production holder device with a pin repairs its set.',
+  );
+  const offending: Buffer[] = [];
+  const { pin: view, key, notices } = verifyCore(reply, pin, request, offending);
+  return { roster: view.roster, head: view.head, key: key!, offending, notices };
+}
+
+function verifyCore(
+  reply: SealedReply,
+  pin: SecretPin | null,
+  request: VerifyRequest,
+  repair: Buffer[] | null,
+) {
+  const noPinAtEntry = !pin,
+    carried = pin ? pinConfirmation(pin) : null;
   let key: Buffer | undefined;
   const secrets: { name: string; kind: 'env' | 'file'; value: Buffer }[] = [],
     notices: string[] = [];
@@ -95,6 +133,8 @@ export function verifySealedReply(reply: SealedReply, pin: SecretPin | null, req
       ),
       'Secret identity differs from the requested project or kind.',
     );
+    const code: CodeAnchor | null = request.anchor?.kind === 'code' ? request.anchor.value : null;
+    if (code) codeAnchor(reply, code);
     const genesisHash = framedHash(rosterBytes(reply.genesis));
     refuse(reply.genesis.rosterVersion === 1, 'Genesis record is not version one.');
     checkRoster(reply.genesis);
@@ -119,6 +159,8 @@ export function verifySealedReply(reply: SealedReply, pin: SecretPin | null, req
       );
       const publicRequest = { ...request };
       delete publicRequest.recipient;
+      // The old set is checked against its pin; a code anchor names the new set only.
+      delete publicRequest.anchor;
       let old: SecretPin;
       try {
         old = verifySealedReply(
@@ -188,10 +230,30 @@ export function verifySealedReply(reply: SealedReply, pin: SecretPin | null, req
         case 'device-head':
           anchor = deviceHeadAnchor(reply, request.anchor.value);
           break;
+        case 'code':
+          anchor = code!.roster;
+          break;
         default:
           refuse(false, 'Unknown journey anchor.');
       }
     }
+    const base: PinConfirmation = code
+      ? 'code'
+      : request.machine
+        ? 'machine'
+        : (carried ??
+          // own-genesis without a recipient proves nothing about this device's keys.
+          (!request.anchor ||
+          request.anchor.kind === 'checks-genesis' ||
+          (request.anchor.kind === 'own-genesis' && !request.recipient)
+            ? 'none'
+            : 'holder'));
+    // GB-08 d4: a wrap is never opened on a Checks view reached only by the walk from genesis.
+    invariant(
+      r.setKind === 1 || !request.recipient || base !== 'none',
+      'SECRETS_CODE_NEEDED',
+      walkOnly('wrap'),
+    );
     if (noPinAtEntry && request.recipient?.kind === 3)
       invariant(
         request.anchor?.kind === 'person-checkpoint',
@@ -261,7 +323,31 @@ export function verifySealedReply(reply: SealedReply, pin: SecretPin | null, req
       'SECRETS_FORK',
       'Current roster differs from the trusted chain.',
     );
-    checkRoster(r, request.development?.roster);
+    // A code confirms the view R; an existing pin must have walked through exactly that roster.
+    if (code)
+      invariant(
+        hashes.some(
+          e =>
+            e.version === code.roster.rosterVersion && sameId(e.hash, framedHash(rosterBytes(code.roster))),
+        ),
+        hashes.some(e => e.version === code.roster.rosterVersion) ? 'SECRETS_FORK' : 'SECRETS_PIN_TOO_OLD',
+        "The code-confirmed roster is not on this device's trusted chain.",
+      );
+    if (repair) {
+      checkRoster(r);
+      const development = request.development!.roster;
+      for (const e of r.entries)
+        if (
+          e.entryKind === 1 &&
+          !development.entries.some(d => ownerDevice(d) && sameId(d.accountId, e.accountId))
+        )
+          repair.push(e.id);
+      invariant(
+        repair.length,
+        'SECRETS_NOT_ALLOWED',
+        'This roster keeps the cross-set rule; nothing to repair.',
+      );
+    } else checkRoster(r, request.development?.roster);
     const headHash = hashHead(h),
       pinnedHash = pin ? hashHead(pin.head) : null;
     const sameHead = !!pin && h.headVersion === pin.head.headVersion && sameId(headHash, pinnedHash!);
@@ -285,6 +371,16 @@ export function verifySealedReply(reply: SealedReply, pin: SecretPin | null, req
     );
     if (pin && h.headVersion === pin.head.headVersion)
       invariant(sameHead, 'SECRETS_FORK', 'Different head at the pinned version.');
+    // 4.13 step 7 (GB-08 a): after a re-pin the holder's verified head is the floor, exactly like a pinned head.
+    if (code?.headFloor) {
+      rollback(h.headVersion >= code.headFloor.version, 'Head is older than the re-pin floor.');
+      if (h.headVersion === code.headFloor.version)
+        invariant(
+          sameId(headHash, code.headFloor.hash),
+          'SECRETS_FORK',
+          'Different head at the re-pin floor version.',
+        );
+    }
     if (adjacent)
       invariant(sameId(h.prevHeadHash, pinnedHash!), 'SECRETS_FORK', 'Head does not extend the pinned head.');
     invariant(
@@ -421,7 +517,7 @@ export function verifySealedReply(reply: SealedReply, pin: SecretPin | null, req
       } finally {
         inbox.privateKey.fill(0);
       }
-      for (const n of h.names) {
+      for (const n of repair ? [] : h.names) {
         if (n.kind === 3) continue;
         const ciphertext = reply.ciphertexts.find(c => c.name === n.name);
         invariant(ciphertext, 'SECRETS_VALUE_REFUSED', 'A signed ciphertext is missing.');
@@ -458,6 +554,7 @@ export function verifySealedReply(reply: SealedReply, pin: SecretPin | null, req
         head: h,
         rosterHashes: hashes.slice(-64),
         holder: !!request.recipient,
+        confirmed: base === 'none' && request.recipient ? 'holder' : base,
       } as SecretPin,
       secrets,
       notices,

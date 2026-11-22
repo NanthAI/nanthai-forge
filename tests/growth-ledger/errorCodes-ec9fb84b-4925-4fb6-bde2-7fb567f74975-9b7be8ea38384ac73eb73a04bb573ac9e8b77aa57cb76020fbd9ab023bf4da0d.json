@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 3,
+  "reason": "GB-08 4.13 codes: SECRETS_CODE_ROSTER_MISMATCH is named by the design; SECRETS_CODE_NEEDED is Gate B1 C6's named walk-only refusal pointing at the code route; SECRETS_CODE_CLOSED tells the person a code ran out of attempts and must restart. None fits an existing code without losing the next step.",
+  "date": "2026-11-22"
+}

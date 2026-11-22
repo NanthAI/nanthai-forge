@@ -6,9 +6,10 @@ import { deviceKeys, recipientId } from '../../dist/sealed-keys.js';
 import { forgeSecretId, framedHash } from '../../dist/sealed-format.js';
 import { rosterBytes, headBytes } from '../../dist/sealed-records.js';
 const clone = x => deserialize(serialize(x));
+// A names-only reader holds no keys of the set; for Checks it walks from the pointer's genesis.
 const pub = f => {
   const { recipient, ...request } = f.request;
-  return request;
+  return request.setKind === 2 ? { ...request, anchor: { kind: 'checks-genesis' } } : request;
 };
 function added(f, accountName = 'second', role = 1) {
   const accountId = forgeSecretId('account', accountName),

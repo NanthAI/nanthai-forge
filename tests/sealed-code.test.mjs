@@ -1,0 +1,515 @@
+// SPDX-License-Identifier: Apache-2.0
+import './check-runtime.mjs';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { readFileSync as read } from 'node:fs';
+import { serialize, deserialize } from 'node:v8';
+import { CodeApprover, CodeRequester, parseWords } from '../dist/sealed-code.js';
+import { codeWords } from '../dist/sealed-words.js';
+import { requireConfirmedBase } from '../dist/sealed-anchors.js';
+import { createTransition } from '../dist/sealed-transition.js';
+import { forgeSecretId } from '../dist/sealed-format.js';
+import { deviceKeys, signBytes } from '../dist/sealed-keys.js';
+import { headBytes } from '../dist/sealed-records.js';
+import { verifySealedReply } from '../dist/sealed-verify.js';
+import { FileKeyStore } from '../dist/sealed-local.js';
+import { SecretPins } from '../dist/sealed-pins.js';
+import { fixture } from './helpers/sealed-fixture.mjs';
+import { codeDevice, newAccountDevice, publish, runCode } from './helpers/sealed-code-journey.mjs';
+
+const vectors = JSON.parse(read(new URL('./fixtures/sealed-v1.json', import.meta.url)));
+const clone = value => deserialize(serialize(value));
+const clear = result => {
+  result.key?.fill(0);
+  for (const secret of result.secrets) secret.value.fill(0);
+};
+const recipient = keys => ({ id: keys.id, enc: keys.enc, kind: 1 });
+const delta = changes => ({
+  added: [],
+  removed: [],
+  roles: [],
+  droppedFormer: [],
+  newSharingMode: null,
+  newChecksPointer: null,
+  supersede: null,
+  epochBumped: 0,
+  ...changes,
+});
+/** Independent of the module: read `count` 11-bit groups from the top of a big-endian hex string. */
+function expectedWords(hex, count) {
+  const value = BigInt(`0x${hex}`),
+    total = BigInt(hex.length * 4);
+  return Array.from(
+    { length: count },
+    (_, i) => codeWords[Number((value >> (total - BigInt(11 * (i + 1)))) & 0x7ffn)],
+  );
+}
+function pinStore(t, keys) {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-code-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const store = new FileKeyStore(join(directory, 'device.bin'));
+  store.save({ ...keys, pinCounter: 0 });
+  const files = () =>
+    Object.fromEntries(readdirSync(directory).map(name => [name, readFileSync(join(directory, name))]));
+  return { directory, pins: new SecretPins(directory, store), files };
+}
+/** A Checks set with trusted Development; `member` (another account) is a Development member device. */
+function checksWithMember() {
+  const checks = fixture(17, 'fixture-project', 2),
+    dev = fixture(17, 'fixture-project', 1),
+    member = newAccountDevice(dev);
+  dev.transition({ newChecksPointer: checks.request.development.roster.checksPointer });
+  dev.transition({
+    added: [
+      dev.entry(member.keys, {
+        accountId: member.accountId,
+        role: 2,
+        how: 2,
+        addedAtRosterVersion: dev.reply.roster.rosterVersion + 1,
+      }),
+    ],
+  });
+  dev.wrap();
+  const development = dev.pin();
+  checks.request.development = development;
+  const memberRequest = {
+    forgeProjectId: checks.request.forgeProjectId,
+    setKind: 2,
+    firstContact: true,
+    development,
+    anchor: { kind: 'checks-genesis' },
+  };
+  return { checks, development, member, memberRequest };
+}
+
+test('T11 the word list is the fixed 2,048-word list and code/reply words are the leading 44 and 22 bits', () => {
+  assert.equal(codeWords.length, 2048);
+  assert.equal(new Set(codeWords.map(w => w.slice(0, 4))).size, 2048);
+  assert.equal(
+    createHash('sha256')
+      .update(`${codeWords.join('\n')}\n`)
+      .digest('hex'),
+    '2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda',
+  );
+  for (const purpose of [1, 2, 3, 4]) {
+    const code = expectedWords(vectors[`code${purpose}`], 4).join(' '),
+      reply = expectedWords(vectors[`reply${purpose}`], 2).join(' ');
+    // The module's parser and the independent bit reader agree on each known-answer vector.
+    assert.equal(parseWords(code, 4).length, 8);
+    assert.equal(parseWords(reply, 2).length, 4);
+  }
+  assert.deepEqual(expectedWords(vectors.code1, 4), ['buzz', 'busy', 'universe', 'paper']);
+  assert.deepEqual(parseWords('BUZZ-busy  univ paper', 4), parseWords('buzz busy universe paper', 4));
+  for (const typed of [
+    'buzz busy universe',
+    'buzz busy universe paperx',
+    'buz busy universe paper',
+    'zzzz a b c',
+  ])
+    assert.equal(parseWords(typed, 4), null, typed);
+});
+
+test('T30/T36 Confirm: the holder needs the spoken code, and the new device pins only after the typed reply', async t => {
+  const f = fixture(),
+    joining = newAccountDevice(f),
+    device = codeDevice(joining.keys, joining.accountId),
+    holderPin = f.pin(),
+    view = f.reply.roster,
+    requester = new CodeRequester(1, view, device);
+  assert.equal(requester.words.length, 4);
+  // A substituted device (the server's own keys) gives a different code; the spoken words never match it.
+  const server = deviceKeys(joining.accountId, f.random);
+  const fake = new CodeApprover({
+    request: { ...requester.request, device: codeDevice(server, joining.accountId) },
+    pin: holderPin,
+    signer: f.keys,
+    person: true,
+  });
+  assert.deepEqual(fake.type(requester.words.join(' ')), { matched: false, attemptsLeft: 2 });
+  // Typing something that is not four list words costs no attempt.
+  assert.deepEqual(fake.type('not words at all'), { matched: false, attemptsLeft: 2 });
+  assert.deepEqual(fake.type(requester.words.join(' ')), { matched: false, attemptsLeft: 1 });
+  assert.throws(() => fake.type(requester.words.join(' ')), { code: 'SECRETS_CODE_CLOSED' });
+  assert.throws(() => fake.type(requester.words.join(' ')), { code: 'SECRETS_CODE_CLOSED' });
+  // No agent path approves.
+  assert.throws(
+    () => new CodeApprover({ request: requester.request, pin: holderPin, signer: f.keys, person: false }),
+    { code: 'PERSON_REQUIRED' },
+  );
+
+  const approver = new CodeApprover({
+    request: requester.request,
+    pin: holderPin,
+    signer: f.keys,
+    person: true,
+  });
+  // Before typing, the person sees what a match grants: another account's device, as a member.
+  assert.deepEqual(approver.grant, {
+    purpose: 1,
+    accountHandle: 'fixture-member',
+    displayName: 'new-device',
+    fingerprint: joining.keys.id.subarray(0, 8).toString('hex'),
+    ownAccount: false,
+    role: 2,
+  });
+  const typed = approver.type(requester.words.join(' '));
+  assert.equal(typed.matched, true);
+  publish(f, typed);
+  const entry = typed.roster.entries.find(e => e.id.equals(joining.keys.id));
+  assert.equal(entry.role, 2);
+  assert.equal(entry.how, 2);
+
+  const c = pinStore(t, joining.keys),
+    before = c.files();
+  const plain = { forgeProjectId: f.request.forgeProjectId, setKind: 1, recipient: recipient(joining.keys) };
+  await assert.rejects(c.pins.verifyAndSave(f.reply, plain, 1), { code: 'SECRETS_ROSTER_REFUSED' });
+  assert.deepEqual(c.files(), before);
+  // Wrong replies count; the right one returns the only anchor that pins this view.
+  const wrong = typed.reply[0] === 'abandon' ? 'ability ability' : 'abandon abandon';
+  assert.deepEqual(requester.confirm(wrong, typed.approval, f.reply.transitions), {
+    matched: false,
+    attemptsLeft: 2,
+  });
+  const confirmed = requester.confirm(typed.reply.join(' '), typed.approval, f.reply.transitions);
+  assert.equal(confirmed.matched, true);
+  assert.throws(() => requester.confirm(typed.reply.join(' '), typed.approval, f.reply.transitions), {
+    code: 'SECRETS_CODE_CLOSED',
+  });
+  clear(await c.pins.verifyAndSave(f.reply, { ...plain, anchor: confirmed.anchor }, 1));
+  const pin = (await c.pins.load(f.request.forgeProjectId, 1)).pin;
+  assert.equal(pin.confirmed, 'code');
+  assert.equal(pin.roster.rosterVersion, 2);
+});
+
+test('T36/T74 a staged approval on a fake roster gives a different reply and three wrong replies close the request', () => {
+  const f = fixture(),
+    joining = newAccountDevice(f),
+    device = codeDevice(joining.keys, joining.accountId),
+    real = new CodeRequester(1, f.reply.roster, device),
+    holderPin = f.pin();
+  // The server shows the requester a roster the holder never trusted: the holder refuses, nothing to type.
+  const forged = fixture(23),
+    shown = new CodeRequester(1, forged.reply.roster, device);
+  assert.throws(
+    () =>
+      new CodeApprover({
+        request: { ...shown.request, setId: f.reply.roster.setId, projectId: f.reply.roster.projectId },
+        pin: holderPin,
+        signer: f.keys,
+        person: true,
+      }),
+    { code: 'SECRETS_CODE_ROSTER_MISMATCH' },
+  );
+  // A server-made approval on its own roster cannot answer the real request.
+  const staged = new CodeApprover({
+    request: { ...shown.request },
+    pin: forged.pin(),
+    signer: forged.keys,
+    person: true,
+  }).type(shown.words.join(' '));
+  assert.throws(() => real.confirm(staged.reply.join(' '), staged.approval, []), {
+    code: 'SECRETS_FORK',
+  });
+  // A roster view that moves closes the request: its nonce is wiped and a new request draws a new one.
+  const nonce = Buffer.from(real.request.nonce);
+  assert.equal(real.sameView(forged.reply.roster), false);
+  assert(real.request.nonce.every(byte => byte === 0));
+  assert.throws(() => real.confirm('abandon abandon', staged.approval, []), { code: 'SECRETS_CODE_CLOSED' });
+  const again = new CodeRequester(1, f.reply.roster, device);
+  assert.notDeepEqual(again.request.nonce, nonce);
+  const typed = new CodeApprover({
+    request: again.request,
+    pin: holderPin,
+    signer: f.keys,
+    person: true,
+  }).type(again.words.join(' '));
+  publish(f, typed);
+  const wrong = typed.reply[0] === 'abandon' ? 'ability ability' : 'abandon abandon';
+  assert.equal(again.confirm(wrong, typed.approval, f.reply.transitions).attemptsLeft, 2);
+  assert.equal(again.confirm(wrong, typed.approval, f.reply.transitions).attemptsLeft, 1);
+  assert.throws(() => again.confirm(wrong, typed.approval, f.reply.transitions), {
+    code: 'SECRETS_CODE_CLOSED',
+  });
+  assert.throws(() => again.confirm(typed.reply.join(' '), typed.approval, f.reply.transitions), {
+    code: 'SECRETS_CODE_CLOSED',
+  });
+});
+
+test('F1 a code anchor is accepted only from a matched reply and only on the chain an existing pin walked', () => {
+  const f = fixture(),
+    joining = newAccountDevice(f),
+    device = codeDevice(joining.keys, joining.accountId),
+    request = {
+      forgeProjectId: f.request.forgeProjectId,
+      setKind: 1,
+      firstContact: true,
+      recipient: recipient(joining.keys),
+    };
+  const handmade = { kind: 'code', value: { purpose: 1, roster: clone(f.reply.roster), headFloor: null } };
+  const { anchor } = runCode(f, { purpose: 1, device, holderPin: f.pin() });
+  assert.throws(() => verifySealedReply(f.reply, null, { ...request, anchor: handmade }), {
+    code: 'SECRETS_ROSTER_REFUSED',
+  });
+  const result = verifySealedReply(f.reply, null, { ...request, anchor });
+  assert.equal(result.pin.confirmed, 'code');
+  clear(result);
+  // The same anchor offered against another set is refused.
+  const other = fixture(29);
+  assert.throws(
+    () => verifySealedReply(other.reply, null, { ...request, forgeProjectId: 'fixture-project', anchor }),
+    { code: 'SECRETS_ROSTER_REFUSED' },
+  );
+});
+
+test('T70 raise: a member device becomes owner only through a purpose-raise code and a role-change transition', () => {
+  const f = fixture(),
+    member = deviceKeys(f.account, f.random),
+    device = codeDevice(member, f.account);
+  f.transition({ added: [f.entry(member, { role: 2, how: 4, addedAtRosterVersion: 2 })] });
+  f.wrap();
+  const memberRequest = {
+    forgeProjectId: f.request.forgeProjectId,
+    setKind: 1,
+    recipient: recipient(member),
+  };
+  const memberPin = verifySealedReply(f.reply, null, {
+    ...memberRequest,
+    machineAnchor: f.reply.genesis,
+  }).pin;
+  // Neither the member itself nor an approval without a code raises it.
+  assert.throws(
+    () => createTransition(f.reply.roster, delta({ roles: [{ id: member.id, role: 1 }] }), member),
+    {
+      code: 'SECRETS_ROSTER_REFUSED',
+    },
+  );
+  assert.throws(() => new CodeRequester(2, f.reply.roster, codeDevice(f.keys, f.account)), {
+    code: 'SECRETS_NOT_ALLOWED',
+  });
+  const { typed, anchor } = runCode(f, { purpose: 2, device, holderPin: f.pin() });
+  assert.deepEqual(typed.approval.transition.delta.roles, [{ id: member.id, role: 1 }]);
+  const result = verifySealedReply(f.reply, memberPin, { ...memberRequest, anchor });
+  assert.equal(result.pin.roster.entries.find(e => e.id.equals(member.id)).role, 1);
+  assert.equal(result.pin.confirmed, 'code');
+  clear(result);
+});
+
+test('d4/C7 a walk-only Checks pin is display-only until a proposer code upgrades it (T78)', () => {
+  const { checks, development, member, memberRequest } = checksWithMember(),
+    device = codeDevice(member.keys, member.accountId);
+  const walked = verifySealedReply(checks.reply, null, memberRequest);
+  assert.equal(walked.pin.confirmed, 'none');
+  assert.equal(walked.pin.holder, false);
+  for (const use of ['proposal', 'join', 'wrap'])
+    assert.throws(() => requireConfirmedBase(walked.pin, use), { code: 'SECRETS_CODE_NEEDED' });
+  // Holder without a code: a walk-only view cannot approve (it would sign a Checks head or a wrap).
+  assert.throws(
+    () =>
+      new CodeApprover({
+        request: new CodeRequester(3, checks.reply.roster, device).request,
+        pin: walked.pin,
+        signer: member.keys,
+        development,
+        person: true,
+      }),
+    { code: 'SECRETS_CODE_NEEDED' },
+  );
+  const { typed, anchor } = runCode(checks, {
+    purpose: 3,
+    view: walked.pin.roster,
+    device,
+    holderPin: checks.pin(),
+    development,
+  });
+  assert(typed.approval.head.proposers.some(p => p.deviceId.equals(member.keys.id)));
+  const upgraded = verifySealedReply(checks.reply, walked.pin, {
+    ...memberRequest,
+    firstContact: false,
+    anchor,
+  });
+  assert.equal(upgraded.pin.confirmed, 'code');
+  requireConfirmedBase(upgraded.pin, 'proposal');
+  requireConfirmedBase(upgraded.pin, 'join');
+  // The upgrade survives later reads without a code.
+  checks.bump();
+  checks.signHead();
+  const later = verifySealedReply(checks.reply, upgraded.pin, { ...memberRequest, firstContact: false });
+  assert.equal(later.pin.confirmed, 'code');
+  // A second request for a device already in proposers is refused before any code exists.
+  assert.throws(
+    () =>
+      new CodeApprover({
+        request: new CodeRequester(3, checks.reply.roster, device).request,
+        pin: checks.pin(),
+        signer: checks.keys,
+        development,
+        person: true,
+      }),
+    { code: 'SECRETS_NOT_ALLOWED' },
+  );
+});
+
+test('d4 a Checks wrap is never opened on a walk-only first contact; an add code makes the owner device a holder', async t => {
+  const f = fixture(17, 'fixture-project', 2),
+    owner = deviceKeys(f.account, f.random),
+    device = codeDevice(owner, f.account, 'second-owner-device');
+  // A Checks recipient always needs a person, even from a full owner device.
+  const entry = f.entry(owner, { how: 4, addedAtRosterVersion: 2 });
+  assert.throws(
+    () =>
+      createTransition(f.reply.roster, delta({ added: [entry] }), f.keys, {
+        development: f.request.development.roster,
+      }),
+    { code: 'PERSON_REQUIRED' },
+  );
+  const view = f.reply.roster,
+    { anchor } = runCode(f, {
+      purpose: 1,
+      view,
+      device,
+      holderPin: f.pin(),
+      development: f.request.development,
+    });
+  const c = pinStore(t, owner),
+    before = c.files(),
+    request = { ...f.request, recipient: recipient(owner) };
+  await assert.rejects(c.pins.verifyAndSave(f.reply, { ...request, anchor: { kind: 'checks-genesis' } }, 1), {
+    code: 'SECRETS_CODE_NEEDED',
+  });
+  assert.deepEqual(c.files(), before);
+  clear(await c.pins.verifyAndSave(f.reply, { ...request, anchor }, 1));
+  const pin = (await c.pins.load(f.request.forgeProjectId, 2)).pin;
+  assert.equal(pin.holder, true);
+  assert.equal(pin.confirmed, 'code');
+  assert.equal(pin.roster.entries.find(e => e.id.equals(owner.id)).how, 4);
+});
+
+test('T95 re-pin by code restores a lost or too-old pin with the holder head as its floor, never a healthy one', async t => {
+  const f = fixture(),
+    second = deviceKeys(f.account, f.random),
+    device = codeDevice(second, f.account, 'second-device');
+  f.transition({ added: [f.entry(second, { how: 4, addedAtRosterVersion: 2 })] });
+  f.wrap();
+  const c = pinStore(t, second),
+    request = { forgeProjectId: f.request.forgeProjectId, setKind: 1, recipient: recipient(second) };
+  clear(await c.pins.verifyAndSave(f.reply, { ...request, machineAnchor: f.reply.genesis }, 1));
+  const older = clone(f.reply);
+  f.bump();
+  f.name('API_TOKEN');
+  const pinFile = join(
+    c.directory,
+    forgeSecretId('project', request.forgeProjectId).toString('hex') + '.bin',
+  );
+  const repin = () => runCode(f, { purpose: 4, device, holderPin: f.pin() });
+  const { anchor, typed } = repin();
+  await assert.rejects(c.pins.repinWithCode(f.reply, { ...request, anchor }, true), {
+    code: 'SECRETS_NOT_ALLOWED',
+  });
+  await assert.rejects(c.pins.repinWithCode(f.reply, { ...request, anchor }, false), {
+    code: 'SECRETS_PIN_LOST',
+  });
+  unlinkSync(pinFile);
+  // Below the floor, or a different head at the floor version: refused, nothing written.
+  const before = c.files();
+  await assert.rejects(c.pins.repinWithCode(older, { ...request, anchor }, true), {
+    code: 'SECRETS_ROLLBACK',
+  });
+  const forkedHead = clone(f.reply);
+  forkedHead.head.signedAt += 7;
+  forkedHead.head.signature = signBytes(headBytes(forkedHead.head), f.keys.sign);
+  await assert.rejects(c.pins.repinWithCode(forkedHead, { ...request, anchor }, true), {
+    code: 'SECRETS_FORK',
+  });
+  assert.deepEqual(c.files(), before);
+  assert.equal(typed.approval.head.headVersion, f.reply.head.headVersion);
+  clear(await c.pins.repinWithCode(f.reply, { ...request, anchor }, true));
+  assert.equal((await c.pins.load(request.forgeProjectId, 1)).pin.confirmed, 'code');
+  // Past the ring a healthy-but-old pin is replaced the same way; the holder walks along in steps.
+  let holderPin = f.pin();
+  const walk = () => {
+    const result = verifySealedReply(f.reply, holderPin, f.request);
+    holderPin = result.pin;
+    clear(result);
+  };
+  for (let i = 0; i < 65; i++) {
+    f.bump();
+    f.transition({});
+    if (i % 32 === 31) walk();
+  }
+  f.wrap();
+  walk();
+  await assert.rejects(c.pins.verifyAndSave(f.reply, request, 1), { code: 'SECRETS_PIN_TOO_OLD' });
+  const late = runCode(f, { purpose: 4, device, holderPin });
+  clear(await c.pins.repinWithCode(f.reply, { ...request, anchor: late.anchor }, true));
+  assert.equal(
+    (await c.pins.load(request.forgeProjectId, 1)).pin.roster.rosterVersion,
+    f.reply.roster.rosterVersion,
+  );
+});
+
+test('d4/C6 every proposal or join builder in src and convex checks the confirmed base first', () => {
+  const root = new URL('../', import.meta.url),
+    exempt = new Set(['src/sealed-future-records.ts', 'src/sealed-format.ts', 'src/sealed-anchors.ts']),
+    // Client code that signs or seals a sealed proposal or join (exchange proposals are unrelated code-change
+    // records). The server only stores these as opaque bytes and holds no pin, so d4 is a client gate.
+    builder = /\bproposal(Seal)?Bytes\b|\bjoin(Request)?Bytes\b/;
+  const walk = dir =>
+    readdirSync(new URL(dir, root), { withFileTypes: true }).flatMap(e =>
+      e.isDirectory()
+        ? e.name === '_generated' || e.name === 'node_modules'
+          ? []
+          : walk(`${dir}${e.name}/`)
+        : /\.tsx?$/.test(e.name)
+          ? [`${dir}${e.name}`]
+          : [],
+    );
+  const unguarded = walk('src/').filter(path => {
+    if (exempt.has(path)) return false;
+    const text = readFileSync(new URL(path, root), 'utf8');
+    return builder.test(text) && !text.includes('requireConfirmedBase(');
+  });
+  assert.deepEqual(unguarded, []);
+  // The pattern still names the real builders, so the guard cannot go silently stale.
+  assert.match(readFileSync(new URL('src/sealed-future-records.ts', root), 'utf8'), builder);
+  // Wraps are produced only from a key verifyCore opened (which refuses a walk-only base) or from genesis.
+  // A new wrap producer, or a new place that mints a code anchor, must be reviewed against d4 first.
+  const callers = pattern =>
+    [...walk('src/'), ...walk('convex/')]
+      .filter(path => pattern.test(readFileSync(new URL(path, root), 'utf8')))
+      .sort();
+  assert.deepEqual(callers(/\bwrapSetKey\(/), [
+    'src/sealed-genesis.ts',
+    'src/sealed-keys.ts',
+    'src/sealed-rekey.ts',
+  ]);
+  assert.deepEqual(callers(/\bcodeConfirmedAnchor\(/), ['src/sealed-anchors.ts', 'src/sealed-code.ts']);
+});
+
+test('T95 a server that drops one transition cannot make a healthy pin replaceable by re-pin', async t => {
+  const f = fixture(),
+    second = deviceKeys(f.account, f.random),
+    device = codeDevice(second, f.account, 'second-device');
+  f.transition({ added: [f.entry(second, { how: 4, addedAtRosterVersion: 2 })] });
+  f.wrap();
+  const c = pinStore(t, second),
+    request = { forgeProjectId: f.request.forgeProjectId, setKind: 1, recipient: recipient(second) };
+  clear(await c.pins.verifyAndSave(f.reply, { ...request, machineAnchor: f.reply.genesis }, 1));
+  f.bump();
+  f.transition({});
+  f.transition({});
+  f.wrap();
+  const { anchor } = runCode(f, { purpose: 4, device, holderPin: f.pin() });
+  const gapped = clone(f.reply);
+  gapped.transitions = gapped.transitions.filter(tr => tr.fromVersion !== 2);
+  await assert.rejects(c.pins.verifyAndSave(gapped, request, 1), { code: 'SECRETS_PIN_TOO_OLD' });
+  const before = c.files();
+  await assert.rejects(c.pins.repinWithCode(gapped, { ...request, anchor }, true), {
+    code: 'SECRETS_NOT_ALLOWED',
+    message: /served history is incomplete/,
+  });
+  assert.deepEqual(c.files(), before);
+});

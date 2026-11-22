@@ -85,7 +85,8 @@ export function fixture(seed = 17, project = 'fixture-project', kind = 1) {
       forgeProjectId: project,
       setKind: kind,
       firstContact: true,
-      anchor: kind === 2 ? { kind: 'checks-genesis' } : { kind: 'own-genesis', deviceId: keys.id },
+      // This device made the genesis of either kind. A walk-only Checks anchor opens no wrap (GB-08 d4).
+      anchor: { kind: 'own-genesis', deviceId: keys.id },
       recipient: { id: keys.id, enc: keys.enc, kind: 1 },
     },
   };

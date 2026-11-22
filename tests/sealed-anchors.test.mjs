@@ -14,6 +14,7 @@ import { verifySealedReply } from '../dist/sealed-verify.js';
 import { FileKeyStore } from '../dist/sealed-local.js';
 import { SecretPins } from '../dist/sealed-pins.js';
 import { fixture } from './helpers/sealed-fixture.mjs';
+import { codeDevice, runCode } from './helpers/sealed-code-journey.mjs';
 
 const clone = value => deserialize(serialize(value));
 const clear = result => {
@@ -38,13 +39,21 @@ test('F1 an unanchored joined Development device is refused even with a complete
   );
 });
 
-test('F1 a non-genesis Checks holder walks from trusted Development and refuses a missing transition', () => {
+test('F1/d4 a non-genesis Checks holder starts at its add code, walks from trusted Development and refuses a missing transition', () => {
   const f = fixture(17, 'fixture-project', 2),
     owner = deviceKeys(f.account, f.random);
-  f.transition({ added: [f.entry(owner, { how: 4, addedAtRosterVersion: 2 })] });
-  f.wrap();
-  const request = { ...f.request, recipient: recipient(owner) };
+  const { anchor } = runCode(f, {
+    purpose: 1,
+    device: codeDevice(owner, f.account),
+    holderPin: f.pin(),
+    development: f.request.development,
+  });
+  const request = { ...f.request, recipient: recipient(owner), anchor };
   clear(verifySealedReply(f.reply, null, request));
+  // GB-08 d4: the walk from the pointer's genesis alone opens no Checks wrap.
+  assert.throws(() => verifySealedReply(f.reply, null, { ...request, anchor: { kind: 'checks-genesis' } }), {
+    code: 'SECRETS_CODE_NEEDED',
+  });
   f.reply.transitions = [];
   assert.throws(() => verifySealedReply(f.reply, null, request), { code: 'SECRETS_PIN_TOO_OLD' });
 });
@@ -222,11 +231,19 @@ test('F1 a joined Development member commits no pin from a served roster or a bo
 test('F1 a non-creator Checks holder and a passkey contact each pin through their own journey anchor', async t => {
   const checks = fixture(17, 'fixture-project', 2),
     holder = deviceKeys(checks.account, checks.random);
-  checks.transition({ added: [checks.entry(holder, { how: 4, addedAtRosterVersion: 2 })] });
-  checks.wrap();
+  const { anchor } = runCode(checks, {
+    purpose: 1,
+    device: codeDevice(holder, checks.account),
+    holderPin: checks.pin(),
+    development: checks.request.development,
+  });
   const c = pinStore(t, holder);
-  clear(await c.pins.verifyAndSave(checks.reply, { ...checks.request, recipient: recipient(holder) }, 1));
-  assert.equal((await c.pins.load(checks.request.forgeProjectId, 2)).pin.holder, true);
+  clear(
+    await c.pins.verifyAndSave(checks.reply, { ...checks.request, recipient: recipient(holder), anchor }, 1),
+  );
+  const held = (await c.pins.load(checks.request.forgeProjectId, 2)).pin;
+  assert.equal(held.holder, true);
+  assert.equal(held.confirmed, 'code');
 
   const { f, person, request } = passkeyContact(),
     p = pinStore(t, deviceKeys(f.account, f.random));

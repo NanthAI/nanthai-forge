@@ -200,62 +200,7 @@ export class SecretPins {
           firstContact: true,
           anchor: { kind: 'device-head', value: { id: currentKeys!.id, signPub: currentKeys!.signPub } },
         });
-        let index: Index,
-          recoveredIndex = false;
-        try {
-          index = unpack<Index>(this.indexPath, 'pin-index', currentKeys!);
-          lost(index.counter === currentKeys!.pinCounter || index.counter === currentKeys!.pinCounter + 1);
-        } catch {
-          recoveredIndex = true;
-          index = {
-            counter: currentKeys!.pinCounter,
-            files: Object.fromEntries(
-              Object.entries(currentKeys!.pinned ?? {}).map(([project, kinds]) => [
-                project,
-                { counter: -1, kinds },
-              ]),
-            ),
-          };
-        }
-        const id = forgeSecretId('project', request.forgeProjectId),
-          name = id.toString('hex'),
-          path = join(this.directory, `${name}.bin`);
-        let previous: PinFile = { counter: 0, kinds: {} };
-        try {
-          previous = unpack<PinFile>(path, 'pins', currentKeys!, id);
-        } catch {
-          /* Explicitly confirmed rebuild replaces only this project/kind. */
-        }
-        const entry = index.files[name],
-          lostSiblings =
-            recoveredIndex ||
-            index.counter !== currentKeys!.pinCounter ||
-            previous.counter !== (entry?.counter ?? 0),
-          remembered = [
-            ...knownKinds(previous),
-            ...(entry?.kinds ?? []),
-            ...(currentKeys!.pinned?.[name] ?? []),
-          ],
-          counter = Math.max(previous.counter, index.counter, currentKeys!.pinCounter) + 1;
-        const file: PinFile = {
-          counter,
-          lostKinds: [
-            ...new Set([...(previous.lostKinds ?? []), ...(lostSiblings ? remembered : [])]),
-          ].filter(kind => kind !== request.setKind),
-          kinds: {
-            ...previous.kinds,
-            [request.setKind]: { pin: result.pin, cache: reply, fetchedAt: Date.now() },
-          },
-        };
-        index.counter = counter;
-        index.files[name] = { counter: file.counter, kinds: knownKinds(file) };
-        atomicPrivate(path, packed('pins', currentKeys!, file.counter, serialize(file), id));
-        atomicPrivate(this.indexPath, packed('pin-index', currentKeys!, index.counter, serialize(index)));
-        this.store.save({
-          ...currentKeys!,
-          pinCounter: index.counter,
-          pinned: { ...currentKeys!.pinned, [name]: knownKinds(file) },
-        });
+        this.replace(request, reply, result, currentKeys!);
         return result;
       } catch (error) {
         discard(result);
@@ -263,6 +208,137 @@ export class SecretPins {
       } finally {
         wipeDeviceKeys(currentKeys);
       }
+    });
+  }
+  /** 4.13 purpose re-pin (F1): a lost pin, or one past the ring, restarts at the code-confirmed view R
+   * with the holder's head as its floor. A pin that still verifies is never replaced, and a readable old pin
+   * stays a floor too, so a lagging holder cannot move this device back. */
+  async repinWithCode(reply: SealedReply, request: VerifyRequest, person: boolean) {
+    lost(person);
+    invariant(
+      request.anchor?.kind === 'code' && request.anchor.value.purpose === 4,
+      'SECRETS_NOT_ALLOWED',
+      'Re-pin by code needs a matched re-pin reply.',
+    );
+    return secretLocked(this.lock, () => {
+      const floor = this.requireRepinnable(reply, request);
+      const keys = this.store.load();
+      let result: ReturnType<typeof verifySealedReply> | undefined;
+      try {
+        lost(keys);
+        result = verifySealedReply(reply, null, { ...request, firstContact: true });
+        invariant(
+          !floor ||
+            (result.pin.roster.rosterVersion >= floor.rosterVersion &&
+              result.pin.head.headVersion >= floor.headVersion),
+          'SECRETS_ROLLBACK',
+          'The confirmed view is older than this device already accepted.',
+        );
+        this.replace(request, reply, result, keys!);
+        return result;
+      } catch (error) {
+        discard(result);
+        throw error;
+      } finally {
+        wipeDeviceKeys(keys);
+      }
+    });
+  }
+  /** Returns the old pin's versions as a floor when it is readable. "Too old" is judged against the
+   * holder-confirmed view R, never the served history alone: a server that drops one transition must not
+   * turn a healthy pin into a replaceable one. */
+  private requireRepinnable(reply: SealedReply, request: VerifyRequest) {
+    let snapshot: ReturnType<SecretPins['snapshot']>;
+    try {
+      snapshot = this.snapshot(request.forgeProjectId, request.setKind);
+    } catch (error) {
+      if (!(error instanceof ForgeError) || error.code === 'SECRETS_PIN_LOST') return null;
+      throw error;
+    }
+    try {
+      if (!snapshot.current) return null;
+      const pin = snapshot.current.pin,
+        floor = { rosterVersion: pin.roster.rosterVersion, headVersion: pin.head.headVersion };
+      const current = { ...request, firstContact: false };
+      delete current.anchor;
+      try {
+        discard(verifySealedReply(reply, pin, current));
+      } catch (error) {
+        if (!(error instanceof ForgeError) || error.code !== 'SECRETS_PIN_TOO_OLD') throw error;
+        const confirmed = request.anchor?.kind === 'code' ? request.anchor.value.roster.rosterVersion : 0;
+        invariant(
+          confirmed - floor.rosterVersion > 64,
+          'SECRETS_NOT_ALLOWED',
+          'This pin is within retained history; the served history is incomplete. Retry later; re-pin is not needed.',
+        );
+        return floor;
+      }
+      throw new ForgeError(
+        'SECRETS_NOT_ALLOWED',
+        'Re-pin only restores lost or too-old trust; this pin verifies.',
+      );
+    } finally {
+      wipeDeviceKeys(snapshot.keys);
+    }
+  }
+  /** Under the lock: replace only this project/kind; unchecked sibling kinds stay lost (L2). */
+  private replace(
+    request: VerifyRequest,
+    reply: SealedReply,
+    result: ReturnType<typeof verifySealedReply>,
+    currentKeys: NonNullable<ReturnType<KeyStore['load']>>,
+  ) {
+    let index: Index,
+      recoveredIndex = false;
+    try {
+      index = unpack<Index>(this.indexPath, 'pin-index', currentKeys!);
+      lost(index.counter === currentKeys!.pinCounter || index.counter === currentKeys!.pinCounter + 1);
+    } catch {
+      recoveredIndex = true;
+      index = {
+        counter: currentKeys!.pinCounter,
+        files: Object.fromEntries(
+          Object.entries(currentKeys!.pinned ?? {}).map(([project, kinds]) => [
+            project,
+            { counter: -1, kinds },
+          ]),
+        ),
+      };
+    }
+    const id = forgeSecretId('project', request.forgeProjectId),
+      name = id.toString('hex'),
+      path = join(this.directory, `${name}.bin`);
+    let previous: PinFile = { counter: 0, kinds: {} };
+    try {
+      previous = unpack<PinFile>(path, 'pins', currentKeys!, id);
+    } catch {
+      /* Explicitly confirmed rebuild replaces only this project/kind. */
+    }
+    const entry = index.files[name],
+      lostSiblings =
+        recoveredIndex ||
+        index.counter !== currentKeys!.pinCounter ||
+        previous.counter !== (entry?.counter ?? 0),
+      remembered = [...knownKinds(previous), ...(entry?.kinds ?? []), ...(currentKeys!.pinned?.[name] ?? [])],
+      counter = Math.max(previous.counter, index.counter, currentKeys!.pinCounter) + 1;
+    const file: PinFile = {
+      counter,
+      lostKinds: [...new Set([...(previous.lostKinds ?? []), ...(lostSiblings ? remembered : [])])].filter(
+        kind => kind !== request.setKind,
+      ),
+      kinds: {
+        ...previous.kinds,
+        [request.setKind]: { pin: result.pin, cache: reply, fetchedAt: Date.now() },
+      },
+    };
+    index.counter = counter;
+    index.files[name] = { counter: file.counter, kinds: knownKinds(file) };
+    atomicPrivate(path, packed('pins', currentKeys!, file.counter, serialize(file), id));
+    atomicPrivate(this.indexPath, packed('pin-index', currentKeys!, index.counter, serialize(index)));
+    this.store.save({
+      ...currentKeys!,
+      pinCounter: index.counter,
+      pinned: { ...currentKeys!.pinned, [name]: knownKinds(file) },
     });
   }
 }

@@ -11,12 +11,19 @@ export function createTransition(
   from: Roster,
   delta: Delta,
   signer: { id: Buffer; sign: Buffer },
-  options: { revoked?: Buffer[]; development?: Roster } = {},
+  /** `person`: a person on a terminal confirmed this change (an owner code, or an owner adding a machine). */
+  options: { revoked?: Buffer[]; development?: Roster; person?: boolean } = {},
 ) {
   invariant(
     from.setKind === 1 || options.development,
     'SECRETS_ROSTER_REFUSED',
     'A Checks or Production transition needs the trusted Development roster.',
+  );
+  // A Checks or Production recipient always needs a person (decision 2): never automatic, never an agent.
+  invariant(
+    from.setKind === 1 || !delta.added.length || options.person === true,
+    'PERSON_REQUIRED',
+    'Adding a Checks or Production recipient needs a person on a terminal with an owner code.',
   );
   const next = rosterAfterDelta(from, delta);
   invariant(
