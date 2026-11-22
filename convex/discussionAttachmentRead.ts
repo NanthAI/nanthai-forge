@@ -35,7 +35,13 @@ export const resolve = internalQuery({
   args: { projectId: v.string(), itemId: v.string(), commentId: v.string(), attachmentId: v.string() },
   returns: v.union(
     v.null(),
-    v.object({ r2Key: v.string(), size: v.number(), digest: v.string(), contentType: v.string() }),
+    v.object({
+      projectId: v.id('hostedProjects'),
+      r2Key: v.string(),
+      size: v.number(),
+      digest: v.string(),
+      contentType: v.string(),
+    }),
   ),
   handler: async (ctx, input) => {
     try {
@@ -68,6 +74,7 @@ export const resolve = internalQuery({
       )
         return null;
       return {
+        projectId,
         r2Key: artifact.r2Key,
         size: artifact.size,
         digest: artifact.digest,

@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "Adds ATTACHMENT_DOWNLOAD_LIMIT, the owner-requested typed refusal for the daily attachment download cap (Issue 9a3d6f5f); removes nothing, but adds no table: the counters reuse gitWorkerUsage and the worker cap pattern.",
+  "date": "2026-11-22"
+}

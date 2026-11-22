@@ -116,7 +116,11 @@ nforge agent ROOT start '{"planningItemId":"ISSUE_ID","model":"unknown"}' # your
 **Discussion attachment downloads.** The hosted server verifies a committed attachment against its project,
 Item and comment. It applies the current discussion visibility before reading from private R2 and checks
 access again before sending the verified bytes as a download. Permanent Item deletion ends access to its
-attachments. Uploads and client download controls are pending.
+attachments. Downloads are capped per UTC day at 2 GB for one project and 20 GB for all projects
+(`attachmentDownloadCaps` in `convex/gitServeWorkerStore.ts`). The bytes are reserved before R2 is read; past
+a cap the route answers 429 `ATTACHMENT_DOWNLOAD_LIMIT` with a message naming the cap and `Retry-After` until
+00:00 UTC. A read that fails or is revoked before any byte is sent gives its reservation back. Uploads and
+client download controls are pending.
 
 **Suggested schedule.** `planning {"kind":"issue","schedule":true}` adds `schedule`: which open and in-progress Issues can run in parallel and which should stack, with the reason. It groups Issues by the repository files their title and body name (`src/work-schedule.ts`); a stack lists started Issues first, then the oldest, and names the shared files. Markdown docs never make Issues stack, since landing merges them. An Issue that names no file is `unknown`, not independent: a missing name proves nothing. It reads up to five pages (`coverage` says whether that reached the end) and no item details: a long body's named files are kept on its index header when it is written. It is advice for the lead or agent choosing the next work; nothing is started, ordered or blocked. The web planning board shows the same suggestion as a `Stack n/m` chip on the Issues that should stack, with the order and reason on hover.
 

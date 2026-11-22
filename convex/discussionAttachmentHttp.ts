@@ -83,27 +83,59 @@ export const serve = httpAction(async (ctx, request) => {
   try {
     const pin = await ctx.runQuery(internal.discussionAttachmentRead.resolve, selection);
     if (!pin) return missing();
-    let bytes;
-    try {
-      bytes = await readBytes(pin);
-    } catch (error) {
-      return error instanceof ForgeError && error.code === 'BLOB_DIGEST_MISMATCH'
-        ? unavailable('BLOB_DIGEST_MISMATCH', 'Stored attachment bytes failed verification.', 502)
-        : unavailable('R2_OBJECT_UNAVAILABLE', 'Stored attachment bytes are unavailable.', 502);
-    }
-    // An access revocation or binding removal during the network read must win.
-    const current = await ctx.runQuery(internal.discussionAttachmentRead.resolve, selection);
-    if (!current || current.r2Key !== pin.r2Key || current.digest !== pin.digest || current.size !== pin.size)
-      return missing();
-    return new Response(downloadBody(bytes), {
-      headers: {
-        ...noStore,
-        'Content-Type': current.contentType,
-        'Content-Length': String(current.size),
-        'Content-Disposition': 'attachment',
-        'Content-Security-Policy': 'sandbox',
-      },
+    // Only a reader with access reaches the caps. The bytes are reserved before R2 is read.
+    const reservation = await ctx.runMutation(internal.discussionAttachmentCaps.reserve, {
+      projectId: pin.projectId,
+      bytes: pin.size,
     });
+    if (!reservation.granted)
+      return Response.json(
+        { code: 'ATTACHMENT_DOWNLOAD_LIMIT', message: reservation.message },
+        {
+          status: 429,
+          headers: { ...noStore, 'Retry-After': String(reservation.retryAfterSeconds) },
+        },
+      );
+    let served = false;
+    try {
+      let bytes;
+      try {
+        bytes = await readBytes(pin);
+      } catch (error) {
+        return error instanceof ForgeError && error.code === 'BLOB_DIGEST_MISMATCH'
+          ? unavailable('BLOB_DIGEST_MISMATCH', 'Stored attachment bytes failed verification.', 502)
+          : unavailable('R2_OBJECT_UNAVAILABLE', 'Stored attachment bytes are unavailable.', 502);
+      }
+      // An access revocation or binding removal during the network read must win.
+      const current = await ctx.runQuery(internal.discussionAttachmentRead.resolve, selection);
+      if (
+        !current ||
+        current.r2Key !== pin.r2Key ||
+        current.digest !== pin.digest ||
+        current.size !== pin.size
+      )
+        return missing();
+      served = true;
+      return new Response(downloadBody(bytes), {
+        headers: {
+          ...noStore,
+          'Content-Type': current.contentType,
+          'Content-Length': String(current.size),
+          'Content-Disposition': 'attachment',
+          'Content-Security-Policy': 'sandbox',
+        },
+      });
+    } finally {
+      // No bytes reached the client: give the reservation back. A failed refund stays counted.
+      if (!served)
+        await ctx
+          .runMutation(internal.discussionAttachmentCaps.release, {
+            projectId: pin.projectId,
+            day: reservation.day,
+            bytes: pin.size,
+          })
+          .catch(() => {});
+    }
   } catch (error) {
     if (error instanceof ConvexError) {
       const data = error.data as { code?: string } | null;
