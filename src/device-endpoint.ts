@@ -12,8 +12,14 @@ export async function devicePost(backend: string, operation: 'start-v2' | 'renew
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
-      redirect: 'error',
+      // Not 'error': with a body, Node's fetch cannot retry a 421 on a new connection (the use_site answer) under
+      // that mode and fails the whole call. A redirect is refused below instead.
+      redirect: 'manual',
       signal: networkTimeout(15_000),
+    }).then(response => {
+      if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400))
+        throw new Error('redirect refused');
+      return response;
     });
   const direct = await send(backend);
   if (direct.status !== 421) return direct;

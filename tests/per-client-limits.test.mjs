@@ -7,6 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
 import { getFunctionName } from 'convex/server';
 import { moduleSource, moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
@@ -341,4 +342,65 @@ test('the CLI follows a use_site answer once to the site and keeps a direct answ
   asked.length = 0;
   assert.equal((await devicePost(BACKEND, 'renew', '{}')).status, 200);
   assert.deepEqual(asked, [`${BACKEND}/auth/device/renew`], 'an older environment answers directly');
+});
+
+test('the CLI follows use_site over real HTTP, where a 421 with a body must not break the request', async t => {
+  const seen = [];
+  const listen = handler =>
+    new Promise(resolve => {
+      const server = createServer((request, response) => {
+        let body = '';
+        request.on('data', chunk => (body += chunk));
+        request.on('end', () => handler(request, response, body));
+      });
+      server.listen(0, '127.0.0.1', () => resolve(server));
+    });
+  const site = await listen((request, response, body) => {
+    seen.push(['site', request.url, body]);
+    response.setHeader('content-type', 'application/json');
+    response.end('{"ok":true}');
+  });
+  const siteOrigin = `http://127.0.0.1:${site.address().port}`;
+  const backend = await listen((request, response, body) => {
+    seen.push(['backend', request.url, body]);
+    response.statusCode = 421;
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ error: 'use_site', site: siteOrigin }));
+  });
+  t.after(() => {
+    backend.close();
+    site.close();
+  });
+  const response = await devicePost(`http://127.0.0.1:${backend.address().port}`, 'start-v2', '{"a":1}');
+  assert.equal(response.status, 200);
+  // The platform's fetch may retry a 421 once on a fresh connection, so the backend can be asked twice; it runs nothing.
+  assert.equal(
+    seen.at(-1).join(' '),
+    'site /auth/device/start-v2 {"a":1}',
+    'the same signed body reaches the site once',
+  );
+  assert.equal(seen.filter(([who]) => who === 'site').length, 1);
+  assert.ok(
+    seen
+      .slice(0, -1)
+      .every(
+        ([who, url, body]) => who === 'backend' && url === '/auth/device/start-v2' && body === '{"a":1}',
+      ),
+  );
+});
+
+test('a redirect from a sign-in endpoint is refused, not followed', async t => {
+  const target = createServer((_request, response) => response.end('{"ok":true}'));
+  await new Promise(resolve => target.listen(0, '127.0.0.1', resolve));
+  const redirector = createServer((_request, response) => {
+    response.statusCode = 302;
+    response.setHeader('location', `http://127.0.0.1:${target.address().port}/`);
+    response.end();
+  });
+  await new Promise(resolve => redirector.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    target.close();
+    redirector.close();
+  });
+  await assert.rejects(devicePost(`http://127.0.0.1:${redirector.address().port}`, 'start-v2', '{}'));
 });
