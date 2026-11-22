@@ -26,6 +26,13 @@ export async function parkedIncident(t, { seed } = {}) {
     ],
   });
   f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
+  // Build the historical parked chain before enabling the newer rule for a
+  // Ready holder that is itself parked. The test below exercises the new-run
+  // wake and its mutant after the chain already exists.
+  const { autonomyPolicy: policy } = f.tables.hostedProjects.get(f.projectId);
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, hostedCrossHeadReuse: false } },
+  });
   const [head, holder, ...followers] = f.entries.map(e => e.state.id);
   // First time each follower is ready (its check passed), on the fixture's simulated clock.
   const readyAt = {};
@@ -57,6 +64,17 @@ export async function parkedIncident(t, { seed } = {}) {
     assert.equal(row.orderWait, holder);
     // No alarm of its own (L1 option B, 687d1eda): the chain end, the holder, owns progress.
   }
+  // Restore the historical wait classification used by the new-run wake.
+  // The temporary exact-only policy was only needed to build this old chain.
+  for (const id of followers) {
+    const row = rows(f).find(request => request.submissionId === id);
+    const waits = row.orderWaits;
+    assert.equal(waits?.at(-1)?.held, 'no-proof');
+    f.patch('projectHostedLandingRequests', row._id, {
+      orderWaits: [...waits.slice(0, -1), { ...waits.at(-1), held: 'unsealed' }],
+    });
+  }
+  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
   await seed?.(f, { head, holder, followers });
   await f.rawChecks.pass(headRun);
   let holderRechecked = false,

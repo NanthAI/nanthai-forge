@@ -11,7 +11,8 @@ import {
 } from '../src/hosted-landing';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
-import { overtakeOlder } from '../src/landing-overtake';
+import { generationStartedAfterPass, orderProofsEnabled, overtakeOlder } from '../src/landing-overtake';
+import { effectivePolicy } from '../src/autonomy-policy';
 import { closeOrderWait, handoffOrderWait, HOSTED_ORDER_WAITS } from './projectHostedLandingOrder';
 import {
   HOSTED_FINISH_COMPOSE_WATCHDOG_MS,
@@ -340,10 +341,11 @@ export async function wakeLandingOrderWaiters(
   readyOnly = false,
   landed = false,
   mainReceiptId?: string,
+  repinnedAt?: number,
 ) {
   const release = landed
     ? 'holder-landed'
-    : speculativeOnly
+    : speculativeOnly || repinnedAt !== undefined
       ? 'baton-repin'
       : readyOnly
         ? 'baton-park'
@@ -364,6 +366,7 @@ export async function wakeLandingOrderWaiters(
     for (const waiter of waiters) {
       after = waiter.sequence;
       if (readyOnly && (waiter.phase !== 'ready' || heldByPaths(waiter, row))) continue;
+      if (repinnedAt !== undefined && !generationStartedAfterPass(waiter.passedAt, repinnedAt)) continue;
       // A re-pin retires speculative source generations, but this predecessor
       // still owns its ordinary place in acceptance order. Only parked conflict
       // cohorts and exact early resolutions need another compose before settlement.
@@ -437,8 +440,24 @@ export async function wakeLandingOrderWaiters(
  * (`heldByPaths`), older ones and those past the page stay with `row`. It runs before the claim's early stale-proof refusal (`refuseStaleLaneProofNow`): when
  * that refusal then recomposes `row`, its followers are already handed on, so its exit wake finds
  * none, and the cohort cap still bounds only that refusal chain. */
-export const passParkedFollowers = (ctx: MutationCtx, row: Doc<'projectHostedLandingRequests'>) =>
-  wakeLandingOrderWaiters(ctx, row, false, true);
+export const passParkedFollowers = (
+  ctx: MutationCtx,
+  row: Doc<'projectHostedLandingRequests'>,
+  repinnedAt?: number,
+) => wakeLandingOrderWaiters(ctx, row, false, true, false, undefined, repinnedAt);
+
+/** Re-drive earlier passes during compose, before the holder binds its replacement check. */
+export async function passRepinnedFollowers(
+  ctx: MutationCtx,
+  row: Doc<'projectHostedLandingRequests'>,
+  repinnedAt: number,
+) {
+  // Unspent holders still have the existing new-run wake. Do not drive their followers twice.
+  if (!row.orderWaited || row.overtaken === undefined || row.priority === 'urgent') return;
+  const project = await ctx.db.get(row.projectId);
+  if (project && orderProofsEnabled(effectivePolicy(project).acceptance))
+    await passParkedFollowers(ctx, row, repinnedAt);
+}
 export async function notifyFinishCompose(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,

@@ -24,7 +24,7 @@ import { pinLandingAttempt } from './projectHostedLandingPins';
 import { wakeLandingQueue, releaseLandingQueue } from './projectHostedLandingWake';
 import { landingQueue } from './projectHostedLandingStore';
 import { writeFinish, failFinish } from './projectHostedFinishStore';
-import { scheduleFinish, wakeLandingOrderWaiters } from './projectHostedFinishWake';
+import { passRepinnedFollowers, scheduleFinish, wakeLandingOrderWaiters } from './projectHostedFinishWake';
 import {
   HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
   hostedFinishBackoff,
@@ -150,7 +150,10 @@ export async function reserveFinishRetry(
       },
       false,
     );
-  if (retiringSolo && landing.orderWaited) await wakeLandingOrderWaiters(ctx, landing, true);
+  if (retiringSolo && landing.orderWaited) {
+    await wakeLandingOrderWaiters(ctx, landing, true);
+    await passRepinnedFollowers(ctx, landing, Date.parse(pending.at));
+  }
   const current = (await ctx.db.get(row._id))!;
   // Solo fallback owns a new generation after the cohort retires. Replace its
   // old compose watch, while ordinary advisory work keeps its coalesced wake.
@@ -163,6 +166,7 @@ export async function reserveFinishRetry(
     cause === 'BATCH_FALLBACK',
     !precompose,
   );
+  return Date.parse(pending.at);
 }
 /** Why this re-check happens: the landings that moved main since the stale
  * attempt was composed, and whether each was submitted before this one. One

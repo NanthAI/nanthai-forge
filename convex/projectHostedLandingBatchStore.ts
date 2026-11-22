@@ -31,7 +31,7 @@ import {
 } from './projectHostedLandingStore';
 import { enqueueHostedCheck } from './projectHostedChecks';
 import { loadHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
-import { finishRow, scheduleFinish } from './projectHostedFinishWake';
+import { finishRow, passRepinnedFollowers, scheduleFinish } from './projectHostedFinishWake';
 import { retainLandingTrain } from './projectHostedLandingWake';
 import { invariant } from '../src/errors';
 import { scopedRecheckPairs, type ScopedRecheckBasis } from '../src/scoped-recheck-policy';
@@ -398,6 +398,7 @@ export async function retryLandingBatch(
     },
     true,
   );
+  const repinnedAt = Date.now();
   for (const { row, state } of live) {
     // This exact prefix was retired. Its advisory must not survive recomposition.
     const current =
@@ -419,11 +420,12 @@ export async function retryLandingBatch(
         timing: {
           submittedAt: state.at,
           ...(state.timing?.ms ? { ms: state.timing.ms } : {}),
-          composeStartedAt: new Date(Date.now()).toISOString(),
+          composeStartedAt: new Date(repinnedAt).toISOString(),
         },
       },
       false,
     );
+    if (batch.members.length === 1) await passRepinnedFollowers(ctx, row, repinnedAt);
   }
   // A previous shared generation trimmed rejected members from the train.
   // Restore this live cohort in its original member order before any successor

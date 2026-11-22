@@ -5,9 +5,9 @@ import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixt
 import { moduleUrl } from './convex-module.mjs';
 import { drive, overlapBase, overlapEdits } from './queue-sim/overtake-drive.mjs';
 import { storageClock } from './storage-clock.mjs';
-const { overtakeOlder, overtakeMark, sealedOlder, unsealedBy, olderRiskOnly } = await import(
-  moduleUrl('../src/landing-overtake.ts')
-);
+const { generationStartedAfterPass, overtakeOlder, overtakeMark, sealedOlder, unsealedBy, olderRiskOnly } =
+  await import(moduleUrl('../src/landing-overtake.ts'));
+const { PASS_HELD } = await import(moduleUrl('../src/landing-speed-alerts.ts'));
 const { recordOrderWait, HOSTED_ORDER_WAITS } = await import(
   moduleUrl('../convex/projectHostedLandingOrder.ts')
 );
@@ -28,6 +28,18 @@ const runOwner = (f, run) =>
   [...f.tables.projectHostedLandingAttempts.values()].find(
     row => JSON.parse(row.value).check?.runId === run.id,
   )?.submissionId;
+
+test('a spent hold only releases a real pass earlier than the holder’s generation', () => {
+  for (const [passedAt, startedAt, releases] of [
+    [undefined, 100, false],
+    [PASS_HELD, 100, false],
+    [100, 99, false],
+    [100, 100, false],
+    [100, 101, true],
+    [100, NaN, false],
+  ])
+    assert.equal(generationStartedAfterPass(passedAt, startedAt), releases, `${passedAt} / ${startedAt}`);
+});
 
 test('overtakeOlder: once per entry, never a Ready or urgent one', () => {
   const target = { phase: 'checking', attemptId: 'a1', runId: 'r1', admitted: false };

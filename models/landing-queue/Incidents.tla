@@ -251,6 +251,29 @@ OrderChain == /\ Scenario = "orderchain"
        [] pc = 4 -> /\ b' = "landed" /\ pc' = 5
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
        [] OTHER -> FALSE
+\* Issue 9064e885: a spent holder a starts another generation. checked is the
+\* generation in flight when the unrelated follower b passes. Only a pass made
+\* in generation 1 can clear the order hold when a re-pins to generation 2.
+PassAge == /\ Scenario = "passage"
+  /\ CASE pc = 0 -> /\ a' = "checking" /\ main' = 1
+                     /\ checked' \in {0, 1}
+                     /\ b' = (IF checked' = 1 THEN "held" ELSE "queued")
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, applied, owner>>
+                     /\ pc' = 1
+       [] pc = 1 -> /\ a' = "composing" /\ main' = 2
+                     /\ b' = (IF Fixed /\ checked = 1 THEN "ready" ELSE b)
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, checked, applied, owner>>
+                     /\ pc' = 2
+       [] pc = 2 -> /\ a' = "checking"
+                     /\ checked' = (IF checked = 0 THEN main ELSE checked)
+                     /\ b' = (IF Fixed /\ checked' < main THEN "landed" ELSE "held")
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, main, applied, owner>>
+                     /\ pc' = 3
+       [] pc = 3 -> /\ a' = "landed"
+                     /\ b' = "landed"
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, main, checked, applied, owner>>
+                     /\ pc' = 4
+       [] OTHER -> FALSE
 \* Issue 72d50375 remainder (w3c, 2026-11-06): the same write outage as
 \* `outage`, in settlement, but nobody ends it: the operator never returns,
 \* no reader waits and nothing else writes (inputsDone = writes refused,
@@ -356,7 +379,7 @@ ReserveCycle == /\ Scenario \in {"reservebudget", "reservehanded"}
        [] OTHER -> FALSE
 Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage \/ CohortHold \/ LostDispatch
         \/ Supervisor \/ CheckRound
-        \/ RetryKeep \/ OrderChain \/ OutageExpiry \/ ProgressWake \/ Reserve \/ ReserveCycle
+        \/ RetryKeep \/ OrderChain \/ PassAge \/ OutageExpiry \/ ProgressWake \/ Reserve \/ ReserveCycle
 \* The two reserve fairness conjuncts are never enabled in any other scenario.
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step) /\ WF_vars(ReserveDriver) /\ WF_vars(ReserveStream)
 FreshTerminal == returned => observed = canonical
@@ -367,6 +390,8 @@ CohortSettles == Scenario = "cohort" => <>(b \in {"landed", "conflict"})
 ExactCheckedHead == applied # 0 => applied = checked
 EventuallyTerminal == <>(a = "landed" \/ a = "failed")
 HeadLands == <>(b = "landed")
+PassReleasedOnRepin == (Scenario = "passage" /\ pc = 1 /\ b = "held") ~> (pc \in 2..3 /\ b \in {"ready", "landed"})
+NoOvertakeOfInFlight == Scenario = "passage" /\ a = "checking" /\ checked = main => b # "landed"
 CohortForms == <>(b = "cohort")
 HeadSettles == <>(b \in {"landed", "failed"})
 \* A transient fault never ends a landing; only the cap on a permanent one does.

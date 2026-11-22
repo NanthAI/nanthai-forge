@@ -15,6 +15,7 @@ import {
   type LandingRow,
 } from './projectHostedLandingStore';
 import { loadFinish } from './projectHostedFinishStore';
+import { passRepinnedFollowers } from './projectHostedFinishWake';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { loadBatch, retryLandingBatch } from './projectHostedLandingBatchStore';
 import { loadHostedCheck } from './projectHostedCheckStore';
@@ -267,5 +268,13 @@ export async function retireSoloCheck(
     await cancelPendingTask(ctx, finish.row.wake?.taskId);
     await ctx.db.patch(finish.row._id, { wake: null });
   }
-  await reserveFinishRetry(ctx, finish.row, finish.value, 'CHECK_EVIDENCE_REFRESH', undefined, main);
+  const repinnedAt = await reserveFinishRetry(
+    ctx,
+    finish.row,
+    finish.value,
+    'CHECK_EVIDENCE_REFRESH',
+    undefined,
+    main,
+  );
+  await passRepinnedFollowers(ctx, row, repinnedAt);
 }

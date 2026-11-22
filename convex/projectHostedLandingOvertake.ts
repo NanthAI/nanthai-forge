@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
+import type { Doc } from './_generated/dataModel';
 import type { LandingRow } from './projectHostedLandingStore';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { ForgeError } from '../src/errors';
 import { effectivePolicy } from '../src/autonomy-policy';
+import { orderProofsEnabled } from '../src/landing-overtake';
 
 /** The net changed paths the compose worker signed on this entry's Candidate
  * (`governance.paths`), or null when they are not retained or unreadable: unknown
@@ -41,8 +43,8 @@ export async function overtakingSide(
   ctx: QueryCtx | MutationCtx,
   row: Pick<LandingRow, 'projectId' | 'actor'>,
   state: HostedLandingState,
+  project: Doc<'hostedProjects'> | null,
 ) {
-  const project = await ctx.db.get(row.projectId);
   if (!project?.checkEntries) return null;
   const paths = await landingChangedPaths(ctx, row, state);
   const { acceptance } = effectivePolicy(project);
@@ -52,7 +54,7 @@ export async function overtakingSide(
         checkEntries: [...project.checkEntries, ...(project.globalRiskPaths ?? [])],
         // A passed check may carry across heads (the first-check proof), so an independent
         // older entry is graph-sealed (src/landing-overtake.ts sealedOlder).
-        proofs: acceptance.hostedCrossHeadReuse !== false && acceptance.mode === 'auto-on-pass',
+        proofs: orderProofsEnabled(acceptance),
       }
     : null;
 }

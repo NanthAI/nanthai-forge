@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { batchesFixture, states } from '../hosted-landing-batches-fixture.mjs';
 import { landingApi } from '../hosted-finish-fixture.mjs';
 import { metricAliasProjectionCounts } from '../observer-projection-budget.mjs';
+import { storageClock } from '../storage-clock.mjs';
 export const overlapBase = 'export const a = 0;\n// gap\nexport const b = 0;\n';
 export const overlapEdits = [
   'export const a = 1;\n// gap\nexport const b = 0;\n',
@@ -36,6 +37,8 @@ export async function drive(
     afterStep,
   },
 ) {
+  // Check passes, compose stamps and scheduled tasks use the same simulated time.
+  storageClock(t);
   const f = await batchesFixture(t, {
     batchMaxSize: null,
     admissionCheck: 'full',

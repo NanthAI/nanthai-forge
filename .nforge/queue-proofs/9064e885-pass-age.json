@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedFinishCompose.ts": "266e5f310b723c27a70b31d2e0aabb5f6ace5118ce8cc2699c67804ec6bc5e1c",
+    "convex/projectHostedFinishWake.ts": "cf2cae121bfa7acfe977ae727824569ab9ed0e925cbbb5f13164f206c4f68bf8",
+    "convex/projectHostedLandingBatchStore.ts": "d9f5da21bb733ddd1111757f2cd45c00863bcf3ec1bf32c2d4d6387815362867",
+    "convex/projectHostedLandingOrder.ts": "6283a4d5dd8ca5c92fc551fc2cd38b1caa724dacdcd57060ba1fb0df56f93545",
+    "convex/projectHostedLandingOvertake.ts": "2bf3b304930873e189d07dbc1856f8177c4fbdd226e54753954e123088710bf3",
+    "convex/projectHostedLandingStaleChecks.ts": "3cecc3bee942ac8ea39e34e0f262123805bbe811e862e8bacf2b29d58a6a5aa5",
+    "src/landing-overtake.ts": "af1af6184a30dd5975daabf23c60b10c1254d9b644c7c0761d1cb228f2f79ad7"
+  },
+  "replay": {
+    "incident": "9064e885",
+    "test": "incident 9064e885: passed independent followers publish within one check of their pass",
+    "receipt": "6ea3a44b-4827-4f2a-8f6c-d24a8c71dc02"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ade6cff09-7e40-4b76-bed6-e36deee05b39",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A28ad67d5-5e4b-4d90-982a-a8321a8fa833%3Adelegate-task%3A775a5d23-a35b-4e50-a292-c1fceb486ff9",
+    "receipt": "6ea3a44b-4827-4f2a-8f6c-d24a8c71dc02"
+  }
+}

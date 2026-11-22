@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { pathsOverlap } from './hosted-cross-head-proof.js';
 import { firstCheckRiskPaths, globalRiskBetween, sharedSequenceFolders } from './first-check-risk.js';
+import type { AutonomyPolicy } from './autonomy-policy.js';
+import { PASS_HELD } from './landing-speed-alerts.js';
+
+export function orderProofsEnabled(acceptance: AutonomyPolicy['acceptance']) {
+  return acceptance.hostedCrossHeadReuse !== false && acceptance.mode === 'auto-on-pass';
+}
+
+/** A spent order hold protects only a generation that was underway when the follower passed. */
+export function generationStartedAfterPass(passedAt: number | undefined, startedAt: number) {
+  return passedAt !== undefined && passedAt !== PASS_HELD && startedAt > passedAt;
+}
 
 /** The older live entry a passed (Ready) landing is about to wait for. */
 export type OvertakeTarget = {

@@ -157,6 +157,13 @@ is enabled; the measured comparison below explains the default.
      not its submission time: an older submission still checking, or one that
      re-entered after a refused proof, never holds back a change that entered
      before it.
+   - With cross-head reuse enabled, a passed one-member group can overtake
+     independent work outside its exact predecessor chain. An earlier,
+     independent pass can also clear a spent order hold when the holder
+     starts a new generation. Re-pinning wakes those parked followers during
+     composition, before the replacement check binds. The order decision
+     uses the submitted Candidate's main-relative paths, including any
+     predecessor changes carried by that Candidate.
    - **Reservation after a supersession** (Issue 10d253c6). Because a checking
      submission holds no order, small changes to the same files can land while a
      large change checks, and its passed check then fails `COMPOSITION_CONFLICT`

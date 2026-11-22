@@ -12,10 +12,12 @@ import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 import { stackedBehind } from './projectHostedLandingSuffix';
 import { batchRow, batchSchema } from './projectHostedLandingBatchState';
 import {
+  generationStartedAfterPass,
   olderRiskOnly,
   overtakeMark,
   overtakeOlder,
   overtakeRiskOnly,
+  orderProofsEnabled,
   ownGlobalRisk,
   sealedOlder,
   unrelatedChanges,
@@ -126,6 +128,13 @@ export type OrderHeld =
   | 'composing'
   // A later landing of reserved files waits for the holder (Issue 10d253c6).
   | 'reserved';
+const generationStartedAt = (state: HostedLandingState) =>
+  Math.max(
+    Date.parse(state.at),
+    Date.parse(state.timing?.composeStartedAt ?? state.at),
+    Date.parse(state.timing?.selectedAt ?? state.at),
+  );
+
 /** The oldest submission that must take main before this one, or null. One
  * indexed window per accept attempt. Urgent entries wait only for older urgent
  * ones; batch members never wait for their own batch. A passed solo entry never
@@ -135,8 +144,10 @@ export type OrderHeld =
  * (`overtakeOlder`, Issue 7d98c7da) and entries it overtakes at a cost are pushed
  * to `spent` for the caller to mark when it takes main; so is an older entry linked only by its own
  * global risk (`olderRiskOnly`, Issue 43b51a5e), a Ready one parked behind an older submission
- * included (`overtakeRiskOnly`). A combined group, or one
- * checked on a predecessor group's predicted head, overtakes nothing. A queued entry no dispatcher owns (its compose
+ * included (`overtakeRiskOnly`). A combined group keeps strict order. With reuse,
+ * one-member groups can overtake outside their exact predecessor, and a spent
+ * holder cannot keep an unrelated pass behind a generation started after it passed.
+ * A queued entry no dispatcher owns (its compose
  * or cohort still preparing) holds its place for the train hold only, as the
  * train does: a dead compose never stops the queue. `until` names the one wake
  * the waiter needs when that hold ends; `held` and `footprints` say why it waits
@@ -148,16 +159,28 @@ export async function olderLandingAhead(
   now = Date.now(),
   spent?: LandingRow[],
 ) {
-  // A solo entry overtakes; a combined group keeps strict order. One batch read for a
-  // pipelined solo group, which must not overtake its own predicted predecessor.
-  const solo = Boolean(spent) && (!state.batchId || Boolean(state.batchSolo));
-  const batch = state.batchId
+  let project: Doc<'hostedProjects'> | null | undefined;
+  const getProject = async () =>
+    project === undefined ? (project = await ctx.db.get(row.projectId)) : project;
+  const reuseOn = async () => {
+    const current = await getProject();
+    return current?.checkEntries && orderProofsEnabled(effectivePolicy(current).acceptance);
+  };
+  let mine: Awaited<ReturnType<typeof overtakingSide>> | undefined;
+  const side = async () =>
+    mine === undefined ? (mine = await overtakingSide(ctx, row, state, await getProject())) : mine;
+  const batchRecord = state.batchId
     ? await batchRow(ctx, { projectId: row.projectId, batchId: state.batchId })
     : null;
-  const predecessor = batch ? batchSchema.parse(JSON.parse(batch.value)).predecessor : undefined;
-  // A full admission holds no general queue order, but this exact successor
-  // checked its predicted tree. Keep the pass parked on that admission's
-  // terminal event instead of mistaking its still-unaccepted base for a race.
+  const batch = batchRecord ? batchSchema.parse(JSON.parse(batchRecord.value)) : null;
+  const predecessor = batch?.predecessor;
+  const solo = !state.batchId || Boolean(state.batchSolo);
+  const singleton = Boolean(spent) && (solo || batch?.members.length === 1);
+  const legacyOvertake = Boolean(spent) && solo && !predecessor;
+  const chain = { reads: RESERVATION_CHAIN_READS };
+  const reservationLive = row.reservedUntil !== undefined && row.reservedUntil > now;
+  // An exact successor must wait for the predicted tree, even when a different
+  // older entry is independent. A full admission can be outside the order index.
   if (predecessor) {
     const ahead = await ctx.db
       .query('projectHostedLandingRequests')
@@ -165,16 +188,16 @@ export async function olderLandingAhead(
         q.eq('projectId', row.projectId).eq('submissionId', predecessor.submissionId),
       )
       .unique();
-    if (
-      ahead?.admitting &&
-      ahead.admission?.full &&
-      holdsLandingOrder(ahead, storedLandingStateSchema.parse(JSON.parse(ahead.value)), now)
-    )
-      return { row: ahead, until: null, held: 'combined' as const, footprints: 'unknown' as const };
+    if (ahead && holdsLandingOrder(ahead, storedLandingStateSchema.parse(JSON.parse(ahead.value)), now)) {
+      const wait = { row: ahead, until: null, held: 'combined' as const, footprints: 'unknown' as const };
+      if (ahead.admitting && ahead.admission?.full) return wait;
+      if (singleton && (await reuseOn()) && (await side())?.proofs) {
+        if (reservationLive && ahead.orderWait && (await waitsOnReservation(ctx, row, ahead, chain)))
+          return { ...wait, cycle: true };
+        return wait;
+      }
+    }
   }
-  const canOvertake = solo && !predecessor;
-  let mine: Awaited<ReturnType<typeof overtakingSide>> | undefined;
-  const side = async () => (mine === undefined ? (mine = await overtakingSide(ctx, row, state)) : mine);
   let reserved: string[] | null | undefined;
   const holder = {
     row,
@@ -182,7 +205,6 @@ export async function olderLandingAhead(
     paths: async () =>
       reserved === undefined ? (reserved = await landingChangedPaths(ctx, row, state)) : reserved,
   };
-  const chain = { reads: RESERVATION_CHAIN_READS };
   const older = await ctx.db
     .query('projectHostedLandingRequests')
     .withIndex('by_project_and_channel_and_orderLive_and_sequence', q =>
@@ -213,7 +235,7 @@ export async function olderLandingAhead(
     let held: OrderHeld = 'combined';
     let independent: boolean | null | undefined;
     let footprints: 'overlap' | 'disjoint' | 'unknown' | undefined;
-    if (canOvertake) {
+    if (legacyOvertake || (singleton && (await reuseOn()) && (await side())?.proofs)) {
       const generation = {
         phase: other.phase as 'queued' | 'checking' | 'ready',
         priority: other.priority,
@@ -235,8 +257,27 @@ export async function olderLandingAhead(
         combined: Boolean(value.batchId && !value.batchSolo),
         ...(other.unsealed !== undefined ? { unsealed: other.unsealed } : {}),
       };
+      // A solo re-pin retires the checked Candidate before it binds a replacement.
+      // Its stored Ready phase still describes the retired generation.
+      const repinning =
+        !value.batchId &&
+        other.pipelineRetiredAttemptId === other.attemptId &&
+        value.timing?.composeStartedAt !== undefined;
+      const passAge =
+        riskStep === 'hold' &&
+        generation.overtaken !== undefined &&
+        generation.priority !== 'urgent' &&
+        (generation.phase !== 'ready' || target.parked || repinning) &&
+        generationStartedAfterPass(row.passedAt, generationStartedAt(value));
+      const soloHolder = async () => {
+        if (!target.combined || !value.batchId) return true;
+        const record = await batchRow(ctx, { projectId: row.projectId, batchId: value.batchId });
+        return record !== null && batchSchema.parse(JSON.parse(record.value)).members.length === 1;
+      };
+      const comparePaths =
+        overtake !== 'hold' || riskStep !== 'hold' || sealedOlder({ ...target, proofs: true });
       // Paths are read only for an entry a rule could skip: one Candidate read each.
-      if (overtake !== 'hold' || riskStep !== 'hold' || sealedOlder({ ...target, proofs: true })) {
+      if (comparePaths) {
         const me = await side();
         const paths = me ? await pathsOf() : null;
         independent = me ? unrelatedChanges(me.paths, paths, me.checkEntries) : null;
@@ -245,30 +286,45 @@ export async function olderLandingAhead(
         if (independent && me && sealedOlder({ ...target, proofs: me.proofs })) continue;
         // Its own global risk alone (43b51a5e) also takes the bounded step, never the sealed one,
         // and from a Ready entry that is itself parked (case 2) as from a checking one.
-        const step = independent ? overtake : riskOnly ? riskStep : 'hold';
-        if (step !== 'hold') {
+        const parkedStep =
+          independent && me?.proofs && target.parked && riskStep !== overtake && (await soloHolder());
+        const step = independent ? (parkedStep ? riskStep : overtake) : riskOnly ? riskStep : 'hold';
+        if (step !== 'hold' && (legacyOvertake || (await soloHolder()))) {
           if (step === 'spend') spent!.push(other);
           continue;
         }
+        if (passAge && me?.proofs && (independent || riskOnly) && (await soloHolder())) continue;
         // A risk-only link is no dependency: the receipt says the bounded step is spent (or the
         // entry is urgent, or Ready and about to land).
-        held = riskOnly
-          ? other.priority === 'urgent'
-            ? 'urgent'
-            : other.phase === 'ready' && !other.orderWait
-              ? 'accepting'
-              : 'overtaken'
-          : independent === null
-            ? 'unknown-paths'
-            : !independent
-              ? 'dependent'
-              : me && !me.proofs
-                ? 'no-proof'
-                : 'unsealed';
-      } else
+        if (legacyOvertake)
+          held = riskOnly
+            ? other.priority === 'urgent'
+              ? 'urgent'
+              : other.phase === 'ready' && !other.orderWait
+                ? 'accepting'
+                : 'overtaken'
+            : independent === null
+              ? 'unknown-paths'
+              : !independent
+                ? 'dependent'
+                : me && !me.proofs
+                  ? 'no-proof'
+                  : 'unsealed';
+      } else {
+        if (passAge && (await reuseOn())) {
+          const me = await side();
+          if (
+            me?.proofs &&
+            waitFootprints(me.paths, await pathsOf(), me.checkEntries) === 'disjoint' &&
+            (await soloHolder())
+          )
+            continue;
+        }
         // Not Ready and not urgent, yet the bounded step holds: it was spent for an earlier
         // generation (`overtaken`), whether or not its pass could carry (43b51a5e, review 8c3f272f).
-        held = other.priority === 'urgent' ? 'urgent' : other.phase === 'ready' ? 'accepting' : 'overtaken';
+        if (legacyOvertake)
+          held = other.priority === 'urgent' ? 'urgent' : other.phase === 'ready' ? 'accepting' : 'overtaken';
+      }
     }
     const wait = async () => ({
       row: other,
@@ -287,12 +343,7 @@ export async function olderLandingAhead(
     if (other.phase === 'ready' && !value.request.finish)
       until = Date.parse(value.timing?.settlementStartedAt ?? value.at) + 60_000;
     else if (other.phase === 'queued' && !other.runnable) {
-      until =
-        Math.max(
-          Date.parse(value.at),
-          Date.parse(value.timing?.composeStartedAt ?? value.at),
-          Date.parse(value.timing?.selectedAt ?? value.at),
-        ) + HOSTED_TRAIN_HOLD_MS;
+      until = generationStartedAt(value) + HOSTED_TRAIN_HOLD_MS;
       if (until <= now) continue;
       composing = true;
     }
@@ -302,13 +353,8 @@ export async function olderLandingAhead(
     // disjoint; otherwise (an overlap, a combined group, a pipelined successor) its reservation is
     // void and the claim ends it (`cycle`). The walk runs here only, so skipped entries spend none
     // of its read budget.
-    if (
-      row.reservedUntil !== undefined &&
-      row.reservedUntil > now &&
-      other.orderWait &&
-      (await waitsOnReservation(ctx, row, other, chain))
-    ) {
-      const me = canOvertake ? await side() : null;
+    if (reservationLive && other.orderWait && (await waitsOnReservation(ctx, row, other, chain))) {
+      const me = legacyOvertake ? await side() : null;
       if (me && waitFootprints(me.paths, await pathsOf(), me.checkEntries) === 'disjoint') continue;
       cycle = true;
     }

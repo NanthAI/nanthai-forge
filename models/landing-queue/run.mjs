@@ -41,6 +41,8 @@ if (config === 'all') {
     'outage-fixed',
     'orderchain',
     'orderchain-fixed',
+    'passage',
+    'passage-fixed',
     'expiry',
     'expiry-fixed',
     'moving',

@@ -117,6 +117,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `f65d8024` | A feed-backed wait could miss a stalled Ready transition or new sync advice. The exact selected operation wakes the wait for both, and the canonical baseline pins the start of live delivery. A current project writer can use a submission ID to read another member's pre-admission failure. |
 
 | `3dfacaa4` | A measurement-held CLI replay submits the original operation once. Direct and desired retries preserve its first measured builder hold and legacy reply shape. |
+| `9064e885` | Earlier passes parked behind unrelated solo checks waited across replacement generations. The replay covers six receipts, preserves exact predecessor and multi-member fences, and verifies that the re-pin wakes earlier independent passes without another holder check. |
 | `65e2d743` | The passed landing waited behind an older submission. Individual and batch receipts record the elapsed order wait, and `landings` includes waits shorter than one minute. |
 | `78a97771` | Withdrawal by Lane keeps the builder's saves and ends the pending check. An old withdrawal reader can still read a reply after a newer CLI stamps the submit. |
 
