@@ -19,7 +19,8 @@
   .tbar .chip .path-cut { direction: rtl; unicode-bidi: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   /* A long run name shrinks to an ellipsis inside the By column instead of running under Check. */
   .hrow > .who { min-width: 0; overflow: hidden; }
-  .hrow > .who .a-run { flex-shrink: 1; }
+  /* Who landed it is one handle (mock 03-history): body size and text colour, cut at the end. */
+  .hrow > .who, .who.handle { font-size: inherit; color: inherit; }
   /* A receipt being read: three still bars where its title, words and facts will be. */
   .sk-rows { display: grid; gap: 22px; padding-block: 6px; }
   .sk-rows .sk:nth-child(odd) { width: 62%; }

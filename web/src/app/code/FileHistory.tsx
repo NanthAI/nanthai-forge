@@ -7,7 +7,7 @@ import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { navigate } from '../router';
 import type { CodeProps } from './CodePlace';
-import { useFileHistory, type FileHistoryView } from './code-data';
+import { useFileHistory, type FileHistoryView } from './use-file-history';
 import { ago, landedAt, landedBy, pathHref, plural, titleOf, typedPath } from './code-words';
 
 export function FileHistory({

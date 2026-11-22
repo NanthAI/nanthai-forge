@@ -341,7 +341,7 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
   await receipt.getByText('src/index.ts').waitFor();
   const text = await receipt.textContent();
   assert.match(text, /Index: rebuild without downtime/);
-  assert.doesNotMatch(text, /Its Item|See the change/);
+  assert.doesNotMatch(text, /Its Item|See the Lane/);
   // No person is named to a visitor: the agent is said in words, never drawn as a handle.
   assert.match(text, /Byan agent/);
   assert.doesNotMatch(text, /@an agent/);

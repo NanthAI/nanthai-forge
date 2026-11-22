@@ -5,6 +5,8 @@
 // opens its receipt; Clear and Back walk the address without reading again; a reply for a file the reader has left
 // never replaces the file now shown; Files links here; nothing is read while idle or on a hidden tab's return; and the
 // ready, empty, loading, failed and worst-case states pass axe at 1440 and 390 in both themes without sideways scroll.
+// The mock (03-history, ?v=landed): the head offers the agent's command, the receipt shows the landing's message and
+// "See the Lane", and who landed it is one handle with its square, cut at the end with the full handle in its label.
 // FORGE_CODE_HISTORY_SHOTS=<dir> also writes the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -39,6 +41,8 @@ async function fixture(out) {
     const HEAD = 'a'.repeat(64), BASE = 'b'.repeat(64);
     const now = Date.now();
     const LONG_RUN = 'an-unreasonably-long-agent-handle-that-keeps-going';
+    const WHY = 'A multi-byte character split across two chunks was decoded as two replacement characters. The parser now keeps the incomplete tail of a chunk.';
+    const LONG_WHY = WHY + ' Generated id: ' + 'f'.repeat(400);
     const land = (sequence, title, more = {}) => ({
       receiptId: String(sequence).padStart(8, '0') + '-0000-4000-8000-000000000000',
       sequence, at: new Date(now - (300 - sequence) * 3_600_000).toISOString(), title, why: null,
@@ -52,14 +56,14 @@ async function fixture(out) {
     let failed = 0;
     const steps = {
       [P]: {
-        null: page([land(300, 'Stream parser: handle split UTF-8'), land(290, 'End of stream flushes held bytes', { agentRun: null, agent: false })], 96, 205),
+        null: page([land(300, 'Stream parser: handle split UTF-8', { why: WHY }), land(290, 'End of stream flushes held bytes', { agentRun: null, agent: false })], 96, 205),
         205: page([], 96, 109),
         109: () => (failed++ ? page([land(50, 'Parser: first version', { check: null })], 108, null) : null),
       },
       [O]: { null: page([land(280, 'Lines: drain in one place')], 40, null) },
       'docs/never.md': { null: page([], 96, 205), 205: page([], 4, null) },
       [L]: { null: page([
-        land(299, 'إضافة ميزانية إعادة المحاولة إلى محوّل الجلب وكل ما يتبعه من اختبارات ووثائق', { actor: 'bartholomew-fitzgerald-the-third', agentRun: LONG_RUN }),
+        land(299, 'إضافة ميزانية إعادة المحاولة إلى محوّل الجلب وكل ما يتبعه من اختبارات ووثائق', { actor: 'bartholomew-fitzgerald-the-third', agentRun: LONG_RUN, why: LONG_WHY }),
         land(298, null, { actor: undefined }),
         land(297, 'x', { agent: false, agentRun: null }),
         land(296, '🦀 Regenerate every schema, all 4,812 of them, after the configuration format changed again', { actor: undefined, agent: false, agentRun: null, check: null }),
@@ -73,7 +77,12 @@ async function fixture(out) {
     const history = { landings: [land(300, 'Stream parser: handle split UTF-8'), land(299, 'Docs: the import format'), land(280, 'Lines: drain in one place')], nextCursor: null };
     const watched = (name, args) => {
       if (name === 'projectCode:history') return JSON.stringify(history);
-      if (name === 'projectHostedLandings:read') return JSON.stringify({ schema: 1, landings: [] });
+      // The receipt's evidence (the existing landings read): its Lane, and six minutes from land to main.
+      if (name === 'projectHostedLandings:read')
+        return JSON.stringify({ schema: 1, landings: [300, 299].map(sequence => {
+          const row = land(sequence, null);
+          return { receiptId: row.receiptId, laneId: 'lane-' + sequence, intentId: null, submittedAt: new Date(Date.parse(row.at) - 360_000).toISOString(), committedAt: row.at };
+        }) });
       throw new Error('unexpected watch ' + name);
     };
     const client = {
@@ -212,6 +221,35 @@ test('What landed narrowed to one file: bounded steps, kept rows, exact address,
   // The receipt beside it is the first match's, and it reads only that landing's evidence and changes.
   const receipt = deep.getByRole('region', { name: 'Receipt' });
   await receipt.getByRole('heading', { name: 'Stream parser: handle split UTF-8' }).waitFor();
+  // As the mock: the message under the title, one handle for who landed it, and "See the Lane" beside "Read the code here".
+  await receipt.getByText(/^A multi-byte character split across two chunks/).waitFor();
+  const lane = receipt.getByRole('link', { name: 'See the Lane' });
+  await lane.waitFor();
+  assert.equal(await lane.getAttribute('href'), '/-/ada/atlas/lanes/lane-300');
+  assert.match(await receipt.textContent(), /6 min 0 s from land/);
+  const handles = cells => cells.locator('.who.handle > .mono').allTextContents();
+  assert.deepEqual(await handles(list(deep).locator('a.hrow > .who')), ['mara/amber-fox', '@mara']);
+  assert.deepEqual(await handles(receipt.locator('.kv')), ['mara/amber-fox']);
+  assert.doesNotMatch(
+    await deep.locator('.panes').textContent(),
+    /for @/,
+    'one handle, never "run · for @person"',
+  );
+  // The head offers what an agent runs: a key that shows the exact command for this file.
+  const cli = deep.locator('.head .tools button.cli');
+  assert.equal(await cli.textContent(), 'nforge agent . history');
+  await cli.focus();
+  await deep.keyboard.press('Enter');
+  assert.equal(await cli.getAttribute('aria-expanded'), 'true');
+  assert.match(
+    await deep.locator('#history-cli').textContent(),
+    /^\$ nforge agent \. history '\{"op":"log","path":"src\/parser\/stream-parser\.ts","limit":50\}'/,
+  );
+  await deep.keyboard.press('Enter');
+  assert.ok(
+    await deep.locator('#history-cli').isHidden(),
+    'Enter again folds it; aria-controls keeps its target',
+  );
 
   // A step with no match still says how far it looked and offers the next step.
   await list(deep).getByRole('button', { name: 'Look further back' }).click();
@@ -401,6 +439,20 @@ test('What landed narrowed to one file: bounded steps, kept rows, exact address,
           assert.equal(await who.nth(1).textContent(), 'an agent');
           assert.equal(await who.nth(3).textContent(), 'not reported');
           for (const cell of await who.all()) assert.ok(await cell.isVisible(), `${where}: who is shown`);
+          // An 83-character handle is cut at its end, the full handle in its label: in the list and the receipt.
+          const full = 'bartholomew-fitzgerald-the-third/an-unreasonably-long-agent-handle-that-keeps-going';
+          const cuts = [who.first().locator('.who.handle')];
+          if (width === 1440)
+            cuts.push(view.getByRole('region', { name: 'Receipt' }).locator('.kv .who.handle'));
+          for (const handle of cuts) {
+            assert.equal(await handle.getAttribute('title'), full);
+            const name = handle.locator('.mono');
+            assert.equal(await name.textContent(), full);
+            assert.ok(
+              await name.evaluate(cell => cell.scrollWidth > cell.clientWidth),
+              `${where}: the handle is cut`,
+            );
+          }
           // A long path in the chip is cut at its start, so the file name stays in view.
           const chip = await list(view)
             .locator('.chip .path-cut')
@@ -428,5 +480,13 @@ test('What landed narrowed to one file: bounded steps, kept rows, exact address,
         if (shots)
           await view.screenshot({ path: join(shots, `${name}-${width}-${theme}.png`), fullPage: true });
       }
+  // A receipt opened on a phone: a 400-character token in its message wraps inside the pane, never sideways.
+  const phone = await open(`${base}/00000299-0000-4000-8000-000000000000?path=${q(LONG)}`, { width: 390 });
+  const opened = phone.getByRole('region', { name: 'Receipt' });
+  await opened.getByText(/Generated id: f+/).waitFor();
+  assert.ok(
+    (await phone.evaluate(() => document.documentElement.scrollWidth - innerWidth)) <= 0,
+    '390: an open receipt with a long token has no sideways scroll',
+  );
   assert.deepEqual(errors, []);
 });
