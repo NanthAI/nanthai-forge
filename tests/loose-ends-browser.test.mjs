@@ -160,7 +160,7 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
         const link = dated.getByRole('link', { name: 'Open the Item' }).first();
         assert.equal(
           await link.getAttribute('href'),
-          '/-/sample-one/tidepool/plan/0e6c1f2a-0000-4000-8000-000000000001',
+          '/sample-one/tidepool/plan/0e6c1f2a-0000-4000-8000-000000000001',
         );
         assert.match(
           await dated.locator('.row.le').first().textContent(),
@@ -178,7 +178,7 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
         );
         // Lead mock check (d): owner, Move to the trash, and the projects waiting for a permanent-delete approval.
         const wait = projects.getByRole('link', { name: /40 projects in the trash wait for you/ });
-        assert.equal(await wait.getAttribute('href'), '/-/account?request=req-1');
+        assert.equal(await wait.getAttribute('href'), '/account?request=req-1');
         assert.match(await wait.textContent(), /an agent or device asked to delete them for good/);
         const stopped = group(page, 'Stopped mid-task');
         assert.match(

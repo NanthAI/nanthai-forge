@@ -130,10 +130,10 @@ const xmlEscape = (text: string) =>
 
 /** The sitemap lists only what the public read lists; `origin` is the configured canonical web address. */
 export function sitemapXml(origin: string, rows: readonly { handle: string; slug: string }[]) {
-  const urls = new Set([`${origin}/-/explore`]);
+  const urls = new Set([`${origin}/explore`]);
   for (const { handle, slug } of rows) {
-    urls.add(`${origin}/-/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`);
-    urls.add(`${origin}/-/${encodeURIComponent(handle)}`);
+    urls.add(`${origin}/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`);
+    urls.add(`${origin}/${encodeURIComponent(handle)}`);
   }
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${[
     ...urls,

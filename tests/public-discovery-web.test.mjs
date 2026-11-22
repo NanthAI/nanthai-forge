@@ -465,7 +465,7 @@ test('public discovery screens: explore, a profile signed out and as its person,
   };
 
   // Explore: the sentence's counts match the list; search filters people and projects; the order reads another file.
-  const ex = await open('/-/explore');
+  const ex = await open('/explore');
   const sit = await ex.locator('.head .sit').textContent();
   assert.match(sit, /5 public projects\. 4 of them landed something this week\./);
   assert.equal(await ex.locator('.row.xrow').count(), 5);
@@ -486,11 +486,11 @@ test('public discovery screens: explore, a profile signed out and as its person,
   await ex.getByRole('dialog', { name: /Sign in to star/ }).waitFor();
   assert.match(
     await ex.getByRole('dialog').getByRole('link', { name: 'Sign in' }).getAttribute('href'),
-    /^\/-\/signin\?next=%2F-%2Fexplore$/,
+    /^\/signin\?next=%2Fexplore$/,
   );
 
   // A public project page: what was done, what is in progress, what is left; Next is derived from the plan.
-  const pp = await open('/-/ada/atlas');
+  const pp = await open('/ada/atlas');
   const glance = await pp.locator('.glance p').textContent();
   assert.match(
     glance,
@@ -513,21 +513,21 @@ test('public discovery screens: explore, a profile signed out and as its person,
   await pp.getByRole('dialog', { name: 'Sign in to clone atlas' }).waitFor();
 
   const cloneGate = pp.getByRole('dialog', { name: 'Sign in to clone atlas' });
-  const next = '/-/ada/atlas?view=public';
+  const next = '/ada/atlas?view=public';
   assert.equal(
     await pp.getByRole('banner').getByRole('link', { name: 'Sign in' }).getAttribute('href'),
-    `/-/signin?next=${encodeURIComponent(next)}`,
+    `/signin?next=${encodeURIComponent(next)}`,
   );
   assert.equal(
     await cloneGate.getByRole('link', { name: 'Sign in' }).getAttribute('href'),
-    `/-/signin?next=${encodeURIComponent(next)}`,
+    `/signin?next=${encodeURIComponent(next)}`,
   );
   await cloneGate.getByRole('button', { name: 'Not now' }).click();
   await pp.getByRole('button', { name: /Star .* for ada\/atlas/ }).click();
   const starGate = pp.getByRole('dialog', { name: 'Sign in to star atlas' });
   assert.equal(
     await starGate.getByRole('link', { name: 'Sign in' }).getAttribute('href'),
-    `/-/signin?next=${encodeURIComponent(next)}`,
+    `/signin?next=${encodeURIComponent(next)}`,
   );
   assert.equal(await pp.getByRole('button', { name: 'Who starred' }).count(), 0);
 
@@ -548,7 +548,7 @@ test('public discovery screens: explore, a profile signed out and as its person,
   await clone.waitFor();
   assert.deepEqual(await clone.locator('code').allTextContents(), [
     `nforge login '${sourceDeployment}'`,
-    `nforge clone 'https://forge.test/-/ada/atlas' 'atlas' --deployment '${sourceDeployment}'`,
+    `nforge clone 'https://forge.test/ada/atlas' 'atlas' --deployment '${sourceDeployment}'`,
   ]);
 
   // The owner's view requests and paginates handles only when opened.
@@ -559,7 +559,7 @@ test('public discovery screens: explore, a profile signed out and as its person,
   await people.getByRole('link', { name: '@wren' }).waitFor();
   await people.getByRole('button', { name: 'Show more' }).click();
   await people.getByRole('link', { name: '@kit' }).waitFor();
-  assert.equal(await people.getByRole('link', { name: '@wren' }).getAttribute('href'), '/-/wren');
+  assert.equal(await people.getByRole('link', { name: '@wren' }).getAttribute('href'), '/wren');
 
   const removed = await open(`${next}&as=owner-after-removal`);
   await removed.getByRole('button', { name: 'Who starred' }).click();
@@ -567,20 +567,20 @@ test('public discovery screens: explore, a profile signed out and as its person,
   await removed.getByRole('dialog').getByRole('button', { name: 'Close' }).click();
   assert.equal(await removed.getByRole('heading', { level: 1 }).count(), 1);
 
-  const legacy = await open('/-/ada/legacy?view=public&as=visitor');
+  const legacy = await open('/ada/legacy?view=public&as=visitor');
   await legacy.getByRole('button', { name: 'Clone' }).click();
   assert.equal(
     await legacy.getByRole('dialog').locator('code').textContent(),
     "nforge clone --find 'ada/atlas' --site 'https://forge.test'",
   );
 
-  const fork = await open('/-/ada/fork');
+  const fork = await open('/ada/fork');
   assert.match(await fork.locator('.phead .fl').textContent(), /Forked from wren\/original-atlas/);
   assert.equal(
     await fork.getByRole('link', { name: 'wren/original-atlas' }).getAttribute('href'),
-    '/-/wren/original-atlas?view=public',
+    '/wren/original-atlas?view=public',
   );
-  const forkUnavailable = await open('/-/ada/fork-unavailable');
+  const forkUnavailable = await open('/ada/fork-unavailable');
   assert.match(
     await forkUnavailable.locator('.phead .fl').textContent(),
     /Forked from a project that is no longer available/,
@@ -588,30 +588,30 @@ test('public discovery screens: explore, a profile signed out and as its person,
   assert.equal(await forkUnavailable.locator('.phead .fl a').count(), 0);
 
   // Lane titles only with the opt-in; a members-only plan shows no plan, no Left and no Items.
-  const titled = await open('/-/ada/titled');
+  const titled = await open('/ada/titled');
   assert.match(
     await titled.getByRole('region', { name: 'Open Lanes' }).textContent(),
     /Faster index rebuild/,
   );
-  const members = await open('/-/ada/members');
+  const members = await open('/ada/members');
   const membersText = await members.locator('main').textContent();
   assert.match(membersText, /plan is for its members/);
   assert.doesNotMatch(membersText, /Items? (are|is) left|open Items|Index rebuild/);
   assert.equal(await members.locator('nav.pstate').count(), 0);
 
-  const partial = await open('/-/ada/partial');
+  const partial = await open('/ada/partial');
   assert.match(await partial.locator('.glance').textContent(), /42 changes recorded this week/);
   assert.match(await partial.locator('nav.pstate').textContent(), /recorded since/);
   assert.match(await partial.getByRole('region', { name: 'Open Lanes' }).textContent(), /Recorded/);
 
   // Missing and private look the same (the read answers 404 for both).
-  const none = await open('/-/ada/private-one');
+  const none = await open('/ada/private-one');
   assert.match(await none.locator('.empty h3').textContent(), /No public project at this address/);
-  const nobody = await open('/-/nobody');
+  const nobody = await open('/nobody');
   assert.match(await nobody.locator('.empty h3').textContent(), /No one at @nobody/);
 
   // A profile lists only public projects; its head says the first and last activity in them (Item 6a251b23).
-  const pr = await open('/-/ada');
+  const pr = await open('/ada');
   assert.match(await pr.locator('.phead .fl').textContent(), /^First activity .+Last activity .+$/);
   assert.equal(await pr.locator('.row.xrow').count(), 2);
   // Its contributions come from the cached read: figures, a day grid, the agents with declared models, and where.
@@ -639,7 +639,7 @@ test('public discovery screens: explore, a profile signed out and as its person,
 
   // The person's own page: their devices and browsers (codes, never device names, a device with no code reads "without a code"; removed devices gone), their
   // stars, and every project they worked on, each read asked once. Seen as others do, the private parts go.
-  const me = await open('/-/ada?as=self');
+  const me = await open('/ada?as=self');
   assert.match(await me.getByRole('link', { name: 'Manage' }).getAttribute('href'), /\/account\/devices$/);
   const devices = await me
     .getByRole('region', { name: 'Devices and places you are signed in' })
@@ -674,16 +674,16 @@ test('public discovery screens: explore, a profile signed out and as its person,
   assert.equal(await me.getByRole('region', { name: 'Starred' }).count(), 0);
   assert.doesNotMatch(await me.locator('main').textContent(), /ledger-private/);
   // Your own page with nothing yet says what will show and how to start, and still lists your devices.
-  const fresh = await open('/-/kit?as=self');
+  const fresh = await open('/kit?as=self');
   assert.match(await fresh.getByRole('region', { name: 'Contributions' }).textContent(), /Nothing yet/);
   await fresh.getByRole('link', { name: 'Import a repository' }).waitFor();
   await fresh.getByRole('region', { name: 'Devices and places you are signed in' }).waitFor();
 
   for (const [name, path] of [
-    ['explore', '/-/explore'],
-    ['project', '/-/ada/atlas'],
-    ['profile', '/-/ada'],
-    ['profile-self', '/-/ada?as=self'],
+    ['explore', '/explore'],
+    ['project', '/ada/atlas'],
+    ['profile', '/ada'],
+    ['profile-self', '/ada?as=self'],
   ])
     for (const width of [1440, 390])
       for (const theme of ['dark', 'light']) {

@@ -24,7 +24,7 @@ test('billing home: monthly pool, bounded project list, chart/table, navigation 
   await page.locator('h1').getByRole('link', { name: 'Billing' }).click();
   assert.equal(await page.getByRole('region', { name: 'This month', exact: true }).count(), 1);
 
-  await page.goto('https://forge.test/-/account/billing?sample=pro&screen=__proto__');
+  await page.goto('https://forge.test/account/billing?sample=pro&screen=__proto__');
   await page.getByRole('region', { name: 'This month', exact: true }).waitFor();
   assert.match(await page.locator('h1').textContent(), /Billing/);
 

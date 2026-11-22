@@ -155,7 +155,7 @@ export const details = internalQuery({
       accountBlock?.blocked === true ||
       Boolean(recipient && (await invitationWasRevoked(ctx, invite, recipient)));
     const web = process.env.FORGE_WEB_URL;
-    const path = '/-/account/people';
+    const path = '/account/people';
     const url = web ? new URL(path, web).href : path;
     // One line, no control characters: the name reaches a mail subject.
     const name =

@@ -13,7 +13,7 @@ import { chromiumLaunchOptions, settleBrowserPage } from './browser-runtime.mjs'
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../', import.meta.url));
 const origin = 'https://forge.test';
-const project = '/-/sample/tidepool';
+const project = '/sample/tidepool';
 const shots = process.env.FORGE_SIDEBAR_SHOTS;
 const fixture = `
 import React from 'react';
@@ -70,7 +70,7 @@ const frames = [
   },
   {
     name: 'Account',
-    base: '/-/account',
+    base: '/account',
     tabs: [
       ['Projects', ''],
       ['Billing', '/billing'],

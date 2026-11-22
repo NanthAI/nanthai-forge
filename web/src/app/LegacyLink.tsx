@@ -32,7 +32,7 @@ const failureWords: Record<CeremonyFailure | 'expired', string> = {
 };
 
 function LegacyForm() {
-  // Back on the sign-in page, a passkey sign-in returns where it started, such as /-/device.
+  // Back on the sign-in page, a passkey sign-in returns where it started, such as /device.
   const back = signInHref(safeNext(useSearch().get('next')));
   const { isLoaded, isSignedIn, sessionId, getToken } = Clerk.useAuth();
   const [busy, setBusy] = useState(false);

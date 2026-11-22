@@ -429,7 +429,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       assert.match(await handBack.textContent(), /Decide which client ships/);
       assert.equal(
         await handBack.getByRole('link', { name: 'Open the thread' }).getAttribute('href'),
-        '/-/sample-one/tidepool/lanes/5d1c7a0e-0000-4000-8000-000000000004/thread',
+        '/sample-one/tidepool/lanes/5d1c7a0e-0000-4000-8000-000000000004/thread',
       );
       const ahead = needs.locator('.grp', { has: page.getByText('Asked ahead', { exact: true }) });
       assert.equal(await ahead.getByRole('button', { name: 'Use it', exact: true }).count(), 1);
@@ -438,7 +438,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       await request.locator('summary').click();
       assert.equal(
         await request.getByRole('link', { name: 'Review the Lane' }).getAttribute('href'),
-        '/-/sample-one/tidepool/lanes/5d1c7a0e-0000-4000-8000-000000000009',
+        '/sample-one/tidepool/lanes/5d1c7a0e-0000-4000-8000-000000000009',
       );
       assert.equal(await request.getByRole('button', { name: 'Approve', exact: true }).count(), 0);
       assert.match(await needs.locator('.dec').first().textContent(), /Tried both clients/);

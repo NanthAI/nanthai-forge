@@ -1,26 +1,26 @@
 {
   "queryRedirects": [
     {
-      "path": "/-/explore?__forge_page=synthetic",
-      "location": "/-/explore?="
+      "path": "/explore?__forge_page=synthetic",
+      "location": "/explore?="
     },
     {
-      "path": "/-/explore?__forge_page=synthetic&q=kept",
-      "location": "/-/explore?q=kept"
+      "path": "/explore?__forge_page=synthetic&q=kept",
+      "location": "/explore?q=kept"
     }
   ],
   "accountRedirects": [
     {
-      "path": "//-/account",
-      "location": "/-/account"
+      "path": "//account",
+      "location": "/account"
     },
     {
-      "path": "///-/account/devices?tab=current",
-      "location": "/-/account/devices?tab=current"
+      "path": "///account/devices?tab=current",
+      "location": "/account/devices?tab=current"
     }
   ],
   "rawDotPath": {
-    "path": "/-/ada/./atlas",
+    "path": "/ada/./atlas",
     "status": 404,
     "body": "",
     "functionOperations": 0

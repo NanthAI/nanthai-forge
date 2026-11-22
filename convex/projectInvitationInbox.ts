@@ -86,8 +86,8 @@ export const inbox = query({
         state,
         href:
           account?.handle && project.slug
-            ? `/-/${encodeURIComponent(account.handle)}/${encodeURIComponent(project.slug)}`
-            : '/-/account',
+            ? `/${encodeURIComponent(account.handle)}/${encodeURIComponent(project.slug)}`
+            : '/account',
       });
     }
     return { rows, cursor: invitationPageCursor(page) };

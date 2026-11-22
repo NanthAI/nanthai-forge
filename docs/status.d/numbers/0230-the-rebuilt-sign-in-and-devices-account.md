@@ -4,7 +4,7 @@ index in pages of 20, and the page loads the rest automatically. Ending other br
 fresh passkey or linked GitHub check; a passkey-add notice is acknowledged only
 in the viewing browser. Browser inactivity is one server setting, approved at 14 days. Current verified GitHub addresses replace
 previous values, including clearing an address the provider no longer reports.
-Draft Terms and Privacy pages are public under `/-`; account creation records
+Draft Terms and Privacy pages are public at `/terms` and `/privacy`; account creation records
 the displayed draft version in its existing write. Explicit Lane holders, takeover
 and accepted handover preserve saved work and appear in Sessions and Lane history
 when the project rollout setting is enabled. CLI `whoami` reports its existing

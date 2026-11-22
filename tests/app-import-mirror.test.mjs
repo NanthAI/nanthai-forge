@@ -124,8 +124,8 @@ test('every mirror state the shared sentence can return has a mark and a distanc
 test('Getting started opens the import page, and the old new-project form no longer imports itself', () => {
   const html = renderToStaticMarkup(h(Start));
   assert.ok(html.includes(`href="${hrefFor({ frame: 'bare', page: 'import' })}"`), 'the import door');
-  assert.equal(hrefFor({ frame: 'bare', page: 'import' }), '/-/new/import');
+  assert.equal(hrefFor({ frame: 'bare', page: 'import' }), '/new/import');
   const old = readFileSync(new URL('../web/src/NewHostedProject.tsx', import.meta.url), 'utf8');
-  assert.match(old, /href="\/-\/new\/import"/);
+  assert.match(old, /href="\/new\/import"/);
   assert.doesNotMatch(old, /ImportGithubProject/);
 });

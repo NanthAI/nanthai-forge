@@ -164,7 +164,7 @@ test('every link on the page has a real destination', () => {
       assert.equal(href, 'https://github.com/NanthAI/nanthai-forge', href);
     else
       assert.ok(
-        ['/', '/projects', '/llms.txt', '/-/privacy', '/-/terms'].includes(href) ||
+        ['/', '/signin', '/new/import', '/llms.txt', '/privacy', '/terms'].includes(href) ||
           /^\/docs\/(?:[a-z0-9/-]+\/)?$/.test(href),
         `${href} is a page the site serves`,
       );
@@ -175,11 +175,11 @@ test('every link on the page has a real destination', () => {
     ['Development status', '/docs/status/'],
     ['Security', '/docs/security/'],
     ['Source', 'https://github.com/NanthAI/nanthai-forge'],
-    ['Privacy', '/-/privacy'],
-    ['Terms', '/-/terms'],
+    ['Privacy', '/privacy'],
+    ['Terms', '/terms'],
   ])
     assert.ok(html.includes(`<a href="${href}">${label}</a>`), label);
-  assert.match(html, /<a class="in" href="\/projects">Sign in<\/a>/);
+  assert.match(html, /<a class="in" href="\/signin">Sign in<\/a>/);
   assert.match(
     text,
     /in open development and builds itself\. There is no public service or package yet, and nothing is charged\. Development status/,
@@ -210,7 +210,7 @@ test('the pricing section shows the billing contract plans and says nothing is c
   }
   // Paid plans cannot be started yet: only the free plan has an action, and it is the app's first run.
   assert.equal((html.match(/class="btn/g) ?? []).length, 1);
-  assert.ok(shown[0].includes('<a class="btn go" href="/projects">Import a repository</a>'));
+  assert.ok(shown[0].includes('<a class="btn go" href="/new/import">Import a repository</a>'));
   assert.ok(
     text.includes(`Extra landings $${extraBlock.usd} per ${extraBlock.landings}, only when you go over`),
   );

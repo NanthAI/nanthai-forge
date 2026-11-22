@@ -21,7 +21,8 @@ import {
   publicCodeIngressKey,
   publicCodeRemaining,
 } from '../../src/public-code-cache.js';
-import { normalizeAccountPathname } from '../../web/src/app/paths.js';
+import { reservedHandles } from '../../src/readable-urls.js';
+import { earlierAppPath, isAppPath, normalizeAccountPathname } from '../../web/src/app/paths.js';
 import { exploreMeta, profileMeta, projectMeta, withMeta, type PageMeta } from '../lib/public-meta.js';
 
 const SHARED = PUBLIC_CODE_SHARED;
@@ -30,8 +31,10 @@ const PAGE_KEY = '__forge_page';
 // Netlify copies the incoming query onto a redirect whose target has no query entries.
 // One empty entry explicitly clears it; a lone '?' does not. It has no page identity.
 const EMPTY_QUERY = '?=';
-/** First path segments under /- that are app places, never a profile handle (web/src/app/paths.ts). */
-const RESERVED = new Set(['account', 'signin', 'device', 'new', 'public', 'explore', 'terms', 'privacy']);
+/** A handle and a project slug (src/readable-urls.ts handleError, src/project-routes.ts slug). Any other shape, such as
+ * a probe for /wp-login.php or /.env, is never a public page and never reaches the backend. */
+const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/;
+const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/;
 /** Set on every function response, independent of static-page headers. */
 const SECURITY: Record<string, string> = {
   'x-frame-options': 'DENY',
@@ -40,7 +43,7 @@ const SECURITY: Record<string, string> = {
   'strict-transport-security': 'max-age=31536000',
   'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
   'content-security-policy':
-    "default-src 'self'; script-src 'self' 'sha256-ex8kSqwf1WiPVL0BhnAXX54XDAjFXEHkC+qlMJg0x4Q=' 'sha256-p2Joqh9y7vaFYpQIDQO6qeRWJS1NU+RqnHs4bxxN1+w=' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://*.clerk.accounts.dev; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src https://challenges.cloudflare.com https://*.clerk.accounts.dev; worker-src 'self' blob:; manifest-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
+    "default-src 'self'; script-src 'self' 'sha256-ex8kSqwf1WiPVL0BhnAXX54XDAjFXEHkC+qlMJg0x4Q=' 'sha256-/bpm5bmsSEb1V97OjNCSeP/6USgbOt6CwVT1lPKPzK4=' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://*.clerk.accounts.dev; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src https://challenges.cloudflare.com https://*.clerk.accounts.dev; worker-src 'self' blob:; manifest-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'",
 };
 const unavailable = (status: number, body: string) =>
   new Response(body, {
@@ -146,19 +149,22 @@ export function readFor(
 ): { json: string; meta: (origin: string, body: never) => PageMeta } | null {
   let parts: string[];
   try {
-    const segments = pathname.split('/').filter(Boolean);
-    if (segments[0] !== '-') return null;
-    parts = segments.slice(1).map(part => decodeURIComponent(part).toLowerCase());
+    parts = pathname
+      .split('/')
+      .filter(Boolean)
+      .map(part => decodeURIComponent(part).toLowerCase());
   } catch {
     return null;
   }
-  if (parts.length === 1 && parts[0] === 'explore')
+  const [first = '', second] = parts;
+  if (parts.length === 1 && first === 'explore')
     return { json: '/-/public/v1/explore/active.json', meta: exploreMeta as never };
-  if (parts.length === 1 && !RESERVED.has(parts[0]!))
-    return { json: `/-/public/v1/profile/${encodeURIComponent(parts[0]!)}.json`, meta: profileMeta as never };
-  if (parts.length === 2 && !RESERVED.has(parts[0]!))
+  if (!HANDLE.test(first) || reservedHandles.has(first)) return null;
+  if (parts.length === 1)
+    return { json: `/-/public/v1/profile/${encodeURIComponent(first)}.json`, meta: profileMeta as never };
+  if (parts.length === 2 && SLUG.test(second!))
     return {
-      json: `/-/public/v1/project/${encodeURIComponent(parts[0]!)}/${encodeURIComponent(parts[1]!)}.json`,
+      json: `/-/public/v1/project/${encodeURIComponent(first)}/${encodeURIComponent(second!)}.json`,
       meta: projectMeta as never,
     };
   return null;
@@ -208,7 +214,15 @@ async function respond(request: Request) {
   const origin = siteOrigin();
   const path = canonicalPath(normalizeAccountPathname(url.pathname));
   const data = path === '/sitemap.xml' || path.startsWith('/-/public/v1/');
-  if (path !== '/sitemap.xml' && !path.startsWith('/-/'))
+  // A page address from before the switch to the root (Item b0704959) moves for good, keeping its query, and always
+  // to this site: the Location is absolute and the path starts with exactly one "/".
+  const earlier = data ? null : earlierAppPath(path);
+  if (earlier)
+    return new Response(null, {
+      status: 301,
+      headers: { location: `${origin ?? url.origin}${earlier}${url.search}`, 'cache-control': 'no-store' },
+    });
+  if (!data && !isAppPath(path))
     return new Response(
       '<!doctype html><html><head><title>Not found · Forge</title></head><body><h1>Page not found</h1></body></html>',
       {
@@ -250,12 +264,15 @@ export default async (request: Request) => {
 };
 
 export const config: Config = {
-  // Include slash/case variants so they reach canonicalization before any public read.
+  // Every one- or two-segment page address, with slash/case variants, so they reach canonicalization before any
+  // public read; a name with a dot is a file. The site's own files (docs, assets) are served before the function.
   path: [
-    '/:page(\\/*-\\/+[^\\/]+(?:\\/+[^\\/]+)?\\/*)',
-    '/-/public/v1/*',
+    '/:page(\\/*[^\\/.]+(?:\\/+[^\\/.]+)?\\/*)',
+    // The cached reads under /-/public/v1/, and the 301 for every other earlier /-/ address (netlify.toml has none).
+    '/-/*',
     '/:sitemap(\\/*[sS][iI][tT][eE][mM][aA][pP][.][xX][mM][lL]\\/*)',
   ],
+  preferStatic: true,
   // Native enforcement precedes handler redirects, but its distributed count can lag.
   // Keep it at the platform: no per-request shared counter or additional I/O.
   rateLimit: { windowLimit: 60, windowSize: 60, aggregateBy: ['ip', 'domain'] },

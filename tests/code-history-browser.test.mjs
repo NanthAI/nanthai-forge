@@ -22,7 +22,7 @@ import { chromiumLaunchOptions, settleBrowserPage } from './browser-runtime.mjs'
 const root = fileURLToPath(new URL('../', import.meta.url));
 const axe = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const shots = process.env.FORGE_CODE_HISTORY_SHOTS;
-const base = '/-/ada/atlas/code';
+const base = '/ada/atlas/code';
 const PATH = 'src/parser/stream-parser.ts';
 const OTHER = 'src/lines.ts';
 const LONG =
@@ -225,7 +225,7 @@ test('What landed narrowed to one file: bounded steps, kept rows, exact address,
   await receipt.getByText(/^A multi-byte character split across two chunks/).waitFor();
   const lane = receipt.getByRole('link', { name: 'See the Lane' });
   await lane.waitFor();
-  assert.equal(await lane.getAttribute('href'), '/-/ada/atlas/lanes/lane-300');
+  assert.equal(await lane.getAttribute('href'), '/ada/atlas/lanes/lane-300');
   assert.match(await receipt.textContent(), /6 min 0 s from land/);
   const handles = cells => cells.locator('.who.handle > .mono').allTextContents();
   assert.deepEqual(await handles(list(deep).locator('a.hrow > .who')), ['mara/amber-fox', '@mara']);

@@ -6,7 +6,7 @@ import { Key } from '../../ds';
 
 const OUTPUT = `$ nforge host . --delete-projects --trash
 request ID  every project in the trash, the list fixed when it is made, good for 30 minutes
-approve   a person only, in the browser: /-/account?request=ID
+approve   a person only, in the browser: /account?request=ID
 withdraw  nforge host . --delete-projects --withdraw ID
 wait      nforge host . --delete-projects --wait ID      one subscription, no polling
 

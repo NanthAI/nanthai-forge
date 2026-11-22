@@ -139,7 +139,7 @@ test('confirmed legacy additions complete and registration failures leave no suc
 });
 
 async function begin(s) {
-  return s.call(links.startSignInWithGithub, { redirectTo: 'https://forge.example/-/signin/passkey' });
+  return s.call(links.startSignInWithGithub, { redirectTo: 'https://forge.example/signin/passkey' });
 }
 
 test('a passkey account links a provider-attested numeric GitHub identity without creating an account and can connect repositories', async t => {

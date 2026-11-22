@@ -33,7 +33,7 @@ const backups = [
 ];
 const imports = [{ id: 'i1', repository: 'sample/parser', ref: 'main', phase: 'ready', createdAt: now - 5 * 86400000 }, { id: 'i2', repository: 'sample/' + 'x'.repeat(70), ref: 'release/2026', phase: 'ready', createdAt: now - 50 * 86400000 }];
 const noop = () => {};
-const trail = [{ label: 'Docs site', href: '/-/sample-owner/docs-site' }, { label: 'Settings', href: '/-/sample-owner/docs-site/settings' }, { label: 'Project' }];
+const trail = [{ label: 'Docs site', href: '/sample-owner/docs-site' }, { label: 'Settings', href: '/sample-owner/docs-site/settings' }, { label: 'Project' }];
 let failOnce = q.get('fail') === '1';
 const extra = (
   <>
@@ -60,7 +60,7 @@ test('settings project: facts, rename keeps one operation across a failed save, 
   const fx = await viewFixture(t, fixture, 'Project settings', browser);
   const { open, check } = fx;
   if (shots) mkdirSync(shots, { recursive: true });
-  const path = '/-/sample-owner/docs-site/settings/project';
+  const path = '/sample-owner/docs-site/settings/project';
   {
     const { page, errors, context } = await open(1440, 'light', 'who=owner&fail=1', path);
     const main = page.locator('main');

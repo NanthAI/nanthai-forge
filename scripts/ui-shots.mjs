@@ -36,6 +36,11 @@ try {
     stage = 'credentials';
     const credentials = await readBotCredentials(config.credentials, config.base);
     const passkey = credentials.kind === 'passkey';
+    // The Clerk flow drove the earlier screens, which the site no longer serves (Item b0704959).
+    if (!passkey && config.pages.some(p => p !== 'device'))
+      throw new ShotError(
+        'The earlier screens are no longer served. Enroll the bot passkey (scripts/ui-bot-setup.mjs) and capture again.',
+      );
     const projectId = config.project || credentials.projectId;
     const needsProject = config.pages.some(
       p => p !== 'device' && !(passkey && ['home', 'settings:devices'].includes(p)),

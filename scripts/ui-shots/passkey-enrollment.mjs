@@ -2,6 +2,7 @@
 import { botHandle, botPasskey } from './bot-credentials.mjs';
 import { botBrowserIdentity, finishClerkBotSignIn } from './browser.mjs';
 import { ShotError } from './options.mjs';
+import { signInHref } from '../../web/src/app/paths.ts';
 import {
   observePasskeySession,
   openNativeBotSignIn,
@@ -41,7 +42,7 @@ async function verify(browser, config, entry) {
 }
 
 async function linkExistingBot(page, { origin, deployment, clerkHandle }, clerk) {
-  const url = new URL('/-/signin?link=existing', origin);
+  const url = new URL(signInHref(undefined, true), origin);
   await page.goto(url.href, { waitUntil: 'domcontentloaded' });
   if (page.url() !== url.href) throw new ShotError('Expected the existing-account passkey page.');
   await page.getByRole('button', { name: 'Continue with your existing sign-in', exact: true }).click();

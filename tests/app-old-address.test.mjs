@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Old addresses (Item d61f36fe): every address the old site served maps to its place in the rebuilt app, with no read
 // for a plain path; an address that names only ids is handed to the resolver with the ids it must look up. Targets are
-// built from paths.ts, so the table holds under ROOT "/-" now and "" after the switch.
+// built from paths.ts; the app is at the root since Item b0704959.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
@@ -62,12 +62,13 @@ const paths = [
   // Dropped screens and the page that replaced one (Item f2ee8381). Guidance is the rebuilt Settings > Agents;
   // contributions are rebuilt with the fork work (d1303286), so their old page opens Lanes, where offered work is read;
   // an import's explorer, its source zones and the code map open Explore, which covers discovery.
-  [`${base}/settings/agents`, '', project('settings', 'agents')],
   [`${base}/settings/contributions`, '', project('lanes')],
   ['/', '?codescape=1', hrefFor({ frame: 'discover', page: 'explore' })],
   ['/projects', '?codescape=1&tour=1', hrefFor({ frame: 'discover', page: 'explore' })],
   ['/', '?codescape=1&zone=src&view=map', hrefFor({ frame: 'discover', page: 'explore' })],
   ['/', '?zone=src', hrefFor({ frame: 'discover', page: 'explore' })],
+  // Contact (an upstream request) is dropped with contributions: the account home.
+  ['/projects', '?surface=contact', `${hrefFor({ frame: 'account', place: 'projects' })}?surface=contact`],
 ];
 // Addresses that are already the new ones, or keep their shape, or keep their old screen.
 const unchanged = [
@@ -224,9 +225,11 @@ test('sign-in returns an old id-only link unchanged, and still refuses addresses
     safeNext(`/mara/tide-pool/decisions/${short('d', LANE)}`),
     `/mara/tide-pool/decisions/${short('d', LANE)}`,
   );
+  // An old plain path is same-origin and redirects after sign-in (main.tsx); the earlier /- form and static pages are not.
+  assert.equal(safeNext('/projects'), '/projects');
   for (const bad of [
-    '/mara/tide-pool',
-    '/projects',
+    '/-/account',
+    '/docs/',
     '//evil.example/projects?project=x',
     'https://evil.example/projects?project=x',
   ])

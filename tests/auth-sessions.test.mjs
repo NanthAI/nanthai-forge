@@ -372,7 +372,7 @@ function githubFixture(t) {
 test('B-05: a fresh GitHub check ends only this account’s other browsers and keeps its new returning session', async t => {
   const s = githubFixture(t);
   const started = await s.call(githubSessions.startSignInWithGithub, {
-    redirectTo: 'https://forge.example/-/account/devices',
+    redirectTo: 'https://forge.example/account/devices',
   });
   const proof = await s.ticket(started.state);
   const result = await s.call(githubSessions.completeSignInWithGithub, proof);
@@ -385,7 +385,7 @@ test('B-05: a fresh GitHub check ends only this account’s other browsers and k
 test('B-05: a GitHub re-check cannot use another account, another originating browser, expired state or a revoked browser', async t => {
   const s = githubFixture(t);
   const start = () =>
-    s.call(githubSessions.startSignInWithGithub, { redirectTo: 'https://forge.example/-/account/devices' });
+    s.call(githubSessions.startSignInWithGithub, { redirectTo: 'https://forge.example/account/devices' });
   let started = await start();
   await assert.rejects(
     s.call(githubSessions.completeSignInWithGithub, await s.ticket(started.state, 456)),
@@ -466,7 +466,7 @@ test('SI-01: the device passkey proof is session-bound, refuses a different acco
 test('SI-01: a GitHub device check proves the account without ending its other browsers', async t => {
   const s = githubFixture(t);
   const started = await s.call(githubSessions.startDeviceSignInWithGithub, {
-    redirectTo: 'https://forge.example/-/device',
+    redirectTo: 'https://forge.example/device',
   });
   const result = await s.call(githubSessions.completeSignInWithGithub, await s.ticket(started.state));
   assert.equal(result.status, 'complete');
@@ -518,7 +518,7 @@ test('SI-01 review: the GitHub end-all-devices route revokes only this account�
   s.tables.cliCredentials.set('device', device);
   s.tables.cliCredentials.set('foreign', { ...device, _id: 'foreign', owner: 'other' });
   const started = await s.call(githubSessions.startEndDevicesWithGithub, {
-    redirectTo: 'https://forge.example/-/account/devices',
+    redirectTo: 'https://forge.example/account/devices',
   });
   const result = await s.call(githubSessions.completeSignInWithGithub, await s.ticket(started.state));
   assert.equal(result.status, 'complete');

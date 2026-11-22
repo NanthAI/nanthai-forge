@@ -672,7 +672,7 @@ function Fixture() {
             <LooseFoldView
               read={loose}
               setAside={record('setAside')}
-              allHref="/-/sample-one/tidepool/needs/loose-ends"
+              allHref="/sample-one/tidepool/needs/loose-ends"
               copy={async text => void writes.push(['copy', text])}
             />
           ) : null

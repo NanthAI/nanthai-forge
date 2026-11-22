@@ -8,7 +8,7 @@ Your account has access. A device uses that access, a sign-in proves it, and a s
 nforge auth status DEPLOYMENT_URL
 ```
 
-Check the deployment as well as the account. Use the **Sign-in and devices** (`/-/account/devices`) for the rebuilt account flow and the [current status](../status.md) for capabilities that are still being rebuilt. The [sign-in steps](../quickstart.md#sign-in) cover terminal approval and reconnecting.
+Check the deployment as well as the account. Use the **Sign-in and devices** (`/account/devices`) for the rebuilt account flow and the [current status](../status.md) for capabilities that are still being rebuilt. The [sign-in steps](../quickstart.md#sign-in) cover terminal approval and reconnecting.
 
 ## Keep the three records separate
 

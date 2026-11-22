@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Old addresses (Item d61f36fe): every address the old site served and a person or an agent may still hold, mapped to
-// its place in the rebuilt app. Pure, and built from paths.ts, so it works under ROOT "/-" now and under "" after the
-// switch. A plain path maps with no read. An address that names only ids (`?project=<id>`, `/decisions/<id>`,
+// its place in the app. Pure, and built from paths.ts (the app is at the root since Item b0704959; "/-/…" is the
+// 301 in netlify.toml). A plain path maps with no read. An address that names only ids (`?project=<id>`, `/decisions/<id>`,
 // `/review/<id>`) needs one access-checked read (convex/urlLegacy.ts): the page that renders it is OldAddress.tsx.
 import { longId } from '../../../src/project-routes';
 import { reservedHandles } from '../../../src/readable-urls';
@@ -118,10 +118,9 @@ export function oldAddress(pathname: string, search: string): OldAddress | null 
   if (first === '-') return null;
   if (parts.length <= 1 && (first === '' || first === 'projects' || first === 'settings')) {
     // Explore an import, followed imports, source zones and the code map are dropped (Item f2ee8381): Explore covers
-    // discovery. Contact keeps its old screen.
+    // discovery. Contact (an upstream request) is dropped with contributions and opens the account home.
     if (params.has('codescape') || params.has('zone'))
       return { kind: 'go', to: hrefFor({ frame: 'discover', page: 'explore' }) };
-    if (params.get('surface') === 'contact') return null;
     const projectId = params.get('project');
     if (projectId) {
       const picked = fromQuery(params);

@@ -19,10 +19,12 @@ import { moduleUrl } from './convex-module.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const { projectTabs, hostedSections, entryFor } = await import(moduleUrl('../web/src/shell/route.ts'));
+const { reservedHandles } = await import(moduleUrl('../src/readable-urls.ts'));
 const read = path => readFileSync(join(root, path), 'utf8');
 const githubBlob = 'https://github.com/NanthAI/nanthai-forge/blob/main/';
 
-// Robots uses longest matching rule; an equally specific Allow wins. Match the full
+// Robots uses the longest matching rule, counted over the whole pattern ("*" and "$" included, as RFC 9309 crawlers
+// count it); an equally specific Allow wins. Match the full
 // path + query so legacy signed-in destinations at / cannot inherit the root Allow.
 function crawlable(robots, url) {
   const rules = [...robots.matchAll(/^(Allow|Disallow): (.+)$/gm)].map(([, kind, pattern]) => {
@@ -34,7 +36,7 @@ function crawlable(robots, url) {
       .join('.*');
     return {
       kind,
-      length: text.replaceAll('*', '').length,
+      length: pattern.length,
       matches: new RegExp(`^${regex}${terminal ? '$' : ''}`).test(url),
     };
   });
@@ -161,30 +163,47 @@ test('llms.txt answers the public page prompt explain-first and states the devel
   const robots = read('web/public/robots.txt');
   for (const url of ['/', '/llms.txt', '/llms-full.txt', '/docs/status.md', '/assets/index-abc.js'])
     assert.ok(crawlable(robots, url), url);
-  for (const url of ['/projects', '/app.html', '/device', '/?project=abc', '/settings', '/owner/repo'])
+  for (const url of ['/projects', '/app.html', '/device', '/?project=abc', '/settings', '/settings/x'])
     assert.ok(!crawlable(robots, url), url);
   // Public discovery (Item 8947a779): explore, profiles, public project front pages and their cached reads are open;
-  // deeper project places and signed-in places of the rebuilt app stay closed.
+  // deeper project places, query links, signed-in places and the earlier /-/ addresses (301s) stay closed.
   for (const url of [
-    '/-/explore',
-    '/-/ada',
-    '/-/ada/atlas',
+    '/explore',
+    '/ada',
+    '/ada/atlas',
     '/-/public/v1/project/ada/atlas.json',
     '/-/public/v1/explore/active.json',
     '/sitemap.xml',
   ])
     assert.ok(crawlable(robots, url), url);
   for (const url of [
-    '/-/ada/atlas/lanes',
-    '/-/ada/atlas/plan/abc',
-    '/-/ada/atlas/needs-me/held',
+    '/ada/atlas/lanes',
+    '/ada/atlas/plan/abc',
+    '/ada/atlas/needs-me/held',
+    '/account',
+    '/account/billing',
+    '/signin',
+    '/device',
+    '/new',
+    '/ada/atlas?view=public',
+    '/-/ada/atlas',
+    '/-/explore',
+    '/-',
     '/-/account',
-    '/-/account/billing',
-    '/-/signin',
-    '/-/device',
-    '/-/new',
+    '/?project=abc&lane=l1',
+    '/explore?q=x',
   ])
     assert.ok(!crawlable(robots, url), url);
+  // Every reserved first segment but the public pages is closed, exactly and as a folder; a handle that starts with
+  // one stays open.
+  for (const name of reservedHandles) {
+    // docs and assets are the site's own static folders.
+    const open = ['explore', 'terms', 'privacy', 'docs', 'assets'].includes(name);
+    assert.equal(crawlable(robots, `/${name}`), open, name);
+    if (name !== 'docs' && name !== 'assets')
+      assert.equal(crawlable(robots, `/${name}/x`), false, `${name}/x`);
+    assert.ok(crawlable(robots, `/${name}ton`), `${name}ton`);
+  }
 });
 
 test('agent discovery teaches current contract verbs and shares measured B1.5d/P6 evidence', () => {
@@ -349,14 +368,7 @@ test('robots excludes every account and project route derived from the shell rou
   assert.ok(accountType, 'account route union is present');
   const accountTabs = [...accountType.matchAll(/'([^']+)'/g)].map(match => match[1]);
   assert.ok(accountTabs.length > 0);
-  const denied = new Set([
-    '/settings',
-    '/settings/you',
-    '/device',
-    '/api/projects',
-    '/local/project',
-    '/new-handle/new-project',
-  ]);
+  const denied = new Set(['/settings', '/settings/you', '/device', '/api/projects', '/local/project']);
   for (const tab of accountTabs) {
     denied.add(`/${tab}`);
     denied.add(`/?surface=${tab}`);
@@ -375,5 +387,12 @@ test('robots excludes every account and project route derived from the shell rou
   // Catch-all coverage also protects future/unknown project sections and query orderings.
   for (const url of ['/?x=1&project=test', '/?tab=code', '/future-owner/future-project/new-section'])
     denied.add(url);
-  for (const url of denied) assert.equal(crawlable(robots, url), false, url);
+  // b0704959: Explore and a project's front page are the public discovery pages at the root; deeper places stay closed.
+  for (const url of denied)
+    assert.equal(
+      crawlable(robots, url),
+      url === '/explore' || (/^\/[^/?]+\/[^/?]+$/.test(url) && !reservedHandles.has(url.split('/')[1])),
+      url,
+    );
+  assert.ok(crawlable(robots, '/new-handle/new-project'));
 });

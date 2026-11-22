@@ -124,7 +124,7 @@ createRoot(document.getElementById('root')!).render(
             rest: 'lane-a',
           }}
           projectId={'p1' as never}
-          trail={[{ label: 'tide-pool', href: '/-/sample-owner/tide-pool' }, { label: 'Lane' }]}
+          trail={[{ label: 'tide-pool', href: '/sample-owner/tide-pool' }, { label: 'Lane' }]}
           who="sample-owner/amber-fox"
           nextOffset={null}
           onMore={() => undefined}

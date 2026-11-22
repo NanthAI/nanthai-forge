@@ -204,7 +204,8 @@ test('design system stress text, zoom reflow and maximum-page Dock reorder', asy
             await page.evaluate(() => document.fonts.ready);
             await checkPanelTitles(page);
           });
-          for (const screen of ['you', 'secrets', 'check', 'place']) {
+          // The placeholder of a place without its own screen has no tools since Item b0704959 (no old screen to open).
+          for (const screen of ['you', 'secrets', 'check']) {
             await t.test(`${screen} keeps a readable sentence beside its tools or above them`, async () => {
               await page.goto(`https://forge.test/${screen}`);
               await page.locator('.head > .tools > *').first().waitFor();

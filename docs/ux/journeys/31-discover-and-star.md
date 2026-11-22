@@ -1,6 +1,6 @@
 # Journey 31 · Discover and star projects
 
-A visitor can open Explore at `/-/explore`, search by name or handle, or follow a link to a public project or a person's or organisation's profile. Private and missing projects give the same answer. A signed-in person can use the same public page and open the project's workspace from it.
+A visitor can open Explore at `/explore`, search by name or handle, or follow a link to a public project or a person's or organisation's profile. Private and missing projects give the same answer. A signed-in person can use the same public page and open the project's workspace from it.
 
 | Step | What Forge does |
 | --- | --- |

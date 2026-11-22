@@ -139,13 +139,13 @@ test('the email names the inviter, the project and the role only, with the proje
     assert.equal(email.to, 'new@example.com');
     assert.equal(email.subject, '@olive invited you to olive/tools on Forge');
     assert.match(email.text, /read and change olive\/tools/);
-    assert.match(email.text, /https:\/\/forge\.example\/-\/account\/people/);
+    assert.match(email.text, /https:\/\/forge\.example\/account\/people/);
     const all = `${email.subject}\n${email.text}\n${email.html}`;
     for (const secret of ['wren', 'rook', 'user_', 'Access project', 'synthetic'])
       assert.ok(!all.includes(secret), `email leaks ${secret}`);
     assert.ok(!/<img|<script|utm_|\?/.test(email.html), 'no image, script, tracking or query string');
     const links = [...email.html.matchAll(/href="([^"]+)"/g)].map(match => match[1]);
-    assert.deepEqual(links, ['https://forge.example/-/account/people']);
+    assert.deepEqual(links, ['https://forge.example/account/people']);
     // Escaped: a name cannot inject markup.
     assert.ok(
       !mail.inviteEmail({ inviter: '<b>', project: 'p', role: 'read', url: 'u' }).html.includes('<b><'),

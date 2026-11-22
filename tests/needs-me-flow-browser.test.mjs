@@ -20,7 +20,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const shots = process.env.FORGE_NEEDS_SHOTS || null;
 const FIXTURE = 'tests/browser/needs-me.tsx';
-const HOME = '/-/sample-one/tidepool';
+const HOME = '/sample-one/tidepool';
 const STOPS = ['editing', 'saved', 'queued', 'checking'];
 /** The picture's size step for its width (web/src/app/flow/geometry.ts `tierOf`). */
 const tierOf = width => (width >= 1000 ? 2 : width >= 640 ? 1 : 0);

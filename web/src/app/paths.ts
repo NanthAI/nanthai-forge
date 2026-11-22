@@ -2,11 +2,44 @@
 // The rebuilt app's addresses (Item 84125787). One codec: every frame, link, key and palette entry builds its href here,
 // and the parser is its exact inverse, so a deep link opened in a new tab lands on the same place.
 //
-// While the old screens and their sign-in still serve the existing addresses, the rebuilt app lives under ROOT ("/-").
-// "-" can never be an account handle (src/readable-urls.ts), so no project address can collide with it. When the old
-// shell is removed, ROOT becomes "" and "/-/*" redirects to "/:splat"; nothing else changes. The server builds its links
-// to these addresses with the same root (src/project-routes.ts APP_ROOT; tests/approval-links.test.mjs keeps them equal).
-export const ROOT = '/-';
+// The app is served at the site root (Item b0704959): `/<handle>/<slug>` is both the project's page and the address
+// `nforge clone` and bindings store. Its first segments never collide with a handle: every app place and static root
+// is in src/readable-urls.ts reservedHandles. The app lived under "/-" before the switch; the cached public read
+// (netlify/functions/public-read.mts) answers every "/-/*" address with a 301 to its root form forever, because mails,
+// CLI output and board text carry those links. ROOT stays a name
+// so the server's links (src/project-routes.ts APP_ROOT) are pinned to it (tests/approval-links.test.mjs).
+export const ROOT = '';
+
+/** src/readable-urls.ts reservedHandles, copied because this module imports nothing (scripts load it as is): app
+ * pages, old addresses old-address.ts resolves before the app renders, server and static roots. A first segment here
+ * that is not one of the app's pages is no address; tests/app-shell-routes.test.mjs keeps the two lists equal. */
+const reserved = new Set([
+  'local',
+  'settings',
+  'projects',
+  'api',
+  'new',
+  'login',
+  'logout',
+  'import',
+  'imports',
+  'assets',
+  'auth',
+  'worker',
+  'github',
+  'device',
+  'approve',
+  'explore',
+  'agents',
+  'account',
+  'contact',
+  'signin',
+  'signup',
+  'public',
+  'terms',
+  'privacy',
+  'docs',
+]);
 
 export const projectPlaces = ['needs', 'lanes', 'plan', 'code', 'stats', 'settings'] as const;
 export type ProjectPlace = (typeof projectPlaces)[number];
@@ -70,12 +103,31 @@ const dec = (part: string) => {
   }
 };
 
+/** First path segments the site serves itself, never the app: the built documentation, its assets, and "-" (the
+ * cached public read at /-/public/v1/ and the 301 from every earlier /-/ address). */
+const siteRoots = new Set(['docs', 'assets', '-']);
+
+/** Whether the app serves this address. `/` is the static public page (web/index.html); a first segment with a dot
+ * is a file (llms.txt, favicon.svg); handles and slugs never contain one. */
 export function isAppPath(pathname: string) {
-  return pathname === ROOT || pathname.startsWith(`${ROOT}/`);
+  const first = pathname.split('/')[1] ?? '';
+  return (
+    pathname.startsWith('/') && first !== '' && !first.includes('.') && !siteRoots.has(first.toLowerCase())
+  );
 }
 
+/** An address from when the app lived under "/-" (before Item b0704959) as its address now, else null. The bare "/-"
+ * was the account home; the cached public read keeps its data under /-/public/v1/ and answers the same 301 (netlify/functions/public-read.mts). */
+export function earlierAppPath(pathname: string) {
+  const rest = /^\/+-(?=\/|$)(.*)$/.exec(pathname)?.[1];
+  if (rest === undefined || /^\/+public\/v1\//.test(rest)) return null;
+  // One leading "/" only: "/-//host" or "/-/\\host" must stay on this site, never become "//host".
+  return /^[/\\]*$/.test(rest) ? '/account' : rest.replace(/^[/\\]+/, '/');
+}
+
+/** The CDN can forward `//account` while the browser keeps its doubled slash; the app reads it as `/account`. */
 export function normalizeAccountPathname(pathname: string) {
-  return pathname.replace(/^\/{2,}(?=-\/account(?:\/|$))/, '/');
+  return pathname.replace(/^\/{2,}(?=account(?:\/|$))/, '/');
 }
 
 export function deleteRequestHref(requestId: string, existingSignIn = false) {
@@ -149,9 +201,9 @@ export function isPublicProjectView(route: AppRoute, signedIn: boolean, view: st
 
 export function parseAppPath(pathname: string): AppRoute {
   if (!isAppPath(pathname)) return { frame: 'missing', path: pathname };
-  const parts = pathname.slice(ROOT.length).split('/').filter(Boolean).map(dec);
+  const parts = pathname.split('/').filter(Boolean).map(dec);
   const [first, second, ...more] = parts;
-  if (!first || first === 'account') {
+  if (first === 'account') {
     const place = accountPlaces.find(name => accountSegment[name] === (second ?? ''));
     return place && more.length === 0 ? { frame: 'account', place } : { frame: 'missing', path: pathname };
   }
@@ -164,6 +216,11 @@ export function parseAppPath(pathname: string): AppRoute {
   if (first === 'new' && second === 'import' && !more.length) return { frame: 'bare', page: 'import' };
   if (first === 'explore')
     return second ? { frame: 'missing', path: pathname } : { frame: 'discover', page: 'explore' };
+  // An old address (`/projects`, `/settings`, `/local/…`) is resolved before the app renders (old-address.ts); any
+  // other reserved first segment is never a handle.
+  // Handles are lower case: /Account or /DOCS is a reserved place in another case, never a person; '-' is never one.
+  if (!first || first === '-' || reserved.has(first.toLowerCase()))
+    return { frame: 'missing', path: pathname };
   if (!second) return { frame: 'discover', page: 'profile', handle: first };
   const [segment = '', ...tail] = more;
   const place =
@@ -194,34 +251,4 @@ export function parseAppPath(pathname: string): AppRoute {
 
 function project(handle: string, name: string, place: ProjectPlace, section: string, rest: string): AppRoute {
   return { frame: 'project', handle, project: name, place, section, rest };
-}
-
-/** The existing screen that still serves a place until its rebuilt screen lands (stage C). Never under ROOT. */
-export function currentScreenHref(route: AppRoute): string | null {
-  if (route.frame === 'account')
-    return {
-      projects: '/projects',
-      billing: null,
-      people: '/settings',
-      devices: '/settings',
-      data: '/settings',
-    }[route.place];
-  if (route.frame !== 'project') return null;
-  const root = `/${enc(route.handle)}/${enc(route.project)}`;
-  switch (route.place) {
-    case 'needs':
-      return route.section === 'held' ? `${root}/activity` : root;
-    case 'lanes':
-      return route.rest ? `${root}/lanes/${enc(route.rest)}` : `${root}/lanes`;
-    case 'plan':
-      return `${root}/planning`;
-    case 'code':
-      return route.section === 'files' && route.rest
-        ? `${root}/code/${route.rest.split('/').map(enc).join('/')}`
-        : `${root}/code`;
-    case 'stats':
-      return null;
-    case 'settings':
-      return `${root}/settings/${{ '': 'access', checks: 'checks', mirror: 'general', secrets: 'general', agents: 'general', project: 'general', you: 'you' }[route.section] ?? 'general'}`;
-  }
 }

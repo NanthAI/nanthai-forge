@@ -36,7 +36,7 @@ export function projectMeta(origin: string, page: PublicProjectPage): PageMeta {
   return {
     title: `${handle}/${name} · Forge`,
     description: `${facts.join('. ')}.`,
-    url: `${origin}/-/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`,
+    url: `${origin}/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`,
     image: `${origin}/forge-badge-256.png`,
     kind: 'website',
   };
@@ -46,7 +46,7 @@ export function profileMeta(origin: string, page: { handle: string; projects: un
   return {
     title: `@${page.handle} · Forge`,
     description: `${plural(page.projects.length, 'public project')} by @${page.handle} on Forge.`,
-    url: `${origin}/-/${encodeURIComponent(page.handle)}`,
+    url: `${origin}/${encodeURIComponent(page.handle)}`,
     image: `${origin}/forge-badge-256.png`,
     kind: 'profile',
   };
@@ -56,7 +56,7 @@ export function exploreMeta(origin: string, page: { total: number; more?: boolea
   return {
     title: 'Explore public projects · Forge',
     description: `${plural(page.total, 'public project')}${page.more ? ' and more' : ''} on Forge, ordered by what landed this week.`,
-    url: `${origin}/-/explore`,
+    url: `${origin}/explore`,
     image: `${origin}/forge-badge-256.png`,
     kind: 'website',
   };

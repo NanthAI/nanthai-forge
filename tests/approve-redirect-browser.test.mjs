@@ -66,7 +66,7 @@ test('0a99ab23: /approve looks its link up once and opens the Lane page in place
     await page.route('**/*', async route => {
       const url = new URL(route.request().url());
       if (url.hostname !== 'forge.test') return route.abort();
-      if (url.pathname === '/-/approve' || url.pathname === '/start')
+      if (url.pathname === '/approve' || url.pathname === '/start')
         return route.fulfill({ contentType: 'text/html', body: html });
       const file = join(out, url.pathname.slice(1));
       if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
@@ -79,7 +79,7 @@ test('0a99ab23: /approve looks its link up once and opens the Lane page in place
     });
     // A page before the link, so Back shows where the reader came from.
     await page.goto('https://forge.test/start');
-    await page.goto(`https://forge.test/-/approve?${query}`);
+    await page.goto(`https://forge.test/approve?${query}`);
     t.after(async () => {
       await context.close();
       assert.deepEqual(errors, [], 'no page errors');
@@ -94,7 +94,7 @@ test('0a99ab23: /approve looks its link up once and opens the Lane page in place
       const page = await open(t, PHONE, `project=p1&submission=${SUBMISSION}&answer=lane`);
       // The link names its landing, so the Lane page decides that exact attempt.
       await page.waitForURL(
-        `https://forge.test/-/sample-owner/tide-pool/lanes/${LANE}?submission=${SUBMISSION}`,
+        `https://forge.test/sample-owner/tide-pool/lanes/${LANE}?submission=${SUBMISSION}`,
       );
       assert.deepEqual(await reads(page), [
         { name: 'urlProjects:approvalTarget', args: { projectId: 'p1', submission: SUBMISSION } },
@@ -104,14 +104,14 @@ test('0a99ab23: /approve looks its link up once and opens the Lane page in place
     });
     await t.test('the lane form opens the Lane page', async t => {
       const page = await open(t, DESK, `project=p1&lane=${LANE}&answer=lane`);
-      await page.waitForURL(`https://forge.test/-/sample-owner/tide-pool/lanes/${LANE}`);
+      await page.waitForURL(`https://forge.test/sample-owner/tide-pool/lanes/${LANE}`);
       assert.deepEqual(await reads(page), [
         { name: 'urlProjects:approvalTarget', args: { projectId: 'p1', lane: LANE } },
       ]);
     });
     await t.test('a settings request opens Needs me', async t => {
       const page = await open(t, DESK, 'project=p1&lane=setting%3Apolicy&answer=needs');
-      await page.waitForURL('https://forge.test/-/sample-owner/tide-pool');
+      await page.waitForURL('https://forge.test/sample-owner/tide-pool');
     });
     await t.test('a link naming nothing reads nothing and says so', async t => {
       const page = await open(t, DESK, 'project=p1');
@@ -122,10 +122,10 @@ test('0a99ab23: /approve looks its link up once and opens the Lane page in place
       for (const viewport of [DESK, PHONE]) {
         const page = await open(t, viewport, `project=p1&lane=${LANE}&answer=none`);
         await page.getByRole('heading', { name: 'No approval to open' }).waitFor();
-        assert.equal(new URL(page.url()).pathname, '/-/approve', 'the address stays the link');
+        assert.equal(new URL(page.url()).pathname, '/approve', 'the address stays the link');
         assert.equal(
           await page.getByRole('link', { name: 'Your projects' }).getAttribute('href'),
-          '/-/account',
+          '/account',
         );
         await page.emulateMedia({ reducedMotion: 'reduce' });
         await page.addScriptTag({ path: axePath });

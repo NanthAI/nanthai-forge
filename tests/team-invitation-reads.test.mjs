@@ -37,7 +37,7 @@ test('the shared inbox serves team invitations only to the verified recipient an
       teamName: 'Synthetic team',
       inviterHandle: 'olive',
       state: 'pending',
-      href: '/-/account/people',
+      href: '/account/people',
     },
   );
   assert.deepEqual(

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// A request to delete many projects for good (Item 7456856f), at /-/account?request=ID: the whole frozen list first,
+// A request to delete many projects for good (Item 7456856f), at /account?request=ID: the whole frozen list first,
 // then what goes and the typed count. Only the owner person approves, once; the server re-checks every project and
 // skips any that changed. One subscription (projectDeleteRequests:read), which the server writes on the decision and
 // once per project as its purge ends; nothing polls. Loaded with its route only.

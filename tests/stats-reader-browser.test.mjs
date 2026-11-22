@@ -103,7 +103,7 @@ test('stats: a reader gets the no-access notice in the frame and the rest of the
         body: asset ? readFileSync(file) : html,
       });
     });
-    await page.goto(`https://forge.test/-/example/tidepool/stats${query}`);
+    await page.goto(`https://forge.test/example/tidepool/stats${query}`);
     await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
     return page;
   };
@@ -121,7 +121,7 @@ test('stats: a reader gets the no-access notice in the frame and the rest of the
   const nav = reader.getByRole('navigation', { name: 'Project' });
   assert((await nav.count()) >= 1, 'the frame still draws');
   await nav.getByRole('link', { name: 'Lanes' }).first().click();
-  await reader.waitForURL(/\/-\/example\/tidepool\/lanes/);
+  await reader.waitForURL(/\/example\/tidepool\/lanes/);
   await reader.locator('h1').waitFor();
 
   // A signed-out visitor gets the same notice; any other failure shows a retry, not a blank app.

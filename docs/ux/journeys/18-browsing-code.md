@@ -38,7 +38,7 @@ Walked: `history` (status and a two-entry log), `landings`, `lane-history`, `hel
 
 ## Web history and Code, as specified (Items 3968a655, 90e5bc9c)
 
-The rebuilt Code place under `/-` answers J18-1 for history and leaves blame and compare open. Question 64 on 581bd373 stays open for the owner. The run brief settled its first half: history is a list of landings.
+The rebuilt Code place answers J18-1 for history and leaves blame and compare open. Question 64 on 581bd373 stays open for the owner. The run brief settled its first half: history is a list of landings.
 
 - **History is landings, not commits.** Code → What landed lists main's receipts, newest first, 25 at a time. Each row has the title from the landing message, who landed it (a public handle and agent run), when, and the check. A row opens its receipt: why, who and with which app, how it was checked, time to main where saved evidence covers it, the files it changed, and links to the files as that landing left them and to the Lane. Only receipt fields are read. A missing message is said as "Landing" plus the short State, never invented. A landing with no saved evidence shows no time to main.
 - **Files at an exact State.** Code → Files reads main, or any landing's State through `?at=`. Folders arrive one page at a time and the file one page at a time, so a large repository never downloads whole. A deep link opens its folders. `#L` selects a line. Binary files, submodules, missing paths and unavailable sources are said in words. Another source is never substituted.

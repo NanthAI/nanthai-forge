@@ -56,7 +56,7 @@ test('the security review hostile inputs stay inert: obfuscated schemes, raw HTM
     '<style>body{display:none}</style>',
     '<!-- secret-note -->',
     '[a](JaVaScRiPt:alert(1)) [b](java&#x73;cript:alert(1)) [c](java\tscript:alert(1))',
-    '[d](vbscript:msgbox) [e](file:///etc/passwd) [f](//evil.example) [g](\\\\evil.example) [h](/-/x)',
+    '[d](vbscript:msgbox) [e](file:///etc/passwd) [f](//evil.example) [g](\\\\evil.example) [h](/x)',
     '[ref][r]\n\n[r]: javascript:alert(4)',
     '<javascript:alert(5)>',
     '[![i](https://evil.example/p.png)](https://example.com)',
@@ -93,7 +93,7 @@ test('only http(s), mailto and in-page anchors become links, and outside links o
     ' JavaScript:x',
     'data:text/html,x',
     '//evil.example',
-    '/-/x',
+    '/x',
     'vbscript:x',
   ])
     assert.equal(safeHref(bad), null, bad);

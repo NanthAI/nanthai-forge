@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Headless smoke for the built web app: evaluate the Hosted chunk and every other chunk under a stub DOM and fail on
+// Headless smoke for the built web app: evaluate the app chunk (src/app/App.tsx, served at the root since Item b0704959) and every other chunk under a stub DOM and fail on
 // any module-evaluation error. This is what the browser does before it renders anything, and what failed on
 // 2026-10-28 ("Could not load Forge." from createRequire). Usage: node scripts/web-smoke-load.mjs <build dir> [ENV_NAME...]
 // Each ENV_NAME must be set and its value baked into a chunk; otherwise the app renders "Forge backend is not configured"
@@ -11,9 +11,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const dir = resolve(process.argv[2] ?? 'hosted-web-dist');
 const assets = join(dir, 'assets');
-const hosted = JSON.parse(readFileSync(join(dir, '.vite/manifest.json'), 'utf8'))['src/Hosted.tsx']?.file;
-if (!hosted) (console.error('web smoke: src/Hosted.tsx is missing from the build manifest'), process.exit(1));
-const chunks = [hosted, ...readdirSync(assets).map(name => `assets/${name}`)].filter(
+const app = JSON.parse(readFileSync(join(dir, '.vite/manifest.json'), 'utf8'))['src/app/App.tsx']?.file;
+if (!app) (console.error('web smoke: src/app/App.tsx is missing from the build manifest'), process.exit(1));
+const chunks = [app, ...readdirSync(assets).map(name => `assets/${name}`)].filter(
   (file, index, all) => file.endsWith('.js') && !file.includes('.worker-') && all.indexOf(file) === index,
 );
 // Chunks are evaluated in a child with the stub DOM preloaded, one import() each, so a throwing chunk cannot hide the rest.
@@ -48,6 +48,6 @@ for (const name of process.argv.slice(3)) {
   if (!value) failures.push(`${name} is not set; the build would render "Forge backend is not configured"`);
   else if (!code.includes(value)) failures.push(`${name} is not baked into the built chunks`);
 }
-console.log(`web smoke: ${evaluated}/${chunks.length} chunks evaluated (Hosted chunk: ${hosted})`);
+console.log(`web smoke: ${evaluated}/${chunks.length} chunks evaluated (app chunk: ${app})`);
 if (failures.length) (console.error(failures.join('\n')), process.exit(1));
 process.exit(0);

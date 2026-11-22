@@ -78,7 +78,7 @@ for (const visibility of ['private', 'public']) {
     // A public pending status keeps the approve link the board note carries (the app-root form).
     assert.equal(
       posted(f).link,
-      visibility === 'public' ? `${web}/-/ada/tide-pool/lanes/${f.lane.laneId}` : opaque(f),
+      visibility === 'public' ? `${web}/ada/tide-pool/lanes/${f.lane.laneId}` : opaque(f),
       'pending',
     );
     // The owner grants the request: the same job now says the run started.

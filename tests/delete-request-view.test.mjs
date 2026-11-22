@@ -89,8 +89,8 @@ test('both sign-in routes retain the same account request through the sign-in re
   assert.deepEqual(parseAppPath(url.pathname), { frame: 'account', place: 'projects' });
   assert.equal(url.searchParams.get('request'), 'request + exact');
   assert.equal(url.searchParams.get('auth'), 'existing');
-  assert.equal(existingDeleteRequestHref('/-/account/billing?request=other'), undefined);
-  assert.equal(existingDeleteRequestHref('https://elsewhere.example/-/account?request=other'), undefined);
+  assert.equal(existingDeleteRequestHref('/account/billing?request=other'), undefined);
+  assert.equal(existingDeleteRequestHref('https://elsewhere.example/account?request=other'), undefined);
 });
 
 test('an expired or declined request says nothing was deleted and cannot be confirmed', () => {

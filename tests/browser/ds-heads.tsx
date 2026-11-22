@@ -4,7 +4,6 @@ import { createRoot } from 'react-dom/client';
 import type { Id } from '../../convex/_generated/dataModel';
 import { AccountFrame, ProjectFrame } from '../../web/src/app/frames';
 import { CheckView } from '../../web/src/app/check/CheckScreen';
-import { Placeholder } from '../../web/src/app/Place';
 import { YouView } from '../../web/src/app/YouView';
 import { fakeConvex } from '../convex-fake.mjs';
 
@@ -14,7 +13,7 @@ const route = {
   frame: 'project' as const,
   handle: 'sample-one',
   project: 'synthetic',
-  place: screen === 'check' ? ('lanes' as const) : ('settings' as const),
+  place: 'lanes' as const,
   section: '',
   rest: '',
 };
@@ -58,28 +57,24 @@ createRoot(document.getElementById('root')!).render(
       projects={null}
       controls={controls}
     >
-      {screen === 'check' ? (
-        <ConvexProvider client={client}>
-          <CheckView
-            read={{
-              laneId: 'lane',
-              title: 'Update the docs',
-              candidateId: null,
-              landing: null,
-              run: null,
-              cause: null,
-              main: null,
-              lane: null,
-            }}
-            trail={[{ label: 'Landing check' }]}
-            projectId={'synthetic' as Id<'hostedProjects'>}
-            projectName="Synthetic"
-            proofHref="/checked"
-          />
-        </ConvexProvider>
-      ) : (
-        <Placeholder route={route} projectName="Synthetic" />
-      )}
+      <ConvexProvider client={client}>
+        <CheckView
+          read={{
+            laneId: 'lane',
+            title: 'Update the docs',
+            candidateId: null,
+            landing: null,
+            run: null,
+            cause: null,
+            main: null,
+            lane: null,
+          }}
+          trail={[{ label: 'Landing check' }]}
+          projectId={'synthetic' as Id<'hostedProjects'>}
+          projectName="Synthetic"
+          proofHref="/checked"
+        />
+      </ConvexProvider>
     </ProjectFrame>
   ),
 );

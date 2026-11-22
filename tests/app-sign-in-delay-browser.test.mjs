@@ -71,7 +71,7 @@ test('a reload with sign-in still loading renders nothing and reads nothing; the
         return { rows: args.kind === kind ? [{
           invitationId: kind,
           projectName: invited ? 'Invited project' : 'Other project',
-          href: invited ? '/-/owner/invited-project' : '/-/owner/other-project',
+          href: invited ? '/owner/invited-project' : '/owner/other-project',
           role: 'read',
           state: 'pending',
         }] : [] };
@@ -205,10 +205,10 @@ test('a reload with sign-in still loading renders nothing and reads nothing; the
 
   // A Lanes page of a project, reloaded: signed-in access.
   {
-    const { page, errors } = await open('/-/sample-owner/parser/lanes');
+    const { page, errors } = await open('/sample-owner/parser/lanes');
     assert.deepEqual(
       await heldState(page),
-      { empty: true, reads: 0, paints: 0, path: '/-/sample-owner/parser/lanes' },
+      { empty: true, reads: 0, paints: 0, path: '/sample-owner/parser/lanes' },
       'while sign-in loads: nothing on screen, no read sent, the address is untouched',
     );
     await page.evaluate(() => window.resolveAuth(true));
@@ -218,14 +218,14 @@ test('a reload with sign-in still loading renders nothing and reads nothing; the
       paints.every(paint => !paint.loading),
       'nothing was painted while sign-in loaded',
     );
-    assert.equal(await page.evaluate(() => location.pathname), '/-/sample-owner/parser/lanes');
+    assert.equal(await page.evaluate(() => location.pathname), '/sample-owner/parser/lanes');
     assert.deepEqual(errors, []);
     await page.close();
   }
 
   // The same page for a visitor who turns out to be signed out: no project view appears first, only the sign-in.
   {
-    const { page, errors } = await open('/-/sample-owner/parser/lanes');
+    const { page, errors } = await open('/sample-owner/parser/lanes');
     assert.equal((await heldState(page)).empty, true, 'while sign-in loads: nothing on screen');
     await page.evaluate(() => window.resolveAuth(false));
     await page.waitForFunction(() => location.pathname.endsWith('/signin'));
@@ -242,7 +242,7 @@ test('a reload with sign-in still loading renders nothing and reads nothing; the
 
   // A public front page for a signed-out visitor appears only after sign-in has resolved too.
   {
-    const { page, errors } = await open('/-/sample-owner/parser');
+    const { page, errors } = await open('/sample-owner/parser');
     assert.deepEqual((await heldState(page)).empty, true);
     assert.equal((await heldState(page)).reads, 0);
     await page.evaluate(() => window.resolveAuth(false));
@@ -258,8 +258,8 @@ test('a reload with sign-in still loading renders nothing and reads nothing; the
 
   for (const method of ['passkey', 'GitHub']) {
     await t.test(`the invitation page survives switching accounts with ${method}`, async () => {
-      const inboxPath = '/-/account/people';
-      const signInPath = `/-/signin?next=${encodeURIComponent(inboxPath)}`;
+      const inboxPath = '/account/people';
+      const signInPath = `/signin?next=${encodeURIComponent(inboxPath)}`;
       const { page, errors } = await open(inboxPath);
       const passkey = async handle => {
         await page.getByLabel('Your handle').fill(handle);
@@ -274,7 +274,7 @@ test('a reload with sign-in still loading renders nothing and reads nothing; the
       assert.equal(new URL(page.url()).pathname, inboxPath);
 
       await page.evaluate(() => {
-        history.pushState(null, '', '/-/owner/other-project');
+        history.pushState(null, '', '/owner/other-project');
         dispatchEvent(new PopStateEvent('popstate'));
       });
       await page.getByText('Previous private project', { exact: true }).first().waitFor();
@@ -319,9 +319,9 @@ test('a reload with sign-in still loading renders nothing and reads nothing; the
       await page.keyboard.press('Control+k');
       await page.getByPlaceholder('Go to a place or run…').fill('Sign out');
       await page.getByRole('menuitem', { name: 'Sign out' }).click();
-      await page.waitForURL('https://forge.test/-/signin');
+      await page.waitForURL('https://forge.test/signin');
       await page.evaluate(() => window.completeSignOut());
-      assert.equal(page.url(), 'https://forge.test/-/signin');
+      assert.equal(page.url(), 'https://forge.test/signin');
       assert.deepEqual(errors, []);
       await page.close();
     });

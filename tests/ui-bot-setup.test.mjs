@@ -146,7 +146,7 @@ function browserFixture({
           socket.send(JSON.stringify({ type: 'ModifyQuerySet', modifications: [{ type: 'Add', queryId: 0, udfPath: 'urlAccounts:current' }] }));
         };
       };
-      if (location.pathname === '/-/account') viewer();
+      if (location.pathname === '/account') viewer();
 
       const register = async () => {
         await fetch(${JSON.stringify(deployment + '/fixture-challenge')});

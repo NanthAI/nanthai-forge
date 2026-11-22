@@ -3,12 +3,16 @@
 // click work); a plain click moves in place with pushState, so browser Back and Forward walk the same entries.
 // No timers and no reads: a change of place re-renders from the address alone.
 import { useSyncExternalStore, type MouseEvent } from 'react';
+import { oldAddress } from './old-address';
 import { isAppPath, parseAppPath, type AppRoute } from './paths';
 
 const listeners = new Set<() => void>();
 const notify = () => listeners.forEach(listener => listener());
 let current = '';
 let route: AppRoute = parseAppPath('/');
+/** Moves in place only to an app address; an old one (old-address.ts) loads as a page, which resolves it. */
+const inApp = (url: URL) =>
+  url.origin === location.origin && isAppPath(url.pathname) && !oldAddress(url.pathname, url.search);
 
 function snapshot() {
   const href = location.pathname + location.search;
@@ -41,7 +45,7 @@ export function useSearch(): URLSearchParams {
 /** Move to an address of the rebuilt app in place; any other address loads as a page. */
 export function navigate(href: string, { replace = false } = {}) {
   const url = new URL(href, location.href);
-  if (url.origin !== location.origin || !isAppPath(url.pathname)) {
+  if (!inApp(url)) {
     location.assign(url.href);
     return;
   }
@@ -73,7 +77,7 @@ export function followLink(event: MouseEvent<HTMLAnchorElement | SVGAElement>) {
   const href = typeof anchor.href === 'string' ? anchor.href : anchor.href.baseVal;
   if (!href) return;
   const url = new URL(href, location.href);
-  if (url.origin !== location.origin || !isAppPath(url.pathname)) return;
+  if (!inApp(url)) return;
   event.preventDefault();
   navigate(url.href);
 }

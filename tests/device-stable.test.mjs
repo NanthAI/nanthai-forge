@@ -150,7 +150,7 @@ test('first approval names and scopes the key once; remembered login keeps setti
     device = key(),
     { flow, input } = await f.start(device);
   assert.equal(f.tables.cliCredentials.size, 0);
-  assert.match(flow.verification_uri_complete, /\/-\/device\?code=/);
+  assert.match(flow.verification_uri_complete, /\/device\?code=/);
   const view = await f.inspect({ code: flow.user_code });
   assert.equal(view.device.code, stableDeviceCode(device.key));
   assert.equal(view.device.known, false);

@@ -68,31 +68,31 @@ const laneUrl = laneId => `${web}${APP_ROOT}/ada/tide-pool/lanes/${laneId}`;
 test('0a99ab23: the server and the app build approval addresses on one root', () => {
   assert.equal(APP_ROOT, ROOT, 'src/project-routes.ts APP_ROOT and web/src/app/paths.ts ROOT move together');
   const address = { handle: 'ada', slug: 'tide-pool' };
-  assert.equal(approvalPath(address, 'p1', 'lane-1'), '/-/ada/tide-pool/lanes/lane-1');
+  assert.equal(approvalPath(address, 'p1', 'lane-1'), '/ada/tide-pool/lanes/lane-1');
   assert.equal(
     approvalPath(address, 'p1', 'lane-1', 'sub-1'),
-    '/-/ada/tide-pool/lanes/lane-1?submission=sub-1',
+    '/ada/tide-pool/lanes/lane-1?submission=sub-1',
     'a held landing names its exact submission',
   );
   assert.equal(
     approvalPath(address, 'p1', 'setting:policy'),
-    '/-/ada/tide-pool?view=needs',
+    '/ada/tide-pool?view=needs',
     "a settings request opens the owner's Needs me",
   );
   assert.equal(
     approvalPath(address, 'p1', null, 'sub-1'),
-    '/-/ada/tide-pool?view=needs',
+    '/ada/tide-pool?view=needs',
     'no one Lane: Needs me',
   );
   // Signed out, view=needs asks for sign-in (not the public front page); signed in it is Needs me.
-  const needs = parseAppPath('/-/ada/tide-pool');
+  const needs = parseAppPath('/ada/tide-pool');
   assert.equal(isPublicProjectView(needs, false, 'needs'), false);
   assert.equal(isPublicProjectView(needs, true, 'needs'), false);
   assert.equal(isPublicProjectView(needs, false, null), true, 'a plain front-page visit stays public');
   assert.equal(approvalPath(null, 'p 1', 'setting:policy'), '/approve?project=p+1&lane=setting%3Apolicy');
   assert.equal(approvalPath(null, 'p1', 'lane-1', 'sub-1'), '/approve?project=p1&submission=sub-1');
   // Each address is one the app parses back to the Lane page or Needs me.
-  assert.deepEqual(parseAppPath('/-/ada/tide-pool/lanes/lane-1'), {
+  assert.deepEqual(parseAppPath('/ada/tide-pool/lanes/lane-1'), {
     frame: 'project',
     handle: 'ada',
     project: 'tide-pool',
@@ -100,7 +100,7 @@ test('0a99ab23: the server and the app build approval addresses on one root', ()
     section: '',
     rest: 'lane-1',
   });
-  assert.equal(parseAppPath('/-/ada/tide-pool').place, 'needs');
+  assert.equal(parseAppPath('/ada/tide-pool').place, 'needs');
 });
 
 test('0a99ab23: /approve is a page of the app that reads its link and names the Lane page', () => {
@@ -114,12 +114,12 @@ test('0a99ab23: /approve is a page of the app that reads its link and names the 
   assert.equal(search('lane=l1'), null);
   assert.equal(
     approveTargetHref({ handle: 'ada', slug: 'tide-pool', laneId: 'l1' }),
-    '/-/ada/tide-pool/lanes/l1',
+    '/ada/tide-pool/lanes/l1',
   );
-  assert.equal(approveTargetHref({ handle: 'ada', slug: 'tide-pool', laneId: null }), '/-/ada/tide-pool');
+  assert.equal(approveTargetHref({ handle: 'ada', slug: 'tide-pool', laneId: null }), '/ada/tide-pool');
   assert.equal(
     approveTargetHref({ handle: 'ada', slug: 'tide-pool', laneId: 'l1' }, 's1'),
-    '/-/ada/tide-pool/lanes/l1?submission=s1',
+    '/ada/tide-pool/lanes/l1?submission=s1',
   );
 });
 

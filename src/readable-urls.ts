@@ -23,7 +23,7 @@ export const reservedHandles = new Set([
   'contact',
   'signin',
   'signup',
-  // App addresses under /-/ (web/src/app/paths.ts): the cached public read and the legal pages.
+  // App addresses (web/src/app/paths.ts), the cached public read under /-/public/ and the legal pages.
   'public',
   'terms',
   'privacy',

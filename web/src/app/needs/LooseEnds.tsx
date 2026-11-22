@@ -820,7 +820,7 @@ export function LooseEndsView({
               ) : null}
               {/* One row per open permanent-delete request, each opening that request on the account page. */}
               {section.deleteRequests.map(request => (
-                <A key={request.id} className="row le-waiting" href={`/-/account?request=${request.id}`}>
+                <A key={request.id} className="row le-waiting" href={`/account?request=${request.id}`}>
                   <div>
                     <div className="ttl">
                       {count(request.projects, 'project')}{' '}

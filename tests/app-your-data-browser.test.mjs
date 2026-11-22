@@ -127,7 +127,7 @@ test('your data: holdings, take-out, the before-list behind the typed handle, an
         body: readFileSync(asset ? file : join(out, 'fixture.html')),
       });
     });
-    await page.goto(`https://forge.test/-/account?data=${data}`);
+    await page.goto(`https://forge.test/account?data=${data}`);
     await page.locator('main h1').first().waitFor();
     // Settle the theme switch's colour transitions before axe reads the colours.
     await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);

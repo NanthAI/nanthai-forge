@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Import from GitHub (`/-/new/import`, Items a488af2a, 2abda01f, c63c2171): one page, one ledger. The report reads
+// Import from GitHub (`/new/import`, Items a488af2a, 2abda01f, c63c2171): one page, one ledger. The report reads
 // what the import would (one action, about three GitHub requests, no rows written), then the person decides who can
 // see it and whether GitHub keeps taking pushes, then one start. Progress is one subscription to the job, invalidated by
 // import writes only; a GitHub rate limit offers "resume at the reset", which Forge runs on its own at that time. The

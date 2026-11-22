@@ -176,7 +176,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
       }
   };
 
-  await page.goto('https://forge.test/-/example/parser/settings/checks');
+  await page.goto('https://forge.test/example/parser/settings/checks');
   const workflows = page.getByRole('radiogroup', { name: 'Which workflow must pass' });
   await workflows.waitFor();
   assert.equal(await workflows.getByRole('radio', { name: /ci\.yml/ }).getAttribute('aria-checked'), 'true');
@@ -245,12 +245,12 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
   await layouts('checks-chosen');
 
   // The trigger line is on main and nothing has landed: nothing to change, the next landing is its first run.
-  await page.goto('https://forge.test/-/example/parser/settings/checks?chosen=1&covered=1');
+  await page.goto('https://forge.test/example/parser/settings/checks?chosen=1&covered=1');
   await page.getByText('Its first run is the next landing.').waitFor();
   assert.equal(await page.getByRole('button', { name: 'Give this to your agent' }).count(), 0);
 
   // Once a landing carries a check run, the evidence is one fact and the setup text is gone.
-  await page.goto('https://forge.test/-/example/parser/settings/checks?chosen=1&landed=1');
+  await page.goto('https://forge.test/example/parser/settings/checks?chosen=1&landed=1');
   await page.getByText(/First landing checked:/).waitFor();
   assert.equal(await page.getByText('No landing checked yet').count(), 0);
   assert.equal(await page.getByText(/forge\/candidates/).count(), 0, 'no standing trigger text');
@@ -262,9 +262,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
   await layouts('checks-landed');
 
   await t.test('the recorded CI and workflow are selected before any workflow files arrive', async () => {
-    await page.goto(
-      'https://forge.test/-/example/parser/settings/checks?dispatched=1&landed=1&pause-source=1',
-    );
+    await page.goto('https://forge.test/example/parser/settings/checks?dispatched=1&landed=1&pause-source=1');
     await page.getByRole('button', { name: 'Change', exact: true }).click();
     await page.getByText(/Looking in .*\.github\/workflows/).waitFor();
     const current = workflows.getByRole('radio', { name: /forge-check\.yml/ });
@@ -283,7 +281,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
   });
 
   await t.test('the dispatch-only check stays selected beside a path-filtered deploy workflow', async () => {
-    await page.goto('https://forge.test/-/example/parser/settings/checks?dispatched=1&landed=1');
+    await page.goto('https://forge.test/example/parser/settings/checks?dispatched=1&landed=1');
     await page.getByRole('button', { name: 'Change', exact: true }).click();
     const current = workflows.getByRole('radio', { name: /forge-check\.yml/ });
     const deploy = workflows.getByRole('radio', { name: /convex-deploy\.yml/ });
@@ -316,7 +314,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
   const values = () =>
     settings.locator('details').evaluateAll(rows => rows.map(row => row.querySelector('.val').textContent));
   assert.deepEqual(await values(), ['Strictdefault', 'Ondefault', 'Ondefault']);
-  await page.goto('https://forge.test/-/example/parser/settings/checks?chosen=1&landed=1&auto=1');
+  await page.goto('https://forge.test/example/parser/settings/checks?chosen=1&landed=1&auto=1');
   await page.getByText(/First landing checked:/).waitFor();
   assert.deepEqual(
     await settings
@@ -350,7 +348,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
     .waitFor();
   await layouts('checks-settings-open');
 
-  await page.goto('https://forge.test/-/example/parser/settings/checks?nomirror=1');
+  await page.goto('https://forge.test/example/parser/settings/checks?nomirror=1');
   await page.getByRole('link', { name: 'Turn on the mirror' }).waitFor();
   assert.equal(
     await page.getByRole('button', { name: /^Use / }).count(),
@@ -360,7 +358,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
   await layouts('checks-mirror-off');
 
   // No CI file on main: "No CI yet" is chosen ahead, one root read, and both places a command can run are offered.
-  await page.goto('https://forge.test/-/example/parser/settings/checks?none=1');
+  await page.goto('https://forge.test/example/parser/settings/checks?none=1');
   const none = page.getByRole('radio', { name: /No CI yet/ });
   await page.getByRole('link', { name: 'How to set up a machine you run' }).waitFor();
   assert.equal(await none.getAttribute('aria-checked'), 'true');
@@ -375,7 +373,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
   await layouts('checks-none');
 
   // Another CI's file on main: that CI is chosen ahead and leads to a route that works today.
-  await page.goto('https://forge.test/-/example/parser/settings/checks?gitlab=1');
+  await page.goto('https://forge.test/example/parser/settings/checks?gitlab=1');
   const gitlab = page.getByRole('radio', { name: /GitLab CI/ });
   await page.getByText('Forge cannot publish to GitLab yet', { exact: false }).waitFor();
   assert.equal(await gitlab.getAttribute('aria-checked'), 'true');
@@ -386,7 +384,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
   await page.getByRole('link', { name: 'How to set up a machine you run' }).waitFor();
   assert.equal(await page.getByText('Forge cannot publish to GitLab yet', { exact: false }).count(), 0);
 
-  await page.goto('https://forge.test/-/new?start=1');
+  await page.goto('https://forge.test/new?start=1');
   await page.getByRole('button', { name: 'Connect your agent app yourself' }).click();
   // Before a pick no app is pressed and the steps every app shares are already there.
   await page.getByRole('list', { name: 'Steps for any agent app' }).waitFor();
@@ -416,7 +414,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
     page.evaluate(() => window.calls.filter(call => call.name === 'agentConnections:read').length);
   assert.equal(await connectionReads(), 1, 'app choices and layout changes make no connection reads');
 
-  await page.goto('https://forge.test/-/new?start=1&connected=1');
+  await page.goto('https://forge.test/new?start=1&connected=1');
   await page.getByText('Connected', { exact: true }).waitFor();
   assert.equal(await connectionReads(), 1);
   await layouts('start-pi-connected');

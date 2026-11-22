@@ -2,7 +2,7 @@
 // A device code that arrives in a link (`?code=`) leaves the address as soon as an approval page loads, so it is not
 // readable in the address bar, kept in browser history or carried into a sign-in return address. The page keeps it in
 // this tab's session storage for the 10 minutes a code lives, so it survives a sign-in round trip. Shared by /device
-// and the rebuilt /-/device.
+// and the rebuilt /device.
 import { codeComplete, formatCode } from './code';
 
 const KEY = 'forge.device-code';
@@ -57,7 +57,7 @@ export function githubReturn(
       // Private mode: the person types the code again after the check.
     }
   }
-  const back = new URL('/-/device', location.origin);
+  const back = new URL('/device', location.origin);
   if (input.requestId) back.searchParams.set('request', input.requestId);
   return back.href;
 }

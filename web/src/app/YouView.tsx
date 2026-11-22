@@ -460,7 +460,7 @@ export function YouView({
                 Add a passkey
               </Key>
               {data && !data.passkeys.length ? (
-                <a className="btn" href="/-/signin/passkey">
+                <a className="btn" href="/signin/passkey">
                   Add your first passkey
                 </a>
               ) : null}
@@ -476,17 +476,17 @@ export function YouView({
           <Region title="Your data and account" weight="ref">
             <p className="quietline">
               Your account is in{' '}
-              <a className="lk" href="/-/account/data">
+              <a className="lk" href="/account/data">
                 Your data
               </a>
               .
             </p>
             <p className="quietline">
-              <a className="lk" href="/-/terms">
+              <a className="lk" href="/terms">
                 Terms
               </a>{' '}
               ·{' '}
-              <a className="lk" href="/-/privacy">
+              <a className="lk" href="/privacy">
                 Privacy policy
               </a>
             </p>

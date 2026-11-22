@@ -14,7 +14,7 @@ test('bulk delete prepares from a glob, explicit ids or the trash', () => {
 
 test('the terminal receipt identifies each frozen project, the approval link and the original deployment', () => {
   const deployment = 'https://scratch.convex.cloud';
-  const url = 'https://forge.example/-/account?request=sample';
+  const url = 'https://forge.example/account?request=sample';
   const receipt = formatDeleteRequest(
     {
       id: 'sample',

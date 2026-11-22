@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// The rebuilt app (Item 84125787): the four frames under ROOT, signed in with Convex Auth. The Convex client sleeps
+// The rebuilt app (Item 84125787): the four frames at the site root, signed in with Convex Auth. The Convex client sleeps
 // with the tab (live-reads.ts) and holds token refresh while asleep (auth-hold.ts), so an idle or hidden tab makes no
 // calls. Each page sends one bounded read for its frame: the project frame resolves its address and then reads the
 // line; the account and public frames read only the viewer.
@@ -19,6 +19,7 @@ import { prefetchLayerWhenIdle } from '../ds';
 import { takeLinkCode } from '../device/link-code';
 import { captureConvexFailures } from '../error-capture';
 import { liveReads } from '../live-reads';
+import { signedInHint } from '../shell/signed-in-hint';
 import { useLiveLine } from '../shell/use-live-line';
 import { withRefreshHold } from './auth-hold';
 import { Device } from './Device';
@@ -149,6 +150,10 @@ function Pages() {
     !isAuthenticated &&
     !discovering &&
     !(route.frame === 'public' && ['signin', 'terms', 'privacy'].includes(route.page));
+  // The public page (web/index.html) opens the app for a browser that last had a session.
+  useEffect(() => {
+    if (!isLoading) signedInHint(isAuthenticated);
+  }, [isLoading, isAuthenticated]);
   // The auth state owns the redirect. A late sign-out response cannot interrupt the next sign-in.
   useEffect(() => {
     if (isLoading || isAuthenticated) return;

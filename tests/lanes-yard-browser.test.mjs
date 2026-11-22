@@ -73,7 +73,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
       const url = new URL(route.request().url());
       if (url.protocol === 'data:') return route.continue();
       if (url.hostname !== 'forge.test') return route.abort();
-      if (url.pathname === '/yard.html' || url.pathname.startsWith('/-/'))
+      if (url.pathname === '/yard.html' || !url.pathname.includes('.'))
         return route.fulfill({ contentType: 'text/html', body: html });
       const file = join(out, url.pathname.slice(1));
       if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
@@ -268,7 +268,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
         await row.getByRole('link', { name: 'quiet-otter' }).getAttribute('href'),
         /lanes\/sessions\/mara\/quiet-otter$/,
       );
-      assert.equal(await row.getByRole('link', { name: '@mara' }).getAttribute('href'), '/-/mara');
+      assert.equal(await row.getByRole('link', { name: '@mara' }).getAttribute('href'), '/mara');
       assert.match(await row.getByRole('link', { name: /Public pages/ }).getAttribute('href'), /^#/);
       assert.equal(await row.locator('a a').count(), 0);
       if (shots) {
@@ -286,7 +286,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
       }
     });
 
-    const LANES = '/-/sample-owner/sample-project/lanes';
+    const LANES = '/sample-owner/sample-project/lanes';
     const FAILED = 'f41ed0a2-3b6c-4d1e-9a7f-2c8e5b0d4f19';
     await t.test(
       'e317b6ea: the overview links Sessions, each Lane and a failed check to their own screens; Back returns',

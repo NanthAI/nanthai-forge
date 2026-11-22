@@ -604,7 +604,7 @@ function AccountSettings({ open, userId }: { open: (id: Id<'imports'>) => void; 
               <>
                 <DeviceCredentials key={`devices-${userId}`} />
                 <p className="account-data-link">
-                  <a href="/-/account/data">Your data: take it out or delete it</a>
+                  <a href="/account/data">Your data: take it out or delete it</a>
                 </p>
               </>
             )}

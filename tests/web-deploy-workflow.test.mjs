@@ -81,9 +81,9 @@ test('the headless smoke fails on a module-evaluation error or unbaked build con
     mkdirSync(join(dir, '.vite'));
     writeFileSync(
       join(dir, '.vite/manifest.json'),
-      JSON.stringify({ 'src/Hosted.tsx': { file: 'assets/Hosted-x.js' } }),
+      JSON.stringify({ 'src/app/App.tsx': { file: 'assets/App-x.js' } }),
     );
-    writeFileSync(join(dir, 'assets/Hosted-x.js'), 'export const ok = 1;\n');
+    writeFileSync(join(dir, 'assets/App-x.js'), 'export const ok = 1;\n');
     writeFileSync(
       join(dir, 'assets/Shell-x.js'),
       'throw new TypeError("createRequire is not a function");\n',
@@ -102,7 +102,7 @@ test('the headless smoke fails on a module-evaluation error or unbaked build con
     const missing = config({ PATH: process.env.PATH });
     assert.equal(missing.status, 1);
     assert.match(missing.stderr, /VITE_CONVEX_URL is not set/);
-    writeFileSync(join(dir, 'assets/Hosted-x.js'), 'export const url = "https://baked.example";\n');
+    writeFileSync(join(dir, 'assets/App-x.js'), 'export const url = "https://baked.example";\n');
     assert.match(
       config({ PATH: process.env.PATH, VITE_CONVEX_URL: 'https://other.example' }).stderr,
       /not baked/,
@@ -185,9 +185,9 @@ test('the landing web build fails on an unevaluated lazy chunk without rebuildin
     );
     writeFileSync(
       join(dir, 'hosted-web-dist/.vite/manifest.json'),
-      JSON.stringify({ 'src/Hosted.tsx': { file: 'assets/Hosted-x.js' } }),
+      JSON.stringify({ 'src/app/App.tsx': { file: 'assets/App-x.js' } }),
     );
-    writeFileSync(join(dir, 'hosted-web-dist/assets/Hosted-x.js'), 'export const ok = 1;');
+    writeFileSync(join(dir, 'hosted-web-dist/assets/App-x.js'), 'export const ok = 1;');
     const lazy = join(dir, 'hosted-web-dist/assets/behaviour-x.js');
     writeFileSync(lazy, 'throw new TypeError("lazy chunk broke");');
     const run = () => spawnSync('npm', ['run', '--silent', 'build:web'], { cwd: dir, encoding: 'utf8' });

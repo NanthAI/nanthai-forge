@@ -1,6 +1,6 @@
 # Project access
 
-Who can do what in a Forge project, and where the server enforces it. The rules follow GitHub's model, frictionless but secure: three roles, invitations by link and email, agents that never get more than their person. The screen is **Settings → People and access** in the rebuilt app (`/-/{handle}/{project}/settings`).
+Who can do what in a Forge project, and where the server enforces it. The rules follow GitHub's model, frictionless but secure: three roles, invitations by link and email, agents that never get more than their person. The screen is **Settings → People and access** in the rebuilt app (`/{handle}/{project}/settings`).
 
 Status: the roles, verbs and resolver below describe what runs today. The parts marked *proposed* wait for the owner's approval on the Items named beside them.
 
@@ -101,7 +101,7 @@ to the signed-in person's current, unique verified address at acceptance. A read
 invitation never lowers existing write access. Accepting write replaces read.
 
 Recipients see **Accept**, **Decline**, and **Decline and block inviter** on Home
-(`/-/account`) and the invitation page (`/-/account/people`). A link opens that
+(`/account`) and the invitation page (`/account/people`). A link opens that
 page and carries no credential, email or private project identifier. Signing in
 preserves the destination. Choose **Use another account** on the invitation page
 to sign in with the invited account and open its inbox. A forwarded link grants

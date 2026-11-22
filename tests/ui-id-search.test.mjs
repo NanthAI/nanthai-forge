@@ -522,10 +522,10 @@ test('the rebuilt palette opens what an id names at its rebuilt address', async 
     assert.deepEqual(
       rows.map(row => row.href),
       [
-        `/-/example/parser/plan/${itemId}`,
-        `/-/example/parser/lanes/${laneId}`,
-        `/-/example/parser/code/${receiptId}`,
-        `/-/example/parser/lanes/${laneId}`,
+        `/example/parser/plan/${itemId}`,
+        `/example/parser/lanes/${laneId}`,
+        `/example/parser/code/${receiptId}`,
+        `/example/parser/lanes/${laneId}`,
       ],
     );
   }));

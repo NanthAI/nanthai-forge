@@ -43,7 +43,7 @@ including on failure and resume. No account identities are included in this ledg
 
 ## Before the import: the report
 
-`nforge import URL --preview [--ref REF]` (and the web import page `/-/new/import` before its
+`nforge import URL --preview [--ref REF]` (and the web import page `/new/import` before its
 Import button) calls `projectGithubImportPreview.preview`: the same reads a start
 makes first (repository access, the commit, one recursive listing; about three
 GitHub requests on the same quota as the import) returned instead of acted on. It

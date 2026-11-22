@@ -185,32 +185,41 @@ test('a public page gets share tags from the public read; private and missing ge
         ? json(PAGE)
         : json({ found: false }, 404),
   );
-  const shown = await serve(new Request('https://site.example/-/ada/atlas'));
+  const shown = await serve(new Request('https://site.example/ada/atlas'));
   const html = await shown.text();
   assert.match(html, /<title>ada\/atlas · Forge<\/title>/);
   assert.match(html, /Main is passing\. 5 changes landed this week\. 1 Lane open\. 4 Items left\. 2 stars\./);
   assert.equal(html.match(/<script/g).length, 1, 'no script added');
   assert.match(shown.headers.get('content-security-policy'), /frame-ancestors 'none'/);
-  const hidden = await (await serve(new Request('https://site.example/-/ada/private-one'))).text();
-  const missing = await (await serve(new Request('https://site.example/-/ada/no-such'))).text();
+  const hidden = await (await serve(new Request('https://site.example/ada/private-one'))).text();
+  const missing = await (await serve(new Request('https://site.example/ada/no-such'))).text();
   assert.equal(hidden, APP);
   assert.equal(missing, APP);
 });
 
 test('only explore, profiles and project front pages map to a public read', () => {
-  assert.equal(readFor('/-/explore').json, '/-/public/v1/explore/active.json');
-  assert.equal(readFor('/-/ada').json, '/-/public/v1/profile/ada.json');
-  assert.equal(readFor('/-/ada/atlas').json, '/-/public/v1/project/ada/atlas.json');
+  assert.equal(readFor('/explore').json, '/-/public/v1/explore/active.json');
+  assert.equal(readFor('/ada').json, '/-/public/v1/profile/ada.json');
+  assert.equal(readFor('/ada/atlas').json, '/-/public/v1/project/ada/atlas.json');
   for (const path of [
-    '/-/account',
-    '/-/signin',
-    '/-/new',
-    '/-/device',
-    '/-/terms',
-    '/-/privacy',
-    '/-/public',
-    '/-/explore/x',
-    '/-/%E0%A4%A',
+    '/account',
+    '/signin',
+    '/new',
+    '/device',
+    '/terms',
+    '/privacy',
+    '/public',
+    '/explore/x',
+    '/%E0%A4%A',
+    // b0704959: the earlier /- form is a redirect, files and the docs are static, and a probe never names a handle.
+    '/-/ada',
+    '/-/ada/atlas',
+    '/docs',
+    '/projects',
+    '/wp-login.php',
+    '/.env',
+    '/ada/at.las',
+    '/-ada',
   ])
     assert.equal(readFor(path), null, path);
 });
@@ -309,11 +318,11 @@ for (const [path, upstream, mime, body] of [
     );
   });
 
-test('paths outside the public root have a nonempty HTML 404 and cannot reach a backend', async t => {
+test('addresses that are not app pages have a nonempty HTML 404 and cannot reach a backend', async t => {
   const asked = backend(t, () => {
     throw Error('must not fetch');
   });
-  for (const path of ['/outside/explore', '/-/../../outside', '/-/public/v1/../../../../outside']) {
+  for (const path of ['/docs', '/assets/x', '/a.b/c', '/llms.txt']) {
     const response = await serve(new Request(`https://site.example${path}`));
     assert.equal(response.status, 404);
     assert.match(response.headers.get('content-type'), /text\/html/);
@@ -323,11 +332,30 @@ test('paths outside the public root have a nonempty HTML 404 and cannot reach a 
   assert.equal(asked.length, 0);
 });
 
+test('b0704959: an earlier /- page address moves for good to the root with its query, without a backend read', async t => {
+  const asked = backend(t, () => {
+    throw Error('must not fetch');
+  });
+  for (const [path, location] of [
+    ['/-/ada/atlas?view=public', '/ada/atlas?view=public'],
+    ['/-/explore', '/explore'],
+    ['/-/ADA', '/ADA'],
+    ['//-/account', '/account'],
+    ['/-/account?request=r1', '/account?request=r1'],
+    ['/-/', '/account'],
+  ]) {
+    const response = await serve(new Request(`https://site.example${path}`));
+    assert.equal(response.status, 301, path);
+    assert.equal(response.headers.get('location'), `https://site.example${location}`, path);
+  }
+  assert.equal(asked.length, 0);
+});
+
 test('private app places retain the SPA shell without a public backend read', async t => {
   const asked = backend(t, () => {
     throw Error('must not fetch');
   });
-  for (const path of ['/-/account', '/-/signin', '/-/device', '/-/ada/atlas/private']) {
+  for (const path of ['/account', '/signin', '/device', '/ada/atlas/private', '/projects', '/settings']) {
     const response = await serve(new Request(`https://site.example${path}`));
     assert.equal(response.status, 200);
     assert.equal(await response.text(), APP);
@@ -359,17 +387,18 @@ test('doubled-leading-slash account addresses reach the ordinary SPA without pub
     assert.equal(account.headers.get('location'), null, location);
     assert.equal(await account.text(), APP, location);
   }
+  // Another doubled address is a project page: it is canonicalized like any other, with no read.
   const outside = await serve(new Request(`${origin}//outside/account`));
-  assert.equal(outside.status, 404);
-  assert.equal(outside.headers.get('location'), null);
+  assert.equal(outside.status, 308);
+  assert.equal(outside.headers.get('location'), `${origin}/outside/account`);
   assert.equal(asked.length, 0);
 });
 
 test('self fetches and share URLs use configuration even on another request host', async t => {
   const asked = backend(t, url => (url.endsWith('/app.html') ? new Response(APP) : json(PAGE)));
-  const response = await serve(new Request('https://untrusted.example/-/ada/atlas'));
+  const response = await serve(new Request('https://untrusted.example/ada/atlas'));
   const html = await response.text();
-  assert.match(html, /https:\/\/site.example\/-\/ada\/atlas/);
+  assert.match(html, /https:\/\/site.example\/ada\/atlas/);
   assert.doesNotMatch(html, /untrusted/);
   assert.deepEqual(
     asked.map(call => call.url),
@@ -387,7 +416,7 @@ test('missing configured site address serves the bundled shell without a request
   t.after(() => {
     if (saved !== undefined) process.env.URL = saved;
   });
-  const response = await serve(new Request('https://untrusted.example/-/ada/atlas'));
+  const response = await serve(new Request('https://untrusted.example/ada/atlas'));
   assert.equal(response.status, 200);
   assert.equal(await response.text(), APP);
   assert.equal(asked.length, 0);
@@ -429,7 +458,7 @@ test('HTML query state stays in the browser while durable caching uses only page
   const asked = backend(t, url => (url.endsWith('/app.html') ? new Response(APP) : json(PAGE)));
   const stored = new Map();
   for (const query of ['?q=one', '?q=two&utm_source=test', '?cache=unbounded']) {
-    const request = new Request(`https://site.example/-/ada/atlas${query}`);
+    const request = new Request(`https://site.example/ada/atlas${query}`);
     // Model the declared Netlify-Vary rule. Its sole query parameter is guaranteed absent before reads.
     const url = new URL(request.url);
     const identity = `${url.pathname}:${url.searchParams.get('__forge_page') ?? ''}`;
@@ -440,12 +469,12 @@ test('HTML query state stays in the browser while durable caching uses only page
       assert.equal(response.headers.get('netlify-vary'), 'query=__forge_page');
       stored.set(identity, response);
     }
-    assert.equal(request.url, `https://site.example/-/ada/atlas${query}`);
+    assert.equal(request.url, `https://site.example/ada/atlas${query}`);
   }
   assert.equal(asked.length, 1, 'one backend fetch across all query variants; shell is bundled');
-  const redirected = await serve(new Request('https://site.example/-/ada/atlas?__forge_page=vary-me&q=kept'));
+  const redirected = await serve(new Request('https://site.example/ada/atlas?__forge_page=vary-me&q=kept'));
   assert.equal(redirected.status, 308);
-  assert.equal(redirected.headers.get('location'), 'https://site.example/-/ada/atlas?q=kept');
+  assert.equal(redirected.headers.get('location'), 'https://site.example/ada/atlas?q=kept');
   assert.equal(asked.length, 1);
 });
 
@@ -458,7 +487,7 @@ for (const failure of [401, 500, 503, 'network', 'invalid-json'])
           ? new Response('invalid json')
           : json({ found: false }, failure),
     );
-    for (const path of ['/-/explore', '/-/ada', '/-/ada/atlas']) {
+    for (const path of ['/explore', '/ada', '/ada/atlas']) {
       const response = await serve(new Request(`https://site.example${path}`));
       assert.equal(response.status, 200);
       assert.equal(await response.text(), APP);
@@ -472,7 +501,7 @@ for (const missing of ['FORGE_PUBLIC_READ_SECRET', 'FORGE_CONVEX_SITE_URL'])
       throw new Error('must not fetch');
     });
     delete process.env[missing];
-    for (const path of ['/-/explore', '/-/ada', '/-/ada/atlas']) {
+    for (const path of ['/explore', '/ada', '/ada/atlas']) {
       const response = await serve(new Request(`https://site.example${path}`));
       assert.equal(response.status, 200);
       assert.equal(await response.text(), APP);
@@ -485,12 +514,12 @@ test('case, encoding and slash variants redirect before any public backend call'
     throw new Error('must not fetch');
   });
   for (const [variant, canonical] of [
-    ['/-/ADA/ATLAS', '/-/ada/atlas'],
-    ['/-/EXPLORE', '/-/explore'],
-    ['/-/%61da/%61tlas', '/-/ada/atlas'],
-    ['/-//ada///atlas/', '/-/ada/atlas'],
-    ['//-/ada/', '/-/ada'],
-    ['/-/ada/atlas/', '/-/ada/atlas'],
+    ['/ADA/ATLAS', '/ada/atlas'],
+    ['/EXPLORE', '/explore'],
+    ['/%61da/%61tlas', '/ada/atlas'],
+    ['//ada///atlas/', '/ada/atlas'],
+    ['//ada/', '/ada'],
+    ['/ada/atlas/', '/ada/atlas'],
     ['/SITEMAP.XML/', '/sitemap.xml'],
     ['/-/public/v1/project/ADA/%61tlas.json', '/-/public/v1/project/ada/atlas.json'],
   ]) {
@@ -503,7 +532,7 @@ test('case, encoding and slash variants redirect before any public backend call'
     assert.equal(response.headers.get('location'), `https://site.example${canonical}`, variant);
   }
   assert.equal(asked.length, 0);
-  for (const path of ['/-/ada/atlas/private', '/-/account/devices/edit'])
+  for (const path of ['/ada/atlas/private', '/account/devices/edit', '/llms.txt', '/assets/app.js', '/'])
     assert.equal(
       config.path.some(pattern => new URLPattern({ pathname: pattern }).test(`https://site.example${path}`)),
       false,
@@ -564,11 +593,11 @@ test('function responses enforce the site security policy without upstream heade
   const security = [...block.matchAll(/^([A-Za-z-]+) = "([^"\n]*)"$/gm)]
     .filter(([_, name]) => name !== 'for')
     .map(([_, name, value]) => [name, value]);
-  for (const path of ['/-/ada/atlas', '/-/public/v1/explore/active.json', '/-/ADA']) {
+  for (const path of ['/ada/atlas', '/-/public/v1/explore/active.json', '/ADA']) {
     const response = await serve(new Request(`https://site.example${path}`));
     for (const [name, value] of security) assert.equal(response.headers.get(name), value, `${path}: ${name}`);
   }
-  const denied = await serve(new Request('https://site.example/-/ada', { method: 'POST' }));
+  const denied = await serve(new Request('https://site.example/ada', { method: 'POST' }));
   for (const [name, value] of security) assert.equal(denied.headers.get(name), value);
   assert.match(toml, /\[functions\."public-read"\]\s+included_files = \["hosted-web-dist\/app\.html"\]/);
 });

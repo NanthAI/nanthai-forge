@@ -91,7 +91,7 @@ export async function billingFixture(t) {
       });
     });
     await tab.addInitScript(value => localStorage.setItem('forge-theme', value), theme);
-    await tab.goto(`https://forge.test/-/account/billing?${query}`);
+    await tab.goto(`https://forge.test/account/billing?${query}`);
     await tab.locator('h1').waitFor();
     await tab.evaluate(value => (document.documentElement.dataset.theme = value), theme);
     return tab;

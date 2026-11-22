@@ -385,7 +385,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.match(page.url(), /type=bug/);
     const parent = heading.getByRole('link', { name: 'Plan', exact: true });
     await parent.waitFor();
-    assert.equal(await parent.getAttribute('href'), '/-/example-builder/synthetic/plan');
+    assert.equal(await parent.getAttribute('href'), '/example-builder/synthetic/plan');
     assert.ok((await parent.boundingBox()).width > 1, 'a query-backed saved view keeps the way back to Plan');
     await page.getByRole('button', { name: 'Remove Type bug' }).click();
     await page
@@ -1217,14 +1217,14 @@ test('plan views and bulk bar: real components keep the view in the address and 
           assert.equal(await work.getByText('Passed', { exact: true }).count(), 1);
           assert.equal(
             await work.getByRole('link', { name: 'Define the wire format' }).getAttribute('href'),
-            `/-/example-builder/synthetic/plan/${workFixture.dependencyId}`,
+            `/example-builder/synthetic/plan/${workFixture.dependencyId}`,
           );
           assert.equal(await work.getByRole('link', { name: 'Parser release' }).count(), 1);
           assert.equal(await work.getByText('Split into', { exact: true }).count(), 1);
           assert.equal(await work.getByText('Blocks', { exact: true }).count(), 2);
           assert.equal(
             await work.getByRole('link', { name: 'Document compatibility' }).getAttribute('href'),
-            `/-/example-builder/synthetic/plan/${workFixture.settledBlockerId}`,
+            `/example-builder/synthetic/plan/${workFixture.settledBlockerId}`,
           );
           assert.doesNotMatch(await page.locator('.head .crumb').textContent(), /00000000/);
           const landings = work.getByRole('link', { name: /^Landing / });
@@ -1232,16 +1232,16 @@ test('plan views and bulk bar: real components keep the view in the address and 
           assert.equal(await laneThreads.count(), 10);
           assert.equal(
             await laneThreads.first().getAttribute('href'),
-            `/-/example-builder/synthetic/lanes/${workFixture.open.id}/thread`,
+            `/example-builder/synthetic/lanes/${workFixture.open.id}/thread`,
           );
           assert.equal(
             await lanes.first().getAttribute('href'),
-            `/-/example-builder/synthetic/lanes/${workFixture.open.id}`,
+            `/example-builder/synthetic/lanes/${workFixture.open.id}`,
           );
           assert.equal(await landings.count(), 2);
           assert.equal(
             await landings.first().getAttribute('href'),
-            `/-/example-builder/synthetic/code/files?at=${'c'.repeat(64)}`,
+            `/example-builder/synthetic/code/files?at=${'c'.repeat(64)}`,
           );
           assert.deepEqual(calls.slice(-1), [
             { itemId, projectId: 'synthetic', limit: 10, cursor: null, details: true },

@@ -965,10 +965,10 @@ test('History links published handles and runs and omits a withheld person for p
   );
   assert.match(
     html,
-    /href="\/-\/sample-owner\/sample-project\/lanes\/sessions\/mara\/amber-fox"[^>]*>amber-fox</,
+    /href="\/sample-owner\/sample-project\/lanes\/sessions\/mara\/amber-fox"[^>]*>amber-fox</,
   );
-  assert.match(html, /href="\/-\/mara"[^>]*>@mara</);
-  assert.match(html, /href="\/-\/jon"[^>]*>@jon</);
+  assert.match(html, /href="\/mara"[^>]*>@mara</);
+  assert.match(html, /href="\/jon"[^>]*>@jon</);
   assert.match(html, /model not declared/);
   assert.match(html, /<span class="a-run mono"[^>]*>bold-finch<\/span>/);
   assert.doesNotMatch(html, /href="[^"]*bold-finch/);

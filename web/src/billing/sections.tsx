@@ -18,7 +18,7 @@ export const billingHref = (
   view = 'owner',
   extra?: Record<string, string>,
 ) =>
-  `/-/account/billing?${new URLSearchParams({ sample, view, ...(screen === 'home' ? {} : { screen }), ...extra })}`;
+  `/account/billing?${new URLSearchParams({ sample, view, ...(screen === 'home' ? {} : { screen }), ...extra })}`;
 type Props = { snapshot: BillingSnapshot; sample: string };
 export function Projects({ snapshot }: Props) {
   const [shown, setShown] = useState(8);

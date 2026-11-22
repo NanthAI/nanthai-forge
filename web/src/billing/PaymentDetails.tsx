@@ -326,7 +326,7 @@ export default function PaymentDetails({ snapshot, sample, view, search }: Scree
                 title="Who can see and change billing"
                 count={2}
                 tools={
-                  <A className="lk" href="/-/account/people">
+                  <A className="lk" href="/account/people">
                     People and teams
                   </A>
                 }

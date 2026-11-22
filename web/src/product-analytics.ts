@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { analyticsTarget, sendAnalytics, type AnalyticsEvent } from '../../src/product-analytics';
-import { parseAppPath, type AppRoute } from './app/paths';
+import { isAppPath, parseAppPath, type AppRoute } from './app/paths';
 
 function screenName(route: AppRoute) {
   switch (route.frame) {
@@ -64,7 +64,7 @@ export function captureBrowserAnalytics(
   try {
     const screen = route
       ? screenName(route)
-      : location.pathname.startsWith('/-')
+      : isAppPath(location.pathname)
         ? screenName(parseAppPath(location.pathname))
         : 'legacy';
     if (event === 'screen_opened') {

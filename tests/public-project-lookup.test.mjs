@@ -85,15 +85,15 @@ test('signed-out CLI and MCP find the same public projects with one request per 
       handle: 'ada',
       slug: 'atlas',
       name: 'atlas',
-      url: `${site}/-/ada/atlas`,
-      cloneCommand: `nforge clone '${site}/-/ada/atlas' 'atlas' --deployment '${target.site}'`,
+      url: `${site}/ada/atlas`,
+      cloneCommand: `nforge clone '${site}/ada/atlas' 'atlas' --deployment '${target.site}'`,
     },
     {
       handle: 'ada',
       slug: 'atlas-tools',
       name: 'Atlas tools',
-      url: `${site}/-/ada/atlas-tools`,
-      cloneCommand: `nforge clone '${site}/-/ada/atlas-tools' 'atlas-tools' --deployment '${target.site}'`,
+      url: `${site}/ada/atlas-tools`,
+      cloneCommand: `nforge clone '${site}/ada/atlas-tools' 'atlas-tools' --deployment '${target.site}'`,
     },
   ]);
   assert.equal(lookup.cloneRequiresSignIn, true);

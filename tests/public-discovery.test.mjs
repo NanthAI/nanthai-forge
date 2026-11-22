@@ -367,8 +367,8 @@ test('public addresses parse strictly and the sitemap escapes what it lists', ()
   ])
     assert.equal(route.publicPath(bad), null, bad);
   const xml = route.sitemapXml('https://forge.test', [{ handle: 'ada', slug: 'a&b' }]);
-  assert.match(xml, /<loc>https:\/\/forge\.test\/-\/ada\/a%26b<\/loc>/);
-  assert.match(xml, /<loc>https:\/\/forge\.test\/-\/explore<\/loc>/);
+  assert.match(xml, /<loc>https:\/\/forge\.test\/ada\/a%26b<\/loc>/);
+  assert.match(xml, /<loc>https:\/\/forge\.test\/explore<\/loc>/);
 });
 
 test('share tags describe the page from the public read and add no script', () => {
@@ -384,7 +384,7 @@ test('share tags describe the page from the public read and add no script', () =
     }),
   );
   assert.match(out, /<title>ada\/at&quot;las · Forge<\/title>/);
-  assert.match(out, /property="og:url" content="https:\/\/forge\.test\/-\/ada\/atlas"/);
+  assert.match(out, /property="og:url" content="https:\/\/forge\.test\/ada\/atlas"/);
   assert.match(out, /Main is passing\. 12 changes landed this week\. 2 Lanes open\. 3 stars\./);
   assert.doesNotMatch(out, /Items left/);
   assert.equal(out.match(/<script/g).length, 1);
@@ -394,7 +394,7 @@ test('profile and explore share tags count only what the public read lists', () 
   const profile = meta.profileMeta('https://forge.test', { handle: 'ada', projects: [{}, {}] });
   assert.equal(profile.kind, 'profile');
   assert.equal(profile.description, '2 public projects by @ada on Forge.');
-  assert.equal(profile.url, 'https://forge.test/-/ada');
+  assert.equal(profile.url, 'https://forge.test/ada');
   const explore = meta.exploreMeta('https://forge.test', { total: 1, more: true });
   assert.match(explore.description, /^1 public project and more on Forge/);
 });
@@ -538,7 +538,7 @@ test('the authenticated sitemap origin is configuration, never a request header'
   });
   const response = await route.serve._handler(ctx, request);
   assert.equal(response.status, 200);
-  assert.match(await response.text(), /https:\/\/canonical.example\/-\/ada\/atlas/);
+  assert.match(await response.text(), /https:\/\/canonical.example\/ada\/atlas/);
   assert.equal(
     response.headers.get('netlify-cdn-cache-control'),
     'public, durable, s-maxage=30, must-revalidate',

@@ -27,9 +27,9 @@ test('an agent run with a model reads run · model · for @person, and each name
   assert.match(html, /title="sample-one\/amber-fox · sample-model-1"/);
   assert.match(
     html,
-    /href="\/-\/sample-owner\/sample-project\/lanes\/sessions\/sample-one\/amber-fox"[^>]*>amber-fox</,
+    /href="\/sample-owner\/sample-project\/lanes\/sessions\/sample-one\/amber-fox"[^>]*>amber-fox</,
   );
-  assert.match(html, /href="\/-\/sample-one"[^>]*>@sample-one</);
+  assert.match(html, /href="\/sample-one"[^>]*>@sample-one</);
 });
 
 test('an agent run that declared no model says so, and never guesses one', () => {
@@ -45,7 +45,7 @@ test('a person shows the handle with the solid mark and no model', () => {
   assert.equal(text(html), 'so@sample-one');
   assert.match(html, /class="av"/);
   assert.doesNotMatch(html, /model|agent run/);
-  assert.match(html, /href="\/-\/sample-one"/);
+  assert.match(html, /href="\/sample-one"/);
 });
 
 test('a public viewer and a row that is itself a link get the same words as text, with no links', () => {
@@ -55,7 +55,7 @@ test('a public viewer and a row that is itself a link get the same words as text
   // Without a project a run has no page to open; the person still has a public page.
   const links = whoLinks('sample-one/amber-fox');
   assert.equal(links.runHref, undefined);
-  assert.equal(links.personHref, '/-/sample-one');
+  assert.equal(links.personHref, '/sample-one');
 });
 
 test('an owner stored as @handle/run is the run of @handle, never @@handle (Plan board mock check, d3357f40)', () => {

@@ -1,22 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 import './zod-jitless';
-import { ErrorToast, ToastProvider } from './ui/Toast';
+import { ErrorToast } from './ui/Toast';
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { errorReporter, installErrorCapture } from './error-capture';
-import { installRoutes } from './shell/location';
 import { AppLoader } from './ui/AppLoader';
-import { NavigationGuard } from './ui/NavigationGuard';
 import './ui/loader.css';
 import './shell/mark.css';
 import { createRoot } from 'react-dom/client';
 
-// Shared by the loader and both apps; the old screens' styles load with the old app (legacy-styles.ts).
+// Shared by the loader and the app.
 import './ui/tokens.css';
 import './ui/components.css';
-import { hrefFor, isAppPath, normalizeAccountPathname } from './app/paths';
+import { earlierAppPath, normalizeAccountPathname } from './app/paths';
 import { oldAddress } from './app/old-address';
 import { applyMotion } from './motion-pref';
-import { normalizeDevicePathname } from './app/device-path';
 class AppBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -50,20 +47,20 @@ installErrorCapture();
 applyMotion();
 const root = createRoot(document.getElementById('root')!);
 // The CDN can serve the shell after normalizing the origin request while the browser keeps the original path.
-const pathname = normalizeDevicePathname(normalizeAccountPathname(location.pathname));
+const pathname = normalizeAccountPathname(location.pathname);
 if (pathname !== location.pathname)
   history.replaceState(history.state, '', pathname + location.search + location.hash);
-// An old /approve link (Item 0a99ab23) opens the rebuilt app's lookup, which replaces it with the Lane page.
-const approve = hrefFor({ frame: 'public', page: 'approve' });
-// The rebuilt app (Item 84125787) serves every address under /-; everything else is the old app until stage C.
-// An old address the rebuilt app has a place for goes there: a plain path with no read (old-address.ts), an id-only
-// link through the app, which resolves it with one access-checked read (OldAddress.tsx).
-const old = oldAddress(pathname, location.search);
-if (pathname === '/approve' && pathname !== approve) {
-  location.replace(approve + location.search + location.hash);
+// The app is served at the root (Item b0704959). An address from before the switch (/-/…) is redirected by
+// netlify.toml; a server that does not apply it reaches the same address here. An old address the app has a place
+// for goes there: a plain path with no read (old-address.ts), an id-only link through the app, which resolves it with
+// one access-checked read (OldAddress.tsx).
+const earlier = earlierAppPath(pathname);
+const old = earlier ? null : oldAddress(pathname, location.search);
+if (earlier) {
+  location.replace(earlier + location.search + location.hash);
 } else if (old?.kind === 'go') {
   location.replace(old.to + location.hash);
-} else if (old || isAppPath(pathname)) {
+} else {
   root.render(
     <AppBoundary>
       <AppLoader />
@@ -78,27 +75,4 @@ if (pathname === '/approve' && pathname !== approve) {
       ),
     )
     .catch(() => root.render(<ErrorToast error="Could not load Forge." retry={() => location.reload()} />));
-} else {
-  installRoutes(true);
-  startOldApp();
-}
-function startOldApp() {
-  const frame = (app: React.ReactNode) => (
-    <ToastProvider>
-      <NavigationGuard />
-      <AppBoundary>{app}</AppBoundary>
-    </ToastProvider>
-  );
-  root.render(frame(<AppLoader />));
-  void import('./Hosted')
-    .then(({ default: Hosted }) => {
-      root.render(frame(<Hosted />));
-      if (import.meta.env.VITE_FORGE_POSTHOG_PROJECT_TOKEN)
-        void import('./product-analytics')
-          .then(({ captureBrowserAnalytics }) => captureBrowserAnalytics('screen_opened'))
-          .catch(() => undefined);
-    })
-    .catch(() =>
-      root.render(frame(<ErrorToast error="Could not load Forge." retry={() => location.reload()} />)),
-    );
 }

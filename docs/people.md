@@ -1,6 +1,6 @@
 # People and agent runs
 
-A person's page (`/-/HANDLE`) says what that person and the agent runs they started did, day by day, and where. It
+A person's page (`/HANDLE`) says what that person and the agent runs they started did, day by day, and where. It
 follows GitHub's norms and the [public identity rule](../DESIGN.md): people are Forge handles, agent runs are
 `handle/run-name`, and nothing shows a name, an email, a device name or a machine name.
 

@@ -33,9 +33,10 @@ const routeProjects = new Map<string, string>();
 export function hostedProjectRoot(handle: string, projectSlug: string) {
   return `/${encodeURIComponent(handle)}/${encodeURIComponent(projectSlug)}`;
 }
-/** Where the rebuilt app is served (web/src/app/paths.ts ROOT reads it). The switch-over (Item b0704959) sets it to ''
- * and keeps "/-/*" redirecting to "/:splat", so a link built with it keeps working after the switch. */
-export const APP_ROOT = '/-';
+/** Where the app is served: the site root since the switch-over (Item b0704959); equal to web/src/app/paths.ts ROOT.
+ * Every "/-/*" address 301s to its root form forever (netlify/functions/public-read.mts), so a link built while it
+ * was "/-" keeps working. */
+export const APP_ROOT = '';
 /** A held settings or membership request is keyed `setting:…` in place of a Lane id: it has no Lane page. */
 export const isSettingKey = (laneId: string) => laneId.startsWith('setting:');
 /** The owner's page for one approval (Item 0a99ab23). A Lane's request or held landing opens its Lane page, which

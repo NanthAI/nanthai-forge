@@ -23,7 +23,7 @@ test('the post-deploy probe follows the reserved HTML redirect exactly once', as
         : { status: 308, location: `https://site.example${path.split('?')[0]}?=` };
     },
   });
-  assert.deepEqual(paths, ['/-/explore?__forge_page=x', '/-/explore?=']);
+  assert.deepEqual(paths, ['/explore?__forge_page=x', '/explore?=']);
   const [{ first, followed }] = result.cases;
   assert.equal(first.status, 308);
   assert.equal(followed.status, 200);
@@ -31,9 +31,9 @@ test('the post-deploy probe follows the reserved HTML redirect exactly once', as
 
 test('a restored query, self target, warm cache or another redirect cannot pass the live one-hop check', async () => {
   for (const location of [
-    'https://site.example/-/explore?__forge_page=x',
-    'https://site.example/-/explore?=&__forge_page=x',
-    'https://other.example/-/explore?=',
+    'https://site.example/explore?__forge_page=x',
+    'https://site.example/explore?=&__forge_page=x',
+    'https://other.example/explore?=',
     'https://site.example/outside?=',
   ])
     await assert.rejects(
@@ -156,12 +156,12 @@ test('the live transport observes redirects without following them or retrying a
     const asked = [];
     t.mock.method(globalThis, 'fetch', async (url, init) => {
       asked.push({ url: String(url), redirect: init.redirect });
-      return new Response(null, { status, headers: { location: 'https://site.example/-/explore' } });
+      return new Response(null, { status, headers: { location: 'https://site.example/explore' } });
     });
-    const result = await requestPublicPath('https://site.example', '/-/EXPLORE');
+    const result = await requestPublicPath('https://site.example', '/EXPLORE');
     assert.equal(result.status, status);
-    assert.equal(result.location, 'https://site.example/-/explore');
-    assert.deepEqual(asked, [{ url: 'https://site.example/-/EXPLORE', redirect: 'manual' }]);
+    assert.equal(result.location, 'https://site.example/explore');
+    assert.deepEqual(asked, [{ url: 'https://site.example/EXPLORE', redirect: 'manual' }]);
     t.mock.restoreAll();
   }
 });

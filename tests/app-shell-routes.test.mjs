@@ -4,12 +4,14 @@
 // passkey's wire shape matching what the server accepts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { moduleUrl } from './convex-module.mjs';
 
 const paths = await import(moduleUrl('../web/src/app/paths.ts'));
 const { safeNext } = await import(moduleUrl('../web/src/app/session.ts'));
 const { assertPasskey, createPasskey, toBase64url } = await import(moduleUrl('../web/src/app/webauthn.ts'));
-const { ROOT, hrefFor, parseAppPath, currentScreenHref, projectPlaces, placeSections, accountPlaces } = paths;
+const { ROOT, hrefFor, parseAppPath, projectPlaces, placeSections, accountPlaces } = paths;
+const { reservedHandles } = await import(moduleUrl('../src/readable-urls.ts'));
 
 const project = (place, section = '', rest = '') => ({
   frame: 'project',
@@ -58,32 +60,54 @@ test('a project discovery link survives sign-in while the ordinary signed-in add
   assert.equal(paths.isPublicProjectView(project('settings'), true, 'public'), false);
 });
 
-test('addresses outside the rebuilt app or with unknown places are not app pages', () => {
-  assert.equal(paths.isAppPath('/mara/tide-pool'), false);
-  assert.equal(paths.isAppPath('/-x/a'), false);
+test('b0704959: the app is served at the root; the public page, docs, files and the earlier /- addresses are not app pages', () => {
+  assert.equal(ROOT, '');
+  assert.equal(paths.isAppPath('/mara/tide-pool'), true, 'the project page is the address bindings store');
+  for (const path of [
+    '/',
+    '/docs',
+    '/docs/',
+    '/docs/status/',
+    '/llms.txt',
+    '/assets/app.js',
+    '/-',
+    '/-/mara',
+  ])
+    assert.equal(paths.isAppPath(path), false, path);
   for (const path of [
     `${ROOT}/mara/tide-pool/nope`,
     `${ROOT}/mara/tide-pool/stats/extra`,
     `${ROOT}/account/billing/x`,
     `${ROOT}/explore/x`,
+    '/-/mara/tide-pool',
   ])
     assert.equal(parseAppPath(path).frame, 'missing', path);
   // A handle alone is that person's or organisation's public profile (Item 8947a779).
   assert.deepEqual(parseAppPath(`${ROOT}/mara`), { frame: 'discover', page: 'profile', handle: 'mara' });
 });
 
-test('old supported destinations stay reachable from every place until stage C replaces them', () => {
-  const missing = [];
-  for (const route of everyRoute.filter(route => route.frame === 'project' || route.frame === 'account')) {
-    const href = currentScreenHref(route);
-    if (href === null) missing.push(route.frame === 'project' ? route.place : route.place);
-    else assert(!paths.isAppPath(href), `${href} must be an old screen, not a rebuilt one`);
+test('b0704959: a reserved first segment never reads as a handle, and every app place is reserved', () => {
+  for (const path of ['/projects', '/settings', '/local/demo', '/api/x', '/import', '/agents/a/b'])
+    assert.equal(parseAppPath(path).frame, 'missing', path);
+  for (const route of everyRoute.filter(route => route.frame !== 'project' && route.page !== 'profile')) {
+    const first = hrefFor(route).split('/')[1];
+    assert(reservedHandles.has(first), `${first} (${hrefFor(route)}) must be a reserved handle`);
   }
-  assert.deepEqual(
-    [...new Set(missing)].sort(),
-    ['billing', 'stats'],
-    'only places with no old screen lack one',
+  for (const page of ['approve', 'terms', 'privacy']) assert(reservedHandles.has(page), page);
+  // paths.ts keeps its own copy of the reserved names: none of them may read as a handle, nor one more.
+  const copy = /const reserved = new Set\(\[([^\]]+)\]\)/.exec(
+    readFileSync(new URL('../web/src/app/paths.ts', import.meta.url), 'utf8'),
   );
+  assert.deepEqual(new Set([...copy[1].matchAll(/'([^']+)'/g)].map(match => match[1])), reservedHandles);
+  for (const name of [
+    ...reservedHandles,
+    ...[...reservedHandles].map(name => name.toUpperCase()),
+    'Account',
+    '-',
+  ]) {
+    assert.notEqual(parseAppPath(`/${name}`).page, 'profile', name);
+    assert.notEqual(parseAppPath(`/${name}/x`).frame, 'project', name);
+  }
 });
 
 test('sign-in returns only to an address inside the rebuilt app', () => {
@@ -93,10 +117,14 @@ test('sign-in returns only to an address inside the rebuilt app', () => {
   );
   assert.equal(safeNext(`${ROOT}/device?code=ABCDE-FGHJK`), `${ROOT}/device?code=ABCDE-FGHJK`);
   for (const bad of [
-    'https://evil.example/-/account',
-    '//evil.example/-/account',
-    '/mara/tide-pool',
+    'https://evil.example/account',
+    '//evil.example/account',
+    '/docs/',
     `${ROOT}/signin?next=x`,
+    '/SIGNIN',
+    '/SignIn/passkey',
+    '/DOCS/',
+    '/\\evil.example/account',
     'javascript:alert(1)',
     null,
   ])

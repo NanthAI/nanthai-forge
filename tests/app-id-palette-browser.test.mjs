@@ -73,7 +73,7 @@ test('the rebuilt ⌘K palette finds an Item by a pasted id with one lookup, and
     function Fixture() {
       const [palette, setPalette] = useState(false);
       const [keys, setKeys] = useState(false);
-      const go = { route: parseAppPath('/-/example/parser'), openPalette: () => setPalette(true), openKeys: () => setKeys(true), signOut() {} };
+      const go = { route: parseAppPath('/example/parser'), openPalette: () => setPalette(true), openKeys: () => setKeys(true), signOut() {} };
       useFrameKeys(go);
       // useFrameKeys adds the ⌘K listener in an effect after the first paint; this later effect in the same component
       // runs after it, so the test presses ⌘K only once the palette can hear it (Item 6a18b123: on loaded runners the
@@ -130,7 +130,7 @@ test('the rebuilt ⌘K palette finds an Item by a pasted id with one lookup, and
       body: readFileSync(asset ? file : join(out, 'fixture.html')),
     });
   });
-  await page.goto('https://forge.test/-/example/parser');
+  await page.goto('https://forge.test/example/parser');
   await page.waitForFunction(() => 'keysReady' in document.documentElement.dataset);
   const calls = () => page.evaluate(() => window.calls);
   const input = page.getByRole('searchbox', { name: 'Search' });
@@ -178,7 +178,7 @@ test('the rebuilt ⌘K palette finds an Item by a pasted id with one lookup, and
     }
   // Enter opens the Item at its rebuilt address.
   await input.press('Enter');
-  await page.waitForFunction(id => location.pathname === `/-/example/parser/plan/${id}`, itemId);
+  await page.waitForFunction(id => location.pathname === `/example/parser/plan/${id}`, itemId);
   // Reopened, the palette starts empty with no stale result. Within one opening the same id in any form is answered
   // from the first lookup; a new opening asks again, so an id filed meanwhile is found (review 4cb180d5 finding 2).
   await open();

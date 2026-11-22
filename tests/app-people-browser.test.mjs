@@ -60,9 +60,9 @@ import { getFunctionName } from ${JSON.stringify(require.resolve('convex/server'
 let version=0; const listeners=new Set(); const emit=()=>{version++;listeners.forEach(fn=>fn());};
 const people=${JSON.stringify(data)};
 let olderInvitation={id:'old-handle',email:'@older-person',state:'pending'};
-let rows=[{ invitationId:'recipient', projectName:'Compiler tools and documentation', inviterHandle:'olive', role:'read', state:'pending', expiresAt:Date.now()+5*86400000, href:'/-/olive/tools' },
-{ invitationId:'old', projectName:'Old project', inviterHandle:'wren', role:'write', state:'expired', expiresAt:Date.now()-2*86400000, href:'/-/wren/old' }];
-let teamRows=[{ invitationId:'team-invite', teamName:'Documentation team', inviterHandle:'olive', state:'pending', href:'/-/account/people' }];
+let rows=[{ invitationId:'recipient', projectName:'Compiler tools and documentation', inviterHandle:'olive', role:'read', state:'pending', expiresAt:Date.now()+5*86400000, href:'/olive/tools' },
+{ invitationId:'old', projectName:'Old project', inviterHandle:'wren', role:'write', state:'expired', expiresAt:Date.now()-2*86400000, href:'/wren/old' }];
+let teamRows=[{ invitationId:'team-invite', teamName:'Documentation team', inviterHandle:'olive', state:'pending', href:'/account/people' }];
 export function useQuery(ref,args){useSyncExternalStore(fn=>{listeners.add(fn);return()=>listeners.delete(fn);},()=>version); const name=getFunctionName(ref);
 if(args==='skip')return undefined;
 if(name==='projectContributors:list')return [];
@@ -224,7 +224,7 @@ if(legacy){
           assert.equal(await page.getByRole('button', { name: 'Accept', exact: true }).count(), 0);
           assert.equal(
             await page.getByRole('link', { name: 'Open the project', exact: true }).getAttribute('href'),
-            '/-/olive/tools',
+            '/olive/tools',
           );
         }
         if (mode === 'team-recipient') {

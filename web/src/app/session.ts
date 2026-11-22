@@ -17,7 +17,7 @@ export function safeNext(value: string | null | undefined): string {
   return url.origin === 'https://forge.invalid' &&
     !url.pathname.startsWith('//') &&
     (isAppPath(url.pathname) || oldAddress(url.pathname, url.search)?.kind === 'look') &&
-    !url.pathname.startsWith(`${ROOT}/signin`)
+    !url.pathname.toLowerCase().startsWith(`${ROOT}/signin`)
     ? url.pathname + url.search
     : `${ROOT}/account`;
 }

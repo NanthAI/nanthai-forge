@@ -286,9 +286,9 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
   };
 
   // From the public project page: Browse the code opens the files at main.
-  const home = await open('/-/ada/atlas');
+  const home = await open('/ada/atlas');
   await home.getByRole('link', { name: 'Browse the code' }).click();
-  await home.waitForURL('**/-/ada/atlas/code/files');
+  await home.waitForURL('**/ada/atlas/code/files');
   await home.waitForFunction(() => !document.querySelector('[aria-busy="true"]'));
   const tree = home.getByRole('region', { name: 'Files' });
   await tree.getByRole('link', { name: 'README.md' }).waitFor();
@@ -297,7 +297,7 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
   // A folder opens in place; a file opens beside the tree.
   await tree.getByRole('button', { name: /src/ }).click();
   await tree.getByRole('link', { name: 'index.ts' }).click();
-  await home.waitForURL('**/-/ada/atlas/code/files/src/index.ts');
+  await home.waitForURL('**/ada/atlas/code/files/src/index.ts');
   await home.getByRole('region', { name: 'File' }).getByText('export const atlas = 1;').waitFor();
   const touching = home.getByRole('region', { name: 'In this file' });
   await touching.getByRole('link', { name: /Index: rebuild without downtime/ }).waitFor();
@@ -331,7 +331,7 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
   await noWrites(home, 'files');
 
   // History: newest first, earlier pages on request, a receipt with no Lane or Item link.
-  const history = await open('/-/ada/atlas/code');
+  const history = await open('/ada/atlas/code');
   const list = history.getByRole('region', { name: 'What landed' });
   assert.equal(await list.locator('a.hrow').count(), 2);
   await list.getByRole('button', { name: 'Show earlier landings' }).click();
@@ -347,12 +347,12 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
   assert.doesNotMatch(text, /@an agent/);
   assert.equal(
     await receipt.getByRole('link', { name: 'Read the code here' }).getAttribute('href'),
-    `/-/ada/atlas/code/files?at=${HEAD}&receipt=${reads[`${code}/history.json`].landings[0].receiptId}`,
+    `/ada/atlas/code/files?at=${HEAD}&receipt=${reads[`${code}/history.json`].landings[0].receiptId}`,
   );
   await noWrites(history, 'history');
 
   // A deep link to a file reads that file with its folders in one GET.
-  const deep = await open('/-/ada/atlas/code/files/README.md');
+  const deep = await open('/ada/atlas/code/files/README.md');
   await deep.getByRole('region', { name: 'File' }).getByText('A small index for cold reads.').waitFor();
   assert.ok(asked.includes(`${code}/${HEAD}/open/${hex('README.md')}.json`));
   const deepHistory = deep.getByRole('region', { name: 'In this file' });
@@ -364,7 +364,7 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
 
   // What landed narrowed to one file (Item 3968a655): the same cached file-history GETs, step by step, and no
   // Convex call; Look further back is the next GET.
-  const narrowed = await open('/-/ada/atlas/code?path=src/index.ts');
+  const narrowed = await open('/ada/atlas/code?path=src/index.ts');
   const narrowedList = narrowed.getByRole('region', { name: 'What landed' });
   await narrowedList.getByText('Index: rebuild without downtime').waitFor();
   assert.equal(await narrowedList.locator('.tbar .n').textContent(), '1 of 52 landings');
@@ -378,7 +378,7 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
   await noWrites(narrowed, 'narrowed history');
 
   // A private project and a missing one look the same: the read answers 404 for both.
-  for (const path of ['/-/ada/private-one/code/files', '/-/nobody/atlas/code'])
+  for (const path of ['/ada/private-one/code/files', '/nobody/atlas/code'])
     assert.match(
       await (await open(path)).locator('.empty h3').textContent(),
       /No public project at this address/,
@@ -386,8 +386,8 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
     );
 
   for (const [name, path] of [
-    ['files', '/-/ada/atlas/code/files/README.md'],
-    ['history', `/-/ada/atlas/code/${reads[`${code}/history.json`].landings[0].receiptId}`],
+    ['files', '/ada/atlas/code/files/README.md'],
+    ['history', `/ada/atlas/code/${reads[`${code}/history.json`].landings[0].receiptId}`],
   ])
     for (const width of [1440, 390])
       for (const theme of ['dark', 'light']) {

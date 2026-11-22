@@ -62,7 +62,7 @@ test('W8/W22: the device page classifies a refusal by its server code, never by 
   assert.equal(code.codeProblem(hostedErrorCode(refused('AUTH_CODE_USED', 'Taken.'))), 'used');
 });
 
-// B-02: the /-/device page keeps every rule of the earlier /device page (docs/security.md, "CLI device credentials").
+// B-02: the /device page keeps every rule of the earlier /device page (docs/security.md, "CLI device credentials").
 const { DeviceView } = await import(moduleUrl('../web/src/app/Device.tsx'));
 const linkCode = await import(moduleUrl('../web/src/device/link-code.ts'));
 const hostileName = 'Forge‮evil​  \n' + 'x'.repeat(100) + '<b>hi</b>';
@@ -157,7 +157,7 @@ test('B-02: a decided code says what was decided and a lapsed code offers no ans
 test('B-02: a code in a link leaves the address on arrival and is kept only in this tab, for the life of a code', () => {
   const kept = new Map();
   const browser = {
-    location: { href: 'https://forge.example/-/device?code=qk7pm-2xdht&from=cli#top' },
+    location: { href: 'https://forge.example/device?code=qk7pm-2xdht&from=cli#top' },
     history: {
       state: null,
       replaceState(_state, _unused, url) {
@@ -178,14 +178,10 @@ test('B-02: a code in a link leaves the address on arrival and is kept only in t
   try {
     const now = Date.now();
     assert.equal(linkCode.takeLinkCode(now), 'QK7PM-2XDHT');
-    assert.equal(
-      browser.location.href,
-      'https://forge.example/-/device?from=cli#top',
-      'only the code leaves',
-    );
+    assert.equal(browser.location.href, 'https://forge.example/device?from=cli#top', 'only the code leaves');
     assert.doesNotMatch(JSON.stringify(browser.location), /QK7PM/i);
     // The sign-in round trip returns to the bare address; the code comes back from this tab.
-    browser.location.href = 'https://forge.example/-/device';
+    browser.location.href = 'https://forge.example/device';
     assert.equal(linkCode.takeLinkCode(now + 60_000), 'QK7PM-2XDHT');
     assert.equal(linkCode.takeLinkCode(now + 600_000), '', 'a code is never kept past its 10 minutes');
     browser.location.href = 'https://forge.example/device?code=QK7PM2XDHT';
@@ -193,7 +189,7 @@ test('B-02: a code in a link leaves the address on arrival and is kept only in t
     assert.equal(browser.location.href, 'https://forge.example/device');
     linkCode.forgetLinkCode();
     assert.equal(linkCode.takeLinkCode(now), '', 'an answered code is not offered again');
-    browser.location.href = 'https://forge.example/-/device?code=QK7';
+    browser.location.href = 'https://forge.example/device?code=QK7';
     assert.equal(linkCode.takeLinkCode(now), 'QK7', 'a partial code fills the field and is not kept');
     assert.equal(kept.size, 0);
   } finally {
@@ -203,25 +199,24 @@ test('B-02: a code in a link leaves the address on arrival and is kept only in t
   }
 });
 
-test("the link the CLI prints opens the app's Device page, and an earlier /device link follows it (ac85b100)", async () => {
+test("the link the CLI prints opens the app's Device page, and an earlier /-/device link follows it (ac85b100, b0704959)", async () => {
   const { readFileSync } = await import('node:fs');
-  const { isAppPath, parseAppPath } = await import(moduleUrl('../web/src/app/paths.ts'));
-  const { normalizeDevicePathname } = await import(moduleUrl('../web/src/app/device-path.ts'));
+  const { earlierAppPath, isAppPath, parseAppPath } = await import(moduleUrl('../web/src/app/paths.ts'));
   const source = readFileSync(new URL('../convex/deviceActions.ts', import.meta.url), 'utf8');
   const links = [...source.matchAll(/new URL\('([^']+)', web\)/g)].map(match => match[1]);
-  assert.deepEqual(links, ['/-/device'], 'one approval link, to a page the app serves');
+  assert.deepEqual(links, ['/device'], 'one approval link, to a page the app serves');
   assert.ok(isAppPath(links[0]) && parseAppPath(links[0]).page === 'device');
-  // A code printed before this change is valid for ten minutes and still points at /device.
-  for (const earlier of ['/device', '/device/'])
-    assert.equal(normalizeDevicePathname(earlier), '/-/device', earlier);
-  assert.equal(normalizeDevicePathname('/device-notes'), '/device-notes');
-  assert.equal(normalizeDevicePathname('/-/device'), '/-/device');
+  // A code printed before the switch to the root is valid for ten minutes and still points at /-/device.
+  for (const earlier of ['/-/device', '//-/device'])
+    assert.equal(earlierAppPath(earlier), '/device', earlier);
+  assert.equal(earlierAppPath('/device'), null);
+  assert.equal(earlierAppPath('/-device'), null);
 });
 
 test('df06081d: the GitHub check keeps the typed terminal code through its redirect, and hides its button without a linked GitHub identity', () => {
   const kept = new Map();
   const browser = {
-    location: { href: 'https://forge.example/-/device?code=QK7PM2XDHT', origin: 'https://forge.example' },
+    location: { href: 'https://forge.example/device?code=QK7PM2XDHT', origin: 'https://forge.example' },
     history: {
       state: null,
       replaceState(_s, _u, url) {
@@ -249,7 +244,7 @@ test('df06081d: the GitHub check keeps the typed terminal code through its redir
   try {
     const now = Date.UTC(2026, 10, 10, 12);
     // A link code: the person types it again, leaves for GitHub and comes back with it still typed.
-    assert.deepEqual(arrive('https://forge.example/-/device?code=QK7PM2XDHT', now), {
+    assert.deepEqual(arrive('https://forge.example/device?code=QK7PM2XDHT', now), {
       code: 'QK7PM-2XDHT',
       typed: '',
     });
@@ -257,7 +252,7 @@ test('df06081d: the GitHub check keeps the typed terminal code through its redir
       { code: 'QK7PM-2XDHT', typed: 'QK7PM-2XDHT', fromLink: true, requestId: '' },
       now,
     );
-    assert.equal(back, 'https://forge.example/-/device');
+    assert.equal(back, 'https://forge.example/device');
     assert.deepEqual(arrive(back, now + 60_000), { code: 'QK7PM-2XDHT', typed: 'QK7PM-2XDHT' });
     linkCode.forgetLinkCode();
     // A request link (remembered device): the request id comes back in the address and the typed code from this tab.
@@ -265,9 +260,9 @@ test('df06081d: the GitHub check keeps the typed terminal code through its redir
       { code: '', typed: 'AB3CD-EF4GH', fromLink: false, requestId: 'req-1' },
       now,
     );
-    assert.equal(back, 'https://forge.example/-/device?request=req-1');
+    assert.equal(back, 'https://forge.example/device?request=req-1');
     assert.deepEqual(
-      arrive('https://forge.example/-/device?request=req-2', now + 60_000),
+      arrive('https://forge.example/device?request=req-2', now + 60_000),
       { code: '', typed: '' },
       'another request never inherits it',
     );

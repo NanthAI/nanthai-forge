@@ -13,7 +13,7 @@
 <meta property="og:title" content="Forge: source control built for coding agents">
 <meta property="og:description" content="Many coding agents, one codebase. Overlaps reported while agents work, one check on the exact result, a landing queue instead of a pile of pull requests.">
 <meta name="twitter:card" content="summary">
-<script>(function(){var d=document.documentElement,q=location.search;d.className='js';if(/[?&](project|codescape|zone|surface|tab|projectTab|collection|lane|intent|viewId|decision|review|planningItem)=/.test(q))return location.replace('/projects'+q+location.hash);try{if(localStorage.getItem('forge-signed-in')==='1')return location.replace('/projects');var t=localStorage.getItem('forge-theme');if(t==='dark'||t==='light')d.setAttribute('data-theme',t)}catch(e){}})();</script>
+<script>(function(){var d=document.documentElement,q=location.search;d.className='js';if(/[?&](project|codescape|zone|surface|tab|projectTab|collection|lane|intent|viewId|decision|review|planningItem)=/.test(q))return location.replace('/projects'+q+location.hash);try{if(localStorage.getItem('forge-signed-in')==='1')return location.replace('/account');var t=localStorage.getItem('forge-theme');if(t==='dark'||t==='light')d.setAttribute('data-theme',t)}catch(e){}})();</script>
 <link rel="preload" href="/src/assets/fonts/AtkinsonHyperlegibleNext-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/src/landing/landing.css">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -36,7 +36,7 @@
     <header class="top w" data-crisp="36">
       <a class="brand" href="/" aria-label="Forge home"><svg viewBox="0 0 64 64" aria-hidden="true"><path class="stem" d="M8 6H20V40.5H8Z"/><path class="stem" d="M8 40H20V58H14L8 52Z"/><path class="arm" d="M8 6H34.6V18H8ZM34 6H58L52 18H34Z"/><rect class="xT" x="8" y="6" width="12" height="12"/><path class="arm" d="M8 28H30.6V40H8ZM30 28H48L42 40H30Z"/><rect class="xL" x="8" y="28" width="12" height="12"/><circle class="sp" cx="54" cy="12" r="2.6"/></svg><span translate="no">Forge</span></a>
       <nav aria-label="Site"><a class="wide" href="#speed">Benchmark</a><a class="wide" href="#why">How it works</a><a class="wide" href="#pricing">Pricing</a><a class="wide" href="/docs/">Docs</a></nav>
-      <a class="in" href="/projects">Sign in</a>
+      <a class="in" href="/signin">Sign in</a>
     </header>
 
     <div class="w lead" data-crisp>
@@ -45,7 +45,7 @@
         <p class="sub">Source control for many coding agents on one codebase. In our benchmark ten agents reached main <b>36% sooner</b>, on <b>65% fewer CI minutes</b>, than through a GitHub flow.</p>
         <div class="go">
           <button class="key" type="button" data-copy><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="7" y="7" width="10" height="10"/><path d="M13 7V3H3v10h4"/></svg><span data-label>Give this to your agent</span></button>
-          <p class="fine">Copies a short prompt. Your agent reads one public file and tells you what would change in your repository before it sets anything up. <a class="lk" href="/projects">Or import a repository yourself</a>.</p>
+          <p class="fine">Copies a short prompt. Your agent reads one public file and tells you what would change in your repository before it sets anything up. <a class="lk" href="/new/import">Or import a repository yourself</a>.</p>
         </div>
       </div>
     </div>
@@ -221,7 +221,7 @@
       </div>
       <div class="proof">
         <div class="plans">
-          <div class="plan"><h3 class="pn">Hobby</h3><span class="amt">$0</span><span class="per">free</span><span class="ld"><b>300</b> landings a month</span><div class="meter" aria-hidden="true"><i style="--v:6%"></i></div><a class="btn go" href="/projects">Import a repository</a></div>
+          <div class="plan"><h3 class="pn">Hobby</h3><span class="amt">$0</span><span class="per">free</span><span class="ld"><b>300</b> landings a month</span><div class="meter" aria-hidden="true"><i style="--v:6%"></i></div><a class="btn go" href="/new/import">Import a repository</a></div>
           <div class="plan"><h3 class="pn">Pro</h3><span class="amt">$15</span><span class="per">a month</span><span class="ld"><b>1,000</b> landings a month</span><div class="meter" aria-hidden="true"><i style="--v:20%"></i></div></div>
           <div class="plan"><h3 class="pn">Team</h3><span class="amt">$49</span><span class="per">a month</span><span class="ld"><b>5,000</b> landings a month</span><div class="meter" aria-hidden="true"><i style="--v:100%"></i></div></div>
         </div>
@@ -270,7 +270,7 @@
       <h2 class="disp" id="endh" data-crisp>Ask your agent what Forge would change.</h2>
       <div class="go" data-crisp>
         <button class="key" type="button" data-copy><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="7" y="7" width="10" height="10"/><path d="M13 7V3H3v10h4"/></svg><span data-label>Give this to your agent</span></button>
-        <p class="fine">It explains first and installs nothing. <a class="lk" href="/projects">Or import a repository yourself</a>.</p>
+        <p class="fine">It explains first and installs nothing. <a class="lk" href="/new/import">Or import a repository yourself</a>.</p>
         <details class="peek"><summary>See the prompt it copies</summary><pre id="prompt" data-prompt>Read /llms.txt on the site this prompt came from.
 
 Then tell me, in five lines: what Forge would change about how you and other agents land work in this repository, what it would cost us in CI minutes compared with our current flow, and what you need from me to try it on one small change. Do not install anything yet.</pre></details>
@@ -279,6 +279,6 @@ Then tell me, in five lines: what Forge would change about how you and other age
   </section>
 </main>
 
-<footer class="ft"><div class="w"><span translate="no">Forge by NanthAi</span><a href="/docs/">Docs</a><a href="/docs/research/p6-exit-bench-results/">Benchmark method</a><a href="/docs/status/">Development status</a><a href="/docs/security/">Security</a><a href="https://github.com/NanthAI/nanthai-forge">Source</a><a href="/-/privacy">Privacy</a><a href="/-/terms">Terms</a><a href="/llms.txt" translate="no">/llms.txt</a></div></footer>
+<footer class="ft"><div class="w"><span translate="no">Forge by NanthAi</span><a href="/docs/">Docs</a><a href="/docs/research/p6-exit-bench-results/">Benchmark method</a><a href="/docs/status/">Development status</a><a href="/docs/security/">Security</a><a href="https://github.com/NanthAI/nanthai-forge">Source</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/llms.txt" translate="no">/llms.txt</a></div></footer>
 </body>
 </html>

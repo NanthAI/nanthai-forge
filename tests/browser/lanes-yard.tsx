@@ -6,7 +6,7 @@
 // Who waits on whom (Item 9e748e41) renders the same queue plus one Lane further back, so its wait is traced to the
 // front. Three Lanes share saved files (Item f787005c): each of their rows says how many, linked to Who is touching
 // what for that Lane.
-// Served under the app's own address (/-/…/lanes), it renders the real Lanes place on the same data plus one Lane whose
+// Served under the app's own address (/…/lanes), it renders the real Lanes place on the same data plus one Lane whose
 // check failed, over a fake Convex client that counts reads, and names the screen the real route registry gives the
 // current address, so the links the overview draws, browser Back and unknown addresses are all followed for real
 // (Item e317b6ea). `?double` doubles the open Lanes for the scale measurement. The fixture's frame subscribes Needs
@@ -405,7 +405,7 @@ function Routed() {
 }
 
 createRoot(document.getElementById('root')!).render(
-  location.pathname.startsWith('/-/') ? (
+  location.pathname !== '/yard.html' ? (
     <ConvexProvider client={fake.client as never}>
       <Routed />
     </ConvexProvider>

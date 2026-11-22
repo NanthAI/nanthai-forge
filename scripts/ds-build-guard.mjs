@@ -77,10 +77,10 @@ const isLayerModule = id =>
 
 /**
  * First paint never carries the layer, and the layer's own chunks fit `maxGzipBytes`.
- * Eager = the HTML entries' chunks plus the immediately loaded app modules (src/Hosted.tsx for the old app,
- * src/app/App.tsx for the rebuilt one under /-) and their static imports.
+ * Eager = the HTML entries' chunks plus the immediately loaded app module (src/app/App.tsx, at the root since
+ * Item b0704959) and their static imports.
  */
-const APP_MODULES = ['/web/src/Hosted.tsx', '/web/src/app/App.tsx'];
+const APP_MODULES = ['/web/src/app/App.tsx'];
 export function layerBundleReport(bundle, maxGzipBytes) {
   const chunks = Object.values(bundle).filter(item => item.type === 'chunk');
   const eagerRoots = chunks

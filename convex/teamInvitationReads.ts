@@ -28,7 +28,7 @@ export async function teamInboxRow(ctx: QueryCtx, row: TeamInvitation, recipient
     invitationId: row._id,
     teamName: team.name,
     inviterHandle: account?.handle ?? '',
-    href: '/-/account/people',
+    href: '/account/people',
     state: row.state,
   };
 }

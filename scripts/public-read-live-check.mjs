@@ -29,8 +29,8 @@ export async function requestPublicPath(base, path, timeoutMs = 10_000) {
 
 /** The reserved selector must be removed without restoring it at the edge. */
 export async function probeSelfRedirects({ base, request = path => requestPublicPath(base, path) }) {
-  const path = '/-/explore?__forge_page=x';
-  const canonical = '/-/explore?=';
+  const path = '/explore?__forge_page=x';
+  const canonical = '/explore?=';
   const first = await request(path);
   if (first.status !== 308 || !first.location?.endsWith('?='))
     throw Error(`Self-redirect probe ${path}: expected 308 with Location ending exactly in ?=`);
@@ -104,7 +104,7 @@ if (isMainModule(import.meta.url)) {
     );
     process.exitCode = 1;
   } else {
-    const path = shape === 'canonical' ? '/-/explore' : '/-/EXPLORE';
+    const path = shape === 'canonical' ? '/explore' : '/EXPLORE';
     try {
       if (shape === 'self-redirect') console.log(JSON.stringify(await probeSelfRedirects({ base })));
       else {

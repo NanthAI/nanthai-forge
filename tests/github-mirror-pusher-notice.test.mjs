@@ -71,12 +71,12 @@ test('the notice says what happened, why, and how to keep the change', () => {
     'c'.repeat(40),
     'd'.repeat(8) + '-0000',
     'MERGE_CONFLICT: details',
-    'https://forge.test/-/a/b/lanes/x',
+    'https://forge.test/a/b/lanes/x',
   );
   assert.match(text, /did not land on Forge \(MERGE_CONFLICT\)/);
   assert.match(text, /next push takes it out of main/);
   assert.match(text, /never rewrites history/);
-  assert.match(text, /Lane dddddddd on Forge and land it: https:\/\/forge\.test\/-\/a\/b\/lanes\/x$/);
+  assert.match(text, /Lane dddddddd on Forge and land it: https:\/\/forge\.test\/a\/b\/lanes\/x$/);
   assert(!text.includes('details'));
   assert.match(pusherNotice('c'.repeat(40), 'd'.repeat(8), null, null), /did not land on Forge, so/);
 });

@@ -29,7 +29,7 @@ const guidance = {
   personal: empty ? '' : worst ? 'x'.repeat(200) + ' ' + 'y'.repeat(120) : 'Explain what you changed in plain words.',
   projectEditable: editable,
 };
-const trail = [{ label: 'Docs site', href: '/-/sample-owner/docs-site' }, { label: 'Settings', href: '/-/sample-owner/docs-site/settings' }, { label: 'Agents' }];
+const trail = [{ label: 'Docs site', href: '/sample-owner/docs-site' }, { label: 'Settings', href: '/sample-owner/docs-site/settings' }, { label: 'Agents' }];
 createRoot(document.getElementById('root')).render(
   <ProjectFrame route={{ frame: 'project', handle: 'sample-owner', project: 'docs-site', place: 'settings', section: 'agents', rest: '' }} name="Docs site" feed={undefined} needs={undefined} projects={null}
     controls={{ viewerHandle: 'sample-owner', onPicker() {}, onPalette() {}, onKeys() {} }}>
@@ -46,7 +46,7 @@ test('settings agents: project and personal guidance save separately, a failed s
   const fx = await viewFixture(t, fixture, 'Agent guidance', browser);
   const { open, check } = fx;
   if (shots) mkdirSync(shots, { recursive: true });
-  const path = '/-/sample-owner/docs-site/settings/agents';
+  const path = '/sample-owner/docs-site/settings/agents';
   {
     const { page, errors, context } = await open(1440, 'light', 'who=owner&fail=1', path);
     const project = page.getByRole('textbox', { name: 'For this project' });

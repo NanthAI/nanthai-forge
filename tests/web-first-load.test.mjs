@@ -15,9 +15,9 @@ const resolveModule = (from, specifier) => {
   }
   return null;
 };
-/** Static (non-type) import closure of the entry and the Hosted page that loads right after it. */
+/** Static (non-type) import closure of the entry and the app (src/app/App.tsx) that loads right after it. */
 function firstLoadSources() {
-  const queue = ['web/src/main.tsx', 'web/src/Hosted.tsx'].map(path => resolve(root, path)),
+  const queue = ['web/src/main.tsx', 'web/src/app/App.tsx'].map(path => resolve(root, path)),
     seen = new Set(queue),
     external = new Set();
   while (queue.length) {

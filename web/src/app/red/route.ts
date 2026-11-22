@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// One main red's address (Item ae068e0c): /-/<handle>/<project>/code/red/<sequence>, the audit event's sequence. Kept
+// One main red's address (Item ae068e0c): /<handle>/<project>/code/red/<sequence>, the audit event's sequence. Kept
 // apart from the screen so the shell can match it without loading the screen's chunk.
 import type { ProjectRoute, ScreenRoutes } from '../screen-route';
 

@@ -44,10 +44,10 @@ test('the served account shell repairs its original doubled-slash URL before cho
     return route.fulfill({ path: join(out, url.pathname) });
   });
   await page.addInitScript(() => history.replaceState({ from: 'fixture' }, ''));
-  await page.goto(`${origin}//-/account/devices?tab=current#details`);
+  await page.goto(`${origin}//account/devices?tab=current#details`);
   await page.getByRole('heading', { name: 'Forge backend is not configured' }).waitFor();
   assert.equal(await page.locator('html[data-ds]').count(), 1);
-  assert.equal(page.url(), `${origin}/-/account/devices?tab=current#details`);
+  assert.equal(page.url(), `${origin}/account/devices?tab=current#details`);
   assert.deepEqual(await page.evaluate(() => history.state), { from: 'fixture' });
-  assert.deepEqual(requests, ['//-/account/devices']);
+  assert.deepEqual(requests, ['//account/devices']);
 });

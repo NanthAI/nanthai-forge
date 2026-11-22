@@ -113,7 +113,7 @@ on a two-way project, the result carries `protection` for `main`
 Status leads with `summary`, the mirror in one sentence, and `mirror` (`state`,
 `direction`: `off`, `one-way` or `two-way`, `repository` and one `next` action when
 a person must act), read from `projectGithubMirrorRead.read`, the same read and
-words as Settings > GitHub mirror on the web (`/-/OWNER/PROJECT/settings/mirror`). A project with no mirror says so (`No mirror.`)
+words as Settings > GitHub mirror on the web (`/OWNER/PROJECT/settings/mirror`). A project with no mirror says so (`No mirror.`)
 and names the connect command.
 
 One approval does both jobs: the owner's authorization of the repository also turns

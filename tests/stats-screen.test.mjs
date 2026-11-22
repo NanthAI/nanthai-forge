@@ -125,7 +125,7 @@ async function fixture(out) {
       const data = statsRangeReply(days, period);
       // Each fold's part, recorded so the test can tell an unopened fold made no read.
       const usePart = part => ((window.foldReads ??= new Set()).add(part), statsRangeReply(days, period, part));
-      return h(StatsView, {data, period, busy: new URLSearchParams(search).has('busy'), now, usePart, historyHref: '/-/example/tidepool/lanes/history', onPeriod: setSearch});
+      return h(StatsView, {data, period, busy: new URLSearchParams(search).has('busy'), now, usePart, historyHref: '/example/tidepool/lanes/history', onPeriod: setSearch});
     }
     createRoot(document.getElementById('root')).render(h(ConvexProvider, {client},
       h(ProjectFrame, {route, name: 'tidepool', projects: [], controls: {onPalette(){}, onKeys(){}, onPicker(){}, viewerHandle: 'example'}},
@@ -192,9 +192,7 @@ test('stats: short headline, one freshness line, today so far, comparison, table
         body: asset ? readFileSync(file) : html,
       });
     });
-    await page.goto(
-      `https://forge.test/-/example/tidepool/stats?sample=${sample}${query ? `&${query}` : ''}`,
-    );
+    await page.goto(`https://forge.test/example/tidepool/stats?sample=${sample}${query ? `&${query}` : ''}`);
     await page.locator('h1').waitFor();
     await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
     return page;

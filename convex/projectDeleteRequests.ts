@@ -85,7 +85,7 @@ export function requestView(row: Row, now = Date.now()) {
 export function deleteRequestUrl(requestId: string) {
   const web = process.env.FORGE_WEB_URL;
   if (!web) return null;
-  const url = new URL('/-/account', web);
+  const url = new URL('/account', web);
   url.searchParams.set('request', requestId);
   return url.href;
 }

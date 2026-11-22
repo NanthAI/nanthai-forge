@@ -8,7 +8,7 @@ import { moduleUrl } from './convex-module.mjs';
 const { PageLinks, pagesFor } = await import(moduleUrl('../web/src/app/project-pages.tsx'));
 const { parseAppPath } = await import(moduleUrl('../web/src/app/paths.ts'));
 const { loadViews, removeView, saveView } = await import(moduleUrl('../web/src/app/plan/query.ts'));
-const base = '/-/sample/tidepool';
+const base = '/sample/tidepool';
 
 test('a detail link marks the nearest page and keeps a real destination in the flyout', () => {
   const route = parseAppPath(base + '/code/files/src/index.ts');
@@ -16,7 +16,7 @@ test('a detail link marks the nearest page and keeps a real destination in the f
   assert.equal(code.find(page => page.current)?.href, base + '/code/files');
   assert.equal(code.find(page => page.current)?.current, 'true');
   const markup = renderToStaticMarkup(createElement(PageLinks, { pages: code, fly: true }));
-  assert.match(markup, /href="\/-\/sample\/tidepool\/code\/files" aria-current="true" tabindex="-1"/);
+  assert.match(markup, /href="\/sample\/tidepool\/code\/files" aria-current="true" tabindex="-1"/);
   assert.equal(markup.match(/aria-current=/g)?.length, 1);
 });
 

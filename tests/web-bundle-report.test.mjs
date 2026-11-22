@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { webBundleReport } from '../scripts/web-bundle-report.mjs';
 
-test('bundle measurement follows static closure once, including immediately loaded Hosted, keeps the public page separate, and separates conditional fonts', t => {
+test('bundle measurement follows static closure once, including the immediately loaded app, keeps the public page separate, and separates conditional fonts', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-web-bundle-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, '.vite'));
@@ -17,11 +17,11 @@ test('bundle measurement follows static closure once, including immediately load
       'app.html': {
         file: 'entry.js',
         imports: ['shared'],
-        dynamicImports: ['src/Hosted.tsx'],
+        dynamicImports: ['src/app/App.tsx'],
         css: ['entry.css'],
         assets: ['latin.woff2'],
       },
-      'src/Hosted.tsx': { file: 'hosted.js', imports: ['shared'], dynamicImports: ['optional'] },
+      'src/app/App.tsx': { file: 'app.js', imports: ['shared'], dynamicImports: ['optional'] },
       shared: { file: 'shared.js', imports: ['app.html'] },
       optional: { file: 'unopened.js' },
     }),
@@ -33,7 +33,7 @@ test('bundle measurement follows static closure once, including immediately load
     'landing.css',
     'entry.js',
     'entry.css',
-    'hosted.js',
+    'app.js',
     'shared.js',
     'latin.woff2',
   ])

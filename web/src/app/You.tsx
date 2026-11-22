@@ -12,7 +12,7 @@ import { DeviceProjectChoice } from './DeviceProjectChoice';
 import { YouView } from './YouView';
 export default function You({ handle, leave }: { handle?: string; leave?: () => void }) {
   const { signOut } = useAuthActions();
-  leave ??= () => void signOut().then(() => location.assign('/-/signin'));
+  leave ??= () => void signOut().then(() => location.assign('/signin'));
   const [cursor, setCursor] = useState<string | null>(null);
   const data = useQuery(api.authSessions.list, { paginationOpts: { numItems: 20, cursor } });
   const {
@@ -149,7 +149,7 @@ export default function You({ handle, leave }: { handle?: string; leave?: () => 
       github={includeDevices =>
         void run(() =>
           (includeDevices ? githubDevices : github)({
-            redirectTo: new URL('/-/account/devices', location.origin).href,
+            redirectTo: new URL('/account/devices', location.origin).href,
           }),
         )
       }

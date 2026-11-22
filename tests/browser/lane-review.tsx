@@ -474,8 +474,8 @@ void reply().then(data => {
             route={route}
             projectId={'p1' as never}
             trail={[
-              { label: 'tide-pool', href: '/-/sample-owner/tide-pool' },
-              { label: 'Lanes', href: '/-/sample-owner/tide-pool/lanes' },
+              { label: 'tide-pool', href: '/sample-owner/tide-pool' },
+              { label: 'Lanes', href: '/sample-owner/tide-pool/lanes' },
               { label: 'sample-owner/amber-fox' },
             ]}
             who="sample-owner/amber-fox"

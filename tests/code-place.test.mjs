@@ -260,14 +260,11 @@ test('What landed narrows to one file only by its ?path= address, and its links 
   assert.equal(words.typedPath('   '), null);
   assert.equal(words.timelinePath('?path='), null, 'an empty path lists every landing');
   assert.equal(words.timelinePath('?at=' + head), null);
-  assert.equal(
-    words.pathHref('/-/ada/atlas/code', 'src/a b&c.ts'),
-    '/-/ada/atlas/code?path=src/a%20b%26c.ts',
-  );
+  assert.equal(words.pathHref('/ada/atlas/code', 'src/a b&c.ts'), '/ada/atlas/code?path=src/a%20b%26c.ts');
   assert.equal(
     words.timelinePath(new URL(words.pathHref('/x', 'src/a b&c.ts'), 'https://forge.test').search),
     'src/a b&c.ts',
     'the address reads back as the same path',
   );
-  assert.equal(words.pathHref('/-/ada/atlas/code', null), '/-/ada/atlas/code');
+  assert.equal(words.pathHref('/ada/atlas/code', null), '/ada/atlas/code');
 });

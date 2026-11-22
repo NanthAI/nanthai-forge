@@ -73,7 +73,7 @@ export async function beginDeviceLogin(
   );
   const deviceCode = deviceSecret(key, args.operationId, args.clientNonce);
   const code = userCode(key, args.operationId, deviceCode),
-    verification = new URL('/-/device', web).href;
+    verification = new URL('/device', web).href;
   const row = await ctx.runMutation(internal.deviceStore.start, {
     operationId: args.operationId,
     ...(args.forceApproval ? { forceApproval: true } : {}),

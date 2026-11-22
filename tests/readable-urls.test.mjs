@@ -44,7 +44,7 @@ test('default handles come from the username, then the GitHub login, never a rea
   assert.equal(isDefaultHandle(`${'a'.repeat(37)}-2`, { username: long }), true);
   for (const value of ['a', '-abc', 'abc-', 'Aaa', 'a_b', 'a'.repeat(40), ...reservedHandles])
     assert.ok(handleError(value), value);
-  // Every app address under /-/ is reserved, so a profile page never collides with one (Item 8947a779).
+  // Every first segment of an app address is reserved, so a profile page never collides with one (Item 8947a779).
   for (const place of ['account', 'signin', 'device', 'new', 'public', 'explore', 'terms', 'privacy'])
     assert.ok(reservedHandles.has(place), place);
   // Extensionless static paths the site serves at the top level (the built docs, the font and image assets): once the

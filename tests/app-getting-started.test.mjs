@@ -112,7 +112,7 @@ test('Cursor gets the one-step command and its project file for manual setup', (
 test('the sign-in step sends the person to the devices page where the same code and name show', () => {
   for (const app of apps.agentApps) {
     const signIn = apps.setupSteps(app, DEPLOYMENT).find(step => step.needsPerson);
-    assert.equal(signIn.link.href, '/-/account/devices');
+    assert.equal(signIn.link.href, '/account/devices');
     assert.match(signIn.detail, /code matches/);
   }
 });

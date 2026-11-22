@@ -5,7 +5,7 @@ import { lazy, Suspense, type ReactNode } from 'react';
 const You = lazy(() => import('./You'));
 const InvitationHome = lazy(() => import('./people/InvitationHome'));
 import { A } from './frames';
-import { currentScreenHref, hrefFor, placeSections, type AppRoute } from './paths';
+import { hrefFor, placeSections, type AppRoute } from './paths';
 import { PhonePageTitle, useProjectPages } from './project-pages';
 import {
   accountPlaceLabels,
@@ -95,7 +95,7 @@ export function Head({
   );
 }
 
-/** The placeholder body of a place: its head and the way to the screen that serves it now. */
+/** The placeholder body of a place that has no screen of its own: its head. */
 export function Placeholder({ route, projectName }: { route: AppRoute; projectName: string }) {
   if (route.frame === 'account' && route.place === 'projects')
     return (
@@ -115,26 +115,11 @@ export function Placeholder({ route, projectName }: { route: AppRoute; projectNa
         <You />
       </Suspense>
     );
-  const current = currentScreenHref(route);
-  const title =
-    route.frame === 'project'
-      ? (sectionLabels[route.place][route.section] ?? projectPlaceLabels[route.place])
-      : route.frame === 'account'
-        ? accountPlaceLabels[route.place]
-        : '';
   const sentence =
     route.frame === 'project'
       ? placeSentence[route.place]
       : route.frame === 'account'
         ? accountSentence[route.place]
         : '';
-  return (
-    <Head trail={crumbsFor(route, projectName)} sentence={sentence}>
-      {current ? (
-        <a className="btn sm" href={current}>
-          Open the current {title} screen
-        </a>
-      ) : null}
-    </Head>
-  );
+  return <Head trail={crumbsFor(route, projectName)} sentence={sentence} />;
 }

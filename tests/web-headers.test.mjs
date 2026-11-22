@@ -108,6 +108,15 @@ test('the public page loads no app code and no third-party origin', () => {
 test('the redirects that serve the app still follow the headers block', () => {
   assert.ok(toml.indexOf('[[headers]]') < toml.indexOf('[[redirects]]'));
   assert.match(toml, /from = "\/\*"[\s\S]*to = "\/app.html"/);
-  assert.match(toml, /from = "\/device"\s+to = "\/app.html"/);
+  // b0704959: the app is at the root, so /device is an ordinary app page; the earlier /- addresses move for good.
+  assert.doesNotMatch(toml, /from = "\/device"/);
+  // The cached public read answers them with a same-site Location (public-read.mts config.path "/-/*"); a "/:splat"
+  // rule here would send "/-//evil.example" to another site.
+  assert.doesNotMatch(toml, /to = "\/:splat"/);
+  assert.doesNotMatch(toml, /from = "\/-/);
+  assert.ok(
+    toml.lastIndexOf('[[redirects]]') === toml.indexOf('[[redirects]]\nfrom = "/*"'),
+    'the catch-all stays last',
+  );
   assert.ok(!toml.includes('to = "/index.html"'), 'app routes serve app.html; "/" is the static public page');
 });

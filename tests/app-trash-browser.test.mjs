@@ -183,7 +183,7 @@ test('trash: forms per phase, restore with Undo, typed delete, owner-only menu a
     await page.getByRole('button', { name: 'More for docs-site' }).click();
     assert.equal(
       await page.getByRole('menuitem', { name: 'Project settings' }).getAttribute('href'),
-      '/-/sample-owner/docs-site/settings/project',
+      '/sample-owner/docs-site/settings/project',
     );
     await page.getByRole('menuitem', { name: 'Move to trash' }).click();
     const sheet = page.getByRole('dialog');

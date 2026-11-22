@@ -653,7 +653,7 @@ Configuration is written to the ignored `.env.local`.
 - `GITHUB_WEBHOOK_SECRET`: set the App webhook to `/github/webhook` on the deployment's `.convex.site` URL, with SSL verification and the Push event. Deliveries are verified by HMAC-SHA256 over the original bytes. Webhooks only record diagnostics. Re-index stays an explicit action.
 - `FORGE_CLI_PRIVATE_KEY`: RSA PKCS#8 private PEM for Forge-issued CLI credentials. Generate a dedicated RSA 2048-bit or larger key; keep it server-side, never under `VITE_`.
 - `FORGE_CLI_ISSUER`: exact HTTPS Convex HTTP origin, e.g. `https://your-deployment.convex.site`, without a trailing slash. It must differ from the Clerk issuer. `/auth/jwks` publishes only its public RSA JWK; the new custom JWT provider accepts audience `forge-cli`.
-- `FORGE_WEB_URL`: HTTPS origin of the Forge web app serving `/-/device` (an earlier `/device` address opens it). Deploy the Convex auth config, HTTP actions, functions and schema together, then publish the hosted web build. Existing Clerk/GitHub settings remain required. For a custom HTTP origin, set `FORGE_HTTP_URL` in the CLI environment; standard `.convex.cloud` deployment URLs derive `.convex.site`.
+- `FORGE_WEB_URL`: HTTPS origin of the Forge web app serving `/device` (the earlier `/-/device` address redirects to it). Deploy the Convex auth config, HTTP actions, functions and schema together, then publish the hosted web build. Existing Clerk/GitHub settings remain required. For a custom HTTP origin, set `FORGE_HTTP_URL` in the CLI environment; standard `.convex.cloud` deployment URLs derive `.convex.site`.
 - `FORGE_SECRET_KEYS`: the Secret Object keyring (see [operations](operations.md)).
 - `GITHUB_PUBLIC_TOKEN`: optional, for public GitHub API reads only.
 - `GITHUB_APP_SLUG`: optional, the Forge GitHub App's URL slug. An import refusal for an owner without an installation links `https://github.com/apps/SLUG/installations/new` when it is set.
@@ -662,25 +662,30 @@ Configuration is written to the ignored `.env.local`.
 
 Imports store gzip JSON in R2 (`r2blob:` references, see [data placement](data-placement.md)) with a 128 MiB artifact budget. Functions never execute target repository code. After setup, `npm run smoke:hosted -- https://github.com/sindresorhus/is-plain-obj` checks live anonymous import.
 
-### Rebuilt app under `/-`
+### The app at the site root
 
-The redesigned app (DESIGN.md frames) is served at `/-/…` by the same
-`app.html`; `web/src/main.tsx` sends those paths to `web/src/app/App.tsx` and
-every other path to the current screens, which stay unchanged until their
-rebuilt place lands. The two apps share no eager code: the current screens'
-CSS loads with `Hosted.tsx`, and the bundle report (`scripts/perf/report.mjs`)
-gives eager JS per app (`eagerJsGzipBytesByApp`; `eagerJsGzipBytes` is the
-heavier one). `scripts/ds-build-guard.mjs` keeps the design-system behaviour
-layer out of both first paints.
+The redesigned app (DESIGN.md frames) is served at the site root by `app.html`;
+`/` stays the static public page (`web/index.html`), and `/docs/`, `/assets/` and
+files are static. `web/src/main.tsx` starts only `web/src/app/App.tsx` (Item
+b0704959); the earlier screens (`Hosted.tsx` and its imports) are no longer
+served and go with the old-shell removal. The app lived under `/-` before; every
+`/-` and `/-/*` address moves for good (301, kept forever: mails, CLI output, board
+text and GitHub statuses carry those links) to the same address without `/-`. The
+cached public read answers them (`netlify/functions/public-read.mts`, path `/-/*`)
+with a Location on this site; netlify.toml has no `/:splat` rule, which would send
+`/-//evil.example` to another site. `main.tsx` does the same for a server that
+does not. The cached public read
+keeps its data at `/-/public/v1/`. `scripts/ds-build-guard.mjs` keeps the
+design-system behaviour layer out of the first paint.
 
 - Addresses: `web/src/app/paths.ts` is the one codec (`hrefFor` and
   `parseAppPath` are inverses). Project places are
-  `/-/{handle}/{project}/{needs|lanes|plan|code|stats|settings}/{section}/…`,
-  account places `/-/account/{projects|billing|people|devices|data}`, public
-  pages `/-/signin`, `/-/signin/passkey` and `/-/device`. Until a place is
-  rebuilt it links to the screen that serves it today (`currentScreenHref`).
+  `/{handle}/{project}/{needs|lanes|plan|code|stats|settings}/{section}/…`,
+  account places `/account/{projects|billing|people|devices|data}`, public
+  pages `/signin`, `/signin/passkey` and `/device`. A first segment in
+  `src/readable-urls.ts` reservedHandles is never read as a handle.
 - Old addresses: `web/src/app/old-address.ts` maps every old address to its new
-  one, built from `paths.ts`, so it holds under any `ROOT`: `/projects`,
+  one, built from `paths.ts`: `/projects`,
   `/settings`, project `activity`, `intents[/id]`, `planning`, `views`,
   `decisions`, `settings/{section}` and short `lanes/l-…` ids. A plain path
   redirects before any screen starts, with no read. A link that names only ids
@@ -692,12 +697,11 @@ layer out of both first paints.
   an Intent that is not an Issue's own (a reopened Issue's successor) opens no
   Item. A project the reader cannot see answers like a missing one, and never
   names its handle. An old `head=<State>` pin on a file link is the rebuilt
-  `?at=`. Settings pages with no rebuilt screen
-  (`general`, `backups`, `transfer`) stay on the old screen until `ROOT` is `""`;
-  guidance, contributions, zones and codescape wait for their keep/drop
-  decision. A saved view's id has no address of its own, so `views/<id>` opens
+  `?at=`. Settings `general`, `backups` and `transfer` open Settings > Project;
+  guidance opens Settings > Agents, contributions open Lanes, and zones and
+  codescape open Explore. A saved view's id has no address of its own, so `views/<id>` opens
   the Plan.
-- Evidence: `/-/{handle}/{project}/lanes/{laneId}/checked` loads its proof screen lazily.
+- Evidence: `/{handle}/{project}/lanes/{laneId}/checked` loads its proof screen lazily.
   Optional `save` and `run` query parameters select exact retained records; the read
   never substitutes another supplied run. One bounded read gives the header and
   claim. Report files load only when opened, through the existing paged report
@@ -753,20 +757,20 @@ layer out of both first paints.
   same close over today as a provisional row at most hourly and only after a
   landing since the last; the real close replaces it. See
   [Stats](run-evidence.md#stats).
-- Invitations: Home and `/-/account/people` load the recipient inbox lazily. The link carries no grant; the signed-in recipient accepts or declines. `FORGE_INVITATION_EMAIL=1` enables the separate sender on dev; its default is off. See [access](access.md#invitations).
+- Invitations: Home and `/account/people` load the recipient inbox lazily. The link carries no grant; the signed-in recipient accepts or declines. `FORGE_INVITATION_EMAIL=1` enables the separate sender on dev; its default is off. See [access](access.md#invitations).
 - Sign-in: one handle field (passkey sign-in or sign-up, browser autofill) and
-  GitHub. After a first GitHub sign-in with no passkey, `/-/signin/passkey`
+  GitHub. After a first GitHub sign-in with no passkey, `/signin/passkey`
   offers one (`authFirstPasskey`), skippable. The return address is kept in
-  session storage and only same-origin `/-` paths are followed. The client is
+  session storage and only same-origin app paths are followed. The client is
   wrapped by `withRefreshHold` (rule 1) and the passkey hook is mounted only
   inside `WhileAwake` (rule 2).
-- `/-/device` approves a terminal sign-in (`deviceActions`; page rules in
-  docs/security.md, "CLI device credentials"). `nforge login` links to it, and the
-  address printed by earlier builds, `/device`, is rewritten to it in the browser
-  before the app starts (`normalizeDevicePathname`). Only the stable device flow
+- `/device` approves a terminal sign-in (`deviceActions`; page rules in
+  docs/security.md, "CLI device credentials"). `nforge login` links to it; the
+  address printed by builds before the switch to the root, `/-/device`, redirects
+  to it. Only the stable device flow
   (`/auth/device/start-v2`) starts a sign-in; a CLI that still posts to
   `/auth/device/start` gets HTTP 426 telling it to run `nforge update`.
-- One Lane, `/-/{handle}/{project}/lanes/{laneId}` (`web/src/app/lane/`, lazy
+- One Lane, `/{handle}/{project}/lanes/{laneId}` (`web/src/app/lane/`, lazy
   with its route): one bounded read, `projectLaneReview.read`, names the pinned
   saved head and every changed path with its exact blobs from the Lane's overlap
   row (400 paths a page; about 7 documents a view; no State or file body). Files
@@ -778,7 +782,7 @@ layer out of both first paints.
   top of the Lane ahead shows where each line came from (`line-origin.ts`:
   main, the Lane ahead's pinned save, this Lane), and only while that Lane still
   holds the pinned save.
-- Code (`web/src/app/code/`, lazy): `/-/{handle}/{project}/code` lists what
+- Code (`web/src/app/code/`, lazy): `/{handle}/{project}/code` lists what
   landed, newest first, one receipt per row (`projectCode:history`, 25
   receipts a page, receipt fields only); `code/{receiptId}` opens one receipt.
   `code?path={file}` narrows the list to one file: it reads that file's
@@ -797,7 +801,7 @@ layer out of both first paints.
   keeps every folder it was sent (`code/listing.ts`): a folder you can see opens
   with no read, and opening it fetches the level below in the background. The views take only a project id and a route, so signed-out public
   reading is a routing change.
-- `/-/new` (`web/src/app/start/Start.tsx`) is the first-project page: the
+- `/new` (`web/src/app/start/Start.tsx`) is the first-project page: the
   explain-first prompt (the same words as `web/index.html`), import, and the
   agent app steps (`start/agent-apps.ts`, each command checked against the CLI
   usage by `tests/app-getting-started.test.mjs`). No Convex call. Getting
@@ -805,7 +809,7 @@ layer out of both first paints.
   nothing is held: one `projectSetup.read` (at most 8 documents) when it opens,
   a subscription only while setup is unfinished, and no read once this browser
   has seen it settled (first landing plus the one "who approves" answer).
-- `/-/new/import` (`web/src/app/start/ImportRepository.tsx`) is the GitHub
+- `/new/import` (`web/src/app/start/ImportRepository.tsx`) is the GitHub
   import page: the pre-import report (one `projectGithubImportPreview.preview`
   action, no rows written), the visibility and mirror questions, one start, then
   one `projectGithubImportProgress.current` subscription (import writes only).
@@ -906,7 +910,7 @@ layer out of both first paints.
   `projectPlanSettled:page` with `initiativeId`, subscribed only while that
   fold is open. There is no separate Initiatives tab. Idle costs nothing.
 
-Billing at `/-/account/billing` lazily loads `web/src/billing/Home.tsx`, replacing
+Billing at `/account/billing` lazily loads `web/src/billing/Home.tsx`, replacing
 its placeholder; `screen=plan|invoices|payment|limit` lazily loads each [billing screen](billing.md#billing-screens).
 The shared [stub contract](billing.md) adds no accounting calls.
 `tests/billing-home.test.mjs` and `tests/billing-screens.test.mjs` render the real frame with
@@ -919,7 +923,7 @@ Convex upgrades must replay scheduler self-cancellation: use `cancelPendingTask`
 
 The backend mounts Convex Auth 2.0.0 on Convex 1.50.0 as `auth`, `authGithub`,
 `authPasskey` and `authUsername`. The current browser screens still use Clerk.
-The rebuilt app under `/-` (below) signs in with these functions only. There
+The app (below) signs in with these functions only. There
 is no provider switch flag. Clerk removal follows the live GitHub and phone
 checks and the pre-removal security review.
 
@@ -994,7 +998,7 @@ token itself is not retained.
 
 #### Secrets screen interface
 
-`web/src/app/secrets/Secrets.tsx` loads lazily at `/-/:handle/:project/settings/secrets`.
+`web/src/app/secrets/Secrets.tsx` loads lazily at `/:handle/:project/settings/secrets`.
 `secrets-model.ts` defines a metadata-only `SecretsView`: unavailable, loading,
 forbidden, ready, or failed with optional previous metadata. `secretsView()` is
 the local unavailable stub; no secret backend or protocol has been added.
@@ -1021,7 +1025,7 @@ encryption must remain separate from `FORGE_SECRET_KEYS`, sign-in keys and
 
 #### Attach sign-in methods to an existing account
 
-Keep Clerk configured while accounts move. On `/-/signin`, choose **Add a
+Keep Clerk configured while accounts move. On `/signin`, choose **Add a
 passkey from your existing sign-in** (`?link=existing`). Sign in through the
 retained provider, then add a passkey. Forge verifies the active provider
 session server-to-server on every ceremony leg and checks the authenticated
@@ -1031,7 +1035,7 @@ that account already has a passkey, it must confirm the addition with one.
 No account is selected by a typed handle or email address. The link keeps
 the sign-in page's return address: after the passkey is added, **Continue with
 your passkey** signs in and returns there, so an account that only had the
-old sign-in can approve an `nforge login` at `/-/device`.
+old sign-in can approve an `nforge login` at `/device`.
 
 Sign in with the added passkey, open **Sign-in and devices → Manage sign-in
 methods**, then **Link GitHub to this account**. A passkey confirms the link
@@ -1189,7 +1193,7 @@ dev billed-usage measurement.
 The removal slice deletes Clerk's web provider/dependency, issuer entry and
 distinctness checks, `CLERK_*` setup/bot helpers, and retained provider lookups in
 GitHub access, linked identities, recipient checks and project people. The
-CLI approval link already points at `/-/device` and `web/src/DeviceLogin.tsx` is gone
+CLI approval link already points at `/device` and `web/src/DeviceLogin.tsx` is gone
 (`tests/ui-device.test.mjs` fails if the link names a page nobody serves). Integrate
 recipient/account lookup with `users` and the unified devices UI first, then
 remove the old path. Live GitHub, real phones/cross-device sign-in, refresh/autofill
@@ -1450,7 +1454,7 @@ from the 30-day maximum and CLI lifetime. Owner confirmation remains open on the
 relevant Issues. The Lane schema accepts optional holder metadata before its
 writer rolls out, preserving earlier clients and saved source pins.
 
-Terms and privacy drafts under `/-/terms` and `/-/privacy` render without a Convex
+Terms and privacy drafts under `/terms` and `/privacy` render without a Convex
 client. The sign-in line links both. New accounts retain the draft version once
 in their existing creation write. These drafts need owner approval before public
 launch; they do not settle the still-open public data-policy commitments.
@@ -1517,7 +1521,7 @@ passing probe establishes abuse protection for that deployment and request shape
 The sustained dev measurements were 9.962 seconds over 64 requests for the canonical address and 12.759 seconds
 over 63 requests for the redirecting address (3.099 and 2.204 seconds after their bursts, respectively).
 
-The `self-redirect` mode requests `/-/explore?__forge_page=x` without following redirects. Its Location must
+The `self-redirect` mode requests `/explore?__forge_page=x` without following redirects. Its Location must
 end exactly in `?=`, and following it once must return 200 with no Location.
 
 To verify data queries after deploy, fetch `/-/public/v1/explore/active.json?forge_probe=61` and

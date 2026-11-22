@@ -62,7 +62,7 @@ export default function NewHostedProject({
         </button>
       </form>
       {/* The import page reports what comes across and asks who can see it before anything starts. */}
-      <a className="fx-btn" href="/-/new/import">
+      <a className="fx-btn" href="/new/import">
         Import from GitHub
       </a>
     </>

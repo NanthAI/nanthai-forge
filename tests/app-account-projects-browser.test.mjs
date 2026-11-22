@@ -107,7 +107,7 @@ test('account projects: the held project leads, rows link to projects, and every
         body: readFileSync(asset ? file : join(out, 'fixture.html')),
       });
     });
-    await page.goto(`https://forge.test/-/account?data=${data}`);
+    await page.goto(`https://forge.test/account?data=${data}`);
     await page.locator('main h1').first().waitFor();
     // Settle the theme switch's colour transitions before axe reads the colours.
     await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
@@ -146,7 +146,7 @@ test('account projects: the held project leads, rows link to projects, and every
     );
     assert.equal(
       await page.getByRole('link', { name: 'stream-parser', exact: true }).getAttribute('href'),
-      '/-/sample-owner/stream-parser',
+      '/sample-owner/stream-parser',
     );
     assert.match(await main.textContent(), /Items not reported/);
     assert.deepEqual(errors, []);
@@ -165,10 +165,10 @@ test('account projects: the held project leads, rows link to projects, and every
   {
     const { page, context } = await open(390, 'dark', 'empty');
     assert.match(await page.locator('main').textContent(), /No projects yet/);
-    assert.equal(await page.getByRole('link', { name: 'Start a project' }).getAttribute('href'), '/-/new');
+    assert.equal(await page.getByRole('link', { name: 'Start a project' }).getAttribute('href'), '/new');
     assert.equal(
       await page.getByRole('link', { name: 'Import a repository' }).getAttribute('href'),
-      '/-/new/import',
+      '/new/import',
     );
     await context.close();
   }

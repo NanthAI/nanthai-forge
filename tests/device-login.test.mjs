@@ -94,7 +94,7 @@ test('device flow hashes secrets, reconciles retries, signs Forge JWTs, and bind
   assert.equal((await poll(s, { deviceCode: input.clientNonce })).status, 'expired_token');
   assert.notEqual(flow.device_code, input.clientNonce);
   assert.ok(flow.expires_in >= 599 && flow.expires_in <= 600);
-  assert.equal(flow.verification_uri, 'https://forge.example/-/device');
+  assert.equal(flow.verification_uri, 'https://forge.example/device');
   assert.match(flow.user_code, /^[A-Z2-9]{5}-[A-Z2-9]{5}$/);
   assert.equal(JSON.stringify([...s.tables.deviceCodes.values()]).includes(flow.device_code), false);
   assert.equal(JSON.stringify([...s.tables.deviceCodes.values()]).includes(flow.user_code), false);

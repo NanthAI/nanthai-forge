@@ -35,7 +35,7 @@ test('docs are static, contract-generated and usable without account or backend 
   assert.match(home, /Your first project/);
   assert.doesNotMatch(home, /<!--docs-content-->|\/src\//);
   // Every docs page links the draft Terms and Privacy pages (a9f4654f).
-  assert.match(home, /<a href="\/-\/terms">Terms<\/a><a href="\/-\/privacy">Privacy policy<\/a>/);
+  assert.match(home, /<a href="\/terms">Terms<\/a><a href="\/privacy">Privacy policy<\/a>/);
   const cli = read(out, 'docs/reference/cli.md');
   const modelRequirement = 'Required for a new agent start unless FORGE_AGENT_MODEL is set';
   assert(cli.includes(modelRequirement));

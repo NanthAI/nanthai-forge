@@ -54,11 +54,11 @@ export default function Legal({ page }: { page: 'terms' | 'privacy' }) {
           </>
         )}
         <p>
-          <a className="lk" href="/-/signin">
+          <a className="lk" href="/signin">
             Sign in
           </a>{' '}
           ·{' '}
-          <a className="lk" href={page === 'terms' ? '/-/privacy' : '/-/terms'}>
+          <a className="lk" href={page === 'terms' ? '/privacy' : '/terms'}>
             {page === 'terms' ? 'Privacy policy' : 'Terms'}
           </a>
         </p>

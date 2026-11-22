@@ -71,8 +71,8 @@ test('a main red says what failed, which landing broke it or which are candidate
       },
       mutation: async ref => { throw new Error('unexpected mutation ' + getFunctionName(ref)); },
     };
-    const trail = [{ label: 'Parser', href: '/-/example/parser' }, { label: 'Code', href: '/-/example/parser/code' }, { label: 'Main broke' }];
-    createRoot(document.getElementById('root')).render(<RedView read={read} trail={trail} projectId="synthetic" receipt={id => '/-/example/parser/code/' + id} />);
+    const trail = [{ label: 'Parser', href: '/example/parser' }, { label: 'Code', href: '/example/parser/code' }, { label: 'Main broke' }];
+    createRoot(document.getElementById('root')).render(<RedView read={read} trail={trail} projectId="synthetic" receipt={id => '/example/parser/code/' + id} />);
   `,
   );
   const { build } = await import('vite');
@@ -155,7 +155,7 @@ test('a main red says what failed, which landing broke it or which are candidate
   );
   assert.equal(
     await page.getByRole('link', { name: 'Open the landing that broke it' }).getAttribute('href'),
-    '/-/example/parser/code/r7-0000-4000-8000-000000000000',
+    '/example/parser/code/r7-0000-4000-8000-000000000000',
   );
   assert.deepEqual(
     await side()
@@ -213,7 +213,7 @@ test('a main red says what failed, which landing broke it or which are candidate
   assert.equal(await page.getByText('Broke main').count(), 0);
   assert.equal(
     await page.getByRole('link', { name: 'Open the landing that made tests run' }).getAttribute('href'),
-    '/-/example/parser/code/r7-0000-4000-8000-000000000000',
+    '/example/parser/code/r7-0000-4000-8000-000000000000',
   );
   await layouts('covered');
 

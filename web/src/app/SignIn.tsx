@@ -162,11 +162,11 @@ function HandleSignIn() {
       <p className="after" data-weight="ref">
         <span>
           By continuing you agree to the{' '}
-          <a className="lk" href="/-/terms">
+          <a className="lk" href="/terms">
             Terms
           </a>{' '}
           and the{' '}
-          <a className="lk" href="/-/privacy">
+          <a className="lk" href="/privacy">
             Privacy policy
           </a>
           .
@@ -230,7 +230,7 @@ export function FirstPasskey({ onDone }: { onDone: (next: string) => void }) {
     try {
       const options = await confirmStart({});
       if (options) await confirm({ response: await assertPasskey(options) });
-      await github({ redirectTo: new URL('/-/signin/passkey', location.origin).href });
+      await github({ redirectTo: new URL('/signin/passkey', location.origin).href });
     } catch (error) {
       setProblem(
         errorCode(error) === 'GITHUB_ACCOUNT_MISMATCH'

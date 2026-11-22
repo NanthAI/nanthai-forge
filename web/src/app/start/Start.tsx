@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Before a first project (`/-/new`, the bare frame): give a prompt to the agent app the person already uses, or import
+// Before a first project (`/new`, the bare frame): give a prompt to the agent app the person already uses, or import
 // a repository yourself (Items 6beca32b, c3e4a838). The agent explains first and installs nothing until its person says
 // so; Forge never starts an agent. The connection step reads this account’s confirmation once. The import
-// door opens the import page (`/-/new/import`).
+// door opens the import page (`/new/import`).
 import type { ConvexReactClient } from 'convex/react';
 import { Region } from '../../ds';
 import { A } from '../frames';

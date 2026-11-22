@@ -130,7 +130,7 @@ if (screen === 'needs') {
   void import('./needs-me');
 } else if (screen === 'secrets') {
   void import('./secrets');
-} else if (screen === 'you' || screen === 'check' || screen === 'place') {
+} else if (screen === 'you' || screen === 'check') {
   void import('./ds-heads');
 } else {
   createRoot(document.getElementById('root')!).render(

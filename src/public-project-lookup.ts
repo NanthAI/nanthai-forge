@@ -84,7 +84,7 @@ export async function findPublicProjects(name: string, site: string) {
     const address = `${handle}/${slug}`;
     const addressMatches = addressTerm && [address, handle, slug].some(text => text.includes(addressTerm));
     if (!addressMatches && !project.name.toLowerCase().includes(term)) continue;
-    const url = `${site}/-/${project.handle}/${project.slug}`;
+    const url = `${site}/${project.handle}/${project.slug}`;
     const match = {
       ...project,
       url,

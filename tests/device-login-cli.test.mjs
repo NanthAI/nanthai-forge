@@ -46,8 +46,8 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
         JSON.stringify({
           device_code: 'a'.repeat(64),
           user_code: 'ABCDE-FGHJK',
-          verification_uri: 'https://forge.example/-/device',
-          verification_uri_complete: 'https://forge.example/-/device?code=ABCDE-FGHJK',
+          verification_uri: 'https://forge.example/device',
+          verification_uri_complete: 'https://forge.example/device?code=ABCDE-FGHJK',
           expires_in: 600,
           interval: 5,
         }),

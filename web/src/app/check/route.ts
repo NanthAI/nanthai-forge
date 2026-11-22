@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// The landing check's address (Item b030c3c5): /-/<handle>/<project>/lanes/<laneId>/check. Kept apart from the screen so
+// The landing check's address (Item b030c3c5): /<handle>/<project>/lanes/<laneId>/check. Kept apart from the screen so
 // the shell can match it without loading the screen's chunk.
 import type { AppRoute } from '../paths';
 import type { ScreenRoutes } from '../screen-route';

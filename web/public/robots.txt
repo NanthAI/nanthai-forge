@@ -1,7 +1,10 @@
-# Crawlable: static public pages ("/", the discovery files, docs and assets) and the public discovery pages under /-/
-# (explore, profiles, public project front pages, their cached reads and /sitemap.xml), served from the site's cache
-# (netlify/functions/public-read.mts). No Sitemap line: this file is the same on every site, the sitemap is not.
-# Old app routes (/projects, /app.html, project paths outside /-/), deeper places and signed-in places stay closed: they would consume Convex reads.
+# Crawlable: static public pages ("/", the discovery files, docs and assets) and the public discovery pages (/explore,
+# profiles /HANDLE, public project front pages /HANDLE/PROJECT, their cached reads under /-/public/v1/ and
+# /sitemap.xml), served from the site's cache (netlify/functions/public-read.mts). No Sitemap line: this file is the
+# same on every site, the sitemap is not. Deeper places, query links, signed-in places and old app routes (/projects,
+# /settings, /app.html) stay closed: they would consume Convex reads. Each closed name is closed exactly and as a
+# folder, so a handle that starts with it (/newton) stays open. Crawlers rank a rule by its full length, "*" and "$"
+# included, and an equal Allow wins: so nothing here opens everything, and anything not closed is open.
 User-agent: *
 User-agent: GPTBot
 User-agent: ClaudeBot
@@ -9,7 +12,6 @@ User-agent: Claude-SearchBot
 User-agent: PerplexityBot
 User-agent: Google-Extended
 User-agent: CCBot
-Disallow: /*
 Allow: /$
 Allow: /llms.txt$
 Allow: /llms-full.txt$
@@ -27,10 +29,55 @@ Allow: /forge-badge-256.png$
 Allow: /maskable-512.png$
 Allow: /site.webmanifest$
 Allow: /sitemap.xml$
-Allow: /-/
 Allow: /-/public/v1/
-Disallow: /-/*/*/
-Disallow: /-/account
-Disallow: /-/signin
-Disallow: /-/device
-Disallow: /-/new
+Disallow: /*?
+Disallow: /*/*/
+Disallow: /-$
+Disallow: /-/
+Disallow: /llms.txt/
+Disallow: /llms-full.txt/
+Disallow: /docs/
+Disallow: /app.html
+Disallow: /account$
+Disallow: /account/
+Disallow: /signin$
+Disallow: /signin/
+Disallow: /device$
+Disallow: /device/
+Disallow: /approve$
+Disallow: /approve/
+Disallow: /new$
+Disallow: /new/
+Disallow: /projects$
+Disallow: /projects/
+Disallow: /settings$
+Disallow: /settings/
+Disallow: /local$
+Disallow: /local/
+Disallow: /api$
+Disallow: /api/
+Disallow: /login$
+Disallow: /login/
+Disallow: /logout$
+Disallow: /logout/
+Disallow: /import$
+Disallow: /import/
+Disallow: /auth$
+Disallow: /auth/
+Disallow: /worker$
+Disallow: /worker/
+Disallow: /github$
+Disallow: /github/
+Disallow: /agents$
+Disallow: /agents/
+Disallow: /contact$
+Disallow: /contact/
+Disallow: /public$
+Disallow: /public/
+Disallow: /imports$
+Disallow: /imports/
+Disallow: /signup$
+Disallow: /signup/
+Disallow: /explore/
+Disallow: /terms/
+Disallow: /privacy/

@@ -1,6 +1,6 @@
 # Journey 21: plans, billing and limits
 
-Open Billing from the account rail at `/-/account/billing`. It leads with the
+Open Billing from the account rail at `/account/billing`. It leads with the
 calendar month's accepted landings against one owner pool, then project usage,
 month history, the plan and statement. Every invented figure says **Sample data**.
 [Billing](../../billing.md) is the pricing, counting, service-limit and stub-adapter

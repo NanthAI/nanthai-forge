@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import '../access.css';
 import { useState } from 'react';
-import { hostedProjectRoot } from '../../../../src/project-routes';
 import { SESSION_QUIET_MS } from '../../../../src/session-presence';
 import { Avatar, Band, CodeBox, Key, Region, Who } from '../../ds';
 import { Head } from '../Place';
@@ -161,7 +160,7 @@ export function SessionsView({
               className="lk"
               href={
                 activity
-                  ? hostedProjectRoot(route.handle, route.project) + '/activity'
+                  ? hrefFor({ ...route, place: 'needs', section: 'held', rest: '' })
                   : listHref(route, {}, true)
               }
             >

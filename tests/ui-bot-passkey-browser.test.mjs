@@ -159,7 +159,7 @@ test('project access waits through the re-authentication the app sends right aft
 
 test('native capture uses rebuilt addresses and refuses legacy-only screens explicitly', () => {
   const project = { handle: 'fixture-owner', slug: 'fixture-project' };
-  const root = `${base}/-/fixture-owner/fixture-project`;
+  const root = `${base}/fixture-owner/fixture-project`;
   assert.equal(passkeyDestination(base, project, 'now'), root);
   assert.equal(
     passkeyDestination(base, project, 'intents', { intentLayout: 'board' }),
@@ -171,7 +171,7 @@ test('native capture uses rebuilt addresses and refuses legacy-only screens expl
     passkeyDestination(base, project, 'code', { diffFile: 'src/has space.ts' }),
     `${root}/code/files/src/has%20space.ts`,
   );
-  assert.equal(passkeyDestination(base, undefined, 'device'), `${base}/-/device`);
+  assert.equal(passkeyDestination(base, undefined, 'device'), `${base}/device`);
   assert.throws(() => passkeyDestination(base, project, 'intent:example'), /Clerk screenshot flow/);
   assert.throws(() => passkeyDestination(base, project, 'review:example'), /Clerk screenshot flow/);
 });
@@ -249,7 +249,7 @@ test('Chromium signs in with the enrolled passkey and a fresh context resumes th
       }
       const form = `<form class="signin"><label>Your handle<input name="username"></label>
         <button>Continue</button><span hidden role="alert"></span></form>`;
-      const body = url.pathname === '/-/signin' ? form : '<main><h1>Projects</h1></main>';
+      const body = url.pathname === '/signin' ? form : '<main><h1>Projects</h1></main>';
       await route.fulfill({
         contentType: 'text/html',
         body: `<!doctype html>${body}<script>
@@ -320,7 +320,7 @@ test('Chromium signs in with the enrolled passkey and a fresh context resumes th
   const storageState = await auth.storageState();
   await auth.close();
   const next = await setup(await browser.newContext({ storageState }));
-  await next.page.goto(`${base}/-/account`);
+  await next.page.goto(`${base}/account`);
   assert.equal(await next.session.waitForViewer(5000), handle);
   assert.equal(next.session.token(), fixtureToken);
   assert.equal(payloads.length, 1, 'cold contexts need only the web session');

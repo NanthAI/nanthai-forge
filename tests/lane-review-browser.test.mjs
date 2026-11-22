@@ -116,7 +116,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
     await t.test(
       'the same live Lane and board reads show the failure to readers and let an authorized writer dismiss it',
       async t => {
-        const board = '/-/sample-owner/tide-pool/lanes';
+        const board = '/sample-owner/tide-pool/lanes';
         const laneId = '7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
         for (const [path, loaded, names] of [
           [
@@ -198,7 +198,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
     );
 
     await t.test('a refused dismissal keeps the save failure and keyboard focus', async t => {
-      const path = '/-/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+      const path = '/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
       const page = await open(t, PHONE, 'routes&s=save-denied', path);
       const dismiss = page.getByRole('button', { name: 'Dismiss save failure' });
       await dismiss.focus();
@@ -210,7 +210,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
     });
 
     await t.test('954afe8c: Lanes and Who is touching what open the same Item heading', async t => {
-      const lanes = '/-/sample-owner/tide-pool/lanes';
+      const lanes = '/sample-owner/tide-pool/lanes';
       const title = 'Stream parser: handle split UTF-8';
       const itemLabel = `${title} · 9e8d7c6b`;
       const page = await open(t, DESK, 'routes', lanes);
@@ -232,7 +232,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
     });
 
     await t.test('the Lane strip opens the merged Thread without reading it on Changes', async t => {
-      const lane = '/-/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+      const lane = '/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
       for (const viewport of [DESK, PHONE]) {
         const page = await open(t, viewport, 'routes', lane);
         const strip = page.getByRole('navigation', { name: 'Lane sections' });
@@ -277,12 +277,12 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
           ['legacy-id', '9e8d7c6b · title unavailable'],
           ['uuid-title', '2a3f12de-8371-4310-a004-f9cae1ef291c · 9e8d7c6b'],
         ]) {
-          const path = '/-/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+          const path = '/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
           const page = await open(t, DESK, `routes&s=${scenario}`, path);
           const item = page.getByRole('link', { name: `Item: ${label}`, exact: true });
           assert.equal(
             await item.getAttribute('href'),
-            '/-/sample-owner/tide-pool/plan/9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a',
+            '/sample-owner/tide-pool/plan/9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a',
           );
           assert.equal(await page.locator('.head .sit b').textContent(), label);
         }

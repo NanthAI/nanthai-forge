@@ -49,7 +49,7 @@ export async function viewFixture(t, source, title, browser) {
     await browser.close();
     rmSync(temp, { recursive: true, force: true });
   });
-  const open = async (width, theme, query, path = '/-/account') => {
+  const open = async (width, theme, query, path = '/account') => {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 } });
     const page = await context.newPage();
     const errors = [];

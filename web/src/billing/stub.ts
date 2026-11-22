@@ -69,7 +69,7 @@ export function createBillingStub(
     ? names.map((name, i) => ({
         id: `sample-${i}`,
         name,
-        href: '/-/account',
+        href: '/account',
         landings:
           i === 0
             ? used - Math.floor(used / names.length) * (names.length - 1)

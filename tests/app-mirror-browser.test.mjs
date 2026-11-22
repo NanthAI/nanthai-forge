@@ -117,7 +117,7 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
       body: readFileSync(asset ? file : join(out, 'fixture.html')),
     });
   });
-  await page.goto('https://forge.test/-/example/parser/settings/mirror');
+  await page.goto('https://forge.test/example/parser/settings/mirror');
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   await page.getByRole('button', { name: 'Resume', exact: true }).waitFor();
   assert.match(await page.locator('.sit').textContent(), /paused/);
@@ -167,7 +167,7 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
     (await page.evaluate(() => window.calls)).filter(c => c.name === 'githubBindingStore:remove').length,
     1,
   );
-  await page.goto('https://forge.test/-/example/parser/settings/mirror?legacy=1');
+  await page.goto('https://forge.test/example/parser/settings/mirror?legacy=1');
   await page.getByRole('heading', { name: 'Turn the mirror on', exact: true }).waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   if (shots) await page.screenshot({ path: join(shots, 'mirror-legacy-off.png'), fullPage: true });
@@ -177,7 +177,7 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
     JSON.parse((await page.evaluate(() => window.calls))[0].args.command).githubMirror.inbound,
     true,
   );
-  await page.goto('https://forge.test/-/example/parser/settings/mirror?unbound=1');
+  await page.goto('https://forge.test/example/parser/settings/mirror?unbound=1');
   assert.match(await page.locator('.mr').textContent(), /without a new GitHub approval/);
   assert(!(await page.locator('.mr').textContent()).includes('Reconnecting this stored link'));
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
@@ -188,7 +188,7 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
   assert.equal(named.args.repoId, 0);
   assert.equal(named.args.repository, 'example/parser');
   // Item c63c2171: a one-way mirror stopped on a moved GitHub main offers GitHub's commit as one press.
-  await page.goto('https://forge.test/-/example/parser/settings/mirror?moved=1');
+  await page.goto('https://forge.test/example/parser/settings/mirror?moved=1');
   const bring = page.getByRole('button', { name: 'Bring GitHub’s commit into Forge', exact: true });
   await bring.waitFor();
   assert.match(await page.locator('.mr').textContent(), /brings GitHub’s commit into Forge/);
@@ -218,11 +218,11 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
     'one press, one call',
   );
   // Review 1812f2ad: while a failed bring-in is kept, both keys would do nothing, so neither shows.
-  await page.goto('https://forge.test/-/example/parser/settings/mirror?kept=1');
+  await page.goto('https://forge.test/example/parser/settings/mirror?kept=1');
   await page.locator('.mr', { hasText: 'GitHub’s main keeps it' }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Bring GitHub’s commit into Forge' }).count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Resume the mirror' }).count(), 0);
-  await page.goto('https://forge.test/-/new/import?import=1');
+  await page.goto('https://forge.test/new/import?import=1');
   await page.getByLabel('Address', { exact: true }).fill('https://github.com/example/parser');
   await page.getByRole('button', { name: 'Check it', exact: true }).click();
   const both = page.getByRole('checkbox', { name: 'Keep GitHub in sync both ways' });

@@ -41,7 +41,7 @@ function decidedWords(state: string) {
   return 'This code already has a decision.';
 }
 
-/** The /-/device page itself. Pure: the container supplies the phase, the code and the actions. */
+/** The /device page itself. Pure: the container supplies the phase, the code and the actions. */
 export function DeviceView({
   phase,
   name,

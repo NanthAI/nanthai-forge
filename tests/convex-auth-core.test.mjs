@@ -722,7 +722,7 @@ test('de67c77d: a Clerk-only account adds a passkey from its live old session, s
   assert.equal((await auth.finishSignInWithUsernamePasskey._handler(s.ctx, { response })).status, 'complete');
   s.ctx.runMutation = dispatch;
   assert.equal(s.tables.users.get(linked._id).deviceApprovalProof.sessionId, 'native-session');
-  // Signed in natively, the account approves a project device sign-in at /-/device; the approval needs that fresh
+  // Signed in natively, the account approves a project device sign-in at /device; the approval needs that fresh
   // passkey proof, and the credential belongs to the same Forge account.
   s.tables.hostedProjects.set(
     'clerk-project',

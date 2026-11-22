@@ -88,7 +88,7 @@ const chunk = (fileName, modules, extra = {}) => ({
 test('the bundle report fails a first-paint chunk that carries the layer and measures the layer against its budget', () => {
   const clean = {
     'app.js': chunk('app.js', ['/r/web/src/main.tsx'], { isEntry: true }),
-    'hosted.js': chunk('hosted.js', ['/r/web/src/Hosted.tsx'], { facadeModuleId: '/r/web/src/Hosted.tsx' }),
+    'hosted.js': chunk('hosted.js', ['/r/web/src/app/App.tsx'], { facadeModuleId: '/r/web/src/app/App.tsx' }),
     'layer.js': chunk(
       'layer.js',
       ['/r/web/src/ds/behaviour/index.ts', '/r/node_modules/react-aria-components/dist/Menu.mjs'],
