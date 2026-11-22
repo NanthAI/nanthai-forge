@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join, relative, isAbsolute } from 'node:path';
 import { ForgeError, invariant } from './errors.js';
 import { forgeSecretId } from './sealed-format.js';
-import { ensureSecretDevice, FileKeyStore } from './sealed-local.js';
+import { openSecretDevice } from './sealed-local.js';
 import { SecretPins } from './sealed-pins.js';
 import { readAuth } from './auth-store.js';
 import { canonicalRoot } from './root-paths.js';
@@ -64,11 +64,6 @@ export async function localSealedIdentity(deployment: string, token: string, roo
       'Keep the secret key store outside project and Lane trees.',
     );
   }
-  const keys = await ensureSecretDevice(directory, accountId);
-  return {
-    account,
-    keys,
-    directory,
-    pins: new SecretPins(directory, new FileKeyStore(join(directory, 'device.bin'))),
-  };
+  const { keys, store } = await openSecretDevice(directory, accountId);
+  return { account, keys, directory, pins: new SecretPins(directory, store) };
 }

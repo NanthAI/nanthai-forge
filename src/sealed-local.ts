@@ -16,13 +16,14 @@ import {
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { deserialize, serialize } from 'node:v8';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { ForgeError, invariant } from './errors.js';
 import { ownerOnly } from './file-mode.js';
 import { processAliveCached, processIdentityIfKnown } from './local-process.js';
 import { refuseRealUserState } from './test-isolation.js';
 import { syncDirectory } from './state/durability.js';
 import { deviceKeys, type DeviceKeys } from './sealed-keys.js';
+import { KeychainKeyStore, platformKeychain, type Keychain } from './sealed-keychain.js';
 
 export function privateDirectory(path: string) {
   refuseRealUserState(path, 'sealed secret state');
@@ -191,44 +192,56 @@ export function wipeDeviceKeys(keys: DeviceKeys | null | undefined) {
   keys?.enc?.fill?.(0);
   keys?.pinKey?.fill?.(0);
 }
-/** Slice 1 uses a private file on every platform. Keychain backends fit this interface later. */
+/** Validates a serialized device key record and returns fresh copies; the decoded buffers are wiped. */
+export function decodeDeviceKeys(bytes: Buffer): StoredDeviceKeys {
+  let keys: StoredDeviceKeys | undefined;
+  try {
+    keys = deserialize(bytes) as StoredDeviceKeys;
+    const loaded = keys;
+    invariant(
+      ['sign', 'enc', 'signPub', 'encPub', 'pinKey'].every(
+        name =>
+          Buffer.isBuffer(loaded[name as keyof DeviceKeys]) &&
+          (loaded[name as keyof DeviceKeys] as Buffer).length === 32,
+      ) &&
+        keys.id.length === 16 &&
+        keys.bindSig.length === 64 &&
+        Number.isSafeInteger(keys.pinCounter) &&
+        keys.pinCounter >= 0,
+      'SECRETS_PIN_LOST',
+      'Local device key store is invalid.',
+    );
+    return {
+      ...keys,
+      sign: Buffer.from(keys.sign),
+      enc: Buffer.from(keys.enc),
+      pinKey: Buffer.from(keys.pinKey),
+      signPub: Buffer.from(keys.signPub),
+      encPub: Buffer.from(keys.encPub),
+      id: Buffer.from(keys.id),
+      bindSig: Buffer.from(keys.bindSig),
+    };
+  } catch {
+    throw new ForgeError('SECRETS_PIN_LOST', 'Local device key store is invalid.');
+  } finally {
+    wipeDeviceKeys(keys);
+  }
+}
+/** The private file store: the fallback where no OS keychain can be used without a prompt. */
 export class FileKeyStore implements KeyStore {
   constructor(readonly path: string) {}
   load(): StoredDeviceKeys | null {
     if (!existsSync(this.path)) return null;
-    let bytes: Buffer | undefined, keys: StoredDeviceKeys | undefined;
+    let bytes: Buffer | undefined;
     try {
       bytes = readPrivate(this.path);
-      keys = deserialize(bytes) as StoredDeviceKeys;
-      const loaded = keys;
-      invariant(
-        ['sign', 'enc', 'signPub', 'encPub', 'pinKey'].every(
-          name =>
-            Buffer.isBuffer(loaded[name as keyof DeviceKeys]) &&
-            (loaded[name as keyof DeviceKeys] as Buffer).length === 32,
-        ) &&
-          keys.id.length === 16 &&
-          keys.bindSig.length === 64 &&
-          Number.isSafeInteger(keys.pinCounter) &&
-          keys.pinCounter >= 0,
-        'SECRETS_PIN_LOST',
-        'Local device key store is invalid.',
-      );
-      return {
-        ...keys,
-        sign: Buffer.from(keys.sign),
-        enc: Buffer.from(keys.enc),
-        pinKey: Buffer.from(keys.pinKey),
-        signPub: Buffer.from(keys.signPub),
-        encPub: Buffer.from(keys.encPub),
-        id: Buffer.from(keys.id),
-        bindSig: Buffer.from(keys.bindSig),
-      };
     } catch {
       throw new ForgeError('SECRETS_PIN_LOST', 'Local device key store is invalid.');
+    }
+    try {
+      return decodeDeviceKeys(bytes);
     } finally {
-      wipeDeviceKeys(keys);
-      bytes?.fill(0);
+      bytes.fill(0);
     }
   }
   save(keys: StoredDeviceKeys) {
@@ -247,7 +260,9 @@ function sweepDeviceKeyTemps(directory: string) {
     for (let entry; (entry = entries.readSync());) {
       if (
         !entry.isFile() ||
-        !/^device\.bin\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(entry.name)
+        !/^(?:device\.(?:bin|kc)|keychain-retry\.bin)\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+          entry.name,
+        )
       )
         continue;
       unlinkSync(join(directory, entry.name));
@@ -258,20 +273,167 @@ function sweepDeviceKeyTemps(directory: string) {
   }
   if (removed) syncDirectory(directory);
 }
-export async function ensureSecretDevice(directory: string, accountId: Buffer): Promise<StoredDeviceKeys> {
-  return secretLocked(join(directory, 'pins.lock'), () => {
-    // All production device-key writes share this lock, so these copies have no live writer.
-    sweepDeviceKeyTemps(directory);
-    const store = new FileKeyStore(join(directory, 'device.bin'));
-    const existing = store.load();
-    if (existing) return existing;
-    const keys = { ...deviceKeys(accountId), pinCounter: 0 };
+const sameKeys = (a: StoredDeviceKeys, b: StoredDeviceKeys) => {
+  const left = serialize(a),
+    right = serialize(b);
+  try {
+    return left.equals(right);
+  } finally {
+    left.fill(0);
+    right.fill(0);
+  }
+};
+const RETRY_MS = 24 * 60 * 60 * 1000;
+const retryPath = (directory: string) => join(directory, 'keychain-retry.bin');
+function keychainDeferred(directory: string) {
+  try {
+    const after = (deserialize(readPrivate(retryPath(directory))) as { after?: unknown }).after;
+    return typeof after === 'number' && Date.now() < after;
+  } catch {
+    return false;
+  }
+}
+/** Moves the record into the keychain store: the private file goes only after a verified round trip. */
+function intoKeychain(directory: string, keychain: Keychain, keys: StoredDeviceKeys): KeyStore | null {
+  const path = join(directory, 'device.kc');
+  if (keychainDeferred(directory)) return null;
+  const store = new KeychainKeyStore(path, keychain, randomBytes(16).toString('hex'));
+  let created = false;
+  try {
+    store.create(keys);
+    created = true;
+    const back = store.load();
     try {
-      store.save(keys);
-      return keys;
-    } catch (error) {
-      wipeDeviceKeys(keys);
-      throw error;
+      invariant(back && sameKeys(back, keys), 'SECRETS_KEYCHAIN_UNAVAILABLE', 'Keychain round trip failed.');
+    } finally {
+      wipeDeviceKeys(back);
     }
-  });
+    if (existsSync(retryPath(directory))) unlinkSync(retryPath(directory));
+    return store;
+  } catch {
+    // Any failure keeps (or writes) the private file; the next attempt waits a day so headless runs
+    // pay at most one bounded timeout per day.
+    if (existsSync(path)) unlinkSync(path);
+    if (created) store.forget();
+    atomicPrivate(retryPath(directory), serialize({ after: Date.now() + RETRY_MS }));
+    return null;
+  }
+}
+/** Moves keys back to the private file (the opt-out, or a newer private record), then drops the
+ * keychain copy and its item. The keychain file goes only after the private file reads back equal. */
+function toFile(file: FileKeyStore, sealed: KeychainKeyStore, keys: StoredDeviceKeys, directory: string) {
+  if (!existsSync(file.path)) {
+    file.save(keys);
+    const back = file.load();
+    try {
+      invariant(back && sameKeys(back, keys), 'SECRETS_PIN_LOST', 'Local device key store is invalid.');
+    } finally {
+      wipeDeviceKeys(back);
+    }
+  }
+  unlinkSync(sealed.path);
+  syncDirectory(directory);
+  sealed.forget();
+  return { keys, store: file as KeyStore };
+}
+/** Both files: an unfinished move, a restored or synced copy, or the opt-out. Never lose the newer
+ * record of this device, and never swap one device identity for another. */
+function reconcile(
+  directory: string,
+  file: FileKeyStore,
+  keychain: Keychain | null,
+  useKeychain: boolean,
+): { keys: StoredDeviceKeys; store: KeyStore } {
+  const plain = file.load()!;
+  let sealed: KeychainKeyStore | undefined,
+    kept: StoredDeviceKeys | null = null;
+  try {
+    const header = KeychainKeyStore.header(join(directory, 'device.kc'));
+    if (keychain?.name === header.keychain) {
+      sealed = new KeychainKeyStore(join(directory, 'device.kc'), keychain, header.account);
+      kept = sealed.load();
+    }
+  } catch {
+    kept = null;
+  }
+  // The keychain cannot be read now: keep both files and use the private one.
+  if (!sealed || !kept) return { keys: plain, store: file };
+  if (!plain.id.equals(kept.id)) {
+    wipeDeviceKeys(plain);
+    wipeDeviceKeys(kept);
+    throw new ForgeError(
+      'SECRETS_KEYCHAIN_UNAVAILABLE',
+      `Two different device key stores are in ${directory}. Both were kept; move the device.bin that does not belong to this computer out of that folder.`,
+    );
+  }
+  if (plain.pinCounter >= kept.pinCounter) {
+    // Identical: the move finished except for removing the private file.
+    if (useKeychain && sameKeys(plain, kept)) {
+      wipeDeviceKeys(plain);
+      unlinkSync(file.path);
+      syncDirectory(directory);
+      return { keys: kept, store: sealed };
+    }
+    // The private record is as new or newer (an unfinished move, or the opt-out): it wins.
+    wipeDeviceKeys(kept);
+    return toFile(file, sealed, plain, directory);
+  }
+  // An older private copy came back (backup or sync): the keychain record is newer.
+  wipeDeviceKeys(plain);
+  unlinkSync(file.path);
+  syncDirectory(directory);
+  return useKeychain ? { keys: kept, store: sealed } : toFile(file, sealed, kept, directory);
+}
+/** Opens this device's key store, creating keys on first use. FORGE_SECRET_KEYCHAIN=off keeps (or
+ * moves keys back to) the private file, for sessions that cannot reach the keychain. */
+export async function openSecretDevice(
+  directory: string,
+  accountId: Buffer,
+  keychain: Keychain | null = platformKeychain(),
+  useKeychain = process.env.FORGE_SECRET_KEYCHAIN !== 'off',
+): Promise<{ keys: StoredDeviceKeys; store: KeyStore }> {
+  // Up to two bounded keychain calls run under the lock; wait past them.
+  return secretLocked(
+    join(directory, 'pins.lock'),
+    () => {
+      // All production device-key writes share this lock, so these copies have no live writer.
+      sweepDeviceKeyTemps(directory);
+      const file = new FileKeyStore(join(directory, 'device.bin')),
+        sealedPath = join(directory, 'device.kc');
+      if (existsSync(sealedPath)) {
+        if (existsSync(file.path)) return reconcile(directory, file, keychain, useKeychain);
+        // Keys live only behind the keychain: never fall back to new keys or a stale copy.
+        const header = KeychainKeyStore.header(sealedPath);
+        invariant(
+          keychain?.name === header.keychain,
+          'SECRETS_KEYCHAIN_UNAVAILABLE',
+          'This device key is in an OS keychain that this session cannot use. Run once from the signed-in desktop session, with FORGE_SECRET_KEYCHAIN=off to move it back to a private file.',
+        );
+        const sealed = new KeychainKeyStore(sealedPath, keychain, header.account);
+        const keys = sealed.load()!;
+        return useKeychain ? { keys, store: sealed } : toFile(file, sealed, keys, directory);
+      }
+      const existing = file.load();
+      const keys = existing ?? { ...deviceKeys(accountId), pinCounter: 0 };
+      try {
+        const sealed = keychain && useKeychain ? intoKeychain(directory, keychain, keys) : null;
+        if (sealed) {
+          if (existing) {
+            unlinkSync(file.path);
+            syncDirectory(directory);
+          }
+          return { keys, store: sealed };
+        }
+        if (!existing) file.save(keys);
+        return { keys, store: file };
+      } catch (error) {
+        if (!existing) wipeDeviceKeys(keys);
+        throw error;
+      }
+    },
+    30_000,
+  );
+}
+export async function ensureSecretDevice(directory: string, accountId: Buffer, keychain?: Keychain | null) {
+  return (await openSecretDevice(directory, accountId, keychain)).keys;
 }

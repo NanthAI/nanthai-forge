@@ -23,11 +23,37 @@ keep their versions. A new change starts one above the higher of the name's
 current version and the floor of the verified head used for the write, including
 any compaction in that write.
 
-Device secret keys are kept in a private file readable by your user account:
-0600, in a 0700 configuration folder, outside projects and Lanes. The OS keychain
-is planned before Gate B (Issue `a9f9b608`). Re-login retains these keys. This does
-not protect against another process running as your user or an unlocked stolen
-disk. Local keys are binary buffers and are not passed in process arguments.
+Device secret keys are kept in a private file: 0600, in a 0700 configuration
+folder, outside projects and Lanes. On macOS (`/usr/bin/security`) and on Linux
+with a session bus (`secret-tool`), that file (`device.kc`) is AES-256-GCM
+encrypted under a random 32-byte key held only in the OS keychain. The key reaches
+the tool through stdin, never in arguments: an interactive-mode command line for
+`security`, the secret input for `secret-tool store`. A command reads it once and
+keeps it in memory for its lifetime; pin updates rewrite only the encrypted file.
+An existing plain `device.bin` moves after the keychain returns the stored key and
+the encrypted file decrypts to the same keys and pin counter; only then is the
+plain file removed. Any failure keeps or writes the plain file, removes any
+keychain item it wrote, and retries a day later. If both files exist (an
+unfinished move, or a plain copy restored from a backup or sync), the record with
+the higher pin counter wins; a plain file for a different device is refused and
+both are kept; when the keychain cannot be read, the plain file is used and the
+encrypted copy is kept. Each keychain call is killed after 5 seconds and runs
+without a terminal, so a headless run cannot hang on an unlock or access prompt.
+Once keys are only behind the keychain, a session that cannot read it (SSH, cron,
+a sandbox without the session bus or `securityd`) fails with
+`SECRETS_KEYCHAIN_UNAVAILABLE` and never creates new keys. To use such sessions,
+run one command from the desktop session with `FORGE_SECRET_KEYCHAIN=off`: it
+moves the keys back to the private file, deletes the keychain item, and no later
+move happens while the setting is off. Unsupported systems and tests keep the
+private file. Only absolute tool paths are used. Re-login retains these keys.
+What the keychain protects: an item that `security` creates trusts
+`/usr/bin/security` itself (Apple's security(1) manual: "By default, the
+application which creates an item is trusted to access its data without
+warning"), so any process running as your user can read it by running that tool.
+An unlocked Linux Secret Service collection likewise answers any process on your
+session bus. The keychain therefore protects device keys against copies of the
+disk, backups and synced folders, not against an agent or other process running as
+your user. Local keys are binary buffers and are not passed in process arguments.
 
 Pins are MAC-authenticated per project/kind, with an account/device index and a
 counter kept beside the device keys. Writers use one exclusive lock file with

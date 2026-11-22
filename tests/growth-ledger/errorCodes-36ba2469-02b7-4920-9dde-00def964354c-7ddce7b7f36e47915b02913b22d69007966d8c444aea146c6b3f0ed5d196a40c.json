@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "SECRETS_KEYCHAIN_UNAVAILABLE (a9f9b608): keys held only behind a locked or absent OS keychain need a distinct refusal; SECRETS_PIN_LOST would teach repin, which cannot help and must not run",
+  "date": "2026-11-22"
+}

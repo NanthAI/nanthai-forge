@@ -24,6 +24,8 @@ const DETACHED_JOBS = {
   'local-watcher-client.ts': 'owner-store: shared file-watch helper',
   'post-accept-main.ts': 'owner-store: applies one acceptance',
   'push-audit-wait.ts': 'waits on one mirror push audit',
+  'sealed-keychain.ts':
+    'runs one synchronous OS keychain call in its own session (no terminal to prompt on), killed after 5 s (Item a9f9b608)',
   'self-metrics-weekly.ts': 'writes one weekly self-metrics report',
 };
 
