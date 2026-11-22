@@ -5,7 +5,7 @@
 // job or row is written; refusals the listing finds (non-UTF-8 paths, unsupported modes, files GitHub cannot
 // return) arrive here, before any work begins.
 import { v } from 'convex/values';
-import { action } from './cliServer';
+import { accountAction } from './cliServer';
 import { githubInput } from '../src/github';
 import { beginGithubSource } from '../src/github-project-source';
 import { listGithubTree } from '../src/github-archive-source';
@@ -25,7 +25,7 @@ import {
 } from '../src/github-import-report';
 
 const visibility = v.union(v.literal('public'), v.literal('private'));
-export const preview = action({
+export const preview = accountAction('same')({
   args: { url: v.string(), ref: v.optional(v.string()) },
   returns: v.object({
     repository: v.string(),

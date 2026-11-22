@@ -3,7 +3,7 @@
 import { randomBytes } from 'node:crypto';
 import { blobStore } from './blobStore';
 import { v } from 'convex/values';
-import { action, type ActionCtx } from './cliServer';
+import { action, accountAction, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { agentTool } from './schema';
@@ -144,7 +144,7 @@ export const recover = action({
     }
   },
 });
-export const describe = action({
+export const describe = accountAction('same')({
   args: { token: v.string() },
   returns: v.string(),
   handler: async (ctx, { token }): Promise<string> => {
@@ -179,7 +179,7 @@ export const describe = action({
     }
   },
 });
-export const read = action({
+export const read = accountAction('same')({
   args: { token: v.string(), endpoint: v.string() },
   returns: v.string(),
   handler: async (ctx, { token, endpoint }): Promise<string> => {

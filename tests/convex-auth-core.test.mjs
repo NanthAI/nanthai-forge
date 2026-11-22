@@ -18,7 +18,7 @@ const deviceStore = await import(moduleUrl('../convex/deviceStore.ts'));
 const tokenStore = await import(moduleUrl('../convex/githubUserTokens.ts'));
 const tokenActions = await import(moduleUrl('../convex/githubUserTokenActions.ts'));
 const deleteRequests = await import(moduleUrl('../convex/projectDeleteRequests.ts'));
-const { action } = await import(moduleUrl('../convex/cliServer.ts'));
+const { accountAction } = await import(moduleUrl('../convex/cliServer.ts'));
 const key = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({
   type: 'pkcs8',
   format: 'pem',
@@ -291,7 +291,7 @@ test('revoking the browser between inspection and decision leaves the device pen
 
 test('an action refuses its result when the browser session is revoked during external work', async t => {
   const s = fixture(t);
-  const read = action({
+  const read = accountAction('same')({
     args: {},
     handler: async ctx => {
       assert.equal((await ctx.auth.getUserIdentity()).subject, s.user.accountKey);

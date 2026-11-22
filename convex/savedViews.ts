@@ -2,10 +2,10 @@
 import type { Doc, Id } from './_generated/dataModel';
 import type { PaginationResult } from 'convex/server';
 import { inventoryPage } from './inventoryPage';
-import { action } from './cliServer';
+import { accountAction } from './cliServer';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import { mutation, internalQuery, internalMutation } from './cliServer';
+import { accountMutation, internalQuery, internalMutation } from './cliServer';
 import { savedLink, savedRoute } from './schema';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -43,7 +43,7 @@ export const listRows = internalQuery({
     };
   },
 });
-export const list = action({
+export const list = accountAction('same')({
   args: { paginationOpts: paginationOptsValidator },
   returns: paginationResultValidator(item),
   handler: (
@@ -124,7 +124,7 @@ export const put = internalMutation({
     return ctx.db.insert('savedViews', { ...args, name: args.name.trim(), owner: user.subject });
   },
 });
-export const rename = mutation({
+export const rename = accountMutation('write')({
   args: { id: v.id('savedViews'), name: v.string() },
   returns: v.null(),
   handler: async (ctx, { id, name }) => {
@@ -140,7 +140,7 @@ export const rename = mutation({
     }
   },
 });
-export const remove = mutation({
+export const remove = accountMutation('write')({
   args: { id: v.id('savedViews') },
   returns: v.null(),
   handler: async (ctx, { id }) => {

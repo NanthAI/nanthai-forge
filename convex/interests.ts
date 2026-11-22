@@ -3,7 +3,7 @@ import type { Doc } from './_generated/dataModel';
 import { makeFunctionReference } from 'convex/server';
 import type { PaginationResult } from 'convex/server';
 import { inventoryPage } from './inventoryPage';
-import { action } from './cliServer';
+import { action, accountAction } from './cliServer';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { internalQuery, internalMutation } from './cliServer';
@@ -65,7 +65,7 @@ export const listRows = internalQuery({
     return { ...result, page };
   },
 });
-export const list = action({
+export const list = accountAction('same')({
   args: { paginationOpts: paginationOptsValidator },
   returns: paginationResultValidator(interestDocument),
   handler: (ctx, args): Promise<PaginationResult<Doc<'projectInterests'>>> =>

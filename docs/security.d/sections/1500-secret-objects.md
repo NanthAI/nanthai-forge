@@ -10,4 +10,8 @@ A Secret Object is an encrypted credential with versions and six independent cap
 - Backend administrators, the keyring owner, the OS and GitHub stay trusted.
 - Recovery needs the original keys. Losing an old key makes its versions unreadable.
 
+Devices need write access to all projects to create, rotate, grant, disable or
+move a Secret Object to trash. Permanent deletion requires the owner person in a
+Forge browser. Existing object capabilities still govern each operation.
+
 Dotenv import creates a Secret Object and a value-free example file. It does not erase committed history or rotate the provider's credential. Rotate an exposed credential at GitHub first.

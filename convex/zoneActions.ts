@@ -3,7 +3,7 @@
 import { v, ConvexError, type Infer } from 'convex/values';
 import { blobStore } from './blobStore';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import { action, type ActionCtx } from './cliServer';
+import { action, accountAction, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { zoneChange, zoneUpdate } from './schema';
@@ -384,7 +384,7 @@ const sharedItem = v.object({
   repository: v.string(),
   head: v.string(),
 });
-export const shared = action({
+export const shared = accountAction('same')({
   args: { paginationOpts: paginationOptsValidator },
   returns: paginationResultValidator(sharedItem),
   handler: async (

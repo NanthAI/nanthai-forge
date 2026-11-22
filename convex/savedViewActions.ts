@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { v } from 'convex/values';
-import { action } from './cliServer';
+import { accountAction } from './cliServer';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { savedLink } from './schema';
@@ -9,7 +9,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { readSource } from './hosted';
 
-export const save = action({
+export const save = accountAction('write')({
   args: savedLink,
   returns: v.id('savedViews'),
   handler: async (ctx, args): Promise<Id<'savedViews'>> => {

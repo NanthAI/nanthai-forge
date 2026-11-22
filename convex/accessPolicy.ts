@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from '../src/errors';
+import type { Doc } from './_generated/dataModel';
 /** Owner-approved access policies. Each rule has one setting; consumers call the policy. */
 export const accessPolicy = {
   laneTakeover: 'same-person-or-project-owner' as 'same-person-or-project-owner' | 'project-writers',
@@ -20,6 +21,14 @@ export const keepsDeviceSettings = (action: 'signout' | 'remove') =>
 
 export const deviceProjectRefusal =
   'This device is approved for its selected project only. Change its settings in your Forge browser.';
+export function requireAccountWriteAccess(device?: Pick<Doc<'cliCredentials'>, 'settings'> | null) {
+  const settings = device?.settings;
+  invariant(
+    !settings || (settings.projects.kind === 'all' && settings.source === 'write'),
+    'AUTH_SCOPE_DENIED',
+    'This device is limited to its selected projects or read-only access. Make account changes in your Forge browser.',
+  );
+}
 /** Unlinked imported views have no native project association to satisfy a selected-project grant. */
 export function requireUnlinkedImportAccess(ctx: object) {
   const device = (ctx as { forgeDevice?: { settings?: { projects: { kind: string } } } | null }).forgeDevice;

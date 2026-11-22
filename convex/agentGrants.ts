@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { PaginationResult } from 'convex/server';
 import { inventoryPage } from './inventoryPage';
-import { action } from './cliServer';
+import { accountAction } from './cliServer';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import {
@@ -232,7 +232,7 @@ export const listRows = internalQuery({
     };
   },
 });
-export const list = action({
+export const list = accountAction('same')({
   args: { paginationOpts: paginationOptsValidator },
   returns: paginationResultValidator(item),
   handler: (

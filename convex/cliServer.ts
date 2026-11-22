@@ -4,7 +4,12 @@ import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import { currentCredential, deviceApprovalExpired } from './deviceFields';
-import { deviceProjectRefusal, requireUnlinkedImportAccess, usesUnlinkedImport } from './accessPolicy';
+import {
+  deviceProjectRefusal,
+  requireAccountWriteAccess,
+  requireUnlinkedImportAccess,
+  usesUnlinkedImport,
+} from './accessPolicy';
 import { recordCallerReceipts } from './projectSelfMetricReceiptStore';
 import {
   mutation as baseMutation,
@@ -23,14 +28,15 @@ import { withPublicWork } from './publicWorkReads';
 import { actionPublicPeople, actionSubjectArgs, publicPeople, subjectArgs, type Shape } from './publicPeople';
 export * from './server';
 type Mapper<C> = (ctx: C, args: unknown, value: unknown, shape?: Shape) => Promise<unknown>;
+type AccountPolicy = 'write' | 'person' | 'handle' | 'same';
 /** Every public function applies the public identity rule (convex/publicPeople.ts) to
  * its arguments and result. The guard test fails any return validator that could not. */
 function withPeople<B, C>(
   builder: B,
   mapArgs: (ctx: C, args: unknown) => Promise<unknown>,
   mapResult: Mapper<C>,
-  account?: 'write' | 'person' | 'handle' | 'same',
-  writes = false,
+  account?: AccountPolicy,
+  kind?: 'mutation' | 'action',
 ): B {
   return ((definition: unknown) => {
     const handler =
@@ -47,10 +53,11 @@ function withPeople<B, C>(
     const imported =
       usesUnlinkedImport((definition as { args?: unknown }).args) || usesUnlinkedImport(returns);
     const argsShape = (definition as { args?: unknown }).args;
-    if (writes && !account && !resourceArguments(argsShape))
-      throw new Error('Account mutations must declare device access with accountMutation.');
+    if (kind && !account && !resourceArguments(argsShape)) {
+      const builder = kind === 'mutation' ? 'accountMutation' : 'accountAction';
+      throw new Error(`Account ${kind}s must declare device access with ${builder}.`);
+    }
     const wrapped = async (ctx: C, args: unknown) => {
-      if (imported) requireUnlinkedImportAccess(ctx as object);
       const selected =
         args && typeof args === 'object' && 'projectId' in args
           ? (args as { projectId: unknown }).projectId
@@ -58,23 +65,29 @@ function withPeople<B, C>(
       const device = (ctx as { forgeDevice?: Doc<'cliCredentials'> | null }).forgeDevice;
       // An optional/unused selector never turns personal work into a project write.
       const personal = args && typeof args === 'object' && 'scope' in args && args.scope === 'personal';
-      const policy = account ?? (writes && (selected === undefined || personal) ? 'write' : undefined);
-      if (device && policy && policy !== 'same') {
-        invariant(
-          policy !== 'person' && policy !== 'handle',
-          'AUTH_SCOPE_DENIED',
-          policy === 'handle'
-            ? 'Change your handle on the web: Settings → Account'
-            : 'Make this account change in your Forge browser.',
-        );
-        invariant(
-          !device.settings || (device.settings.projects.kind === 'all' && device.settings.source === 'write'),
-          'AUTH_SCOPE_DENIED',
-          'This device is limited to its selected projects or read-only access. Make account changes in your Forge browser.',
-        );
+      const policy =
+        account ?? (kind === 'mutation' && (selected === undefined || personal) ? 'write' : undefined);
+      try {
+        if (imported) requireUnlinkedImportAccess(ctx as object);
+        if (device && policy && policy !== 'same') {
+          invariant(
+            policy !== 'person' && policy !== 'handle',
+            'AUTH_SCOPE_DENIED',
+            policy === 'handle'
+              ? 'Change your handle on the web: Settings → Account'
+              : 'Make this account change in your Forge browser.',
+          );
+          requireAccountWriteAccess(device);
+        }
+        if (typeof selected === 'string' && device?.settings?.projects.kind === 'project')
+          invariant(
+            selected === device.settings.projects.projectId,
+            'AUTH_SCOPE_DENIED',
+            deviceProjectRefusal,
+          );
+      } catch (error) {
+        return report(error);
       }
-      if (typeof selected === 'string' && device?.settings?.projects.kind === 'project')
-        invariant(selected === device.settings.projects.projectId, 'AUTH_SCOPE_DENIED', deviceProjectRefusal);
       return mapResult(ctx, args, await handler(ctx, await mapArgs(ctx, args)), returns);
     };
     return (builder as (definition: unknown) => unknown)(
@@ -82,9 +95,9 @@ function withPeople<B, C>(
     );
   }) as B;
 }
-const people = <B>(builder: B, account?: 'write' | 'person' | 'handle' | 'same', writes = false) =>
-  withPeople<B, QueryCtx | MutationCtx>(builder, subjectArgs, publicPeople, account, writes);
-/** Registration, not request values, determines whether a mutation selects a resource. */
+const mutationPeople = <B>(builder: B, account?: AccountPolicy) =>
+  withPeople<B, MutationCtx>(builder, subjectArgs, publicPeople, account, 'mutation');
+/** Registration, not request values, determines whether a function selects a resource. */
 function resourceArguments(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   const shape = ('json' in value ? value.json : value) as Record<string, unknown>;
@@ -98,8 +111,8 @@ function resourceArguments(value: unknown): boolean {
     return true;
   return Object.entries(shape).some(([name, child]) => name === 'projectId' || resourceArguments(child));
 }
-const actionPeople = <B>(builder: B) =>
-  withPeople<B, ActionCtx>(builder, actionSubjectArgs, actionPublicPeople);
+const actionPeople = <B>(builder: B, account?: AccountPolicy) =>
+  withPeople<B, ActionCtx>(builder, actionSubjectArgs, actionPublicPeople, account, 'action');
 // Signed credential markers keep scope/revocation enforcement during issuer reconfiguration.
 export function isDeviceIdentity(user: { issuer?: string; forgeCredential?: unknown }) {
   return (
@@ -242,11 +255,11 @@ const guardedMutationFor = (scope: 'cli' | 'coordination') =>
     customCtx((ctx: MutationCtx) => guard(ctx, scope)),
   );
 const guardedMutation = guardedMutationFor('cli');
-export const mutation = people(guardedMutation, undefined, true);
+export const mutation = mutationPeople(guardedMutation);
 /** Account writes declare their device rule at registration; no request can select a weaker rule. */
-export const accountMutation = (policy: 'write' | 'person' | 'handle' | 'same') =>
+export const accountMutation = (policy: AccountPolicy) =>
   // Handle policy refuses every device itself, with one remedy for both credential scopes.
-  people(policy === 'handle' ? guardedMutationFor('coordination') : guardedMutation, policy, true);
+  mutationPeople(policy === 'handle' ? guardedMutationFor('coordination') : guardedMutation, policy);
 const guardedActionFor = (scope: 'cli' | 'coordination') =>
   customAction(baseAction, {
     args: {},
@@ -271,24 +284,25 @@ const guardedActionFor = (scope: 'cli' | 'coordination') =>
   });
 const guardedAction = guardedActionFor('cli');
 export const action = actionPeople(guardedAction);
-export const accountAction = (policy: 'write' | 'person' | 'handle' | 'same') =>
-  withPeople<typeof guardedAction, ActionCtx>(
-    policy === 'handle' ? guardedActionFor('coordination') : guardedAction,
-    actionSubjectArgs,
-    actionPublicPeople,
-    policy,
-  );
+export const accountAction = (policy: AccountPolicy) =>
+  actionPeople(policy === 'handle' ? guardedActionFor('coordination') : guardedAction, policy);
 
 export const coordinationAction = actionPeople(guardedActionFor('coordination'));
 /** A bounded result must paginate after the one public identity mapping. */
 export function actionWithMappedResult(transform: (value: unknown, args: unknown) => unknown) {
-  return withPeople(guardedAction, actionSubjectArgs, async (ctx: ActionCtx, args, value, shape) => {
-    try {
-      return transform(await actionPublicPeople(ctx, args, value, shape), args);
-    } catch (error) {
-      return report(error);
-    }
-  });
+  return withPeople(
+    guardedAction,
+    actionSubjectArgs,
+    async (ctx: ActionCtx, args, value, shape) => {
+      try {
+        return transform(await actionPublicPeople(ctx, args, value, shape), args);
+      } catch (error) {
+        return report(error);
+      }
+    },
+    undefined,
+    'action',
+  );
 }
 export const coordinationQuery = readPeople(
   customQuery(
@@ -296,11 +310,11 @@ export const coordinationQuery = readPeople(
     customCtx((ctx: QueryCtx) => guard(ctx, 'coordination')),
   ),
 );
-export const coordinationMutation = people(guardedMutationFor('coordination'), undefined, true);
+export const coordinationMutation = mutationPeople(guardedMutationFor('coordination'));
 /** A CLI mutation that may also carry deferred caller receipts (`metricReceipts`).
  * They are written only if the host mutation succeeds, bound to its authorized
  * project and authenticated requester. No extra call is made for them. */
-export const receiptMutation = people(
+export const receiptMutation = mutationPeople(
   customMutation(baseMutation, {
     args: { metricReceipts: v.optional(v.string()) },
     input: async (ctx: MutationCtx, { metricReceipts }) => {
@@ -321,8 +335,6 @@ export const receiptMutation = people(
       };
     },
   }),
-  undefined,
-  true,
 );
 
 /** Public query composition, separate from the shared credential helpers. */

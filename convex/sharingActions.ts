@@ -3,7 +3,7 @@
 import { convexFetch, networkTimeout } from './networkFetch';
 import { v } from 'convex/values';
 import { paginationOptsValidator } from 'convex/server';
-import { action } from './cliServer';
+import { action, accountAction } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { currentAccess } from './access';
@@ -48,7 +48,7 @@ export const add = action({
     }
   },
 });
-export const list = action({
+export const list = accountAction('same')({
   args: { paginationOpts: paginationOptsValidator },
   returns: v.object({
     page: v.array(

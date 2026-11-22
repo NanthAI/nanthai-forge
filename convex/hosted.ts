@@ -3,7 +3,7 @@
 import { paginationOptsValidator } from 'convex/server';
 import { ForgeError } from '../src/errors';
 import { v } from 'convex/values';
-import { action, type ActionCtx } from './cliServer';
+import { action, accountAction, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { currentAccess, githubConfig } from './access';
@@ -16,7 +16,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { requireUnlinkedImportAccess } from './accessPolicy';
 
-export const start = action({
+export const start = accountAction('write')({
   args: { url: v.string(), ref: v.optional(v.string()) },
   returns: v.id('imports'),
   handler: async (ctx, { url, ref }): Promise<Id<'imports'>> => {
@@ -60,7 +60,7 @@ export const status = action({
     }
   },
 });
-export const refresh = action({
+export const refresh = accountAction('write')({
   args: { id: v.id('imports') },
   returns: v.id('imports'),
   handler: async (ctx, { id }): Promise<Id<'imports'>> => {
@@ -144,7 +144,7 @@ export const read = action({
   handler: readSource,
 });
 
-export const discover = action({
+export const discover = accountAction('same')({
   args: { paginationOpts: paginationOptsValidator },
   returns: v.string(),
   handler: async (ctx, { paginationOpts }): Promise<string> => {

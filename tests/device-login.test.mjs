@@ -244,14 +244,14 @@ test('full CLI token does not grant access to another owner and checks revocatio
     }),
     rejected('PROJECT_UNAVAILABLE'),
   );
-  const { action, credentialReuseMs } = await import(moduleUrl('../convex/cliServer.ts'));
+  const { accountAction, credentialReuseMs } = await import(moduleUrl('../convex/cliServer.ts'));
   const realNow = Date.now;
   let now = realNow() + 10 * credentialReuseMs,
     checks = 0;
   Date.now = () => now;
   t.after(() => (Date.now = realNow));
   // A long action re-checks after it runs: revocation during the run is honoured.
-  const long = action({
+  const long = accountAction('same')({
     args: {},
     handler: async () => {
       row.revoked = true;
@@ -272,7 +272,7 @@ test('full CLI token does not grant access to another owner and checks revocatio
   // of short actions), and a revocation takes effect once the bound has passed.
   row.revoked = false;
   now += 1;
-  const short = action({ args: {}, handler: async () => 'result' });
+  const short = accountAction('same')({ args: {}, handler: async () => 'result' });
   checks = 0;
   for (let i = 0; i < 5; i++) assert.equal(await short._handler(actionCtx, {}), 'result');
   assert.equal(checks, 1, 'one credential read for five short actions inside the bound');

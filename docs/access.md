@@ -76,9 +76,10 @@ their rows are then deleted in bounded background work, which never changes what
 the cleanup reports.
 
 Selected-project and read-only devices cannot make account-level writes, including
-team changes or project creation. The public wrapper decides
-from the credential it already reads; account mutations declare their device rule
-at registration. Unrestricted devices keep their existing account-write rights,
+team changes, project creation, import starts and saved-view writes. The public
+wrapper decides from the credential it already reads. Public actions and
+mutations without a resource selector declare their account device rule at
+registration. Unrestricted devices keep their existing account-write rights,
 subject to the same person-only rules. Adding team members by handle or email
 requires the person in a browser: the existing membership approval store is
 project-bound, so team additions use the refusal alternative and grant nothing

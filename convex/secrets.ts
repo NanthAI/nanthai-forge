@@ -20,6 +20,7 @@ import {
 import { internal } from './_generated/api';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { requireAccountWriteAccess } from './accessPolicy';
 import {
   affectedGrant,
   descendantGrants,
@@ -179,6 +180,7 @@ export const archive = accountMutation('same')({
   returns: v.null(),
   handler: async (ctx, input) => {
     try {
+      if (input.archived) requireAccountWriteAccess(ctx.forgeDevice);
       const actor = (await ctx.auth.getUserIdentity())?.subject,
         { object } = await authority(ctx, input.id, actor, 'discover');
       invariant(
@@ -617,6 +619,7 @@ export const enabled = accountMutation('same')({
   returns: v.null(),
   handler: async (ctx, input) => {
     try {
+      if (!input.enabled) requireAccountWriteAccess(ctx.forgeDevice);
       const actor = (await ctx.auth.getUserIdentity())?.subject,
         { object } = await authority(ctx, input.id, actor, 'delegate');
       invariant(

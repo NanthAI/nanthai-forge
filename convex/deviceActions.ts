@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { v, type Infer } from 'convex/values';
 import type { Doc } from './_generated/dataModel';
-import { action, internalAction, isDeviceIdentity } from './cliServer';
+import { accountAction, internalAction, isDeviceIdentity } from './cliServer';
 import { internal } from './_generated/api';
 import { deviceScope, deviceSettings } from './deviceFields';
 import {
@@ -210,7 +210,7 @@ const approvalView = v.union(
     ),
   }),
 );
-export const inspect = action({
+export const inspect = accountAction('same')({
   args: { code: v.optional(v.string()), requestId: v.optional(v.string()) },
   returns: approvalView,
   handler: async (ctx, args): Promise<Infer<typeof approvalView>> => {
@@ -230,7 +230,7 @@ export const inspect = action({
     );
   },
 });
-export const decide = action({
+export const decide = accountAction('same')({
   args: {
     code: v.optional(v.string()),
     requestId: v.optional(v.string()),

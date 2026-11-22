@@ -2,7 +2,7 @@
 'use node';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import { action, accountAction } from './cliServer';
+import { accountAction } from './cliServer';
 import { emailRecipient } from './projectPeople';
 import { teamEmailInvitationsEnabled } from './projectInvitationPolicy';
 import { teamInvitationAnswerArgs } from './teamInvitationWrites';
@@ -30,7 +30,7 @@ export const addMember = accountAction('person')({
     }
   },
 });
-export const codescapes = action({
+export const codescapes = accountAction('same')({
   args: { id: v.id('teams'), paginationOpts: paginationOptsValidator },
   returns: paginationResultValidator(
     v.object({ id: v.id('imports'), repository: v.string(), ref: v.string(), phase: v.string() }),
@@ -138,7 +138,7 @@ export const answerInvitation = accountAction('person')({
   },
 });
 
-export const labels = action({
+export const labels = accountAction('same')({
   args: { id: v.id('teams'), paginationOpts: paginationOptsValidator },
   returns: paginationResultValidator(v.object({ member: v.string(), label: v.string() })),
   handler: async (

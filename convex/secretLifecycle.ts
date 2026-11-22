@@ -253,7 +253,7 @@ export async function deleteSecret(
   await resume(ctx, row);
   return deletionReceipt(row);
 }
-export const permanentlyDelete = accountMutation('same')({
+export const permanentlyDelete = accountMutation('person')({
   args: { id: v.id('secretObjects'), operationId: v.string(), ...pins },
   returns: receipt,
   handler: async (ctx, input) => {

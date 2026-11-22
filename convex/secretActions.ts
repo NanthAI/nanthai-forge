@@ -3,8 +3,9 @@
 import { convexFetch } from './networkFetch';
 import { v } from 'convex/values';
 import { requireOwnerPerson } from './ownerPerson';
+import { requireAccountWriteAccess } from './accessPolicy';
 import { parseEnv } from 'node:util';
-import { action, type ActionCtx } from './cliServer';
+import { accountAction, type ActionCtx } from './cliServer';
 import { api, internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { secretCapability } from './schema';
@@ -116,7 +117,7 @@ async function createSecret(
     sealed: sealSecret(keys, binding(object, 1), input.value),
   });
 }
-export const create = action({
+export const create = accountAction('write')({
   args: {
     name: v.string(),
     repository: v.string(),
@@ -133,7 +134,7 @@ export const create = action({
     }
   },
 });
-export const createFromEnv = action({
+export const createFromEnv = accountAction('write')({
   args: {
     env: v.string(),
     variable: v.string(),
@@ -170,7 +171,7 @@ export const createFromEnv = action({
     }
   },
 });
-export const envReference = action({
+export const envReference = accountAction('same')({
   args: { id: v.id('secretObjects') },
   returns: v.object({ id: v.id('secretObjects'), manifest: v.string(), example: v.string() }),
   handler: async (ctx, { id }): Promise<{ id: Id<'secretObjects'>; manifest: string; example: string }> => {
@@ -186,7 +187,7 @@ export const envReference = action({
     }
   },
 });
-export const rotate = action({
+export const rotate = accountAction('write')({
   args: {
     id: v.id('secretObjects'),
     value: v.string(),
@@ -230,7 +231,7 @@ export const rotate = action({
     }
   },
 });
-export const grant = action({
+export const grant = accountAction('same')({
   args: {
     id: v.id('secretObjects'),
     principal: v.string(),
@@ -245,6 +246,8 @@ export const grant = action({
     input,
   ): Promise<{ principal: string; capabilities: SecretCapability[]; expiresAt: number | null }[]> => {
     try {
+      // An empty capability list revokes the existing grant.
+      if (input.capabilities.length) requireAccountWriteAccess(ctx.forgeDevice);
       const caller = await actor(ctx);
       operation(input.operationId);
       await ctx.runMutation(internal.secrets.authorize, {
@@ -262,7 +265,7 @@ export const grant = action({
     }
   },
 });
-export const use = action({
+export const use = accountAction('same')({
   args: { id: v.id('secretObjects'), operationId: v.string() },
   returns: v.object({ sha: v.string(), version: v.number(), observedAt: v.number() }),
   handler: async (
@@ -316,7 +319,7 @@ export const use = action({
     }
   },
 });
-export const names = action({
+export const names = accountAction('same')({
   args: { id: v.id('secretObjects') },
   returns: v.object({ name: v.string(), repository: v.string(), ref: v.string() }),
   handler: async (ctx, { id }): Promise<{ name: string; repository: string; ref: string }> => {
@@ -333,7 +336,7 @@ export const names = action({
     }
   },
 });
-export const reveal = action({
+export const reveal = accountAction('same')({
   args: { id: v.id('secretObjects'), operationId: v.string() },
   returns: v.object({ value: v.string(), version: v.number() }),
   handler: async (ctx, { id, operationId }): Promise<{ value: string; version: number }> => {
@@ -366,7 +369,7 @@ export const reveal = action({
   },
 });
 
-export const revocationNames = action({
+export const revocationNames = accountAction('same')({
   args: { id: v.id('secretObjects'), principal: v.string() },
   returns: v.array(v.object({ principal: v.string(), name: v.string() })),
   handler: async (ctx, input): Promise<{ principal: string; name: string }[]> => {

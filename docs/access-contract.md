@@ -163,3 +163,13 @@ until its existing owner-policy and cost review are complete.
 Private device labels remain in account-owned credentials. Shared session snapshots contain the stable code and approval metadata only. Session pages resolve permitted current labels by deduplicated credential IDs within their existing bounded query; historical labels are filtered from public replies.
 
 Selected-project device settings guard native Forge project operations and Git serving, and refuse unlinked imported Codescape views (source, graph, export and lifecycle). The owner-approved imported-view policy is centralized with the other access policies. Existing argument/return validators identify unlinked resources at public registration; the source gate also covers string-based requests. The credential projection supplies this decision before business I/O, with no extra RPC or database read. All-project devices keep the existing person/provider checks. Currently no legacy imported view has a native-project association; a future association must be verified on the server before it can satisfy a selected-project grant.
+
+After the dev functions deploy, an operator can clear historical keys and codes
+left by device removal with `npx --no-install convex run --deployment
+benevolent-wildebeest-974 deviceRemovalBackfill:run '{"cursor":null}'`. Pass the
+returned `continueCursor` as `cursor` until `isDone`. Each call examines up to 100
+credential rows and reports `scanned` and `cleared`. The mutation changes only the
+key and code of rows marked removed. Replaying a page safely skips rows already
+cleared. If a reply is lost, record the cleared total as incomplete because the
+replay counts only new clears. The function is internal, runs only on Forge dev,
+and schedules no work.
