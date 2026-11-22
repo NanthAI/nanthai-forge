@@ -2387,7 +2387,12 @@ retained full pass gives the time it ran when that evidence is available. A
 recorded state change gives the start of the streak. An inconclusive audit
 leaves the previous verdict in force, if there is one. A red
 episode counts once when it ends, as reverted or fixed on top by the audit's
-recovery verdict. CI seconds count
+recovery verdict, in the hour it began while that hour is kept. While it is
+still open, "main failed today" counts it on the day it began too
+(`mainFailedToday`), so a red main never sits beside "main failed 0 today" and
+no red counts on two days (Item 8d21cc9e). The red verdict keeps its audit
+event's sequence; the Flow view says since when (with the date when it began
+before the UTC day) and links that red's view. CI seconds count
 each check once: a submission's latest check (a batch member's share) when it
 lands or its check fails, and a check it discards (a failed shared check, a cancelled run)
 when a write moves those seconds into its own discarded seconds, in one summary

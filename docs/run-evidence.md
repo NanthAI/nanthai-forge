@@ -250,6 +250,14 @@ at most once every `STATS_TODAY_REFRESH_MS` (60 min). The shell's feed already r
 no landing, so most opens make no call. The close writes today's row marked `provisional` with the
 time it covers up to. It probes no earlier day, judges no day budget, rolls no month and keeps no
 late-correction lists; it does write the same person days, which the real close replaces.
+The first landing of each later UTC hour (a new day's first too) also schedules it for the end of
+that hour (Item 8d21cc9e), from the landing's speed record, which already knows the previous
+landing's time and so reads nothing more. Today's row then counts every landing up to the last full
+active hour, whether or not anyone opened Stats: it is short by at most the current hour's
+landings, and the screen states the time it counts up to ("Includes today up to 18:00 UTC."). A
+provisional close runs at most once per UTC hour, whichever asks; one scheduled for the end of
+23:00 runs after midnight and writes nothing, and a new day's first runs an hour after the
+previous day's close. Idle projects schedule nothing.
 
 The day's real close after midnight UTC replaces the provisional row with a fresh row. No month
 rollup, late correction or Lane backfill reads a provisional row. A later close that finds an
@@ -265,8 +273,11 @@ Measured in `tests/stats-today.test.mjs` with two check runs per landing:
 | 200 landings (dogfood) | 3 documents, 4.4 KB | 1,243 documents, 430 queries, 2 writes | 1.40 MB, $0.00028 | $0.0067 |
 | 400 landings (doubled) | 3 documents, 4.4 KB | 2,445 documents, 832 queries, 2 writes | 2.72 MB, $0.00055 | $0.013 |
 
-A close is capped at 14 MiB (about $0.0029), so 24 a day cost at most about $0.07 per project. With
-Stats closed, or no landing today, nothing runs: no cron and no new work per landing.
+A close is capped at 14 MiB (about $0.0029), so 24 a day cost at most about $0.07 per project. Since
+the hourly close (Item 8d21cc9e) the worst-day column is what an active day costs whether or not
+Stats is open: one scheduled close per active hour, so on the dogfood day (130 landings over 19
+hours, closes reading 65 landings on average) about 9 MB and $0.002 a day, about $0.014 per 1,000
+landings. A day with no landing runs nothing: no cron, and no read added to the landing.
 A month's rollup is written by `projectStats:rollMonth` (at most 31 day rows read, one write): scheduled by the first
 close of a later month, or by a reclose that rebuilds a month's last day or the end of its run. An idle project
 schedules nothing, and a month with no closed day has no row.

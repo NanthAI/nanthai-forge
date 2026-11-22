@@ -52,35 +52,45 @@ export function mainCheckoutTransport(
   };
   return {
     current,
-    /** A bare status: main plus the top bar's main figure on the same read (Item 32e8de50). An older server
-     * refuses `today` and is asked again without it. */
+    /** A bare status: main plus the top bar's main figure and main's state on the same read (Items 32e8de50,
+     * 8d21cc9e). An older server refuses `today: 2` and is asked with `today: 1`, then without it. */
     currentToday: async () => {
       if (baseline.schema !== 2) return { main: await current(), today: null };
       let value: unknown;
-      try {
-        value = await client.query(makeFunctionReference<'query'>(api), {
-          projectId: address.projectId,
-          today: 1,
-        });
-      } catch (error) {
-        if (!(error instanceof Error) || !error.message.includes('ArgumentValidationError')) throw error;
-        return { main: await current(), today: null };
+      for (const today of [2, 1] as const) {
+        try {
+          value = await client.query(makeFunctionReference<'query'>(api), {
+            projectId: address.projectId,
+            today,
+          });
+          break;
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes('ArgumentValidationError')) throw error;
+          if (today === 1) return { main: await current(), today: null };
+        }
       }
-      const { mainDay: today, ...main } = (typeof value === 'string' ? JSON.parse(value) : value) as Record<
-        string,
-        unknown
-      >;
-      return { main: hostedMainSchema.parse(main), today: mainDaySchema.safeParse(today).data ?? null };
+      return splitMainToday(value);
     },
     calls: () => ({ ...calls }),
     ...downloads.transport({ sourcePack: false }),
   };
 }
+/** A channel read with `today`: hosted main and the day beside it (null when its shape is not this CLI's). */
+export function splitMainToday(value: unknown) {
+  const { mainDay: today, ...main } = (typeof value === 'string' ? JSON.parse(value) : value) as Record<
+    string,
+    unknown
+  >;
+  return { main: hostedMainSchema.parse(main), today: mainDaySchema.safeParse(today).data ?? null };
+}
 /** The CLI's main figure (Item 32e8de50): today's from a read day, on this machine's clock; src/flow-day.ts loads
  * only on a bare status. */
 export async function mainTodayFrom(day: MainDay) {
-  const { mainToday } = await import('./flow-day.js');
-  return mainToday({ ...day, took: [] }, Date.now());
+  const { mainStateWords, mainToday } = await import('./flow-day.js');
+  const now = Date.now();
+  // main's state rides the same row when the server sent it (Item 8d21cc9e).
+  const state = mainStateWords(day, now);
+  return { ...mainToday({ ...day, took: [] }, now), ...(state ? { state } : {}) };
 }
 const pendingSchema = z
   .object({

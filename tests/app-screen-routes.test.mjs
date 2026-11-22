@@ -35,14 +35,18 @@ test('Flow names the destination for passed Lanes and dates main green from fres
     word: 'main green',
     state: 'passed',
     title: 'Latest full check of main passed at 16:45',
+    red: null,
   });
   assert.equal(mainHealth(green, undefined, at).title, 'Latest full check of main passed');
   assert.equal(mainHealth({ ...green, since: at }, yesterday, at).title, 'Latest full check of main passed');
-  assert.deepEqual(mainHealth({ red: true, since: at, checkedAt: null }, yesterday, at), {
-    word: 'main red',
+  // Red says since when where it is read and names its red view (Item 8d21cc9e), not only on hover.
+  assert.deepEqual(mainHealth({ red: true, since: at, checkedAt: null, sequence: 7 }, yesterday, at), {
+    word: 'main red since 16:45',
     state: 'failed',
     title: 'main red since 16:45',
+    red: 7,
   });
+  assert.equal(mainHealth({ red: true, since: null, checkedAt: null }, at, at).word, 'main red');
   assert.equal(mainHealth(null, at, at), null);
 });
 

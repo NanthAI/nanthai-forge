@@ -23,15 +23,43 @@ test.after(() => {
   }
 });
 
-test('only the first landing of a later UTC day schedules a close, for the previous day', async () => {
+test('only the first landing of a later UTC day schedules a close, for the previous day', async t => {
   const calls = [];
   const ctx = { scheduler: { runAfter: async (delay, ref, args) => calls.push({ delay, args }) } };
   const at = Date.parse('2026-11-04T23:59:00.000Z');
   await scheduleStatsClose(ctx, 'p', undefined, at);
   await scheduleStatsClose(ctx, 'p', at - 60_000, at);
   assert.equal(calls.length, 0, 'no previous landing, or the same day: nothing scheduled');
+  t.mock.method(Date, 'now', () => at + 120_000);
   await scheduleStatsClose(ctx, 'p', at, at + 120_000);
-  assert.deepEqual(calls, [{ delay: 0, args: { projectId: 'p', day: '2026-11-04' } }]);
+  // Then the new day's first hour counts so far at its end (Item 8d21cc9e).
+  assert.deepEqual(calls, [
+    { delay: 0, args: { projectId: 'p', day: '2026-11-04' } },
+    { delay: 59 * 60_000 + 5_000, args: { projectId: 'p', day: '2026-11-05', provisional: true } },
+  ]);
+});
+
+test('the first landing of each UTC hour schedules today so far for its end, with no read (Item 8d21cc9e)', async t => {
+  const calls = [];
+  const ctx = { scheduler: { runAfter: async (delay, ref, args) => calls.push({ delay, args }) } };
+  const at = Date.parse('2026-11-22T13:20:45.000Z');
+  t.mock.method(Date, 'now', () => at);
+  await scheduleStatsClose(ctx, 'p', at - 60_000, at);
+  assert.equal(calls.length, 0, 'a later landing in the same hour schedules nothing');
+  await scheduleStatsClose(ctx, 'p', Date.parse('2026-11-22T12:51:04.000Z'), at);
+  const endOfHour = Date.parse('2026-11-22T14:00:05.000Z') - at;
+  assert.deepEqual(calls, [
+    { delay: endOfHour, args: { projectId: 'p', day: '2026-11-22', provisional: true } },
+  ]);
+  // A new day's first landing closes the previous day now and counts its own first hour at that hour's end.
+  calls.length = 0;
+  const first = Date.parse('2026-11-23T09:05:00.000Z');
+  t.mock.method(Date, 'now', () => first);
+  await scheduleStatsClose(ctx, 'p', Date.parse('2026-11-22T23:40:00.000Z'), first);
+  assert.deepEqual(calls, [
+    { delay: 0, args: { projectId: 'p', day: '2026-11-22' } },
+    { delay: 55 * 60_000 + 5_000, args: { projectId: 'p', day: '2026-11-23', provisional: true } },
+  ]);
 });
 
 test('a closed day holds measured figures from receipts and landing rows, once', async t => {

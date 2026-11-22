@@ -329,6 +329,7 @@ export function NeedsMeView({
             stats: at({ place: 'stats' }),
             lanes: at({ place: 'lanes' }),
             code: at({ place: 'code' }),
+            red: sequence => at({ place: 'code', rest: `red/${sequence}` }),
           }}
         />
       ),

@@ -19,7 +19,7 @@ import { landingAcceptedBySchema } from '../src/landing-accepted-by';
 import { recordPersonDays } from './personDays';
 import { DAY_MS, STATS_LANE_LOOKBACK_DAYS, isAccount, laneWindowStart, lanesByDay } from './statsLanes';
 import { PLANNING_HOT_MS, planningContributions, planningMembers, planningPartialDays } from './personWork';
-import { utcDay } from './projectStatsClose';
+import { utcDay, utcHour } from './projectStatsClose';
 import {
   STATS_CLOSE_TRIES,
   STATS_DAY_MAX_LANDINGS,
@@ -39,7 +39,6 @@ import { makeFunctionReference } from 'convex/server';
 import {
   STATS_PARTS,
   STATS_RANGE_MAX_DAYS,
-  STATS_TODAY_REFRESH_MS,
   previousRange,
   provisionalAt,
   rangeDays,
@@ -238,12 +237,13 @@ export const closeDay = internalMutation({
       .withIndex('by_project_and_day', q => q.eq('projectId', projectId).eq('day', day))
       .unique();
     // A day left as not measured (src/stats-estimate.ts#statsFailedDay) is closed again when asked, and so is a day
-    // closed so far only (provisional). A refresh runs at most once in STATS_TODAY_REFRESH_MS: a second refresh
-    // scheduled before the first ran reads this one row.
+    // closed so far only (provisional). A refresh runs at most once per UTC hour (a Stats open asks at most once in
+    // STATS_TODAY_REFRESH_MS, a landing at its hour's first, Item 8d21cc9e): a second refresh in the same hour reads
+    // this one row.
     const kept = existing ? statsDaySchema.parse(JSON.parse(existing.value)) : null;
     const unfinished = kept?.schema === 2 ? kept.failed : undefined;
     const keptSoFar = kept?.schema === 2 ? kept.provisional : undefined;
-    if (provisional && existing && (keptSoFar === undefined || now - keptSoFar < STATS_TODAY_REFRESH_MS))
+    if (provisional && existing && (keptSoFar === undefined || utcHour(keptSoFar) >= utcHour(now)))
       return null;
     if (existing && !reclose && !unfinished && keptSoFar === undefined && !provisional) {
       await closeNext();

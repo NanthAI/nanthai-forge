@@ -395,7 +395,10 @@ export async function finishFixture(
   };
   const executeTask = async (task, stop) => {
     assert(task, 'pending task');
-    clock.now = Math.max(clock.now, task.scheduledTime);
+    // Today so far (Item 8d21cc9e) is a wall-clock timer for the end of the hour that writes only the Stats day
+    // row: it runs at the fixture's time instead of leaping it up to an hour past every queue deadline.
+    if (!(task.name === 'projectStats:closeDay' && task.args[0]?.provisional))
+      clock.now = Math.max(clock.now, task.scheduledTime);
     f.patch('_scheduled_functions', task._id, {
       // Convex mutations execute atomically while their row is still pending.
       state: { kind: (await isTaskMutation(task.name)) ? 'pending' : 'inProgress' },

@@ -4,7 +4,7 @@
 // count here is the line's count for that stop (Line.tsx `lineStops`) and a held block's words are its Needs you row's.
 // No read, timer or clock of its own: "today" and elapsed times are worked out from the feed's timestamps against the
 // time the page was drawn. Pure.
-import { flowToday, flowVerdict, utcDayStart } from '../../../../src/flow-day';
+import { flowToday, flowVerdict, mainFailedToday, utcDayStart } from '../../../../src/flow-day';
 import { lineStopCounts, lineStops, type LineFeed, type LineStop } from '../Line';
 import { unheldConflict } from '../lane-state';
 import type { StateWord } from '../../ds';
@@ -121,7 +121,7 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
 export function flowFigures(feed: LineFeed | undefined, drawnAt: number) {
   const today = flowToday(feed?.flow, drawnAt, utcDayStart(drawnAt));
   const verdict = flowVerdict(feed?.flow);
-  return { ...today, red: verdict?.red === true, verdict };
+  return { ...today, failed: mainFailedToday(today), red: verdict?.red === true, verdict };
 }
 
 export function mainHealth(
@@ -130,20 +130,32 @@ export function mainHealth(
   drawnAt: number,
 ) {
   if (!verdict) return null;
-  if (verdict.red)
+  // Red says since when where it is read, not only on hover (Item 8d21cc9e), and names its red view when known.
+  if (verdict.red) {
+    // A red that began before the project day (UTC) gives its date, as "main failed today" counts it on that day.
+    const word =
+      verdict.since === null
+        ? 'main red'
+        : `main red since ${verdict.since < utcDayStart(drawnAt) ? dated(verdict.since) : clock(verdict.since, drawnAt)}`;
     return {
-      word: 'main red',
+      word,
       state: 'failed' as const,
-      title:
-        verdict.since === null ? 'A check of main failed' : `main red since ${clock(verdict.since, drawnAt)}`,
+      title: verdict.since === null ? 'A check of main failed' : word,
+      red: verdict.sequence ?? null,
     };
+  }
   // FYI and the line arrive independently. A pass from an earlier green streak
   // cannot date the check that ended a more recent red.
   const time =
     checkedAt !== undefined && checkedAt >= (verdict.since ?? -Infinity)
       ? ` at ${clock(checkedAt, drawnAt)}`
       : '';
-  return { word: 'main green', state: 'passed' as const, title: `Latest full check of main passed${time}` };
+  return {
+    word: 'main green',
+    state: 'passed' as const,
+    title: `Latest full check of main passed${time}`,
+    red: null,
+  };
 }
 
 export function duration(seconds: number) {
@@ -159,11 +171,13 @@ export function duration(seconds: number) {
 export function clock(at: number, drawnAt: number) {
   const day = new Date(drawnAt);
   day.setHours(0, 0, 0, 0);
-  const time = new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  return at >= day.getTime()
-    ? time
-    : `${new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ${time}`;
+  return at >= day.getTime() ? timeOf(at) : dated(at);
 }
+const timeOf = (at: number) =>
+  new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+/** "22 Nov 23:50", in the reader's time. */
+const dated = (at: number) =>
+  `${new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ${timeOf(at)}`;
 
 /** The last part of a handle for a tag, such as the agent name in "mara/salt-wren". */
 export const shortWho = (who: string | null) => (who ? (who.split('/').pop() ?? who) : null);

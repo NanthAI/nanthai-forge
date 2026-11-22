@@ -18,7 +18,7 @@ export async function readHostedCliStatus(root: string, supplied?: Pick<HostedAg
     clone?: { status: string; sourceRevisionsBehind: number | null; next: string | null };
     githubMirror?: HostedMirrorStatus | null;
     needsFix?: unknown[];
-    mainToday?: { words: string };
+    mainToday?: { words: string; state?: string };
     landingHold?: LandingHold;
     scratchPath?: string;
     disk?: ReturnType<typeof laneDiskUsage>;
@@ -33,7 +33,9 @@ export async function readHostedCliStatus(root: string, supplied?: Pick<HostedAg
       ? hostedMirrorStatusText(result.githubMirror, Date.now())
       : 'Hosted status: GitHub mirror status unavailable.';
   // The top bar's main figure (Item 32e8de50), from the same summary row; the project day is the UTC day.
-  const main = result.mainToday ? `\nmain: ${result.mainToday.words} (UTC day)` : '';
+  const main = result.mainToday
+    ? `\nmain: ${result.mainToday.words} (UTC day)${result.mainToday.state ? ` · ${result.mainToday.state}` : ''}`
+    : '';
   const hold = result.landingHold;
   const approval = hold?.kind === 'review' ? `\n${reviewHoldLine(hold.review)}` : '';
   const scratch = result.scratchPath ? `\nLane scratch: ${JSON.stringify(result.scratchPath)}` : '';

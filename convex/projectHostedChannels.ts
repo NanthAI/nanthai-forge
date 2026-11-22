@@ -145,10 +145,11 @@ function cliReleaseMetadata(channel: 'main', stableProject?: Id<'hostedProjects'
 /** Version-2 start observation, separate from legacy projectMain generation reads.
  * Release clients opt in to compatibility metadata so strict main readers keep their reply. */
 export const current = query({
-  /** `today: 1`: a clone's bare status also wants the top bar's main figure (Item 32e8de50). */
+  /** `today: 1`: a clone's bare status also wants the top bar's main figure (Item 32e8de50); `today: 2` also main's
+   * state from the same row (Item 8d21cc9e). A CLI that asks 1 keeps its strict day shape. */
   args: {
     projectId: v.id('hostedProjects'),
-    today: v.optional(v.literal(1)),
+    today: v.optional(v.union(v.literal(1), v.literal(2))),
     cliRelease: v.optional(v.union(v.literal(1), v.literal(2))),
   },
   returns: v.string(),
@@ -166,7 +167,9 @@ export const current = query({
         'SOURCE_AUTHORITY_CHANGED',
         'Hosted main and project authority differ.',
       );
-      const selected = input.today ? { ...main, mainDay: await readMainDay(ctx.db, input.projectId) } : main;
+      const selected = input.today
+        ? { ...main, mainDay: await readMainDay(ctx.db, input.projectId, input.today === 2) }
+        : main;
       return canonicalPayload(
         input.cliRelease
           ? {

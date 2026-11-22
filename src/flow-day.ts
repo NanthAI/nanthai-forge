@@ -32,10 +32,11 @@ export type FlowDay = {
   hours: FlowHour[];
   /** [hour, seconds from submission to main] per landing, newest last. */
   took: Array<[number, number]>;
-  /** main's audit verdict as the line last heard it: failing or passing, and since when (ms). */
-  main?: { red: boolean; since: number };
+  /** main's audit verdict as the line last heard it: failing or passing, and since when (ms). A red verdict carries
+   * its audit event's sequence when the writer knew it: the address of its red view (code/red/<sequence>). */
+  main?: { red: boolean; since: number; sequence?: number };
   /** A retained verdict when the beginning of the streak was never projected. */
-  audit?: { red: boolean; at?: number };
+  audit?: { red: boolean; at?: number; sequence?: number };
   /** Coverage of the UTC day rebuilt from receipts. Other days continue to use live events. */
   repair?: FlowRepair;
   /** [hour, first-try landings, landings judged] (Item 32e8de50): a landing is judged when its landing write
@@ -48,8 +49,8 @@ export type FlowDayFeed = {
   hours: number[][];
   took: number[][];
   first?: number[][] | undefined;
-  main?: FlowDay['main'];
-  audit?: { red: boolean; at?: number | undefined } | undefined;
+  main?: { red: boolean; since: number; sequence?: number | undefined } | undefined;
+  audit?: { red: boolean; at?: number | undefined; sequence?: number | undefined } | undefined;
   repair?: { day: number; partial: string[] } | undefined;
 };
 
@@ -70,6 +71,8 @@ const hourOf = (at: number) => Math.floor(at / HOUR_MS);
 const numbers = (row: unknown, length: number) =>
   Array.isArray(row) && row.length === length && row.every(n => Number.isFinite(n));
 const empty = (): FlowDay => ({ hours: [], took: [] });
+const sequenceOf = (n: unknown) =>
+  typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 ? { sequence: n } : {};
 
 /** A stored value that is missing or from another shape reads as an empty day, never a failure. */
 export function flowDay(value: unknown): FlowDay {
@@ -79,7 +82,13 @@ export function flowDay(value: unknown): FlowDay {
     hours: day.hours.filter(row => numbers(row, 7)) as FlowHour[],
     took: day.took.filter(row => numbers(row, 2)) as Array<[number, number]>,
     ...(day.main && Number.isFinite(day.main.since)
-      ? { main: { red: !!day.main.red, since: day.main.since } }
+      ? {
+          main: {
+            red: !!day.main.red,
+            since: day.main.since,
+            ...(day.main.red ? sequenceOf(day.main.sequence) : {}),
+          },
+        }
       : {}),
     ...(day.audit && typeof day.audit.red === 'boolean'
       ? {
@@ -88,6 +97,7 @@ export function flowDay(value: unknown): FlowDay {
             ...(typeof day.audit.at === 'number' && Number.isFinite(day.audit.at)
               ? { at: day.audit.at }
               : {}),
+            ...(day.audit.red ? sequenceOf(day.audit.sequence) : {}),
           },
         }
       : {}),
@@ -174,19 +184,34 @@ export function rebuildFlowLandings(
   };
 }
 
-/** main's verdict changed: record it with its time. The same verdict again keeps its first time. */
-export function flowMain(value: unknown, red: boolean, at: number): FlowDay {
+/** main's verdict changed: record it with its time, and a red one with its audit event's sequence (its red view's
+ * address). The same verdict again keeps its first time. */
+export function flowMain(value: unknown, red: boolean, at: number, sequence?: number): FlowDay {
   const day = flowDay(value);
   if (day.main?.red === red) return day;
   delete day.audit;
-  return { ...day, main: { red, since: at } };
+  return { ...day, main: { red, since: at, ...(red ? sequenceOf(sequence) : {}) } };
 }
 
-/** Both clients distinguish a known streak from the most recent retained verdict. */
-export function flowVerdict(value: Pick<FlowDayFeed, 'main' | 'audit'> | undefined) {
-  if (value?.main) return { red: value.main.red, since: value.main.since, checkedAt: null };
-  if (value?.audit) return { red: value.audit.red, since: null, checkedAt: value.audit.at ?? null };
+/** Both clients distinguish a known streak from the most recent retained verdict. A red verdict whose audit event
+ * is known carries its `sequence` (its red view, code/red/<sequence>). */
+export function flowVerdict(
+  value: Pick<FlowDayFeed, 'main' | 'audit'> | undefined,
+): { red: boolean; since: number | null; checkedAt: number | null; sequence?: number } | null {
+  const sequence = (v: { red: boolean; sequence?: number | undefined }) =>
+    v.red && typeof v.sequence === 'number' ? { sequence: v.sequence } : {};
+  if (value?.main)
+    return { red: value.main.red, since: value.main.since, checkedAt: null, ...sequence(value.main) };
+  if (value?.audit)
+    return { red: value.audit.red, since: null, checkedAt: value.audit.at ?? null, ...sequence(value.audit) };
   return null;
+}
+
+/** main failed today (Item 8d21cc9e): red episodes that ended today (reverted or fixed on top) and the one still open
+ * when it began today, so "main red" and "main failed N today" never contradict each other. An episode that began
+ * before today and is still open counts on the day it began; its state says since when. */
+export function mainFailedToday(today: Pick<FlowToday, 'reverted' | 'fixedOnTop' | 'stillRed'>) {
+  return today.reverted + today.fixedOnTop + today.stillRed;
 }
 
 /** The value at a rank (0 to 1) of sorted numbers, nearest rank. */
@@ -211,6 +236,8 @@ export type FlowToday = {
   firstTry: number;
   judged: number;
   firstTryShare: number | null;
+  /** 1 when main is red now and its red began today (it has not ended, so it is neither reverted nor fixed on top). */
+  stillRed: number;
   partial: FlowFigure[];
 };
 
@@ -254,6 +281,7 @@ export function flowToday(value: unknown, now: number, dayStart: number): FlowTo
     firstTry,
     judged,
     firstTryShare: judged ? firstTry / judged : null,
+    stillRed: day.main?.red && day.main.since >= dayStart && day.main.since <= now ? 1 : 0,
     partial: day.repair?.day === dayStart ? day.repair.partial : [],
   };
 }
@@ -273,6 +301,22 @@ export function mainToday(value: unknown, now: number): MainToday & { words: str
     share: today.firstTryShare,
   };
   return { ...figure, words: mainTodayWords(figure) };
+}
+
+/** main's state as the CLI and the top bar's name say it (Item 8d21cc9e), from the same Flow day as the figure:
+ * "main red since 18:32 UTC" (with the date when it began before today), "main green", or null before any conclusive
+ * check of main. UTC, as the project day. */
+export function mainStateWords(value: Pick<FlowDayFeed, 'main' | 'audit'> | undefined, now: number) {
+  const verdict = flowVerdict(value);
+  if (!verdict) return null;
+  if (!verdict.red) return 'main green';
+  if (verdict.since === null) return 'main red';
+  const iso = new Date(verdict.since).toISOString();
+  const day =
+    verdict.since >= utcDayStart(now)
+      ? ''
+      : `${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(verdict.since)} `;
+  return `main red since ${day}${iso.slice(11, 16)} UTC`;
 }
 
 /** Whole percent, never rounded up to 100 % or down to 0 % unless every or no judged landing was a first try. */

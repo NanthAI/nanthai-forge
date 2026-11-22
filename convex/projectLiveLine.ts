@@ -49,8 +49,11 @@ export const liveLineResult = v.object({
     v.object({
       hours: v.array(v.array(v.number())),
       took: v.array(v.array(v.number())),
-      main: v.optional(v.object({ red: v.boolean(), since: v.number() })),
-      audit: v.optional(v.object({ red: v.boolean(), at: v.optional(v.number()) })),
+      /** A red verdict's audit event sequence: its red view (code/red/<sequence>, Item 8d21cc9e). */
+      main: v.optional(v.object({ red: v.boolean(), since: v.number(), sequence: v.optional(v.number()) })),
+      audit: v.optional(
+        v.object({ red: v.boolean(), at: v.optional(v.number()), sequence: v.optional(v.number()) }),
+      ),
       repair: v.optional(v.object({ day: v.number(), partial: v.array(v.string()) })),
       /** [hour, first-try landings, landings judged] (Item 32e8de50). */
       first: v.optional(v.array(v.array(v.number()))),

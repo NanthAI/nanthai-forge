@@ -5,7 +5,13 @@
 // ('ready') counts at Checking, so the line, the picture and Lanes count every stop alike (`lineStops`).
 import { hrefFor } from './paths';
 import { followLink } from './router';
-import { firstTryPercent, flowVerdict, mainToday, type FlowDayFeed } from '../../../src/flow-day';
+import {
+  firstTryPercent,
+  flowVerdict,
+  mainStateWords,
+  mainToday,
+  type FlowDayFeed,
+} from '../../../src/flow-day';
 import { LineMarks } from './LineMarks';
 
 export type LineStage = 'editing' | 'saved' | 'queued' | 'checking' | 'ready';
@@ -161,7 +167,9 @@ function MainStop({ feed, href, phone }: { feed: LineFeed | undefined; href: str
   const pct = today ? firstTryPercent(today) : null;
   const n = today?.landed.toLocaleString('en-US');
   const verdict = flowVerdict(feed?.flow);
-  const state = verdict ? (verdict.red ? 'Main failing' : 'Main passing') : undefined;
+  // Red names since when (UTC, as the figure's day), the same words `nforge status` prints (Item 8d21cc9e).
+  const since = verdict?.red ? mainStateWords(feed?.flow, Date.now())?.replace(/^main red/, '') : '';
+  const state = verdict ? (verdict.red ? `Main failing${since ?? ''}` : 'Main passing') : undefined;
   return (
     <a href={href} onClick={followLink} className="stop tomain" title={state}>
       {/* Two unbreakable groups, so a narrow line wraps it to two rows at most: "main · N today", "· X% first try". */}

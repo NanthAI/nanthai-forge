@@ -27,7 +27,8 @@ export type PictureFacts = {
   stationFacts: readonly (string | null)[];
   mainFact: ReturnType<typeof mainHealth>;
   fix: { n: number; waiting: number };
-  failed: { n: number; reverted: number; fixedOnTop: number };
+  /** main failed today: ended reds (reverted, fixed on top) and one still red that began today (Item 8d21cc9e). */
+  failed: { n: number; reverted: number; fixedOnTop: number; stillRed: number };
 };
 
 /** A track's dash has the same length and speed on every rail. */
@@ -323,7 +324,7 @@ export function Picture({
           <BackLabel
             label="main failed"
             n={facts.failed.n}
-            fact={`${facts.failed.reverted} reverted, ${facts.failed.fixedOnTop} fixed on top`}
+            fact={`${facts.failed.stillRed ? 'still red, ' : ''}${facts.failed.reverted} reverted, ${facts.failed.fixedOnTop} fixed on top`}
             short={short}
             hot={facts.red}
             style={{ left: Math.round((C[0]![0] + C[4]![0]) / 2 + (short ? -40 : 20)), top: y2 - 9 }}

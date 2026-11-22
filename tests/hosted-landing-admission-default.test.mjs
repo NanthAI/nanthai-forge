@@ -72,12 +72,19 @@ test('the same queue wave crossing an hour adds only its declared account-order 
       samples.push(result);
     });
   const [withinHour, acrossHour] = samples;
-  const { accountOrderTouch: firstTouches, ...firstCalls } = withinHour.callCounts;
-  const { accountOrderTouch: nextTouches, ...nextCalls } = acrossHour.callCounts;
+  const {
+    accountOrderTouch: firstTouches,
+    statsClose: firstStats = 0,
+    ...firstCalls
+  } = withinHour.callCounts;
+  const { accountOrderTouch: nextTouches, statsClose: nextStats = 0, ...nextCalls } = acrossHour.callCounts;
   assert.equal(firstTouches, 1);
   assert.equal(nextTouches, 2);
+  // Stats today so far (Item 8d21cc9e): one close for the hour the wave crossed out of, none within an hour.
+  assert.equal(firstStats, 0);
+  assert.equal(nextStats, 1);
   assert.deepEqual(nextCalls, firstCalls, 'clock phase changes no queue, source or check call');
-  assert.equal(acrossHour.calls - withinHour.calls, nextTouches - firstTouches);
+  assert.equal(acrossHour.calls - withinHour.calls, nextTouches - firstTouches + nextStats - firstStats);
   assert.equal(acrossHour.checks, withinHour.checks);
   assert.equal(acrossHour.ciMinutes, withinHour.ciMinutes);
   assert.equal(acrossHour.idle, 0);

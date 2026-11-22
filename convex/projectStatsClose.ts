@@ -4,19 +4,34 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 
 export const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const HOUR_MS = 3_600_000;
+/** The UTC hour a time falls in (ms / one hour). */
+export const utcHour = (ms: number) => Math.floor(ms / HOUR_MS);
+/** Today so far runs this long after the hour it counts ends, so that hour's last landings have committed. */
+export const STATS_HOUR_SLACK_MS = 5_000;
 
 /** Stats day close (Item a61d3c91): called from the landing's speed record with the previous newest
  * landing's time, so it reads nothing. It schedules one close when the UTC day changed since that landing:
- * one scheduled mutation per active project-day, none for an idle project. */
+ * one scheduled mutation per active project-day, none for an idle project. The first landing of each later UTC hour
+ * (a new day's too) schedules today so far for the end of that hour (Item 8d21cc9e): Stats' open day then counts
+ * every landing up to the last full hour, first and last active hours included, whether or not anyone opens Stats.
+ * One scheduled close per active project-hour, none idle; a new day's runs after the previous day's close. */
 export async function scheduleStatsClose(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   previousAt: number | undefined,
   at: number,
 ) {
-  if (previousAt === undefined || !Number.isFinite(previousAt) || utcDay(previousAt) >= utcDay(at)) return;
-  await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectStats:closeDay'), {
-    projectId,
-    day: utcDay(previousAt),
-  });
+  if (previousAt === undefined || !Number.isFinite(previousAt)) return;
+  if (utcDay(previousAt) < utcDay(at))
+    await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectStats:closeDay'), {
+      projectId,
+      day: utcDay(previousAt),
+    });
+  if (utcHour(previousAt) < utcHour(at))
+    await ctx.scheduler.runAfter(
+      Math.max(0, (utcHour(at) + 1) * HOUR_MS + STATS_HOUR_SLACK_MS - Date.now()),
+      makeFunctionReference<'mutation'>('projectStats:closeDay'),
+      { projectId, day: utcDay(at), provisional: true },
+    );
 }

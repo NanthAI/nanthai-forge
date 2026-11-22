@@ -15,7 +15,8 @@ import { FlowChecks, FlowLegend } from './Checks';
 import { clock, duration, flowFigures, flowStations, mainHealth, type HeldRow, type Station } from './model';
 import './flow.css';
 
-type FlowHrefs = { stats: string; lanes: string; code: string };
+/** `red`: one main red's view (code/red/<sequence>, Item ae068e0c). */
+type FlowHrefs = { stats: string; lanes: string; code: string; red: (sequence: number) => string };
 
 /** Each stop's few words at full size: what is checked there, and what is held. */
 function stationFact(station: Station) {
@@ -76,7 +77,12 @@ export function FlowRegion({
     stationFacts: stations.map(stationFact),
     mainFact,
     fix: { n: day.fix, waiting },
-    failed: { n: day.reverted + day.fixedOnTop, reverted: day.reverted, fixedOnTop: day.fixedOnTop },
+    failed: {
+      n: day.failed,
+      reverted: day.reverted,
+      fixedOnTop: day.fixedOnTop,
+      stillRed: day.stillRed,
+    },
   };
   const spark = day.byHour.slice(-12);
   const max = Math.max(1, ...spark);
@@ -181,7 +187,7 @@ export function FlowRegion({
               Needs fix <b>{day.fix}</b> today
             </span>
             <span data-st={day.red ? 'failed' : undefined}>
-              main failed <b>{day.reverted + day.fixedOnTop}</b> today
+              main failed <b>{day.failed}</b> today
             </span>
           </div>
         ) : null}
@@ -246,7 +252,8 @@ export function FlowRegion({
                 <b>{day.fixedOnTop.toLocaleString('en')}</b> fixed on top
               </span>
             </A>
-            <A href={hrefs.code} title={mainFact?.title}>
+            {/* A red main links its red view (why, since when); otherwise what landed. */}
+            <A href={mainFact?.red != null ? hrefs.red(mainFact.red) : hrefs.code} title={mainFact?.title}>
               {mainFact ? null : <span className="k">main</span>}
               {mainFact ? (
                 <b>

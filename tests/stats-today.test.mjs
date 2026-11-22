@@ -302,3 +302,26 @@ test('a provisional close at dogfood scale and doubled: two calls, DB I/O linear
   assert(io(two.close) < 2.2 * io(one.close), `${io(two.close)} vs ${io(one.close)}`);
   assert((24 * io(one.close) * 0.2) / 1e9 < 0.01);
 });
+
+test('a so-far close runs once per UTC hour, so a landing at the next hour counts within the hour (Item 8d21cc9e)', async t => {
+  const { f, receipts, day, start } = await landedDay(t);
+  const late = start + 12 * 3_600_000 + 50 * MIN;
+  const close = ms =>
+    at(t, ms, () =>
+      f.tx('statsClose', statsApi.closeDay, { projectId: f.projectId, day, provisional: true }),
+    );
+  await close(late);
+  landAt(f, receipts[0], late + 5 * MIN, 1);
+  const writes = f.counts.length;
+  await close(late + 9 * MIN);
+  assert.equal(
+    f.counts.slice(writes).find(c => c.name === 'statsClose').writes,
+    0,
+    'same hour: one row read',
+  );
+  // 13:00:30, 10.5 min after the last: the next hour's first landing refreshes it.
+  await close(late + 10 * MIN + 30_000);
+  const page = await at(t, late + 11 * MIN, () => read(f, day));
+  assert.equal(page.window.landings, receipts.length + 1);
+  assert.equal(page.todayUpTo, late + 10 * MIN + 30_000);
+});

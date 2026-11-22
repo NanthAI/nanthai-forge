@@ -22,10 +22,22 @@ export const lineSummary = (db: Pick<Db, 'query'>, projectId: Id<'hostedProjects
 /** The top bar's main figure for agents (Item 32e8de50): one read of the summary row the top bar already reads,
  * made only by a bare status that asks for it. The rolling day's landing and first-try rows (at most a day of each),
  * not a figure: the caller works out "today" with its own clock, so a cached query never serves yesterday's. */
-export async function readMainDay(db: Pick<Db, 'query'>, projectId: Id<'hostedProjects'>) {
+export async function readMainDay(
+  db: Pick<Db, 'query'>,
+  projectId: Id<'hostedProjects'>,
+  /** Also main's state from the same row (Item 8d21cc9e), so `nforge status` says it beside the figure. Only the
+   * capabilities reply sends it: a CLI from before it drops the unknown keys at its reply boundary
+   * (src/hosted-response.ts), while the clone's main read parses its day strictly. */
+  state = false,
+) {
   const summary = await lineSummary(db, projectId);
   const day = flowDay(summary ? JSON.parse(summary.value).flow : undefined);
-  return { hours: day.hours.slice(-24), first: (day.first ?? []).slice(-24) };
+  return {
+    hours: day.hours.slice(-24),
+    first: (day.first ?? []).slice(-24),
+    ...(state && day.main ? { main: day.main } : {}),
+    ...(state && day.audit ? { audit: day.audit } : {}),
+  };
 }
 /** Only an explicit removal updates the small latest-exit snapshot. A landing or failed check that writes it also
  * steps the Flow view's day (src/flow-day.ts) in the same write; `step` alone writes only when it counts something. */
@@ -53,15 +65,20 @@ export async function lineExit(
 export async function lineMainState(
   db: Db,
   projectId: Id<'hostedProjects'>,
-  verdict: { red: boolean; at: string; ended?: 'reverted' | 'fixed-on-top' },
+  verdict: { red: boolean; at: string; ended?: 'reverted' | 'fixed-on-top'; sequence?: number },
 ) {
   const old = await lineSummary(db, projectId);
   const value = old ? JSON.parse(old.value) : {};
   const at = Date.parse(verdict.at);
   const when = Number.isFinite(at) ? at : Date.now();
-  const flow = flowMain(value.flow, verdict.red, when);
+  const before = flowDay(value.flow).main;
+  const flow = flowMain(value.flow, verdict.red, when, verdict.sequence);
+  // An ended red counts in the hour it began while that hour is still kept (Item 8d21cc9e): "main failed today" counts
+  // a red on the day it began, open (src/flow-day.ts mainFailedToday) or ended, never on two days.
+  const began =
+    before?.red && before.since <= when && before.since > when - 23 * HOUR_MS ? before.since : when;
   const next = verdict.ended
-    ? stepFlow(flow, when, verdict.ended === 'reverted' ? { reverted: 1 } : { fixedOnTop: 1 })
+    ? stepFlow(flow, began, verdict.ended === 'reverted' ? { reverted: 1 } : { fixedOnTop: 1 })
     : flow;
   if (JSON.stringify(next) === JSON.stringify(value.flow)) return;
   value.flow = next;

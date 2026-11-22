@@ -252,7 +252,8 @@ export async function auditEvent(
     ...(controlBuild ? { controlBuild } : {}),
   });
   // `row` is the audit before this verdict: the first conclusive audit and later flips reach the line.
-  if (kind === 'red' && !row.red) await lineMainState(ctx.db, row.projectId, { red: true, at });
+  // A red carries its event's sequence: the Flow view links its red view (code/red/<sequence>, Item 8d21cc9e).
+  if (kind === 'red' && !row.red) await lineMainState(ctx.db, row.projectId, { red: true, at, sequence });
   else if (kind === 'green' && (row.red || !row.lastGreen))
     await lineMainState(ctx.db, row.projectId, {
       red: false,

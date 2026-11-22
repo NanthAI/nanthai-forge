@@ -10,6 +10,7 @@ import {
   firstTryPercent,
   flowToday,
   flowVerdict,
+  mainFailedToday,
   utcDayStart,
   type FlowDayFeed,
 } from './flow-day.js';
@@ -126,7 +127,7 @@ export function flowText(feed: FlowFeed, now: number, root = '.') {
     `${'main'.padEnd(width)}  ${String(today.landed).padStart(3)}${partial.has('landed') ? '+' : ''}   landed today (UTC), ${today.thisHour} this hour${pct === null ? '' : `, ${pct}% first try`}; ${verdict ? `${red ? 'failing' : 'passing'}${since}${checked}` : 'waiting for a conclusive main check'}`,
   );
   lines.push(
-    `Ways back: needs fix ${today.fix} today; main failed ${today.reverted + today.fixedOnTop} today (${today.reverted} reverted, ${today.fixedOnTop} fixed on top)${red ? '; main is failing now' : ''}`,
+    `Ways back: needs fix ${today.fix} today; main failed ${mainFailedToday(today)} today (${today.stillRed ? 'still red, ' : ''}${today.reverted} reverted, ${today.fixedOnTop} fixed on top)${red ? `; main is failing now${since}` : ''}`,
   );
   const checking = stations.find(s => s.stop === 'checking')!;
   lines.push(
@@ -177,6 +178,7 @@ export function flowText(feed: FlowFeed, now: number, root = '.') {
       needsFix: today.fix,
       reverted: today.reverted,
       fixedOnTop: today.fixedOnTop,
+      mainFailed: mainFailedToday(today),
       ciMinutes: today.ciMinutes,
       lostMinutes: today.lostMinutes,
     },
@@ -184,6 +186,7 @@ export function flowText(feed: FlowFeed, now: number, root = '.') {
       red,
       since: verdict?.since ?? null,
       ...(verdict?.checkedAt != null ? { checkedAt: verdict.checkedAt } : {}),
+      ...(verdict?.sequence != null ? { redSequence: verdict.sequence } : {}),
       head: feed.main?.head ?? null,
     },
     more: feed.more,

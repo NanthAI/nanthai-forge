@@ -190,7 +190,9 @@ export const capabilities = query({
             : {}),
           ...(noticeVersion === 1 ? { needsFix: needsFix(project) } : {}),
           // Only a bare status asks (Item 32e8de50), so other commands read no summary row.
-          ...(features?.includes('main-today') ? { mainDay: await readMainDay(ctx.db, projectId) } : {}),
+          ...(features?.includes('main-today')
+            ? { mainDay: await readMainDay(ctx.db, projectId, true) }
+            : {}),
           ...(mirrorVersion === 1 ? { githubMirror: await githubMirrorStatus(ctx, project) } : {}),
           ...(settling !== undefined
             ? { settledSave: await settledSave(ctx, projectId, user.subject, settling) }
