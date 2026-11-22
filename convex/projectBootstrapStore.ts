@@ -11,6 +11,7 @@ import { storageDigest } from './projectStorage';
 import { report } from './errors';
 import { r2Key } from './r2';
 import { selectBornMain } from './projectHostedBirth';
+import { storeCatalogObjects } from './projectObjectCatalogStore';
 
 export const bootstrapInput = { operationId: v.string(), name: v.string() };
 const requestFor = (name: string) => JSON.stringify(['empty-hosted-project', name.trim()]);
@@ -135,22 +136,27 @@ export const publish = internalMutation({
         preview: bootstrap.preview,
         status: 'stored',
       });
+      const catalog: Parameters<typeof storeCatalogObjects>[2] = [];
       for (const [index, object] of input.objects.entries()) {
         const pin = bootstrap.objects[index]!;
-        await ctx.db.insert('projectObjects', {
-          projectId: project._id,
+        const entry = {
           digest: pin.sha256,
           size: pin.size,
           ...(pin.sha256 === bootstrap.preview.head
             ? { stateGeneration: 1, stateSize: { fileCount: 0, manifestBytes: pin.size } }
             : {}),
-          nonce: object.nonce,
-          ...(object.r2Key
-            ? { location: 'r2' as const, r2Key: object.r2Key, r2Committed: true }
-            : { storageId: object.storageId }),
-          removed: false,
-        });
+        };
+        if (object.r2Key) catalog.push(entry);
+        else
+          await ctx.db.insert('projectObjects', {
+            projectId: project._id,
+            ...entry,
+            nonce: object.nonce,
+            storageId: object.storageId,
+            removed: false,
+          });
       }
+      if (catalog.length) await storeCatalogObjects(ctx, project._id, catalog, input.operationId);
       const generationId = await ctx.db.insert('projectWorkGenerations', {
         recordTables: 'split',
         projectId: project._id,

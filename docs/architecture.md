@@ -402,9 +402,10 @@ objects and mirror continuations use the same checksum-verified R2 source seam.
 Repeated check selections reuse an existing digest-bound object after HEAD
 verification, without uploading its body again; the recipe format is unchanged.
 Bootstrap reserves its operation-bound project namespace and original timestamp
-before R2 upload, then publishes source/Work atomically. A reservation is not a
-completed creation and retries preserve its bytes. Legacy Convex upload
-receipts written before R2 became the only byte path remain reconcilable.
+before R2 upload. One transaction publishes the three R2 object pins in one
+catalog page alongside the ready Work index and initial main selection. A
+reservation is not a completed creation and retries preserve its bytes. Legacy
+Convex upload receipts still reconcile using their individual object rows.
 
 Merge preparation first verifies nearby parent frontiers. Composition and
 resolution pin their selected tips; resolution retains the two tips from its

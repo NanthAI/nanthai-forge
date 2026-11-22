@@ -156,7 +156,6 @@
   "tests/hosted-agent-transport.test.mjs": {"date":1},
   "tests/hosted-backup.test.mjs": {"date":1},
   "tests/hosted-batch-orphan.test.mjs": {"date":3},
-  "tests/hosted-bootstrap.test.mjs": {"date":1},
   "tests/hosted-brief.test.mjs": {"date":4},
   "tests/hosted-check-configure.test.mjs": {"date":2},
   "tests/hosted-check-log.test.mjs": {"poll":1},

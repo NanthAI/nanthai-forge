@@ -8,6 +8,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
+import { ConvexError } from 'convex/values';
 import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { emptyHostedProject } from '../dist/hosted-bootstrap.js';
@@ -17,6 +18,8 @@ const names = [
   'projectBootstrap',
   'projectBootstrapStore',
   'projectBackups',
+  'projectHostedChannels',
+  'projectObjectFind',
   'projectObjects',
   'projectWork',
   'projectWorkIndex',
@@ -47,7 +50,7 @@ function setup() {
 const input = (name = 'Empty project') => ({ operationId: randomUUID(), name });
 const code = expected => error => error.data?.code === expected || error.code === expected;
 
-test('browser creation publishes an empty retained State, initialized indexed Work and main', async () => {
+test('browser creation publishes one R2 catalog page, initialized indexed Work and main', async () => {
   const s = setup(),
     args = input();
   const projectId = await s.create(args);
@@ -56,6 +59,10 @@ test('browser creation publishes an empty retained State, initialized indexed Wo
   assert.deepEqual(project.autonomyPolicy, policyPreset('supervised'));
   assert.equal(s.tables.projectBackups.size, 1);
   assert.equal(s.tables.projectWorkGenerations.size, 1);
+  assert.equal(s.tables.projectObjects.size, 0);
+  assert.equal(s.tables.projectObjectCatalog.size, 1);
+  assert.equal(s.files.size, 0);
+  assert.deepEqual(s.scheduled, []);
   const snapshot = await modules.projectWorkActions.load(s.ctx, projectId, 'owner');
   assert.equal(snapshot.manifest.kind, 'forge-native-work-backup');
   assert.equal(snapshot.data.nativeHead, snapshot.manifest.head);
@@ -63,7 +70,18 @@ test('browser creation publishes an empty retained State, initialized indexed Wo
   assert.equal(snapshot.data.channelMoves[0].channel, 'main');
   assert.deepEqual(snapshot.data.lanes, []);
   assert.deepEqual(snapshot.data.intents, []);
-  const row = [...s.tables.projectObjects.values()].find(row => row.digest === snapshot.manifest.head);
+  const main = await modules.projectHostedChannels.hostedStartMain(s.ctx, projectId);
+  assert.equal(main.head, snapshot.manifest.head);
+  assert.equal(main.receipt.id, `bootstrap:${main.head}`);
+  assert.deepEqual(main.seed, { backupId: project.currentBackup, generationId: project.work.generationId });
+  const expected = emptyHostedProject(args.operationId, new Date(project._creationTime).toISOString());
+  for (const pin of expected.objects) {
+    const object = await modules.projectObjectFind.findStoredObject(s.ctx, projectId, pin.sha256);
+    assert.equal(object.size, pin.size);
+    assert.equal(object.location, 'r2');
+    assert.equal((await storedBytes(s, object)).toString(), pin.text);
+  }
+  const row = await modules.projectObjectFind.findStoredObject(s.ctx, projectId, main.head);
   const source = JSON.parse((await storedBytes(s, row)).toString());
   assert.deepEqual(source.files, []);
   assert.deepEqual(source.parents, []);
@@ -75,17 +93,27 @@ test('browser creation publishes an empty retained State, initialized indexed Wo
   assert.deepEqual(JSON.parse(tree.value), { head: snapshot.manifest.head, files: 0 });
 });
 
-test('a lost creation response retries to one project with identical source and no extra storage', async () => {
-  const s = setup(),
-    args = input();
-  const first = await s.create(args),
-    before = structuredClone([...s.tables.hostedProjects.values()]);
-  const files = s.files.size;
+test('a lost publication reply retries to the selected project without another R2 request', async t => {
+  const r2 = fakeSourceR2(t),
+    s = setup(),
+    args = input(),
+    run = s.ctx.runMutation;
+  s.ctx.runMutation = async (ref, payload) => {
+    const result = await run(ref, payload);
+    if (getFunctionName(ref) === 'projectBootstrapStore:publish')
+      throw new ConvexError({ code: 'INTERNAL_ERROR', message: 'lost publication reply' });
+    return result;
+  };
+  await assert.rejects(s.create(args), code('HOSTED_ACTION_FAILED'));
+  const [first] = s.tables.hostedProjects.keys();
+  const before = structuredClone([...s.tables.hostedProjects.values()]);
+  const requests = [...r2.requests];
   assert.equal(await s.create(args), first);
-  assert.equal(s.files.size, files);
+  assert.deepEqual(r2.requests, requests);
   assert.deepEqual([...s.tables.hostedProjects.values()], before);
   assert.equal(s.tables.hostedProjects.size, 1);
   assert.equal(s.tables.projectBackups.size, 1);
+  assert.equal(s.tables.projectObjectCatalog.size, 1);
 });
 
 test('reusing an operation with a different payload is refused without changing accepted source', async () => {
@@ -129,10 +157,8 @@ test('operation identity is owner-scoped and never grants another account the or
   assert.equal(s.tables.hostedProjects.get(second).owner, 'other-owner');
 });
 
-test('publication validates all immutable bytes and rolls back a corrupt bootstrap', async () => {
-  const s = setup(),
-    args = input(),
-    at = new Date().toISOString();
+async function retainLegacyInput(s, args) {
+  const at = '2026-01-01T00:00:00.000Z';
   const objects = [];
   for (const object of emptyHostedProject(args.operationId, at).objects) {
     const nonce = randomUUID();
@@ -145,9 +171,36 @@ test('publication validates all immutable bytes and rolls back a corrupt bootstr
       ),
     });
   }
-  s.files.get(objects[1].storageId).metadata.size++;
+  return { ...args, at, objects };
+}
+
+test('publication reconciles original legacy Convex storage receipts', async () => {
+  const s = setup(),
+    args = input(),
+    retained = await retainLegacyInput(s, args);
+  const publish = () => s.transaction(() => modules.projectBootstrapStore.publish._handler(s.ctx, retained));
+  const { projectId, created } = await publish();
+  assert.equal(created, true);
+  assert.equal(s.tables.projectObjectCatalog.size, 0);
+  assert.equal(s.tables.projectObjects.size, 3);
+  const main = await modules.projectHostedChannels.hostedStartMain(s.ctx, projectId);
+  const row = await modules.projectObjectFind.findStoredObject(s.ctx, projectId, main.head);
+  assert.equal(row.storageId, retained.objects[0].storageId);
+  assert.equal(row.stateGeneration, 1);
+  assert.deepEqual(row.stateSize, { fileCount: 0, manifestBytes: row.size });
+  assert.equal(
+    (await storedBytes(s, row)).toString(),
+    emptyHostedProject(args.operationId, retained.at).objects[0].text,
+  );
+  assert.deepEqual(await publish(), { projectId, created: false });
+});
+
+test('publication validates all immutable bytes and rolls back a corrupt bootstrap', async () => {
+  const s = setup(),
+    retained = await retainLegacyInput(s, input());
+  s.files.get(retained.objects[1].storageId).metadata.size++;
   await assert.rejects(
-    s.transaction(() => modules.projectBootstrapStore.publish._handler(s.ctx, { ...args, at, objects })),
+    s.transaction(() => modules.projectBootstrapStore.publish._handler(s.ctx, retained)),
     code('INVALID_WORK_BACKUP'),
   );
   assert.equal(s.tables.hostedProjects.size, 0);
@@ -240,7 +293,7 @@ test('fresh hosted main checks out zero file blobs with a valid receipt and repl
       ).map(row => ({ sha256: row.digest, size: row.size })),
     downloadToFile: async (pin, path) => {
       downloaded.push(pin.sha256);
-      const row = [...s.tables.projectObjects.values()].find(row => row.digest === pin.sha256);
+      const row = await modules.projectObjectFind.findStoredObject(s.ctx, projectId, pin.sha256);
       writeFileSync(path, await storedBytes(s, row));
     },
   };
@@ -272,11 +325,17 @@ test('R2 bootstrap retries an incomplete reservation without any Convex byte sto
   await assert.rejects(s.create(args));
   assert.equal(s.tables.hostedProjects.size, 1);
   assert.equal(s.tables.projectBackups.size, 0, 'reservation is not published completion');
+  assert.equal(s.tables.projectObjectCatalog.size, 0);
+  r2.hooks.mismatch = true;
+  await assert.rejects(s.create(args), code('R2_VERIFY_FAILED'));
+  assert.equal(s.tables.projectObjectCatalog.size, 0, 'unconfirmed R2 bytes are not cataloged');
+  r2.hooks.mismatch = false;
   const id = await s.create(args);
   assert.equal(await s.create(args), id);
   assert.equal(s.tables.hostedProjects.size, 1);
-  const rows = [...s.tables.projectObjects.values()];
-  assert.equal(rows.length, 3);
-  assert(rows.every(r => r.location === 'r2' && r.r2Committed && !r.storageId));
+  assert.equal(s.tables.projectObjects.size, 0);
+  const [page] = s.tables.projectObjectCatalog.values();
+  assert.equal(s.tables.projectObjectCatalog.size, 1);
+  assert.equal(page.sizes.length, 3);
   assert.equal(r2.objects.size, 3);
 });
