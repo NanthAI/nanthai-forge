@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedOwnerReview.ts": "4f3349e40ce169ee934caca8e079ecaaddcddd2bec9246e1ab7a8cec097c8d7e"
+  },
+  "replay": {
+    "incident": "9497ec68",
+    "test": "incident 9497ec68: protected review starts beside CI, stays idle through main moves, and one approved exact check owns publication",
+    "receipt": "5ee34b00-5497-4136-8386-41373b537c03"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "thread:claude-session:7059c330-d207-4ce7-8763-6eb65414c716",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A18959d9f-710d-45c1-9fe9-2f5a53f07061%3Adelegate-task%3Aba5e7b7b-a591-4025-a062-56cd6a287951",
+    "receipt": "ba5e7b7b-a591-4025-a062-56cd6a287951"
+  },
+  "exercised": {
+    "convex/projectHostedOwnerReview.ts": {
+      "executed": [
+        "held",
+        "heldPolicy",
+        "heldPolicyNote",
+        "heldReview",
+        "landingApproveUrl",
+        "link",
+        "loadHeldPolicy",
+        "noteHeldPolicy",
+        "reviewState"
+      ],
+      "digest": "20fdf6f155d4bdbca2d8595ded8b483e563fcfe08a9c15ff6be3a4393d22b98a",
+      "units": [
+        [
+          "HELD_POLICY_REREADS",
+          "b82db0e2661c1b2daa25145980f0762750a2e56826cc8e70f548fa787f0e4b26"
+        ],
+        [
+          "REVIEW_HELD",
+          "ff3dae632c27bf0e032fb4ebe4fe585a88b19f83a608e50ae66b49c0f004ffb1"
+        ],
+        [
+          "acceptanceActor",
+          "0c9112e8326de402fdb77b8cece78b3ea8676c6d95760b6ea8075135b05abaf0"
+        ],
+        [
+          "acceptanceSelection",
+          "46c5920b363500520e7a015044b21cf280401a5f8890c842cb2e31c59c2c086b"
+        ],
+        [
+          "accessibleProject",
+          "50a4d4f1047573513f361192189b40078a2daa64c945e440ac80ed1a45c7d270"
+        ],
+        [
+          "accountFor",
+          "94862030fbddbe8fed2091739a0cd507571493d571399504faa37a2e53d2125a"
+        ],
+        [
+          "activeOwnedProject",
+          "f69cc92d65d5e23f3f54c78049427c8fe9d6ac4a6bf76fa36d5650d551fc38fb"
+        ],
+        [
+          "approvalLinkFor",
+          "0088966091937739817601e8f744c43e7904d81837a2a6e7efbbd004cbc448c7"
+        ],
+        [
+          "cancelHostedLanding",
+          "aaeb910dfe4433ba79699ea0b5937dc6ec8acb8992dad4f6595cd8fd90957d06"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "decline",
+          "772893473bb76f8802d89e8bc80198ac44b1c5b2648e19441d77b6171dabe679"
+        ],
+        [
+          "declineHeldLanding",
+          "b3ebc81dce3f3eafc75b6e4cf0ab5e61c934c10f37ebff91473a7161519e46f0"
+        ],
+        [
+          "effectivePolicy",
+          "3cdc0ff32407b7603d7a90387ef5e3b5e63f8a4336f55bfdf7f1dac19863e36e"
+        ],
+        [
+          "finishRow",
+          "42f05b1aac53a7d0d1b32027b90939cd2afcd2e8f6f2648e459e44a2ca8c92b5"
+        ],
+        [
+          "handleError",
+          "3a1ffd2060ef54eee735d7a368e6c339949cb1f35838ca204f276c2b5d3cd878"
+        ],
+        [
+          "held",
+          "a689daa567ecc03b59bf92056ebedee3ea07bcb9fb21acabd11e9db5a3e95a83"
+        ],
+        [
+          "heldPolicy",
+          "ca8e730609d9c566b9b240a1a56b5668a2a85874d1d6f94d6aba4259c692bc4c"
+        ],
+        [
+          "heldPolicyNote",
+          "bd604163c877681de51b02d92e505b7b072b225cb369287d0e674107814cb8b9"
+        ],
+        [
+          "heldReview",
+          "bfc68b637004eb4bee7628eb9f2321dea550cd4292d30c5b3701d8f3c39e1d12"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "landingApproveUrl",
+          "09e90e207eab5785e77506f3515807b2c93c0e89ae891bbd61a9287ccd7cdec6"
+        ],
+        [
+          "landingObservation",
+          "09012ed641a96f08b1189eb8956b8639de4d4f07ad39d94d952cd1c01d4cade8"
+        ],
+        [
+          "landingStateFromRow",
+          "e9544abb32ec380806ee05d0c5356ffef65c48ef8e5f2b615f74e09b65bd7af6"
+        ],
+        [
+          "link",
+          "54d7ce38f27fcc98dcfeadac906496e60511f9ee8be2fea3338ad6372605171f"
+        ],
+        [
+          "loadHeldPolicy",
+          "29e30c2e60120c01820b6d11b046cc56ebd9f0c95e790684b191f0fc42e60b76"
+        ],
+        [
+          "loadLanding",
+          "ebcbbc4824870ad74803810ad5144fbbc671303f4a51f289356b20578d07ace2"
+        ],
+        [
+          "loadLandingAttempt",
+          "dc24c29748a2166c91f395c24af74f3b3feff418a6aeb0341b9392e1e4c45331"
+        ],
+        [
+          "mutation",
+          "4f17c7855059ce010489b8b943f417aba3333721a20f7872a46abe0eee887bc9"
+        ],
+        [
+          "noteHeldPolicy",
+          "2aa9eb58e0c90dca53b04c07c3681993e7bd11e78cfced86036530ca4da55679"
+        ],
+        [
+          "ownerPerson",
+          "b6009d2d07400074d7bc816f0839ed0e637dbcb4944dce37f6d03b22c947d384"
+        ],
+        [
+          "policyDigestCurrent",
+          "bc0c0038557cd846db575b5932a763b4dde1ab79da6a79f738a0a7dbe949c597"
+        ],
+        [
+          "query",
+          "daf3f45820a616be793e9371cc4c356cef17e60a669e2c4a3587a50a99345ee8"
+        ],
+        [
+          "releaseApprovedReview",
+          "22cc00ae5bbf72c7921355fa8962a6bc4c4e37f0b8c2e30065b0d0532a30ba3a"
+        ],
+        [
+          "report",
+          "11f51c908ed7b15c3270a2410f7282cdb9c431b81d35e62cdff8695c9d306e0b"
+        ],
+        [
+          "reviewState",
+          "67218c54bd0d116838aaec8efd12bd693cee3d0c59bd44048312e92c2e3cf678"
+        ],
+        [
+          "selection",
+          "e8a24c7cb1fe2f79c85417b20762525c927e2983009dc6b4481d484077e5066a"
+        ],
+        [
+          "settleAttemptApprovals",
+          "6d713d58c3f735f921512dbf4f954d03d84ab0c664df9534da71abe202ce2fff"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ],
+        [
+          "writeLanding",
+          "66d679cf148e8bffa47ba33cf08bb2006907e465b1d2a27dae0b275f4082152c"
+        ]
+      ]
+    }
+  }
+}

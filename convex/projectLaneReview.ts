@@ -18,6 +18,26 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { landedTiming } from './projectLaneTiming';
 import { saveFailureForViewer } from './projectHostedSaveStore';
+import { approvalRow, approvalView } from './projectHostedApprovalStore';
+import { deriveApproval } from '../src/approval-state';
+
+/** The owner's open decision on a Lane's own request: asked, or declined while it still holds the Lane (the owner may
+ * approve instead). A settings key is never a Lane; a fork run is decided once. The Needs me request shape. */
+function ownerRequest(row: Awaited<ReturnType<typeof approvalRow>>, laneId: string) {
+  if (!row || row.setting) return null;
+  const view = approvalView(row, laneId);
+  const state = deriveApproval(view);
+  const declined = state.state === 'declined' && view.live && row.pullRequest === undefined;
+  if (!state.needsOwner && !declined) return null;
+  return {
+    ...view,
+    kind: state.kind,
+    state: state.state,
+    needsOwner: state.needsOwner,
+    label: state.label,
+    nextStep: state.nextStep,
+  };
+}
 
 /** Changed paths per reply page. A 128 KB overlap row holds at most about 800, so one page is the usual case. */
 export const REVIEW_PAGE = 400;
@@ -54,6 +74,10 @@ export const read = query({
         offset === 0
           ? readHostedIntentLabel(ctx, { projectId, actor: user.subject, intentId: lane.intentId })
           : null;
+      // Item 0a99ab23: this Lane's approval request, for its owner, so the page decides it from this exact row even
+      // before the Lane holds a landing. One point read, first page only, owner only.
+      const askedRead =
+        offset === 0 && project.owner === user.subject ? approvalRow(ctx, projectId, laneId) : null;
       // The row describes this exact pinned pair only when it was written for the Lane's current head and base.
       const current = !!row && row.head === lane.head && row.baseHead === lane.base.head;
       const changes: OverlapChange[] = current ? JSON.parse(row.changes) : [];
@@ -113,6 +137,7 @@ export const read = query({
       );
       const timing = row?.landed ? await landedTiming(ctx, projectId, row.landed.receiptId) : null;
       const intent = await intentRead;
+      const request = ownerRequest(await askedRead, laneId);
       const run = isAgentSlug(lane.agentRun) ? lane.agentRun : null;
       const savedBy = current ? row.savedBy : undefined;
       // Before the save's author was projected, a holder change or a legacy owner override
@@ -158,6 +183,7 @@ export const read = query({
               }
             : {}),
         },
+        ...(request ? { request } : {}),
         supervised: policy.acceptance.mode === 'review',
         protectedRules: policy.acceptance.protectedPaths.length,
         files: {

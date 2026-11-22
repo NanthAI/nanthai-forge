@@ -8,7 +8,13 @@ import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './server';
 import type { Doc } from './_generated/dataModel';
 import { saveLane } from './projectHostedSaveStore';
-import { approvalRow, fitNote, laneApproveUrl, writeApproval } from './projectHostedApprovalStore';
+import {
+  approvalRow,
+  fitNote,
+  laneApproveUrl,
+  opaqueApproveUrl,
+  writeApproval,
+} from './projectHostedApprovalStore';
 import { postSystemLaneNote } from './projectBoardSystem';
 import { parseInbound } from './projectGithubInboundQueue';
 import { endForkApproval, projectLink } from './projectGithubPullQueue';
@@ -72,8 +78,15 @@ export async function forkGate(ctx: MutationCtx, job: Job, project: Doc<'hostedP
     waitKey: operationId,
     inbound: canonicalPayload({ ...inbound, pull: { ...pull, approval: operationId } } satisfies InboundJob),
   });
-  const url = laneApproveUrl(project._id, laneId);
-  await pending(ctx, job, pull.head, forkStatus.pending, url);
+  const url = await laneApproveUrl(ctx, project, laneId);
+  // GitHub readers see the status link before Forge checks access: a private project's stays opaque (Item 0a99ab23).
+  await pending(
+    ctx,
+    job,
+    pull.head,
+    forkStatus.pending,
+    project.visibility === 'public' ? url : opaqueApproveUrl(project._id, laneId),
+  );
   await postSystemLaneNote(ctx, {
     projectId: project._id,
     id: operationId,

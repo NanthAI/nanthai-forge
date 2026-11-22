@@ -4,7 +4,8 @@
 //
 // While the old screens and their sign-in still serve the existing addresses, the rebuilt app lives under ROOT ("/-").
 // "-" can never be an account handle (src/readable-urls.ts), so no project address can collide with it. When the old
-// shell is removed, ROOT becomes "" and "/-/*" redirects to "/:splat"; nothing else changes.
+// shell is removed, ROOT becomes "" and "/-/*" redirects to "/:splat"; nothing else changes. The server builds its links
+// to these addresses with the same root (src/project-routes.ts APP_ROOT; tests/approval-links.test.mjs keeps them equal).
 export const ROOT = '/-';
 
 export const projectPlaces = ['needs', 'lanes', 'plan', 'code', 'stats', 'settings'] as const;
@@ -24,6 +25,8 @@ export const placeSections: Record<ProjectPlace, readonly string[]> = {
 
 export type AppRoute =
   | { frame: 'public'; page: 'signin' | 'passkey' | 'device' | 'terms' | 'privacy' }
+  /** An old /approve?project=…&submission=|lane=… link (Item 0a99ab23): looked up once, then replaced by its Lane page. */
+  | { frame: 'public'; page: 'approve' }
   | { frame: 'bare'; page: 'new' | 'import' }
   /** Public discovery (Item 8947a779): readable signed out, served from the cached public read. */
   | { frame: 'discover'; page: 'explore' }
@@ -123,10 +126,17 @@ export function publicProjectHref(handle: string, project: string) {
   return `${hrefFor({ frame: 'project', handle, project, place: 'needs', section: '', rest: '' })}?view=public`;
 }
 
+/** `view=public` keeps the front page after sign-in; `view=needs` (an approval link, Item 0a99ab23) asks for the
+ * owner's Needs me, so a signed-out reader signs in first. */
 export function isPublicProjectView(route: AppRoute, signedIn: boolean, view: string | null) {
   if (route.frame !== 'project') return false;
   if (route.place === 'code') return !signedIn;
-  return route.place === 'needs' && !route.section && !route.rest && (!signedIn || view === 'public');
+  return (
+    route.place === 'needs' &&
+    !route.section &&
+    !route.rest &&
+    (signedIn ? view === 'public' : view !== 'needs')
+  );
 }
 
 export function parseAppPath(pathname: string): AppRoute {
@@ -140,6 +150,7 @@ export function parseAppPath(pathname: string): AppRoute {
   if (first === 'signin' && !second) return { frame: 'public', page: 'signin' };
   if (first === 'signin' && second === 'passkey' && !more.length) return { frame: 'public', page: 'passkey' };
   if (first === 'device' && !second) return { frame: 'public', page: 'device' };
+  if (first === 'approve' && !second) return { frame: 'public', page: 'approve' };
   if ((first === 'terms' || first === 'privacy') && !second) return { frame: 'public', page: first };
   if (first === 'new' && !second) return { frame: 'bare', page: 'new' };
   if (first === 'new' && second === 'import' && !more.length) return { frame: 'bare', page: 'import' };

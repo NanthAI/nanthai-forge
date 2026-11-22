@@ -21,7 +21,6 @@ import { openApprovalsReply } from '../dist/hosted-agent-approval.js';
 const acceptance = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
 const review = await import(moduleUrl('../convex/projectHostedOwnerReview.ts'));
 const { grantedApproval } = await import(moduleUrl('../convex/projectHostedOwnerGrant.ts'));
-const { OwnerApproval } = await import(moduleUrl('../web/src/review/OwnerApproval.tsx'));
 const { LaneApproval } = await import(moduleUrl('../web/src/review/LaneApproval.tsx'));
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
@@ -623,36 +622,6 @@ test('a retained grant carries only to verified Candidate bytes under the same o
   assert.equal(grantedApproval({ ...grant, verifiedDigest: 'different-files' }, attempt, 'owner'), undefined);
   assert.equal(grantedApproval(grant, { ...attempt, check: null }, 'owner'), undefined);
   assert.deepEqual(grantedApproval({ ...grant, attemptId: 'a1', paths: null }, attempt, 'owner'), owner);
-});
-
-test('the /approve card shows Accept and Decline only for a held landing', () => {
-  const noop = { accept() {}, decline() {} };
-  const base = { id: randomUUID(), error: null, observation: { state: 'pending', pendingReason: 'queued' } };
-  const render = request =>
-    renderToStaticMarkup(
-      createElement(OwnerApproval, {
-        phase: { kind: 'read', request, agent: true },
-        review: noop,
-        signIn: null,
-        reviewHref: '/review',
-      }),
-    );
-  const heldCard = render({
-    ...base,
-    observation: { state: 'pending', pendingReason: 'waiting-for-review' },
-    error: { code: 'REVIEW_REQUIRED', message: 'needs owner approval: protected paths selected.txt' },
-  });
-  assert.match(heldCard, /Approve and land/);
-  assert.match(heldCard, /protected paths selected\.txt/);
-  assert.doesNotMatch(render(base), /Approve and land/);
-  assert.match(
-    render({
-      ...base,
-      observation: { state: 'terminal-failed', pendingReason: null },
-      error: { code: 'REVIEW_DECLINED', message: 'Declined by the project owner.' },
-    }),
-    /Declined/,
-  );
 });
 
 /** A Lane with no protected path whose builder (the owner's device, an agent) asks for approval. */

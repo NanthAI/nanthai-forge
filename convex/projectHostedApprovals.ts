@@ -19,7 +19,8 @@ import { postSystemLaneNote } from './projectBoardSystem';
 import {
   APPROVAL_LIVE_LIMIT,
   approvalRow,
-  laneApproveUrl,
+  approvalLinks,
+  type ApprovalLink,
   openSettingRequest,
   settingChange,
   approvalView,
@@ -63,9 +64,10 @@ export const request = mutation({
       const reason = text(input.reason);
       invariant(reason, 'BAD_ARGUMENT', 'request-approval needs a reason the owner can read.');
       const actor = await acceptanceActor(ctx, true);
-      await activeProject(ctx, input.projectId, actor.id);
+      const project = await activeProject(ctx, input.projectId, actor.id);
+      const link = approvalLinks(ctx, project);
       const old = await approvalRow(ctx, input.projectId, input.laneId);
-      if (old?.operationId === input.operationId) return canonicalPayload(requestReply(old, input));
+      if (old?.operationId === input.operationId) return canonicalPayload(await requestReply(old, link));
       const lane = await saveLane(ctx, { projectId: input.projectId, actor: actor.id, laneId: input.laneId });
       await requireMemberAuthorityById(ctx, input.projectId, lane.actor, actor.id, 'Lane');
       invariant(
@@ -95,7 +97,7 @@ export const request = mutation({
           ...(agent ? { agent } : {}),
           version: 1,
         });
-      const url = laneApproveUrl(input.projectId, lane.id);
+      const url = await link(lane.id);
       await postSystemLaneNote(ctx, {
         projectId: input.projectId,
         id: input.operationId,
@@ -110,17 +112,14 @@ export const request = mutation({
         ),
         now,
       });
-      return canonicalPayload(requestReply((await approvalRow(ctx, input.projectId, lane.id))!, input));
+      return canonicalPayload(await requestReply((await approvalRow(ctx, input.projectId, lane.id))!, link));
     } catch (error) {
       return report(error);
     }
   },
 });
-function requestReply(
-  row: NonNullable<Awaited<ReturnType<typeof approvalRow>>>,
-  input: { projectId: string; laneId: string },
-) {
-  const url = laneApproveUrl(input.projectId, row.laneId);
+async function requestReply(row: NonNullable<Awaited<ReturnType<typeof approvalRow>>>, link: ApprovalLink) {
+  const url = await link(row.laneId);
   return {
     ...approvalView(row, row.laneId),
     url,
@@ -331,7 +330,7 @@ export const observe = query({
               }
             : {}),
           landing: null,
-          url: laneApproveUrl(input.projectId, input.laneId),
+          url: await approvalLinks(ctx, project)(input.laneId),
         });
       // Held for the landing: the Lane's live landing, when one waits for review, for the owner page.
       const detail = Boolean((row?.live || openForkRequest(row)) && input.detail);
@@ -349,7 +348,7 @@ export const observe = query({
         ...view,
         ...(lane ? { currentHead: lane.head, intentId: lane.intentId } : {}),
         landing,
-        url: row ? laneApproveUrl(input.projectId, input.laneId) : null,
+        url: row ? await approvalLinks(ctx, project)(input.laneId) : null,
       });
     } catch (error) {
       return report(error);
@@ -364,7 +363,11 @@ export const observe = query({
  * so a missing request is "can't confirm", never "none". No client polls this; Needs me reads it
  * inside its one reactive subscription (projectNeedsMe:read), which re-runs only when these rows
  * change. Call only after project read access is established. */
-export async function openApprovalRequests(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+export async function openApprovalRequests(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  link: ApprovalLink,
+) {
   const byLive = (live: boolean) =>
     ctx.db
       .query('projectHostedApprovals')
@@ -384,12 +387,13 @@ export async function openApprovalRequests(ctx: QueryCtx, projectId: Id<'hostedP
   ]);
   const rows = new Map<string, ApprovalRow>();
   for (const row of [...liveRows, ...settingRows, ...otherRows]) rows.set(row.laneId, row);
-  const requests = [...rows.values()]
+  const open = [...rows.values()]
     .map(row => ({ row, view: approvalView(row, row.laneId) }))
     .map(({ row, view }) => ({ row, view, state: deriveApproval(view) }))
     .filter(({ state }) => state.open)
-    .sort((a, b) => b.row.at - a.row.at)
-    .map(({ row, view, state }) => ({
+    .sort((a, b) => b.row.at - a.row.at);
+  const requests = await Promise.all(
+    open.map(async ({ row, view, state }) => ({
       ...view,
       kind: state.kind,
       state: state.state,
@@ -398,8 +402,9 @@ export async function openApprovalRequests(ctx: QueryCtx, projectId: Id<'hostedP
       label: state.label,
       tone: state.tone,
       nextStep: state.nextStep,
-      url: laneApproveUrl(projectId, row.laneId),
-    }));
+      url: await link(row.laneId),
+    })),
+  );
   return canonicalPayload({
     requests,
     complete: [liveRows, otherRows, settingRows].every(page => page.length < APPROVAL_LIVE_LIMIT),
@@ -412,10 +417,11 @@ export const list = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read approval requests.');
-      await accessibleProject(ctx, input.projectId, user.subject);
+      const project = await accessibleProject(ctx, input.projectId, user.subject);
+      const link = approvalLinks(ctx, project);
       const [requests, { reviews, reviewsComplete }] = await Promise.all([
-        openApprovalRequests(ctx, input.projectId),
-        openLandingReviews(ctx, input.projectId),
+        openApprovalRequests(ctx, input.projectId, link),
+        openLandingReviews(ctx, input.projectId, link),
       ]);
       return reviews.length || !reviewsComplete
         ? canonicalPayload({

@@ -259,24 +259,12 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
     .filter(row => parkShown(row, now))
     .map(parkedRow)
     .sort((a, b) => a.since - b.since);
-  // A Lane request holds that Lane's landing, so it is drawn on the held row, never twice (rule 9).
+  // A Lane request holds that Lane's landing, so it is drawn on the held row, never twice (rule 9). Asked before the
+  // Lane holds a landing (request-approval, then wait), it holds nothing yet and is listed ahead (Item 0a99ab23).
+  const heldLanes = new Set(read.held.map(lane => lane.laneId));
   const ahead = requests
-    .filter(request => request.kind !== 'lane')
-    .map(request => ({
-      ...request,
-      word: aheadWord(request),
-      tag: request.membership
-        ? 'Access'
-        : request.setting?.origin === 'github-connect'
-          ? 'GitHub'
-          : request.kind === 'setting'
-            ? 'Setting'
-            : request.kind === 'fork'
-              ? 'Fork run'
-              : 'Request',
-      question: aheadHead(request),
-      who: whoOf(request.requester, request.agent),
-    }));
+    .filter(request => request.kind !== 'lane' || !heldLanes.has(request.laneId))
+    .map(aheadRow);
   return {
     now: waiting,
     asks,
@@ -287,6 +275,25 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
     count: waiting.length + asks.length + parked.length,
     atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true,
     approvalsComplete: complete,
+  };
+}
+
+/** A request asked ahead, as Needs me and the Lane page draw it (Item 0a99ab23). */
+export function aheadRow(request: Approval): AheadRow {
+  return {
+    ...request,
+    word: aheadWord(request),
+    tag: request.membership
+      ? 'Access'
+      : request.setting?.origin === 'github-connect'
+        ? 'GitHub'
+        : request.kind === 'setting'
+          ? 'Setting'
+          : request.kind === 'fork'
+            ? 'Fork run'
+            : 'Request',
+    question: aheadHead(request),
+    who: whoOf(request.requester, request.agent),
   };
 }
 

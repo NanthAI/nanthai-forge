@@ -5,7 +5,10 @@
 // with the Lane ahead; `?s=combined` is the same Lane after it was combined on top of that Lane; `?s=parked` is the
 // held Lane also parked on a named holder (Item e1633718); `?s=landed` and `?s=abandoned` are the Lane once review is
 // over. Each file carries the +/- counts its save recorded (c2388099), except docs/parser.md and the fixture, which
-// stand for an older save that recorded none.
+// stand for an older save that recorded none. Item 0a99ab23: `?s=asked` is the Lane with an approval request asked
+// at an older save, before it holds a landing, decided from the Lane read's own row; `?s=declined` is that request
+// declined while it still holds the Lane; `?s=linked&submission=…` is an approval link naming one of two landings of
+// this Lane that wait for review, after a newer save moved the Lane's mark.
 import type { ReactNode } from 'react';
 import { ProjectFrame } from '../../web/src/app/frames';
 import { createRoot } from 'react-dom/client';
@@ -71,6 +74,11 @@ const client = {
     const name = getFunctionName(ref as never);
     calls.push(name);
     (window as unknown as { __calls: string[] }).__calls = calls;
+    if (name === 'projectHostedApprovals:decide' || name === 'projectHostedAcceptance:approve') {
+      (window as unknown as { __decide: unknown[] }).__decide ??= [];
+      (window as unknown as { __decide: unknown[] }).__decide.push(args);
+      return JSON.stringify({ approval: { status: 'granted' } });
+    }
     if (name === 'projectHostedSaves:dismissFailure') {
       (window as unknown as { __dismissArgs: unknown }).__dismissArgs = args;
       if (scenario === 'save-denied') return false;
@@ -126,6 +134,7 @@ const reads = new Map<string, unknown>();
 const BASE = 'b'.repeat(64);
 const AHEAD_HEAD = 'a1'.repeat(32);
 const HEAD = 'c3'.repeat(32);
+const LINKED_SUBMISSION = 'a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d';
 
 async function reply(): Promise<Reply> {
   const stream = {
@@ -244,6 +253,30 @@ async function reply(): Promise<Reply> {
           }
         : {}),
     },
+    ...(scenario === 'asked' || scenario === 'declined'
+      ? {
+          request: {
+            laneId: LANE,
+            kind: 'lane' as const,
+            status: scenario,
+            state: scenario === 'asked' ? 'requested' : 'declined',
+            live: true,
+            needsOwner: scenario === 'asked',
+            label: scenario === 'asked' ? 'Approval requested' : 'Declined',
+            nextStep:
+              scenario === 'asked'
+                ? 'Approve or decline it; landing waits for your answer.'
+                : 'The builder was told; you can still approve it.',
+            reason: 'Touches the billing migration; please look first.',
+            requester: 'sample-two',
+            agent: 'salt-wren',
+            // The request was asked at an older save; the decision names the Lane's current one.
+            head: AHEAD_HEAD,
+            at: '2026-11-22T12:00:00.000Z',
+            ...(scenario === 'declined' ? { decision: { reason: 'Wait for the schema review.' } } : {}),
+          },
+        }
+      : {}),
     supervised: true,
     protectedRules: 2,
     files: { current: true, complete: true, total: files.length, offset: 0, nextOffset: null, items: files },
@@ -296,7 +329,7 @@ const feed = {
           {
             laneId: LANE,
             stage: unattended ? ('editing' as const) : ('checking' as const),
-            held: !unattended,
+            held: !unattended && !['asked', 'declined', 'linked'].includes(scenario),
             overlap: !unattended,
             changedAt: Date.now(),
           },
@@ -339,6 +372,25 @@ function Routed() {
 }
 
 void reply().then(data => {
+  if (scenario === 'linked')
+    reads.set('projectNeedsMe:read', {
+      held: ['older', 'newer'].map((which, index) => ({
+        laneId: LANE,
+        title: 'Stream parser',
+        actor: 'sample-two',
+        agent: 'salt-wren',
+        why: 'review',
+        note: null,
+        submissionId: which === 'older' ? LINKED_SUBMISSION : '9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d',
+        attemptId:
+          which === 'older' ? 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e' : 'c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f',
+        since: 1_790_000_000_000 - index,
+      })),
+      more: 0,
+      moreIsLowerBound: false,
+      canDecide: true,
+      approvals: '{}',
+    });
   if (routed) {
     reads.set('projectLaneReview:read', JSON.stringify(data));
     reads.set('projectDiscussionThread:read', {

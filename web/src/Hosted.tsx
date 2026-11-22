@@ -39,7 +39,6 @@ const ImportedSourceSettings = lazy(() => import('./settings/ImportedSourceSetti
 const Teams = lazy(() => import('./Teams'));
 const Secrets = lazy(() => import('./Secrets'));
 const ProjectBackups = lazy(() => import('./ProjectBackups'));
-const OwnerApprove = lazy(() => import('./OwnerApprove'));
 const DeviceCredentials = lazy(() =>
   import('./device/DeviceList').then(module => ({ default: module.DeviceCredentials })),
 );
@@ -665,7 +664,7 @@ export default function Hosted() {
     <ClerkProvider publishableKey={key}>
       <ConvexProviderWithClerk client={client} useAuth={useConvexTokenAuth}>
         <Suspense fallback={<AppLoader />}>
-          {location.pathname === '/approve' ? <OwnerApprove /> : <ConnectedExplorer />}
+          <ConnectedExplorer />
         </Suspense>
       </ConvexProviderWithClerk>
     </ClerkProvider>

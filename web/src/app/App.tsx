@@ -35,6 +35,9 @@ import { FirstPasskey, SignIn } from './SignIn';
 import './app.css';
 const Legal = lazy(() => import('./Legal'));
 const ExistingDeleteRequest = lazy(() => import('./requests/ExistingDeleteRequest'));
+const ApproveRedirect = lazy(() =>
+  import('./ApproveRedirect').then(module => ({ default: module.ApproveRedirect })),
+);
 const OldAddressPage = lazy(() => import('./OldAddress'));
 const loadingPlace = (
   <p className="quietline" aria-busy="true">
@@ -188,6 +191,12 @@ function Pages() {
     if (route.page === 'signin')
       return isAuthenticated && search.get('link') !== 'existing' ? <AfterSignIn /> : <SignIn />;
     if (route.page === 'passkey') return <FirstPasskey onDone={finishPasskeyStep} />;
+    if (route.page === 'approve')
+      return (
+        <Suspense fallback={null}>
+          <ApproveRedirect search={search} />
+        </Suspense>
+      );
     return <Device viewerHandle={viewer?.handle} />;
   }
   const leave = (next?: string) => {

@@ -360,6 +360,14 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       );
       const ahead = needs.locator('.grp', { has: page.getByText('Asked ahead', { exact: true }) });
       assert.equal(await ahead.getByRole('button', { name: 'Use it', exact: true }).count(), 1);
+      // Item 0a99ab23: a Lane request asked ahead opens its Lane page, which decides it on the Lane's current save.
+      const request = page.locator('details.sumdec', { hasText: 'Touches the billing migration' });
+      await request.locator('summary').click();
+      assert.equal(
+        await request.getByRole('link', { name: 'Review the Lane' }).getAttribute('href'),
+        '/-/sample-one/tidepool/lanes/5d1c7a0e-0000-4000-8000-000000000009',
+      );
+      assert.equal(await request.getByRole('button', { name: 'Approve', exact: true }).count(), 0);
       assert.match(await needs.locator('.dec').first().textContent(), /Tried both clients/);
       await handBack.getByRole('textbox', { name: 'Reason (optional)' }).fill('I can finish this.');
       await handBack.getByRole('button', { name: 'Decline' }).click();

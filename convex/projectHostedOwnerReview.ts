@@ -19,7 +19,7 @@ import {
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
-import { settleAttemptApprovals } from './projectHostedApprovalStore';
+import { approvalLinkFor, settleAttemptApprovals } from './projectHostedApprovalStore';
 import { accountFor } from './urlIdentity';
 import { handleError } from '../src/readable-urls';
 import type { LandingReview } from '../src/hosted-landing-hold';
@@ -193,25 +193,45 @@ export function noteHeldPolicy<T extends { error?: { code: string; message: stri
   // The CLI uses the semicolon to end the protected path list in the reason.
   return { ...submission, error: { ...error, message: `${error.message}; ${heldPolicyNote(pin)}` } };
 }
-export function approvePath(projectId: string, submissionId: string) {
-  return `/approve?${new URLSearchParams({ project: projectId, submission: submissionId })}`;
-}
-
-export function approveUrl(projectId: string, submissionId: string) {
+/** A landing's owner link (Item 0a99ab23): its Lane page when its one Lane is known from its solo composition (one
+ * indexed read), else Needs me; both decide the held attempt. Null without a configured web URL. */
+export async function landingApproveUrl(
+  ctx: QueryCtx | MutationCtx,
+  project: Pick<Doc<'hostedProjects'>, '_id' | 'slug'>,
+  handle: string | undefined,
+  state: HostedLandingState,
+) {
   const web = process.env.FORGE_WEB_URL;
-  return web ? new URL(approvePath(projectId, submissionId), web).href : null;
+  if (!web) return null;
+  // The same solo-composition read as the review inbox (projectHostedQueueEntries `queueComposeLanes`), kept here so
+  // owner-review code reaches no queue-directory module.
+  const compose = state.request.finish?.composeOperationId;
+  const composed = compose
+    ? await ctx.db
+        .query('projectHostedComposeSelections')
+        .withIndex('by_project_and_actor_and_operation_and_kind_and_key', q =>
+          q
+            .eq('projectId', project._id)
+            .eq('actor', state.actor)
+            .eq('operationId', compose)
+            .eq('kind', 'inputs'),
+        )
+        .take(2)
+    : [];
+  return approvalLinkFor(web, project, handle)(composed.length === 1 ? composed[0]!.key : null, state.id);
 }
 /** Only the current held operation needs the project's public address handle. Never infer it from
  * the owner subject, the submitter, a provider name or an email. No lookup on an unheld operation. */
 export async function heldReview(
   ctx: QueryCtx | MutationCtx,
-  project: Pick<Doc<'hostedProjects'>, '_id' | 'owner'> | undefined,
+  project: Pick<Doc<'hostedProjects'>, '_id' | 'owner' | 'slug'> | undefined,
   state: HostedLandingState,
 ): Promise<LandingReview | undefined> {
   if (!project || !held(state)) return;
-  const approver = (await accountFor(ctx, project.owner))?.handle;
-  const url = approveUrl(project._id, state.id);
-  return { ...(approver && !handleError(approver) ? { approver } : {}), ...(url ? { url } : {}) };
+  const found = (await accountFor(ctx, project.owner))?.handle;
+  const approver = found && !handleError(found) ? found : undefined;
+  const url = await landingApproveUrl(ctx, project, approver, state);
+  return { ...(approver ? { approver } : {}), ...(url ? { url } : {}) };
 }
 
 /** The approve link of a landing operation, for any project reader (an agent
@@ -246,7 +266,9 @@ export const link = query({
         ...(policy ? { policy, policyNote: heldPolicyNote(policy) } : {}),
         phase: state.phase,
         ...review,
-        url: review?.url ?? approveUrl(input.projectId, state.id),
+        url:
+          review?.url ??
+          (await landingApproveUrl(ctx, project, (await accountFor(ctx, project.owner))?.handle, state)),
       });
     } catch (error) {
       return report(error);

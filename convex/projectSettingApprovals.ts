@@ -4,7 +4,7 @@ import type { Id } from './_generated/dataModel';
 import { isDeviceIdentity } from './cliServer';
 import {
   approvalRow,
-  laneApproveUrl,
+  opaqueApproveUrl,
   openSettingRequest,
   writeApproval,
   type ApprovalRow,
@@ -70,8 +70,10 @@ export async function agentSettingRule(
 const requestHead = (request: string, base?: string) =>
   digest(canonicalPayload({ request, base: base ?? null }));
 
+/** The /approve form, with no read: that page looks the project up and opens Needs me, where a settings request is
+ * decided (Item 0a99ab23). Lists and observe link to Needs me directly. */
 export function settingReply(row: ApprovalRow) {
-  const url = laneApproveUrl(row.projectId, row.laneId);
+  const url = opaqueApproveUrl(row.projectId, row.laneId);
   return {
     id: row.laneId,
     status: row.status,

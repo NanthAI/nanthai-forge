@@ -86,7 +86,7 @@ export const request = internalMutation({
   handler: async (ctx, input) => {
     const user = await ctx.auth.getUserIdentity();
     invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to manage project membership.');
-    await activeOwnedProject(ctx, input.projectId, user.subject);
+    const project = await activeOwnedProject(ctx, input.projectId, user.subject);
     const change = memberChange.parse(JSON.parse(input.request));
     const key = `setting:membership:${input.operationId}`;
     const previous = await heldReplay(ctx, input.projectId, key, input.operationId, input.request);
@@ -119,7 +119,7 @@ export const request = internalMutation({
       status: row.status,
       applied: row.ended?.kind === 'applied',
       id: key,
-      url: laneApproveUrl(input.projectId, key),
+      url: await laneApproveUrl(ctx, project, key),
     });
   },
 });

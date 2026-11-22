@@ -33,6 +33,33 @@ const routeProjects = new Map<string, string>();
 export function hostedProjectRoot(handle: string, projectSlug: string) {
   return `/${encodeURIComponent(handle)}/${encodeURIComponent(projectSlug)}`;
 }
+/** Where the rebuilt app is served (web/src/app/paths.ts ROOT reads it). The switch-over (Item b0704959) sets it to ''
+ * and keeps "/-/*" redirecting to "/:splat", so a link built with it keeps working after the switch. */
+export const APP_ROOT = '/-';
+/** A held settings or membership request is keyed `setting:…` in place of a Lane id: it has no Lane page. */
+export const isSettingKey = (laneId: string) => laneId.startsWith('setting:');
+/** The owner's page for one approval (Item 0a99ab23). A Lane's request or held landing opens its Lane page, which
+ * decides both; a settings request, or a landing whose one Lane is not known, opens Needs me, which decides every
+ * kind. A held landing's link names its submission, so the Lane page decides that exact attempt; Needs me's link asks
+ * for the owner's workspace (`view=needs`), so a signed-out owner signs in and lands there, not on the public front
+ * page. Without the project's address the link is the /approve form, which looks the address up and redirects. */
+export function approvalPath(
+  address: { handle: string; slug: string } | null,
+  projectId: string,
+  laneId: string | null,
+  submissionId?: string,
+) {
+  if (address) {
+    const root = `${APP_ROOT}${hostedProjectRoot(address.handle, address.slug)}`;
+    if (!laneId || isSettingKey(laneId)) return `${root}?view=needs`;
+    const lane = `${root}/lanes/${encodeURIComponent(laneId)}`;
+    return submissionId ? `${lane}?submission=${encodeURIComponent(submissionId)}` : lane;
+  }
+  const search = new URLSearchParams({ project: projectId });
+  if (submissionId) search.set('submission', submissionId);
+  else if (laneId) search.set('lane', laneId);
+  return `/approve?${search}`;
+}
 export function projectRouteIdentity(href: string) {
   const url = new URL(href),
     parts = segments(url);

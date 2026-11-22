@@ -16,7 +16,7 @@ import { finishRow } from './projectHostedFinishWake';
 import { openApprovalRequests } from './projectHostedApprovals';
 import { messagesTo } from './projectNeedsFyi';
 import { openLandingReviews, reviewSubmitter } from './projectHostedReviewInbox';
-import { approvePath, approveUrl } from './projectHostedOwnerReview';
+import { approvalLinks, type ApprovalLink } from './projectHostedApprovalStore';
 import { storedLandingStateSchema } from '../src/hosted-landing';
 import { report } from './errors';
 import { invariant } from '../src/errors';
@@ -65,7 +65,7 @@ export const needsMeResult = v.object({
        * here with the calls the /approve page makes (projectHostedAcceptance:approve, projectHostedOwnerReview:decline).
        * A landing-policy hold (protected paths, supervised) has no Lane approval request to decide instead. */
       attemptId: v.optional(v.string()),
-      /** The owner's review page for this submission, when the deployment has a web address. */
+      /** The owner's page for this decision: the Lane page (Item 0a99ab23), when the deployment has a web address. */
       url: v.optional(v.union(v.string(), v.null())),
       /** When the hold began, as far as the records say (ms). */
       since: v.number(),
@@ -134,6 +134,7 @@ async function reason(
   projectId: Id<'hostedProjects'>,
   mark: Held,
   reviewIds: ReadonlySet<string>,
+  link: ApprovalLink,
 ) {
   const owner = await lineOwner(ctx.db, mark.laneId);
   // Binding stamps the submission on the owner row. A new save clears it in
@@ -165,7 +166,7 @@ async function reason(
     ...(why === 'review' && state
       ? {
           attemptId: state.attemptId,
-          url: approveUrl(projectId, state.id) ?? approvePath(projectId, state.id),
+          url: await link(mark.laneId, state.id),
         }
       : {}),
     since: ended ? Date.parse(ended) : mark.changedAt,
@@ -204,12 +205,14 @@ export const read = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what needs you.');
       const project = await accessibleProject(ctx, projectId, user.subject);
+      // The owner's handle (one indexed read) is read only when a row below needs an approval link.
+      const link = approvalLinks(ctx, project);
       const [marks, approvals, asks, parks, { reviews }] = await Promise.all([
         ctx.db
           .query('projectLiveLineLanes')
           .withIndex('by_project_and_held', q => q.eq('projectId', projectId).eq('held', true))
           .take(NEEDS_ME_HELD_LIMIT + 1),
-        openApprovalRequests(ctx, projectId),
+        openApprovalRequests(ctx, projectId, link),
         messagesTo(ctx, project, user.subject, true),
         ctx.db
           .query('projectHostedParks')
@@ -217,7 +220,7 @@ export const read = query({
             q.eq('projectId', projectId).eq('parkedFor', user.subject),
           )
           .take(NEEDS_ME_PARKED_LIMIT + 1),
-        openLandingReviews(ctx, projectId),
+        openLandingReviews(ctx, projectId, link),
       ]);
       const reviewIds = new Set(reviews.map(review => review.submissionId));
       const shown = marks.slice(0, NEEDS_ME_HELD_LIMIT);
@@ -243,7 +246,7 @@ export const read = query({
           .unique();
       const marked = await Promise.all(
         shown.map(async mark => {
-          const recorded = await reason(ctx, projectId, mark, reviewIds);
+          const recorded = await reason(ctx, projectId, mark, reviewIds, link);
           // One decision for all the Lane marks on this exact submission.
           // A different submission on the same Lane can still have its own hold.
           if (!recorded) return null;

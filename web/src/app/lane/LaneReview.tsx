@@ -228,7 +228,9 @@ export function ReviewPage({
   // Review is over once the Lane lands or is set aside (c2388099): no read marks, no "Needs eyes first" order.
   const closed = Boolean(lane.landed) || lane.state !== 'active';
   const isHeld = Boolean(stop?.held) && !lane.landed;
-  const heldView = useHeldView(projectId, isHeld);
+  // An approval link names its landing (Item 0a99ab23): Needs me is read for that exact attempt too.
+  const linked = lane.landed ? null : new URLSearchParams(location.search).get('submission');
+  const heldView = useHeldView(projectId, isHeld || Boolean(linked));
   const heldRow = heldView
     ? [...heldView.view.now, ...heldView.view.fyi].find(row => row.laneId === lane.laneId)
     : undefined;
@@ -324,7 +326,15 @@ export function ReviewPage({
           </p>
         </div>
       ) : null}
-      <LaneDecision projectId={projectId} laneId={lane.laneId} held={isHeld} read={heldView} />
+      <LaneDecision
+        projectId={projectId}
+        laneId={lane.laneId}
+        held={isHeld}
+        submission={linked}
+        {...(reply.request && !lane.landed ? { request: reply.request } : {})}
+        head={lane.head}
+        read={heldView}
+      />
       {lane.park && !lane.landed ? (
         <p className="quietline" dir="auto">
           {parkLine(lane.park, Date.now())}

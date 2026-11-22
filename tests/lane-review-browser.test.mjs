@@ -415,6 +415,65 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
       );
     });
 
+    await t.test(
+      '0a99ab23: a request asked before the Lane holds a landing is decided on the Lane page',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          const page = await open(t, viewport, 's=asked');
+          const decision = page.getByRole('region', { name: 'Your decision' });
+          await decision.waitFor();
+          assert.match(await decision.textContent(), /holds nothing yet/);
+          assert.match(await decision.textContent(), /Touches the billing migration; please look first\./);
+          assert.equal(
+            await page.evaluate(
+              () => (window.__watches ?? []).filter(name => name === 'projectNeedsMe:read').length,
+            ),
+            0,
+            'decided from the Lane read: no Needs me read',
+          );
+          await decision.getByRole('button', { name: 'Decline', exact: true }).waitFor();
+          await decision.getByRole('button', { name: 'Approve', exact: true }).click();
+          await page.getByRole('status').filter({ hasText: 'Approved. It is in the log.' }).waitFor();
+          const [sent] = await page.evaluate(() => window.__decide);
+          assert.equal(sent.decision, 'grant');
+          assert.equal(sent.laneId, '7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d');
+          // Asked at an older save (a1…): a save between the request and the review must not leave the keys stale.
+          assert.equal(sent.head, 'c3'.repeat(32), "the decision names the Lane's current save");
+          assert.match(sent.operationId, /^[0-9a-f-]{36}$/);
+        }
+      },
+    );
+
+    await t.test(
+      '0a99ab23: a declined request that still holds the Lane can be approved instead',
+      async t => {
+        const page = await open(t, DESK, 's=declined');
+        const decision = page.getByRole('region', { name: 'Your decision' });
+        await decision.waitFor();
+        assert.match(await decision.textContent(), /you declined it/);
+        assert.match(await decision.textContent(), /You said: Wait for the schema review\./);
+        assert.equal(await decision.getByRole('button', { name: 'Decline', exact: true }).count(), 0);
+        await decision.getByRole('button', { name: 'Approve', exact: true }).click();
+        const [sent] = await page.evaluate(() => window.__decide);
+        assert.equal(sent.decision, 'grant');
+        assert.equal(sent.head, 'c3'.repeat(32));
+      },
+    );
+
+    await t.test(
+      '0a99ab23: an approval link decides the landing it names, not another of the Lane',
+      async t => {
+        const page = await open(t, DESK, 's=linked&submission=a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d');
+        const decision = page.getByRole('region', { name: 'Your decision' });
+        await decision.waitFor();
+        await decision.getByRole('button', { name: 'Approve and land' }).click();
+        await page.waitForFunction(() => window.__decide?.length === 1);
+        const [sent] = await page.evaluate(() => window.__decide);
+        assert.equal(sent.submissionId, 'a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d');
+        assert.equal(sent.attemptId, 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e');
+      },
+    );
+
     await t.test('the Lane sidebar stays pinned below the project bar', async t => {
       const page = await open(t, { width: 1000, height: 540 }, 's=review&frame');
       const change = page.getByRole('region', { name: 'The change' });
@@ -431,7 +490,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
 
     await t.test('axe and widths: both themes, desk and phone', async t => {
       for (const viewport of [DESK, PHONE])
-        for (const s of ['review', 'combined', 'parked']) {
+        for (const s of ['review', 'combined', 'parked', 'asked', 'declined']) {
           const page = await open(t, viewport, `s=${s}`);
           await page.locator('.lr-file').first().locator('summary').click();
           await page.locator('.lr-file').first().locator('.code').first().waitFor();

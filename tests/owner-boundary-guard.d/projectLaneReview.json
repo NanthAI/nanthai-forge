@@ -1,0 +1,6 @@
+{
+  "actions": [
+    "read"
+  ],
+  "reason": "Read-only: the owner check only adds the Lane's own open approval request to the owner's page (Item 0a99ab23); deciding stays on projectHostedApprovals:decide, owner person only."
+}

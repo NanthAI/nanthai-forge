@@ -5,6 +5,8 @@ import { acceptancePage, acceptancePlan } from './projectHostedAcceptanceStore';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { postSystemLaneNote } from './projectBoardSystem';
 import { BOARD_TEXT_CHARS } from '../src/board-text';
+import { approvalPath } from '../src/project-routes';
+import { accountFor } from './urlIdentity';
 
 /** Issue fe5bea80: builder approval requests on Lanes (table projectHostedApprovals). */
 export type ApprovalRow = Doc<'projectHostedApprovals'>;
@@ -13,14 +15,46 @@ export const APPROVAL_LIVE_LIMIT = 100;
 /** A landing's input pages read for the hold; a solo landing has one. */
 const INPUT_PAGE_LIMIT = 8;
 
-export function laneApproveUrl(projectId: string, laneId: string) {
+/** The owner's approval links for one project (Item 0a99ab23; src/project-routes.ts `approvalPath`). The owner's
+ * handle is one indexed read, made by the first link asked for and shared by the rest, so a reply with no link reads
+ * nothing. Null links without a configured web URL. */
+export function approvalLinks(
+  ctx: QueryCtx | MutationCtx,
+  project: Pick<Doc<'hostedProjects'>, '_id' | 'owner' | 'slug'>,
+) {
   const web = process.env.FORGE_WEB_URL;
-  if (!web) return null;
-  const url = new URL('/approve', web);
-  url.searchParams.set('project', projectId);
-  url.searchParams.set('lane', laneId);
-  return url.href;
+  let handle: Promise<string | undefined> | undefined;
+  return async (laneId: string | null, submissionId?: string): Promise<string | null> => {
+    if (!web) return null;
+    handle ??= project.slug
+      ? accountFor(ctx, project.owner).then(account => account?.handle)
+      : Promise.resolve(undefined);
+    return approvalLinkFor(web, project, await handle)(laneId, submissionId);
+  };
 }
+export type ApprovalLink = ReturnType<typeof approvalLinks>;
+/** The same links when the caller already read the owner's handle. */
+export function approvalLinkFor(
+  web: string | undefined,
+  project: Pick<Doc<'hostedProjects'>, '_id' | 'slug'>,
+  handle: string | undefined,
+) {
+  const address = handle && project.slug ? { handle, slug: project.slug } : null;
+  return (laneId: string | null, submissionId?: string): string | null =>
+    web ? new URL(approvalPath(address, project._id, laneId, submissionId), web).href : null;
+}
+/** One request's link: the Lane page, or Needs me for a settings request. */
+export const laneApproveUrl = (
+  ctx: QueryCtx | MutationCtx,
+  project: Pick<Doc<'hostedProjects'>, '_id' | 'owner' | 'slug'>,
+  laneId: string,
+) => approvalLinks(ctx, project)(laneId);
+/** The /approve form, with no read: that page looks the project up and opens the Lane page or Needs me. For a link
+ * shown where the project's address must not be (a GitHub status on a private project) and settings replies. */
+export const opaqueApproveUrl = (projectId: string, laneId: string) => {
+  const web = process.env.FORGE_WEB_URL;
+  return web ? new URL(approvalPath(null, projectId, laneId), web).href : null;
+};
 
 export const approvalRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, laneId: string) =>
   ctx.db

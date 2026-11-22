@@ -51,7 +51,7 @@ export type DecisionItem = {
   gates?: { main?: boolean; overlaps: number; queuedAt?: string };
   /** Small fact beside the answers, e.g. "6 files · +212 −38". */
   hint?: string;
-  /** An approval request's page for the owner (`/approve?project=…&lane=…`). */
+  /** An approval request's page for the owner: the server's link, else `/approve?project=…&lane=…`. */
   approveHref?: string;
   /** The person or agent best placed to take it next. */
   owner?: string;
@@ -384,7 +384,22 @@ export type OpenApproval = {
   setting?: { origin: string };
   membership?: boolean;
   at?: string;
+  /** The server's link to the page that decides it (Item 0a99ab23); absent without a configured web URL. */
+  url?: string | null;
 };
+
+/** The server's link on this site (its path), else the /approve form, which redirects to the same page. */
+function approvalHref(projectId: string, request: OpenApproval) {
+  try {
+    if (request.url) {
+      const url = new URL(request.url);
+      return url.pathname + url.search;
+    }
+  } catch {
+    // An unreadable link falls back to the lookup form.
+  }
+  return `/approve?project=${encodeURIComponent(projectId)}&lane=${encodeURIComponent(request.laneId)}`;
+}
 
 /** Requests that wait for the owner's answer: a Lane, a fork pull request run or a held settings
  * change. Owners otherwise learn of them only from a board note. `projectId` builds the page link. */
@@ -411,7 +426,7 @@ export function approvalDecisions(projectId: string, requests: readonly OpenAppr
         hint: request.nextStep,
         ...(request.at ? { at: request.at } : {}),
         ...(request.kind === 'lane' ? { laneId: request.laneId } : {}),
-        approveHref: `/approve?project=${encodeURIComponent(projectId)}&lane=${encodeURIComponent(request.laneId)}`,
+        approveHref: approvalHref(projectId, request),
       };
     });
 }

@@ -6,6 +6,7 @@ import { documentationPath } from '../../../../src/prose-paths';
 import { reviewEntry, type ReviewEntry, type ReviewFacts } from '../../../../src/review-order';
 import type { LineFeed, LineStage } from '../Line';
 import type { Park } from '../needs/count';
+import type { Approval } from '../needs/model';
 import type { SaveFailure } from '../SaveFailureNotice';
 import { uniqueBy } from '../../ui/unique';
 
@@ -77,6 +78,8 @@ export type Reply = {
     park?: Park;
     resolution?: { status: string; origin: string | null };
   };
+  /** For the owner: this Lane's open request (Item 0a99ab23), asked or declined while it still holds the Lane. */
+  request?: Approval & { state: string; decision?: { reason?: string } };
   supervised: boolean;
   protectedRules: number;
   files: {

@@ -344,7 +344,11 @@ const conversationRead: NeedsRead = {
   held: [],
   more: 0,
   moreIsLowerBound: false,
-  approvals: JSON.stringify({ requests: [], complete: true }),
+  // Item 0a99ab23: a Lane request asked before the Lane holds a landing is listed ahead, decided on its Lane page.
+  approvals: JSON.stringify({
+    requests: [approval(uuid(9), 'Touches the billing migration; look first.', 5)],
+    complete: true,
+  }),
   canDecide: true,
   asks: [
     {

@@ -3,6 +3,7 @@
 // A standalone Lane request goes through projectHostedApprovals:decide. A held landing is decided
 // on its exact attempt with the calls the /approve page makes: projectHostedAcceptance:approve
 // and projectHostedOwnerReview:decline. No new authority: the server checks the owner person on every call.
+import { useRef } from 'react';
 import { useMutation } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
@@ -37,22 +38,31 @@ const declineLanding = makeFunctionReference<
   string
 >('projectHostedOwnerReview:decline');
 
-/** Every call is retry-safe by its own operation id (decline) or its exact attempt (approve). */
+/** Every call is retry-safe by its own operation id (decline, a request) or its exact attempt (approve). A retry of the
+ * same decision after a lost reply keeps its operation id, so it is one decision, as the /approve page did (Item
+ * 0a99ab23); a reply, even a refusal, ends that attempt. */
 export function useProjectDecide(projectId: Id<'hostedProjects'>): Decide {
   const lane = useMutation(api.projectHostedApprovals.decide);
   const approve = useMutation(approveLanding);
   const decline = useMutation(declineLanding);
-  return input => {
-    const operationId = crypto.randomUUID();
-    if ('head' in input)
-      return lane({
-        projectId,
-        laneId: input.laneId,
-        head: input.head,
-        decision: input.decision,
-        operationId,
-      });
-    const selection = { projectId, ...input.landing };
-    return input.decision === 'grant' ? approve(selection) : decline({ ...selection, operationId });
+  const pending = useRef(new Map<string, string>());
+  return async input => {
+    const key = JSON.stringify(input);
+    const operationId = pending.current.get(key) ?? crypto.randomUUID();
+    pending.current.set(key, operationId);
+    const selection = 'landing' in input ? { projectId, ...input.landing } : null;
+    const reply = await ('head' in input
+      ? lane({
+          projectId,
+          laneId: input.laneId,
+          head: input.head,
+          decision: input.decision,
+          operationId,
+        })
+      : input.decision === 'grant'
+        ? approve(selection!)
+        : decline({ ...selection!, operationId }));
+    pending.current.delete(key);
+    return reply;
   };
 }

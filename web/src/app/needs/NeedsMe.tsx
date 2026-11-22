@@ -81,7 +81,7 @@ import {
   type ParkedRow,
 } from './model';
 import { decideTarget, useProjectDecide, type Decide } from './decide';
-import { DecisionKeys, useDecideRun } from './DecisionKeys';
+import { AheadKeys, DecisionKeys } from './DecisionKeys';
 import './needs.css';
 
 type ProjectRoute = PlaceProps['route'];
@@ -833,8 +833,6 @@ function Ahead({
   canDecide: boolean;
   announce: (text: string) => void;
 }) {
-  const { run, busy } = useDecideRun(decide, announce);
-  const connect = row.setting?.origin === 'github-connect';
   const asked = Date.parse(row.at);
   const [open, setOpen] = useState(false);
   return (
@@ -866,25 +864,24 @@ function Ahead({
         {open && detail ? detail(row.laneId) : null}
         {row.needsOwner && canDecide ? (
           <div className="btns">
-            <Key
-              disabled={busy !== null}
-              onClick={() =>
-                run(
-                  row.laneId,
-                  { head: row.head },
-                  'grant',
-                  connect ? 'Allowed. Opening GitHub to authorize.' : 'Approved. It is in the log.',
-                )
-              }
-            >
-              {connect ? 'Allow on GitHub' : 'Approve'}
-            </Key>
-            <Key
-              disabled={busy !== null}
-              onClick={() => run(row.laneId, { head: row.head }, 'decline', 'Declined. The agent was told.')}
-            >
-              Decline
-            </Key>
+            {row.kind === 'lane' ? (
+              // A Lane request is decided on the Lane's current save, which its page shows (Item 0a99ab23).
+              <A
+                className="btn sm"
+                href={hrefFor({
+                  frame: 'project',
+                  handle: project.handle,
+                  project: project.project,
+                  place: 'lanes',
+                  section: '',
+                  rest: row.laneId,
+                })}
+              >
+                Review the Lane
+              </A>
+            ) : (
+              <AheadKeys row={row} decide={decide} announce={announce} />
+            )}
           </div>
         ) : null}
       </div>

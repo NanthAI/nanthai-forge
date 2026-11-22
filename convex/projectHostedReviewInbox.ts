@@ -5,7 +5,7 @@ import { splitAgentActor } from '../src/agent-slug';
 import { QUEUE_VIEW_LIMIT } from '../src/hosted-queue-view';
 import { landingStateField } from '../src/landing-state';
 import { landingRow, landingStateFromRow, type LandingRow } from './projectHostedLandingStore';
-import { approvePath, approveUrl } from './projectHostedOwnerReview';
+import type { ApprovalLink } from './projectHostedApprovalStore';
 import { queueComposeLanes, queueIntentLanes, queueViewKeys } from './projectHostedQueueEntries';
 import type { HostedLandingState } from '../src/hosted-landing';
 
@@ -23,7 +23,7 @@ export function reviewSubmitter(row: LandingRow, state: HostedLandingState) {
 
 /** Read only review entries in the queue's existing directory window. A Lane mark
  * may overlap, move to a newer head, or be absent while its submitted attempt still waits. */
-export async function openLandingReviews(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+export async function openLandingReviews(ctx: QueryCtx, projectId: Id<'hostedProjects'>, link: ApprovalLink) {
   const keys = (await queueViewKeys(ctx, projectId)).filter(key => key.held === 'review');
   const rows = await Promise.all(
     keys.slice(0, QUEUE_VIEW_LIMIT).map(async key => {
@@ -33,16 +33,17 @@ export async function openLandingReviews(ctx: QueryCtx, projectId: Id<'hostedPro
       if (landingStateField(state).state !== 'held-review') return null;
       const intentId = row.intentId ?? null;
       const composed = await queueComposeLanes(ctx, projectId, state);
-      const laneId =
-        composed.length === 1
-          ? composed[0]!.key
-          : ((await queueIntentLanes(ctx, projectId, intentId))[0]?.key ?? null);
+      const byIntent = composed.length === 1 ? [] : await queueIntentLanes(ctx, projectId, intentId);
+      const laneId = composed.length === 1 ? composed[0]!.key : (byIntent[0]?.key ?? null);
+      // The link names a Lane only when exactly one is known; otherwise Needs me decides it (Item 0a99ab23).
+      const exact =
+        composed.length === 1 ? laneId : !composed.length && byIntent.length === 1 ? laneId : null;
       return {
         laneId,
         intentId,
         submissionId: state.id,
         attemptId: state.attemptId,
-        url: approveUrl(projectId, state.id) ?? approvePath(projectId, state.id),
+        url: await link(exact, state.id),
         note: state.error?.message ?? null,
         since: Date.parse(state.timing?.ciEndedAt ?? state.timing?.selectedAt ?? state.at),
         ...reviewSubmitter(row, state),
