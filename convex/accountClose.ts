@@ -11,8 +11,9 @@
  *   another id while one runs is refused; once the row is gone it answers `closed`.
  * - `closeFor`: the same close for an operator with deployment access (no browser person exists for synthetic keys).
  * - `step`: the background removal, one bounded page per task, in this order (review of the delete path, round 1):
- *   1. `secrets` leaves the secret grants given to the person by the close's start, like a Your data cleanup
- *      (accountExecute.leaveSecrets). They stop giving access when `close` records its time; their rows go here.
+ *   1. `secrets` leaves the secret grants given to the person before the close's start, like a Your data cleanup
+ *      (accountExecute.leaveSecrets): `close` issues a review epoch, and from that write grants below it give nothing;
+ *      their rows go here.
  *   2. `receipts` deletes finished deletion receipts, and unsealed (`preparing`) ones from before the close, with their
  *      items; an unfinished one, or one begun after the close started, stops the close.
  *   3. `signout` revokes every device sign-in page by page, denies device codes still waiting to be redeemed and ends
@@ -43,6 +44,7 @@ import {
 } from './accountResources';
 import { KINDS } from './accountData';
 import { leaveSecret } from './accountExecute';
+import { givenBefore, nextReview } from './secretGrantAuthority';
 import { accountFor } from './urlIdentity';
 import { endSessions, nativeUser, passkeyCount, removeNativeSignIn } from './accountCloseSignIn';
 import { invariant } from '../src/errors';
@@ -217,11 +219,13 @@ async function closeAccount(ctx: MutationCtx, actor: string, input: { operationI
   );
   const stop = await blocker(ctx, actor);
   invariant(stop === null, 'ACCOUNT_CHANGED', stop ?? '');
-  const at = Date.now();
-  // From this write, every secret grant given to the person by now gives nothing (secretGrantAuthority.leftByCleanup).
+  const at = Date.now(),
+    below = await nextReview(ctx, account, input.operationId);
+  // From this write, every secret grant given to the person before it gives nothing (secretGrantAuthority.leftByCleanup);
+  // one given after it carries this epoch or a later one, whatever the clock.
   await ctx.db.patch(account._id, {
-    secretsLeftBefore: Math.max(account.secretsLeftBefore ?? 0, at),
-    closing: { operationId: input.operationId, at, phase: 'secrets', cursor: null },
+    secretsLeftBelow: Math.max(account.secretsLeftBelow ?? 0, below),
+    closing: { operationId: input.operationId, at, below, phase: 'secrets', cursor: null },
   });
   await schedule(ctx, (await ctx.db.get(account._id))!, 'secrets', null);
   return { stage: 'closing' } satisfies Reply;
@@ -304,7 +308,13 @@ export const step = internalMutation({
         async row => ctx.db.get(row.secretId),
       );
       for (const { row: grant, parent } of p.rows)
-        if ((grant.grantedAt ?? grant._creationTime) <= closing.at && parent?.owner !== actor)
+        if (
+          givenBefore(
+            grant,
+            closing.below !== undefined ? { below: closing.below } : { before: closing.at },
+          ) &&
+          parent?.owner !== actor
+        )
           await leaveSecret(ctx, grant, actor, childId(operationId, `secrets:${grant._id}`));
       await schedule(ctx, account, p.isDone ? 'receipts' : 'secrets', p.isDone ? null : p.continueCursor);
       return null;

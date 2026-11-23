@@ -134,12 +134,14 @@ export const exportPage = query({
           .query('secretVersions')
           .withIndex('by_secretId_and_version', q => q.eq('secretId', input.id))
           .paginate(input.paginationOpts);
-      else if (input.part === 'grants')
-        result = await ctx.db
+      else if (input.part === 'grants') {
+        const grants = await ctx.db
           .query('secretGrants')
           .withIndex('by_secretId_and_principal', q => q.eq('secretId', input.id))
           .paginate(input.paginationOpts);
-      else if (input.eventThrough === null) return { page: [], isDone: true, continueCursor: '' };
+        // A grant's epoch counts its principal's own Your data reviews: never the object owner's to read.
+        result = { ...grants, page: grants.page.map(({ epoch: _epoch, ...grant }) => grant) };
+      } else if (input.eventThrough === null) return { page: [], isDone: true, continueCursor: '' };
       else
         result = await ctx.db
           .query('secretEvents')

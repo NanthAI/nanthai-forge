@@ -20,17 +20,45 @@ export async function principalGrant(ctx: Ctx, id: Id<'secretObjects'>, principa
     .withIndex('by_secretId_and_principal', q => q.eq('secretId', id).eq('principal', principal))
     .unique();
 }
-/** Whether a Your data cleanup left this grant (forgeAccounts.secretsLeftBefore): it gives nothing from the moment
- * the cleanup records that, before the row itself is deleted. A grant given, or given again in place, later keeps
- * working. */
-export async function leftByCleanup(ctx: Ctx, row: Doc<'secretGrants'>) {
-  const person = await ctx.db
+/** Where secret grants to a person split into given before a review and given after it. `below` is a review epoch
+ * (forgeAccounts.secretsReview). Giving a grant reads the person's account row and issuing a review writes it, so
+ * Convex orders the two transactions: a grant given after the review carries an epoch at or above it, whatever the
+ * clock says (reviews s1-sol62 r4 #1, s1-astra62 r4 #3). Only the server issues an epoch, so no caller chooses the
+ * boundary. `before` is the time cutoff that receipts, closes and accounts recorded before epochs, kept only for them. */
+export type GrantCut = { below?: number | undefined; before?: number | undefined };
+export function givenBefore(row: Doc<'secretGrants'>, cut: GrantCut) {
+  if (cut.below !== undefined) return (row.epoch ?? 0) < cut.below;
+  return cut.before !== undefined && (row.grantedAt ?? row._creationTime) <= cut.before;
+}
+const person = (ctx: Ctx, owner: string) =>
+  ctx.db
     .query('forgeAccounts')
-    .withIndex('by_owner', q => q.eq('owner', row.principal))
+    .withIndex('by_owner', q => q.eq('owner', owner))
     .unique();
+/** The epoch a grant to `principal` records when it is given: 0 before their first review, or with no account row. */
+export async function grantEpoch(ctx: Ctx, principal: string) {
+  return (await person(ctx, principal))?.secretsReview?.epoch ?? 0;
+}
+/** Issues the person's next review epoch in one write to their account row. A retry of the same review (operation id)
+ * returns the epoch it was issued; any other review supersedes it. Each epoch is above the row's last one, which is
+ * what orders it; it is also at least the current time, so epochs keep rising when a closed account's row is made again
+ * for the same key (an old-provider sign-in): a grant recorded under the old row is still below the new row's first
+ * review. */
+export async function nextReview(ctx: MutationCtx, account: Doc<'forgeAccounts'>, operationId: string) {
+  const last = account.secretsReview;
+  if (last?.operationId === operationId) return last.epoch;
+  const epoch = Math.max((last?.epoch ?? 0) + 1, Date.now());
+  await ctx.db.patch(account._id, { secretsReview: { epoch, operationId } });
+  return epoch;
+}
+/** Whether a Your data cleanup or a close left this grant (forgeAccounts.secretsLeftBelow): it gives nothing from the
+ * moment that is recorded, before the row itself is deleted. A grant given, or given again in place, after the review
+ * keeps working. */
+export async function leftByCleanup(ctx: Ctx, row: Doc<'secretGrants'>) {
+  const p = await person(ctx, row.principal);
   return (
-    person?.secretsLeftBefore !== undefined &&
-    (row.grantedAt ?? row._creationTime) <= person.secretsLeftBefore
+    !!p &&
+    (givenBefore(row, { below: p.secretsLeftBelow }) || givenBefore(row, { before: p.secretsLeftBefore }))
   );
 }
 /** Older rows already retain the issuing actor in the audit; no hosted rewrite is needed. */

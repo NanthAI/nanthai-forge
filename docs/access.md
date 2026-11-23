@@ -71,26 +71,32 @@ read (a changed maintainer flag counts as a change): if any of them changed afte
 that review, it refuses before registering anything, and the person reviews again.
 Secret objects shared with the person are never listed, counted or part of the
 review, so nothing in it can show whether one exists. Leaving everything also
-leaves every secret grant the person held when they read the reviewed list, by
-the time the review's token carries: a grant given, or given again in place, at a
-later time stays. Those grants stop giving access as soon as the cleanup starts;
-their rows are then deleted in bounded background work, which never changes what
-the cleanup reports.
+leaves every secret grant the person held when the review started. Starting a
+review is one person-only write that issues the next review number on the
+account; every grant records the number current when it was given, so a grant
+given, or given again in place, after that write stays, even in the same
+millisecond. The cleanup accepts only the number issued for the person's latest
+review, never one the caller chose. Those grants stop giving access as soon as the
+cleanup starts; their rows are then deleted in bounded background work, which
+never changes what the cleanup reports. A background page that fails, even after
+the receipt says Done, is started again from where it stopped by a check that
+backs off from one minute to once a day, for about a month; after that,
+continuing the deletion starts it again.
 
 Closing the account (Your data, once it holds nothing) is person-only too, behind
 the typed handle. Another person's handle is refused, so nobody closes an account
 but its own person. The close refuses with the next step while the account holds
 or is shared anything, or while an earlier deletion runs. Secret grants given to
-the person by the time the close starts stop giving access then, and their rows go
-before the account row. The close then ends every device sign-in, every waiting
-device code and every native browser session. Only after that does it check the
-holdings again. In one transaction it then removes the passkeys, username, current
-handle and account row. If anything is held by then, the account stays whole.
-The native user gets a fresh account key and keeps only a GitHub numeric id (and
-any conflict mark). The next GitHub sign-in therefore starts a new, empty account
-and never acts as the closed key. Old-provider (Clerk) sessions cannot be ended
-from Forge. Until that provider is removed, signing in there again starts a new
-account on the old key.
+the person before the close starts (ordered the same way, by review number) stop
+giving access then, and their rows go before the account row. The close then ends
+every device sign-in, every waiting device code and every native browser session.
+Only after that does it check the holdings again. In one transaction it then
+removes the passkeys, username, current handle and account row. If anything is
+held by then, the account stays whole. The native user gets a fresh account key
+and keeps only a GitHub numeric id (and any conflict mark). The next GitHub
+sign-in therefore starts a new, empty account and never acts as the closed key.
+Old-provider (Clerk) sessions cannot be ended from Forge. Until that provider is
+removed, signing in there again starts a new account on the old key.
 
 Selected-project and read-only devices cannot make account-level writes, including
 team changes, project creation, import starts and saved-view writes. The public

@@ -8,7 +8,7 @@ import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { resourceKind, accountSelection, leaveKind } from './accountTypes';
 import { metadataBytes } from './accountMetadata';
-import { incomingStart, reviewedAt } from './accountResources';
+import { incomingStart, reviewEpoch } from './accountResources';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -174,11 +174,11 @@ export const begin = accountAction('person')({
         );
         if (original.stage !== 'preparing') return receipt(original);
       }
-      // The time the person read the list, carried by the review's token; a token that carries none, or a time still
-      // to come, is not a review.
-      const at = incoming === null ? null : reviewedAt(incoming);
-      invariant(incoming === null || (at !== null && at <= Date.now()), 'ACCOUNT_CHANGED', changedShared);
-      const start = at === null ? '' : incomingStart(at);
+      // The review epoch the server issued when the review started (accountData.review), carried by its token; a token
+      // that carries none is not a review. register accepts it only while it is the person's latest.
+      const epoch = incoming === null ? null : reviewEpoch(incoming);
+      invariant(incoming === null || epoch !== null, 'ACCOUNT_CHANGED', changedShared);
+      const start = epoch === null ? '' : incomingStart(epoch);
       if (selection.some(item => item.kind === 'project'))
         await requireOwnerPerson(ctx, 'permanently delete projects through account cleanup');
       // The reviewed before-list, first without keeping anything: nothing is registered unless it still matches.
@@ -189,7 +189,7 @@ export const begin = accountAction('person')({
         request,
         expectedItems: selection.length,
         leave,
-        ...(at !== null && leave.includes('secrets') ? { secretsBefore: at } : {}),
+        ...(epoch !== null && leave.includes('secrets') ? { secretsBelow: epoch } : {}),
       });
       invariant(account, 'ACCOUNT_UNAVAILABLE', 'The original operation is unavailable.');
       // An overlapping retry of this same request sealed it first (review s1-sol62 #4): that is this begin's answer.

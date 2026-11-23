@@ -28,10 +28,13 @@ export const accountFields = {
   captured: v.array(leaveKind),
   pending: v.number(),
   at: v.number(),
-  /** When the person read the reviewed list: a cleanup that leaves secret grants leaves only those given by then. */
+  /** The review epoch the cleanup was registered with: one that leaves secret grants leaves only those given below it
+   * (secretGrantAuthority.givenBefore). */
+  secretsBelow: v.optional(v.number()),
+  /** The same by time, on receipts registered before epochs: grants given at or before it. */
   secretsBefore: v.optional(v.number()),
   /** Leaving those grants: unset until started, false while their rows are deleted in the background, true when done.
-   * They stop giving access when it starts (forgeAccounts.secretsLeftBefore), so no receipt waits for or shows it. */
+   * They stop giving access when it starts (forgeAccounts.secretsLeftBelow), so no receipt waits for or shows it. */
   secretsDone: v.optional(v.boolean()),
   /** Where the next background page starts, and the task that runs it: a failed task is rescheduled from here. */
   secretsCursor: v.optional(v.union(v.string(), v.null())),
@@ -60,11 +63,13 @@ export const accountItemFields = {
     }),
   ),
 };
-/** A closing account (convex/accountClose.ts): the close operation, when it started (secret grants given to the person
- * by then stop giving access at once) and the background step that runs next, with its task. */
+/** A closing account (convex/accountClose.ts): the close operation, when it started, the review epoch it issued
+ * (secret grants given to the person below it stop giving access at once; closes from before epochs cut by `at`) and
+ * the background step that runs next, with its task. */
 export const accountClosing = v.object({
   operationId: v.string(),
   at: v.number(),
+  below: v.optional(v.number()),
   phase: v.union(v.literal('secrets'), v.literal('receipts'), v.literal('signout'), v.literal('finish')),
   cursor: v.union(v.string(), v.null()),
   task: v.optional(v.id('_scheduled_functions')),

@@ -309,14 +309,15 @@ export async function incomingPage(
 }
 /** The chain a review and its cleanup both compute: one link per page, in SHARED order, over exactly the rows the
  * review shows (ids and labels). It is built from nothing the person cannot see, so it cannot tell anyone anything
- * hidden, whatever prefix a caller chooses; secret grants are never part of it. A token is `<at>:<digest>`: `at` is
- * the server time the review's first page was read, carried through the chain unchanged, so the cleanup leaves only
- * the secret grants that existed when the person read the list (accountExecute.leaveSecrets). */
-export function incomingStart(at: number) {
-  return `${at}:${digest(`forge-incoming\n${at}`)}`;
+ * hidden, whatever prefix a caller chooses; secret grants are never part of it. A token is `<epoch>:<digest>`: `epoch`
+ * is the review epoch the server issued when the review started (accountData.review), carried through the chain
+ * unchanged. The cleanup accepts it only while it is the person's latest (accountPlan.register) and leaves only the
+ * secret grants given before it (accountExecute.leaveSecrets). */
+export function incomingStart(epoch: number) {
+  return `${epoch}:${digest(`forge-incoming\n${epoch}`)}`;
 }
-/** The review time a token carries, or null when it carries none. */
-export function reviewedAt(token: string) {
+/** The review epoch a token carries, or null when it carries none. */
+export function reviewEpoch(token: string) {
   const at = Number(token.slice(0, token.indexOf(':')));
   return token.includes(':') && Number.isSafeInteger(at) && at > 0 ? at : null;
 }

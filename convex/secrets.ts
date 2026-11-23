@@ -27,6 +27,7 @@ import {
   grantAuthority,
   grantSummary,
   granter,
+  grantEpoch,
   principalGrant,
   revokeDescendants,
 } from './secretGrantAuthority';
@@ -511,6 +512,8 @@ export const grant = internalMutation({
         activeUntil: input.expiresAt ?? Number.MAX_VALUE,
         ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
         grantedAt: Date.now(),
+        // Orders this grant against the principal's Your data reviews by transaction, not by clock.
+        epoch: await grantEpoch(ctx, input.principal),
       };
       if (!capabilities.length) {
         if (row) await ctx.db.delete(row._id);

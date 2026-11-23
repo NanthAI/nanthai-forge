@@ -17,11 +17,12 @@ async function createCounter(s) {
 async function leaveProject(s) {
   s.caller();
   const operationId = randomUUID();
-  // The review's token first (accountData.shared), as the page reads it.
+  // The review's token first (accountData.review, then accountData.shared), as the page reads it.
+  const { token: start } = await data.review._handler(s.ctx, { review: randomUUID() });
   const { token: incoming } = await data.shared._handler(s.ctx, {
     kind: 'projects',
     cursor: null,
-    token: null,
+    token: start,
   });
   await account.begin._handler(s.ctx, { operationId, selection: [], leave: ['projects'], incoming });
   let cursor = null;

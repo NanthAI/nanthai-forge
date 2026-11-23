@@ -32,7 +32,7 @@ async function reviewed(f, leave) {
     leave.includes(kind),
   );
   if (!kinds.length) return null;
-  let token = null;
+  let { token } = await data.review._handler(f.ctx, { review: randomUUID() });
   for (const kind of kinds)
     for (let cursor = null; ;) {
       const p = await data.shared._handler(f.ctx, { kind, cursor, token });

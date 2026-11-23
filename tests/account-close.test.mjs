@@ -13,6 +13,9 @@ import { state, providers } from './hosted-fixture.mjs';
 
 const close = await import(moduleUrl('../convex/accountClose.ts'));
 const authority = await import(moduleUrl('../convex/secretGrantAuthority.ts'));
+const secrets = await import(moduleUrl('../convex/secrets.ts'));
+const data = await import(moduleUrl('../convex/accountData.ts'));
+const actions = await import(moduleUrl('../convex/accountActions.ts'));
 test.beforeEach(t => t.after(providers()));
 let clock = 1;
 const row = (id, fields) => ({ _id: id, _creationTime: clock++, ...fields });
@@ -217,6 +220,82 @@ test('an account that holds nothing closes: account, handles, receipts, devices 
   assert.equal(await close.preview._handler(f.ctx, {}), null);
 });
 
+test('a secret grant given in the same millisecond after the close starts is ordered by transaction and stays', async t => {
+  // Reviews s1-sol62 r4 #1 and s1-astra62 r4 #3, for the close's own cutoff: one clock value for every write.
+  t.mock.timers.enable({ apis: ['Date'], now: 1_800_000_000_000 });
+  const { f, t: tables } = emptyWorld();
+  as(f, 'owner');
+  tables.secretObjects.set(
+    'later-secret',
+    row('later-secret', { ...tables.secretObjects.get('their-secret'), _id: 'later-secret', name: 'later' }),
+  );
+  await closeAs(f, { operationId: randomUUID(), handle: 'sample-owner' });
+  await f.transaction(() =>
+    secrets.grant._handler(f.ctx, {
+      id: 'later-secret',
+      actor: 'other',
+      principal: 'owner',
+      capabilities: ['use'],
+      expectedPolicyRevision: 1,
+      operationId: randomUUID(),
+    }),
+  );
+  const later = [...tables.secretGrants.values()].find(g => g.secretId === 'later-secret');
+  assert.equal(later.grantedAt, tables.forgeAccounts.get('acct').closing.at, 'the grant ties with the close');
+  assert.equal(await authority.leftByCleanup(f.ctx, later), false);
+  assert.equal(await authority.leftByCleanup(f.ctx, tables.secretGrants.get('hidden-grant')), true);
+  await background(f);
+  assert.equal(tables.forgeAccounts.size, 0, 'closed');
+  assert.deepEqual(
+    [...tables.secretGrants.keys()],
+    [later._id],
+    'only the grant given before the close went',
+  );
+  // Signed in again on the same key (the old provider keeps it), the new account row's first review still covers that
+  // grant: epochs keep rising across rows, so a cleanup leaves it.
+  t.mock.timers.tick(60_000);
+  const { token } = await data.review._handler(f.ctx, { review: randomUUID() });
+  let incoming = token;
+  for (const kind of ['projects', 'projectReaders', 'readers', 'teams', 'zones'])
+    incoming = (await data.shared._handler(f.ctx, { kind, cursor: null, token: incoming })).token;
+  const operationId = randomUUID();
+  const leave = ['projectReaders', 'projects', 'readers', 'secrets', 'teams', 'zones'];
+  await actions.begin._handler(f.ctx, { operationId, selection: [], leave, incoming });
+  await actions.advance._handler(f.ctx, { operationId, cursor: null });
+  for (let task; (task = f.scheduled.find(x => getFunctionName(x.fn) === 'accountExecute:leaveSecrets'));) {
+    f.scheduled.splice(f.scheduled.indexOf(task), 1);
+    await f.ctx.runMutation(task.fn, task.args);
+  }
+  assert.equal(tables.secretGrants.size, 0, 'the grant from before the new row is left');
+});
+
+test('a close begun before review epochs keeps its time cutoff', async () => {
+  const { f, t: tables } = emptyWorld();
+  tables.secretGrants.get('hidden-grant').grantedAt = 100;
+  tables.secretObjects.set(
+    'later-secret',
+    row('later-secret', { ...tables.secretObjects.get('their-secret'), _id: 'later-secret', name: 'later' }),
+  );
+  tables.secretGrants.set(
+    'later-grant',
+    row('later-grant', {
+      ...tables.secretGrants.get('hidden-grant'),
+      _id: 'later-grant',
+      secretId: 'later-secret',
+      grantedAt: 300,
+    }),
+  );
+  const account = tables.forgeAccounts.get('acct');
+  account.closing = { operationId: randomUUID(), at: 200, phase: 'secrets', cursor: null };
+  await close.step._handler(f.ctx, {
+    accountId: 'acct',
+    operationId: account.closing.operationId,
+    phase: 'secrets',
+    cursor: null,
+  });
+  assert.deepEqual([...tables.secretGrants.keys()], ['later-grant']);
+});
+
 test('an account signed in with the old provider only (no native user) closes the same way', async () => {
   const { f, t, calls } = emptyWorld({ native: false });
   as(f, 'owner');
@@ -290,6 +369,8 @@ test('an account that still holds or is shared anything is refused with the next
     );
     assert.equal(t.forgeAccounts.get('acct').closing, undefined, label);
     assert.equal(t.forgeAccounts.get('acct').secretsLeftBefore, 5, label);
+    assert.equal(t.forgeAccounts.get('acct').secretsLeftBelow, undefined, label);
+    assert.equal(t.forgeAccounts.get('acct').secretsReview, undefined, label);
     assert.equal(f.scheduled.length, 0, label);
   }
 });

@@ -53,7 +53,7 @@ export const register = internalMutation({
     request: v.string(),
     expectedItems: v.number(),
     leave: v.array(leaveKind),
-    secretsBefore: v.optional(v.number()),
+    secretsBelow: v.optional(v.number()),
   },
   returns: v.any(),
   handler: async (ctx, input) => {
@@ -70,6 +70,19 @@ export const register = internalMutation({
           'Reconcile your original selected Forge data operation.',
         );
         return old;
+      }
+      // The secret boundary is the epoch the server issued for the person's latest review, read in this transaction:
+      // a token carrying any other (an older review, or a number the caller made up) is not that review.
+      if (input.secretsBelow !== undefined) {
+        const person = await ctx.db
+          .query('forgeAccounts')
+          .withIndex('by_owner', q => q.eq('owner', owner))
+          .unique();
+        invariant(
+          person?.secretsReview?.epoch === input.secretsBelow,
+          'ACCOUNT_CHANGED',
+          'What is shared with you changed after your review. Review again; nothing was deleted.',
+        );
       }
       const id = await ctx.db.insert('accountOperations', {
         ...input,

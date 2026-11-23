@@ -7,11 +7,12 @@
  *   Labels never carry a repository location: a location needs a fresh provider check, which only the export (the
  *   inventory action, on press) pays for.
  * - `owned`: one page of one owned kind with its pins, for the review before a cleanup.
+ * - `review`: the one write of a review (on press): issues the review epoch its token starts from.
  * - `shared`: one page of what others shared with the person that they can see, for the review, and the token that
  *   binds the cleanup to exactly that review (accountActions.begin re-reads the same pages and refuses on any
- *   difference). The token is a digest of the shown rows only. Secret grants are never read here: leaving them is
- *   bound to the time the deletion starts instead (accountExecute.leaveSecrets), so no reply, token, page boundary or
- *   refusal depends on a hidden grant.
+ *   difference). The token is the review's epoch and a digest of the shown rows only. Secret grants are never read
+ *   here: leaving them is bound to the review's epoch instead (accountExecute.leaveSecrets), so no reply, token, page
+ *   boundary or refusal depends on a hidden grant.
  * - `watch`: reactive marks of the resources a cleanup is waiting on (accountResources.resourceMark), compared with
  *   the marks its last step returned, so the page advances when one of them changes instead of on a timer. It re-runs
  *   only when those rows are written; nothing runs while the tab is idle.
@@ -22,7 +23,9 @@
  * plus one parent at most; watch: at most WATCH_MAX resources or WATCH_BYTES plus one resource, answering for the
  * prefix it read. Replies carry ids, pins, marks and clipped labels only. */
 import { v, getDocumentSize } from 'convex/values';
-import { query } from './cliServer';
+import { accountMutation, query } from './cliServer';
+import { ensureAccount } from './urlIdentity';
+import { nextReview } from './secretGrantAuthority';
 import {
   accountActor,
   clip,
@@ -51,6 +54,7 @@ export const OVERVIEW_BYTES = 32 * 1024;
 export const WATCH_MAX = 50;
 /** One watch reads at most this much (plus the last resource it marks); the page chains watches to cover the rest. */
 export const WATCH_BYTES = 512 * 1024;
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 export const KINDS = ['project', 'import', 'secret', 'agent', 'team', 'view', 'interest'] as const;
 
 const ownedRow = v.object({
@@ -160,14 +164,30 @@ export const owned = query({
   },
 });
 
+/** Starts a review: issues the person's next review epoch (secretGrantAuthority.nextReview) and the token the review's
+ * first shared page chains from. The one write of a review, on press, never on open; a retry with the same `review`
+ * id returns the same token. Secret grants given before this write fall under the review, any given after it do not,
+ * whatever the clock (reviews s1-sol62 r4 #1, s1-astra62 r4 #3). */
+export const review = accountMutation('person')({
+  args: { review: v.string() },
+  returns: v.object({ token: v.string() }),
+  handler: async (ctx, { review }) => {
+    try {
+      invariant(UUID.test(review), 'BAD_ARGUMENT', 'Start each review with a fresh UUID.');
+      const account = await ensureAccount(ctx, await accountActor(ctx));
+      return { token: incomingStart(await nextReview(ctx, account, review)) };
+    } catch (e) {
+      return report(e);
+    }
+  },
+});
+
 export const shared = query({
   args: {
     kind: sharedKind,
     cursor: v.union(v.string(), v.null()),
-    token: v.union(v.string(), v.null()),
-    /** A fresh id per review (first page only): the review time in its token is then this review's own, never a
-     * cached answer's older one. */
-    review: v.optional(v.string()),
+    /** The chain so far: on the first page, the token `review` issued. */
+    token: v.string(),
   },
   returns: v.object({
     rows: v.array(sharedRow),
@@ -181,7 +201,7 @@ export const shared = query({
       const p = await incomingPage(ctx, kind, actor, serverCursor(cursor, actor));
       return {
         rows: p.shown,
-        token: incomingLink(token ?? incomingStart(Date.now()), kind, p.bound),
+        token: incomingLink(token, kind, p.bound),
         isDone: p.isDone,
         continueCursor: publicCursor(p.continueCursor),
       };

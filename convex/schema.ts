@@ -720,9 +720,15 @@ export default defineSchema({
     connectedApps: v.optional(connectedApps),
     /** True until the person picks or keeps a handle once; unset until first checked. */
     handlePrompt: v.optional(v.boolean()),
-    /** Set when a Your data cleanup leaves the secret grants shared with the person: every grant to them given at or
-     * before this time stops giving access at once (secretGrantAuthority), before the grants themselves are deleted
-     * in the background (accountExecute.leaveSecrets). */
+    /** The person's latest secret review (secretGrantAuthority.nextReview): each Your data review and each close
+     * advances `epoch` in one person-only write, and every secret grant to the person records the epoch it was given
+     * in. `operationId` lets a retried review return the epoch it issued. */
+    secretsReview: v.optional(v.object({ epoch: v.number(), operationId: v.string() })),
+    /** Set when a Your data cleanup or a close leaves the secret grants shared with the person: every grant to them
+     * with an epoch below this stops giving access at once (secretGrantAuthority), before the grants themselves are
+     * deleted in the background (accountExecute.leaveSecrets). */
+    secretsLeftBelow: v.optional(v.number()),
+    /** The same, by time, as cleanups and closes recorded it before epochs: every grant given at or before it. */
     secretsLeftBefore: v.optional(v.number()),
     /** Set while the account closes (convex/accountClose.ts): its operation, start time and where the background
      * removal stands. The row itself goes last. */
@@ -999,9 +1005,12 @@ export default defineSchema({
     grantedBy: v.optional(v.string()),
     parentGrantId: v.optional(v.id('secretGrants')),
     revokedAt: v.optional(v.number()),
-    /** When this grant was last given (insert or in-place regrant); absent on rows given before it was kept. Account
-     * cleanup leaves only grants given before the person's review. */
+    /** When this grant was last given (insert or in-place regrant); absent on rows given before it was kept. */
     grantedAt: v.optional(v.number()),
+    /** The principal's secret review epoch when this grant was last given (forgeAccounts.secretsReview); absent (0) on
+     * rows given before epochs, and on an owner's own grant. Account cleanup and close leave only grants below the
+     * person's reviewed epoch: transaction order, never a clock tick. Never returned to the object's owner. */
+    epoch: v.optional(v.number()),
   })
     .index('by_secretId_and_principal', ['secretId', 'principal'])
     .index('by_principal_and_discover_and_secretId', ['principal', 'discover', 'secretId']),
