@@ -87,8 +87,15 @@ export const completeSignInWithGithub = accountMutation('same')({
           sessionIds: sessions.filter(row => row.sessionId !== freshSession).map(row => row.sessionId),
         });
       if (proof.purpose !== 'device' && proof.includeDevices)
-        await endAccountDevices(ctx, user.accountKey, user, { markSealed: true });
-      await ctx.db.patch(user._id, { sessionEnd: undefined });
+        await endAccountDevices(ctx, user.accountKey, user, { markSealed: true, issuer: freshSession });
+      // A check from the sweep's issuing session hands the tab a fresh session, which stays the issuer (a sweep
+      // started here records that session itself).
+      const sweep =
+        user.sealedSweep?.sessionId === sessionId && !(proof.purpose !== 'device' && proof.includeDevices);
+      await ctx.db.patch(user._id, {
+        sessionEnd: undefined,
+        ...(sweep ? { sealedSweep: { ...user.sealedSweep!, sessionId: freshSession } } : {}),
+      });
     }
     return result;
   },

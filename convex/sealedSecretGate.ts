@@ -166,33 +166,27 @@ export function markersForRemovedAccount(set: StoredSealedSet, ...accountIds: Ui
  * drops their waiting join requests. The set's last unmarked owner device is never marked: no device could act on it,
  * and its own reads would refuse it for good. Null when nothing changes.
  *
- * `everywhere` (the account's "Sign out everywhere", M3 follow-up) ends every device of the account at once, one
- * sign-in per step. Its owner devices are marked only while an owner device of another account stays unmarked: when
- * the account holds every owner device, keeping one by step order could keep the lost laptop and lock out the device
- * at hand, so all stay and the person removes the lost one by itself. Its other entries are marked while any owner
- * device stays unmarked. Both answers are the same in every step order. */
+ * `everywhere` (the account's "Sign out everywhere", M3 follow-up and its sole-owner follow-up, owner 2026-11-23)
+ * marks every entry of the account, owner devices included, in any step order. When the account holds every owner
+ * device the set is then locked until one of its devices clears its own mark (clearSweptOwnerMark); `kept` lists the
+ * devices that clear already kept for this sweep, which its later steps leave alone. */
 export function markersForEndedDevice(
   set: StoredSealedSet,
   accountId: Uint8Array,
   deviceIds: Uint8Array[],
-  { everywhere = false }: { everywhere?: boolean } = {},
+  { everywhere = false, kept = [] }: { everywhere?: boolean; kept?: Uint8Array[] } = {},
 ) {
-  const ended = (id: Uint8Array) => deviceIds.some(device => equalBytes(id, device));
+  const ended = (id: Uint8Array) =>
+    deviceIds.some(device => equalBytes(id, device)) && !kept.some(k => equalBytes(id, k));
   const roster = (decodeSealedWire(u8(set.payload)) as Payload).roster,
     owners = roster.entries.filter(e => e.entryKind === 1 && e.role === 1),
     before = set.revoked ?? [],
     revoked = [...before];
   const unmarked = (e: { id: Uint8Array }) => !revoked.some(id => equalBytes(u8(id), e.id));
-  type Entry = (typeof roster.entries)[number];
-  const survivor = (entry: Entry) =>
-    everywhere
-      ? entry.entryKind === 1 && entry.role === 1
-        ? owners.some(o => !equalBytes(o.accountId, accountId) && unmarked(o))
-        : owners.some(unmarked)
-      : // Counting owners already marked, so ending two owner devices one at a time keeps the second.
-        owners.some(o => !ended(o.id) && unmarked(o));
+  // Counting owners already marked, so ending two owner devices one at a time keeps the second.
+  const survivor = () => everywhere || owners.some(o => !ended(o.id) && unmarked(o));
   for (const entry of roster.entries)
-    if (ended(entry.id) && equalBytes(entry.accountId, accountId) && survivor(entry) && unmarked(entry))
+    if (ended(entry.id) && equalBytes(entry.accountId, accountId) && survivor() && unmarked(entry))
       revoked.push(Uint8Array.from(entry.id).buffer);
   const waiting = set.joinRequests ?? [],
     joinRequests = waiting.filter(j => {
@@ -202,6 +196,28 @@ export function markersForEndedDevice(
   return revoked.length === before.length && joinRequests.length === waiting.length
     ? null
     : { revoked, joinRequests };
+}
+/** Sole-owner follow-up (owner 2026-11-23): after "Sign out everywhere" no owner device of this set is unmarked, and
+ * the person approves a device sign-in in the browser session that issued it (convex/sealedSecretMarkers.ts
+ * clearSweptSignIn checks that). The marks on `deviceIds` that are owner-role entries of `accountId` are dropped, so
+ * that device's next owner write removes the other marked devices and re-keys. Once one owner device is unmarked the
+ * set is no longer locked and nothing more is cleared, so at most one sign-in per set is (one sign-in can hold a
+ * second id after a new key store). Returns the markers left and the ids kept; null when nothing changes. */
+export function clearSweptOwnerMark(set: StoredSealedSet, accountId: Uint8Array, deviceIds: Uint8Array[]) {
+  const revoked = set.revoked ?? [];
+  const marked = (id: Uint8Array) => revoked.some(r => equalBytes(u8(r), id));
+  const owners = (decodeSealedWire(u8(set.payload)) as Payload).roster.entries.filter(
+    e => e.entryKind === 1 && e.role === 1,
+  );
+  if (!owners.length || !owners.every(o => marked(o.id))) return null;
+  const clear = owners.filter(
+    o => equalBytes(o.accountId, accountId) && deviceIds.some(id => equalBytes(id, o.id)),
+  );
+  if (!clear.length) return null;
+  return {
+    revoked: revoked.filter(r => !clear.some(o => equalBytes(u8(r), o.id))),
+    kept: clear.map(o => Uint8Array.from(o.id).buffer),
+  };
 }
 /** Gate B2 M3: `deviceId` is a device entry of `accountId` in this set's roster (one decode of the roster). */
 export const isOwnDeviceEntry = (set: StoredSealedSet, accountId: Uint8Array, deviceId: Uint8Array) =>

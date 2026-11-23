@@ -157,6 +157,8 @@ export const write = mutation({
         payload: args.payload,
         ...(state.revoked.length ? { revoked: state.revoked } : {}),
         ...(state.joinRequests.length ? { joinRequests: state.joinRequests } : {}),
+        // A sweep's later marking steps still skip the device its issuing browser kept, after this write too.
+        ...(set?.sweptKept ? { sweptKept: set.sweptKept } : {}),
       };
       const events = [
         ...(previous?.events ?? []),

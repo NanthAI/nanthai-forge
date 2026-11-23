@@ -528,7 +528,7 @@ function verifyCore(
       );
       refuse(
         !reply.revoked.some(id => sameId(id, request.recipient!.id)),
-        'Forge marked this device for removal: its sign-in ended elsewhere or its person left. An owner device removes it and re-keys on its next write; then share this device again.',
+        'Forge marked this device for removal: its sign-in ended elsewhere or its person left. An owner device removes it and re-keys on its next write; then share this device again. After Sign out everywhere, if this is the device at hand, run nforge login and approve it in the browser you signed out from.',
       );
       refuse(findEntry(r, request.recipient.id), 'This recipient is revoked or absent.');
       const wrap = reply.wraps.find(w => sameId(w.recipientId, request.recipient!.id));

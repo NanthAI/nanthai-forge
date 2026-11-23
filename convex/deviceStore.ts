@@ -19,6 +19,7 @@ import { grantStamp } from './accessPolicy';
 import { freshDeviceApproval } from './authDeviceFresh';
 import { deviceApproval } from './deviceApproval';
 import { accountSignInEpoch, signInEpoch } from './deviceEndAll';
+import { clearSweptSignIn, currentSweep } from './sealedSecretMarkers';
 import { deviceOperation, finishDeviceOperation } from './deviceOperation';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
@@ -265,6 +266,17 @@ export const decide = internalMutation({
       else if ('removedId' in device && device.removedId)
         await ctx.db.patch(device.removedId, { ...value, ...stamp, removed: undefined });
       else await ctx.db.insert('cliCredentials', { ...value, ...(stamp.grant ? stamp : {}) });
+      // Sole-owner follow-up: approved in the browser session that signed out everywhere, after a fresh passkey or
+      // GitHub check, the device at hand clears its own mark where the sweep left no owner device unmarked. The lost
+      // laptop's browser was signed out by that sweep, so its own sign-in is never approved here.
+      const sweep = currentSweep(account);
+      if (
+        sweep &&
+        device.current?.sealed?.length &&
+        approver.forgeAuthSession === sweep.sessionId &&
+        freshDeviceApproval(approver)
+      )
+        await clearSweptSignIn(ctx, args.owner, device.current.sealed, sweep.epoch);
     }
     if (args.approve && !stable) signOutEpoch = await accountSignInEpoch(ctx, args.owner);
     await ctx.db.patch(row._id, {

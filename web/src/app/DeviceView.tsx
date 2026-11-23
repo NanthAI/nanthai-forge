@@ -12,6 +12,8 @@ export type DeviceRequest = {
   needsConfirmation?: boolean;
   /** False when the account has no linked GitHub identity: the GitHub check is not offered. */
   github?: boolean;
+  /** This browser issued the latest "Sign out everywhere": approving keeps this device for sealed secrets. */
+  sealedKeep?: boolean;
   scope: 'cli' | 'coordination';
   expiresAt: number;
   state: string;
@@ -114,6 +116,12 @@ export function DeviceView({
           <p>
             Approve only if you just ran <code>nforge login</code> yourself. If you did not, deny it.
           </p>
+          {request.sealedKeep ? (
+            <p>
+              You signed out everywhere from this browser. Approving here keeps this device for sealed secrets
+              where no owner device was left; its next write removes your other signed-out devices.
+            </p>
+          ) : null}
         </div>
         <div className="blk">
           {request.device ? (

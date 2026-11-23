@@ -20,6 +20,9 @@ export const sealedSetFields = {
    * join requests. A removing or adding transition clears its own. Absent when empty. */
   revoked: v.optional(v.array(v.bytes())),
   joinRequests: v.optional(v.array(v.object({ deviceId: v.bytes(), request: v.bytes(), at: v.number() }))),
+  /** Server-owned: the owner devices the issuing browser of the account's "Sign out everywhere" at `epoch` kept
+   * (convex/sealedSecretMarkers.ts clearSweptSignIn); that sweep's later marking steps leave them unmarked. */
+  sweptKept: v.optional(v.object({ epoch: v.number(), ids: v.array(v.bytes()) })),
 };
 export const sealedHistoryFields = {
   projectId: v.id('hostedProjects'),

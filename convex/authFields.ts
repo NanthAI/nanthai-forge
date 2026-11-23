@@ -22,6 +22,9 @@ export const authTables = {
     deviceApprovalProof: v.optional(v.object({ sessionId: v.string(), verifiedUntil: v.number() })),
     /** CLI device sign-out epoch: each "sign out everywhere" start moves it on (convex/deviceEndAll.ts). */
     deviceSignOutEpoch: v.optional(v.number()),
+    /** The latest "Sign out everywhere" with devices: its issuing browser session and the epoch it moved to. Only a
+     * device approval in that session clears the sweep's sealed marks (convex/sealedSecretMarkers.ts). */
+    sealedSweep: v.optional(v.object({ sessionId: v.string(), epoch: v.number(), until: v.number() })),
     sessionEnd: v.optional(
       v.object({
         sessionId: v.string(),

@@ -3,7 +3,7 @@ import { v } from 'convex/values';
 import { internalMutation, type MutationCtx, type QueryCtx } from './server';
 import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
-import { scheduleAccountMarks } from './sealedSecretMarkers';
+import { scheduleAccountMarks, SWEEP_KEEP_MS } from './sealedSecretMarkers';
 
 /** An account with no users row cannot approve a device sign-in (deviceStore.approve needs the row), so its sweep
  * ends every device it has. */
@@ -33,21 +33,35 @@ export async function accountSignInEpoch(ctx: QueryCtx, owner: string) {
  * `markSealed` (the person's "Sign out everywhere", Gate B2 M3 follow-up): every swept sign-in linked to a sealed
  * device marks that device in its linked projects, signed out earlier or not, so a lost laptop is removed and
  * re-keyed on the next owner write. A page's links, each (project, device) pair once, mark in scheduled steps
- * (sealedSecretMarkers.scheduleAccountMarks; own-account entries only; owner devices only while another account's owner
- * device stays unmarked, see markersForEndedDevice), at most one step per row.
+ * (sealedSecretMarkers.scheduleAccountMarks; own-account entries only, owner devices included, see
+ * markersForEndedDevice), at most one step per row.
  * The person issues it from a browser session (authLinkAccount), which holds no sealed device, so no device of the
- * account is spared as the issuer. An operator suspension leaves it off: a reversible switch removes no device.
+ * account is spared as the issuer. `issuer` names that session, the only one the action keeps: a device approved
+ * there clears its own mark where the sweep left no owner device unmarked (sole-owner follow-up). An operator suspension leaves it off: a reversible switch removes no device.
  */
 export async function endAccountDevices(
   ctx: MutationCtx,
   owner: string,
   /** The caller's account row when it has one; read here otherwise. */
   account?: Doc<'users'> | null,
-  { markSealed = false }: { markSealed?: boolean } = {},
+  {
+    markSealed = false,
+    issuer,
+  }: {
+    markSealed?: boolean;
+    /** With `markSealed`: the browser session that issued it and stays signed in (sealedSweep). */
+    issuer?: string;
+  } = {},
 ) {
   const row = account === undefined ? await accountRow(ctx, owner) : account;
   const epoch = row ? signInEpoch(row) + 1 : NO_ACCOUNT;
-  if (row) await ctx.db.patch(row._id, { deviceSignOutEpoch: epoch });
+  if (row)
+    await ctx.db.patch(row._id, {
+      deviceSignOutEpoch: epoch,
+      ...(markSealed && issuer
+        ? { sealedSweep: { sessionId: issuer, epoch, until: Date.now() + SWEEP_KEEP_MS } }
+        : {}),
+    });
   await endPage(ctx, owner, epoch, null, markSealed);
 }
 async function endPage(
@@ -67,7 +81,7 @@ async function endPage(
     if (!row.revoked) await ctx.db.patch(row._id, { revoked: true });
     if (markSealed) links.push(...(row.sealed ?? []));
   }
-  if (links.length) await scheduleAccountMarks(ctx, owner, links);
+  if (links.length) await scheduleAccountMarks(ctx, owner, links, epoch);
   if (!page.isDone)
     await ctx.scheduler.runAfter(0, internal.deviceEndAll.next, {
       owner,

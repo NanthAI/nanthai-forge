@@ -185,6 +185,9 @@ const approvalView = v.union(
     needsConfirmation: v.optional(v.boolean()),
     /** With needsConfirmation: whether this account has a linked GitHub identity to check with. */
     github: v.optional(v.boolean()),
+    /** Approving in this browser, which issued the account's latest "Sign out everywhere", clears this sealed
+     * device's own mark where the sweep left no owner device unmarked (sole-owner follow-up). */
+    sealedKeep: v.optional(v.literal(true)),
     scope: deviceScope,
     expiresAt: v.number(),
     state: v.string(),

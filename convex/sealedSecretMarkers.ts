@@ -4,6 +4,8 @@
 // removes the entries and re-keys (design 5.5). The server opens nothing and changes no signed record. A direct
 // removal (projectActorNames.retainMembership), a team change and a project trash (below) end here, in the same
 // mutation. Ending one device's sign-in elsewhere (deviceCredentials.revoke) marks that device alone (Gate B2 M3).
+// "Sign out everywhere" marks every device of the account; the device the person approves in the browser session
+// that issued it clears its own mark where no owner device is left unmarked (clearSweptSignIn, sole-owner follow-up).
 import { internalMutation, type MutationCtx } from './server';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
@@ -11,6 +13,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { equalBytes, forgeSecretId, hex } from '../src/sealed-portable';
 import {
+  clearSweptOwnerMark,
   markableAccountIds,
   markableAccounts,
   markersForEndedDevice,
@@ -197,13 +200,14 @@ export async function linkSealedDevice(
 /** Gate B2 M3: a sign-in ended (signed out from elsewhere, or removed), so each linked project marks its sealed
  * device: a lost laptop is removed and re-keyed on the next owner write, with its rotate list. The first
  * `DEVICE_MARK_PAGE` projects mark in the ending mutation and the rest in scheduled steps; the sign-in already
- * ended, so the device cannot read a set meanwhile. A sign-in with no link reads nothing. `everywhere`: this sign-in
- * is one of the account's "Sign out everywhere" (convex/deviceEndAll.ts, markersForEndedDevice). */
+ * ended, so the device cannot read a set meanwhile. A sign-in with no link reads nothing. `sweep`: this sign-in is one
+ * of the account's "Sign out everywhere" (convex/deviceEndAll.ts, markersForEndedDevice), at that sign-out epoch; a
+ * device the sweep's issuing browser already kept in a set (`sweptKept`, clearSweptSignIn) is not marked again. */
 export async function markEndedSignIn(
   ctx: MutationCtx,
   owner: string,
   links: readonly SealedLink[],
-  everywhere = false,
+  sweep: number | null = null,
 ) {
   const projects = [...new Set(links.map(l => l.projectId))];
   if (!projects.length) return;
@@ -214,34 +218,45 @@ export async function markEndedSignIn(
     if (!project) continue;
     const deviceIds = links.filter(l => l.projectId === projectId).map(l => new Uint8Array(l.deviceId));
     await mark(ctx, await activeSets(ctx, project), [], set =>
-      markersForEndedDevice(set, accountId, deviceIds, { everywhere }),
+      markersForEndedDevice(set, accountId, deviceIds, {
+        everywhere: sweep !== null,
+        kept:
+          sweep !== null && set.sweptKept?.epoch === sweep
+            ? set.sweptKept.ids.map(id => new Uint8Array(id))
+            : [],
+      }),
     );
   }
   const rest = links.filter(l => !page.includes(l.projectId));
-  if (rest.length) await scheduleSignInMarks(ctx, owner, rest, everywhere);
+  if (rest.length) await scheduleSignInMarks(ctx, owner, rest, sweep);
 }
-/** One "Sign out everywhere" page's sealed links (convex/deviceEndAll.ts): the account's signed-out sign-ins often
- * repeat one device in one project, so each (project, device) pair is marked once, in steps of `SEALED_LINKS` pairs
- * sorted by project (at most one step per swept row). The everywhere rule is order independent, so how the pairs are
- * split does not change what is marked. */
-export async function scheduleAccountMarks(ctx: MutationCtx, owner: string, links: readonly SealedLink[]) {
+/** One "Sign out everywhere" page's sealed links (convex/deviceEndAll.ts), at sign-out epoch `sweep`: the account's
+ * signed-out sign-ins often repeat one device in one project, so each (project, device) pair is marked once, in steps
+ * of `SEALED_LINKS` pairs sorted by project (at most one step per swept row). The everywhere rule is order
+ * independent, so how the pairs are split does not change what is marked. */
+export async function scheduleAccountMarks(
+  ctx: MutationCtx,
+  owner: string,
+  links: readonly SealedLink[],
+  sweep: number,
+) {
   const unique = new Map<string, SealedLink>();
   for (const l of links) unique.set(`${l.projectId}:${hex(new Uint8Array(l.deviceId))}`, l);
   const sorted = [...unique.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, l]) => l);
   for (let i = 0; i < sorted.length; i += SEALED_LINKS)
-    await scheduleSignInMarks(ctx, owner, sorted.slice(i, i + SEALED_LINKS), true);
+    await scheduleSignInMarks(ctx, owner, sorted.slice(i, i + SEALED_LINKS), sweep);
 }
 /** The rest of one ended sign-in's marking, in its own scheduled step. */
 async function scheduleSignInMarks(
   ctx: MutationCtx,
   owner: string,
   links: readonly SealedLink[],
-  everywhere: boolean,
+  sweep: number | null,
 ) {
   await ctx.scheduler.runAfter(0, internal.sealedSecretMarkers.markSignIn, {
     owner,
     links: [...links],
-    ...(everywhere ? { everywhere: true as const } : {}),
+    ...(sweep !== null ? { everywhere: true as const, sweep } : {}),
   });
 }
 export const markSignIn = internalMutation({
@@ -249,10 +264,85 @@ export const markSignIn = internalMutation({
     owner: v.string(),
     links: v.array(v.object({ projectId: v.string(), deviceId: v.bytes() })),
     everywhere: v.optional(v.literal(true)),
+    /** The sweep's sign-out epoch (steps scheduled before it was recorded carry `everywhere` alone). */
+    sweep: v.optional(v.number()),
   },
   returns: v.null(),
-  handler: async (ctx, { owner, links, everywhere }) => {
-    await markEndedSignIn(ctx, owner, links, everywhere === true);
+  handler: async (ctx, { owner, links, everywhere, sweep }) => {
+    await markEndedSignIn(ctx, owner, links, everywhere ? (sweep ?? -1) : null);
+    return null;
+  },
+});
+
+/** Sole-owner follow-up (owner 2026-11-23): the account's latest "Sign out everywhere", as the users row records it
+ * (`sealedSweep`). Its issuing browser session is the only one whose device approvals clear a sweep's marks: that
+ * action ended every other browser session, the lost laptop's included. The role lasts `SWEEP_KEEP_MS`. */
+/** The sweep is still the account's latest sign-out (a later sweep or an operator suspension moves the epoch on). */
+export const currentSweep = (account: Doc<'users'> | null, now = Date.now()) =>
+  account?.sealedSweep &&
+  account.sealedSweep.epoch === (account.deviceSignOutEpoch ?? 0) &&
+  account.sealedSweep.until > now
+    ? account.sealedSweep
+    : null;
+/** How long the issuing browser keeps the role: long enough to reach the device at hand; then sweep again. */
+export const SWEEP_KEEP_MS = 7 * 86400000;
+
+/** A device sign-in was just approved in the sweep's issuing session with a fresh passkey or GitHub check
+ * (deviceStore.decide). In each project its credential links, where the account still writes and no owner device is
+ * left unmarked, its own owner-role entry is unmarked (clearSweptOwnerMark). The first `DEVICE_MARK_PAGE` projects
+ * clear in the approving mutation, the rest in scheduled steps that re-check the sweep is still the latest. Per
+ * project: the set kinds (at most three); the project row and its write check only when a set qualifies; one patch
+ * per cleared set. */
+export async function clearSweptSignIn(
+  ctx: MutationCtx,
+  owner: string,
+  links: readonly SealedLink[],
+  epoch: number,
+) {
+  const projects = [...new Set(links.map(l => l.projectId))];
+  const page = projects.slice(0, DEVICE_MARK_PAGE),
+    accountId = forgeSecretId('account', owner);
+  for (const projectId of page) {
+    const id = ctx.db.normalizeId('hostedProjects', projectId);
+    if (!id) continue;
+    const deviceIds = links.filter(l => l.projectId === projectId).map(l => new Uint8Array(l.deviceId));
+    let writes: boolean | undefined;
+    for (const set of await activeSets(ctx, id)) {
+      const cleared = clearSweptOwnerMark(set, accountId, deviceIds);
+      if (!cleared) continue;
+      if (writes === undefined) {
+        const project = await ctx.db.get(id);
+        writes = Boolean(project && (await hasWriteRole(ctx, project, owner)));
+      }
+      if (!writes) break;
+      // The sweep's later marking steps skip what this approval kept (an approval can run between them).
+      await ctx.db.patch(set._id, {
+        revoked: cleared.revoked.length ? cleared.revoked : undefined,
+        sweptKept: { epoch, ids: cleared.kept },
+      });
+    }
+  }
+  const rest = links.filter(l => !page.includes(l.projectId));
+  if (rest.length)
+    await ctx.scheduler.runAfter(0, internal.sealedSecretMarkers.clearSweptStep, {
+      owner,
+      links: [...rest],
+      epoch,
+    });
+}
+export const clearSweptStep = internalMutation({
+  args: {
+    owner: v.string(),
+    links: v.array(v.object({ projectId: v.string(), deviceId: v.bytes() })),
+    epoch: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, { owner, links, epoch }) => {
+    const account = await ctx.db
+      .query('users')
+      .withIndex('by_accountKey', q => q.eq('accountKey', owner))
+      .unique();
+    if (currentSweep(account)?.epoch === epoch) await clearSweptSignIn(ctx, owner, links, epoch);
     return null;
   },
 });

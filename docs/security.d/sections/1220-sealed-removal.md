@@ -52,20 +52,35 @@ There are three routes to that one write:
   the device and its keys stay for its next sign-in. The set's last unmarked owner
   device is never marked, because no device could act on it. "Sign out
   everywhere" with devices (Account settings, by passkey or a fresh GitHub check)
-  marks each sealed device of the account the same way, in every project where
-  one of its swept sign-ins is linked, including sign-ins already ended by
-  `nforge logout`; a sign-in issued after it started is kept. It is issued from a
-  browser, which holds no sealed device, so no device is spared as the issuer.
-  The account's owner devices in a set are marked only while an owner device of
-  another account stays unmarked; its other entries, while any owner device
-  does. When the account holds every owner device of a set, none of them is
-  marked: Forge cannot tell the lost laptop from the device at hand, and keeping
-  the wrong one would leave no device able to act. The checkbox says so on hover.
-  Remove the lost device by itself: Remove in Account settings (which marks it,
-  since the device at hand stays unmarked), or `nforge secret unshare DEVICE_ID`
-  on the device at hand; either way the device at hand signs in again for the
-  owner write that removes and re-keys. Marking runs in scheduled steps, and
-  the result is the same in any order. An operator
+  marks every sealed entry of the account, owner devices included, in every
+  project where one of its swept sign-ins is linked, including sign-ins already
+  ended by `nforge logout`; a sign-in issued after it started is kept. It is
+  issued from a browser, which holds no sealed device, so no device is spared as
+  the issuer. When the account holds every owner device of a set, that leaves
+  none unmarked, so the device at hand clears its own mark: sign it in again
+  (`nforge login`) and approve it in the browser that pressed "Sign out
+  everywhere", after a fresh passkey or GitHub check there; the approval page and
+  the checkbox hover say so. That action ended every other browser session of the
+  account, the lost laptop's included, and keeps only the issuing one (the GitHub
+  route keeps the fresh session it opens in that tab, and a GitHub check from it
+  hands the role to its new session). The role lasts a week. A device approved in any other
+  browser stays marked, so whoever holds the lost laptop signing in first clears
+  nothing. Only an owner-role entry of the account is cleared, only while no owner
+  device of the set is unmarked and the account still writes the project, so at
+  most one sign-in per set is cleared; the set records it, so the sweep's later
+  marking steps leave it alone, even after a write. Its next owner write removes
+  the other marked devices and re-keys, with the rotate list. An approval that
+  runs before the sweep's marks reach a set, or from a sign-in not yet linked
+  there, clears nothing in it: the device reads the refusal and is approved again. A later sweep or an operator
+  suspension voids the issuing browser, and a new sweep makes its own browser the
+  issuer: if the issuing browser was signed out meanwhile, sign out everywhere
+  again from the browser at hand. Residual: anyone who passes the account's own
+  passkey or GitHub check can also sign out everywhere and become the issuer; a
+  lost laptop holding a synced passkey or a live GitHub session is that case, so
+  remove its passkey and end its GitHub sessions first. Approving a device code
+  someone else sends you in the issuing browser clears that device, as for any
+  device sign-in. Marking runs in scheduled steps, and
+  the result is the same in any order.
   suspension signs devices out and marks none: it is a reversible switch. A device that
   was marked and signs in again reads `SECRETS_ROSTER_REFUSED` saying Forge
   marked it, until an owner device removes it. After that it is shared again:
@@ -123,7 +138,13 @@ marks. "Sign out everywhere" adds no read to its sweep pages. It covers every
 swept sign-in with links, including ones signed out earlier, and marks each
 (project, device) pair of a page once, in steps of up to 100 pairs (at most one
 step per swept sign-in); each step reads the set kinds of four projects at a
-time and patches each set it marks. A sealed write or join patches its sign-in once, the first time per project
+time and patches each set it marks. The sweep start writes its issuing browser and
+epoch on the account row it already patches. A device approval reads nothing
+more unless it is in that browser with a fresh check and the device has links;
+then it reads each linked project's set kinds (four projects in the approval,
+the rest in scheduled steps of four that re-read the account row), the project
+row and its write check only for a set it clears, and patches each such set. The
+approval page reads the account row once for a known device with links. A sealed write or join patches its sign-in once, the first time per project
 and device, and reads nothing more. A read tells an unlinked sign-in so from its
 credential row, already read; that device then makes one link call per project,
 once (one set read and one patch). A removal write is one read and one write, at

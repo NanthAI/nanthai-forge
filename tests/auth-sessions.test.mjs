@@ -450,7 +450,15 @@ test('SI-01: ending other browsers can also end devices, preserves their setting
   assert.deepEqual(s.tables.cliCredentials.get('device').settings, device.settings);
   assert.equal(s.tables.cliCredentials.get('foreign').revoked, false);
   // Gate B2 M3 follow-up: this account's sealed device is marked in its linked project; another account's is not.
-  assert.deepEqual(sealedMarkSteps(s), [{ owner: s.owner, links: SEALED_LINK, everywhere: true }]);
+  const user = s.tables.users.get('user');
+  assert.deepEqual(sealedMarkSteps(s), [
+    { owner: s.owner, links: SEALED_LINK, everywhere: true, sweep: user.deviceSignOutEpoch },
+  ]);
+  // Sole-owner follow-up: the sweep records this issuing browser, the one session it keeps, its epoch and how long
+  // the browser keeps that role.
+  const { until, ...sweep } = user.sealedSweep;
+  assert.deepEqual(sweep, { sessionId: 'session', epoch: user.deviceSignOutEpoch });
+  assert(Number.isFinite(until) && until > 0);
   await assert.rejects(
     s.call(sessionsApi.revokeOthers, { operationId: 'with-devices', response: assertion }),
     refused('WORK_OPERATION_CHANGED'),
@@ -486,6 +494,25 @@ test('SI-01: a GitHub device check proves the account without ending its other b
   assert(s.sessions.has('other'));
   assert(s.sessions.has('stranger'));
   assert.equal(s.tables.users.get('user').deviceApprovalProof.sessionId, 'new-session');
+});
+
+test('Sole-owner follow-up review L2: a GitHub check (device, or ending other browsers) from the issuing browser hands the issuer role to its fresh session; from another browser it changes nothing', async t => {
+  for (const route of ['startDeviceSignInWithGithub', 'startSignInWithGithub'])
+    for (const issuer of ['session', 'other']) {
+      const s = githubFixture(t);
+      s.tables.users.get('user').sealedSweep = { sessionId: issuer, epoch: 0, until: 1 };
+      const started = await s.call(githubSessions[route], { redirectTo: 'https://forge.example/device' });
+      assert.equal(
+        (await s.call(githubSessions.completeSignInWithGithub, await s.ticket(started.state))).status,
+        'complete',
+      );
+      // The check runs from 'session': its returning tab now holds 'new-session', which stays the issuer.
+      assert.deepEqual(
+        s.tables.users.get('user').sealedSweep,
+        { sessionId: issuer === 'session' ? 'new-session' : 'other', epoch: 0, until: 1 },
+        `${route} ${issuer}`,
+      );
+    }
 });
 
 test('SI-01 review: direct GitHub sign-in completion preserves the library result and binds fresh proof to its new session', async t => {
@@ -545,5 +572,11 @@ test('SI-01 review: the GitHub end-all-devices route revokes only this accountâ€
   assert.deepEqual(ended.settings, device.settings);
   assert.equal(s.tables.cliCredentials.get('foreign').revoked, false);
   // Gate B2 M3 follow-up: the GitHub route marks this account's sealed devices like the passkey route.
-  assert.deepEqual(sealedMarkSteps(s), [{ owner: s.owner, links: SEALED_LINK, everywhere: true }]);
+  const user = s.tables.users.get('user');
+  assert.deepEqual(sealedMarkSteps(s), [
+    { owner: s.owner, links: SEALED_LINK, everywhere: true, sweep: user.deviceSignOutEpoch },
+  ]);
+  // Sole-owner follow-up: the issuer is the returning browser's fresh session, the only one this route keeps.
+  assert.equal(user.sealedSweep.sessionId, 'new-session');
+  assert.equal(user.sealedSweep.epoch, user.deviceSignOutEpoch);
 });

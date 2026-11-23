@@ -87,7 +87,7 @@ export function YouView({
         ) : null}
         <label
           className="btn"
-          title="Sealed secrets: each device is marked for removal. Where all owner devices of a project are yours, none is marked; remove the lost one by itself."
+          title="Sealed secrets: each device is marked for removal. To keep the device at hand, sign it in again by approving it in this browser."
         >
           <input
             type="checkbox"

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Gate B2 (Item 14314add) M3 follow-up, owner 2026-11-23: "Sign out everywhere" marks every sealed device of the
-// account in its linked projects (the issuer is a browser session, which holds no sealed device), never the set's
-// last unmarked owner device, so a lost laptop is re-keyed on the next owner write. Real sealed, marker and
-// sign-out sweep Convex modules on a synthetic hosted project; synthetic keys and values only.
+// account in its linked projects (the issuer is a browser session, which holds no sealed device), owner devices
+// included, so a lost laptop is re-keyed on the next owner write. Sole-owner follow-up (owner 2026-11-23 07:50Z): when
+// that leaves no owner device unmarked, only a device sign-in approved in the browser session that issued the sweep,
+// after a fresh check, clears its own mark (the lost laptop's browser was signed out by it). Real sealed, marker,
+// sweep and device-approval Convex modules on a synthetic hosted project; synthetic keys and values only.
 import './check-runtime.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,6 +22,9 @@ import { rotateList } from '../dist/sealed-unshare.js';
 const credentials = await import(moduleUrl('../convex/deviceCredentials.ts'));
 const sweep = await import(moduleUrl('../convex/deviceEndAll.ts'));
 const markers = await import(moduleUrl('../convex/sealedSecretMarkers.ts'));
+const store = await import(moduleUrl('../convex/deviceStore.ts'));
+const approvalStore = await import(moduleUrl('../convex/deviceApprovalStore.ts'));
+const approval = await import(moduleUrl('../convex/deviceApproval.ts'));
 const code = expected => error => (error.code ?? error.data?.code) === expected;
 const VALUE = Buffer.from('synthetic-sign-out-everywhere-value-0123');
 const clear = result => {
@@ -174,26 +179,25 @@ async function runSplit(h, steps, order) {
     await run(h, { args: { owner: h.account, links: [l], everywhere: true } });
 }
 
-test('M3 follow-up: when the account holds every owner device, Sign out everywhere marks none of them in either step order (no coin-flip lockout)', async t => {
+test('Sole-owner follow-up: when the account holds every owner device, Sign out everywhere marks all of them and its member device, in either step order', async t => {
   for (const order of ['swept', 'reversed']) {
     const h = setup(t);
-    const { member } = await twoOwnerDevices(h, { ownMember: true });
+    const { owned, member } = await twoOwnerDevices(h, { ownMember: true });
     const steps = await everywhere(h, h.account, { markSealed: true });
     assert.equal(steps.length, 1, order);
     assert.equal(steps[0].args.links.length, 3, order);
     await runSplit(h, steps, order);
-    // Review L4: its own member-role device is still marked, since its owner devices stay to act on it.
-    assert.deepEqual(marks(h), [hex(member.id)], order);
+    assert.deepEqual(marks(h), [...owned, hex(member.id)].sort(), order);
   }
 });
 
-test("M3 follow-up: when another account's owner device is already marked, the account's owner devices stay unmarked", async t => {
+test("Sole-owner follow-up: when another account's owner device is already marked, the account's owner devices are marked too", async t => {
   const h = setup(t);
-  const { other } = await twoOwnerDevices(h, { coOwner: true });
+  const { owned, other } = await twoOwnerDevices(h, { coOwner: true });
   const row = set(h);
   row.revoked = [Uint8Array.from(other.id).buffer];
   for (const s of await everywhere(h, h.account, { markSealed: true })) await run(h, s);
-  assert.deepEqual(marks(h), [hex(other.id)]);
+  assert.deepEqual(marks(h), [...owned, hex(other.id)].sort());
 });
 
 test("M3 follow-up: with another account's owner device unmarked, Sign out everywhere marks both of the account's owner devices", async t => {
@@ -253,4 +257,182 @@ test('M3 follow-up review L3: a sweep past one page keeps marking: the next page
   assert.equal(steps.length, 1);
   for (const step of steps) await run(h, step);
   assert.deepEqual(marks(h), [hex(m.keys.id)]);
+});
+
+const ISSUER = 'fixture-issuing-browser';
+/** Fixture instant far past the run: the code expiry and the ten-minute check window compare against it. */
+const LATER = 4102444800000;
+/** Sole-owner follow-up: the desktop (the owner fixture device, row device-row) and the laptop (second-row) of
+ * twoOwnerDevices, each with its own device key and the credential id an approval derives from it. */
+async function desktopAndLaptop(h) {
+  const { owned } = await twoOwnerDevices(h);
+  const ids = {};
+  for (const [row, key] of [
+    ['device-row', 'fixture-desktop-key'],
+    ['second-row', 'fixture-laptop-key'],
+  ]) {
+    const credential = h.s.tables.cliCredentials.get(row);
+    const { credentialId } = await approval.deviceApproval(
+      h.s.ctx,
+      { credentialId: 'fixture-unknown', deviceKey: key, request: '{}' },
+      h.account,
+    );
+    Object.assign(credential, { deviceKey: key, credentialId });
+    ids[row] = credentialId;
+  }
+  h.identity.forgeCredential = ids['device-row'];
+  const desktop = hex(h.s.tables.cliCredentials.get('device-row').sealed[0].deviceId),
+    laptop = hex(h.s.tables.cliCredentials.get('second-row').sealed[0].deviceId);
+  assert.deepEqual(owned, [desktop, laptop].sort());
+  return { desktop, laptop };
+}
+/** The person approves `row`'s new sign-in code in browser session `session` (fresh: after a passkey or GitHub check
+ * in the last ten minutes). Returns what the approval page showed. */
+async function approve(h, row, session, { fresh = true } = {}) {
+  const credential = h.s.tables.cliCredentials.get(row);
+  h.s.tables.deviceCodes ??= new Map();
+  const userHash = randomUUID(),
+    id = `code-${userHash}`;
+  h.s.tables.deviceCodes.set(id, {
+    _id: id,
+    _creationTime: 1,
+    userHash,
+    deviceHash: randomUUID(),
+    operationId: randomUUID(),
+    credentialId: credential.credentialId,
+    deviceKey: credential.deviceKey,
+    request: '{}',
+    name: credential.name,
+    scope: 'cli',
+    state: 'pending',
+    expiresAt: LATER,
+    nextPollAt: 0,
+  });
+  const saved = { ...h.identity };
+  for (const key of Object.keys(h.identity)) delete h.identity[key];
+  Object.assign(h.identity, {
+    subject: h.account,
+    forgeAuthSession: session,
+    ...(fresh ? { forgeAuthDeviceVerifiedUntil: LATER } : {}),
+  });
+  try {
+    const page = JSON.parse(await approvalStore.inspect._handler(h.s.ctx, { userHash, owner: h.account }));
+    await h.s.transaction(() =>
+      store.decide._handler(h.s.ctx, {
+        userHash,
+        owner: h.account,
+        approve: true,
+        operationId: randomUUID(),
+      }),
+    );
+    return page;
+  } finally {
+    for (const key of Object.keys(h.identity)) delete h.identity[key];
+    Object.assign(h.identity, saved);
+  }
+}
+
+test('Sole-owner follow-up, lost-laptop race: the laptop signing in first clears nothing; the device at hand approved in the issuing browser after a fresh check clears its own mark, and its next write removes the laptop and re-keys', async t => {
+  const h = setup(t);
+  const { desktop, laptop } = await desktopAndLaptop(h);
+  const steps = await everywhere(h, h.account, { markSealed: true, issuer: ISSUER });
+  for (const s of steps) await run(h, s);
+  assert.deepEqual(marks(h), [desktop, laptop].sort());
+  // Whoever holds the laptop signs in again first, with a fresh check, in a browser of its own.
+  assert.equal((await approve(h, 'second-row', 'fixture-laptop-browser')).sealedKeep, undefined);
+  assert.equal(credential(h, h.s.tables.cliCredentials.get('second-row').credentialId).revoked, false);
+  assert.deepEqual(marks(h), [desktop, laptop].sort());
+  // The issuing browser without a fresh check: the page asks for one; approving without it clears nothing.
+  const unchecked = await approve(h, 'device-row', ISSUER, { fresh: false });
+  assert.equal(unchecked.needsConfirmation, true);
+  assert.equal(unchecked.sealedKeep, true);
+  assert.deepEqual(marks(h), [desktop, laptop].sort());
+  // With a fresh check there, the page says so and the desktop's own mark is cleared.
+  assert.equal((await approve(h, 'device-row', ISSUER)).sealedKeep, true);
+  assert.deepEqual(marks(h), [laptop]);
+  // Review M1: a marking step of the same sweep that runs late (another swept sign-in's page) leaves the kept desktop.
+  for (const s of steps) await run(h, s);
+  assert.deepEqual(marks(h), [laptop]);
+  // The set is no longer locked: a laptop code approved in the issuing browser (say, a phished code) clears nothing.
+  await approve(h, 'second-row', ISSUER);
+  assert.deepEqual(marks(h), [laptop]);
+  // The desktop's next owner write, on its new sign-in, removes the laptop and re-keys.
+  h.identity.forgeSignIn = h.s.tables.cliCredentials.get('device-row').renewal.operationId;
+  const o = owner(h);
+  await o.client.write('API_TOKEN', VALUE);
+  const state = await o.client.read();
+  try {
+    assert(!state.pin.roster.entries.some(e => hex(e.id) === laptop));
+    assert(state.pin.roster.entries.some(e => hex(e.id) === desktop));
+  } finally {
+    clear(state);
+  }
+  assert.deepEqual(marks(h), []);
+  assert(o.notices.some(line => line.includes('Removed fp')));
+  // The re-keying write keeps that record: a late step after it still marks nothing.
+  for (const s of steps) await run(h, s);
+  assert.deepEqual(marks(h), []);
+});
+
+test('Sole-owner follow-up: a later sweep or an operator suspension voids the issuing browser, and an account that no longer writes the project clears nothing', async t => {
+  const h = setup(t);
+  const { desktop, laptop } = await desktopAndLaptop(h);
+  const both = [desktop, laptop].sort();
+  for (const s of await everywhere(h, h.account, { markSealed: true, issuer: ISSUER })) await run(h, s);
+  // Review L1: the issuing browser keeps the role for a week; past it, it clears nothing.
+  const account = [...h.s.tables.users.values()].find(u => u.accountKey === h.account);
+  const until = account.sealedSweep.until;
+  account.sealedSweep.until = 1;
+  assert.equal((await approve(h, 'device-row', ISSUER)).sealedKeep, undefined);
+  assert.deepEqual(marks(h), both);
+  account.sealedSweep.until = until;
+  // An operator suspension moves the sign-out epoch on: the earlier issuer clears nothing.
+  await everywhere(h, h.account);
+  assert.equal((await approve(h, 'device-row', ISSUER)).sealedKeep, undefined);
+  assert.deepEqual(marks(h), both);
+  // A new sweep from another browser makes that browser the issuer; the first one stays void.
+  for (const s of await everywhere(h, h.account, { markSealed: true, issuer: 'fixture-second-browser' }))
+    await run(h, s);
+  await approve(h, 'device-row', ISSUER);
+  assert.deepEqual(marks(h), both);
+  // The project changed hands meanwhile: the account no longer writes it, so even its issuer clears nothing.
+  const project = h.s.tables.hostedProjects.get(h.project),
+    keeper = project.owner;
+  project.owner = 'fixture-new-owner';
+  await approve(h, 'device-row', 'fixture-second-browser');
+  assert.deepEqual(marks(h), both);
+  project.owner = keeper;
+  await approve(h, 'device-row', 'fixture-second-browser');
+  assert.deepEqual(marks(h), [laptop]);
+});
+
+test('Sole-owner follow-up: past four linked projects the clear continues in a scheduled step, which re-checks the sweep is still the latest', async t => {
+  const h = setup(t);
+  const { desktop, laptop } = await desktopAndLaptop(h);
+  const row = h.s.tables.cliCredentials.get('device-row');
+  const fillers = Array.from({ length: 4 }, (_, i) => ({
+    projectId: `fixture-gone-project-${i}`,
+    deviceId: row.sealed[0].deviceId,
+  }));
+  for (const s of await everywhere(h, h.account, { markSealed: true, issuer: ISSUER })) await run(h, s);
+  row.sealed = [...fillers, ...row.sealed];
+  const from = h.s.scheduled.length;
+  await approve(h, 'device-row', ISSUER);
+  assert.deepEqual(marks(h), [desktop, laptop].sort());
+  const steps = h.s.scheduled
+    .slice(from)
+    .filter(e => getFunctionName(e.fn) === 'sealedSecretMarkers:clearSweptStep');
+  assert.equal(steps.length, 1);
+  assert.deepEqual(
+    steps[0].args.links.map(l => l.projectId),
+    [h.project],
+  );
+  // A sweep started meanwhile voids the step.
+  const epoch = steps[0].args.epoch;
+  await h.s.transaction(() =>
+    markers.clearSweptStep._handler(h.s.ctx, { ...steps[0].args, epoch: epoch - 1 }),
+  );
+  assert.deepEqual(marks(h), [desktop, laptop].sort());
+  await h.s.transaction(() => markers.clearSweptStep._handler(h.s.ctx, steps[0].args));
+  assert.deepEqual(marks(h), [laptop]);
 });
