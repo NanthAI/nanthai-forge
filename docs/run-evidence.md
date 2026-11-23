@@ -238,6 +238,15 @@ and one failing day never stops the days after it. The close reads, in this orde
   project's compact index is being built (at most 6,000);
 - one compact landing row per submission whose passed run neither landed that day nor was rechecked (at most 300).
 
+Run rows written before their compact projection (the oldest days) are first projected, at most 8 a page and each
+page in its own transaction (`projectStatsRuns.ts#projectDayRuns`, the close schedules itself with a cursor), so the day's
+reading transaction finds compact rows: a full run row (about 90 KB on a busy day) used to spend the shared read meter
+and leave the day partial (dev 30 Oct to 10 Nov, Item 3678767e). Cost: a page reads and patches 8 run rows (about 1 MB);
+a day with no legacy rows pays one empty indexed read and no extra call, at 100 or 1,000 landings a day alike. New
+runs project when written, so only a day closed from legacy rows pays this, once: with N legacy runs it takes
+ceil(N/8)+1 extra scheduled calls, N run-row reads and N patches (about 0.09 MB each on a busy day; 1,000 legacy
+runs is about 90 MB read and written once, about $0.04 at $0.20/GB).
+
 Every read counts on the transaction's own meter (`ctx.meta.getTransactionMetrics`: Convex's 4,096 queries, 16 MiB
 and 32,000 documents). The landings stop while 1,000 queries, 5 MiB and 1,000 documents are left
 (`STATS_LANDINGS_KEEP`), so the person-day writes and the runs have room; the runs, attempts and lookups stop while 64

@@ -193,6 +193,17 @@ const scheduledCloses = (f, before) =>
     .filter(task => !before.has(task._id) && task.name === 'projectStats:closeDay')
     .map(task => task.args[0]);
 
+/** One close of a day, followed through the pages that project its legacy run rows (Item 3678767e). */
+async function closeThroughProjection(f, args) {
+  for (;;) {
+    const seen = scheduledIds(f);
+    await f.tx('statsClose', statsApi.closeDay, args);
+    const next = scheduledCloses(f, seen).find(a => a.projecting !== undefined);
+    if (!next) return;
+    args = next;
+  }
+}
+
 test('a day with check runs and no landing closes before the next landing day, and is counted', async t => {
   const f = await batchesFixture(t);
   await f.drain();
@@ -247,7 +258,7 @@ test('a day with check runs and no landing closes before the next landing day, a
     `the existing row, the previous day and two run probes: ${probe.documents}`,
   );
   const thenAt = scheduledIds(f);
-  await f.tx('statsClose', statsApi.closeDay, { projectId: f.projectId, day: gap, then: next });
+  await closeThroughProjection(f, { projectId: f.projectId, day: gap, then: next });
   const gapRow = [...f.tables.projectStatsDays.values()].find(r => r.day === gap);
   const gapDay = JSON.parse(gapRow.value);
   assert.deepEqual([gapDay.landings, gapDay.ci.all.runs, gapDay.ci.unlinked.runs], [0, 1, 1]);
@@ -257,15 +268,19 @@ test('a day with check runs and no landing closes before the next landing day, a
     [{ runId: 'gap-run', bucket: 'unlinked' }],
     'its minutes may still arrive',
   );
-  assert.deepEqual(scheduledCloses(f, thenAt), [{ projectId: f.projectId, day: next }], 'then the later day');
+  assert.deepEqual(
+    scheduledCloses(f, thenAt).filter(a => a.projecting === undefined),
+    [{ projectId: f.projectId, day: next }],
+    'then the later day',
+  );
   const lastAt = scheduledIds(f),
     lastCounted = f.counts.length;
   await f.tx('statsClose', statsApi.closeDay, { projectId: f.projectId, day: next });
   assert.deepEqual(scheduledCloses(f, lastAt), [], 'no gap left: nothing more scheduled');
   // The day after the previous closed day has no gap to probe (review b4dd69b4 finding 5): its one read of run rows not
-  // projected yet is the close's own.
+  // projected yet is the close's own, after the one empty page that projects the day's legacy run rows (Item 3678767e).
   const consecutive = f.counts.slice(lastCounted).find(c => c.name === 'statsClose');
-  assert.equal(consecutive.readRangesByTable.projectHostedCheckRuns, 1, 'no gap probe');
+  assert.equal(consecutive.readRangesByTable.projectHostedCheckRuns, 2, 'no gap probe');
   assert(
     [...f.tables.projectStatsDays.values()].some(r => r.day === next),
     'the later day closes once the gap day is closed',
@@ -552,11 +567,14 @@ test('a close reads no body page: its landing rows, the Intent’s earlier rows 
   const before = f.counts.length;
   fixtureLayers.outer = false;
   try {
-    await f.tx('statsClose', statsApi.closeDay, { projectId: f.projectId, day });
+    await closeThroughProjection(f, { projectId: f.projectId, day });
   } finally {
     fixtureLayers.outer = true;
   }
-  const close = f.counts.slice(before).find(c => c.name === 'statsClose');
+  const close = f.counts
+    .slice(before)
+    .filter(c => c.name === 'statsClose')
+    .at(-1);
   const docs = close.readDocumentsByTable;
   // Each landing's own row, each landing's previous row of the Intent, and the fate lookup: all landing rows.
   assert(docs.projectHostedLandingRequests >= 2 * requests.length + 1, JSON.stringify(docs));
@@ -781,15 +799,24 @@ async function closeAtLimits(f, day) {
   // documents; the fixture throws on any read past them. Its controller bounds assert after the close, on purpose.
   readLimits.documents = 32_000;
   try {
-    await f
-      .transaction('statsClose', statsApi.closeDay, { projectId: f.projectId, day }, 'owner')
-      .catch(error => {
+    // Legacy run rows are projected a page at a time first (Item 3678767e): follow those pages to the reading close.
+    let args = { projectId: f.projectId, day };
+    for (;;) {
+      const seen = scheduledIds(f);
+      await f.transaction('statsClose', statsApi.closeDay, args, 'owner').catch(error => {
         if (!/statsClose: (bounded|metadata)/.test(error.message)) throw error;
       });
+      const next = scheduledCloses(f, seen).find(a => a.projecting !== undefined);
+      if (!next) break;
+      args = next;
+    }
   } finally {
     readLimits.documents = 4096;
   }
-  const close = f.counts.slice(before).find(c => c.name === 'statsClose');
+  const close = f.counts
+    .slice(before)
+    .filter(c => c.name === 'statsClose')
+    .at(-1);
   assert(close.ranges < 4_096, `queries: ${close.ranges}`);
   assert(close.readBytes < 16 * 1024 * 1024, `bytes read: ${close.readBytes}`);
   assert(close.documents < 32_000, `documents: ${close.documents}`);
@@ -1044,4 +1071,28 @@ test('All time reads one rollup a closed month and the open month’s days, neve
     3,
     'the head reads its own range only',
   );
+});
+
+test('legacy run rows are projected a page at a time before the day is read (Item 3678767e)', async t => {
+  const f = await batchesFixture(t);
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const day = utcDay([...f.tables.projectHostedAcceptances.values()][0]._creationTime);
+  const start = Date.parse(`${day}T00:00:00.000Z`);
+  const template = [...f.tables.projectHostedCheckRuns.values()][0];
+  for (let n = 0; n < 20; n++)
+    f.tables.projectHostedCheckRuns.set(`legacy-${n}`, {
+      ...template,
+      _id: `legacy-${n}`,
+      _creationTime: start + 600_000 + n,
+      runId: `legacy-${n}`,
+      value: JSON.stringify({ ...JSON.parse(template.value), id: `legacy-${n}` }),
+      metricsProjected: undefined,
+    });
+  const seen = scheduledIds(f);
+  await f.tx('statsClose', statsApi.closeDay, { projectId: f.projectId, day });
+  const [next] = scheduledCloses(f, seen);
+  assert.deepEqual(next, { projectId: f.projectId, day, projecting: start + 600_000 + 7 }, 'page one of 8');
+  assert(![...f.tables.projectStatsDays.values()].some(r => r.day === day), 'the day is not read yet');
 });

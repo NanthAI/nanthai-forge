@@ -574,15 +574,16 @@ async function resubmissionJourney(t, mode, failedSeconds) {
   const people = new Set([...f.tables.personDays.values()].map(row => row.person)).size;
   assert.equal(people, 1, 'one person landed here');
   // Every check run (Item a61d3c91, review 1240fe03 finding 5): the compact run rows of the day and the run rows not
-  // projected yet (one range each), the project's compact attempt index and the attempt rows around the day (one
+  // projected yet (one range each, and one empty page that projects legacy ones first), the project's compact attempt index and the attempt rows around the day (one
   // range), and the newest earlier submissions of the landing's Intent until one landed or failed (at most
   // STATS_RESUBMIT_LOOKBACK; here the newest failed, so one). An empty range bills as one document.
   const statsRuns = { projectFinishReadRows: 2, projectHostedCheckRuns: 1, projectHostedLandingAttempts: 1 };
   for (const close of closes) {
     const docs = close.readDocumentsByTable;
     assert(
-      // + 2: the project row and its newest policy receipt, for the merge-queue replay's width (Item 3678767e).
-      close.documents <= 6 + 2 + people + 1 + 1 + 1 + 1 + 4 + 2 && close.readBytes < 16_000,
+      // + 2: the project row and its newest policy receipt, for the merge-queue replay's width; + 1: the empty page
+      // that projects the day's legacy run rows first (Item 3678767e).
+      close.documents <= 6 + 2 + 1 + people + 1 + 1 + 1 + 1 + 4 + 2 && close.readBytes < 16_000,
       `the close reads receipt and ticket/body pages, the Lanes (open and closed), the person row, the change range, the project and its writers, one earlier submission and the day's runs: ${JSON.stringify(docs)}`,
     );
     assert.equal(
@@ -590,7 +591,12 @@ async function resubmissionJourney(t, mode, failedSeconds) {
       1 + 1,
       'the ticket and one earlier same-Intent submission',
     );
-    for (const [table, n] of Object.entries(statsRuns)) assert.equal(docs[table] ?? 0, n, table);
+    for (const [table, n] of Object.entries(statsRuns)) {
+      // The run rows not projected yet: the close's own range, and (a close that starts the day) the empty page that
+      // projects legacy ones first (Item 3678767e).
+      if (table === 'projectHostedCheckRuns') assert([n, n + 1].includes(docs[table] ?? 0), table);
+      else assert.equal(docs[table] ?? 0, n, table);
+    }
     assert((docs.projectPolicyChanges ?? 0) <= 1, 'at most one policy receipt for the replay width');
     assert.equal(close.writes, 1 + people);
   }

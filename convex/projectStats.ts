@@ -32,7 +32,13 @@ import {
   statsDaySchema,
   type StatsLanding,
 } from '../src/stats-estimate';
-import { STATS_LANDINGS_KEEP, STATS_PEOPLE_KEEP, statsDayRuns, statsRoom } from './projectStatsRuns';
+import {
+  STATS_LANDINGS_KEEP,
+  STATS_PEOPLE_KEEP,
+  projectDayRuns,
+  statsDayRuns,
+  statsRoom,
+} from './projectStatsRuns';
 import { landingRequestOriginalDb } from './projectLandingRequestBody';
 import { workRecordOriginalDb } from './projectWorkRecordWriter';
 import { metricRunKind } from './projectMetricReadProjection';
@@ -223,9 +229,12 @@ export const closeDay = internalMutation({
      * provisional row. It probes no earlier day, judges no day budget, rolls no month and keeps no late-correction
      * lists; the day's real close replaces it. */
     provisional: v.optional(v.literal(true)),
+    /** Projecting the day's legacy run rows (convex/projectStatsRuns.ts#projectDayRuns), each page in its own
+     * transaction: the next page starts after this run time. */
+    projecting: v.optional(v.number()),
   },
   returns: v.null(),
-  handler: async (ctx, { projectId, day, reclose, then, provisional }) => {
+  handler: async (ctx, { projectId, day, reclose, then, provisional, projecting }) => {
     invariant(/^\d{4}-\d{2}-\d{2}$/.test(day), 'BAD_ARGUMENT', 'A day is YYYY-MM-DD.');
     const now = Date.now();
     // A refresh that runs after midnight UTC leaves the day to its real close.
@@ -255,6 +264,21 @@ export const closeDay = internalMutation({
       return null;
     }
     const from = Date.parse(`${day}T00:00:00.000Z`);
+    // Legacy run rows (never projected) are projected a page at a time first, so the day's read finds compact rows
+    // and is not stopped by the read meter. Today so far leaves them (runs still in flight).
+    if (!provisional) {
+      const next = await projectDayRuns(ctx, projectId, from, from + DAY_MS, projecting);
+      if (next !== null) {
+        await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectStats:closeDay'), {
+          projectId,
+          day,
+          ...(reclose ? { reclose } : {}),
+          ...(then ? { then } : {}),
+          projecting: next,
+        });
+        return null;
+      }
+    }
     // The replayed queue starts behind the newest closed day before this one.
     const before = await ctx.db
       .query('projectStatsDays')

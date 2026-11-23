@@ -33,6 +33,36 @@ export const STATS_CLOSE_PAGE = 200;
  * paths, contract reports), so a read past the meter's check stays inside the room it keeps (review d6b0f1aa finding
  * 6). They are few: rows written before their projection (convex/projectMetricReadWriter.ts). */
 export const STATS_CLOSE_UNPROJECTED_PAGE = 1;
+/** Run rows written before their projection are compact-projected a few at a time, each page in its own transaction
+ * (before the day's reading transaction), so the close reads them as compact rows instead of full ones (each up to 1
+ * MiB, about 90 KB on busy days, which spent the shared read meter and left the day partial). A full page reads and
+ * patches at most 8 run rows (about 1 MB read and written). */
+export const STATS_PROJECT_PAGE = 8;
+/** Project one page of the day's unprojected run rows, after `after` (a `_creationTime`): a patch through the
+ * check-run writer (convex/projectMetricReadWriter.ts) writes the compact row. Returns where the next page starts, or
+ * null when this page found none. A row with no projection (an unreadable run) stays unprojected and is passed by the cursor;
+ * the close still reads it itself, under its cap. */
+export async function projectDayRuns(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  from: number,
+  to: number,
+  after: number | undefined,
+) {
+  const rows = await ctx.db
+    .query('projectHostedCheckRuns')
+    .withIndex('by_project_and_metrics_projection', q => {
+      const range = q.eq('projectId', projectId).eq('metricsProjected', undefined);
+      return (after === undefined ? range.gte('_creationTime', from) : range.gt('_creationTime', after)).lt(
+        '_creationTime',
+        to,
+      );
+    })
+    .take(STATS_PROJECT_PAGE);
+  for (const row of rows) await ctx.db.patch(row._id, {});
+  // Any page that did work ends its transaction: the reading close starts in one that projected nothing.
+  return rows.at(-1)?._creationTime ?? null;
+}
 /** What a reader leaves of the transaction when it stops: queries (index ranges and gets), bytes and documents read,
  * and for a writer the documents and bytes it may still write. */
 export type StatsKeep = {
