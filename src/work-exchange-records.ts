@@ -239,15 +239,18 @@ export async function* workRecordChunks(
   );
   return actual;
 }
-/** The whole-Work pin a record catalog's bytes give (a catalog being written, whose `work` is not known yet). */
+/** The whole-Work pin a record catalog's bytes give (a catalog being written, whose `work` is not known yet);
+ * `sink` sees the whole Work's bytes in order. */
 export async function measureWorkRecords(
   root: WorkRecordRoot,
   read: (pin: { sha256: string; size: number }) => Promise<Buffer>,
+  sink?: (bytes: Buffer) => void,
 ) {
   const chunks = recordChunks(root, read);
   for (;;) {
     const next = await chunks.next();
     if (next.done) return next.value;
+    sink?.(next.value);
   }
 }
 async function* recordChunks(

@@ -15,6 +15,7 @@ import { splitRecordTable } from './projectWorkRecordTables';
 import { recordHead } from './projectHostedRecords';
 import { metadataRequest } from '../src/work-metadata';
 import { pendingIntentArchives } from './projectJournalArchivePlan';
+import { indexValue } from './projectPlanningPurgeRedact';
 
 /** Journal rows per selection page: a planning row is at most ~110 KB, so a page stays far under the read limit. */
 export const PURGE_SELECT_PAGE = 64;
@@ -102,8 +103,9 @@ export function baseRevision(project: Doc<'hostedProjects'>, generation: { initi
     ? Math.max(details.revision, generation.initialRevision)
     : generation.initialRevision;
 }
-export const BASE_BLOCK =
-  'This Item is in the base checkpoint (created before it, or imported); its words are in the stored archive, which a rebuild reads again. A base-checkpoint scrub must come first. Nothing was purged.';
+/** A purge of an Item created after the base that a new stored base (a record-detail catalog) reached since. */
+export const BASE_CUT =
+  'A stored base checkpoint cut during this purge holds the Item’s words again; run the purge after its base scrub. The purge stays open.';
 /** Hosted display snapshots (projectHostedProjection) copy record bodies, the Item's included, under no index the
  * purge can page by Item. One indexed read; dogfood keeps none. */
 export const DISPLAY_BLOCK =
@@ -160,6 +162,114 @@ export const preflight = internalQuery({
     };
   },
 });
+
+/** The index collections a base Item's rows are found by (line 2e), with the parent they page by: its versions and
+ * comments by the Item, its notes by its Intent; then the Intent's own row. */
+const baseSources = [
+  ['planningVersions', 'history'],
+  ['planningComments', 'history'],
+  ['notes', 'intent'],
+] as const;
+
+/** One page of a base Item's rows (line 2e): the rows of the Item that exist only in the stored base (no Work row of
+ * their own), found through the selected Work index (each version, comment and note names its event; the Intent row
+ * is the Intent's id), with the digest of their redacted facts, for the purge command (planning-purge-v2). A row the
+ * journal holds is selected from the journal instead; an event already purged (an earlier comment purge) is skipped.
+ * Cursor: source index and index position. At most PURGE_SELECT_PAGE index records and their events per page. */
+export const basePage = internalQuery({
+  args: {
+    projectId: v.id('hostedProjects'),
+    ids: v.array(v.string()),
+    historyId: v.string(),
+    intentId: v.union(v.string(), v.null()),
+    source: v.number(),
+    after: v.union(v.number(), v.null()),
+  },
+  returns: v.object({
+    rows: v.array(
+      v.object({ operationId: v.string(), revision: v.number(), digest: v.string(), request: v.string() }),
+    ),
+    source: v.number(),
+    after: v.union(v.number(), v.null()),
+    done: v.boolean(),
+  }),
+  handler: async (ctx, input) => {
+    const project = await ctx.db.get(input.projectId);
+    invariant(project && !project.removal, 'PROJECT_UNAVAILABLE', 'Select an existing Forge project.');
+    const generation = await selectedGeneration(ctx, project);
+    invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before purging.');
+    const partition = recordPartition(generation);
+    const candidates: string[] = [];
+    let { source, after } = input;
+    const current = baseSources[source];
+    if (current) {
+      const [collection, which] = current;
+      const parent = which === 'history' ? input.historyId : input.intentId;
+      const page = parent
+        ? await ctx.db
+            .query(splitRecordTable(collection))
+            .withIndex('by_generation_and_collection_and_parent_and_position', q => {
+              const scoped = q
+                .eq('generationId', partition)
+                .eq('collection', collection)
+                .eq('parent', parent);
+              return after === null ? scoped : scoped.gt('position', after);
+            })
+            .take(PURGE_SELECT_PAGE)
+        : [];
+      for (const row of page) {
+        if (collection === 'planningComments' || collection === 'planningVersions') candidates.push(row.key);
+        else {
+          const { full } = await indexValue(ctx, partition, collection, row);
+          const id = full.operationId ?? full.id;
+          if (typeof id === 'string') candidates.push(id);
+        }
+      }
+      if (page.length === PURGE_SELECT_PAGE) after = page.at(-1)!.position;
+      else {
+        source++;
+        after = null;
+      }
+    } else if (input.intentId) {
+      candidates.push(input.intentId);
+      source++;
+    } else source++;
+    const named = new Set(input.ids);
+    const rows = [];
+    for (const operationId of candidates) {
+      if (await journalHolds(ctx, input.projectId, operationId)) continue;
+      const root = await record(ctx, partition, 'events', operationId);
+      if (!root) continue;
+      const { full } = await indexValue(ctx, partition, 'events', root);
+      const target = purgeableRowTarget(operationId, full.command);
+      if (!target || !named.has(target.id)) continue;
+      rows.push({
+        operationId,
+        revision: 0,
+        digest: purgedFactsDigest(redactPlanningWrite(target.command)),
+        request: typeof full.request === 'string' ? full.request : '',
+      });
+    }
+    return { rows, source, after, done: source > baseSources.length };
+  },
+});
+
+/** Whether the Work journal (either table) holds a row with this operation id. */
+async function journalHolds(ctx: QueryCtx, projectId: Id<'hostedProjects'>, operationId: string) {
+  for (const table of purgeJournalTables)
+    if (
+      (
+        await ctx.db
+          .query(table)
+          .withIndex('by_project_and_operation', q =>
+            q.eq('projectId', projectId).eq('operationId', operationId),
+          )
+          .take(1)
+      ).length
+    )
+      return true;
+  return false;
+}
 
 /** One selection page of one journal table: the Item's rows after `after` (revision), with their purged digests,
  * plus any decision comment (its derived version's purged request). Archived rows are selected by the Node reader. */

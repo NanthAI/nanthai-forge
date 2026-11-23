@@ -423,6 +423,9 @@ const projectFields = {
    * stays until it finishes; finished ones keep the newest few. */
   /** Invalidates whole-Work and recovery reads that crossed the end of a physical Item redaction. */
   planningPurgeRevision: v.optional(v.number()),
+  /** The one record-detail migration whose staged copy (a copy of every word) exists (Item b6588425 line 2e): purges
+   * refuse to start while it is set; set by the stage, cleared when the copy is published or deleted. */
+  stagedDetailMigration: v.optional(v.object({ operationId: v.string(), at: v.number() })),
   itemPurges: v.optional(
     v.array(
       v.object({

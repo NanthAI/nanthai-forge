@@ -175,7 +175,9 @@ async function pageOf(
       changes +=
         input.step === 'events' && partition
           ? await indexRecord(ctx, write, partition, 'events', operationId, purge.operationId, decisions)
-          : await journalRow(ctx, write, input.projectId, operationId, expected, purge.operationId);
+          : await journalRow(ctx, write, input.projectId, operationId, expected, purge.operationId, {
+              base: !!purge.baseScrub,
+            });
     return { changes, after: start + PURGE_PAGE < rows.length ? String(start + PURGE_PAGE) : null };
   }
   if (input.step === 'intents') {
@@ -312,10 +314,13 @@ export async function journalRow(
   operationId: string,
   expected: string,
   purgeOperationId: string,
+  /** A base Item's purge also lists rows only the stored base holds (no Work row); the base scrub replaces those. */
+  options: { base?: boolean } = {},
 ) {
   const event = await byOperation(ctx, 'projectWorkEvents', projectId, operationId);
   const body = event ? null : await byOperation(ctx, 'projectHostedRecordBodies', projectId, operationId);
   const row = event ?? body;
+  if (!row && options.base) return 0;
   invariant(row, 'INVALID_WORK_JOURNAL', 'A row the purge lists is missing from the Work journal.');
   if (row.purged !== undefined) return 0;
   // The segment action publishes the redacted event and the live retry envelope together.

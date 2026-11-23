@@ -47,6 +47,9 @@ export async function walkPurge(
         const done = await ctx.runAction(internal.projectPlanningPurgeSegmentRun.run, { ...id, deadline });
         if (!done) return { done: false, walk };
       }
+      // A base Item's words in the stored base checkpoint (Item b6588425 line 2e): one scrub, a fixed point once done.
+      if (purge.baseScrub && !purge.baseScrub.done)
+        await ctx.runAction(internal.projectCommentPurgeBase.scrubItem, { ...id, itemId: purge.itemId });
       walk = start(walk.round, 'check');
       continue;
     }

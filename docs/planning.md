@@ -159,10 +159,10 @@ older bytes. A stopped purge resumes selection or retirement using the original 
 versions can enter journal segments again. An in-flight Intent archive keeps its upload pins until publication or
 cleanup, so a purge can account for bytes from an interrupted upload. Aliases have no index by Intent, so a purge reads all of the project's
 aliases and refuses a project with more than 8,000 (nothing written). The preflight also refuses a project that keeps hosted
-display snapshots (they copy record bodies under no index by Item), an Item whose Intent has an id of its own, an Item
-in a stored base (no creation row after the
-backup's revision or a record-detail catalog's: the archive keeps its words and a load or rebuild reads it again, so a
-base scrub must come first; a detail migration is refused while a purge is open). The last step also refuses while a Work index build runs or the set of
+display snapshots (they copy record bodies under no index by Item), and an Item whose Intent has an id of its own. An
+Item in a stored base (no creation row after the backup's revision) is purged there too
+([whole Item in the base checkpoint](#whole-item-in-the-base-checkpoint)); one a record-detail catalog holds is
+refused (a second stored base), and a detail migration is refused while a purge is open. The last step also refuses while a Work index build runs or the set of
 record partitions differs from the one the check walked. The same pages
 run read-only as the completeness check; the purge's `purgedAt` (project `itemPurges`) is set only when the check
 finds nothing left on the generation still selected. A stopped purge resumes by running again with the same
@@ -257,8 +257,53 @@ backup (checked again when the scrub is published), a base with no record catalo
 one read of the base's root, catalog and manifest trees, every record once (one GET per record pack, one object
 resolve query per 100 pins, packs read up to 100 or 8 MiB at a time), a few new objects (the two records, the packs over them, the changed tree chunks, the
 root), one tombstone per replaced object, and three small mutations. In `tests/comment-purge-base.test.mjs` the
-whole purge is 151 document reads (about 102 KB) and 36 writes (about 20 KB). Nothing runs while idle. Whole-Item
-purge of an Item in the base checkpoint is still refused.
+whole purge is 151 document reads (about 102 KB) and 36 writes (about 20 KB). Nothing runs while idle.
+
+### Whole Item in the base checkpoint
+
+An Item written before the stored base was cut (Item b6588425 line 2e) has its words in the same base records: its
+`planningItems` versions, `planningComments`, `hostedEvents`, its Intent (with notes and lifecycle) and Initiative.
+When the purge's first step finds the Item in the base, the executor checks that the scrub can rewrite this base
+(the refusals above, nothing written) and lists the Item's base rows from the Work index
+(`projectPlanningPurgeSelect.basePage`: its versions, comments and notes, and its Intent; rows the journal still holds
+are listed by the normal selection). Each is listed in the purge command like a journal row, so the reader rule
+covers it, and the index redaction purges its records. After the journal sweep the walk runs the base scrub once
+(`projectCommentPurgeBase.scrubItem`), and `purgedAt` waits for it. The scrub replaces every record of the Item with
+its purged form and, while it measures the whole-Work digest, checks every record in the base: a record of the Item
+that is not in its purged form (a copy the index list missed) refuses the publication with nothing removed from the
+base. A base converted to Intents also keeps the pre-conversion planning records inline in its catalog
+(`legacyIntentMerge`): the Item's Issue versions, comments and Intents there take their purged form too, and the old
+catalog's tree chunks are tombstoned (its extension `fields` stay opaque). One unfinished base scrub runs per
+project. A base read through a record-detail catalog is refused, and so is an Item with more than 2,000 comments in
+the Work index (imported ones included), both before the first step writes anything.
+
+The reference check: the scrub chunks the scrubbed whole Work as a seed's recipe would (content-defined chunks,
+digests only). A chunk or page of the old whole Work that the scrubbed Work repeats holds none of the Item's words
+and is never tombstoned, so another object stored in chunks that names it (a large source file, another seed) still
+reads. The chunks the scrubbed Work does not repeat hold or border the changed records; only those, and the old
+recipe, are tombstoned. The old whole Work, its recipe parts and its catalog also stay while another backup's
+exchange root names the same whole Work or catalog. An object that names one of the tombstoned chunks holds a copy
+of the Item's words itself, and loses it with them.
+
+A detail migration stages its new catalog before writing it (`projectWorkDetailMigrations.staged`, and the project's
+`stagedDetailMigration` marker: one staged copy per project). No purge starts while the marker is set, and staging
+refuses during an open purge. The step invocation that stages a copy holds its token: only it publishes the copy.
+When its publication is refused, it deletes its own copy; a stopped run's copy is deleted by the next run once it is
+15 minutes old (longer than an action runs), so no running step loses its copy. Deleting removes every plain object
+row created after the copy was staged, with its bytes (R2 keys deleted after the row, in batches of 200). It deletes
+instead of tombstoning, so a later migration stores the same records again. Older rows stay: they were there before
+the copy and may be named elsewhere; with one staged copy per project, no other migration writes in that window.
+
+Client caches after a scrub: a presigned object URL handed out before it fails once its R2 key is deleted, and
+expires after 5 minutes in any case. A CLI keeps a disposable exchange cache keyed by the root's digest; the scrubbed root has a new digest, so the
+next read fetches it, but an entry from before the scrub stays on that machine until the machine's owner removes it.
+
+Cost per whole-Item base purge: the base purge's cost above, plus one index page per 64 of the Item’s versions,
+comments and notes, one bounded comment count (at most 2,001 index rows) before the first step, one check and one
+chunking pass per byte during the measure pass (CPU only, no extra reads; memory one 1 MiB chunk buffer and one digest
+per chunk), one root read per other backup, and one mutation per R2 batch. In `tests/planning-purge-base.test.mjs`
+(an Item with three comments and a kept Item) the whole purge is about 504 document reads (about 412 KB) and 78
+writes (about 42 KB). Nothing runs while idle.
 
 Rebuilding a hosted display snapshot page skips a purged comment's versions. A page that pins the rewritten
 decision version still refuses to rebuild (its digest changed).

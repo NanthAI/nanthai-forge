@@ -37,6 +37,8 @@ const modules = {
   projectJournalCapture: await import(moduleUrl('../convex/projectJournalCapture.ts')),
   projectJournalPublish: await import(moduleUrl('../convex/projectJournalPublish.ts')),
   projectJournalRun: await import(moduleUrl('../convex/projectJournalRun.ts')),
+  projectCommentPurgeBase: await import(moduleUrl('../convex/projectCommentPurgeBase.ts')),
+  projectCommentPurgeBaseStore: await import(moduleUrl('../convex/projectCommentPurgeBaseStore.ts')),
 };
 const { readArchiveCoverage } = await import(moduleUrl('../convex/projectPlanningArchiveCoverage.ts'));
 const coverage = async s =>
@@ -343,7 +345,7 @@ test('review 2026-11-20 finding 2: a project with more aliases than one purge ca
   assert.equal(s.tables.hostedProjects.get(s.projectId).itemPurges, undefined, 'no progress entry');
 });
 
-test('review 2026-11-20 (third) finding 1: an Item in the base checkpoint is refused with nothing written, since a rebuild reads the stored archive again', async t => {
+test('review 2026-11-20 (third) finding 1, Item b6588425 line 2e: an Item in a base checkpoint the scrub cannot rewrite (a legacy archive) is refused with nothing written, since a rebuild reads the stored archive again', async t => {
   const itemId = randomUUID();
   const s = await setup(t, true, async (_root, local) => {
     await local.dispatch(
@@ -370,7 +372,7 @@ test('review 2026-11-20 (third) finding 1: an Item in the base checkpoint is ref
     status: 'deleted',
   });
   const before = s.tables.projectWorkEvents.size;
-  await assert.rejects(executor(s).run(itemId, randomUUID()), /base checkpoint/);
+  await assert.rejects(executor(s).run(itemId, randomUUID()), /legacy archive/);
   assert.equal(s.tables.projectWorkEvents.size, before, 'no purge row');
   assert.equal(s.tables.hostedProjects.get(s.projectId).itemPurges, undefined, 'no progress entry');
 });
@@ -401,14 +403,14 @@ test('review 2026-11-20 (fourth): an Item a record-detail catalog holds (a secon
   );
 });
 
-test('review 2026-11-20 (fifth): an Item whose Intent row is in the stored base, with its first put after it, is refused', async t => {
+test('review 2026-11-20 (fifth): an Item whose Intent row is in the stored base (a legacy archive), with its first put after it, is refused', async t => {
   const { s, itemId } = await deletedItem(t);
   const project = s.tables.hostedProjects.get(s.projectId);
   const intentRow = [...s.tables.projectWorkEvents.values()].find(row => row.operationId === itemId);
   // The base reaches the Intent row (and no further): the put came after it.
   s.tables.projectWorkGenerations.get(project.work.generationId).initialRevision = intentRow.revision;
   const before = s.tables.projectWorkEvents.size;
-  await assert.rejects(executor(s).run(itemId, randomUUID()), /base checkpoint/);
+  await assert.rejects(executor(s).run(itemId, randomUUID()), /legacy archive/);
   assert.equal(s.tables.projectWorkEvents.size, before, 'no purge row');
 });
 

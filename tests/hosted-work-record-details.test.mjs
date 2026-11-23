@@ -161,3 +161,122 @@ test('object-backed hosted migration pages the catalog and preserves journal rep
   assert.equal(after.data.intents.find(intent => intent.id === id).notes.at(-1).text, 'After migration');
   assert.ok(after.data.runs[0].detailRef);
 });
+
+test('Item b6588425 line 2e: a rejected detail-migration publication deletes its staged copy (rows created for it, not tombstoned); no purge starts while a copy is staged; the rerun stages the same bytes again and publishes', async t => {
+  const s = await fixture(t, 'native-owner', true);
+  const migration = modules.projectWorkDetailMigration;
+  const { noStagedMigration } = migration;
+  const publish = migration.publish._handler,
+    discard = migration.discardBatch._handler;
+  const objects = () => new Set([...s.tables.projectObjects.values()].map(row => row.digest));
+  const row = () => [...s.tables.projectWorkDetailMigrations.values()][0];
+  let result;
+  do {
+    result = JSON.parse(await s.step());
+  } while (!result.complete && row().collection < 2);
+  const before = objects();
+  // A purge started meanwhile rejects the publication (noPurgeSince); the first deletion batch also stops once.
+  migration.publish._handler = async () => {
+    throw Object.assign(new Error('rejected'), { code: 'WORK_STALE' });
+  };
+  migration.discardBatch._handler = async () => {
+    throw new Error('stopped');
+  };
+  // An unexpected error reaches the caller as a retryable request failure.
+  await assert.rejects(s.step(), /HOSTED_REQUEST_FAILED/);
+  const staged = row().staged;
+  assert.ok(staged, 'the stopped deletion leaves the copy recorded');
+  await assert.rejects(
+    noStagedMigration(s.ctx, s.projectId),
+    error => (error.data?.code ?? error.code) === 'WORK_STALE',
+  );
+  migration.discardBatch._handler = discard;
+  // While the copy may still belong to a running step (an action runs at most 10 minutes), a rerun leaves it.
+  await assert.rejects(s.step(), /still writing its copy|WORK_STALE/);
+  assert.ok(row().staged, 'a young copy is not deleted by another run');
+  row().staged.at -= 16 * 60 * 1000;
+  await assert.rejects(s.step(), /HOSTED_REQUEST_FAILED/);
+  assert.equal(row().staged, undefined, 'the copy is gone');
+  assert.equal(row().root, undefined, 'and nothing was published');
+  assert.deepEqual(
+    [...objects()].filter(digest => !before.has(digest)),
+    [],
+    'every object it created is deleted',
+  );
+  assert.equal(before.has(staged.root.sha256), false, 'the staged catalog was a new object');
+  assert.equal(
+    [...s.tables.projectObjects.values()].some(object => object.purged),
+    false,
+    'nothing is tombstoned, so the same bytes can be stored again',
+  );
+  await noStagedMigration(s.ctx, s.projectId);
+  assert.equal(
+    s.tables.hostedProjects.get(s.projectId).stagedDetailMigration,
+    undefined,
+    'the marker is cleared',
+  );
+  migration.publish._handler = publish;
+  do {
+    result = JSON.parse(await s.step());
+  } while (!result.complete);
+  assert.equal(result.root.sha256, staged.root.sha256, 'the rerun publishes the same catalog');
+  assert.equal(s.tables.hostedProjects.get(s.projectId).work.recordDetails.root.sha256, staged.root.sha256);
+  assert.ok(objects().has(staged.root.sha256), 'its catalog is stored again');
+});
+
+test('review finding 3: one staged copy per project, owned by the step that staged it: a second migration cannot stage or delete it, and a publish without its token is refused', async t => {
+  const s = await fixture(t, 'native-owner', true);
+  const migration = modules.projectWorkDetailMigration;
+  const publish = migration.publish._handler,
+    discard = migration.discardBatch._handler;
+  // Migration A stops after staging and writing its copy (publication and deletion both fail once).
+  migration.publish._handler = async () => {
+    throw new Error('stopped');
+  };
+  migration.discardBatch._handler = async () => {
+    throw new Error('stopped');
+  };
+  t.after(() => {
+    migration.publish._handler = publish;
+    migration.discardBatch._handler = discard;
+  });
+  let result;
+  do {
+    result = await s.step().then(JSON.parse, () => ({ failed: true }));
+  } while (!result.complete && !result.failed);
+  const a = [...s.tables.projectWorkDetailMigrations.values()].find(row => row.operationId === s.operationId);
+  assert.ok(a.staged, 'A’s copy is staged');
+  assert.equal(s.tables.hostedProjects.get(s.projectId).stagedDetailMigration.operationId, s.operationId);
+  migration.publish._handler = publish;
+  migration.discardBatch._handler = discard;
+  const objects = () => [...s.tables.projectObjects.values()].map(row => row.digest).sort();
+  const before = objects();
+  // Migration B reaches its stage and is refused there: A's copy is untouched.
+  const other = randomUUID();
+  const stepB = () =>
+    modules.projectWorkDetailMigrationActions.step._handler(s.ctx, {
+      projectId: s.projectId,
+      operationId: other,
+    });
+  let refused;
+  for (let n = 0; n < 10 && !refused; n++)
+    refused = await stepB().then(
+      () => undefined,
+      error => error,
+    );
+  assert.match(String(refused?.message ?? refused), /Another Work detail migration has a staged copy/);
+  assert.deepEqual(objects(), before, 'nothing of A’s copy was deleted');
+  assert.equal(s.tables.hostedProjects.get(s.projectId).stagedDetailMigration.operationId, s.operationId);
+  // A publish that does not hold the stage's token is refused.
+  await assert.rejects(
+    migration.publish._handler(s.ctx, {
+      projectId: s.projectId,
+      owner: 'owner',
+      operationId: s.operationId,
+      root: a.staged.root,
+      token: randomUUID(),
+    }),
+    error => (error.data?.code ?? error.code) === 'WORK_STALE',
+  );
+  assert.equal(s.tables.hostedProjects.get(s.projectId).work.recordDetails, undefined);
+});

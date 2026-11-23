@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// The Convex half of a base comment's scrub (Item b6588425 line 2d; the action is convex/projectCommentPurgeBase.ts):
+// The Convex half of a base-checkpoint scrub (Item b6588425 lines 2d, 2e; the action is
+// convex/projectCommentPurgeBase.ts), for one purged comment (`commentId`) or a whole purged Item (no `commentId`):
 // what the scrub replaces (`plan`), its publication (`publish`: the scrubbed root selected on the backup and every
 // replaced object tombstoned in one transaction, so reads of them refuse PURGED from then on) and the end of its R2
 // step (`done`). Each is a fixed point, so the action can run again after any failure.
@@ -10,20 +11,26 @@ import { internalMutation, internalQuery } from './server';
 import { invariant } from '../src/errors';
 import { backupRootPin } from '../src/work-backup-root';
 import { decisionOperationId } from '../src/work-planning-put';
-import { planningCommentCommandSchema } from '../src/work-planning-types';
+import { PURGE_ROW_LIMIT, planningCommentCommandSchema } from '../src/work-planning-types';
 import { decisionLines } from '../src/work-planning-purge';
 import { purgedDecisionRequest } from '../src/work-planning-state';
 import { baseEvent, commentRow, purgedHere } from './projectCommentPurge';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { findObject, purgeTargetRow } from './projectObjectFind';
+import { splitRecordTable } from './projectWorkRecordTables';
+import { purgeRows } from './projectPlanningPurgeRedact';
 import { notBusy, tombstoneObject } from './projectSavePurgeStore';
 
-const identity = { projectId: v.id('hostedProjects'), commentId: v.string(), operationId: v.string() };
+const identity = {
+  projectId: v.id('hostedProjects'),
+  commentId: v.optional(v.string()),
+  operationId: v.string(),
+};
 const pin = v.object({ sha256: v.string(), size: v.number() });
 /** Backup rows the scrub checks (the base must be the only stored one: another would share its record objects); a
  * project with more is refused, never half checked. */
 const BACKUP_LIMIT = 64;
-type Identity = { projectId: Id<'hostedProjects'>; commentId: string; operationId: string };
+type Identity = { projectId: Id<'hostedProjects'>; commentId?: string | undefined; operationId: string };
 
 const entryOf = (project: Doc<'hostedProjects'>, input: Identity) =>
   project.itemPurges?.find(
@@ -80,12 +87,15 @@ export const plan = internalQuery({
       );
       await assertOnlyBase(ctx, project);
     }
+    // A whole Item's targets come from the purge entry (itemTargets); only a comment has a decision to rewrite.
+    if (input.commentId === undefined) return { owner: project.owner, backupId: backup._id, state } as const;
+    const commentId = input.commentId;
     const generation = await selectedGeneration(ctx, project);
     invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before purging.');
     const partition = recordPartition(generation);
     // The comment's facts: its Work row, else its event in the Work index (whole, or purged by this purge).
-    const row = await commentRow(ctx, input.projectId, input.commentId);
-    const event = await baseEvent(ctx, partition, input.commentId);
+    const row = await commentRow(ctx, input.projectId, commentId);
+    const event = await baseEvent(ctx, partition, commentId);
     const text = row?.command ?? (row && 'journalCommand' in row ? row.journalCommand : undefined);
     const facts = text
       ? JSON.parse(text)
@@ -97,7 +107,7 @@ export const plan = internalQuery({
     const comment = planningCommentCommandSchema.safeParse(facts);
     const owner = { owner: project.owner, backupId: backup._id, state } as const;
     if (!comment.success || !comment.data.decision) return owner;
-    const version = await record(ctx, partition, 'planningVersions', decisionOperationId(input.commentId));
+    const version = await record(ctx, partition, 'planningVersions', decisionOperationId(commentId));
     const number = version && Number((JSON.parse(version.value) as { version?: unknown }).version);
     if (!number || !Number.isInteger(number)) return owner;
     const lines = decisionLines(comment.data, row?.at ?? event?.at ?? '');
@@ -191,6 +201,92 @@ export const recipes = internalQuery({
         found.push({ digest, size: row.size, recipe: { sha256: row.recipe.digest, size: row.recipe.size } });
     }
     return found;
+  },
+});
+
+/** A whole Item's scrub targets (line 2e), from its purge entry: the Item's ids, Intent and successor Intents, the
+ * Deleted version, every row the purge lists, its comments in the selected Work index (an imported comment has no
+ * row) and the decision requests the redaction gives derived versions. Read before the purge finishes. */
+export const itemTargets = internalQuery({
+  args: { projectId: v.id('hostedProjects'), operationId: v.string() },
+  returns: v.object({
+    historyId: v.string(),
+    ids: v.array(v.string()),
+    intentKeys: v.array(v.string()),
+    version: v.number(),
+    rows: v.array(v.string()),
+    comments: v.array(v.string()),
+    decisions: v.array(v.array(v.string())),
+  }),
+  handler: async (ctx, input) => {
+    const project = await ctx.db.get(input.projectId);
+    invariant(project, 'PROJECT_UNAVAILABLE', 'Select an existing Forge project.');
+    const entry = entryOf(project, input);
+    invariant(entry?.baseScrub, 'WORK_STALE', 'Run the Item’s purge first.');
+    const comments = await itemComments(ctx, project, entry.itemId);
+    return {
+      historyId: entry.itemId,
+      ids: entry.ids,
+      intentKeys: [...new Set([...(entry.intentId ? [entry.intentId] : []), ...(entry.intentKeys ?? [])])],
+      version: entry.version,
+      rows: (await purgeRows(ctx, input.projectId, input.operationId)).map(([row]) => row),
+      comments: comments.map(row => row.key),
+      decisions: entry.decisions,
+    };
+  },
+});
+/** Comments one Item purge scrubs from the base (its rows are capped at PURGE_ROW_LIMIT; imported comments add). */
+const COMMENT_LIMIT = 2 * PURGE_ROW_LIMIT;
+/** The Item's comments in the selected Work index (an imported comment has no row), refused above COMMENT_LIMIT. */
+async function itemComments(ctx: QueryCtx, project: Doc<'hostedProjects'>, itemId: string) {
+  const generation = await selectedGeneration(ctx, project);
+  invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before purging.');
+  const comments = await ctx.db
+    .query(splitRecordTable('planningComments'))
+    .withIndex('by_generation_and_collection_and_parent_and_position', q =>
+      q
+        .eq('generationId', recordPartition(generation))
+        .eq('collection', 'planningComments')
+        .eq('parent', itemId),
+    )
+    .take(COMMENT_LIMIT + 1);
+  invariant(
+    comments.length <= COMMENT_LIMIT,
+    'BAD_ARGUMENT',
+    `This Item has more than ${COMMENT_LIMIT} comments; a purge removes at most that many. Nothing was purged.`,
+  );
+  return comments;
+}
+/** The comment limit, checked before a whole Item purge's first step writes anything (checkItem). */
+export const checkComments = internalQuery({
+  args: { projectId: v.id('hostedProjects'), itemId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const project = await ctx.db.get(input.projectId);
+    invariant(project, 'PROJECT_UNAVAILABLE', 'Select an existing Forge project.');
+    await itemComments(ctx, project, input.itemId);
+    return null;
+  },
+});
+
+/** The exchange roots of the project's other backups (any status): the scrub keeps every recipe part their whole
+ * Work still names (convex/projectCommentPurgeBase.ts recipeParts). Bounded like assertOnlyBase. */
+export const otherRoots = internalQuery({
+  args: { projectId: v.id('hostedProjects'), backupId: v.id('projectBackups') },
+  returns: v.array(pin),
+  handler: async (ctx, input) => {
+    const rows = await ctx.db
+      .query('projectBackups')
+      .withIndex('by_project', q => q.eq('projectId', input.projectId))
+      .take(BACKUP_LIMIT + 1);
+    invariant(
+      rows.length <= BACKUP_LIMIT,
+      'BAD_ARGUMENT',
+      'This project keeps too many backup rows to check; the scrub rewrites one base. Nothing was purged.',
+    );
+    return rows
+      .filter(row => row._id !== input.backupId && row.transport === 'objects')
+      .map(row => backupRootPin(row));
   },
 });
 

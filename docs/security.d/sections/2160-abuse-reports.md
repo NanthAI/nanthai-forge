@@ -72,8 +72,15 @@ after the content expires). Look, then act:
   rewrites the stored base and deletes its old objects), and its audit row says
   `done: false` until that finishes. A
   refusal before it wrote anything sets `failed` and returns the report to the
-  open queue; a retry of the same review starts a failed run again.
-  The report's excerpt is kept as the operator's evidence.
+  open queue; a retry of the same review starts a failed run again. A whole
+  Item purged after its deletion is removed from the stored base the same way
+  ([whole Item in the base checkpoint](../../planning.md#whole-item-in-the-base-checkpoint)).
+  After a base rewrite, a presigned link handed out earlier stops working once
+  its bytes are deleted (5 minutes at most), and a CLI's local cache of the old
+  base stays on that machine until its owner removes it.
+  The report's excerpt is kept on the report row as the operator's moderation
+  record, as GitHub keeps reported content for its moderators: only operators
+  read it, and a project purge deletes it with the report.
 - `dismiss` closes the report with no action.
 
 Each action writes a `boardAudit` row naming the report, and the report keeps

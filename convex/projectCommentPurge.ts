@@ -45,6 +45,7 @@ import { removeArtifact } from './artifactStorage';
 import { projectPrefix } from './r2Operations';
 import { baseRevision } from './projectPlanningPurgeSelect';
 import { readArchiveCoverage } from './projectPlanningArchiveCoverage';
+import { noStagedMigration } from './projectWorkDetailMigration';
 import {
   dropFingerprint,
   fingerprint,
@@ -302,6 +303,8 @@ export async function purgeComment(ctx: MutationCtx, input: Input): Promise<0 | 
     'WORK_STALE',
     'A Work index build is running and may copy the comment again. Retry the purge after it finishes. Nothing was purged.',
   );
+  // A detail migration writing a new base copies the comment whole (convex/projectWorkDetailMigration.ts).
+  await noStagedMigration(ctx, input.projectId);
   const partitions = await partitionsOf(ctx, input.projectId);
   for (const partition of partitions)
     invariant(

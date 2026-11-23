@@ -1,21 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Item purge executor (Item 4c9e961e, purge Lane 2). `run` is internal: the 30-day timer and the owner's early
 // removal (purge Lane 4) call it. Order: read-only preflight; selection of every journal row of the Item (all its
-// ids, notes included; refused above PURGE_ROW_LIMIT); the atomic first step (purge command with the row list and
-// the tombstone, plus this purge's progress entry); paged redaction of every store; the completeness check; and
-// only then `purgedAt`. Every step is idempotent, so a purge that stops anywhere resumes by running again with the
+// ids, notes included; refused above PURGE_ROW_LIMIT), and for an Item in the stored base checkpoint every base row
+// too (Item b6588425 line 2e, projectPlanningPurgeSelect basePage); the atomic first step (purge command with the row
+// list and the tombstone, plus this purge's progress entry); paged redaction of every store; for a base Item, the base
+// scrub (convex/projectCommentPurgeBase.ts scrubItem); the completeness check; and only then `purgedAt`. Every step is idempotent, so a purge that stops anywhere resumes by running again with the
 // same operation id, also after an index rebuild (the index steps work on the selected generation, and `finish`
 // refuses when the generation the check read is no longer selected).
 import { v } from 'convex/values';
 import { internalAction, internalMutation, internalQuery } from './server';
-import type { MutationCtx, QueryCtx } from './_generated/server';
+import type { ActionCtx, MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { invariant } from '../src/errors';
 import { PURGE_ROW_LIMIT } from '../src/work-planning-types';
 import { executeCommand } from './projectWorkCommand';
 import {
-  BASE_BLOCK,
+  BASE_CUT,
   baseRevision,
   DISPLAY_BLOCK,
   displaySnapshots,
@@ -45,6 +46,7 @@ import {
 } from './projectPlanningPurgeArchiveSelection';
 import { itemRetentionOperation } from './projectItemRetentionStore';
 import { purgeWalk, walkPurge } from './projectPlanningPurgeWalk';
+import { noStagedMigration } from './projectWorkDetailMigration';
 
 const LATE_ROW_BLOCK =
   'A note reached this Item’s Intent after its purge began; its words are not on the purge’s list, so the purge stays open (not done). Nothing more was purged.';
@@ -59,6 +61,8 @@ const selection = v.object({
   decisions: v.array(v.array(v.string())),
   archive: v.optional(archivePin),
   through: throughRevisions,
+  /** The Item is in the stored base checkpoint: `rows` lists its base rows too, and the purge scrubs the base. */
+  base: v.optional(v.literal(true)),
 });
 const stepName = v.union(...purgeSteps.map(step => v.literal(step)));
 
@@ -116,14 +120,32 @@ export const begin = internalMutation({
       'WORK_STALE',
       'The Item changed before its purge began.',
     );
-    if (
+    const inBase =
       !input.selection.creates ||
       input.selection.created === null ||
-      input.selection.created <= baseRevision(project, target.generation)
-    ) {
+      input.selection.created <= baseRevision(project, target.generation);
+    if (inBase && !input.selection.base) {
       if (input.selection.archive) await clearArchiveSelection(ctx, input.projectId, input.operationId);
       return 'base';
     }
+    if (input.selection.base) {
+      invariant(project.work, 'PROJECT_WORK_MISSING', 'Start hosted Work from a stored source backup.');
+      // One base scrub at a time: a scrub built over a base another one is replacing would keep that one's words.
+      invariant(
+        !project.itemPurges?.some(
+          purge => purge.baseScrub && !purge.baseScrub.done && purge.operationId !== input.operationId,
+        ),
+        'WORK_STALE',
+        'Another purge is scrubbing the base checkpoint; this one runs after it. Nothing was purged.',
+      );
+      invariant(
+        project.work.recordDetails?.backupId !== project.work.backupId,
+        'BAD_ARGUMENT',
+        'This project reads its base through a migrated record-detail catalog, which the base scrub does not rewrite yet. Nothing was purged.',
+      );
+    }
+    // A detail migration writing a new base copies the Item's words whole (convex/projectWorkDetailMigration.ts).
+    await noStagedMigration(ctx, input.projectId);
     invariant(
       input.selection.rows.length <= PURGE_ROW_LIMIT,
       'BAD_ARGUMENT',
@@ -185,8 +207,10 @@ export const begin = internalMutation({
       version: target.item.version,
       decisions: input.selection.decisions,
       rows: input.selection.rows.length,
-      created: input.selection.created,
+      ...(input.selection.created !== null ? { created: input.selection.created } : {}),
       startedAt: Date.now(),
+      // The stored base is scrubbed in the walk (convex/projectPlanningPurgeWalk.ts); the purge is open until then.
+      ...(input.selection.base ? { baseScrub: { backupId: project.work!.backupId, done: false } } : {}),
       ...(project.journalRevision || journalEnabled()
         ? {
             segmentSweep: {
@@ -285,12 +309,20 @@ export const finish = internalMutation({
       'WORK_STALE',
       'The Work index changed during the completeness check. Run the purge again to resume.',
     );
-    // A stored base cut since begin (a record-detail migration) may hold the Item's words again.
-    invariant(
-      purge.created === undefined || purge.created > baseRevision(project, generation!),
-      'BAD_ARGUMENT',
-      BASE_BLOCK,
-    );
+    // A base Item is done once its base scrub is (convex/projectCommentPurgeBase.ts scrubItem). Any other purge: a
+    // stored base cut since begin (a record-detail migration) may hold the Item's words again.
+    if (purge.baseScrub)
+      invariant(
+        purge.baseScrub.done,
+        'WORK_STALE',
+        'The base checkpoint scrub has not finished. Run the purge again to resume.',
+      );
+    else
+      invariant(
+        purge.created === undefined || purge.created > baseRevision(project, generation!),
+        'BAD_ARGUMENT',
+        BASE_CUT,
+      );
     // Copies the redaction steps cannot reach keep the purge open (never done with words left).
     invariant(!(await displaySnapshots(ctx, input.projectId)), 'BAD_ARGUMENT', DISPLAY_BLOCK);
     // A note on the Item's Intent is still accepted after the first step (refusing it would cost every note write a
@@ -312,6 +344,7 @@ export const finish = internalMutation({
         const finished = { ...item, decisions: [], purgedAt };
         delete finished.intentKeys;
         delete finished.segmentSweep;
+        delete finished.baseScrub;
         return finished;
       }),
     });
@@ -433,13 +466,16 @@ export const run = internalAction({
         );
         if (page.done) hot.table++;
       }
+      // A base Item's rows that only the stored base holds (line 2e), selected once begin says it is in the base.
+      let base: ArchiveSelection['rows'] | undefined;
       for (;;) {
         if (Date.now() >= deadline) {
           await resume(expectedVersion, { hot });
           return null;
         }
         const selected = mergeSelection(hot.selected, archived?.selected);
-        if (selected.rows.length > PURGE_ROW_LIMIT && archived)
+        const rows = [...(base ?? []), ...selected.rows];
+        if (rows.length > PURGE_ROW_LIMIT && archived)
           await ctx.runMutation(internal.projectPlanningPurgeArchiveSelection.discard, id);
         const result = await ctx.runMutation(ref.begin, {
           ...id,
@@ -449,13 +485,24 @@ export const run = internalAction({
             ids: preflight.ids,
             created: selected.created,
             creates: selected.creates,
-            rows: selected.rows.map(({ operationId, digest }) => [operationId, digest]),
+            rows: rows.map(({ operationId, digest }) => [operationId, digest]),
             decisions: selected.decisions,
             through: hot.through,
             archive: archived?.pin,
+            ...(base ? { base: true as const } : {}),
           },
         });
-        invariant(result !== 'base', 'BAD_ARGUMENT', BASE_BLOCK);
+        if (result === 'base') {
+          // A base the scrub cannot rewrite refuses here, before anything is written.
+          await ctx.runAction(internal.projectCommentPurgeBase.checkItem, { ...id, itemId: input.itemId });
+          base = await selectBase(ctx, input.projectId, preflight);
+          invariant(
+            base.length + selected.rows.length <= PURGE_ROW_LIMIT,
+            'BAD_ARGUMENT',
+            `This Item has more than ${PURGE_ROW_LIMIT} Work rows; a purge removes at most ${PURGE_ROW_LIMIT}.`,
+          );
+          continue;
+        }
         if (result === 'begun') break;
         archived = await selectArchive();
         if (!archived.done) {
@@ -474,6 +521,38 @@ export const run = internalAction({
     return settled(await ctx.runQuery(ref.status, id));
   },
 });
+
+/** Every base row of the Item (projectPlanningPurgeSelect basePage, page by page). */
+async function selectBase(
+  ctx: ActionCtx,
+  projectId: Id<'hostedProjects'>,
+  preflight: { ids: string[]; historyId: string; intentId: string | null },
+) {
+  const rows: ArchiveSelection['rows'] = [];
+  for (let source = 0, after: number | null = null; ;) {
+    const page: {
+      rows: ArchiveSelection['rows'];
+      source: number;
+      after: number | null;
+      done: boolean;
+    } = await ctx.runQuery(internal.projectPlanningPurgeSelect.basePage, {
+      projectId,
+      ids: preflight.ids,
+      historyId: preflight.historyId,
+      intentId: preflight.intentId,
+      source,
+      after,
+    });
+    rows.push(...page.rows);
+    invariant(
+      rows.length <= PURGE_ROW_LIMIT,
+      'BAD_ARGUMENT',
+      `This Item has more than ${PURGE_ROW_LIMIT} Work rows; a purge removes at most ${PURGE_ROW_LIMIT}.`,
+    );
+    if (page.done) return [...new Map(rows.map(row => [row.operationId, row])).values()];
+    ({ source, after } = page);
+  }
+}
 
 /** A legacy command relocated between the hot and archived reads can appear in both. */
 function mergeSelection(hot: ArchiveSelection, archive?: ArchiveSelection): ArchiveSelection {
