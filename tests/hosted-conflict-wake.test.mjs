@@ -184,7 +184,9 @@ test('d6bc421b: exact advice agrees across ordinary and finite reads through a p
     ranges(legacy).map(reads => reads - 1),
   );
   assert(off[0].cost.ranges <= 18, 'projected finish wait stays within 18 indexed reads');
-  assert(off[1].cost.ranges <= 13, 'projected peer wait stays within 13 indexed reads');
+  // Item 0487bccb: +1 point read of the peer's row per open peer notice (the notice is live only at the
+  // peer head it was decided against); 17/13 before.
+  assert(off[1].cost.ranges <= 14, 'projected peer wait stays within 14 indexed reads');
   t.diagnostic(
     `finish/peer index reads with advice suppressed: legacy ${ranges(legacy)}, projected ${ranges(off)}`,
   );

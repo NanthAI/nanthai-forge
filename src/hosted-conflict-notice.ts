@@ -12,6 +12,8 @@ export const exactConflictsSchema = z.array(
     flaggedAt: z.string(),
     // Optional for older servers; publication advances this only for a changed exact notice.
     generation: z.number().optional(),
+    /** The saved head the notice was decided for (Item 0487bccb); optional for older servers. */
+    head: z.string().optional(),
     earlyResolution: wouldConflictSchema.optional(),
     files: z.array(
       z.object({

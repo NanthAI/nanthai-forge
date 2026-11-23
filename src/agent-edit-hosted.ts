@@ -71,7 +71,12 @@ export async function readHostedEditPeers(
     status: 'allowed',
     coverage: 'hosted',
     checked: 1,
-    ...boardLines(target, (value as { board?: unknown }).board, enqueue),
+    ...boardLines(
+      target,
+      (value as { board?: unknown }).board,
+      enqueue,
+      (value as { peerEvidence?: unknown }).peerEvidence,
+    ),
   };
 }
 const optionalString = (value: unknown) => value === undefined || typeof value === 'string';
@@ -106,10 +111,33 @@ export const touchingLine = (path: string, row: { author?: string; fromLaneId: s
     240,
   );
 };
+/** Another open Lane whose saves change this file and have not landed (Item 0487bccb): its automatic
+ * claim hides once it saves, so the saved-path evidence the same read returns names it. A save still
+ * settling counts too, so the line does not claim a published head. One line ≤240. */
+export const savedLine = (path: string, row: { actor?: string; lane: string }) =>
+  `Saved on ${path.slice(0, 80)}: ${actorLabel(row.actor)} (Lane ${row.lane.slice(0, 8)}) has saved changes to it, not landed yet.`.slice(
+    0,
+    240,
+  );
+/** Open peers that saved `path`, from the path read's peerEvidence (already in this reply: no read). */
+function savedPeers(laneId: string, path: string, evidence: unknown) {
+  const items = (evidence as { items?: unknown } | null)?.items;
+  if (!Array.isArray(items)) return [];
+  const peers = new Map<string, string | undefined>();
+  for (const item of items as { file?: unknown; participants?: unknown; superseded?: unknown }[]) {
+    // A Lane whose Intent another Lane already landed (superseded) is listed by peers(path), not warned.
+    if (item?.file !== path || item.superseded === true || !Array.isArray(item.participants)) continue;
+    for (const row of item.participants as { lane?: unknown; actor?: unknown }[])
+      if (typeof row?.lane === 'string' && row.lane !== laneId && !peers.has(row.lane))
+        peers.set(row.lane, typeof row.actor === 'string' ? row.actor : undefined);
+  }
+  return [...peers].map(([lane, actor]) => ({ lane, ...(actor ? { actor } : {}) }));
+}
 function boardLines(
   target: EditTarget,
   field: unknown,
   enqueue: ClaimQueue,
+  evidence?: unknown,
 ): { board?: { claims: string[]; notices: string[] } } {
   const value = field as {
     messages?: unknown;
@@ -126,8 +154,13 @@ function boardLines(
     typeof value.more !== 'number' ||
     typeof value.cursor !== 'number' ||
     !(value.claims === undefined || (Array.isArray(value.claims) && value.claims.every(isNote)))
-  )
-    return {};
+  ) {
+    // No board news (the server omits the field then): a peer's saved file still warns.
+    const saved = savedPeers(target.laneId, target.path, evidence).slice(0, 2);
+    return saved.length
+      ? { board: { claims: saved.map(row => savedLine(target.path, row)), notices: [] } }
+      : {};
+  }
   // Off the hook's path: queue this path; a detached sender batches and sends it.
   if (value.claim === 'send' && target.url)
     enqueue({
@@ -138,14 +171,23 @@ function boardLines(
       path: target.path,
     });
   const touching = Array.isArray(value.touching) ? value.touching.filter(isTouching).slice(0, 2) : [];
-  const claims = [
-    ...((value.claims as BoardNote[] | undefined) ?? [])
-      .slice(0, 2)
-      .map(
-        claim =>
-          `Claim on ${target.path.slice(0, 80).replace(/[\uD800-\uDBFF]$/, '')}: ${boardNoticeLine(claim, target.laneId)}`,
-      ),
+  const manual = ((value.claims as BoardNote[] | undefined) ?? []).slice(0, 2);
+  // One line per Lane: a Lane with a note or unsaved claim on the path is not repeated as saved.
+  const named = new Set([...touching.map(row => row.fromLaneId), ...manual.map(note => note.fromLaneId)]);
+  const saved = savedPeers(target.laneId, target.path, evidence)
+    .filter(row => !named.has(row.lane))
+    .slice(0, 2);
+  const others = [
+    ...manual.map(
+      claim =>
+        `Claim on ${target.path.slice(0, 80).replace(/[\uD800-\uDBFF]$/, '')}: ${boardNoticeLine(claim, target.laneId)}`,
+    ),
     ...touching.map(row => touchingLine(target.path, row)),
+  ];
+  // Three lines at most; a saved peer keeps one of them (the claims alone can fill the cap).
+  const claims = [
+    ...others.slice(0, saved.length ? 2 : 3),
+    ...saved.map(row => savedLine(target.path, row)),
   ].slice(0, 3);
   const notices = value.messages.length
     ? boardEnvelope(target.root, target.laneId, {

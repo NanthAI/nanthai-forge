@@ -249,31 +249,37 @@ async function setup(t, options = {}) {
           const x = { request: { operationId: args.operationId } };
           const pending = await s.submit(x);
           if (pending.outcome) return JSON.stringify(pending);
-          const terminal = await s.publish(await s.work(x));
-          // Model the scheduled advisory completing before the caller's overlap read.
-          // Publication already has a terminal receipt; late delivery has its own wake guard.
-          const task = s.scheduled.find(
-            task =>
-              task.name === 'projectHostedConflictMerge:run' &&
-              JSON.parse(task.args.plan).head === terminal.outcome.result.head,
-          );
-          if (task) {
-            const plan = JSON.parse(task.args.plan);
-            const result = await trialMerge(plan.tasks, id => {
-              const bytes = s.objects.get(id);
-              if (!bytes) throw new TrialUnavailable(id);
-              return bytes;
-            });
-            await s.transaction('trial', exact.record, {
-              projectId: s.projectId,
-              laneId: plan.laneId,
-              head: plan.head,
-              peers: plan.peers,
-              ...(plan.main ? { mainHead: plan.main.head } : {}),
-              conflicts: result.conflicts,
-            });
-          }
-          return JSON.stringify(terminal);
+          const publish = async () => {
+            const terminal = await s.publish(await s.work(x));
+            // Model the scheduled advisory completing before the caller's overlap read.
+            // Publication already has a terminal receipt; late delivery has its own wake guard.
+            const task = s.scheduled.find(
+              task =>
+                task.name === 'projectHostedConflictMerge:run' &&
+                JSON.parse(task.args.plan).head === terminal.outcome.result.head,
+            );
+            if (task) {
+              const plan = JSON.parse(task.args.plan);
+              const result = await trialMerge(plan.tasks, id => {
+                const bytes = s.objects.get(id);
+                if (!bytes) throw new TrialUnavailable(id);
+                return bytes;
+              });
+              await s.transaction('trial', exact.record, {
+                projectId: s.projectId,
+                laneId: plan.laneId,
+                head: plan.head,
+                peers: plan.peers,
+                ...(plan.main ? { mainHead: plan.main.head } : {}),
+                conflicts: result.conflicts,
+              });
+            }
+            return terminal;
+          };
+          // A save that settles in the background (status settling): the reply comes before its publish.
+          if (await options.deferPublish?.(publish))
+            return JSON.stringify({ status: 'submitted', jobId: 'synthetic' });
+          return JSON.stringify(await publish());
         }
         assert.fail(name);
       },
@@ -1887,3 +1893,56 @@ for (const action of ['status', 'board', 'save', 'peers']) {
     }
   });
 }
+
+test('0487bccb: a settling save reply shows no conflict of the head it replaces; status and peers agree once it lands', async t => {
+  let defer = false,
+    deferred;
+  const { lane, peer, transport } = await setup(t, {
+    // 'later': reply first, publish when the test says; 'first': publish (and decide) before the reply.
+    deferPublish: async publish => {
+      if (defer === 'first') await publish();
+      else if (defer === 'later') deferred = publish;
+      return Boolean(defer);
+    },
+  });
+  const first = transport(lane),
+    second = transport(peer);
+  await first.dispatch('save', { operationId: randomUUID(), message: 'first' });
+  const conflicted = await second.dispatch('save', { operationId: randomUUID(), message: 'second' });
+  assert.equal(conflicted.conflictNotice.items[0].with, lane.id, 'a live conflict shows');
+  // A conflict already decided for the new head of a settling save stays.
+  writeFileSync(join(second.root, 'a.txt'), 'another peer edit');
+  defer = 'first';
+  const decided = await second.dispatch('save', { operationId: randomUUID(), message: 'again' });
+  assert.equal(decided.result.status, 'settling');
+  assert.equal(decided.conflictNotice?.items[0].with, lane.id, 'the new head conflicts too');
+  // The peer takes the first Lane's text, so the new head merges cleanly. A save settling in the
+  // background replies before the server publishes that head: its overlap read still sees the old pair.
+  writeFileSync(join(second.root, 'a.txt'), 'my edit');
+  defer = 'later';
+  const settling = await second.dispatch('save', { operationId: randomUUID(), message: 'resolved' });
+  assert.equal(settling.result.status, 'settling');
+  assert.equal(settling.conflictNotice, undefined, 'no notice for the head this save replaces');
+  await deferred();
+  // Same source as status and peers: the published head has no conflict either.
+  const peers = await second.dispatch('peers', { laneId: peer.id });
+  assert.equal(peers.conflictNotice, undefined);
+  const status = await second.dispatch('status', { laneId: peer.id });
+  assert.equal(status.conflictNotice, undefined);
+});
+
+test('0487bccb: a conflict ends for the other Lane as soon as the peer saves a newer head, before its trial merge', async t => {
+  const { s, lane, peer, transport } = await setup(t);
+  const first = transport(lane),
+    second = transport(peer);
+  await first.dispatch('save', { operationId: randomUUID(), message: 'first' });
+  await second.dispatch('save', { operationId: randomUUID(), message: 'second' });
+  assert.equal((await first.dispatch('peers', { laneId: lane.id })).conflictNotice.items[0].with, peer.id);
+  // The peer publishes a newer head; its trial merge has not recorded yet.
+  const row = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === peer.id);
+  row.head = 'f'.repeat(64);
+  assert.equal((await first.dispatch('peers', { laneId: lane.id })).conflictNotice, undefined);
+  assert.equal((await first.dispatch('status', { laneId: lane.id })).conflictNotice, undefined);
+  const saved = await first.dispatch('save', { operationId: randomUUID(), message: 'no-op' });
+  assert.equal(saved.conflictNotice, undefined, 'save, status and peers agree');
+});

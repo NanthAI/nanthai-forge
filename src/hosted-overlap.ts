@@ -337,6 +337,8 @@ export function hostedOverlapAdvice(
     lanes: string[];
     text: string;
     participants: { lane: string; actor: string; intent: string }[];
+    /** On a path read only: the peer's Intent landed through another Lane (first-write hook skips it). */
+    superseded?: true;
   }[] = [];
   let count = 0,
     blockingCount = 0,
@@ -416,6 +418,7 @@ export function hostedOverlapAdvice(
           0,
           400,
         ),
+        ...(requestedPath && quiet ? { superseded: true as const } : {}),
       };
       if (priority) items.splice(items.findIndex(item => item.class === 'advisory') >>> 0, 0, item);
       else items.push(item);

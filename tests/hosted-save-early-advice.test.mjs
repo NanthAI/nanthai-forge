@@ -81,7 +81,9 @@ for (const earlyResolve of [undefined, 'off'])
       { _handler: ctx => conflicts.laneConflicts(ctx, f.projectId, author.laneId, author.head) },
       {},
     );
-    assert.equal(exactConflictNotice(author.laneId, stale).continuation, undefined);
+    // Item 0487bccb: a notice decided against the peer's older head is not live at all now.
+    assert.deepEqual(stale, []);
+    assert.equal(exactConflictNotice(author.laneId, stale)?.continuation, undefined);
   });
 
 for (const delayMs of [40000, 76000])

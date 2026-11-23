@@ -41,6 +41,9 @@ for (const kind of ['save', 'compose', 'sync']) {
     const lane = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.open);
     const peer = randomUUID(),
       at = Date.now();
+    // The peer Lane is open at the head the notice was decided against (Item 0487bccb).
+    const { _id, _creationTime, ...peerRow } = lane;
+    s.insert('projectHostedOverlapLanes', { ...peerRow, laneId: peer, head: 'peer' });
     s.insert('projectHostedConflictNotices', {
       projectId: s.projectId,
       laneId: lane.laneId,

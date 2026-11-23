@@ -50,7 +50,11 @@ import { rememberBoardServerFeatures } from './board-local.js';
 import { restackAfterSave, type StackHint } from './hosted-stack-restack.js';
 import { coordinateField, firstStartTip, memberDataNotice } from './member-data-notice.js';
 import type { BoardWaitOption } from './hosted-board-wait.js';
-import { exactConflictNotice, type ExactConflictNotice } from './hosted-conflict-notice.js';
+import {
+  exactConflictNotice,
+  type ExactConflictNotice,
+  type ExactConflicts,
+} from './hosted-conflict-notice.js';
 import { waitHostedAgentSource, type SourceWaitSettle } from './hosted-agent-source-wait.js';
 import {
   recoverHostedFinish,
@@ -2275,7 +2279,7 @@ export class HostedAgentTransport {
       advice?.presence && overlapLaneId ? presenceDelivery(overlapLaneId, advice.presence) : undefined;
     const conflictNotice =
       advice && overlapLaneId
-        ? exactConflictNotice(overlapLaneId, advice.conflicts ?? [])
+        ? exactConflictNotice(overlapLaneId, liveConflicts(this.root, action, result, advice.conflicts))
         : this.sourceNotice;
     this.sourceNotice = undefined;
     const board =
@@ -2979,3 +2983,11 @@ const tipField = (): { tip?: string } => {
   const tip = firstStartTip();
   return tip ? { tip } : {};
 };
+/** A save settling in the background replies before the server publishes its new head (Item
+ * 0487bccb): notices for the head it replaces (the marker's) are not live. A notice the server
+ * already decided for the new head stays; an older server names no head, so all such notices go. */
+function liveConflicts(root: string, action: string, result: unknown, conflicts: ExactConflicts = []) {
+  if (action !== 'save' || (result as { status?: unknown } | null)?.status !== 'settling') return conflicts;
+  const replaced = readHostedLaneCheckout(hostedAgentRoot(root))?.selection.head;
+  return conflicts.filter(conflict => conflict.head !== undefined && conflict.head !== replaced);
+}

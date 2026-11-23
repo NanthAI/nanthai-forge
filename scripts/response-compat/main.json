@@ -5008,6 +5008,9 @@
               "generation": {
                 "type": "number"
               },
+              "head": {
+                "type": "string"
+              },
               "earlyResolution": {
                 "anyOf": [
                   {

@@ -25,7 +25,8 @@ export function hostedMarker(root, url, laneId = laneB, files = 0) {
 }
 /** Independent event loop: synchronous hook supervisors must not starve the fixture server. The hosted
  * first write reads only board claims and notes (Issue 853fcde3): another Lane touches shared.txt. */
-export async function hostedEditServer() {
+/** `replies` (optional): path -> overlap read value to answer for that path instead (a recorded reply). */
+export async function hostedEditServer(replies = {}) {
   const counts = new Int32Array(new SharedArrayBuffer(16));
   const server = new Worker(
     `
@@ -41,6 +42,11 @@ export async function hostedEditServer() {
       }
       if (args.path === 'slow.txt') { setTimeout(() => res.end(), 3000).unref(); return; }
       if (args.path === 'unreachable.txt') { req.socket.destroy(); return; }
+      if (Object.hasOwn(workerData.replies, args.path)) {
+        res.setHeader('Content-Type','application/json');
+        res.end(JSON.stringify({status:'success',value:workerData.replies[args.path],logLines:[]}));
+        return;
+      }
       const touching = args.path === 'shared.txt' ? [{ author: 'thevarsek/peer', fromLaneId: '${laneA}', at: Date.now() - 120000 }] : [];
       const board = { messages: [], more: 0, cursor: args.board.after, touching };
       res.setHeader('Content-Type','application/json');
@@ -48,7 +54,7 @@ export async function hostedEditServer() {
     });
     server.listen(0, '127.0.0.1', () => parentPort.postMessage(server.address().port));
   `,
-    { eval: true, execArgv: [], workerData: { counts: counts.buffer } },
+    { eval: true, execArgv: [], workerData: { counts: counts.buffer, replies } },
   );
   const [port] = await once(server, 'message');
   return { url: `http://127.0.0.1:${port}`, counts, close: () => server.terminate() };

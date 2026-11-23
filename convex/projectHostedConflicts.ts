@@ -527,30 +527,40 @@ export async function laneConflicts(
     after !== undefined && rows.some(row => row.updatedAt > after)
       ? (await laneRow(ctx, projectId, laneId))?.head
       : head;
-  const current = rows.filter(
+  const candidates = rows.filter(
     row =>
       (currentHead === undefined || row.laneHead === currentHead) &&
       (after === undefined || row.updatedAt > after),
   );
+  // A notice is live only while the peer Lane is open at the head it was decided against (Item
+  // 0487bccb): a peer's newer save is re-decided by its own trial merge. One point read per peer, and
+  // only when an open notice names one; main rows need none.
+  const peers = new Map(
+    await Promise.all(
+      [...new Set(candidates.map(row => row.peer).filter(peer => peer !== MAIN))].map(
+        async peer => [peer, await laneRow(ctx, projectId, peer)] as const,
+      ),
+    ),
+  );
+  const current = candidates.filter(row => {
+    if (row.peer === MAIN) return true;
+    const peer = peers.get(row.peer);
+    return Boolean(peer?.open && peer.head === row.peerHead);
+  });
   const project = current.some(row => row.earlyResolution)
     ? (authorizedProject ?? (await ctx.db.get(projectId)))
     : null;
   const enabled = project && (await earlyResolutionForProject(ctx, project));
-  return Promise.all(
-    current.map(async row => {
-      const peer = enabled && row.earlyResolution ? await laneRow(ctx, projectId, row.peer) : null;
-      return {
-        with: row.peer,
-        goal: row.peerGoal,
-        flaggedAt: new Date(row.flaggedAt).toISOString(),
-        generation: row.updatedAt,
-        files: row.paths,
-        ...(peer?.open && peer.head === row.peerHead && row.earlyResolution
-          ? { earlyResolution: JSON.parse(row.earlyResolution) }
-          : {}),
-      };
-    }),
-  );
+  return current.map(row => ({
+    with: row.peer,
+    goal: row.peerGoal,
+    flaggedAt: new Date(row.flaggedAt).toISOString(),
+    generation: row.updatedAt,
+    // The saved head this notice was decided for: a settling save drops the head it replaces.
+    head: row.laneHead,
+    files: row.paths,
+    ...(enabled && row.earlyResolution ? { earlyResolution: JSON.parse(row.earlyResolution) } : {}),
+  }));
 }
 
 /** Notices read per summary: a week of dogfood is well under this. */
