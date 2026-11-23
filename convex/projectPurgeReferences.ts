@@ -14,7 +14,7 @@ type StorageRow = { storageId?: StorageId; archiveReceipt?: { storageId?: Storag
 type KeyRow = { r2Key?: string; archiveReceipt?: { r2Key?: string } };
 type AliasRow = { projectId: ProjectId };
 type AliasQuery = PageQuery<AliasRow> & { take: (count: number) => Promise<AliasRow[]> };
-type Side = 'lt' | 'gt';
+type KeyedRow = { projectId: ProjectId } & KeyRow;
 
 const candidates = {
   objects: (ctx, projectId) =>
@@ -47,39 +47,41 @@ const aliasTable = {
   proposals: 'projectProposals',
 };
 
-// Seek directly to both sides of the selected project. These scans read only
-// metadata families with stored keys and add no maintained indexes.
-const foreignRows = {
-  objectKeys: [
-    'projectObjects',
-    (ctx, projectId, side) =>
-      ctx.db.query('projectObjects').withIndex('by_project_and_digest', q => q[side]('projectId', projectId)),
-  ],
-  backupKeys: [
-    'projectBackups',
-    (ctx, projectId, side) =>
-      ctx.db.query('projectBackups').withIndex('by_project', q => q[side]('projectId', projectId)),
-  ],
-  proposalKeys: [
-    'projectProposals',
-    (ctx, projectId, side) =>
-      ctx.db
-        .query('projectProposals')
-        .withIndex('by_project_and_operation', q => q[side]('projectId', projectId)),
-  ],
-  uploadKeys: [
-    'projectUploadCleanup',
-    (ctx, projectId, side) =>
-      ctx.db
-        .query('projectUploadCleanup')
-        .withIndex('by_project_and_pending', q => q[side]('projectId', projectId)),
-  ],
-} satisfies Record<
-  string,
-  [string, (ctx: Pick<QueryCtx, 'db'>, projectId: ProjectId, side: Side) => PageQuery<KeyRow>]
->;
+// Every stored key under the selected project's prefix, from any project, on an index of the stored
+// key itself (Item 411727ba): Convex maintains it, so no writer can miss a row. The page reads the
+// selected project's own key-bearing rows plus real matches, never every other project's rows.
+// Prefixes are ASCII and end in '/', so the range [prefix, prefix with '/' -> '0') is startsWith.
+type KeyField = 'r2Key' | 'archiveReceipt.r2Key';
+const keyRows = {
+  objectKeys: ['projectObjects', 'r2Key'],
+  backupKeys: ['projectBackups', 'r2Key'],
+  archiveKeys: ['projectBackups', 'archiveReceipt.r2Key'],
+  proposalKeys: ['projectProposals', 'r2Key'],
+  uploadKeys: ['projectUploadCleanup', 'r2Key'],
+} as const satisfies Record<Exclude<(typeof r2Sections)[number], 'artifactKeys'>, [string, KeyField]>;
+function keyRange(ctx: Pick<QueryCtx, 'db'>, section: keyof typeof keyRows, prefix: string) {
+  const end = prefix.slice(0, -1) + '0';
+  const db = ctx.db;
+  const ranges = {
+    objectKeys: () =>
+      db.query('projectObjects').withIndex('by_r2Key', q => q.gte('r2Key', prefix).lt('r2Key', end)),
+    backupKeys: () =>
+      db.query('projectBackups').withIndex('by_r2Key', q => q.gte('r2Key', prefix).lt('r2Key', end)),
+    archiveKeys: () =>
+      db
+        .query('projectBackups')
+        .withIndex('by_archive_r2Key', q =>
+          q.gte('archiveReceipt.r2Key', prefix).lt('archiveReceipt.r2Key', end),
+        ),
+    proposalKeys: () =>
+      db.query('projectProposals').withIndex('by_r2Key', q => q.gte('r2Key', prefix).lt('r2Key', end)),
+    uploadKeys: () =>
+      db.query('projectUploadCleanup').withIndex('by_r2Key', q => q.gte('r2Key', prefix).lt('r2Key', end)),
+  } satisfies Record<keyof typeof keyRows, () => PageQuery<KeyedRow>>;
+  return ranges[section]() as PageQuery<KeyedRow>;
+}
 
-type Section = keyof typeof candidates | keyof typeof foreignRows | 'artifactKeys';
+type Section = keyof typeof candidates | (typeof r2Sections)[number];
 const sections = [...Object.keys(candidates), ...r2Sections] as Section[];
 const cursor = v.union(v.string(), v.null());
 const scan = v.object({
@@ -191,7 +193,7 @@ const isStorage = (section: Section): section is keyof typeof candidates =>
 async function scanSection(
   ctx: QueryCtx,
   projectId: ProjectId,
-  { section, cursor, side = 'lt', single }: Infer<typeof scan>,
+  { section, cursor, side, single }: Infer<typeof scan>,
   references: Reference[],
 ): Promise<Position | null> {
   const following = sections[sections.indexOf(section) + 1];
@@ -218,21 +220,25 @@ async function scanSection(
     await scanR2References(
       ctx,
       projectId,
-      { section, side, cursor, ...(single ? { single } : {}) },
+      { section, cursor, ...(side ? { side } : {}), ...(single ? { single } : {}) },
       references,
     )
   ).next;
 }
 
 /** Returns the next unchecked R2 range. A split-required page can prove presence
- * but cannot prove absence, so retry its original range one document at a time. */
+ * but cannot prove absence, so retry its original range one document at a time.
+ * A position saved by the earlier per-side foreign scan carries `side`; its cursor
+ * belongs to another index, so it proves nothing and the scan restarts. */
 export async function scanR2References(
   ctx: Pick<QueryCtx, 'db'>,
   projectId: ProjectId,
-  position: Infer<typeof r2ReferencePosition> = { section: 'objectKeys', cursor: null },
+  saved: Infer<typeof r2ReferencePosition> = { section: 'objectKeys', cursor: null },
   references: Reference[] = [],
 ) {
-  const { section, cursor, side = 'lt', single } = position;
+  const position: Infer<typeof r2ReferencePosition> =
+    saved.side === undefined ? saved : { section: 'objectKeys', cursor: null };
+  const { section, cursor, single } = position;
   const following = r2Sections[r2Sections.indexOf(section) + 1];
   const resume = following ? { section: following, cursor: null } : null;
   const prefix = projectPrefix(projectId);
@@ -248,7 +254,7 @@ export async function scanR2References(
       'WORK_STALE',
       'The R2 reference range did not advance.',
     );
-    return page.isDone ? end : { section, side, cursor: page.continueCursor };
+    return page.isDone ? end : { section, cursor: page.continueCursor };
   };
 
   if (section === 'artifactKeys') {
@@ -268,16 +274,14 @@ export async function scanR2References(
     return { next: advance(page, resume), references };
   }
 
-  const [table, range] = foreignRows[section];
-  const page = await read<KeyRow>(range(ctx, projectId, side), 256);
-  for (const row of page.page)
-    for (const key of [row.r2Key, row.archiveReceipt?.r2Key])
-      if (key?.startsWith(prefix)) references.push({ key, table });
-
-  return {
-    next: advance(page, side === 'lt' ? { section, side: 'gt', cursor: null } : resume),
-    references,
-  };
+  const [table, field] = keyRows[section];
+  const page = await read(keyRange(ctx, section, prefix), 256);
+  // Own rows enter the range too; only another project's row is a reference.
+  for (const row of page.page) {
+    const key = field === 'r2Key' ? row.r2Key : row.archiveReceipt?.r2Key;
+    if (row.projectId !== projectId && key?.startsWith(prefix)) references.push({ key, table });
+  }
+  return { next: advance(page, resume), references };
 }
 
 export async function referencePage(

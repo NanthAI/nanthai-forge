@@ -861,7 +861,7 @@ export default defineSchema({
     .index('by_upload', ['uploadId'])
 
     .index('by_project_and_pending', ['projectId', 'pending'])
-    .index('by_r2Key', { fields: ['r2Key'], staged: true }),
+    .index('by_r2Key', ['r2Key']),
   projectReaders: defineTable({ projectId: v.id('hostedProjects'), reader: v.string() })
     .index('by_project_and_reader', ['projectId', 'reader'])
     .index('by_reader', ['reader']),
@@ -925,7 +925,7 @@ export default defineSchema({
   projectProposals: defineTable(projectProposalFields)
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_storage', ['storageId'])
-    .index('by_r2Key', { fields: ['r2Key'], staged: true }),
+    .index('by_r2Key', ['r2Key']),
   projectItemRetention: defineTable({
     projectId: v.id('hostedProjects'),
     itemId: v.string(),
@@ -975,8 +975,8 @@ export default defineSchema({
     .index('by_project', ['projectId'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_storage', ['storageId'])
-    .index('by_r2Key', { fields: ['r2Key'], staged: true })
-    .index('by_archive_r2Key', { fields: ['archiveReceipt.r2Key'], staged: true }),
+    .index('by_r2Key', ['r2Key'])
+    .index('by_archive_r2Key', ['archiveReceipt.r2Key']),
   projectInterests: defineTable(interestFields)
     .index('by_importId', ['importId'])
     .index('by_owner_and_importId', ['owner', 'importId'])

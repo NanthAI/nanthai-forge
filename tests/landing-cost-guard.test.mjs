@@ -915,6 +915,10 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   // coordination session row while it is open (released with its presence row at close). Fixed per open Lane,
   // not per landing or history.
   // Each adds 357 modeled key bytes to the existing per-project and per-Lane event-time keys.
+  // Ten-landing index writes 13,852 -> 13,890 and stored entries +10/+16/+56/+56 (Item 411727ba, Fable verdict
+  // 184c7d95): the purge reference proof reads stored-key indexes (by_r2Key on objects, backups, proposals,
+  // upload cleanup; by_archive_r2Key), so each object row written carries one more ~110 B index entry. That
+  // replaces a scan of every other project's rows per deletion (3.1 GB on 11-22).
   const indexBudget = storageBudgets.tenLandingIndexes;
   const aliasWrites = ten.reduce((n, s) => n + s.metricAliasWrites, 0);
   // 0de95ef2: the separately priced aliases must fit their measured budget.
@@ -1532,6 +1536,9 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
   // index key bytes to the immediate and retained budgets in both scenarios.
   // 9064e885: the existing queue row retains one 55-byte main-receipt pin per project.
   // The acceptance timing evidence adds 50 B fresh and 21 B dogfood to each request.
+  // Item 411727ba: the stored-key purge indexes hold one ~115 B entry per object, backup, proposal and upload
+  // cleanup row: stored entries 225 -> 231 fresh and 24,789 -> 28,889 dogfood before landing, plus about 8
+  // per landing scenario. Index writes stay within budget. The entry lives and dies with its row.
   for (const [name, scenario] of Object.entries(scenarios)) {
     const indexBudget = storageBudgets[name].indexes;
     const aliasBudget = storageBudgets[name].metricAliases;

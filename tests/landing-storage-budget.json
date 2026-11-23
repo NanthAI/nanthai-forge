@@ -64,23 +64,32 @@
     },
     "indexes": {
       "before": {
-        "entries": 225,
-        "keyBytes": 15819
+        "entries": 231,
+        "keyBytes": 16621
       },
       "immediate": {
-        "entries": 416,
-        "keyBytes": 31859
+        "entries": 424,
+        "keyBytes": 32956
       },
       "retained": {
-        "entries": 421,
-        "keyBytes": 32160
+        "entries": 429,
+        "keyBytes": 33257
       },
       "written": 1611
     },
     "metricAliases": {
-      "before": { "entries": 3, "keyBytes": 733 },
-      "immediate": { "entries": 13, "keyBytes": 2531 },
-      "retained": { "entries": 13, "keyBytes": 2531 },
+      "before": {
+        "entries": 3,
+        "keyBytes": 733
+      },
+      "immediate": {
+        "entries": 13,
+        "keyBytes": 2531
+      },
+      "retained": {
+        "entries": 13,
+        "keyBytes": 2531
+      },
       "written": 13
     }
   },
@@ -149,23 +158,32 @@
     },
     "indexes": {
       "before": {
-        "entries": 24789,
-        "keyBytes": 1680083
+        "entries": 28889,
+        "keyBytes": 2154715
       },
       "immediate": {
-        "entries": 25173,
-        "keyBytes": 1711591
+        "entries": 29281,
+        "keyBytes": 2187214
       },
       "retained": {
-        "entries": 25206,
-        "keyBytes": 1714338
+        "entries": 29314,
+        "keyBytes": 2189961
       },
       "written": 3028
     },
     "metricAliases": {
-      "before": { "entries": 3, "keyBytes": 739 },
-      "immediate": { "entries": 22, "keyBytes": 4194 },
-      "retained": { "entries": 22, "keyBytes": 4194 },
+      "before": {
+        "entries": 3,
+        "keyBytes": 739
+      },
+      "immediate": {
+        "entries": 22,
+        "keyBytes": 4194
+      },
+      "retained": {
+        "entries": 22,
+        "keyBytes": 4194
+      },
       "written": 22
     }
   },
@@ -189,32 +207,44 @@
   },
   "tenLandingIndexes": {
     "landings": 10,
-    "written": 13852,
+    "written": 13890,
     "metricAliases": {
       "written": 77,
       "stored": [
-        { "entries": 13, "keyBytes": 2531 },
-        { "entries": 22, "keyBytes": 4166 },
-        { "entries": 43, "keyBytes": 9074 },
-        { "entries": 43, "keyBytes": 9074 }
+        {
+          "entries": 13,
+          "keyBytes": 2531
+        },
+        {
+          "entries": 22,
+          "keyBytes": 4166
+        },
+        {
+          "entries": 43,
+          "keyBytes": 9074
+        },
+        {
+          "entries": 43,
+          "keyBytes": 9074
+        }
       ]
     },
     "stored": [
       {
-        "entries": 868,
-        "keyBytes": 52829
+        "entries": 878,
+        "keyBytes": 53932
       },
       {
-        "entries": 1062,
-        "keyBytes": 67797
+        "entries": 1078,
+        "keyBytes": 69588
       },
       {
-        "entries": 2173,
-        "keyBytes": 154482
+        "entries": 2229,
+        "keyBytes": 160868
       },
       {
-        "entries": 2173,
-        "keyBytes": 154482
+        "entries": 2229,
+        "keyBytes": 160868
       }
     ]
   }

@@ -217,7 +217,7 @@ test('a byte-limited R2 page resumes at a large document without calling the pur
       stateTree: '∑'.repeat(220_000),
     });
   const read = reader(s.ctx);
-  const first = await read({ next: { section: 'objectKeys', side: 'gt', cursor: null } });
+  const first = await read({ next: { section: 'objectKeys', cursor: null } });
   const second = await read({ next: first.next });
   const third = await read({ next: second.next });
   assert.deepEqual(
@@ -265,4 +265,148 @@ test('the internal preflight rejects unknown retained projects and non-storage a
     read({ next: { section: 'fileChecks', remaining: [projectId], aliases: [], resume: null } }),
     { code: 'BAD_ARGUMENT' },
   );
+});
+
+// Item 411727ba: the proof reads key-prefix ranges on indexes of the stored key. The scan it
+// replaced (every other project's rows, both sides of the selected project on the by-project
+// indexes) is kept here as the oracle: both must find the same references for every project.
+const { scanR2References } = await import(moduleUrl('../convex/projectPurgeReferences.ts'));
+const oracleRanges = [
+  ['projectObjects', 'by_project_and_digest'],
+  ['projectBackups', 'by_project'],
+  ['projectProposals', 'by_project_and_operation'],
+  ['projectUploadCleanup', 'by_project_and_pending'],
+];
+async function oracle(ctx, id) {
+  const prefix = projectPrefix(id),
+    found = [];
+  for (const [table, index] of oracleRanges)
+    for (const side of ['lt', 'gt']) {
+      let cursor = null,
+        page;
+      do {
+        page = await ctx.db
+          .query(table)
+          .withIndex(index, q => q[side]('projectId', id))
+          .paginate({ cursor, numItems: 7 });
+        for (const row of page.page)
+          for (const key of [row.r2Key, row.archiveReceipt?.r2Key])
+            if (key?.startsWith(prefix)) found.push({ key, table });
+        cursor = page.continueCursor;
+      } while (!page.isDone);
+    }
+  return found;
+}
+async function indexed(read, id) {
+  const found = [];
+  let next = { section: 'objectKeys', cursor: null },
+    reads = 0;
+  // Stop before the artifact section: the oracle covers the four key-bearing families.
+  while (next && next.section !== 'artifactKeys') {
+    const page = await read({ projectId: id, next });
+    found.push(...page.references);
+    reads += page.documentsRead;
+    next = page.next;
+  }
+  return { found, reads };
+}
+const keySet = refs => new Set(refs.map(({ key, table }) => `${table} ${key}`));
+function seeded(seed) {
+  return () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+}
+// Most keys sit under their own project's prefix; `foreign` of them name another project's.
+const keyedFixture = (random, ids, rows, foreign) => {
+  const s = fixture();
+  for (const id of ids) s.insert('hostedProjects', id, { owner: 'owner' });
+  const pick = list => list[Math.floor(random() * list.length)];
+  let owner;
+  const key = () =>
+    random() < 0.15
+      ? undefined
+      : `${projectPrefix(random() < foreign ? pick(ids) : owner)}o/${Math.floor(random() * 40)}`;
+  for (let i = 0; i < rows; i++) {
+    owner = pick(ids);
+    const fields = k => (k === undefined ? {} : { r2Key: k });
+    const kind = Math.floor(random() * 4);
+    if (kind === 0)
+      s.insert('projectObjects', `o-${i}`, { projectId: owner, digest: `d${i}`, ...fields(key()) });
+    if (kind === 1) {
+      const archive = key();
+      s.insert('projectBackups', `b-${i}`, {
+        projectId: owner,
+        ...fields(key()),
+        ...(archive === undefined ? {} : { archiveReceipt: { r2Key: archive } }),
+      });
+    }
+    if (kind === 2)
+      s.insert('projectProposals', `p-${i}`, { projectId: owner, operationId: `op${i}`, ...fields(key()) });
+    if (kind === 3)
+      s.insert('projectUploadCleanup', `u-${i}`, {
+        projectId: owner,
+        pending: random() < 0.5,
+        ...fields(key()),
+      });
+  }
+  return s;
+};
+
+test('the indexed R2 key proof finds exactly the references of the per-project scan it replaced', async () => {
+  // Ids sort below and above the target; one shares its text as a prefix.
+  const ids = ['project-a', 'project-0', 'project-z', 'project-a0', 'project-b'];
+  const outcomes = new Set();
+  for (let seed = 1; seed <= 12; seed++) {
+    const s = keyedFixture(seeded(seed), ids, 400, seed % 3 ? 0.02 : 0);
+    const read = reader(s.ctx);
+    for (const id of ids) {
+      const expected = keySet(await oracle(s.ctx, id));
+      const { found } = await indexed(read, id);
+      assert.deepEqual(keySet(found), expected, `seed ${seed}, ${id}`);
+      assert.equal(found.length > 0, expected.size > 0, `seed ${seed}, ${id}: blocked/clear outcome`);
+      outcomes.add(expected.size > 0 ? 'blocked' : 'clear');
+    }
+  }
+  assert.deepEqual([...outcomes].sort(), ['blocked', 'clear'], 'fixtures cover both outcomes');
+});
+
+test('a deletion reads the same documents when other projects hold ten times as many key rows', async () => {
+  const reads = [];
+  for (const scale of [1, 10]) {
+    const s = fixture();
+    for (let i = 0; i < 20; i++)
+      s.insert('projectObjects', `own-${i}`, { projectId, digest: `d${i}`, r2Key: `${prefix}o/${i}` });
+    s.insert('projectBackups', 'foreign-match', {
+      projectId: foreignId,
+      archiveReceipt: { r2Key: `${prefix}o/shared` },
+    });
+    for (let i = 0; i < 300 * scale; i++)
+      s.insert('projectObjects', `foreign-${i}`, {
+        projectId: foreignId,
+        digest: `f${i}`,
+        r2Key: `${projectPrefix(foreignId)}o/${i}`,
+      });
+    const { found, reads: documents } = await indexed(reader(s.ctx), projectId);
+    assert.deepEqual(found, [{ key: `${prefix}o/shared`, table: 'projectBackups' }]);
+    reads.push(documents);
+  }
+  assert.equal(reads[0], reads[1]);
+  // The project record per page plus the 20 own rows and the one match.
+  assert.ok(reads[0] <= 30, String(reads[0]));
+});
+
+test('a purge position saved by the per-side scan restarts the proof from the first key section', async () => {
+  const s = fixture();
+  s.insert('projectObjects', 'foreign-object', {
+    projectId: foreignId,
+    digest: 'd',
+    r2Key: `${prefix}o/shared`,
+  });
+  for (const side of ['lt', 'gt']) {
+    const scan = await scanR2References(s.ctx, projectId, {
+      section: 'uploadKeys',
+      side,
+      cursor: 'old-cursor',
+    });
+    assert.deepEqual(scan.references, [{ key: `${prefix}o/shared`, table: 'projectObjects' }]);
+    assert.deepEqual(scan.next, { section: 'backupKeys', cursor: null });
+  }
 });

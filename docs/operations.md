@@ -1068,10 +1068,22 @@ receipt, which the scan visits after backups and proposals.
 Each scan delivery makes one action, one query and one mutation. It reads one
 index page and at most two project records. The artifact section adds up to
 eight indexed alias probes. Per delivery the document-read budget is under 4 MiB
-for the foreign-project ranges and under 8 MiB for artifacts. The scan keeps only
-one page in memory and makes zero R2 requests. The work scales with foreign rows
-in the four indexed families and artifacts in the selected namespace. It adds
-zero maintained indexes, idle calls or landing-path calls.
+for the key ranges and under 8 MiB for artifacts. The scan keeps only
+one page in memory and makes zero R2 requests. Each key section reads one range
+on an index of the stored key (`by_r2Key` on objects, backups, proposals and
+upload cleanup receipts, `by_archive_r2Key` on backup archive receipts): only
+rows whose key lies under the selected prefix, from any project. The selected
+project's own rows are skipped by `projectId`. The work scales with the selected
+project's remaining keyed rows plus real matches, not with other projects' rows.
+It adds no idle or landing-path calls. Each key-bearing row write maintains one more
+index entry. A purge position saved by the earlier per-project scan (it carries
+`side`) proves nothing under the new ranges, so the scan restarts from objects.
+
+`r2SweepKey`, `projectObjectReceipts.sourceBinding.r2Key` and catalog pack keys
+are not reference fields. A sweep key is a pending delete of the row's own earlier
+key, which the sweep claims only under its own project's prefix. A source binding is validated
+against its row's project at publication and read time. A catalog pack key is
+derived from the catalog page's project and pack digest; it is never stored.
 
 After the reference scan completes, each prefix page makes one query, one LIST,
 at most 100 DELETEs and one mutation. The receipt counts removed `r2Objects` and
@@ -1167,10 +1179,9 @@ Pass the returned `next` object alongside the same `projectId` until `next` is
 table, and transaction counts for queries, documents and bytes read. A file may
 appear on multiple pages. Each file match names the first external reference
 found. Legacy storage checks cover objects, backups, archive receipts,
-proposals and import artifact aliases. R2 checks page foreign object, backup,
-proposal and upload cleanup records using their existing project indexes. They
-compare the direct keys, including nested archive receipt keys, to the selected
-project's exact prefix. The project artifact namespace page checks import links
+proposals and import artifact aliases. R2 checks page object, backup, archive
+receipt, proposal and upload cleanup keys under the selected project's exact prefix
+on the stored-key indexes, and report rows of other projects. The project artifact namespace page checks import links
 to those artifacts. Source point bindings validate their own project's key at
 publication and read time. Foreign keys in the selected project's rows fall
 outside the prefix that its purge can delete.
