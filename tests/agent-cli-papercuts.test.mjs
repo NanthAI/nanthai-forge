@@ -262,3 +262,10 @@ test('an unknown top-level key names the accepted keys in the refusal, so no --h
   assert.match(message, /Accepted: model, outcome, constraints, intentId/);
   assert.doesNotMatch(refused('start', { planningItemId: 'short' }), /Accepted:/, 'only on an unknown key');
 });
+
+// 6b7d5a79 tiny-brief test: a fresh agent read its Item with show {planningItemId} (one wasted call).
+test('an Item id given to another read names the Item read (6b7d5a79)', () => {
+  const message = refused('show', { planningItemId: 'ITEM' });
+  assert.match(message, /An Item is read with nforge agent \S+ planning '\{"planningItemId":"ITEM"\}'/);
+  assert.doesNotMatch(refused('show', { item: 'ITEM' }), /An Item is read/);
+});

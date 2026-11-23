@@ -70,10 +70,15 @@ export function validateHostedCliCommand(
     parsed.error.issues.some(issue => issue.code === 'unrecognized_keys' && issue.path.length === 0)
       ? ` Accepted: ${Object.keys(schema.shape).join(', ')}.`
       : '';
+  // An Item id given to another read means the Item read (6b7d5a79 tiny-brief: show {planningItemId}).
+  const itemRead =
+    accepted && requestedAction !== 'planning' && typeof parameters.planningItemId === 'string'
+      ? ` An Item is read with ${actionRoot('planning')} planning '${JSON.stringify({ planningItemId: parameters.planningItemId })}'.`
+      : '';
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    `Invalid ${requestedAction} parameters: ${parsed.success ? '' : describeIssues(parsed.error.issues, parameters)}.${accepted} Run ${actionRoot(requestedAction)} ${requestedAction} --help, correct the named fields and retry.${listed}`,
+    `Invalid ${requestedAction} parameters: ${parsed.success ? '' : describeIssues(parsed.error.issues, parameters)}.${accepted} Run ${actionRoot(requestedAction)} ${requestedAction} --help, correct the named fields and retry.${itemRead}${listed}`,
   );
   // A bare start has nothing to start (Issue ec7bd1b5): refused before any call, as dispatch does.
   if (requestedAction === 'start') {
