@@ -140,6 +140,16 @@ test('the live line reports running checks, grouped Lane counts and configured q
   const single = check('running');
   const queued = check('queued');
   const passed = check('passed');
+  // A landing in the checking phase whose CI run is not even named yet (9e748e41, owner 16:36Z).
+  const bareId = randomUUID();
+  const bareRow = f.insert('projectHostedLandingRequests', {
+    ...landing,
+    submissionId: bareId,
+    phase: 'checking',
+    operationId: randomUUID(),
+    value: JSON.stringify({ ...state, id: bareId }),
+  });
+  const bare = { key: bareId.slice(0, 8), rowId: bareRow };
   const unrelated = check('running', at + 10_000, undefined, false); // A run whose work has no Lanes on Flow.
   const [queue] = f.tables.projectHostedLandingQueues.values();
   f.tables.projectHostedLandingQueues.set(queue._id, { ...queue, train: [shared.submissionId] });
@@ -168,9 +178,10 @@ test('the live line reports running checks, grouped Lane counts and configured q
   lane(shared.key);
   lane(single.key);
   lane(queued.key);
+  lane(bare.key);
   lane(passed.key, 'ready');
   lane(shared.key, 'checking', true);
-  for (let i = 7; i < 56; i++) lane(undefined, 'editing');
+  for (let i = 8; i < 56; i++) lane(undefined, 'editing');
 
   const started = performance.now();
   const { checks, ...baseline } = await read(f);
@@ -181,7 +192,22 @@ test('the live line reports running checks, grouped Lane counts and configured q
     [
       { groups: [single.key], lanes: 1, at: Date.parse(reservedAt), reserved: true },
       { groups: [shared.key], lanes: 2, at },
-    ],
+      // Checks that hold a slot with no CI run started are drawn and counted, never dropped: one whose run is queued at
+      // the provider, and one with no run named yet. `at` is when each was requested.
+      ...[queued, bare]
+        .map(entry => ({
+          groups: [entry.key],
+          lanes: 1,
+          at: f.tables.projectHostedLandingRequests.get(entry.rowId)._creationTime,
+          starting: true,
+        }))
+        .sort((a, b) => a.at - b.at),
+    ].sort((a, b) => a.at - b.at),
+  );
+  assert.equal(
+    checks.pickupMs,
+    at - Date.parse(reservedAt),
+    'the middle request-to-start time of the runs in view',
   );
   assert.equal(checks.free, 1, 'use the train and its pinned width, excluding independent admission checks');
   assert.equal(checks.partial, undefined);
@@ -191,7 +217,8 @@ test('the live line reports running checks, grouped Lane counts and configured q
   );
   const before = Buffer.byteLength(JSON.stringify(baseline));
   const after = Buffer.byteLength(JSON.stringify({ ...baseline, checks }));
-  assert.ok(after - before < 180, 'only the check summaries cross the feed');
+  // Four run summaries now (two of them starting, 9e748e41) and the pickup time: about 100 bytes each.
+  assert.ok(after - before < 420, 'only the check summaries cross the feed');
   t.diagnostic(
     JSON.stringify({
       before,
@@ -224,7 +251,7 @@ test('the live line reports running checks, grouped Lane counts and configured q
   const originalLanding = f.tables.projectHostedLandingRequests.get(single.rowId);
   f.tables.projectHostedLandingRequests.set(single.rowId, { ...originalLanding, runId: replacement.runId });
   assert.deepEqual(
-    (await read(f)).checks.runs.sort((a, b) => a.at - b.at),
+    (await read(f)).checks.runs.filter(run => !run.starting).sort((a, b) => a.at - b.at),
     [
       { groups: [shared.key], lanes: 2, at },
       { groups: [single.key], lanes: 1, at: at + 20_000 },

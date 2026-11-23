@@ -42,8 +42,16 @@ export type LineFeed = {
   flow?: FlowDayFeed;
   /** Recorded runs for open Lanes and available room in the check pipeline. */
   checks?: {
-    runs: readonly { groups: readonly string[]; lanes: number; at: number; reserved?: true }[];
+    runs: readonly {
+      groups: readonly string[];
+      lanes: number;
+      at: number;
+      reserved?: true;
+      starting?: true;
+    }[];
     free?: number;
+    /** The middle request-to-start time of the project's recent runs (ms). */
+    pickupMs?: number;
     partial?: true;
   };
 };

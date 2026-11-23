@@ -389,6 +389,8 @@ export type RollSegment = {
   state?: 'ok' | 'run' | 'wait' | 'fail' | undefined;
   /** How far along, 0 to 1: the segment fills from the start in its state's colour. */
   fill?: number;
+  /** Holds its place but has not begun: hatched in the state's colour. */
+  hatched?: true;
   /** Progress is not known: drawn as an outline in the state's colour, never as a full or empty segment. */
   unknown?: true;
   /** The segment's hover. */
@@ -411,7 +413,13 @@ export function Roll({
       {segments.map((segment, i) => (
         <i
           key={i}
-          className={segment.unknown ? `${segment.state ?? ''} unknown` : segment.state}
+          className={
+            segment.unknown
+              ? `${segment.state ?? ''} unknown`
+              : segment.hatched
+                ? `${segment.state ?? ''} hatched`
+                : segment.state
+          }
           title={segment.title}
         >
           {segment.fill === undefined ? null : (

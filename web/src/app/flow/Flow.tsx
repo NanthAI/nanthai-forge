@@ -279,7 +279,6 @@ export function FlowRegion({
             day={day}
             drawnAt={drawnAt}
             passed={checking.passed}
-            failed={waiting}
             open={stop === 'checking'}
             onOpen={() => onOpen('checking')}
           />

@@ -23,6 +23,7 @@ import type { LooseEndsRead } from '../../web/src/app/needs/loose-ends';
 
 const params = new URLSearchParams(location.search);
 const stall = params.get('data') === 'stall';
+const starting = params.get('data') === 'starting';
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const review = params.get('data') === 'review';
 const first = params.get('data') === 'first' || review;
@@ -575,22 +576,32 @@ const fixtureFeed: LineFeed = {
             .map((lane, i) => ({ groups: [`stall-${i}`], lanes: 1, at: lane.changedAt })),
           free: 0,
         }
-      : worst
+      : starting
         ? {
+            // Two checks hold slots; one has no CI run yet (Item 9e748e41, owner 16:36Z); six more can start.
             runs: [
-              { groups: ['c0ffee01'], lanes: 4, at: ago(4) },
-              { groups: ['c0ffee00'], lanes: 3, at: ago(3) },
-              { groups: ['c0ffee02'], lanes: 3, at: ago(2), reserved: true },
+              { groups: ['c0ffee01'], lanes: 1, at: ago(4) },
+              { groups: ['c0ffee03'], lanes: 1, at: ago(3), starting: true as const },
             ],
-            free: 1,
+            free: 6,
+            pickupMs: 20_000,
           }
-        : {
-            runs: [
-              { groups: ['c0ffee01'], lanes: 2, at: ago(4) },
-              { groups: ['c0ffee02'], lanes: 1, at: ago(2) },
-            ],
-            free: 2,
-          },
+        : worst
+          ? {
+              runs: [
+                { groups: ['c0ffee01'], lanes: 4, at: ago(4) },
+                { groups: ['c0ffee00'], lanes: 3, at: ago(3) },
+                { groups: ['c0ffee02'], lanes: 3, at: ago(2), reserved: true },
+              ],
+              free: 1,
+            }
+          : {
+              runs: [
+                { groups: ['c0ffee01'], lanes: 2, at: ago(4) },
+                { groups: ['c0ffee02'], lanes: 1, at: ago(2) },
+              ],
+              free: 2,
+            },
 };
 
 const projectName = stress ? stressText.identifier : 'tidepool';

@@ -18,9 +18,14 @@ export const lineChecksView = v.object({
       lanes: v.number(),
       at: v.number(),
       reserved: v.optional(v.literal(true)),
+      /** The check holds a slot but its CI run has not started (Item 9e748e41): `at` is when it was requested. */
+      starting: v.optional(v.literal(true)),
     }),
   ),
   free: v.optional(v.number()),
+  /** The middle of this project's recent pickup times (request to CI start), in ms, from the runs in view: a start that
+   * waits several times longer is slow. */
+  pickupMs: v.optional(v.number()),
   partial: v.optional(v.literal(true)),
 });
 
@@ -100,22 +105,40 @@ export async function lineChecks(
     freeCheckSlots(db, project, laneCounts.size > 0),
   ]);
   const groups = new Map<string, Set<string | null>>();
+  // When each group was requested (its earliest landing row), for a check whose CI run has not started.
+  const requested = new Map<string, number>();
   for (const landing of landings?.page ?? []) {
-    const state = JSON.parse(landing.value) as { batchId?: string };
+    const state = JSON.parse(landing.value) as {
+      batchId?: string;
+      timing?: { checkReservedAt?: string | number };
+    };
     const key = (state.batchId ?? landing.submissionId).slice(0, 8);
     if (!laneCounts.has(key)) continue;
     const group = groups.get(key) ?? new Set<string | null>();
     group.add(landing.runId ?? null);
     groups.set(key, group);
+    // When this check was requested: its reservation (not the landing's creation, which includes the queue wait).
+    const reserved = state.timing?.checkReservedAt;
+    const asked = typeof reserved === 'number' ? reserved : Date.parse(reserved ?? '');
+    requested.set(
+      key,
+      Math.min(requested.get(key) ?? Infinity, Number.isFinite(asked) ? asked : landing._creationTime),
+    );
   }
   const runGroups = new Map<string, { lanes: number; groups: string[] }>();
+  const starting: (typeof lineChecksView.type)['runs'] = [];
   for (const [key, lanes] of laneCounts) {
     const runs = groups.get(key);
     const runId = runs?.values().next().value;
-    if (!landings?.isDone || runs?.size !== 1 || !runId) {
+    if (!landings?.isDone || runs?.size !== 1) {
       // A split may briefly associate one group of marks with several runs.
       // No one of those runs can claim all of the group's Lanes.
       partial = true;
+      continue;
+    }
+    if (!runId) {
+      // In the checking phase with no CI run yet: it holds a slot, so it is drawn and counted as starting.
+      starting.push({ groups: [key], lanes, at: requested.get(key)!, starting: true });
       continue;
     }
     const group = runGroups.get(runId) ?? { lanes: 0, groups: [] };
@@ -133,19 +156,37 @@ export async function lineChecks(
         .take(9)
     : [];
   const runs: (typeof lineChecksView.type)['runs'] = [];
+  const pickups: number[] = [];
+  const seen = new Set<string>();
   for (const row of active.slice(0, 8).reverse()) {
     const group = runGroups.get(row.runId);
     if (!group) continue;
-    if (row.shardStartedAt !== undefined) runs.push({ ...group, at: row.shardStartedAt });
-    else {
+    seen.add(row.runId);
+    if (row.shardStartedAt !== undefined) {
+      runs.push({ ...group, at: row.shardStartedAt });
+      const asked = Date.parse((JSON.parse(row.value) as Pick<HostedCheckRun, 'at'>).at);
+      if (Number.isFinite(asked) && row.shardStartedAt >= asked) pickups.push(row.shardStartedAt - asked);
+    } else {
       const run = JSON.parse(row.value) as Pick<HostedCheckRun, 'at'>;
       const at = Date.parse(run.at);
       if (Number.isFinite(at)) runs.push({ ...group, at, reserved: true });
       else partial = true;
     }
   }
+  // A run the landing names but that is not running yet (queued at the CI provider) holds its slot too. Only said when the
+  // read of running runs was not capped: a capped read cannot tell a run that has not started from one it did not list.
+  for (const [runId, group] of runGroups)
+    if (!seen.has(runId) && active.length < 9)
+      starting.push({
+        ...group,
+        at: Math.min(...group.groups.map(key => requested.get(key) ?? Infinity)),
+        starting: true,
+      });
+  runs.push(...starting.filter(run => Number.isFinite(run.at)));
+  const pickupMs = pickups.sort((a, b) => a - b)[Math.floor(pickups.length / 2)];
   return {
     runs,
+    ...(pickupMs === undefined ? {} : { pickupMs }),
     ...(free === undefined ? {} : { free }),
     ...(partial || active.length === 9 || (landings && !landings.isDone) ? { partial: true as const } : {}),
   };

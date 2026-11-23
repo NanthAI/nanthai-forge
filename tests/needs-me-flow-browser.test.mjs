@@ -183,19 +183,17 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
           /^This Lane’s changes clash with another Lane’s on the same lines/,
         );
         // Owner 2026-11-23 14:20Z: running checks are the Standing line's roll, one segment each, filled by elapsed time
-        // against the day's middle landing time (9 min here), passed Lanes in the waiting colour, free room empty.
+        // against the day's middle landing time (9 min here), free room empty; the bar's width is the check width.
         const roll = page.locator('.flow-bar .roll i');
         assert.deepEqual(await roll.evaluateAll(parts => parts.map(part => part.className)), [
           'run',
           'run',
-          'wait',
-          'wait',
           '',
           '',
         ]);
         assert.deepEqual(
           await roll.evaluateAll(parts => parts.map(part => part.querySelector('span')?.style.width ?? null)),
-          ['47%', '23%', '100%', '100%', null, null],
+          ['47%', '23%', null, null],
         );
         assert.match(
           await roll.nth(0).getAttribute('title'),
@@ -622,6 +620,30 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
               `CI minutes starts at the panel's edge with ${data} checks running at ${width}`,
             );
           }
+        }
+      },
+    );
+
+    await t.test(
+      'a check that holds a slot but whose CI run has not started is a starting segment, counted and slow when it waits (9e748e41)',
+      async t => {
+        for (const width of [1440, 390]) {
+          const page = await open(t, width, 'starting', { reducedMotion: 'reduce' });
+          const roll = page.locator('.flow-bar .roll i');
+          assert.deepEqual(
+            await roll.evaluateAll(parts => parts.map(part => part.className)),
+            ['run', 'run hatched', '', '', '', '', '', ''],
+            'one segment per slot: running, starting, then the free room, 8 in all',
+          );
+          assert.equal(
+            await roll.nth(1).getAttribute('title'),
+            'Starting check: 1 Lane · requested 3 min ago · CI provider not started yet · starting slowly: longer than this project’s usual pickup',
+          );
+          assert.match(
+            await page.locator('.flow-chk .flow-check-title').textContent(),
+            /^Checks1 running · 1 starting · .*6 more checks can start now$/,
+          );
+          if (shots) await page.screenshot({ path: join(shots, `checks-starting-${width}.png`) });
         }
       },
     );
