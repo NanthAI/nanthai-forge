@@ -55,13 +55,9 @@ async function fixture(t) {
   for (const [field, name] of Object.entries(names)) process.env[name] = fakeR2Config[field];
   process.env.CONVEX_CLOUD_URL = 'https://example.convex.cloud';
   process.env.R2_ENDPOINT = `https://${fake.host}`;
-  const gate = process.env.FORGE_DISCUSSION_UPLOADS;
-  process.env.FORGE_DISCUSSION_UPLOADS = '1';
   t.after(async () => {
     restore();
     await fake.close?.();
-    if (gate === undefined) delete process.env.FORGE_DISCUSSION_UPLOADS;
-    else process.env.FORGE_DISCUSSION_UPLOADS = gate;
     for (const [name, value] of saved)
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
@@ -443,15 +439,6 @@ test('the CLI uploads local files for a comment: bytes stored, names cleaned, li
     uploadDiscussionFiles(f.port, f.item.itemId, randomUUID(), [shot, shot, shot, shot, shot]),
     /at most 4 files/,
   );
-});
-
-test('uploads are refused, with nothing reserved, until the deployment turns them on', async t => {
-  const f = await fixture(t);
-  delete process.env.FORGE_DISCUSSION_UPLOADS;
-  const before = f.s.tables.artifactBlobs.size;
-  await assert.rejects(f.prepare(randomUUID(), { bytes: png }), /not enabled on this deployment yet/);
-  assert.equal(f.s.tables.artifactBlobs.size, before);
-  assert.equal(f.stored(), undefined, 'no bytes were counted');
 });
 
 test('a file at the 25 MB maximum goes up and comes back byte for byte', async t => {

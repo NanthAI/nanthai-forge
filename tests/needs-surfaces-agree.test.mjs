@@ -13,6 +13,8 @@ const model = await import(moduleUrl('../web/src/app/needs/model.ts'));
 const count = await import(moduleUrl('../web/src/app/needs/count.ts'));
 const fyi = await import(moduleUrl('../web/src/app/needs/fyi.ts'));
 const laneStateModule = await import(moduleUrl('../web/src/app/lane-state.ts'));
+const { buildYard, needsYouLanes: yardNeeds } = await import(moduleUrl('../web/src/app/lanes/model.ts'));
+const { decideTarget } = await import(moduleUrl('../web/src/app/needs/decide.ts'));
 const { lineStopCounts, lineStops } = await import(moduleUrl('../web/src/app/Line.tsx'));
 const { baseMark } = await import(moduleUrl('../web/src/app/mark.ts'));
 
@@ -258,4 +260,107 @@ test('incident replay 9b9057a9: the owner approval and the conflicted Lane in on
   const alone = laneStateModule.laneState({ stage: 'saved', held: true, overlap: true }, null);
   assert.equal(alone.kind, 'conflict');
   assert.notEqual(alone.glyph, 'Needs you');
+});
+
+// Incident replay 9b9057a9, core-claim line: Licence submission 4a6e7ec2 (Lanes af85c71e, 106d1da6, 88671ba0, dd636eb4 of
+// one Intent) held for the owner's approval of protected paths (the forge-check and measure-web-typecheck scripts).
+// The queue read said held-review, the Lanes read said "ready" for all four, and one review row named one Lane. The owner
+// first saw 106d1da6 as "Held · held" with no way to approve and Needs you 0; with the fix on main (2e9f6209, 392fed36,
+// d91b837c) Needs me showed the approval and the owner approved it (owner, 2026-11-23 ~11:20Z). Each surface below counts
+// it, says why, and carries the approve action.
+test('incident replay 9b9057a9 (core claim): a protected-path review on a four-Lane Intent whose lanes read says ready, on every surface', () => {
+  const ids = ['af85c71e', '106d1da6', '88671ba0', 'dd636eb4'];
+  const intent = 'ffb6cc49';
+  // Paths are built at run time: a literal repo path here would make this file a reader of it (test-impact).
+  const protectedPaths = ['forge-check', 'measure-web-typecheck'].map(name =>
+    ['scripts', `${name}.mjs`].join('/'),
+  );
+  const reason = `needs owner approval: protected paths ${protectedPaths.join(', ')}`;
+  const input = read([
+    held('af85c71e', 'review', {
+      intentId: intent,
+      laneIds: ids,
+      submissionId: '4a6e7ec2',
+      attemptId: 'attempt-1',
+      title: 'Licence: AGPL-3.0-only',
+      note: reason,
+    }),
+  ]);
+  const lanes = ids.map(id => mark(id, { stage: 'ready' }));
+  const view = model.needsView(input, NOW);
+
+  // count.ts and the top bar / sidebar badge: one decision for one submission.
+  assert.equal(count.needsCount(input, NOW).n, 1);
+  // The Needs me page: the row, its reason, and the exact attempt to approve.
+  assert.deepEqual(
+    view.now.map(row => [row.laneId, row.word, row.landing?.submissionId]),
+    [['af85c71e', 'Needs you', '4a6e7ec2']],
+  );
+  assert.match(view.now[0].head, /waits for your approval to land/);
+  assert.match(view.now[0].note, /protected paths .*forge-check\.mjs/);
+  assert.deepEqual(decideTarget(view.now[0]), {
+    landing: { submissionId: '4a6e7ec2', attemptId: 'attempt-1' },
+  });
+  assert.match(model.needsSentence(view).bold, /^1 thing holds work until you decide\.$/);
+  // The top bar's line and F count every Lane of it as waiting on the reader.
+  const waiting = count.waitingLanes(count.needsYouLanes(input, NOW));
+  assert.deepEqual([...waiting].sort(), [...ids].sort());
+  const feed = { lanes, more: 0, moreIsLowerBound: false, main: null };
+  assert.equal(
+    lineStopCounts(
+      feed,
+      lineStops.find(stop => stop.stage === 'checking'),
+      waiting,
+    ).held,
+    4,
+  );
+  assert.equal(baseMark(feed, waiting), 'waiting');
+  // Lanes > Open: all four under Needs you with the approval word and reason, whatever the lanes read's "ready" says;
+  // only the representative Lane has a queue entry.
+  const meta = id => ({
+    laneId: id,
+    intentId: intent,
+    intent: 'Licence',
+    actor: 'mara',
+    lastSaveAt: null,
+    landing: { submissionId: '4a6e7ec2', state: 'ready' },
+  });
+  const queue = {
+    total: 0,
+    held: 1,
+    listed: 1,
+    more: false,
+    entries: [
+      {
+        position: null,
+        laneId: 'af85c71e',
+        submissionId: '4a6e7ec2',
+        landingState: { state: 'held-review', label: 'Waiting for review' },
+        phase: 'ready',
+        submittedAt: '2026-11-23T11:01:00.000Z',
+        lastProgressAt: '2026-11-23T11:01:00.000Z',
+        hold: {
+          kind: 'review',
+          reason,
+          paths: protectedPaths,
+        },
+      },
+    ],
+  };
+  const lanesHeld = lanes.map(lane => ({ ...lane, held: true }));
+  const yard = buildYard(
+    { lanes: lanesHeld, more: 0, moreIsLowerBound: false, main: null },
+    ids.map(meta),
+    queue,
+    NOW,
+    yardNeeds(input, NOW),
+  );
+  assert.deepEqual(
+    yard.rows.map(row => [row.laneId, row.band, row.word]).sort(),
+    ids.map(id => [id, 'needs', 'Needs you']).sort(),
+  );
+  assert.ok(
+    yard.rows.every(row => /approval/.test(row.why)),
+    'each says why: waiting for approval',
+  );
 });

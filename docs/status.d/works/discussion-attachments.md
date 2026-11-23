@@ -17,5 +17,4 @@ upload in flight across a purge deletes its own bytes at commit (operator count:
 Downloads are capped at 2 GB per project and 5 GB for all projects per UTC day: one mutation reserves the bytes
 before R2 is read, a refused download is a 429 `ATTACHMENT_DOWNLOAD_LIMIT` naming the cap and resetting at
 00:00 UTC (the web view shows that message), and a read that fails or is revoked gives its reservation back.
-Uploads are off on a deployment until its operator sets `FORGE_DISCUSSION_UPLOADS=1`, after the deployed download at
-the 25 MB maximum has been verified (not yet done on any deployment).
+Uploads need no per-deployment setting.

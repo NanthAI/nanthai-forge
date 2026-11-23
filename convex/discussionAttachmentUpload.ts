@@ -12,7 +12,7 @@ import { retainedItem } from './discussionAttachmentRead';
 import { report } from './errors';
 import { activeProject } from './projectAuthority';
 import { presignPut, r2Config } from './r2';
-import { ForgeError, invariant } from '../src/errors';
+import { invariant } from '../src/errors';
 import {
   ATTACHMENT_LIMITS,
   attachmentByteLimit,
@@ -60,11 +60,6 @@ async function writer(
   return project;
 }
 
-/** Uploads stay off on a deployment until its operator has verified the download at the 25 MB maximum (Item
- * 9a3d6f5f): set `FORGE_DISCUSSION_UPLOADS` to `1`. Reads and downloads of files already stored never depend on it.
- * Delete this switch once the check is recorded on every deployment. */
-export const uploadsEnabled = () => process.env.FORGE_DISCUSSION_UPLOADS === '1';
-
 const target = v.object({
   kind: v.literal('r2'),
   url: v.string(),
@@ -87,11 +82,6 @@ export const prepare = mutation({
   returns: result,
   handler: async (ctx, input) => {
     try {
-      if (!uploadsEnabled())
-        throw new ForgeError(
-          'HOSTED_ACTION_UNSUPPORTED',
-          'Discussion attachment uploads are not enabled on this deployment yet.',
-        );
       await writer(ctx, input);
       const name = attachmentName(input.name);
       const contentType = storedMediaType(input.contentType, name);
