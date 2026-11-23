@@ -22,10 +22,12 @@ import { safeRelative } from './files.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { z } from 'zod';
 import {
+  changedExports,
   documentation,
   fitPreflightBudget,
   preflightTierRule,
   protectedTiers,
+  removedNames as removedNamesOf,
   selectTests,
   selectPreflightTests,
   selectionSourcePath,
@@ -36,7 +38,7 @@ import { cachedGuardCandidates } from './preflight-guard-cache.js';
 import { type GuardSetReport, planGuardSet, recordPreflightRun } from './preflight-guard-set.js';
 import { ranEvidence } from './preflight-guard-learning.js';
 export { guardGateFields } from './preflight-guard-set.js';
-import { commentOnlyPaths } from './preflight-comment-only.js';
+import { changedSources, commentOnlyEdit } from './preflight-comment-only.js';
 import { spawnCaptured, failureExcerpt } from './agent-preflight-capture.js';
 import {
   dropKeptStatic,
@@ -1125,17 +1127,31 @@ function planTests(
         );
     const learnedGuards = (guardSet?.tests ?? []).filter(test => !declaredTests.has(test));
     const guardTests = [...declaredTests, ...learnedGuards];
-    // Comment-only edits (an SPDX header, a reworded comment) run the same program: they rank only the
-    // tests that read the file. Needs the base bytes on this machine; otherwise nothing is skipped.
-    const commentOnly = context?.base
-      ? commentOnlyPaths(
+    // The base and saved text of each changed source, from the base bytes on this machine (else nothing,
+    // which only costs precision). Comment-only edits (an SPDX header, a reworded comment) run the same
+    // program: they rank only the tests that read the file. The change also tells what it took out of a
+    // file (a literal an old test still asserts) and which exports it altered (consumers import them by name).
+    const sources = context?.base
+      ? changedSources(
           root,
           context.base,
           context.files,
           changed.paths,
           path => files.get(path) ?? laneText(root, path),
         )
-      : [];
+      : new Map<string, { before: string; after: string }>();
+    const commentOnly = [...sources]
+      .filter(([path, { before, after }]) => commentOnlyEdit(path, before, after))
+      .map(([path]) => path);
+    const productSources = [...sources].filter(([path]) => !isTest(path));
+    const removedNames = productSources.flatMap(([path, { before, after }]) =>
+      removedNamesOf(path, before, after),
+    );
+    const alteredExports = new Map(
+      productSources
+        .map(([path, { before, after }]) => [path, changedExports(path, before, after)] as [string, string[]])
+        .filter(([, names]) => names.length),
+    );
     const learnedForPaths = learnedTests(root, changed.paths, undefined, test =>
       runnerTestPath(resolved.runner, test),
     );
@@ -1150,6 +1166,8 @@ function planTests(
       files,
       paths: changed.paths,
       guards: guardTests,
+      removedNames,
+      changedExports: alteredExports,
       learned: learnedForPaths,
       recent: recentFailedTests(root),
       ...(commentOnly.length ? { commentOnly } : {}),
@@ -1184,6 +1202,8 @@ function planTests(
       isProtected: tier => protectedTiers.has(tier),
       guards: new Set(guardTests),
       treeGuards: selection.treeGuards ?? [],
+      pins: selection.pins ?? [],
+      firstPins: selection.pinsFirst ?? [],
       leadTests: selection.leadTests ?? [],
       ownTests: changed.paths.filter(isTest),
       specificModules: selection.specificModules ?? [],
@@ -1310,6 +1330,16 @@ function planTests(
           tests: guard.tests,
           seconds: Math.round(guard.tests.reduce((sum, test) => sum + secondsFor(test), 0) * 10) / 10,
         })),
+        ...(selection.pins?.length
+          ? [
+              {
+                name: CONTRACT_PINS_NAME,
+                tests: selection.pins,
+                seconds:
+                  Math.round(selection.pins.reduce((sum, test) => sum + secondsFor(test), 0) * 10) / 10,
+              },
+            ]
+          : []),
         ...(learnedGuards.length
           ? [
               {
@@ -1390,6 +1420,9 @@ function planTests(
 
 /** The guard entry the learned set adds to `local.guards`. */
 const LEARNED_GUARD_NAME = 'learned guard set';
+/** The guard entry the contract pins add to `local.guards`: budget, cost, registration and contract tests
+ * the change reaches, promoted into the protected tier (at most CONTRACT_PIN_SECONDS). */
+const CONTRACT_PINS_NAME = 'contract pins this change reaches';
 /** The guard set's reason and, per file, why it is in: p x C / r - t = saving (seconds). */
 function guardSetLine(report: GuardSetReport) {
   const why = report.files

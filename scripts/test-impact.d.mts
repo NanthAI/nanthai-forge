@@ -49,6 +49,14 @@ export type PreflightTier = {
   tests: string[];
 };
 export const preflightTierRule: string;
+/** Export names whose declaring statement differs between two texts of a module (or one side lacks). */
+export function changedExports(path: string, before: string, after: string): string[];
+/** Name literals of `before` that `after` no longer holds. */
+export function removedNames(path: string, before: string, after: string): string[];
+/** A test file named for a budget, cost, registration or contract guard (on its own name). */
+export function contractGuardTest(test: string): boolean;
+/** Seconds of contract pins one plan promotes into the protected tier. */
+export const CONTRACT_PIN_SECONDS: number;
 /** Tiers the time budget never trims from the plan; the run starts them first. */
 export const protectedTiers: Set<string>;
 export function selectPreflightTests(
@@ -66,6 +74,10 @@ export function selectPreflightTests(
     commentOnly?: string[];
     /** Project-declared guard tests this change triggers; mandatory, so never trimmed. */
     guards?: string[];
+    /** Name literals the change removed from changed files: tests that hard-code one are direct. */
+    removedNames?: string[];
+    /** Export names the change altered, per changed module: tests that import one by name are direct. */
+    changedExports?: Map<string, string[]>;
     /** Protect direct tests module by module, most specific first, while their cost fits; the
      * rest are broad modules whose consumers are ranked (`wide`). Absent: all are protected. */
     hubBudget?: { seconds: number; secondsFor: (test: string) => number };
@@ -76,6 +88,10 @@ export function selectPreflightTests(
   tiers: PreflightTier[];
   /** Changed modules whose direct tests were ranked (`wide`) instead of protected. */
   broadModules: string[];
+  /** Budget, cost, registration and contract tests the change reaches, promoted into the mandatory tier. */
+  pins: string[];
+  /** The registration and inventory pins of a backend change, which start early even untimed. */
+  pinsFirst: string[];
   /** Distinctive names each promoted `watch` test shares with a changed source. */
   watchedNames: Record<string, string[]>;
   /** [product hops, carrier fan-in, helper hops] of each direct, wide and near test; lower is closer. */

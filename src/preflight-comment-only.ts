@@ -67,39 +67,37 @@ export function commentOnlyEdit(path: string, before: string, after: string): bo
   return hashHeader(path) && afterHeader(before) === afterHeader(after);
 }
 
-/** Changed paths whose saved bytes differ from their base only in comments. Reads the base State and
- * blobs from this machine's object stores (the Lane checkout cached them); never a server call. A
- * path whose base bytes are absent, added, deleted or not a regular file is not comment-only, so a
- * missing observation only costs precision. */
-export function commentOnlyPaths(
+/** The base and saved text of each changed regular file that exists on both sides and parses as source.
+ * Reads the base State and blobs from this machine's object stores (the Lane checkout cached them);
+ * never a server call. A path whose base bytes are absent, added, deleted or not a regular file is
+ * missing, so an absent observation only costs precision. */
+export function changedSources(
   root: string,
   base: string,
   head: NativeFile[],
   paths: string[],
   text: (path: string) => string | undefined,
-): string[] {
+): Map<string, { before: string; after: string }> {
+  const found = new Map<string, { before: string; after: string }>();
   const candidates = paths.filter(path => scriptKind(path) !== null || hashHeader(path));
-  if (!candidates.length) return [];
+  if (!candidates.length) return found;
   const object = localObjects(root);
   try {
     const state = object(base);
-    if (!state) return [];
+    if (!state) return found;
     const before = new Map(parseNativeState(state).files.map(file => [file.path, file]));
     const after = new Map(head.map(file => [file.path, file]));
-    return candidates.filter(path => {
+    for (const path of candidates) {
       const left = before.get(path);
       const right = after.get(path);
-      if (left?.mode !== 'file' || right?.mode !== 'file' || left.blob === right.blob) return false;
+      if (left?.mode !== 'file' || right?.mode !== 'file' || left.blob === right.blob) continue;
       const current = text(path);
       const previous = object(left.blob);
-      return (
-        current !== undefined &&
-        digest(current) === right.blob &&
-        previous !== null &&
-        commentOnlyEdit(path, previous.toString('utf8'), current)
-      );
-    });
+      if (current !== undefined && digest(current) === right.blob && previous !== null)
+        found.set(path, { before: previous.toString('utf8'), after: current });
+    }
   } catch {
-    return [];
+    return new Map();
   }
+  return found;
 }

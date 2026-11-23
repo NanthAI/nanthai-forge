@@ -669,7 +669,14 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   that failed landing checks preflight skipped, by the saving formula in the same section; first,
   inside the budget, `local.guardSet`); then *learned* tests; then *direct* tests; then direct consumers
   of hub modules (`wide`); then *recent* failers; then tests that watch a distinctive name in a changed source (any import distance);
-  then `near` consumers (two modules between). There is no file count. Mandatory, learned and direct
+  then `near` consumers (two modules between). Two kinds of evidence from the change itself make a test
+  *direct* at any distance: it hard-codes a literal the change removed from a changed file (a stale id
+  or path; only a literal few tests carry), or it imports an export the change altered by name. Tests
+  named for a budget, cost, registration, inventory or contract guard that the change reaches only
+  through a hub or at a distance become *contract pins* (`local.guards`, up to 20 s, protected, counted
+  inside the budget); a backend change (`convex/`) takes registration and inventory pins first, then
+  cost pins, and a pin timed at 6 s or less starts with the fast files, ahead of the declared guards.
+  There is no file count. Mandatory, learned and direct
   tests are protected: the time budget never trims them (`local.protected`; `protectedOverBudget`
   says when they alone exceed it), and only the run's wall-time cap stops one, which makes the
   run NOT COMPLETE (below). The cap never stops a guard: guards run first, and any left when it is

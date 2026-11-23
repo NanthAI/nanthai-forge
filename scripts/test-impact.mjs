@@ -2,8 +2,9 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { posix, join } from 'node:path';
 import { testImportGraph } from './test-import-graph.mjs';
-import { moduleTaint, wholeTaint } from './test-symbols.mjs';
-import { watchRanking } from './test-name-watchers.mjs';
+import { changedExports, moduleTaint, namedConsumers, wholeTaint } from './test-symbols.mjs';
+import { removedNames, staleWatchers, watchRanking } from './test-name-watchers.mjs';
+
 import { closenessIndex, compareRank } from './test-closeness.mjs';
 import { changeSalt, compareRelevance, relevanceFor, stableKey } from './test-tiebreak.mjs';
 import { coverageShadow } from './test-coverage.mjs';
@@ -19,6 +20,8 @@ import {
 } from './script-impact.mjs';
 import { docsReaders } from './docs-readers.mjs';
 import { scanDetail, scanReaders } from './test-tree-scanners.mjs';
+
+export { changedExports, removedNames };
 
 export const smokeTests = [
   'tests/files.test.mjs',
@@ -104,6 +107,17 @@ export const preflightTierRule =
   'changed tests, explicit coverage and smoke; then tests that failed for these paths before; then tests that run a changed module directly, through a test fixture or through one module that imports it, or are named for it (never trimmed, most specific first); then the same consumers of hub modules (their direct tests would push protected tests past the budget; closest first); then tests that run a changed module within two modules and failed in a landing check lately; then tests that watch a distinctive name in a changed source; then tests that run a changed module through two modules, most specific first; comment-only edits add only tests that read the file; a docs-only change runs only the tests that read the changed documents';
 /** Tiers the time budget never trims from the plan; the run starts them first. */
 export const protectedTiers = new Set(['mandatory', 'learned', 'direct']);
+/** A test file named for a budget, cost, contract or registration guard: it pins a number or a list
+ * a change moves without breaking any import (a read count, a table registration, a tool list). */
+const CONTRACT_GUARD_NAME =
+  /(?:^|[-_.])(?:budgets?|weights?|growth|ceilings?|costs?|contracts?|ratchet|baselines?|limits?|dbio|registrations?|inventory|tool-?lists?)(?:[-_.]|$)/i;
+// The file name up to its first dot, in any ecosystem: budget.test.mjs, test_budget.py, budget_test.go.
+export const contractGuardTest = test =>
+  CONTRACT_GUARD_NAME.test(test.slice(test.lastIndexOf('/') + 1).split('.')[0]);
+const REGISTRATION_PIN = /(?:^|[-_.])(?:registrations?|inventory)(?:[-_.]|$)/i;
+const COST_PIN = /(?:^|[-_.])(?:costs?|dbio|budgets?)(?:[-_.]|$)/i;
+/** Seconds of contract pins one plan promotes into the protected tier (Item 13ea93bf, friction baaec084). */
+export const CONTRACT_PIN_SECONDS = 20;
 const testFile = path => /^tests\/[^/]+\.test\.mjs$/.test(path);
 const moduleName = path => posix.basename(path).replace(/(?:\.test)?\.[cm]?[jt]sx?$/, '');
 const wordCache = new Map();
@@ -273,6 +287,22 @@ export function selectPreflightTests(input, graphCache = {}) {
     // Without a graph the selector's own one-edge reason still counts.
     else if (!index && kind(test) === 'dependency' && distance(test) === 1) direct.add(test);
   }
+  // A test that hard-codes a literal the change removed, or imports an export the change altered, fails
+  // on this change whatever its distance in the import graph (Item 13ea93bf: a stale timeline id, a
+  // changed notice signature). Both are evidence from the change's own base-to-head difference.
+  const pointed = [
+    ...new Set([
+      ...staleWatchers({ files: input.files, tests: allTests, removed: input.removedNames }),
+      ...namedConsumers({ files: input.files, tests: allTests, changed: input.changedExports }),
+    ]),
+  ].filter(eligible);
+  for (const test of pointed) {
+    direct.add(test);
+    wide.delete(test);
+    offer(test, [0, 1, 0]);
+  }
+  if (pointed.length)
+    specificModules.unshift({ path: 'changed exports and removed literals', tests: pointed });
   // Tests that failed in a landing check under other paths, not these: the failure proves the test
   // guards its region, not that this change reaches it. Only tests that run a changed module within
   // two product modules qualify (a computed path, a by-name closure or a chain through the backend's
@@ -356,6 +386,38 @@ export function selectPreflightTests(input, graphCache = {}) {
     tier,
     tests: ranked(tier),
   }));
+  // Contract pins: tests named for a budget, cost, registration or contract guard that this change
+  // reaches only through a hub (or at a distance) are promoted into the protected tier while their
+  // seconds fit CONTRACT_PIN_SECONDS, closest first. A moved read count or a new table fails them
+  // without breaking an import, so only the landing check found it (friction baaec084, 60d68b5f).
+  const pins = [],
+    pinsFirst = [];
+  if (input.hubBudget) {
+    let room = CONTRACT_PIN_SECONDS;
+    const later = tiers.filter(item => !protectedTiers.has(item.tier));
+    // A backend change moves table registrations, purge inventories and read/write counts without
+    // breaking an import: those pins go first (registrations, then cost and budget pins), then the
+    // tests most about the changed modules (a recent failure, name affinity, mentions), then a stable hash.
+    const backend = behavioural.some(path => path.startsWith('convex/'));
+    const weight = test =>
+      !backend ? 0 : REGISTRATION_PIN.test(moduleName(test)) ? 2 : COST_PIN.test(moduleName(test)) ? 1 : 0;
+    const pinnable = later
+      .flatMap(item => item.tests)
+      .filter(contractGuardTest)
+      .sort((a, b) => weight(b) - weight(a) || tied(a, b));
+    for (const test of pinnable) {
+      if (cost(test) > room) continue;
+      room -= cost(test);
+      pins.push(test);
+    }
+    // Registration and inventory pins of a backend change are cheap static reads: they start early untimed too.
+    for (const test of pins) if (weight(test) === 2) pinsFirst.push(test);
+    if (pins.length) {
+      const moved = new Set(pins);
+      for (const item of later) item.tests = item.tests.filter(test => !moved.has(test));
+      tiers[0].tests = [...tiers[0].tests, ...pins].sort();
+    }
+  }
   const local = new Set(tiers.flatMap(item => item.tests));
   // Run-order hints for preflight (src/preflight-run-order.ts); tier membership never depends on them.
   const protectedTests = tiers.filter(item => protectedTiers.has(item.tier)).flatMap(item => item.tests);
@@ -378,6 +440,10 @@ export function selectPreflightTests(input, graphCache = {}) {
       }))
       .filter(item => item.tests.length),
     broadModules: broad,
+    /** Contract pins promoted into the protected tier, in promotion order. */
+    pins,
+    /** The registration and inventory pins of a backend change, which start early even untimed. */
+    pinsFirst,
     ...(commentOnly.size ? { commentOnly: [...commentOnly].sort() } : {}),
     /** Rank of each direct and wide test ([product hops, carrier fan-in, helper hops]). */
     ranks: Object.fromEntries([...local].filter(test => rank.has(test)).map(test => [test, rank.get(test)])),

@@ -4,8 +4,9 @@
  * stops whatever has not started when the budget is spent, so the order decides what a long plan
  * catches. In order:
  * 1. fast files, timed here at about 2 s or less: repo-wide guard tests (a test that scans a folder
- *    holding a changed file), then files whose learned saving beats their seconds, most saving per
- *    second first. They go ahead of the declared guards, which are never stopped for time anyway, so
+ *    holding a changed file), then contract pins timed at 6 s or less (cost, budget, registration and
+ *    inventory tests the change reaches), then files whose learned saving beats their seconds, most
+ *    saving per second first. They go ahead of the declared guards, which are never stopped for time anyway, so
  *    they always start and the guards still run. The first 10 s of them always go first (so a fast
  *    repo-wide guard always runs, and nothing after them starts more than 10 s later); up to 30 s
  *    while the guards, the change's own test files, the tests of step 3a and the files that failed
@@ -41,15 +42,15 @@
  * 8. smoke and explicit-coverage tests (fixed smoke, document readers, slower scans, path rules).
  * Unprotected tiers follow in their own order. Membership never changes: the same files run, only
  * sooner or later. Pure: no file read, no call. */
-/** A test file named for a budget or contract guard (step 3b), on its own name only. */
-export const CONTRACT_GUARD_NAME =
-  /(?:^|[-_.])(?:budgets?|weights?|growth|ceilings?|costs?|contracts?|ratchet|baselines?|limits?|dbio)(?:[-_.]|$)/i;
-// The file name up to its first dot, in any ecosystem: budget.test.mjs, test_budget.py, budget_test.go.
-export const contractGuardTest = (test: string) =>
-  CONTRACT_GUARD_NAME.test(test.slice(test.lastIndexOf('/') + 1).split('.')[0]!);
+// A test file named for a budget or contract guard (step 3b), on its own name only: the selector's
+// definition, which also promotes the ones a change reaches into this tier.
+import { contractGuardTest } from '../scripts/test-impact.mjs';
 export const FAST_GUARD_SECONDS = 2;
 export const FAST_GUARDS_TOTAL_SECONDS = 30;
 export const FAST_ALWAYS_SECONDS = 10;
+/** A contract pin timed at or under this joins the first fast files, ahead of the declared guards: a cheap
+ * registration or inventory pin must start even when the guards alone outlast a short run. */
+export const FAST_PIN_SECONDS = 6;
 
 export type RunOrderInput = {
   tiers: { tier: string; tests: string[] }[];
@@ -63,6 +64,10 @@ export type RunOrderInput = {
   leadTests: readonly string[];
   /** The change's own test files (the ones the learned guard set leaves budget for). */
   ownTests: readonly string[];
+  /** Contract pins the selector promoted (selectPreflightTests().pins): cheap ones start with the fast files. */
+  pins?: readonly string[];
+  /** The pins that are cheap static reads by kind (selectPreflightTests().pinsFirst): they start early untimed too. */
+  firstPins?: readonly string[];
   /** Tests that load each protected changed module, most specific module first
    * (selectPreflightTests().specificModules). */
   specificModules?: readonly { tests: readonly string[] }[];
@@ -114,10 +119,22 @@ export function protectedRunOrder(input: RunOrderInput): string[] {
   const guardSeconds = seconds(guardTests);
   const failing = input.failing ?? new Set<string>();
   const fastTree = new Set(input.treeGuards.filter(timedFast));
+  const early = new Set(input.firstPins ?? []);
+  const fastPins = new Set(
+    (input.pins ?? []).filter(test => {
+      const seconds = input.measuredSeconds(test);
+      return seconds === undefined ? early.has(test) : seconds <= FAST_PIN_SECONDS;
+    }),
+  );
   // Step 3b's files (a fast repo-wide guard keeps step 1): each counts once, in step 3b only.
   const contractSet = new Set(
     protectedTests.filter(
-      test => contractGuardTest(test) && !input.guards.has(test) && !own.has(test) && !fastTree.has(test),
+      test =>
+        contractGuardTest(test) &&
+        !input.guards.has(test) &&
+        !own.has(test) &&
+        !fastTree.has(test) &&
+        !fastPins.has(test),
     ),
   );
   // Files that failed before: the learned tier and any protected file in `failing`.
@@ -187,6 +204,7 @@ export function protectedRunOrder(input: RunOrderInput): string[] {
   const fastCandidates = [
     ...new Set([
       ...input.treeGuards.filter(timedFast),
+      ...fastPins,
       ...protectedTests.filter(test => timedFast(test) && perSecond(test) > 0).sort(bySaving),
     ]),
   ].filter(
@@ -201,7 +219,7 @@ export function protectedRunOrder(input: RunOrderInput): string[] {
   let fastSeconds = 0;
   const fast = take(
     fastCandidates.filter(test => {
-      const spent = input.measuredSeconds(test)!;
+      const spent = input.measuredSeconds(test) ?? input.secondsFor(test);
       if (fastSeconds + spent > room) return false;
       fastSeconds += spent;
       return true;

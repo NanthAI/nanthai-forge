@@ -9,6 +9,8 @@ import ts from 'typescript';
 export const distinctiveShare = 0.01;
 
 const NAME = /^[A-Za-z0-9_.@][A-Za-z0-9_.@/-]*$/;
+// A removed literal may carry a prefix separator (`accepted:`), which no path name has.
+const REMOVED = /^[A-Za-z0-9_.@][A-Za-z0-9_.@/:-]*$/;
 const SEPARATED = /[-_./]/;
 const PATH_CALL =
   /^(?:join|resolve|mkdtemp|mkdtempSync|mkdir|mkdirSync|rename|renameSync|rm|rmSync|open|openSync)$/;
@@ -16,12 +18,12 @@ const sourceKind = path => (/\.(?:[cm]?ts|tsx)$/.test(path) ? ts.ScriptKind.TS :
 
 /** Name-shaped literals (static string and template pieces, minus import specifiers) and the
  * regular expressions a file contains. A bare word counts only as an argument of a path call. */
-export function nameLiterals(path, text) {
+export function nameLiterals(path, text, shape = NAME) {
   const names = new Set();
   const patterns = [];
   const add = (value, pathArgument) => {
-    if (value.length < 3 || value.length > 64 || !NAME.test(value)) return;
-    if (pathArgument || SEPARATED.test(value)) names.add(value);
+    if (value.length < 3 || value.length > 64 || !shape.test(value)) return;
+    if (pathArgument || SEPARATED.test(value) || (shape === REMOVED && value.includes(':'))) names.add(value);
   };
   const callee = call =>
     ts.isIdentifier(call.expression)
@@ -100,4 +102,34 @@ export function watchRanking({ files, tests, candidates, changed }) {
     }
   }
   return ranking;
+}
+
+/** Names the change took out of a file: literals of `before` that `after` no longer holds. */
+export function removedNames(path, before, after) {
+  const kept = nameLiterals(path, after, REMOVED).names;
+  return [...nameLiterals(path, before, REMOVED).names].filter(name => !kept.has(name));
+}
+
+/** Tests that hard-code a literal the change removed (a stale id, a renamed path): they assert the
+ * old value, so the change breaks them whatever the import graph says. A literal counts only while
+ * few tests carry it (`distinctiveShare`), as for any watched name. */
+export function staleWatchers({ files, tests, removed = [] }) {
+  const fragments = [...new Set(removed)];
+  const found = new Set();
+  if (!fragments.length) return found;
+  const ceiling = Math.max(1, Math.floor(tests.length * distinctiveShare));
+  const matched = new Map(fragments.map(name => [name, []]));
+  for (const test of tests) {
+    const text = files.get(test);
+    if (typeof text !== 'string') continue;
+    const possible = fragments.filter(name => text.includes(name));
+    if (!possible.length) continue;
+    const literals = nameLiterals(test, text, REMOVED).names;
+    for (const name of possible)
+      if ([...literals].some(literal => literal === name || (name.length >= 5 && literal.includes(name))))
+        matched.get(name).push(test);
+  }
+  for (const watchers of matched.values())
+    if (watchers.length && watchers.length <= ceiling) for (const test of watchers) found.add(test);
+  return found;
 }

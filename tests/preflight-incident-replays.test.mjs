@@ -5,8 +5,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  CONTRACT_PIN_SECONDS,
+  changedExports,
+  contractGuardTest,
   fitPreflightBudget,
   protectedTiers,
+  removedNames,
   selectPreflightTests,
   selectTests,
   smokeTests,
@@ -16,7 +20,13 @@ import { scanReaders } from '../scripts/test-tree-scanners.mjs';
 import { recursiveFolderReader } from '../scripts/script-impact.mjs';
 import { incompletePreflight, mustRunNotRun, preflightVerdict } from '../dist/agent-preflight-incomplete.js';
 import * as preflight from '../dist/agent-preflight.js';
-import { preflightGuards, selectGuards } from '../dist/agent-preflight-static.js';
+import {
+  preflightGuards,
+  selectGuards,
+  selectStaticChecks,
+  staticChecks,
+} from '../dist/agent-preflight-static.js';
+import { protectedRunOrder } from '../dist/preflight-run-order.js';
 import { readFileSync } from 'node:fs';
 
 const files = sourceFiles(new URL('..', import.meta.url).pathname);
@@ -111,9 +121,19 @@ test('eb0491bb: direct importers of changed job modules run before any recent fa
   // job modules are hubs (well over a hundred tests load them, all ranked [0, 1, 0]); equally close
   // tests order by relevance and a stable hash, never by file name, so the four importers fit
   // (17cce1b3: one new equally close test pushed the hosted saves test past the 45-file edge).
-  const fit = fitPreflightBudget({ tiers: plan.tiers, budgetSeconds: 180, secondsPerFile: 4 });
-  const local = new Set(fit.tests);
-  for (const test of importers) assert.ok(local.has(test), `${test} fits the default budget`);
+  // The plan's contract pins (cost, budget and registration guards a backend change reaches, at most
+  // CONTRACT_PIN_SECONDS) are protected and counted inside the budget (Item 13ea93bf), so they take
+  // places from the tail of the default budget. The three most specific importers keep theirs; the
+  // fourth, the last file the 180 s budget reached before the pins, fits again once the budget covers
+  // the pins' own seconds: the pins displace nothing else.
+  const pinSeconds = plan.pins.length * 4;
+  assert.ok(pinSeconds <= CONTRACT_PIN_SECONDS);
+  const fits = seconds =>
+    new Set(fitPreflightBudget({ tiers: plan.tiers, budgetSeconds: seconds, secondsPerFile: 4 }).tests);
+  for (const test of importers.slice(0, 3)) assert.ok(fits(180).has(test), `${test} fits the default budget`);
+  for (const test of importers)
+    assert.ok(fits(180 + pinSeconds).has(test), `${test} fits the default budget plus the pins`);
+  const fit = { tests: [...fits(180)] };
   for (const test of recentTier) assert.ok(!fit.tests.includes(test), `${test} displaced an importer`);
   t.diagnostic(`recent ${recentTier.join(' ') || 'none'}; local ${fit.tests.length}`);
 });
@@ -414,4 +434,241 @@ test('abfc9b96: a hosted agent schema change runs its generated-docs guard first
   // The help table in the agent workflow doc is generated from these schemas; the landing check
   // failed on it after preflight stopped at 48 of 560 files.
   assert.ok(guardTests.includes(at('tests', 'hosted-agent-help.test.mjs')));
+});
+
+// Item 13ea93bf friction triage (2026-11-22) and the lead's 2026-11-23 cost-pin line: each preflight miss the
+// landing check later caught is selected, and a backend change starts its cost and registration pins inside
+// land's 90 s quick run. These live here, not in a file of their own: this file already reads the whole tree,
+// and one more recursive reader of it would be one more loader of every module (the 8809fba5 budget edge).
+const packageJson = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
+const tests = (...names) => names.map(name => at('tests', `${name}.test.mjs`));
+const guards = paths =>
+  selectGuards(
+    preflightGuards(packageJson, path => files.has(path)),
+    paths,
+  ).selected.flatMap(guard => guard.tests);
+// Land's quick run budget: 90 s, at 4 s a file.
+const budget = { seconds: 90, secondsFor: () => 4 };
+
+/** The pure run order land's quick run uses, at 4 s a file unless `measured` says otherwise. */
+function quickQueue(plan, paths, measured = {}) {
+  const guardTests = guards(paths);
+  return protectedRunOrder({
+    tiers: plan.tiers,
+    isProtected: name => protectedTiers.has(name),
+    guards: new Set(guardTests),
+    treeGuards: plan.treeGuards ?? [],
+    leadTests: plan.leadTests ?? [],
+    ownTests: [],
+    specificModules: plan.specificModules ?? [],
+    pins: plan.pins,
+    firstPins: plan.pinsFirst,
+    budgetSeconds: 90,
+    measuredSeconds: test => measured[test],
+    secondsFor: test => measured[test] ?? 4,
+    failureSeconds: () => 0,
+  });
+}
+const startsAt = (queue, test, measured = {}) =>
+  queue.slice(0, queue.indexOf(test)).reduce((sum, name) => sum + (measured[name] ?? 4), 0);
+
+test('baaec084 (receipt 4f687721): the read reduction in convex/ starts its cost and inventory pins inside 90 s', () => {
+  // Lane 01cd81c8 changed these two backend modules; three exact cost pins failed only in the queue check.
+  const paths = [at('convex', 'projectConvexSourceObjects.ts'), at('convex', 'projectPlanningList.ts')];
+  const plan = selectPreflightTests({ files, paths, guards: guards(paths), hubBudget: budget }, {});
+  assert.ok(plan.pins.length >= 3, `pins ${plan.pins.length}`);
+  assert.ok(plan.pins.length * 4 <= CONTRACT_PIN_SECONDS, 'pins stay inside their allowance');
+  const mandatory = tier(plan, 'mandatory');
+  for (const pin of plan.pins) {
+    assert.ok(contractGuardTest(pin), `${pin} is named for a guard`);
+    assert.ok(mandatory.includes(pin), `${pin} is protected, so the plan never trims it`);
+  }
+  // Registration and inventory pins first, then the cost pins the changed modules are about.
+  assert.match(plan.pins[0], /inventory|registration/);
+  assert.ok(
+    plan.pins.some(pin => /source-(?:point-query|generation)|dbio/.test(pin)),
+    'a source read pin',
+  );
+  const queue = quickQueue(plan, paths);
+  for (const pin of plan.pins) assert.ok(startsAt(queue, pin) < 90, `${pin} starts after 90 s`);
+});
+
+test('60d68b5f (Lane ef5d2a08): a schema change starts the registration and inventory guards first, even behind slow guards', () => {
+  const paths = [at('convex', 'schema.ts')];
+  const plan = selectPreflightTests({ files, paths, guards: guards(paths), hubBudget: budget }, {});
+  const registrations = at('tests', 'table-registrations.test.mjs');
+  const inventory = at('tests', 'project-purge-inventory.test.mjs');
+  for (const pin of [registrations, inventory]) {
+    assert.ok(plan.pins.includes(pin), `${pin} is a pin`);
+    assert.ok(tier(plan, 'mandatory').includes(pin), `${pin} is protected`);
+  }
+  assert.ok(plan.pins.indexOf(registrations) < 2 && plan.pins.indexOf(inventory) < 2, 'registrations lead');
+  // The landing-I/O guards this schema change triggers take ~30 s each here; the cheap pins, timed
+  // fast, start before every one of them.
+  const measured = { [registrations]: 2.2, [inventory]: 5.5 };
+  for (const guard of guards(paths)) measured[guard] ??= 30;
+  // A fresh clone has timed nothing: the registration and inventory pins still start before the guards.
+  const fresh = quickQueue(plan, paths);
+  assert.ok(startsAt(fresh, registrations) <= 8 && startsAt(fresh, inventory) <= 8, 'untimed, they lead');
+  const queue = quickQueue(plan, paths, measured);
+  assert.ok(startsAt(queue, registrations, measured) <= 10, 'registrations start within 10 s');
+  assert.ok(startsAt(queue, inventory, measured) <= 10, 'inventory starts within 10 s');
+});
+
+test('42e2a995: the tool-list contract test runs first when a contract schema changes', () => {
+  const toolList = at('tests', 'mcp-tool-list.test.mjs');
+  assert.ok(contractGuardTest(toolList));
+  const paths = [at('src', 'hosted-agent-contract.ts')];
+  const plan = selectPreflightTests({ files, paths, guards: guards(paths), hubBudget: budget }, {});
+  assert.ok(tier(plan, 'mandatory').includes(toolList), 'mcp-tool-list is protected for a contract change');
+});
+
+test('8cf45311: a source-text guard that reads a changed file is must-run (the detached:true literal)', () => {
+  const plan = selectPreflightTests({
+    files,
+    paths: [at('src', 'agent-preflight-capture.ts')],
+    hubBudget: budget,
+  });
+  assert.ok(tier(plan, 'mandatory').includes(at('tests', 'no-resident-process.test.mjs')));
+});
+
+test('10d969ca: a test that hard-codes an id format the change removed is direct, however far it sits', () => {
+  const before = 'export const timelineId = id => `accepted:${id}`;\nexport const other = 1;\n';
+  const after = 'export const timelineId = id => `landed:${id}`;\nexport const other = 1;\n';
+  const gone = removedNames(at('src', 'timeline.ts'), before, after);
+  assert.deepEqual(gone, ['accepted:']);
+  const inventory = new Map([
+    [at('src', 'timeline.ts'), after],
+    [at('tests', 'stale-id.test.mjs'), "import '../dist/timeline.js';\nassert.equal(x, 'accepted:abc');\n"],
+    ...['a', 'b', 'c'].map(name => [
+      at('tests', `consumer-${name}.test.mjs`),
+      "import '../dist/timeline.js';\nassert.ok(true);\n",
+    ]),
+    ['package.json', '{}'],
+    ['package-lock.json', '{}'],
+  ]);
+  // A one-file budget makes the module a hub: its consumers are ranked, not protected.
+  const input = {
+    files: inventory,
+    paths: [at('src', 'timeline.ts')],
+    hubBudget: { seconds: 4, secondsFor: () => 4 },
+  };
+  const control = selectPreflightTests(input, {});
+  assert.ok(!tier(control, 'direct').includes(at('tests', 'stale-id.test.mjs')), 'control: not protected');
+  const plan = selectPreflightTests({ ...input, removedNames: gone }, {});
+  assert.ok(tier(plan, 'direct').includes(at('tests', 'stale-id.test.mjs')));
+  for (const name of ['a', 'b', 'c'])
+    assert.ok(!tier(plan, 'direct').includes(at('tests', `consumer-${name}.test.mjs`)));
+  assert.equal(plan.specificModules[0].tests[0], at('tests', 'stale-id.test.mjs'), 'it runs first');
+});
+
+test('5b30f265: a test that imports a changed export by name is direct, one that imports another export is not', () => {
+  const before = 'export function notice(a) { return a; }\nexport function steady() { return 1; }\n';
+  const after = 'export function notice(a, b) { return [a, b]; }\nexport function steady() { return 1; }\n';
+  const path = at('src', 'canary.ts');
+  const altered = changedExports(path, before, after);
+  assert.deepEqual(altered, ['notice']);
+  const inventory = new Map([
+    [path, after],
+    [at('tests', 'trust.test.mjs'), "import { notice as n } from '../dist/canary.js';\nn(1);\n"],
+    [at('tests', 'steady.test.mjs'), "import { steady } from '../dist/canary.js';\nsteady();\n"],
+    [at('tests', 'other.test.mjs'), "import { steady } from '../dist/canary.js';\nsteady();\n"],
+    ['package.json', '{}'],
+    ['package-lock.json', '{}'],
+  ]);
+  // A default import may come first; a module of the same file name elsewhere is not the changed one.
+  inventory.set(
+    at('tests', 'default.test.mjs'),
+    "import c, { notice } from '../dist/canary.js';\nc(notice);\n",
+  );
+  inventory.set(
+    at('tests', 'elsewhere.test.mjs'),
+    "import { notice } from './fixtures/canary.js';\nnotice();\n",
+  );
+  const plan = selectPreflightTests(
+    {
+      files: inventory,
+      paths: [path],
+      changedExports: new Map([[path, altered]]),
+      hubBudget: { seconds: 4, secondsFor: () => 4 },
+    },
+    {},
+  );
+  assert.ok(tier(plan, 'direct').includes(at('tests', 'trust.test.mjs')));
+  assert.ok(!tier(plan, 'direct').includes(at('tests', 'steady.test.mjs')));
+  assert.ok(tier(plan, 'direct').includes(at('tests', 'default.test.mjs')));
+  assert.ok(!tier(plan, 'direct').includes(at('tests', 'elsewhere.test.mjs')));
+});
+
+test('ca035ee5: a field in any schema the generated command table renders runs its generated-doc guards', () => {
+  const guardTests = guards([at('src', 'hosted-agent-reads.ts')]);
+  for (const test of tests('hosted-agent-help', 'hosted-response-contract', 'table-registrations'))
+    assert.ok(guardTests.includes(test), `${test} is a guard of a schema change`);
+  // Every schema file the contract, the reads and the help module import directly is covered.
+  const schemaFiles = new Set();
+  for (const entry of ['hosted-agent-help', 'hosted-agent-contract', 'hosted-agent-reads']) {
+    schemaFiles.add(at('src', `${entry}.ts`));
+    const text = files.get(at('src', `${entry}.ts`));
+    for (const match of text.matchAll(/from '\.\/([\w-]+)\.js'/g)) {
+      const path = at('src', `${match[1]}.ts`);
+      if (/z\.(?:object|strictObject)\(/.test(files.get(path) ?? '')) schemaFiles.add(path);
+    }
+  }
+  for (const path of schemaFiles)
+    assert.ok(
+      guards([path]).includes(at('tests', 'hosted-agent-help.test.mjs')),
+      `${path} defines a schema the help table renders but triggers no generated-doc guard`,
+    );
+});
+
+test('daedb321 and 57ab011b: a new module runs the package ceilings (the cheap check the lead chose over full smoke, 11-20), a Convex-reached module the runtime-import check', () => {
+  const checks = staticChecks(packageJson);
+  const ceilings = checks.find(check => check.command.includes('scripts/package-ceilings.mjs'));
+  assert.deepEqual(selectStaticChecks([ceilings], [at('src', 'a-new-module.ts')]).selected, [ceilings]);
+  const runtime = checks.find(check => check.name === 'convex runtime imports');
+  assert.deepEqual(selectStaticChecks([runtime], [at('src', 'hosted-main.ts')]).selected, [runtime]);
+  assert.ok(guards([at('src', 'hosted-main.ts')]).includes(at('tests', 'convex-runtime-imports.test.mjs')));
+});
+
+test('df1eca81: a data file under src stays scoped when only prose, manifests, ledgers and type includes name it', () => {
+  const real = selectTests({ files, paths: [at('src', 'speed-budgets.json')] });
+  assert.equal(real.scope, 'scoped');
+  const data = at('src', 'new-limits.json');
+  const base = new Map([
+    ...files,
+    [data, '{}'],
+    [at('src', 'new-limits.ts'), "import limits from './new-limits.json';\nexport default limits;\n"],
+    [at('tests', 'new-limits.test.mjs'), "import '../dist/new-limits.js';\n"],
+    [at('tests', 'new-limits-baseline.json'), '{"files":["dist/new-limits.json"]}'],
+    [at('scripts', 'package-documents', 'new-limits.json'), '{"path":"docs/new-limits.md"}'],
+  ]);
+  assert.equal(selectTests({ files: base, paths: [data] }).scope, 'scoped');
+  // A shell script or workflow naming it may read it: the data file stays unobserved.
+  const read = new Map([...base, ['scripts/run.sh', 'cat src/new-limits.json']]);
+  assert.equal(selectTests({ files: read, paths: [data] }).scope, 'full');
+  const shipped = { ...JSON.parse(files.get('package.json')), files: ['src/new-limits.json'] };
+  // A fixture a test reads may hand the path to code: the readers of that fixture become readers of the
+  // data file (never dropped), and a fixture nobody reads is inert.
+  const fixture = new Map([
+    ...base,
+    [at('tests', 'cases.json'), '{"input":"src/new-limits.json"}'],
+    [at('tests', 'cli-case.test.mjs'), "import '../dist/cli.js';\nreadFileSync('tests/cases.json');\n"],
+  ]);
+  const viaFixture = selectTests({ files: fixture, paths: [data] });
+  assert.ok(viaFixture.tests.includes(at('tests', 'cli-case.test.mjs')), 'the fixture reader runs');
+  const manifest = new Map([...base, ['package.json', JSON.stringify(shipped)]]);
+  assert.equal(selectTests({ files: manifest, paths: [data] }).scope, 'full');
+});
+
+test('bf230974: a new docs page and its package-documents manifest stay scoped', () => {
+  const inventory = new Map([
+    ...files,
+    [at('scripts', 'package-documents', 'phase7-plan.json'), '{"path":"docs/phase7-plan.md"}'],
+  ]);
+  const selection = selectTests({
+    files: inventory,
+    paths: [at('docs', 'phase7-plan.md'), at('scripts', 'package-documents', 'phase7-plan.json')],
+  });
+  assert.equal(selection.scope, 'scoped');
+  assert.ok(selection.tests.length < files.size / 3, `selected ${selection.tests.length}`);
 });

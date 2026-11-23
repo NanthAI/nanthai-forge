@@ -8,6 +8,7 @@
 // tainted function only runs when tainted code or load-time code calls it, so references are enough.
 // Parse-only, like the graph; type positions carry no runtime reference.
 import ts from 'typescript';
+import { posix } from 'node:path';
 
 const functionLike = node =>
   ts.isFunctionDeclaration(node) ||
@@ -299,4 +300,70 @@ export function moduleTaint(info, entries) {
   const names = new Set(entries.exports);
   for (const [name, local] of info.exports) if (locals.has(local)) names.add(name);
   return { whole: false, names: names.size ? names : emptyNames };
+}
+
+const kindOf = path =>
+  /\.[cm]?tsx$/.test(path)
+    ? ts.ScriptKind.TSX
+    : /\.[cm]?ts$/.test(path)
+      ? ts.ScriptKind.TS
+      : ts.ScriptKind.JS;
+/** Exports of a module with the text of the statement that declares each (whitespace folded). */
+function exportBodies(path, text) {
+  const ast = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, kindOf(path));
+  const facts = moduleSymbols(ast);
+  const bodies = new Map();
+  ast.statements.forEach((statement, index) => {
+    const body = statement.getText(ast).replace(/\s+/g, ' ');
+    for (const name of facts.statements[index]) bodies.set(name, body);
+  });
+  return new Map([...facts.exports].map(([name, local]) => [name, bodies.get(local) ?? local]));
+}
+/** Export names whose declaring statement differs between `before` and `after`, or that one side lacks.
+ * An unexported helper an export calls is not compared here: that reach is `moduleTaint`'s. */
+export function changedExports(path, before, after) {
+  const left = exportBodies(path, before);
+  const right = exportBodies(path, after);
+  return [...new Set([...left.keys(), ...right.keys()])].filter(name => left.get(name) !== right.get(name));
+}
+/** Past this many altered exports the module was rewritten, and the whole-module reach already covers it. */
+const MOST_ALTERED_EXPORTS = 40;
+const segments = path => path.replace(/\.[^./]+$/, '').split('/');
+const sameSegments = (a, b) => a.length === b.length && a.every((part, index) => part === b[index]);
+/** `specifier`, imported by `test`, names the changed module: the same path, or its build output (the
+ * tests import `dist/x.js` for `src/x.ts`). Never a module of the same file name elsewhere. */
+function reaches(test, specifier, changedPath) {
+  if (!specifier.startsWith('.')) return false;
+  const resolved = segments(posix.normalize(posix.join(posix.dirname(test), specifier)));
+  const changed = segments(changedPath);
+  return (
+    sameSegments(resolved, changed) ||
+    (changed[0] === 'src' && resolved[0] === 'dist' && sameSegments(resolved.slice(1), changed.slice(1)))
+  );
+}
+/** Tests whose own source imports an altered export of a changed module by name (a default import may
+ * come first: `import d, { a }`). `changed`: path -> altered export names. */
+export function namedConsumers({ files, tests, changed }) {
+  const found = new Set();
+  if (!changed?.size) return found;
+  const wanted = [...changed]
+    .map(([path, altered]) => [path, new Set(altered.filter(name => name !== 'default'))])
+    .filter(([, names]) => names.size && names.size <= MOST_ALTERED_EXPORTS);
+  if (!wanted.length) return found;
+  const importPattern = /import\s*(?:type\s+)?(?:[\w$]+\s*,\s*)?\{([^}]*)\}\s*from\s*['"]([^'"]+)['"]/g;
+  for (const test of tests) {
+    const text = files.get(test);
+    if (typeof text !== 'string') continue;
+    for (const match of text.matchAll(importPattern)) {
+      const imported = match[1].split(',').map(item =>
+        item
+          .trim()
+          .split(/\s+as\s+/)[0]
+          .replace(/^type\s+/, ''),
+      );
+      for (const [path, names] of wanted)
+        if (imported.some(name => names.has(name)) && reaches(test, match[2], path)) found.add(test);
+    }
+  }
+  return found;
 }

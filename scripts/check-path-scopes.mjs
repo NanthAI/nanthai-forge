@@ -21,10 +21,26 @@ function jsonReaders(path, files) {
   for (const [file, text] of files) {
     if (file === path || !named.test(text)) continue;
     if (codePath.test(file)) readers.push(file);
-    else if (!/\.(?:md|mdx|markdown)$/i.test(file)) return null;
+    // A data file may hand this path to code (a CLI case reading it from a fixture): the code that
+    // reads that file is a reader of this one too, and nobody reading it makes it inert.
+    else if (file.endsWith('.json') && !posix.basename(file).startsWith('package'))
+      readers.push(...fixtureReaders(file, files));
+    else if (!inertMention(file)) return null;
   }
-  return readers;
+  return [...new Set(readers)];
 }
+/** Code files that name a JSON data file by its file name. */
+function fixtureReaders(fixture, files) {
+  const name = posix.basename(fixture);
+  return [...files]
+    .filter(([file, text]) => codePath.test(file) && text.includes(name))
+    .map(([file]) => file);
+}
+
+/** A non-code, non-JSON file that names a data file without running or reading it: prose. Any other
+ * config, shell or workflow file naming it may read it, so the data file stays unobserved (broad).
+ * Item 13ea93bf: `src/speed-budgets.json` selected the whole suite because five files named it. */
+const inertMention = file => /\.(?:md|mdx|markdown)$/i.test(file);
 
 /** A non-source file in a folder under scripts/ or tests/ (shell, Python, notes)
  * is data to the code that runs or reads it, which the selector never parses.
