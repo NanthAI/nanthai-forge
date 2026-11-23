@@ -75,6 +75,12 @@ the static inventory covers the entire deployed schema. There is no index-name
 allowlist. New dynamic selectors need static analysis alongside their runtime
 implementation; they cannot silently count a shared index name on another table.
 
+A staged index (`.index(name, { fields, staged: true })`) backfills after the push
+without blocking it and cannot be queried. The guard lists it as `staged`, accepts it
+without a caller and fails any query on it. Ship a large-table index staged, then
+remove the flag and add its caller in a later landing; that deploy enables the
+backfilled index.
+
 The finite selectors cover project purge registries, ownership seeks, the finish
 read proxy, recovery benchmark selection and serialized sandbox queries in scripts.
 Ownership and benchmark selection preserve schema declaration order. Prefix

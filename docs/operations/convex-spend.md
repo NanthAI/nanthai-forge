@@ -238,7 +238,15 @@ blocked, paused or disabled; thresholds only notify.
 
 The ledger stores only function identifiers, hashed execution identities, numeric
 usage, coverage and alert/gap records. It never stores console lines, arguments,
-results or error text. Each append is flushed; replayed execution identities are
+results or error text. The one exception is a read-shape label: a function that
+prints exactly one `FORGE_IO_ATTRIBUTION {"label":…}` line
+(`convex/ioAttribution.ts`) has that code-chosen label kept, if it matches the
+lowercase `a/b` grammar. The day summary then splits the function by label in
+`perAttribution`, and the report shows the top ten as `topAttributions`.
+`projectSelfMetrics:page` labels each call `metrics-<stream>/<shape>`: `window`
+reads canonical rows, `compact` a compact projection, and `context`, `inputs` and
+`save-heads` the follow-up lookups. The line also carries the call's own
+`documentsRead` and `bytesRead`, which stay in the provider log. It adds no read or call. Each append is flushed; replayed execution identities are
 ignored, including after a restart. Every local tick also atomically replaces a
 derived `YYYY-MM-DD.summary.json` with per-function/per-class totals and dollars;
 these summaries can always be rebuilt from the append-only `.jsonl` journals.

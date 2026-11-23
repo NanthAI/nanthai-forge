@@ -158,6 +158,14 @@ export function indexInventory(root = process.cwd()) {
           const name = strings(call.arguments[0]);
           const kind = call.expression.name.text === 'searchIndex' ? 'search' : 'database';
           let fields = unwrap(call.arguments[1]);
+          let staged = false;
+          // Staged database index: { fields, staged: true } backfills without blocking the push and
+          // cannot be queried until the flag is removed.
+          if (kind === 'database' && fields && ts.isObjectLiteralExpression(fields)) {
+            const option = name => fields.properties.find(p => p.name?.getText() === name)?.initializer;
+            staged = option('staged')?.kind === ts.SyntaxKind.TrueKeyword;
+            fields = unwrap(option('fields'));
+          }
           if (kind === 'search' && fields && ts.isObjectLiteralExpression(fields)) {
             const search = fields.properties.find(p => p.name?.getText() === 'searchField')?.initializer;
             const filters = fields.properties.find(p => p.name?.getText() === 'filterFields')?.initializer;
@@ -175,6 +183,7 @@ export function indexInventory(root = process.cwd()) {
             kind,
             name: name[0],
             fields: names.flat(),
+            ...(staged ? { staged } : {}),
             location: location(call.expression.name),
             reason: before.match(/index-order:\s*([^\n]+)/)?.[1]?.trim() ?? '',
             uses: [],
@@ -296,11 +305,13 @@ export function indexInventory(root = process.cwd()) {
         ),
       };
     }
-    index.classification = !index.uses.length
-      ? 'unused'
-      : index.prefixOf.length
-        ? 'prefix-redundant'
-        : 'used';
+    index.classification = index.staged
+      ? 'staged'
+      : !index.uses.length
+        ? 'unused'
+        : index.prefixOf.length
+          ? 'prefix-redundant'
+          : 'used';
     index.uses = [...new Set(index.uses)].sort();
   }
   return {
@@ -329,7 +340,10 @@ export function indexInventory(root = process.cwd()) {
 export function indexIssues(inventory) {
   const issues = inventory.unresolved.map(u => `${u.location}: ${u.text}`);
   for (const index of inventory.indexes) {
-    if (!index.uses.length) issues.push(`${index.location}: unused ${index.table}.${index.name}`);
+    if (index.staged && index.uses.length)
+      issues.push(`${index.location}: staged ${index.table}.${index.name} cannot be queried until enabled`);
+    else if (!index.uses.length && !index.staged)
+      issues.push(`${index.location}: unused ${index.table}.${index.name}`);
     if (
       index.prefixOf.length &&
       (!index.ordering?.verified ||

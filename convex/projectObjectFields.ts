@@ -106,7 +106,9 @@ export const objectTables = {
     .index('by_digest_and_removed', ['digest', 'removed'])
     .index('by_storage', ['storageId'])
     .index('by_project_and_storage_and_removed', ['projectId', 'storageId', 'removed'])
-    .index('by_nonce', ['nonce']),
+    .index('by_nonce', ['nonce'])
+    // Purge reference proof by key prefix (Item 411727ba); staged until backfilled, then enabled.
+    .index('by_r2Key', { fields: ['r2Key'], staged: true }),
   /** Sorted, immutable object catalog pages: one row per `objectCatalogPage`
    * stored objects instead of one row per object (GitHub import). */
   projectObjectCatalog: defineTable({

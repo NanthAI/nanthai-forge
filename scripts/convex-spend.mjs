@@ -68,6 +68,7 @@ export async function printSpend(journal, now = Date.now(), plan = null, deploym
           gaps: gaps.length,
         })),
         top10: days[0].perFunction.slice(0, 10),
+        topAttributions: (days[0].perAttribution ?? []).slice(0, 10),
       },
       null,
       2,

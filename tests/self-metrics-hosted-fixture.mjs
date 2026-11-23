@@ -60,7 +60,14 @@ export function fixture() {
     meter.bytes += rows.reduce((n, row) => n + Buffer.byteLength(JSON.stringify(row)), 0);
     return structuredClone(rows);
   };
-  const makeCtx = state => ({
+  const makeCtx = (state, start = { ...meter }) => ({
+    // This call's own read meter, as Convex's getTransactionMetrics reports it.
+    meta: {
+      getTransactionMetrics: async () => ({
+        documentsRead: { used: meter.documents - start.documents },
+        bytesRead: { used: meter.bytes - start.bytes },
+      }),
+    },
     auth: { getUserIdentity: async () => (actor ? { subject: actor } : null) },
     db: {
       // Convex file storage, newest first; nothing writes it, so it is empty.

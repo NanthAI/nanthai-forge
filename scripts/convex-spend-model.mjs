@@ -14,20 +14,45 @@ export const utcDay = at => new Date(at).toISOString().slice(0, 10);
 const sum = (a, b) => (a === null || b === null ? null : a + b);
 const empty = () => ({ calls: 0, io: 0, search: 0, compute: 0, egress: 0 });
 
+const messages = log =>
+  (log.logLines ?? []).map(line => {
+    const text = typeof line === 'string' ? line : (line.messages ?? []).join(' ');
+    // Provider JSONL console arguments may carry one balanced single-quote pair.
+    return text.startsWith("'") && text.endsWith("'") ? text.slice(1, -1) : text;
+  });
+
 // Match the entire console message, never a substring of repository/user output.
 export function acceptedLandings(log) {
   if (log.error || log.cachedResult || !/^mutation$/i.test(log.udfType ?? '')) return 0;
-  const counts = (log.logLines ?? []).flatMap(line => {
-    const text = typeof line === 'string' ? line : (line.messages ?? []).join(' ');
-    // Provider JSONL console arguments may carry one balanced single-quote pair.
-    const message = text.startsWith("'") && text.endsWith("'") ? text.slice(1, -1) : text;
+  const counts = messages(log).flatMap(message => {
     const match = /^FORGE_ACCEPTED_LANDINGS ([1-9]\d*)$/.exec(message);
     return match ? [Number(match[1])] : [];
   });
   return counts.length === 1 && Number.isSafeInteger(counts[0]) ? counts[0] : 0;
 }
 
-/** Never retain arguments, results, error text or console output. OCC attempts remain distinct. */
+/** The read-shape label of convex/ioAttribution.ts (Item 411727ba). Only a code-chosen label of the
+ * same grammar is kept, and only when the call printed exactly one; its numbers stay in the log. */
+export function ioAttribution(log) {
+  const labels = messages(log).flatMap(message => {
+    const match = /^FORGE_IO_ATTRIBUTION (\{.*\})$/.exec(message);
+    if (!match) return [];
+    try {
+      const { label } = JSON.parse(match[1]);
+      return typeof label === 'string' &&
+        label.length <= 64 &&
+        /^[a-z][a-z0-9-]*(?:\/[a-z][a-z0-9-]*){0,3}$/.test(label)
+        ? [label]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  return labels.length === 1 ? labels[0] : null;
+}
+
+/** Never retain arguments, results, error text or console output (beyond the code-chosen read label).
+ * OCC attempts remain distinct. */
 export function spendEvent(log, deployment) {
   if (log.kind === 'Progress') return null;
   if (
@@ -69,6 +94,7 @@ export function spendEvent(log, deployment) {
     deployment,
     identifier: log.identifier,
     acceptedLandings: acceptedLandings(log),
+    ...(ioAttribution(log) ? { attribution: ioAttribution(log) } : {}),
     usage: {
       calls: 1,
       io: sum(usage.databaseIoReadBytes, usage.databaseIoWriteBytes),
@@ -94,6 +120,7 @@ export function costOf(usage, knownUsage = usage) {
 export function daySummary(day, rows, now = Date.now()) {
   const deployments = new Map(),
     functions = new Map(),
+    attributions = new Map(),
     gaps = [],
     alerts = new Set();
   const get = name => {
@@ -130,7 +157,16 @@ export function daySummary(day, rows, now = Date.now()) {
         missingFields: new Set(),
       });
     const fn = functions.get(row.identifier);
-    for (const target of [dep, fn]) {
+    const shape = row.attribution ? `${row.identifier}#${row.attribution}` : null;
+    if (shape && !attributions.has(shape))
+      attributions.set(shape, {
+        identifier: row.identifier,
+        attribution: row.attribution,
+        usage: empty(),
+        knownUsage: empty(),
+        missingFields: new Set(),
+      });
+    for (const target of [dep, fn, ...(shape ? [attributions.get(shape)] : [])]) {
       for (const key of Object.keys(spendRates)) {
         target.usage[key] = sum(target.usage[key], row.usage[key]);
         target.knownUsage[key] += row.usage[key] ?? 0;
@@ -179,6 +215,14 @@ export function daySummary(day, rows, now = Date.now()) {
         knownUsage: fn.knownUsage,
         missingFields: [...fn.missingFields],
         ...costOf(fn.usage, fn.knownUsage),
+      }))
+      .sort((a, b) => b.knownUsd - a.knownUsd),
+    // Calls that printed a read-shape label, split by it; unlabelled calls stay only in perFunction.
+    perAttribution: [...attributions.values()]
+      .map(({ missingFields, ...shape }) => ({
+        ...shape,
+        missingFields: [...missingFields],
+        ...costOf(shape.usage, shape.knownUsage),
       }))
       .sort((a, b) => b.knownUsd - a.knownUsd),
     coverage: 'partial: provider drops cannot be ruled out; unobserved time is unknown',

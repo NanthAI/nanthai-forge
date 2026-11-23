@@ -7,7 +7,8 @@ import { moduleUrl } from './convex-module.mjs';
 function distinctIndexes(schema) {
   for (const [table, definition] of Object.entries(schema.tables)) {
     const fields = new Map();
-    for (const index of definition.export().indexes) {
+    const { indexes, stagedDbIndexes } = definition.export();
+    for (const index of [...indexes, ...stagedDbIndexes]) {
       const key = JSON.stringify(index.fields);
       if (fields.has(key))
         throw Error(`IndexNotUnique: ${table}.${index.indexDescriptor} duplicates ${fields.get(key)}`);
@@ -57,10 +58,17 @@ test('Convex deployment guard rejects unused indexes and prefixes without a loca
     const database = deployed.indexes.map(i => ({ name: i.indexDescriptor, fields: i.fields }));
     assert.deepEqual(
       inventory.indexes
-        .filter(i => i.table === table && i.kind === 'database')
+        .filter(i => i.table === table && i.kind === 'database' && !i.staged)
         .map(({ name, fields }) => ({ name, fields })),
       database,
       `${table}: every deployed database index is inventoried`,
+    );
+    assert.deepEqual(
+      inventory.indexes
+        .filter(i => i.table === table && i.staged)
+        .map(({ name, fields }) => ({ name, fields })),
+      deployed.stagedDbIndexes.map(i => ({ name: i.indexDescriptor, fields: i.fields })),
+      `${table}: every staged index is inventoried as staged`,
     );
     assert.deepEqual(
       inventory.indexes.filter(i => i.table === table && i.kind === 'search').map(i => i.name),
@@ -68,6 +76,23 @@ test('Convex deployment guard rejects unused indexes and prefixes without a loca
       `${table}: every search index is inventoried`,
     );
   }
+});
+test('a staged index may ship before its caller, and a query on it fails the guard until it is enabled', t => {
+  const schema = `const tables = { one: defineTable({a: v.string()})
+    .index('by_a', { fields: ['a'], staged: true }) };`;
+  const quiet = sourceFixture(t, schema, `export const none = 1;`);
+  assert.deepEqual(indexIssues(quiet), []);
+  assert.deepEqual(
+    quiet.indexes.map(({ name, fields, staged, classification }) => ({
+      name,
+      fields,
+      staged,
+      classification,
+    })),
+    [{ name: 'by_a', fields: ['a'], staged: true, classification: 'staged' }],
+  );
+  const early = sourceFixture(t, schema, `ctx.db.query('one').withIndex('by_a').first();`);
+  assert.match(indexIssues(early).join('\n'), /staged one.by_a cannot be queried until enabled/);
 });
 test('query use belongs to its resolved table, not another table sharing the index name', t => {
   const i = sourceFixture(

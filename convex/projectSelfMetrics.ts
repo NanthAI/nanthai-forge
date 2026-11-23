@@ -21,6 +21,7 @@ import { invariant } from '../src/errors';
 import { metricRunRow } from '../src/self-metrics-run';
 import { metricRunsPage } from './projectMetricReadRuns';
 import { report } from './errors';
+import { logIoAttribution } from './ioAttribution';
 import { metricReceiptCoverage } from '../src/self-metric-receipts';
 import { landingClientHoldSeconds, landingCosts } from '../src/hosted-landings-view';
 import {
@@ -159,6 +160,9 @@ export const page = query({
   },
   returns: v.string(),
   handler: async (ctx, input) => {
+    // Which read shape served this call (Item 411727ba): window = canonical rows, compact = a
+    // compact projection, context / inputs / save-heads = the follow-up lookups.
+    let mode = 'window';
     try {
       const project = await metricsReader(ctx, input.projectId);
       const from = Date.parse(input.from),
@@ -175,6 +179,7 @@ export const page = query({
       );
       const context = from - contextDays * 86400000;
       if (input.contextSelection) {
+        mode = 'context';
         return canonicalPayload({
           ...(await metricContextPage(ctx, project, {
             ...input.contextSelection,
@@ -204,6 +209,7 @@ export const page = query({
           'BAD_ARGUMENT',
           'Select Lane or save input context.',
         );
+        mode = input.exactSaveHeads || input.saveHeadReferences ? 'save-heads' : 'inputs';
         return canonicalPayload({
           ...(await metricInputReferences(
             ctx,
@@ -235,7 +241,8 @@ export const page = query({
           authority: project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 },
         });
       }
-      if (input.stream === 'runs' && input.compactRuns)
+      if (input.stream === 'runs' && input.compactRuns) {
+        mode = 'compact';
         return canonicalPayload({
           ...(await metricRunsPage(ctx, input.projectId, context, to, input.cursor)),
           contextFrom: new Date(context).toISOString(),
@@ -244,9 +251,11 @@ export const page = query({
           cutover: project.sourceCutover?.at ?? null,
           authority: project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 },
         });
+      }
       if (input.stream === 'attempts') {
         const page = await capsuleMetricsPage(ctx, input.projectId, context, to, input.cursor);
-        if (page)
+        if (page) {
+          mode = 'compact';
           return canonicalPayload({
             ...page,
             inputReferencesVersion: 1,
@@ -255,6 +264,7 @@ export const page = query({
             cutover: project.sourceCutover?.at ?? null,
             authority: project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 },
           });
+        }
       }
       if (input.stream === 'lanes') {
         const page = await journalLaneMetricsPage(
@@ -265,7 +275,8 @@ export const page = query({
           input.cursor,
           project.journalRecordReceipts,
         );
-        if (page)
+        if (page) {
+          mode = 'compact';
           return canonicalPayload({
             ...page,
             inputReferencesVersion: 1,
@@ -274,6 +285,7 @@ export const page = query({
             cutover: project.sourceCutover?.at ?? null,
             authority: project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 },
           });
+        }
       }
       if (input.stream === 'receipts') {
         const rows = await ctx.db
@@ -466,6 +478,8 @@ export const page = query({
       });
     } catch (error) {
       return report(error);
+    } finally {
+      await logIoAttribution(ctx, `metrics-${input.stream}/${mode}`);
     }
   },
 });
