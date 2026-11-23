@@ -399,8 +399,8 @@ search cursor can show that a term matched more than one page, and its Lanes sta
 stand-in Intent id, so they can be counted; no Item, title or id of it reaches the reply, and a page left empty is
 finished. A request such a viewer sends that is not a JSON object is refused; so is a journal history request that
 is not one, for every viewer (`BAD_ARGUMENT`). Archived and Deleted Items are never public, under any setting. Only the project owner switches the plan between
-public and members-only (`publicDiscovery:setSettings`, next to the Lane-title opt-in); there is no web control for
-it yet.
+public and members-only (`publicDiscovery:setSettings`, next to the Lane-title opt-in). Settings > Project has the
+same switch for the owner and shows the setting read-only to everyone else.
 `tests/public-plan-access-matrix.test.mjs` checks every viewer against every setting on these reads.
 
 When Plan resolves an Item page, Work opens with one page of 10 Lanes from `projectItemWork:read`, the same

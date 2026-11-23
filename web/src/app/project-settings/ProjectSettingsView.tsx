@@ -9,7 +9,14 @@ import { MoveToTrash } from '../trash/MoveToTrash';
 import { MakePrivate, MakePublic } from './VisibilitySheets';
 import '../trash/trash.css';
 import './project-settings.css';
-import { createdWords, renameProblem, sentence, visibilityWords, type ProjectFacts } from './project-model';
+import {
+  createdWords,
+  planWords,
+  renameProblem,
+  sentence,
+  visibilityWords,
+  type ProjectFacts,
+} from './project-model';
 
 type Crumb = { label: string; href?: string };
 /** One opened confirmation: its own operation id and the revision the person saw, kept for retries of that sheet only. */
@@ -30,6 +37,7 @@ export function ProjectSettingsView({
   rename,
   moveToTrash,
   setVisibility,
+  setPlanVisibility,
   extra,
 }: {
   facts: ProjectFacts;
@@ -41,6 +49,8 @@ export function ProjectSettingsView({
   moveToTrash: () => Promise<void>;
   /** Owner person only: the server refuses anyone else. Going public carries the typed name. */
   setVisibility: (change: VisibilityChange) => Promise<void>;
+  /** Owner person only: the server refuses anyone else. One reversible write; repeating it changes nothing. */
+  setPlanVisibility: (plan: ProjectFacts['planVisibility']) => Promise<void>;
   /** Further regions of the page (backups, transfer, imports), after the lifecycle. */
   extra?: ReactNode;
 }) {
@@ -65,6 +75,7 @@ export function ProjectSettingsView({
           </span>
         </Fact>
         <Fact label="Visibility">{visibilityWords(facts.visibility)}</Fact>
+        <Fact label="Plan">{planWords(facts)}</Fact>
         <Fact label="Owner">
           <span className="mono" translate="no">
             @{facts.handle}
@@ -101,6 +112,7 @@ export function ProjectSettingsView({
           </Row>
         </Region>
       ) : null}
+      {owner ? <PlanSwitch facts={facts} set={setPlanVisibility} /> : null}
       {owner ? (
         <Region title="Trash" weight="ref">
           <Row cols="minmax(0, 1fr) auto">
@@ -157,6 +169,55 @@ export function ProjectSettingsView({
         />
       ) : null}
     </div>
+  );
+}
+
+/** Who reads the plan (Items, Initiatives, comments) of a public project. One write, safe to repeat; the page rereads. */
+function PlanSwitch({
+  facts,
+  set,
+}: {
+  facts: ProjectFacts;
+  set: (plan: ProjectFacts['planVisibility']) => Promise<void>;
+}) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const members = facts.planVisibility === 'members';
+  const change = async () => {
+    setPending(true);
+    setError('');
+    try {
+      await set(members ? 'public' : 'members');
+    } catch (failure) {
+      setError(hostedError(failure));
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <Region title="Plan" weight="ref">
+      <Row cols="minmax(0, 1fr) auto">
+        <span className="nm">
+          <span className="ttl">{members ? 'Make the plan public' : 'Keep the plan to members'}</span>
+          <span className="meta">
+            {members
+              ? 'Visitors to this public project can read its Items, Initiatives and comments again.'
+              : 'Only you and the people you invite can read the Items, Initiatives and comments.'}
+            {facts.visibility === 'private'
+              ? ' The project is private, so this applies once it is public.'
+              : ''}
+          </span>
+        </span>
+        <Key size="sm" disabled={pending} onClick={() => void change()}>
+          {members ? 'Make public' : 'Members only'}
+        </Key>
+      </Row>
+      {error ? (
+        <p className="pf" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </Region>
   );
 }
 

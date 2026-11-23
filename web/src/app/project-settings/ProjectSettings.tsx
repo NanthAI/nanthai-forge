@@ -31,6 +31,7 @@ export default function ProjectSettings(props: PlaceProps) {
           slug: project.slug,
           handle: route.handle,
           visibility: project.visibility === 'public' ? 'public' : 'private',
+          planVisibility: project.planVisibility === 'members' ? 'members' : 'public',
           createdAt: project._creationTime,
           revision: project.revision,
           removal: project.removal,
@@ -83,6 +84,10 @@ export default function ProjectSettings(props: PlaceProps) {
           read(); // a stale refusal shows the project as it is now; the next sheet opens at that revision
           throw failure;
         }
+        read();
+      }}
+      setPlanVisibility={async planVisibility => {
+        await client.mutation(api.publicDiscovery.setSettings, { projectId, planVisibility });
         read();
       }}
       extra={

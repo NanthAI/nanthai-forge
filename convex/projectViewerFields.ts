@@ -17,6 +17,7 @@ const VIEWER_FIELDS = [
   'name',
   'slug',
   'visibility',
+  'planVisibility',
   'currentBackup',
   'revision',
   'removal',

@@ -6,6 +6,8 @@ export type ProjectFacts = {
   slug: string | undefined;
   handle: string;
   visibility: 'public' | 'private';
+  /** Whether a public project's plan is open to visitors or kept to members (convex/publicDiscovery.ts). */
+  planVisibility: 'public' | 'members';
   createdAt: number;
   revision: number;
   removal: string | undefined;
@@ -19,6 +21,13 @@ export const createdWords = (at: number) =>
   new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 export const visibilityWords = (visibility: ProjectFacts['visibility']) =>
   visibility === 'public' ? 'Public' : 'Private';
+
+export const planWords = (facts: Pick<ProjectFacts, 'visibility' | 'planVisibility'>) =>
+  facts.visibility === 'private'
+    ? 'Members only: the project is private'
+    : facts.planVisibility === 'members'
+      ? 'Members only'
+      : 'Public';
 
 /** The page sentence: one fact, then what the person may do here. */
 export function sentence(facts: ProjectFacts, owner: boolean) {

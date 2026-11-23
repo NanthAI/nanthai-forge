@@ -35,7 +35,7 @@ The table is `projectVerbs` in `convex/projectAccessContract.ts`; `projectMay` g
 | Remove people, end invitations (`removePeople`) | no | no | no | yes | same | `projectContributors.remove`, `projectReaders.set` |
 | Change settings and policy (`changeSettings`) | no | no | no | yes | held | `projectAutonomy`, `projectSettingApprovals` |
 | Approve a protected path (`approveProtected`) | no | no | no | yes | never | `projectHostedApprovals`, `projectHostedAcceptance` |
-| Secret values, permanent delete, runner keys, public or private (`ownerPersonOnly`) | no | no | no | yes | never | `requireOwnerPerson`; visibility: `projectVisibility.setVisibility` |
+| Secret values, permanent delete, runner keys, public or private, public or members-only plan (`ownerPersonOnly`) | no | no | no | yes | never | `requireOwnerPerson`; visibility: `projectVisibility.setVisibility`; plan: `publicDiscovery.setSettings` |
 
 Agent coordination (sessions, messages, handoffs, claims, activity counts and the feed), the board and the agent session holding a Lane follow one [audience rule](#audience): they belong to the project's team.
 
@@ -114,7 +114,7 @@ Without a role, a private project answers exactly like a missing one: `PROJECT_U
 
 ## What leaves Convex
 
-The owner reads their whole project row. Everyone else, members and signed-in readers of a public project, gets an allowlist from `projectWork.state`: id, creation time, owner, key, name, address, visibility, selected source, revision, Work pointer and removal state ([convex/projectViewerFields.ts](../convex/projectViewerFields.ts)). Policy, purges, retention, pending owner operations, project guidance and storage internals stay in Convex. A new project field stays owner-only until it is added to that list.
+The owner reads their whole project row. Everyone else, members and signed-in readers of a public project, gets an allowlist from `projectWork.state`: id, creation time, owner, key, name, address, visibility, plan setting, selected source, revision, Work pointer and removal state ([convex/projectViewerFields.ts](../convex/projectViewerFields.ts)). Policy, purges, retention, pending owner operations, project guidance and storage internals stay in Convex. A new project field stays owner-only until it is added to that list.
 
 Policy copies (the `policy` read, landing settings, agent capabilities, the workspace, pinned landing attempts, capsules and briefings) still show the project's rules to every reader. The public boundary ([convex/publicPeople.ts](../convex/publicPeople.ts)) removes stall-alert addresses (`email`) and check-runner credential references (`credentialsRef`) from every public result for anyone but the owner. Changing policy is owner-only, so no reader needs them for a compare-and-swap. Both projections use rows the read already loaded, so they cost no Convex read. Guard: `tests/project-viewer-fields.test.mjs`.
 

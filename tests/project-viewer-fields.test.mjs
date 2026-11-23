@@ -33,6 +33,7 @@ function setup() {
     key: 'synthetic',
     name: 'Viewer fields project',
     visibility: 'public',
+    planVisibility: 'members',
     currentBackup: 'backup',
     revision: 1,
     work: {
@@ -89,7 +90,7 @@ test('a signed-in stranger on a public project gets no owner-only or personal fi
   const s = setup();
   s.caller('stranger');
   const view = await reads['projectWork.state'](s);
-  // The screens still get what they read: identity, name, visibility, selected source and revision.
+  // The screens still get what they read: identity, name, visibility, plan setting, selected source and revision.
   assert.deepEqual(Object.keys(view).sort(), [
     '_creationTime',
     '_id',
@@ -97,6 +98,7 @@ test('a signed-in stranger on a public project gets no owner-only or personal fi
     'key',
     'name',
     'owner',
+    'planVisibility',
     'revision',
     'visibility',
     'work',
