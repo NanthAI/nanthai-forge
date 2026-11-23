@@ -31,6 +31,10 @@ const advice = z.object({
   stack: stackHintSchema.optional(),
   /** Exact conflicts a trial merge of saved files found (flip 4, Issue 853fcde3). */
   conflicts: exactConflictsSchema.optional(),
+  /** A landing of this Lane's Intent superseded its current head (Item 3f70760d). */
+  superseded: z
+    .object({ by: z.string(), receiptId: z.string(), at: z.string(), summary: z.string() })
+    .optional(),
   /** D2 (Issue 1eb42254): build on an admitted peer's pending head instead of repairing a conflict later. */
   stackOffer: z
     .looseObject({

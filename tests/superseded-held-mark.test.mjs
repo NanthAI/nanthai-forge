@@ -136,11 +136,14 @@ test('incident replay f5c4d136: a Lane held at save, then superseded, leaves no 
 
   assert.equal(await supersede(f), true);
   const after = await surfaces(f);
+  const { topBarMark, ...rest } = after;
   assert.deepEqual(
-    after,
-    { ...held, lineHeld: 0, needsHeld: 0 },
-    'the supersede lifts the hold in its own transaction; the open Lane stays on the line, unheld (its saved-file conflict is still real)',
+    rest,
+    (({ topBarMark: _mark, ...kept }) => ({ ...kept, lineHeld: 0, needsHeld: 0 }))(held),
+    'the supersede lifts the hold in its own transaction; the open Lane stays on the line, unheld',
   );
+  // Item 3f70760d: its work landed through the successor, so its exact conflict ended with it.
+  assert.notEqual(topBarMark, 'overlap', 'no overlap mark for a superseded Lane');
   assert.equal(marks(f)[0].retried, true, 'its failed submission still counts against a first try');
 
   // A later record write at the same head keeps it superseded and unheld.

@@ -303,11 +303,30 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
         finished.add(intentId);
   }
   // Retirement already read the whole input page. Note its origins once, even when the resolution
-  // Lane's own record is handled by a later tick of this page.
+  // Lane's own record is handled by a later tick of this page. A landing that keeps its Lanes open
+  // (keepOpen, completeOnAccept off) still completes each landed resolution's conflicted original:
+  // only the resolution Lane carries on, so the original never stays active producing notices
+  // (friction f1a09ee2, regression of 55024d40). `closes: false` changes nothing.
   if (resolutionCandidates.size)
     for (const entry of entries)
-      if ('laneId' in entry && resolutionCandidates.has(entry.laneId))
-        await noteResolutionOrigins(ctx, input.projectId, entry, note);
+      if ('laneId' in entry && resolutionCandidates.has(entry.laneId)) {
+        const resolution = await noteResolutionOrigins(ctx, input.projectId, entry, note);
+        if (resolution && !notesOnly)
+          for (const intentId of await completeResolutionOrigins(
+            ctx,
+            {
+              projectId: input.projectId,
+              owner: project.owner,
+              authorityEpoch: receipt.authorityEpoch,
+              receiptId: input.receiptId,
+              commit: landed.commit,
+              at: receipt.at,
+              ...(landed.mainRedHolds ? { mainRedHolds: landed.mainRedHolds } : {}),
+            },
+            resolution,
+          ))
+            finished.add(intentId);
+      }
   const currentWorkItems = [];
   for (const [intentId, { laneIds, viaLaneId }] of noted) {
     const head = await recordHead(ctx, input.projectId, 'intent', intentId);

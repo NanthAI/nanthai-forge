@@ -11,6 +11,19 @@ reason, and the other Lane's goal (member-written data, quoted, at most 160 char
 `next` says what to do: sync for a main conflict; for a Lane conflict, agree an order or split with
 that Lane (a board note) or change your edit, then save. There is nothing to acknowledge. A notice
 clears when a later save of either Lane no longer conflicts, or when one side lands or is abandoned.
+A save that drops the shared file (restored to its base, or removed) clears the pair on that save,
+before its head publishes, so its reply, `status` and `peers` already name nothing. No surface names
+a Lane whose current head landed (its own landing, a kept-open landing, or a resolution Lane's) or
+was superseded by a landing of its Intent; a revert makes it live again. Superseding a Lane ends its
+exact conflicts on both sides. A plain `status` and `status {laneId}` show `superseded {by,
+receiptId, summary}` while it holds (from rows the reads already load). Two Lanes that added the
+same lines are no conflict. A kept-open Lane is measured from its own landed head, so its accepted
+lines are never "the other side". `main` is named only when a main commit after the Lane's base
+touched the file. While background saves settle, the row keeps what the saved head held for the
+paths they touched: a failed one is taken back out of the overlap row and presence (saves still
+settling keep theirs) and the trial runs again, so peers, the first-write hook and protected-path
+notices never name unsaved work, and a conflict a failed restore ended comes back. A trial that
+finishes after either side landed or was superseded records nothing.
 Hidden or automatic snapshots never run it; only Lane-record head moves do.
 
 Save publication does not wait for its advisory trial. When a trial records a new or changed

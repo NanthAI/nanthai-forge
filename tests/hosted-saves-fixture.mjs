@@ -13,6 +13,7 @@ export const jobApi = await import(moduleUrl('../convex/projectHostedSaveJobs.ts
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
 const callbacks = await import(moduleUrl('../convex/projectSourceJobApi.ts'));
+const runStore = await import(moduleUrl('../convex/projectSourceRunStore.ts'));
 export const maxima = {};
 export async function saveFixture(originalText = 'original', originalPath = 'a.txt') {
   const s = lanesFixture(),
@@ -176,7 +177,9 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
       );
     }
   };
-  const submit = async (x, timing = {}) => {
+  /** `background`: a split save (save-settle-background) submits through the source-run store, which
+   * records its paths in the overlap evidence before its head publishes. */
+  const submit = async (x, timing = {}, background = false) => {
     const progress = JSON.parse(
       await call('progress', api.progress, { projectId, operationId: x.request.operationId }),
     );
@@ -193,6 +196,19 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
       FORGE_SOURCE_KEY_ID: 'SYNTHETIC',
     });
     try {
+      if (background)
+        return JSON.parse(
+          JSON.parse(
+            await call('submit', runStore.submit, {
+              projectId,
+              operationId: x.request.operationId,
+              actor: 'owner',
+              kind: 'save',
+              background: true,
+              ...timing,
+            }),
+          ).payload,
+        );
       return JSON.parse(
         await call('submit', jobApi.submit, { projectId, operationId: x.request.operationId, ...timing }),
       );

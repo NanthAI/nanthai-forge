@@ -76,6 +76,10 @@ export const hostedOverlapTables = {
     ),
     changes: v.string(),
     complete: v.boolean(),
+    /** While background saves settle at this head (Item 3f70760d): the saved evidence of the paths their
+     * pending deltas touched (`changes`, entries absent when the saved head did not change the path),
+     * so a publish or a failure rebuilds `changes` from the saved head, never from unsaved work. */
+    settled: v.optional(v.object({ paths: v.array(v.string()), changes: v.string(), complete: v.boolean() })),
     /** This Lane's active background save failure, carried by the existing board lookup. */
     saveFailure: v.optional(saveFailureView),
     /** This Lane's presence row and the activity time it last wrote, so presence costs no read. */

@@ -15,6 +15,7 @@ import {
   type SaveIdentity,
 } from './projectHostedSaveStore';
 import { finishHostedOperation } from './projectHostedOperations';
+import { revertPendingSaveOverlap } from './projectHostedSavePendingOverlap';
 import { writeHostedRecord } from './projectHostedRecords';
 import { loadSourceJob } from './projectSourceJobs';
 import { sourceServerTiming } from './projectSourceStepTiming';
@@ -109,6 +110,7 @@ export async function publishHostedSave(
     };
     await finishHostedOperation(ctx, { ...input, receipt: terminal });
     await writeSaveState(ctx, row._id, { ...state, status: 'stale' });
+    await revertPendingSaveOverlap(ctx, row, state);
     await writeSaveFailure(ctx, row, terminal.attemptId, terminal.outcome.error.code);
     await wakeLifecycleSave(ctx, input);
     return terminal;
@@ -130,6 +132,7 @@ export async function publishHostedSave(
     };
     await finishHostedOperation(ctx, { ...input, receipt: terminal });
     await writeSaveState(ctx, row._id, { ...state, status: 'refused' });
+    await revertPendingSaveOverlap(ctx, row, state);
     await writeSaveFailure(ctx, row, terminal.attemptId, terminal.outcome.error.code);
     await wakeLifecycleSave(ctx, input);
     return terminal;

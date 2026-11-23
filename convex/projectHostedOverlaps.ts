@@ -7,7 +7,7 @@ import { dormantCutoff, liveOpenOverlapLanes } from './projectHostedDormancy';
 import { hostedStartMain } from './projectHostedChannels';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
-import { hostedOverlapAdvice, IDLE_NOTICE_MS } from '../src/hosted-overlap';
+import { hostedOverlapAdvice, IDLE_NOTICE_MS, supersededSummary } from '../src/hosted-overlap';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { safeRelative } from '../src/safe-relative';
@@ -335,6 +335,19 @@ export const read = query({
       // Exact conflicts a trial merge of saved files found (flip 4): one small index read.
       const found = lane.state === 'active' ? await laneConflicts(ctx, projectId, laneId, lane.head) : [];
       const conflictsField = found.length ? { conflicts: found } : {};
+      // From the row already read: one read tells a superseded Lane from a live one (Item 3f70760d).
+      const superseded =
+        lane.state === 'active' && mine?.superseded?.laneHead === lane.head ? mine.superseded : undefined;
+      const supersededField = superseded
+        ? {
+            superseded: {
+              by: superseded.by,
+              receiptId: superseded.receiptId,
+              at: superseded.at,
+              summary: supersededSummary(superseded.by, superseded.receiptId),
+            },
+          }
+        : {};
       const offered = await coordinate();
       return JSON.stringify({
         behindMain: advice.behindMain,
@@ -347,6 +360,7 @@ export const read = query({
         ...boardField,
         ...stackField,
         ...conflictsField,
+        ...supersededField,
       });
     } catch (error) {
       return report(error);

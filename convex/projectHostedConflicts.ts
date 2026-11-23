@@ -118,12 +118,35 @@ export async function closeConflictNotices(
     }
   }
 }
+/** A write that takes files out of the Lane before its new head is published (a background save's
+ * pending paths): every notice that names only files the Lane no longer changes ends now, on both
+ * sides, so status, peers and the board agree with the save reply (Item 3f70760d, frictions
+ * 9ad0df2e, e58dee09). A file the Lane does not change cannot conflict. Pairs that still share a file
+ * are decided by the trial merge of the published head. Only for a Lane with open notices: the same
+ * two index ranges `closeConflictNotices` reads. */
+export async function closeLeftConflicts(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  laneId: string,
+  paths: ReadonlySet<string>,
+) {
+  const { mine, about } = await openRows(ctx, projectId, laneId);
+  const keep = new Set<string>();
+  for (const row of [...mine, ...about])
+    if (row.paths.some(file => paths.has(file.path))) keep.add(row.laneId === laneId ? row.peer : row.laneId);
+  if (keep.size < new Set([...mine.map(row => row.peer), ...about.map(row => row.laneId)]).size)
+    await closeConflictNotices(ctx, projectId, laneId, 'save', keep);
+}
 const laneRow = (ctx: QueryCtx, projectId: Id<'hostedProjects'>, laneId: string) =>
   ctx.db
     .query('projectHostedOverlapLanes')
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
     .unique();
 
+/** The Lane's saved head is landed work (its own landing, or its resolution's) or was superseded by a
+ * landing of its Intent: no exact conflict names it (Item 3f70760d). */
+const finishedAtHead = (row: Pick<Row, 'head' | 'landed' | 'superseded'>) =>
+  (row.landed?.laneHead === row.head && !row.landed.revertedBy) || row.superseded?.laneHead === row.head;
 const changesOf = (row: Pick<Row, 'changes'>): OverlapChange[] => {
   try {
     return JSON.parse(row.changes) as OverlapChange[];
@@ -133,19 +156,38 @@ const changesOf = (row: Pick<Row, 'changes'>): OverlapChange[] => {
 };
 const fileOf = (file: OverlapChange['before']) => (file ? { blob: file.blob, mode: file.mode } : null);
 
+const acceptanceSequence = async (ctx: QueryCtx, projectId: Id<'hostedProjects'>, receiptId: string) =>
+  (
+    await ctx.db
+      .query('projectHostedAcceptances')
+      .withIndex('by_project_and_receipt', q => q.eq('projectId', projectId).eq('receiptId', receiptId))
+      .unique()
+  )?.sequence;
+
+/** A Lane kept open after its own landing and saved again since (friction 8366f56e): the head that
+ * landed, when that landing came after the Lane's base. Main holds that head's files, so the trial
+ * measures this Lane's edits from it, not from the older base, and its own accepted lines never read
+ * as a conflict with main. One indexed read, only for such a Lane. */
+async function landedSinceBase(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  row: Row,
+  baseSequence: number | undefined,
+) {
+  const landed = row.landed;
+  if (!landed || landed.revertedBy || landed.laneHead === row.head || baseSequence === undefined) return;
+  const sequence = await acceptanceSequence(ctx, projectId, landed.receiptId);
+  return sequence !== undefined && sequence > baseSequence ? landed.laneHead : undefined;
+}
+
 /** Main's changed paths after the Lane's base: the per-landing log after the base (Issue 750c5929),
  * or the whole main path history the overlap read uses when the log cannot answer. */
-async function mainChanged(ctx: QueryCtx, projectId: Id<'hostedProjects'>, row: Row, paths: Set<string>) {
-  const baseSequence =
-    row.baseSequence ??
-    (
-      await ctx.db
-        .query('projectHostedAcceptances')
-        .withIndex('by_project_and_receipt', q =>
-          q.eq('projectId', projectId).eq('receiptId', row.baseReceiptId),
-        )
-        .unique()
-    )?.sequence;
+async function mainChanged(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  baseSequence: number | undefined,
+  paths: Set<string>,
+) {
   if (baseSequence === undefined) return new Set<string>();
   const history =
     (await overlapMainSince(ctx, projectId, baseSequence)) ??
@@ -196,11 +238,7 @@ export async function planTrialMerge(
     )
   ).filter(
     (peer): peer is Row =>
-      !!peer &&
-      peer.open &&
-      peer.superseded?.laneHead !== peer.head &&
-      !sameResolution(row, peer) &&
-      !sameStack(row, peer),
+      !!peer && peer.open && !finishedAtHead(peer) && !sameResolution(row, peer) && !sameStack(row, peer),
   );
   const tasks = new Map<string, TrialTask>();
   const peers = new Map<string, { laneId: string; head: string; goal: string }>();
@@ -230,13 +268,18 @@ export async function planTrialMerge(
         goal: peer.intent,
       });
   }
-  const onMain = await mainChanged(ctx, projectId, row, new Set(mine.keys()));
+  const baseSequence = row.baseSequence ?? (await acceptanceSequence(ctx, projectId, row.baseReceiptId));
+  const onMain = await mainChanged(ctx, projectId, baseSequence, new Set(mine.keys()));
   const mainState = onMain.size || tasks.size ? await mainStateObject(ctx, projectId) : undefined;
   let main: TrialPlan['main'];
   if (mainState) {
-    main = { ...mainState, paths: [...onMain].slice(0, TRIAL_PATHS) };
-    for (const path of main.paths)
+    // Main is a side on every selected file it changed; only main-only files count against the cap.
+    main = { ...mainState, paths: [] };
+    let added = 0;
+    for (const path of onMain) {
       if (!tasks.has(path)) {
+        if (added >= TRIAL_PATHS) continue;
+        added++;
         const own = mine.get(path)!;
         tasks.set(path, {
           path,
@@ -244,6 +287,8 @@ export async function planTrialMerge(
           peers: [],
         });
       }
+      main.paths.push(path);
+    }
   }
   // Pairs no longer sharing a file (and main when it no longer changes one) close now.
   if (row.conflicted)
@@ -291,7 +336,21 @@ export async function planTrialMerge(
         : null;
       const right = record ? JSON.parse(record.value).resolution?.right : undefined;
       const resolved = right ? await sourceState(right) : undefined;
-      sources.push({ laneId: source.laneId, base, head, ...(resolved ? { resolved } : {}) });
+      // A kept-open Lane that landed and saved again is measured from its landed head, mine or a peer's.
+      const landedHead = await landedSinceBase(
+        ctx,
+        projectId,
+        source,
+        source === row ? baseSequence : (source.baseSequence ?? undefined),
+      );
+      const landed = landedHead ? await sourceState(landedHead) : undefined;
+      sources.push({
+        laneId: source.laneId,
+        base,
+        head,
+        ...(resolved ? { resolved } : {}),
+        ...(landed ? { landed } : {}),
+      });
     }
   }
   const plan: TrialPlan = {
@@ -353,7 +412,8 @@ export const record = internalMutation({
   handler: async (ctx, input) => {
     const lane = (laneId: string) => laneRow(ctx, input.projectId, laneId);
     const me = await lane(input.laneId);
-    if (!me?.open || me.head !== input.head) {
+    // Landed or superseded since the trial was planned: its work is in main, so it names nothing.
+    if (!me?.open || me.head !== input.head || finishedAtHead(me)) {
       return null;
     }
     const now = Date.now();
@@ -477,7 +537,7 @@ export const record = internalMutation({
     };
     for (const planned of input.peers) {
       const peer = await lane(planned.laneId);
-      if (!peer?.open || peer.head !== planned.head) continue;
+      if (!peer?.open || peer.head !== planned.head || finishedAtHead(peer)) continue;
       const found = input.conflicts.filter(item => item.peer === planned.laneId);
       await write(me, planned.laneId, peer.head, peer.intent, found, false);
       await write(peer, me.laneId, me.head, me.intent, found, true);
@@ -534,7 +594,9 @@ export async function laneConflicts(
   );
   // A notice is live only while the peer Lane is open at the head it was decided against (Item
   // 0487bccb): a peer's newer save is re-decided by its own trial merge. One point read per peer, and
-  // only when an open notice names one; main rows need none.
+  // only when an open notice names one; main rows need none. A peer whose saved head already landed,
+  // or that a landing of its Intent superseded at that head, holds no work left to agree an order
+  // with (Item 3f70760d): the same row says so, no added read.
   const peers = new Map(
     await Promise.all(
       [...new Set(candidates.map(row => row.peer).filter(peer => peer !== MAIN))].map(
@@ -545,7 +607,7 @@ export async function laneConflicts(
   const current = candidates.filter(row => {
     if (row.peer === MAIN) return true;
     const peer = peers.get(row.peer);
-    return Boolean(peer?.open && peer.head === row.peerHead);
+    return Boolean(peer?.open && peer.head === row.peerHead && !finishedAtHead(peer));
   });
   const project = current.some(row => row.earlyResolution)
     ? (authorizedProject ?? (await ctx.db.get(projectId)))

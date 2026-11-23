@@ -32,12 +32,12 @@ async function conflicted(t, laneRoot) {
   assert(first.result.recovery.conflict, 'the conflict returns its recovery');
   return { s, f, root, command, conflict: first.result.recovery.conflict };
 }
-async function resolveAndLand({ s, f, conflict }) {
+async function resolveAndLand({ s, f, conflict }, extra = {}) {
   writeFileSync(join(conflict.root, 'a.txt'), 'chosen\nb\nc\n');
   const [resolve, parameters] = strip(conflict.next);
   const fixed = await s.transport(conflict.root).dispatch(resolve, parameters);
   const [finish, selection] = strip(fixed.result.next);
-  const submitted = await s.transport(conflict.root).dispatch(finish, selection);
+  const submitted = await s.transport(conflict.root).dispatch(finish, { ...selection, ...extra });
   await f.drain();
   await f.passChecks();
   await f.drain();
@@ -81,6 +81,21 @@ test('case 1 (bd201506, 015bfc34, 2e264cd6): landing the resolution Lane complet
     prepares.filter(request => request.kind === 'resolution').map(request => request.originLaneId),
     [f.lane.laneId],
   );
+});
+
+// Item 3f70760d (frictions f1a09ee2, 5c2b5e1b; regression of 55024d40): a resolution Lane landed with
+// keepOpen stayed open by request, and so did its conflicted original, for hours, raising blocking
+// overlaps and conflicts on other builders' saves. Only the resolution Lane carries on.
+test('incident replay 5c2b5e1b: a resolution Lane landed with keepOpen completes its original; the resolution stays open', async t => {
+  const run = await conflicted(t);
+  const { f, conflict } = run;
+  await resolveAndLand(run, { keepOpen: true });
+  assert.equal((await f.readLane(conflict.laneId)).state, 'active', 'keepOpen keeps the resolution Lane');
+  const original = await f.readLane(f.lane.laneId);
+  assert.equal(original.state, 'completed', 'its conflicted original completes');
+  assert.equal(original.head, f.lane.head, 'the original source is preserved');
+  const overlap = [...f.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === f.lane.laneId);
+  assert.equal(overlap?.open ?? false, false, 'the original leaves the open overlap index');
 });
 
 // Item 593fc2d7 (Lane 0200969a, receipt 93b3b701): the original was saved again with the same bytes

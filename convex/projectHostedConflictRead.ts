@@ -12,7 +12,7 @@ import { physicalKey } from '../src/physical-manifest-binary';
 import type { PhysicalPin, PhysicalEntry } from '../src/physical-manifest-codec';
 import { packHeaders } from '../src/object-pack-range';
 import { parseNativeState } from '../src/state/format';
-import { TRIAL_FILE_BYTES, type TrialObject, type TrialPlan } from '../src/hosted-trial-plan';
+import { bindTrialSides, TRIAL_FILE_BYTES, type TrialObject, type TrialPlan } from '../src/hosted-trial-plan';
 import { TrialUnavailable } from '../src/hosted-trial-merge';
 import { exchangeFetch } from '../src/exchange-request';
 import { digest } from '../src/hash';
@@ -122,22 +122,19 @@ export function trialReader(
      * State); undefined for a State not read. */
     entries: (digest: string) => indexed.get(digest),
     async prepare() {
-      for (const source of plan.sources ?? []) {
-        const base = await state(source.base),
-          head = await state(source.head);
-        const resolved = source.resolved ? await state(source.resolved) : undefined;
-        for (const task of plan.tasks) {
-          const side =
-            source.laneId === plan.laneId ? task.mine : task.peers.find(p => p.laneId === source.laneId);
-          if (side) {
-            side.before = base.get(task.path) ?? null;
-            side.after = head.get(task.path) ?? null;
-            if (resolved) side.resolved = resolved.get(task.path) ?? null;
-          }
-        }
-      }
-      const main = plan.main ? await state(plan.main.state) : undefined;
-      if (main) for (const task of plan.tasks) task.main = main.get(task.path) ?? null;
+      const sources = [];
+      for (const source of plan.sources ?? [])
+        sources.push({
+          laneId: source.laneId,
+          base: await state(source.base),
+          head: await state(source.head),
+          ...(source.resolved ? { resolved: await state(source.resolved) } : {}),
+          // A kept-open Lane's landed head (this Lane or a peer): its baseline for this trial.
+          ...(source.landed ? { landed: await state(source.landed) } : {}),
+        });
+      // Main's State only when main changed a shared path; merge rules read it lazily (run below).
+      const main = plan.main?.paths.length ? await state(plan.main.state) : undefined;
+      bindTrialSides(plan, sources, main);
       const ids = new Set(
         plan.tasks
           .flatMap(task => [

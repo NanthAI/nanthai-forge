@@ -2347,6 +2347,7 @@ export class HostedAgentTransport {
           : result,
       ...(advice ? { behindMain: advice.behindMain } : {}),
       ...(advice?.stack ? { stack: advice.stack } : {}),
+      ...(advice?.superseded ? { superseded: advice.superseded } : {}),
       ...(offer
         ? {
             stackOffer: {

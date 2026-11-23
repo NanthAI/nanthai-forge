@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedSuperseded.ts": "95e569e32e13c8d545c9df6bcd42f1663214210c62524aa3d495191ead4d46f4"
+  },
+  "replay": {
+    "incident": "f5c4d136",
+    "test": "incident replay f5c4d136: a Lane held at save, then superseded, leaves no held or needs-you item on any surface",
+    "receipt": "1ca88432-889e-4edc-84c5-c575239b9a9a"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Aa95dd584-3d94-4968-904c-994b14578f85",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Ac7ff2859-5f95-4b59-b58d-3b95f54bc9c3%3Adelegate-task%3A9726e192-6b1f-44c8-b760-eaf690762d73",
+    "receipt": "1ca88432-889e-4edc-84c5-c575239b9a9a"
+  },
+  "exercised": {
+    "convex/projectHostedSuperseded.ts": {
+      "executed": [
+        "overlapRow",
+        "supersede",
+        "supersedeLane"
+      ],
+      "digest": "a7384d86bb15a32976f57df697cc619a599fe4dacf037fa68a38b1301ba3ad70",
+      "units": [
+        [
+          "closeConflictNotices",
+          "6b766ef3d269b5b1a4b0674eb89437f48e4296fc9667899689f417c28f062d82"
+        ],
+        [
+          "dropLanePark",
+          "5a29580fb75e5554d315423bc87bb9085662438891b06db5eb53fcfd8448524e"
+        ],
+        [
+          "overlapRow",
+          "72ed749472286be4d5ef87f368997370dfe4dba7f26973a023f7ac2692bb0a7d"
+        ],
+        [
+          "releaseLaneSession",
+          "b5c778fb8ab9106aadcfc3302e8817d8d0a012c143f34a9b73251fc5481c7afa"
+        ],
+        [
+          "supersede",
+          "23f2a30dc9eecb4a167243b1586127f85dd086416a512291cede770cb011268a"
+        ],
+        [
+          "supersedeLane",
+          "6e7bbc355a2b77d322b845b7cb2af4cb6461d4a66ea73d4465b851632fb2849d"
+        ],
+        [
+          "supersedeQuietSiblings",
+          "a4f7761e4670a81f57f6c1c6c3ff0dec5a9944d18406db4a707193ad8657945a"
+        ]
+      ]
+    }
+  }
+}

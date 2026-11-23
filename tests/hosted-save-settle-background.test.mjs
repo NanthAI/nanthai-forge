@@ -1064,3 +1064,76 @@ test('9124ec2f: status {files:true} right after a settling save names it and lis
   );
   assert.match(status.note, new RegExp(`Settling: save ${saved.operationId}`));
 });
+
+// Item 3f70760d: a background save writes its paths into the shared evidence at submit; a failure
+// takes them back out, so peers, presence and the first-write hook never name unsaved work.
+const presence = f =>
+  [...f.s.tables.projectHostedPresence.values()].find(row => row.laneId === f.entry.laneId);
+
+test('3f70760d: a background save that fails takes its paths back out of every overlap surface', async t => {
+  const f = await setup(t);
+  const saved = await saveHostedLane(
+    f.root,
+    { operationId: randomUUID(), message: 'split save' },
+    f.exchange,
+    contract,
+  );
+  const paths = row =>
+    JSON.parse(row.changes)
+      .map(change => change.path)
+      .sort();
+  assert.deepEqual(paths(f.overlap()), f.changed, 'peers see the pending paths at submit');
+  assert.deepEqual([...presence(f).paths].sort(), f.changed);
+  await failSaveJob(f, saved.jobId);
+  assert.deepEqual(paths(f.overlap()), [], 'the failed save names no path');
+  assert.equal(f.overlap().head, f.entry.head);
+  assert.deepEqual(presence(f).paths, []);
+  assert.equal(presence(f).pathCount, 0);
+  const failures = (await projectBoard(f)).saveFailures;
+  assert.equal(failures?.[0]?.code, 'SOURCE_HASH_MISMATCH', 'the failure itself is still reported');
+});
+
+test('3f70760d: a protected file restored after a failed background save leaves no protected notice', async t => {
+  const f = await setup(t, { protectedPath: true });
+  const agent = new HostedAgentTransport(
+    f.root,
+    { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    f.exchange,
+  );
+  const returned = await agent.dispatch('save', { message: 'Save protected configuration' });
+  assert.deepEqual(returned.result.protectedPathNotice.paths, ['netlify.toml']);
+  const dispatch = f.scheduled.find(item => item.name === 'projectConvexSource:dispatch');
+  await failSaveJob(f, dispatch.args.jobId);
+  await assert.rejects(agent.dispatch('status', {}), { code: 'SAVE_SETTLE_FAILED' });
+  writeFileSync(join(f.root, 'netlify.toml'), 'original-0\n');
+  const restored = await agent.dispatch('save', { message: 'Drop the protected edit' });
+  assert.equal(restored.result.protectedPathNotice, undefined);
+  assert.deepEqual(JSON.parse(f.overlap().changes), []);
+});
+
+test('3f70760d: status by Lane id tells a superseded Lane from a live one, with the receipt', async t => {
+  const f = await setup(t);
+  const agent = new HostedAgentTransport(
+    f.root,
+    { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    f.exchange,
+  );
+  await agent.dispatch('save', { message: 'split save' });
+  await f.settle(f.scheduled.find(item => item.name === 'projectConvexSource:dispatch').args.jobId);
+  const status = async () => (await agent.dispatch('status', { laneId: f.entry.laneId })).result.superseded;
+  assert.equal(await status(), undefined, 'a live Lane names no successor');
+  const row = f.overlap(),
+    by = randomUUID(),
+    receiptId = randomUUID(),
+    at = '2026-11-20T12:00:00.000Z';
+  assert.equal(row.head, readHostedLaneCheckout(f.root).selection.head);
+  f.s.patch('projectHostedOverlapLanes', row._id, { superseded: { by, receiptId, laneHead: row.head, at } });
+  const marked = await status();
+  assert.deepEqual({ ...marked, summary: undefined }, { by, receiptId, at, summary: undefined });
+  assert(marked.summary.startsWith(`superseded by Lane ${by} (receipt ${receiptId})`), marked.summary);
+  // Superseded at an older head: a later save made it live again.
+  f.s.patch('projectHostedOverlapLanes', row._id, {
+    superseded: { by, receiptId, laneHead: f.entry.head, at },
+  });
+  assert.equal(await status(), undefined);
+});

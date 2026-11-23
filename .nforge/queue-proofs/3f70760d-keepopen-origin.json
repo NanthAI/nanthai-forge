@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedAcceptanceCompletion.ts": "3ed88d2bebbb8713c5deffbd54aab16b1060afc141ad6e90caf8a1645a5211ec"
+  },
+  "replay": {
+    "incident": "5c2b5e1b",
+    "test": "incident replay 5c2b5e1b: a resolution Lane landed with keepOpen completes its original; the resolution stays open",
+    "receipt": "1ca88432-889e-4edc-84c5-c575239b9a9a"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Aa95dd584-3d94-4968-904c-994b14578f85",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Ac7ff2859-5f95-4b59-b58d-3b95f54bc9c3%3Adelegate-task%3A9726e192-6b1f-44c8-b760-eaf690762d73",
+    "receipt": "1ca88432-889e-4edc-84c5-c575239b9a9a"
+  },
+  "exercised": {
+    "convex/projectHostedAcceptanceCompletion.ts": {
+      "executed": [
+        "armGuard",
+        "completeAcceptedHeads",
+        "scheduleAcceptanceCompletion",
+        "settleCompletion"
+      ],
+      "digest": "549f56afe572bca64a77d49848d32ca7ee72949e40dab453132957deae923de3",
+      "units": [
+        [
+          "ACCEPTANCE_COMPLETION_STALLED",
+          "588f781aacc4902ae20629c80f6ff5564de16a0b36b7d798f352dde78f8195eb"
+        ],
+        [
+          "COMPLETE",
+          "6f872a456933efecc5afb8cd4e8d2baa9d2e2b13fb13c2cb6e613f8fd7dd321b"
+        ],
+        [
+          "FOLD_WORK",
+          "8ebe48ed8a888f7f624af0afec298380d7d4a6503aab53901dfb082079b422eb"
+        ],
+        [
+          "GUARD",
+          "33d0942f7d540dbd7afb4bf9b67d39c9b0da0e9961bdb770e803e62c1ce2839d"
+        ],
+        [
+          "LANDING_STALL_MS",
+          "47902a9578a66d1da900d0915c12cab3aa2c22706c1e25b45bb2fb790c6ae555"
+        ],
+        [
+          "acceptancePage",
+          "c21ebf1db7bd8fb05c081895b066beb4ce1c249e9522d6e42028dc9b2be66480"
+        ],
+        [
+          "acceptancePlan",
+          "aa37cecd0d6d247ca7125af00ccf2c8fbf3a33208889969db6cd5dd541745b03"
+        ],
+        [
+          "acceptanceRow",
+          "98deb415e96c9a4a60049727beb64c3e9a1835ebf28219984c26218fb31b4986"
+        ],
+        [
+          "acceptanceWorkItems",
+          "572ec552db1fe3ebdb7a0940eed67afd2c48ba5ed8a690e3db18899e9901c318"
+        ],
+        [
+          "armGuard",
+          "9b3e9689175b79c1f9c48049c0d8ed62616c3697495be33a76aafd8a5a262f35"
+        ],
+        [
+          "cancelPendingTask",
+          "84ed3533530e281a188a8b8c0b152ef3c5f8d15ad1bce7dbcf4834f23072f2a3"
+        ],
+        [
+          "cancelStaleLandingChecks",
+          "c4e9f2a360aaea550805c4a310cbe7b7db530ed0bf0ae53398c06e2552ece0b7"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "completeAcceptedHeads",
+          "b52dc7dd7441a3509cb788d247c1fdbade150fd57b037e056946f80c746ff5ae"
+        ],
+        [
+          "completeIntentWhenLanesDone",
+          "9426effc18792cb7c53e8b72d56011729c4329df55f2cace03f4795644375993"
+        ],
+        [
+          "completeResolutionOrigins",
+          "5c9939c1db9b34ca22eca526288bfa520621ecd49c9674b4b6907a8f853e755b"
+        ],
+        [
+          "composeLaneSchema",
+          "38f595d8263d0421fbce1bfedab7edbec272f9f975154206f05721bdd7813d17"
+        ],
+        [
+          "effectiveAgentDefaults",
+          "b07c5c21291d41c264cb2b94862011d2c305524d09c04f5445bcecbf90443407"
+        ],
+        [
+          "effectivePolicy",
+          "3cdc0ff32407b7603d7a90387ef5e3b5e63f8a4336f55bfdf7f1dac19863e36e"
+        ],
+        [
+          "guardAcceptanceCompletion",
+          "2add3f0a5879c55e41e81dd47c9a25d8e246c467fbd04c1ff83b675206ddde81"
+        ],
+        [
+          "hostedAcceptanceSchema",
+          "39327ee6e33a3edc9e10d59d90a736f1e9fdf38624551ffdd071f753e5be3d69"
+        ],
+        [
+          "hostedLaneSchema",
+          "3ae272c97f1db7904a3d8c6e5bcca5843553b538502a2884c781a0ab8ab1a561"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "makeFunctionReference",
+          "90760cdb0f99f8303180da5ca3bbe536fdac31c89e78b170e62dbf914920e3e4"
+        ],
+        [
+          "noteResolutionOrigins",
+          "04f9b91fd4b13c3fd392a6344d75c87a2f23fa407685db568dfea9c3e4762541"
+        ],
+        [
+          "postIntentLandingNote",
+          "4c21d2168eadfa4b22f340f262a52212159b9f53c4aad2b189c0972729a3b9b8"
+        ],
+        [
+          "readHostedRecord",
+          "f8ebe857e46255798f036f3db0acb78682a740661afb1147e12c1163e7ad5ee2"
+        ],
+        [
+          "recordHead",
+          "475b9c6dbb95c08ce317da362de940ef01974e26d05ba3e3c167ac83d2fc1b0f"
+        ],
+        [
+          "recordLandedFeedPage",
+          "e35c76d4547000d0bda3b3782e5b43aca8bcdb1ce3981bfe4651a161514ea8e0"
+        ],
+        [
+          "retireLandedOverlapLanes",
+          "8fa00f266c3e7690e5fde6eccb2360b3e604b4e43544a7cb350957cbf18ed959"
+        ],
+        [
+          "scheduleAcceptanceCompletion",
+          "f44ea67d0947c692d53ba18e4086256c876ab2f0a75758ccd9b44968e06de0ac"
+        ],
+        [
+          "scheduleLandingPrecompose",
+          "af5fa7623f0811237929fb902d1b070eb6c5b333c6959d60a7469bfd34c6c713"
+        ],
+        [
+          "settleCompletion",
+          "343b5819161bfd1cb518098f78fb2c96feee492244de1bc9498ab0f13eb82040"
+        ],
+        [
+          "validateComposePage",
+          "a780f580bd94295a19c6503c156d34f012d97195fcba207a4477f76d3d193da3"
+        ],
+        [
+          "wakeLandingCapsule",
+          "b8b76c2132b94f012d6bc875b8c551a795448a20296f2e82c12ffbc8a839b1d6"
+        ],
+        [
+          "writeHostedRecord",
+          "fc8651df82e1fc039dedf06d867148f410393e198d708a05ff5017b7966dfe4f"
+        ]
+      ]
+    }
+  }
+}

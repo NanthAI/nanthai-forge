@@ -154,6 +154,11 @@ export function boundOverlapChanges(changes: OverlapChange[], complete = true) {
 }
 
 /** Keep the first baseline bytes so edits reverted to the base stop overlapping. */
+/** A Lane whose current head a landing of its Intent superseded (Issue 55024d40, Item 3f70760d): the
+ * line the status read and the overlap read give, so one read tells it from a live Lane. */
+export const supersededSummary = (by: string, receiptId: string) =>
+  `superseded by Lane ${by} (receipt ${receiptId}): its Intent landed there. Abandon this Lane, or save to make it live again.`;
+
 export function mergeOverlapChanges(previous: OverlapChange[], delta: OverlapChange[], complete = true) {
   const paths = new Map(previous.map(change => [change.path, change]));
   for (const change of delta) {

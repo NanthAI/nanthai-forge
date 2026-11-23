@@ -2,6 +2,7 @@
 import type { MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { dropLanePark, releaseLaneSession } from './projectHostedPresence';
+import { closeConflictNotices } from './projectHostedConflicts';
 
 type Row = Doc<'projectHostedOverlapLanes'>;
 const overlapRow = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, laneId: string) =>
@@ -10,9 +11,10 @@ const overlapRow = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, laneId: s
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
     .unique();
 
-/** Marks one open Lane superseded on its overlap row: it leaves presence (its slim row is deleted) and
- * advisory notices, keeps its saved work, stays open and keeps blocking notices. Stamped with the head
- * it was set on, so a later save or `start --reopen` makes it live again. Idempotent. */
+/** Marks one open Lane superseded on its overlap row: it leaves presence (its slim row is deleted),
+ * advisory notices and exact conflicts (both sides end now, Item 3f70760d), keeps its saved work,
+ * stays open and keeps blocking notices. Stamped with the head it was set on, so a later save or
+ * `start --reopen` makes it live again (that save plans its trial merge afresh). Idempotent. */
 async function supersede(ctx: MutationCtx, row: Row, by: { laneId: string; receiptId: string; at: string }) {
   if (!row.open || row.superseded?.laneHead === row.head) return false;
   if (row.presenceRow) {
@@ -25,6 +27,7 @@ async function supersede(ctx: MutationCtx, row: Row, by: { laneId: string; recei
     presenceRow: undefined,
     superseded: { by: by.laneId, receiptId: by.receiptId, laneHead: row.head, at: by.at },
   });
+  if (row.conflicted) await closeConflictNotices(ctx, row.projectId, row.laneId, 'landed');
   return true;
 }
 

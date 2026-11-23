@@ -22,6 +22,7 @@ import { hostedSaveInput, stageSavePage } from './projectHostedSaves';
 import { enqueueSourceJob, loadSourceJob } from './projectSourceJobs';
 import { publishHostedSave, publishSaveJob, saveForJob } from './projectHostedSavePublish';
 import { trackHostedOverlapLane } from './projectHostedOverlapStore';
+import { revertPendingSaveOverlap } from './projectHostedSavePendingOverlap';
 import { requireMemberAuthorityById } from './projectLaneAuthority';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { savePin, saveDurationMs } from '../src/hosted-save';
@@ -216,6 +217,7 @@ export const resultDownload = internalMutation({
         },
       });
       await writeSaveState(ctx, row._id, { ...state, status: 'failed' });
+      await revertPendingSaveOverlap(ctx, row, state);
       await writeSaveFailure(ctx, row, operation.firstAttempt.id, code);
       await wakeLifecycleSave(ctx, row);
       return null;

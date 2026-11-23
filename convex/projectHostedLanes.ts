@@ -11,6 +11,7 @@ import { effectiveLifecycleRecord } from './projectHostedLifecycleOverlay';
 import { hostedLaneSchema, hostedLaneSelectionSchema, hostedIntentSchema } from '../src/hosted-lane';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { invariant } from '../src/errors';
+import { supersededSummary } from '../src/hosted-overlap';
 import { report } from './errors';
 import { findObject } from './projectObjectFind';
 import { isStored } from './projectObjectFields';
@@ -83,6 +84,12 @@ export const head = query({
         revertedBy: v.optional(v.object({ receiptId: v.string(), at: v.string() })),
       }),
     ),
+    /** Present while a landing of the Lane's Intent superseded its current head (Issue 55024d40): the
+     * Lane that landed, its receipt and one line saying what that means (Item 3f70760d). A save or
+     * reopen makes the Lane live again. Same overlap row read, no added call. */
+    superseded: v.optional(
+      v.object({ by: v.string(), receiptId: v.string(), at: v.string(), summary: v.string() }),
+    ),
     /** The Lane's landing that is still composing, queued, checking or ready (includeLanding only), so an
      * agent that lost its Lane folder or operation id recovers it by laneId alone. */
     inFlight: v.optional(
@@ -99,15 +106,16 @@ export const head = query({
       const { lane, project, saveFailure } = await laneRecord(ctx, input);
       const viewer = (await ctx.auth.getUserIdentity())!.subject;
       const holder = input.includeHolder ? await laneHolderFor(ctx, project, viewer, lane.holder) : undefined;
-      // Same query, one indexed read: the overlap row carries the landing stamp.
-      const landed = (
-        await ctx.db
-          .query('projectHostedOverlapLanes')
-          .withIndex('by_project_and_lane', q =>
-            q.eq('projectId', input.projectId).eq('laneId', input.laneId),
-          )
-          .unique()
-      )?.landed;
+      // Same query, one indexed read: the overlap row carries the landing and supersede stamps.
+      const overlap = await ctx.db
+        .query('projectHostedOverlapLanes')
+        .withIndex('by_project_and_lane', q => q.eq('projectId', input.projectId).eq('laneId', input.laneId))
+        .unique();
+      const landed = overlap?.landed;
+      const superseded =
+        lane.state === 'active' && overlap?.superseded?.laneHead === lane.head
+          ? overlap.superseded
+          : undefined;
       // Bounded: the same compose-selection lookup a save's live-finish refusal makes (at most 8).
       const live =
         input.includeLanding && lane.state === 'active'
@@ -137,6 +145,16 @@ export const head = query({
                 at: landed.at,
                 current: landed.laneHead === lane.head && !landed.revertedBy,
                 ...(landed.revertedBy ? { revertedBy: landed.revertedBy } : {}),
+              },
+            }
+          : {}),
+        ...(superseded
+          ? {
+              superseded: {
+                by: superseded.by,
+                receiptId: superseded.receiptId,
+                at: superseded.at,
+                summary: supersededSummary(superseded.by, superseded.receiptId),
               },
             }
           : {}),

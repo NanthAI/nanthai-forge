@@ -13,7 +13,7 @@ import {
 } from './projectHostedPresence';
 import { parkedFor } from '../src/hosted-records';
 import { notifyStackDependents, trackStackDependent } from './projectHostedStackNotice';
-import { closeConflictNotices, planTrialMerge } from './projectHostedConflicts';
+import { closeConflictNotices, closeLeftConflicts, planTrialMerge } from './projectHostedConflicts';
 import { appendOverlapMainLog } from './projectHostedOverlapMainLog';
 import { addPlanLane, planLaneItem, removePlanLanes } from './projectPlanLaneMarks';
 import { recordHead } from './projectHostedRecords';
@@ -45,6 +45,35 @@ function looseEndDetails(
   };
 }
 
+type OverlapRow = Doc<'projectHostedOverlapLanes'>;
+/** The saved head's evidence: pending entries swapped back for what the saved head held. */
+function settledEvidence(row: OverlapRow) {
+  const touched = new Set(row.settled!.paths);
+  const kept = (JSON.parse(row.changes) as OverlapChange[]).filter(change => !touched.has(change.path));
+  return {
+    changes: [...kept, ...(JSON.parse(row.settled!.changes) as OverlapChange[])].sort((a, b) =>
+      a.path.localeCompare(b.path),
+    ),
+    complete: row.settled!.complete,
+  };
+}
+/** Records the saved evidence of the paths a pending delta touches, once per path. */
+function addSettled(row: OverlapRow, delta: OverlapChange[]) {
+  const settled = row.settled ?? { paths: [], changes: '[]', complete: row.complete };
+  const known = new Set(settled.paths);
+  const added = delta.map(change => change.path).filter(path => !known.has(path));
+  if (!added.length) return settled;
+  const current = new Map((JSON.parse(row.changes) as OverlapChange[]).map(change => [change.path, change]));
+  return {
+    paths: [...settled.paths, ...added],
+    changes: JSON.stringify([
+      ...(JSON.parse(settled.changes) as OverlapChange[]),
+      ...added.flatMap(path => (current.has(path) ? [current.get(path)!] : [])),
+    ]),
+    complete: settled.complete,
+  };
+}
+
 export async function trackHostedOverlapLane(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -65,6 +94,9 @@ export async function trackHostedOverlapLane(
     /** A save submitted to settle in the background (fea47345 C): its paths count before its head
      * is published, so a first save from the base still records them. */
     pending?: boolean;
+    /** A background save at this head failed (Item 3f70760d): rebuild from the saved evidence plus the
+     * deltas of the saves still settling at this head, and trial-merge again. */
+    restorePending?: { changes: OverlapChange[]; complete: boolean }[];
   },
   planning?: {
     project: Doc<'hostedProjects'>;
@@ -81,15 +113,38 @@ export async function trackHostedOverlapLane(
   const keepChanges = sameBase || metadata?.rebased === true;
   const sameHead = old?.head === lane.head;
   const unchangedBase = lane.head === lane.base.head && !metadata?.pending;
+  // Pending deltas never outlive their head: a head move (that save's publish, or any other) and a
+  // failed save start from the saved evidence (Item 3f70760d, review of receipt 4401958d).
+  const saved =
+    keepChanges && old
+      ? old.settled && (!sameHead || metadata?.restorePending)
+        ? settledEvidence(old)
+        : { changes: JSON.parse(old.changes) as OverlapChange[], complete: old.complete }
+      : { changes: [], complete: false };
   let projection = unchangedBase
     ? { changes: '[]', complete: true }
     : mergeOverlapChanges(
-        keepChanges && old ? JSON.parse(old.changes) : [],
+        saved.changes,
         metadata?.changes ?? [],
-        (keepChanges && old ? old.complete : false) &&
-          (sameHead || metadata?.changes !== undefined) &&
-          metadata?.complete !== false,
+        saved.complete && (sameHead || metadata?.changes !== undefined) && metadata?.complete !== false,
       );
+  for (const other of unchangedBase ? [] : (metadata?.restorePending ?? []))
+    projection = mergeOverlapChanges(
+      JSON.parse(projection.changes),
+      other.changes,
+      projection.complete && other.complete,
+    );
+  // What `changes` held at the saved head for every path a still-settling save touched.
+  const settled =
+    ['active', 'paused', 'ready'].includes(lane.state) && keepChanges && sameHead && old && !unchangedBase
+      ? metadata?.pending
+        ? addSettled(old, metadata.changes ?? [])
+        : metadata?.restorePending
+          ? metadata.restorePending.length
+            ? old.settled
+            : undefined
+          : old.settled
+      : undefined;
   // A resolution Lane is the same agent run's work as the Lane it resolves (d730121f): its first row
   // takes the origin's run slug, one indexed read once per resolution Lane.
   const origin =
@@ -199,6 +254,7 @@ export async function trackHostedOverlapLane(
     // Open exact-conflict notices (flip 4) are ended by closeConflictNotices, never by a record write.
     ...(old?.conflicted ? { conflicted: true as const } : {}),
     ...(old?.saveFailure ? { saveFailure: old.saveFailure } : {}),
+    ...(settled ? { settled } : {}),
     // Parked (Item e1633718): only an open Lane is parked; closing it ends the park with its presence row.
     ...(open && lane.park ? { park: lane.park } : {}),
     ...looseEndDetails(old, lane, sameHead, unchangedBase),
@@ -261,6 +317,30 @@ export async function trackHostedOverlapLane(
   // lands or is abandoned ends the notices on both sides.
   if (old?.open && !open && old.conflicted)
     await closeConflictNotices(ctx, projectId, lane.id, lane.state === 'abandoned' ? 'abandoned' : 'landed');
+  else if (old && open && metadata?.restorePending)
+    // A failed background save: notices its pending paths ended are decided again from the saved head.
+    await planTrialMerge(
+      ctx,
+      projectId,
+      { ...stored, _id: old._id, _creationTime: old._creationTime },
+      undefined,
+    );
+  else if (
+    old?.conflicted &&
+    open &&
+    old.head === lane.head &&
+    metadata?.changes !== undefined &&
+    stored.complete
+  )
+    // Paths changed at the same head (a background save before its head publishes): notices on files
+    // the Lane no longer changes end now, not on a later read (Item 3f70760d). A bounded (incomplete)
+    // path list proves nothing, so it ends none.
+    await closeLeftConflicts(
+      ctx,
+      projectId,
+      lane.id,
+      new Set((JSON.parse(stored.changes) as OverlapChange[]).map(change => change.path)),
+    );
   else if (old && open && old.head !== lane.head)
     await planTrialMerge(
       ctx,

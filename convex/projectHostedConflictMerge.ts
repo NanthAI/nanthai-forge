@@ -173,9 +173,12 @@ export const run = internalAction({
     let found: Awaited<ReturnType<typeof trialMerge>>['conflicts'] = [];
     try {
       const files = await reader.prepare();
+      // Merge rules come from main's pinned State (R2), read only when a merge needs them.
       const declared = async () => {
-        if (!files) return mainMergeLists(ctx, projectId);
-        const config = files.get(FORGE_CONFIG_FILE);
+        const main =
+          files ?? (plan.main ? await reader.state(plan.main.state).catch(() => undefined) : undefined);
+        if (!main) return mainMergeLists(ctx, projectId);
+        const config = main.get(FORGE_CONFIG_FILE);
         return mergePathsOf(
           config?.mode === 'file' ? await reader.blob(config.blob).catch(() => undefined) : undefined,
         );

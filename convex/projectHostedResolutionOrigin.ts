@@ -19,7 +19,8 @@ import type { MainRedHold } from '../src/hosted-acceptance';
 const DEPTH = 4;
 type Lane = z.infer<typeof hostedLaneSchema>;
 
-/** Read the accepted resolution's origin even after a sync replaced the Lane's current version. */
+/** Read the accepted resolution's origin even after a sync replaced the Lane's current version.
+ * Returns the accepted resolution Lane (its pinned version) when it names an origin. */
 export async function noteResolutionOrigins(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -27,14 +28,14 @@ export async function noteResolutionOrigins(
   reached: (intentId: string, laneId: string, viaLaneId?: string) => void,
 ) {
   const pinned = await recordVersion(ctx, projectId, 'lane', accepted.laneId, accepted.version);
-  if (!pinned) return;
+  if (!pinned) return undefined;
   const lane = hostedLaneSchema.parse(JSON.parse(await hostedRecordBody(ctx, pinned)));
   if (
     lane.head !== accepted.head ||
     lane.sourceVersion !== accepted.sourceVersion ||
     lane.lifecycleVersion !== accepted.lifecycleVersion
   )
-    return;
+    return undefined;
   let origin = lane.resolution?.origin;
   for (let depth = 0; origin && depth < DEPTH; depth++) {
     const laneId: string = origin.laneId;
@@ -47,6 +48,7 @@ export async function noteResolutionOrigins(
     if (current.head !== origin.head || current.sourceVersion !== origin.sourceVersion) break;
     origin = current.resolution?.origin;
   }
+  return lane.resolution?.origin ? lane : undefined;
 }
 
 /** A landed resolution Lane completes the conflicted Lane it was made for, so the original never
