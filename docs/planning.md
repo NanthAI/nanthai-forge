@@ -170,8 +170,9 @@ operation id, also after an index rebuild. New Issue and comment versions stay i
 The durable Item tombstone ends discussion downloads as soon as the purge begins.
 The executor also walks the Item's discussion namespace in indexed pages and marks every
 artifact binding removed, including unfinished reservations. Each new artifact tombstone
-schedules the existing R2 byte cleanup. Completion checks the bindings, while R2 deletion
-runs through those scheduled cleanup actions.
+starts its tracked R2 delete ([removed artifact bytes](r2-storage-plan.md#removed-artifact-bytes)): retried until
+it succeeds, and not done before any upload signed for the binding has run out, while a late commit deletes its own
+bytes. Completion checks the bindings; R2 deletion runs through those cleanup actions.
 A purged Intent or lifecycle version, read by version, answers `PLANNING_ITEM_PURGED` naming the Item. A note or
 status change on the Item's Intent is still accepted after the first step (refusing it would cost every note write a
 read); the last step refuses to finish while such a note exists, so the purge never reports done over it. A purged decision
@@ -200,7 +201,7 @@ their purged form: its journal row (comment text "Deleted comment", no author la
 `planningComments` index records and payload chunks on every record partition and their store fingerprints, its
 work-store versions (purged marker, body emptied) and head (an older head without an inline value gets the tombstone
 inline), the staged pages of a failed index build (which cannot resume), and its discussion attachments (removed, with
-R2 byte cleanup scheduled). The purge row itself goes to the event table even where planning is a primary store
+the tracked R2 delete started, as for an Item purge). The purge row itself goes to the event table even where planning is a primary store
 writer: it projects no record of its own. A staged index page can no longer be written once its build has stopped.
 Work-store copy and compare count a purged version as matching, since its index row is now the tombstone. Readers accept the purged row by the same one rule, so a rebuild, full load or export keeps
 "Deleted comment" in its place and never brings the text back. A retry of the comment's own operation, or a read of a

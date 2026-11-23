@@ -62,7 +62,9 @@ after the content expires). Look, then act:
   stays); a reported account or project loses every board note, one page now and
   the rest through the scheduler. Only the document reported is touched, never
   another one sharing its id. A reported Item comment is removed from every Work
-  store and copy, its attachments included, and reads as "Deleted comment"; the
+  store and copy, its attachments included (their R2 deletes are retried until done;
+  `artifactStorage:pendingDeletes` counts those still waiting, [removed artifact bytes](../../r2-storage-plan.md#removed-artifact-bytes)),
+  and reads as "Deleted comment"; the
   Item and the rest of its discussion stay ([removing one comment](../../planning.md#removing-one-comment)).
   A decision comment is refused (its words are also in the Item body): purge the
   Item, or suspend the account. The report's excerpt is kept as the operator's

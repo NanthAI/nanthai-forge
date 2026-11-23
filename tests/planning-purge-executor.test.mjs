@@ -17,6 +17,7 @@ import { setup, actions } from './hosted-planning-fixture.mjs';
 import { workRecordRows } from './hosted-fixture.mjs';
 import { meterWorkIO } from './hosted-read-set.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { replayFailedDelete, replayLateUpload } from './artifact-delete-replay.mjs';
 
 const SECRET = 'quokka-executor-fixture';
 const code = expected => error => (error.data?.code ?? error.code) === expected;
@@ -540,6 +541,30 @@ test('purge charges one check and redaction per additional attachment page', asy
       );
     });
   }
+});
+
+test('Item purge: a refused R2 delete is retried until it succeeds, and an upload in flight across the purge leaves no bytes (Item 2766ef9e)', async t => {
+  await t.test('failed delete', async t => {
+    const { s, itemId } = await deletedItem(t);
+    const r2 = storage(t),
+      commentId = randomUUID(),
+      rows = [];
+    for (const text of ['first', 'second']) {
+      const row = await discussionArtifact(s, s.projectId, itemId, commentId, text);
+      await artifactStorage.markCommitted._handler(s.ctx, { ref: `r2blob:${row._id}` });
+      rows.push(row);
+    }
+    await replayFailedDelete(t, { s, r2, rows, purge: () => executor(s).run(itemId, randomUUID()) });
+  });
+  await t.test('late upload', async t => {
+    const { s, itemId } = await deletedItem(t);
+    const r2 = storage(t),
+      commentId = randomUUID();
+    const committing = await discussionArtifact(s, s.projectId, itemId, commentId, 'committing');
+    const abandoned = await discussionArtifact(s, s.projectId, itemId, commentId, 'abandoned');
+    const purge = () => executor(s).run(itemId, randomUUID());
+    await replayLateUpload(t, { s, r2, committing, abandoned, purge });
+  });
 });
 
 test('a pre-upgrade terminal check checkpoint cannot finish over a live discussion artifact', async t => {

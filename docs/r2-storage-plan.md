@@ -190,7 +190,34 @@ PUTs carry checksums; HEAD verifies each new artifact before commit. Repeating a
 unknown upload or commit reuses that reservation. Reads resolve each row's location
 and verify full downloaded bytes. References grant no authority: owning actions
 retain current access checks. Existing resource cleanup tombstones the binding and
-schedules a signed DELETE; it does not start a new retention timer.
+starts its tracked signed DELETE; it does not start a new retention timer.
+
+### Removed artifact bytes
+
+A removed binding (a purge, or its owner's cleanup; `convex/artifactStorage.ts`) tracks its R2 delete on its own row
+until the delete succeeds: retries so far, the armed retry and, when an upload signed for it could still be running,
+the end of that upload window. The window starts at the reservation, or at `signedAt`, the last time a reserve handed
+an uncommitted binding back for another upload, and lasts the PUT signature's 15 minutes plus one, plus the ten-minute
+action limit for an upload already started. It applies whether or not the binding was committed: a second
+create-only PUT can recreate the key after the first upload's bytes were deleted. Each attempt is scheduled from a
+mutation together with the retry after it, one minute, doubling, at most six hours, so a refused, crashed or lost
+attempt runs again. A successful delete cancels the retry and clears the row, unless it started inside the upload
+window; then tracking stays open until a delete that starts after it. A commit of an upload that started before the
+removal is refused and deletes its own bytes first (and arms the retry if that delete fails), so purged bytes do not
+stay in R2 behind a late upload. A delete scheduled before tracking existed tracks the row before it touches R2. A
+project being deleted leaves its bytes to the project-prefix purge: its rows stay counted, retrying at their backoff
+without an R2 call, until that purge removes them, so a blocked project purge still shows. An upload that runs past
+the action limit and never commits is the remaining case; a commit always deletes it.
+
+The operator reads how many removed bindings still wait, and the most retries one has had, with
+`npx convex run artifactStorage:pendingDeletes '{}'` (one bounded index read; it counts up to 1,000 and says `more`).
+
+Cost per removed attachment: the removal write schedules the attempt and its retry; the attempt is one action (one
+read, one R2 DELETE, one write that cancels the retry). A binding removed inside its upload window (an upload in
+flight, usually) adds one retry write and one more attempt at the window's end; each failed attempt adds one retry
+write and one attempt. A reserve that hands back an uncommitted binding writes its `signedAt` (one write, only on that
+retry path). Nothing is
+scheduled once the bytes are gone, and there is no cron or polling, so idle costs no calls.
 
 Zones and source-agent grants retain exact indexed-artifact references, including
 old Convex rows. Zone binary exports and large hosted-query derivatives use the
