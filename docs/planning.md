@@ -327,13 +327,14 @@ text: Keep both saves it as the next version over theirs (theirs stays in Versio
 ### Audit trail
 
 Every planning version, comment, Lane and landing stays in the existing hosted journal (no extra table or index).
-Planning puts from device credentials also record the writing agent session slug (`agent`) and declared launcher/model
-(`agentClient`) in the same write mutation (0 extra Convex calls; browser sign-ins and scheduled server jobs carry
-neither).
+Planning puts, ticks, start moves and comments from device credentials record the writing agent session slug (`agent`)
+and declared launcher/model (`agentClient`: `FORGE_AGENT_MODEL`, the client's own `ANTHROPIC_MODEL` or `GEMINI_MODEL`,
+or the model the session declared at `start`) in the same write mutation (0 extra Convex calls; browser sign-ins and
+scheduled server jobs carry neither).
 
 - **Item timeline**: `planning {"planningItemId":"ISSUE_ID","history":true,"limit":50}` (CLI or MCP `forge_planning`)
   returns one bounded, newest-first page (at most 100 events) of who (public Forge handle or `handle/agent` + declared
-  model; never raw account IDs, display names or emails), when and what changed: status and close/abandon reasons,
+  model, or `"not declared"` when an agent declared none; never raw account IDs, display names or emails), when and what changed: status and close/abandon reasons,
   archive/delete/restore, title and bounded body diff summaries, Done-when checkbox ticks/unticks/edits, `waitingOn`
   set/changed/cleared, Initiative/parent/order moves, owner, type, visibility, relations, Intent links, comments
   (including replies and decisions), Lanes and landings/reverts. The reply reports `historyStartsAt`, `firstVersion`,
@@ -537,8 +538,9 @@ reader agents use. Work shows the Lane count and links the receipts on those Lan
 Show more work advances the Lane, landing and Related cursors that still have pages. Work stays idle between requests.
 
 Who wrote a comment comes from the sign-in, never from typed text: a browser sign-in is the person, a device
-credential is an agent run (its session slug, and the model its launcher declared in `FORGE_AGENT_MODEL`, stored as
-`agentClient` beside the slug; declared, not verified). Members see `@handle` and "person", or `handle/run`, "agent"
+credential is an agent run (its session slug, and the model declared in `FORGE_AGENT_MODEL`, the client's own
+`ANTHROPIC_MODEL`/`GEMINI_MODEL`, or the session's `start` declaration, stored as `agentClient` beside the slug;
+declared, not verified). Members see `@handle` and "person", or `handle/run`, "agent"
 and the model ("model not declared" when none). Readers and public viewers see no person: "a person", or the run
 name with its model.
 

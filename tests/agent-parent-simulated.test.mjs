@@ -55,6 +55,7 @@ const EXCLUDED = {
   'tests/hosted-agent-withdraw.test.mjs': 'slow (12 s); withdraw verb',
   'tests/hosted-submission-wait.test.mjs': 'slow (9 s); wake on a submission',
   'tests/bench-t3code-replay-adapters.test.mjs': 'sets FORGE_AGENT_SESSION only to name replay agents',
+  'tests/planning-audit-trail.test.mjs': 'slow (7 s); Item audit trail and model attribution',
 };
 
 // The inputs the detection code reads, and the modules that read them.

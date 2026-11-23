@@ -8,10 +8,12 @@ import { getFunctionName } from 'convex/server';
 import { setup } from './hosted-planning-fixture.mjs';
 import { installPlanningSearch } from './planning-search-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { executeHostedPlanning } from '../dist/hosted-agent-planning.js';
+import { executeHostedPlanning, markPlanningStarted } from '../dist/hosted-agent-planning.js';
+import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
 import { capabilityOptions } from '../dist/hosted-capabilities-early.js';
 import {
+  advertisedFeatures,
   hostedContractFeatures,
   MAX_CONTRACT_FEATURES,
   planningAuditFeature,
@@ -22,6 +24,11 @@ import {
 import { diffDoneWhen, bodyDiffSummary, parseAuditInstant } from '../dist/planning-audit.js';
 import { cliReplyLines } from '../dist/cli-reply-lines.js';
 import { isAgentSlug } from '../dist/agent-slug.js';
+import { agentAuthorship } from '../dist/agent-turn-work.js';
+import { AGENT_CLIENTS, nearestAgentProcess } from '../dist/agent-session.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const hostedPlanning = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
@@ -122,6 +129,7 @@ test('capability negotiation fits planning-audit inside MAX_CONTRACT_FEATURES fo
     ['planning', false, false, {}],
     ['planning', false, false, { counts: true, initiativeId: randomUUID() }],
     ['put-planning-item', false, false, {}],
+    ['tick-planning-item', false, false, {}],
     ['start', false, false, {}],
     ['start', false, true, {}],
     ['finish', false, false, {}],
@@ -131,7 +139,7 @@ test('capability negotiation fits planning-audit inside MAX_CONTRACT_FEATURES fo
       features.length <= MAX_CONTRACT_FEATURES,
       `${action} (${startWithIntent}): ${features.length} > ${MAX_CONTRACT_FEATURES}`,
     );
-    if (['planning', 'put-planning-item', 'start'].includes(action))
+    if (['planning', 'put-planning-item', 'tick-planning-item', 'start'].includes(action))
       assert.ok(features.includes(planningAuditFeature), `${action} requests planning-audit`);
   }
 });
@@ -1143,4 +1151,333 @@ test('411727ba row 3: Item history and Work event readers answer byte-equal befo
   await runComment(p, { planningItemId: itemId, text: 'After the move' });
   assert.deepEqual([...rowsOf('projectPlanningRecords'), ...rowsOf('projectWorkRecords')], []);
   assert.match(JSON.stringify(await runPlanning(p, { planningItemId: itemId })), /After the move/);
+});
+
+test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decision, start, reconcile) records its declared model or says "not declared"', async t => {
+  const baseTime = Date.parse('2026-11-22T12:00:00.000Z');
+  t.mock.timers.enable({ apis: ['Date'], now: baseTime });
+  const stateDir = mkdtempSync(join(tmpdir(), 'forge-audit-model-'));
+  const envKeys = [
+    'XDG_STATE_HOME',
+    'FORGE_AGENT_MODEL',
+    'FORGE_AGENT_SESSION',
+    'FORGE_HUMAN',
+    'ANTHROPIC_MODEL',
+    'GEMINI_MODEL',
+    ...AGENT_CLIENTS.map(client => client.sessionVariable).filter(Boolean),
+  ];
+  const savedEnv = Object.fromEntries(envKeys.map(key => [key, process.env[key]]));
+  t.after(() => {
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+  const setEnv = vars => {
+    for (const key of envKeys) delete process.env[key];
+    process.env.XDG_STATE_HOME = stateDir;
+    for (const [key, value] of Object.entries(vars)) if (value !== undefined) process.env[key] = value;
+  };
+
+  const s = await setup(t);
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  addDeviceAndAccounts(s);
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: 'cred-1' });
+  installPlanningSearch(s);
+
+  const calls = [];
+  let intentState = null;
+  const invoke = async (name, args) => {
+    calls.push(name);
+    if (name === 'projectHostedAgent:capabilities')
+      return JSON.stringify({
+        schema: 1,
+        protocolVersion: 1,
+        projectId: s.projectId,
+        actor: 'owner',
+        authority: { mode: 'server', epoch: 1 },
+        actions: ['planning', 'put-planning-item', 'comment-planning-item', 'start'],
+        mainReady: true,
+        sourceWorkerConfigured: true,
+        checkCallbackConfigured: true,
+        nativeOwnerRequired: false,
+        observation: 'finite',
+        features: advertisedFeatures(args.features ?? []),
+      });
+    if (name === 'projectHostedPlanning:intentStates')
+      return JSON.stringify(intentState ? Object.fromEntries(args.ids.map(id => [id, intentState])) : {});
+    if (name === 'projectItemWork:read')
+      return JSON.stringify({
+        role: true,
+        intent: intentState,
+        intents: 1,
+        lanes: [],
+        total: 0,
+        atLeast: false,
+        nextCursor: null,
+      });
+    const [mod, fn] = name.split(':');
+    const handler = {
+      projectWorkIndex: index,
+      projectHostedPlanning: hostedPlanning,
+      projectWorkCommand: workCommand,
+      projectPlanningBatch: planningBatch,
+      projectItemWork: itemWork,
+    }[mod][fn];
+    return handler._handler(s.ctx, args);
+  };
+  const address = { url: 'https://fixture.invalid', projectId: s.projectId };
+  const makeTransport = agentSession => {
+    const client = {
+      query: (ref, args) => invoke(getFunctionName(ref), args),
+      mutation: (ref, args) => invoke(getFunctionName(ref), args),
+    };
+    const tr = new HostedAgentTransport(s.directory, address, { client, projectId: s.projectId });
+    if (agentSession !== undefined) tr.agentSession = agentSession;
+    return tr;
+  };
+
+  // 1. Create an Item with two Done-when boxes via HostedAgentTransport with FORGE_AGENT_MODEL (even with no harness).
+  setEnv({ FORGE_AGENT_MODEL: 'synth-forge-model' });
+  const created = (
+    await makeTransport(undefined).dispatch('put-planning-item', {
+      kind: 'issue',
+      title: 'Model audit target',
+      body: 'Scope.\n\n## Done when\n- [ ] First check\n- [ ] Second check\n',
+    })
+  ).result;
+  const itemId = created.itemId;
+
+  // 2. Run tick-planning-item through HostedAgentTransport: negotiates planning-audit and stamps
+  //    checkbox-tick version, evidence decision comment AND derived Decisions version with the model.
+  t.mock.timers.setTime(Date.parse('2026-11-22T12:10:00.000Z'));
+  calls.length = 0;
+  const tickSession = `tick-${randomUUID()}`;
+  const ticked = (
+    await makeTransport(tickSession).dispatch('tick-planning-item', {
+      planningItemId: itemId,
+      line: 1,
+      evidence: 'Verified line 1.',
+    })
+  ).result;
+  assert.equal(ticked.version, 2);
+  assert.equal(
+    calls.filter(c => c === 'projectWorkCommand:command').length,
+    2,
+    'exactly 2 mutations (body tick + decision comment), 0 extra Convex calls',
+  );
+
+  // Inspect stored versions v1, v2 (tick), v3 (derived Decisions body) directly.
+  const versionItem = ver => {
+    const row = [...s.tables.projectHostedRecords.values()].find(
+      r => r.kind === 'issue' && r.key === itemId && r.version === ver,
+    );
+    const raw = row.inline ?? s.tables.projectHostedRecordBodies.get(row.bodyId)?.value;
+    return JSON.parse(raw).item;
+  };
+  assert.ok(isAgentSlug(versionItem(1).agent), 'create with only FORGE_AGENT_MODEL gets an agent slug');
+  assert.match(versionItem(1).agentClient, /:synth-forge-model$/);
+  assert.ok(isAgentSlug(versionItem(2).agent), 'tick body put records agent slug');
+  assert.match(versionItem(2).agentClient, /:synth-forge-model$/, 'tick body put records declared model');
+  assert.ok(isAgentSlug(versionItem(3).agent), 'derived Decisions version records agent slug');
+  assert.match(
+    versionItem(3).agentClient,
+    /:synth-forge-model$/,
+    'derived Decisions version records declared model directly (for windowHistory & cross-page reads)',
+  );
+
+  // 3. Session-inherited model (declared once at start, then put/reconcile with NO model env var).
+  const ancestor = nearestAgentProcess();
+  const inheritedKey = `inherited-${randomUUID()}`;
+  const inheritedEnv = ancestor
+    ? ancestor.sessionVariable
+      ? { FORGE_AGENT_SESSION: inheritedKey, [ancestor.sessionVariable]: inheritedKey }
+      : {}
+    : { CODEX_THREAD_ID: inheritedKey };
+  setEnv(inheritedEnv);
+  const startStamp = agentAuthorship({ model: 'inherited-from-start', required: true }, process.env);
+  assert.match(startStamp.agentClient, /:inherited-from-start$/);
+  t.mock.timers.setTime(Date.parse('2026-11-22T12:20:00.000Z'));
+  // markPlanningStarted (used by start {planningItemId}) stamps the start's model on the in-progress put.
+  const startPort = makePort(s, {
+    commentAgent: () => ({ agent: startStamp.agentRun, agentClient: startStamp.agentClient }),
+  });
+  const started = await markPlanningStarted(startPort, itemId, randomUUID(), `ada/${startStamp.agentRun}`);
+  assert.equal(started.updated, true);
+  assert.equal(versionItem(4).agent, startStamp.agentRun);
+  assert.match(versionItem(4).agentClient, /:inherited-from-start$/);
+  // Subsequent plain put-planning-item in the same session inherits the start's model with no model env var.
+  t.mock.timers.setTime(Date.parse('2026-11-22T12:25:00.000Z'));
+  await makeTransport(undefined).dispatch('put-planning-item', {
+    planningItemId: itemId,
+    expectedVersion: 4,
+    title: 'Model audit target (inherited)',
+  });
+  assert.match(versionItem(5).agentClient, /:inherited-from-start$/);
+
+  // 4. Reconcile held-close comment + reason put carry the reconciling agent's slug and model.
+  t.mock.timers.setTime(Date.parse('2026-11-22T12:30:00.000Z'));
+  intentState = 'completed';
+  await makeTransport(undefined).dispatch('planning', { planningItemId: itemId, reconcile: true });
+  assert.match(versionItem(6).agentClient, /:inherited-from-start$/);
+  const heldComment = [...s.tables.projectHostedRecordHeads.values()]
+    .filter(h => h.kind === 'comment' && h.parent === itemId)
+    .map(h => JSON.parse(h.value))
+    .find(c => /Done-when line\(s\) still open/.test(c.text));
+  assert.ok(heldComment, 'reconcile posted held comment');
+  assert.match(heldComment.agentClient, /:inherited-from-start$/);
+  intentState = null;
+
+  // 5. Agent with NO declared model anywhere: stored agentClient has no fake model, and audit reads say 'not declared'.
+  setEnv({});
+  const undeclaredSession = `undeclared-${randomUUID()}`;
+  t.mock.timers.setTime(Date.parse('2026-11-22T12:40:00.000Z'));
+  await makeTransport(undeclaredSession).dispatch('tick-planning-item', {
+    planningItemId: itemId,
+    line: 2,
+    evidence: 'Verified line 2 without a model env.',
+  });
+  assert.ok(isAgentSlug(versionItem(7).agent));
+  assert.equal(versionItem(7).agentClient, undefined, 'no fake model id is stored');
+  assert.ok(isAgentSlug(versionItem(8).agent));
+  assert.equal(versionItem(8).agentClient, undefined);
+
+  // Also add an undeclared agent Lane and landing note, plus a browser (person) edit.
+  const laneId = randomUUID();
+  await records.writeHostedRecord(s.ctx, {
+    projectId: s.projectId,
+    actor: 'owner',
+    authorityEpoch: 1,
+    expectedVersion: null,
+    record: {
+      kind: 'lane',
+      id: laneId,
+      version: 0,
+      at: '2026-11-22T12:45:00.000Z',
+      intentId: itemId,
+      actor: 'owner',
+      agentRun: 'amber-fox',
+      agentClient: 'claude-code',
+      base: { head: 'a'.repeat(64), receiptId: 'seed' },
+      head: 'b'.repeat(64),
+      sourceVersion: 0,
+      lifecycleVersion: 0,
+      state: 'active',
+      authorityEpoch: 1,
+    },
+  });
+  await notes.postIntentLandingNote(s.ctx, s.projectId, {
+    intentId: itemId,
+    receiptId: randomUUID(),
+    kind: 'landed',
+    at: '2026-11-22T12:46:00.000Z',
+    laneIds: [laneId],
+    commit: 'c'.repeat(64),
+    sequence: 12,
+    actor: 'owner',
+    agentRun: 'amber-fox',
+    agentClient: 'claude-code',
+    landedBy: { by: 'agent', review: 'none' },
+  });
+  const sluglessLandingId = randomUUID();
+  await notes.postIntentLandingNote(s.ctx, s.projectId, {
+    intentId: itemId,
+    receiptId: sluglessLandingId,
+    kind: 'landed',
+    at: '2026-11-22T12:47:00.000Z',
+    laneIds: [laneId],
+    commit: 'd'.repeat(64),
+    sequence: 13,
+    actor: 'owner',
+    landedBy: { by: 'agent', review: 'none' },
+  });
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
+  t.mock.timers.setTime(Date.parse('2026-11-22T12:50:00.000Z'));
+  await runPut(makePort(s), { planningItemId: itemId, expectedVersion: 8, title: 'Browser edit' });
+
+  // Read full Item timeline: EVERY agent event has a non-empty model (declared or 'not declared'); person has null.
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: 'cred-1' });
+  const history = (
+    await makeTransport(undefined).dispatch('planning', { planningItemId: itemId, history: true, limit: 100 })
+  ).result;
+  const agentEvents = history.events.filter(e => e.actorKind === 'agent');
+  assert.ok(
+    agentEvents.length >= 10,
+    `expected agent events across versions/comments/lane/landing, got ${agentEvents.length}`,
+  );
+  for (const event of agentEvents) {
+    assert.ok(
+      typeof event.model === 'string' && event.model.length > 0,
+      `${event.kind} ${event.id} must never have an empty model, got ${JSON.stringify(event.model)}`,
+    );
+  }
+  const byVersion = new Map(history.events.filter(e => e.kind === 'version').map(e => [e.version, e]));
+  assert.equal(byVersion.get(1).model, 'synth-forge-model');
+  assert.equal(byVersion.get(2).model, 'synth-forge-model');
+  assert.equal(byVersion.get(3).model, 'synth-forge-model');
+  assert.equal(byVersion.get(4).model, 'inherited-from-start');
+  assert.equal(byVersion.get(5).model, 'inherited-from-start');
+  assert.equal(byVersion.get(6).model, 'inherited-from-start');
+  assert.equal(byVersion.get(7).model, 'not declared');
+  assert.equal(byVersion.get(8).model, 'not declared');
+  assert.equal(byVersion.get(9).actorKind, 'person');
+  assert.equal(byVersion.get(9).model, null, 'person edits have null model');
+  const laneEvent = history.events.find(e => e.kind === 'lane');
+  const landingEvents = history.events.filter(e => e.kind === 'landing');
+  assert.equal(laneEvent.model, 'not declared');
+  assert.equal(landingEvents.length, 2);
+  for (const landing of landingEvents) {
+    assert.equal(landing.actorKind, 'agent');
+    assert.equal(landing.model, 'not declared');
+  }
+
+  // Cross-page timeline read (limit=1): derived Decisions version v3 keeps its model even without its comment on the page.
+  let pageCursor = null;
+  let pagedV3 = null;
+  for (let guard = 0; guard < 30; guard++) {
+    const page = (
+      await makeTransport(undefined).dispatch('planning', {
+        planningItemId: itemId,
+        history: true,
+        limit: 1,
+        cursor: pageCursor,
+      })
+    ).result;
+    const hit = page.events.find(e => e.kind === 'version' && e.version === 3);
+    if (hit) {
+      pagedV3 = hit;
+      break;
+    }
+    pageCursor = page.nextCursor;
+    if (!pageCursor) break;
+  }
+  assert.ok(pagedV3, 'found derived Decisions version v3 while paging 1 event at a time');
+  assert.equal(pagedV3.actorKind, 'agent');
+  assert.equal(pagedV3.model, 'synth-forge-model');
+
+  // Backlog window read for the undeclared agent version (before the browser edit) says 'not declared'.
+  const windowUndeclared = (
+    await makeTransport(undefined).dispatch('planning', {
+      history: { from: '2026-11-22T12:00:00Z', to: '2026-11-22T12:42:00Z' },
+    })
+  ).result;
+  const winItem = windowUndeclared.items.find(i => i.itemId === itemId);
+  assert.equal(winItem.actorKind, 'agent');
+  assert.equal(winItem.model, 'not declared');
+
+  // Backlog window read ending at v3 (tick's derived Decisions version) reports 'synth-forge-model'.
+  const windowTick = (
+    await makeTransport(undefined).dispatch('planning', {
+      history: { from: '2026-11-22T12:00:00Z', to: '2026-11-22T12:15:00Z' },
+    })
+  ).result;
+  const winTickItem = windowTick.items.find(i => i.itemId === itemId);
+  assert.equal(winTickItem.actorKind, 'agent');
+  assert.equal(winTickItem.model, 'synth-forge-model');
+
+  // Terminal formatting prints both declared model and '(not declared)', and omits model for person.
+  const lines = cliReplyLines(['agent', '.', 'planning'], { action: 'planning', result: history });
+  assert.ok(lines.some(line => line.includes('(synth-forge-model)')));
+  assert.ok(lines.some(line => line.includes('(not declared)')));
 });

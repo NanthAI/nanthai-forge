@@ -35,7 +35,11 @@ export function capabilityOptions(
     action === 'planning' && initiativeProgressRequested(input)
       ? planningInitiativeCountsFeature
       : planningWaitingFeature;
-  const planningAudit = action === 'planning' || action === 'put-planning-item' || action === 'start';
+  const planningAudit =
+    action === 'planning' ||
+    action === 'put-planning-item' ||
+    action === 'tick-planning-item' ||
+    action === 'start';
   return {
     // Named contract features (a83b6fd5): the reply lists the ones this server implements.
     features: status

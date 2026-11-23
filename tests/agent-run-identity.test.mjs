@@ -331,22 +331,69 @@ test('receipts carry the agent run that landed them; old receipts without it sti
   assert.equal(hostedAcceptanceSchema.parse(old).agentRun, undefined);
 });
 
-test('the agent client is the harness and, only when the launcher declared it, the model', () => {
+test('the agent client is the harness and, only when the launcher declared it, the model', async t => {
   assert.equal(agentClient({ CLAUDE_CODE_SESSION_ID: 's' }), 'claude-code');
   assert.equal(agentClient({ CODEX_THREAD_ID: 't', FORGE_AGENT_MODEL: 'gpt-test-1' }), 'codex:gpt-test-1');
   assert.equal(agentClient({ FORGE_AGENT_MODEL: 'pi/model.x' }), 'agent:pi/model.x');
+  assert.equal(
+    agentClient({ CLAUDE_CODE_SESSION_ID: 's', ANTHROPIC_MODEL: 'claude-opus-5-5' }),
+    'claude-code:claude-opus-5-5',
+    'Claude Code uses ANTHROPIC_MODEL when FORGE_AGENT_MODEL is unset',
+  );
+  assert.equal(
+    agentClient({ GEMINI_SESSION_ID: 'g', GEMINI_MODEL: 'gemini-4-neon' }),
+    'gemini:gemini-4-neon',
+    'Gemini CLI uses GEMINI_MODEL when FORGE_AGENT_MODEL is unset',
+  );
+  assert.equal(
+    agentClient({
+      CLAUDE_CODE_SESSION_ID: 's',
+      FORGE_AGENT_MODEL: 'override-model',
+      ANTHROPIC_MODEL: 'claude-opus-5-5',
+    }),
+    'claude-code:override-model',
+    'FORGE_AGENT_MODEL wins over client model env',
+  );
+  assert.equal(
+    agentClient({
+      CLAUDE_CODE_SESSION_ID: 's',
+      FORGE_AGENT_MODEL: '',
+      ANTHROPIC_MODEL: 'claude-opus-5-5',
+    }),
+    'claude-code:claude-opus-5-5',
+    'empty FORGE_AGENT_MODEL falls through to client model env',
+  );
   assert.equal(
     agentClient({ FORGE_AGENT_MODEL: ' pi/model.x ' }),
     undefined,
     'declarations are never trimmed',
   );
   assert.equal(
-    agentClient({ CLAUDE_CODE_SESSION_ID: 's', FORGE_AGENT_MODEL: 'not a model!' }),
+    agentClient({
+      CLAUDE_CODE_SESSION_ID: 's',
+      FORGE_AGENT_MODEL: 'not a model!',
+      ANTHROPIC_MODEL: 'claude-opus-5-5',
+    }),
     'claude-code',
+  );
+  assert.equal(
+    agentClient({ CLAUDE_CODE_SESSION_ID: 's', FORGE_AGENT_MODEL: 'gpt-test-1', FORGE_HUMAN: '1' }),
+    undefined,
+    'FORGE_HUMAN=1 suppresses agent attribution',
   );
   assert.equal(agentClient({}), undefined);
   for (const value of ['claude-code', 'codex:gpt-test-1', 'agent:pi/model.x'])
     assert.deepEqual(landingAgentClient(value), { agentClient: value });
+
+  // Session-inherited model (declared once on start) is picked up by agentClient for later planning writes.
+  stateHome(t);
+  const { agentAuthorship } = await import('../dist/agent-turn-work.js');
+  const startedEnv = { CODEX_THREAD_ID: `thread-${randomUUID()}` };
+  agentAuthorship({ model: 'session-model-1', required: true }, startedEnv);
+  assert.equal(agentClient(startedEnv), 'codex:session-model-1');
+  const unknownEnv = { CODEX_THREAD_ID: `thread-${randomUUID()}` };
+  agentAuthorship({ required: true }, unknownEnv);
+  assert.equal(agentClient(unknownEnv), 'codex', 'defaulted unknown is never stamped as a model id');
 });
 
 test('the CLI sends the run with a landing only to a server that advertises landing-agent-run', async t => {

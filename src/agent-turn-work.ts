@@ -43,19 +43,32 @@ export type TurnWork = z.infer<typeof entrySchema>;
 export type TurnLedger = z.infer<typeof ledgerSchema>;
 const MAX_ENTRIES = 32;
 
-/** The agent client for landing receipts (81d12a32): the harness, from the same variables that
- * identify its session, and the model when the launcher declared it in `FORGE_AGENT_MODEL` (no
- * harness exposes its model to shell commands). Undefined outside an agent session. */
-export function agentClient(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const tool = resolveAgentSession(env)?.harness;
+/** The agent client for landing receipts and planning writes (81d12a32, 1d51c91f): the harness,
+ * from the same variables that identify its session, and the model declared in `FORGE_AGENT_MODEL`,
+ * the client's own model variable (`ANTHROPIC_MODEL`, `GEMINI_MODEL`), or this session's earlier
+ * declaration (`start`/`save`/`land`). Undefined outside an agent session or under `FORGE_HUMAN=1`. */
+export function agentClient(
+  env: NodeJS.ProcessEnv = process.env,
+  session?: string | null,
+): string | undefined {
+  if (env.FORGE_HUMAN === '1') return undefined;
+  const resolved = resolveAgentSession(env, undefined, session);
+  if (!resolved && session === null) return undefined;
+  const tool = resolved?.harness;
   const declared = env.FORGE_AGENT_MODEL;
-  const model = declared && AGENT_STAMP_VALUE.test(declared) ? declared : undefined;
+  const validDeclared = declared && AGENT_STAMP_VALUE.test(declared) ? declared : undefined;
+  const inherited =
+    declared !== undefined && declared !== ''
+      ? validDeclared
+      : (clientModel(env, tool) ?? (resolved?.harness ? sessionModel(resolved.key) : undefined));
+  const model = inherited && inherited !== 'unknown' ? inherited : undefined;
   if (!tool && !model) return undefined;
   return `${tool ?? 'agent'}${model ? `:${model}` : ''}`;
 }
 const modelSchema = z.object({ schema: z.literal(1), model: z.string().regex(AGENT_STAMP_VALUE) }).strict();
 /** A separate Forge record: advisory work-ledger updates cannot overwrite a declaration. */
 function sessionModel(session: string, declaration?: string) {
+  if (disabled()) return declaration;
   const path = turnLedgerFile(session).replace(/\.json$/, '.model.json');
   let model: string | undefined;
   try {

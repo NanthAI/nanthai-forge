@@ -528,6 +528,7 @@ async function reconcile(
               itemId: item.id,
               authorLabel: '',
               text: `${marker}, so this Issue stays open. ${advice.text}`,
+              ...port.commentAgent?.(),
             },
             undefined,
             undefined,

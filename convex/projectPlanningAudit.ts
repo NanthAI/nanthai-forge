@@ -44,6 +44,8 @@ type StreamPos = z.infer<typeof streamPos>;
 type AuditCursor = z.infer<typeof auditCursorSchema>;
 type Budget = ReturnType<typeof planningHistoryBudget>;
 
+const MODEL_NOT_DECLARED = 'not declared';
+
 export type ResolvedWriter = {
   actor?: string;
   actorKind: 'person' | 'agent' | 'system' | 'unknown';
@@ -58,7 +60,7 @@ export function writerIdentity(
   agentClient: string | undefined,
 ): ResolvedWriter {
   const slug = isAgentSlug(agent) ? agent : undefined;
-  const model = slug ? modelFromAgentClient(agentClient) : null;
+  const model = slug ? (modelFromAgentClient(agentClient) ?? MODEL_NOT_DECLARED) : null;
   const actor = rawActor ? (slug ? agentActor(rawActor, slug) : rawActor) : undefined;
   const actorKind = slug ? 'agent' : rawActor ? 'person' : 'unknown';
   return {
@@ -173,7 +175,7 @@ type AuditEvent =
       resolves?: string;
       summary: string;
     } & ResolvedWriter)
-  | {
+  | ({
       kind: 'landing' | 'revert';
       id: string;
       intentId: string;
@@ -183,10 +185,8 @@ type AuditEvent =
       laneIds: string[];
       landedBy?: string;
       revertOf?: string;
-      actor?: string;
-      actorKind: 'person' | 'agent' | 'system' | 'unknown';
       summary: string;
-    };
+    } & ResolvedWriter);
 
 type CommentRow = {
   id: string;
@@ -209,7 +209,7 @@ type LaneRecord = {
   head: string;
   agentRun?: string;
   agentClient?: string;
-  authorship?: { kind: 'agent' | 'person' };
+  authorship?: { kind: 'agent' | 'person'; declaration?: 'unknown' | 'not-declared' };
   holder?: { agent?: string };
   resolution?: { origin?: { laneId: string } };
 };
@@ -623,7 +623,10 @@ export async function readItemAuditHistory(
       }
       const run = [lane.agentRun, lane.holder?.agent].find(isAgentSlug);
       const isAgent = Boolean(run) || lane.authorship?.kind === 'agent';
-      const model = isAgent ? modelFromAgentClient(lane.agentClient) : null;
+      const model = isAgent
+        ? (modelFromAgentClient(lane.agentClient) ??
+          (lane.authorship?.declaration === 'unknown' ? 'unknown' : MODEL_NOT_DECLARED))
+        : null;
       const who: ResolvedWriter = {
         actor: agentActor(lane.actor, run),
         actorKind: isAgent ? 'agent' : 'person',
@@ -686,19 +689,26 @@ export async function readItemAuditHistory(
       const run = 'agentRun' in note && typeof note.agentRun === 'string' ? note.agentRun : undefined;
       const client =
         'agentClient' in note && typeof note.agentClient === 'string' ? note.agentClient : undefined;
-      const who = rawActor
-        ? writerIdentity(rawActor, run, client)
-        : {
-            actorKind:
-              note.landedBy?.by === 'agent'
-                ? ('agent' as const)
-                : note.landedBy?.by === 'person'
-                  ? ('person' as const)
+      const slug = isAgentSlug(run) ? run : undefined;
+      const isAgent = Boolean(slug) || note.landedBy?.by === 'agent';
+      const who: ResolvedWriter = isAgent
+        ? {
+            ...(rawActor ? { actor: slug ? agentActor(rawActor, slug) : rawActor } : {}),
+            actorKind: 'agent',
+            ...(slug ? { agent: slug } : {}),
+            model: modelFromAgentClient(client) ?? MODEL_NOT_DECLARED,
+          }
+        : rawActor
+          ? writerIdentity(rawActor, undefined, undefined)
+          : {
+              actorKind:
+                note.landedBy?.by === 'person'
+                  ? 'person'
                   : note.landedBy?.by === 'queue'
-                    ? ('system' as const)
-                    : ('unknown' as const),
-            model: null,
-          };
+                    ? 'system'
+                    : 'unknown',
+              model: null,
+            };
       entries.push({
         examined: examined.length - 1,
         event: {

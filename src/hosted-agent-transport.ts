@@ -131,7 +131,7 @@ import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { HostedAgentJournal, finishCommandLaneIds, hostedAgentRoot } from './hosted-agent-journal.js';
 import { shellQuote } from './shell-quote.js';
 import { landPhase } from './hosted-land-summary.js';
-import { sessionAgentSlug, sessionAgentIdentity } from './agent-slug-session.js';
+import { agentSlug, sessionAgentSlug, sessionAgentIdentity } from './agent-slug-session.js';
 import {
   hostedAgentAction,
   hostedAgentAddressSchema,
@@ -444,6 +444,17 @@ export class HostedAgentTransport {
   }
   private sentAgent() {
     return this.serverFeatures?.includes('agent-slug') ? this.agentSlug() : undefined;
+  }
+  /** The writing agent's slug and declared client/model for planning puts, ticks, start moves and comments. */
+  private planningAgent(
+    stamp?: ReturnType<typeof agentAuthorship>,
+  ): { agent: string; agentClient?: string } | undefined {
+    if (stamp?.authorship.kind === 'person') return undefined;
+    const agent = stamp?.agentRun ?? this.agentSlug();
+    const client = stamp?.agentClient ?? agentClient(process.env, this.agentSession);
+    if (!agent && !client) return undefined;
+    const slug = agent ?? agentSlug(`declared:${sessionAgentIdentity(this.agentSession).sessionId}`);
+    return { agent: slug, ...(client ? { agentClient: client } : {}) };
   }
   /** CLI only: start reports the new Lane before its checkout downloads. */
   onStarted?: (lane: { laneId: string; path: string | null }) => void;
@@ -1256,11 +1267,7 @@ export class HostedAgentTransport {
             query: this.query.bind(this),
             mutation: this.mutation.bind(this),
             serverFeatures: this.serverFeatures,
-            commentAgent: () => {
-              const agent = this.agentSlug();
-              const client = agent ? agentClient() : undefined;
-              return agent ? { agent, ...(client ? { agentClient: client } : {}) } : undefined;
-            },
+            commentAgent: () => this.planningAgent(),
             retainOperation: (id: string) => {
               this.callerOperationId ??= id;
             },
@@ -1541,6 +1548,10 @@ export class HostedAgentTransport {
       let budget: MemberBudget | undefined;
       let budgetExpiresAt = 0;
       let carriedMain = mainFirstActions.has(action) ? capabilities.main : undefined;
+      const fallbackLandingClient =
+        !sourceStamp && this.serverFeatures?.includes('landing-agent-client') && this.agentSlug()
+          ? agentClient(process.env, this.agentSession)
+          : undefined;
       const session: HostedAgentSession = {
         ...(undoReplay?.selection ? { undoSelection: undoReplay.selection } : {}),
         ...(syncSaveInventory ? { syncSaveInventory } : {}),
@@ -1580,11 +1591,8 @@ export class HostedAgentTransport {
             : {}),
         ...(sourceStamp?.agentClient
           ? { landingClient: sourceStamp.agentClient }
-          : !sourceStamp &&
-              this.serverFeatures?.includes('landing-agent-client') &&
-              this.agentSlug() &&
-              agentClient()
-            ? { landingClient: agentClient()! }
+          : fallbackLandingClient
+            ? { landingClient: fallbackLandingClient }
             : {}),
         ...(this.serverFeatures?.includes('landing-tokens') ? { landingTokens: true as const } : {}),
         query: this.query.bind(this),
@@ -1852,6 +1860,7 @@ export class HostedAgentTransport {
                 query: this.query.bind(this),
                 mutation: this.mutation.bind(this),
                 serverFeatures: this.serverFeatures,
+                commentAgent: () => this.planningAgent(sourceStamp),
               },
               planningItemId,
               journal.operationId,

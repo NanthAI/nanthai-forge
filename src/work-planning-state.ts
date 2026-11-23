@@ -11,6 +11,7 @@ import {
   bodyWithDecision,
   decisionOperationId,
   discussionFields,
+  putAgentFields,
   refusePurged,
   resolvePlanningPut,
 } from './work-planning-put.js';
@@ -84,6 +85,7 @@ export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at
         text: command.text,
         commentId: command.operationId,
       }),
+      ...putAgentFields(command),
     },
     at,
     request === undefined ? undefined : purgedDecisionRequest(request),
