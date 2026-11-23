@@ -87,9 +87,14 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
    evidence; otherwise that acceptance stays open. Perf/cost claims: [perf-claims](perf-claims.md).
 9. Land your own Lane (`land --save`) unless review is required first.
    The one review round runs through [the review script](review-api.md) unless the brief names a model
-   reviewer: save, run `node scripts/review-api.mjs --lane LANE_PATH --item ISSUE_ID`, fix its findings,
-   land, no second round. If it refuses (no key, a cap), tell the lead on the Item and use the reviewer
-   the brief names; never raise a cap yourself. A core queue change still takes the fresh-context session
+   reviewer: save, run `node scripts/review-api.mjs --lane LANE_PATH --item ISSUE_ID --builder-model
+   YOUR_MODEL`, fix its findings, land, no second round. The reviewer's model family differs from yours:
+   a Claude builder is reviewed by GPT-6.2 Sol, a GPT or Gemini builder by Claude (Sonnet, or Opus for a
+   core, queue, security or root-cause Lane that the brief or the Item marks `review-tier: core`; pass
+   `--tier core` if the brief says so). When one provider's daily cap is spent the script moves to the other
+   by itself and says so. If it refuses (no key, both caps spent), tell the lead on the Item and use the
+   reviewer the brief names, or a subscription reviewer; never raise a cap yourself. `--spend` prints
+   today's and the month's spend per provider. A core queue change still takes the fresh-context session
    review recorded in its [queue proof](#attaching-queue-proof); the script does not qualify for that.
    The reviewer prompt must include the AGENTS.md safety line verbatim.
    Copy the full line starting with “Never print environment values or

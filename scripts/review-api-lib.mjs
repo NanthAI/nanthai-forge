@@ -15,18 +15,34 @@ export const PRICES = {
     'claude-fable-5-2': { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 },
   },
   openai: {
+    // GPT-6.2 Sol, Standard tier, from developers.openai.com/api/docs/pricing and the model page
+    // (2026-11-23): $2 in, $0.10 cached, $10 out; above 272K input tokens input and cache rates double
+    // and output is 1.5x for the whole request.
+    'gpt-6.2-sol': {
+      input: 2,
+      output: 10,
+      cacheRead: 0.1,
+      longContext: { aboveTokens: 272_000, inputFactor: 2, outputFactor: 1.5 },
+    },
     'gpt-5.5': { input: 5, output: 30, cacheRead: 0.5 },
     'gpt-5.4': { input: 2.5, output: 15, cacheRead: 0.25 },
   },
 };
 export const DEFAULTS = {
-  provider: 'anthropic',
-  models: { anthropic: 'claude-opus-5-5', openai: 'gpt-5.5' },
   maxOutputTokens: 16000,
   maxCallUsd: 1,
-  maxDayUsd: 10,
   contextBytes: 100_000,
   timeoutMs: 300_000,
+};
+/** Routing and credit config. Override per machine in ~/.forge-review/config.json (or --config FILE):
+ * {"daysPerMonth":30,"providers":{"openai":{"monthlyCreditUsd":220,"models":{"standard":"…","core":"…"}}}}.
+ * A provider's daily cap is its monthlyCreditUsd / daysPerMonth. */
+export const CONFIG = {
+  daysPerMonth: 30,
+  providers: {
+    anthropic: { monthlyCreditUsd: 180, models: { standard: 'claude-sonnet-5-5', core: 'claude-opus-5-5' } },
+    openai: { monthlyCreditUsd: 220, models: { standard: 'gpt-6.2-sol', core: 'gpt-6.2-sol' } },
+  },
 };
 export const KEYCHAIN = {
   anthropic: 'forge-review-anthropic',
@@ -57,27 +73,53 @@ export function priceFor(provider, model, override = {}) {
     output,
     cacheRead: override.cacheRead ?? row?.cacheRead ?? input,
     cacheWrite: row?.cacheWrite ?? input,
+    longContext: override.input === undefined && override.output === undefined ? row?.longContext : undefined,
+  };
+}
+
+/** Rates for a request of `inputTokens`: a price row's long-context surcharge covers the whole request. */
+function rates(price, inputTokens) {
+  const lc = price.longContext;
+  const long = lc && inputTokens > lc.aboveTokens;
+  const inFactor = long ? lc.inputFactor : 1;
+  return {
+    input: price.input * inFactor,
+    cacheRead: price.cacheRead * inFactor,
+    cacheWrite: price.cacheWrite * inFactor,
+    output: price.output * (long ? lc.outputFactor : 1),
   };
 }
 
 /** Billed USD from a provider's reported usage. Tokens are normalized by usageOf: `input` excludes
  * cached tokens, so each token class is priced once. */
 export function costUsd(price, usage) {
+  const r = rates(price, usage.input + usage.cacheRead + usage.cacheWrite);
   const total =
-    usage.input * price.input +
-    usage.output * price.output +
-    usage.cacheRead * price.cacheRead +
-    usage.cacheWrite * price.cacheWrite;
+    usage.input * r.input +
+    usage.output * r.output +
+    usage.cacheRead * r.cacheRead +
+    usage.cacheWrite * r.cacheWrite;
   return total / 1_000_000;
 }
 
 /** Upper bound before sending: bytes/2.5 over-counts tokens for code, and output is priced at the cap. */
 export function estimateUsd(price, promptBytes, maxOutputTokens) {
-  return (Math.ceil(promptBytes / 2.5) * price.input + maxOutputTokens * price.output) / 1_000_000;
+  const tokens = Math.ceil(promptBytes / 2.5);
+  const r = rates(price, tokens);
+  return (tokens * r.input + maxOutputTokens * r.output) / 1_000_000;
 }
 
-/** Refuse before sending when the estimate breaks a cap. `spentTodayUsd` is the logged sum for the UTC day. */
-export function checkCaps({ estimate, spentTodayUsd, maxCallUsd, maxDayUsd }) {
+/** Refuse before sending when the estimate breaks a cap. `spentTodayUsd` and `spentMonthUsd` are the logged
+ * sums for this provider's UTC day and month; `maxDayUsd` is its daily cap, `monthlyCreditUsd` its credit.
+ * The day and month caps are the ones that let a review spill to the other provider. */
+export function checkCaps({
+  estimate,
+  spentTodayUsd,
+  maxCallUsd,
+  maxDayUsd,
+  spentMonthUsd = 0,
+  monthlyCreditUsd = Infinity,
+}) {
   if (estimate > maxCallUsd)
     throw new ReviewError(
       'REVIEW_CALL_CAP',
@@ -86,8 +128,75 @@ export function checkCaps({ estimate, spentTodayUsd, maxCallUsd, maxDayUsd }) {
   if (spentTodayUsd + estimate > maxDayUsd)
     throw new ReviewError(
       'REVIEW_DAY_CAP',
-      `Spent $${spentTodayUsd.toFixed(3)} today plus worst case $${estimate.toFixed(3)} is over the daily cap $${maxDayUsd}.`,
+      `Spent $${spentTodayUsd.toFixed(3)} today plus worst case $${estimate.toFixed(3)} is over the daily cap $${maxDayUsd.toFixed(2)}.`,
     );
+  if (spentMonthUsd + estimate > monthlyCreditUsd)
+    throw new ReviewError(
+      'REVIEW_MONTH_CAP',
+      `Spent $${spentMonthUsd.toFixed(3)} this month plus worst case $${estimate.toFixed(3)} is over the monthly credit $${monthlyCreditUsd}.`,
+    );
+}
+
+const FAMILIES = [
+  ['anthropic', /claude|opus|sonnet|haiku|fable|mythos/i],
+  ['openai', /gpt|codex|^o\d|\bsol\b/i],
+  ['google', /gemini|neon|argon/i],
+];
+/** Model family of a model name: 'anthropic', 'openai', 'google', or null when unrecognized. */
+export function familyOf(model) {
+  return FAMILIES.find(([, pattern]) => pattern.test(model ?? ''))?.[0] ?? null;
+}
+
+/** Local config merged over CONFIG; a bad value is an error, never silently ignored. */
+export function mergeConfig(local = {}) {
+  const config = structuredClone(CONFIG);
+  const positive = (value, what) => {
+    if (!(Number(value) > 0))
+      throw new ReviewError('REVIEW_CONFIG', `Config ${what} must be a positive number.`);
+    return Number(value);
+  };
+  if (local.daysPerMonth !== undefined) config.daysPerMonth = positive(local.daysPerMonth, 'daysPerMonth');
+  for (const [name, row] of Object.entries(local.providers ?? {})) {
+    if (!config.providers[name])
+      throw new ReviewError('REVIEW_CONFIG', `Config names unknown provider ${name}.`);
+    if (row.monthlyCreditUsd !== undefined)
+      config.providers[name].monthlyCreditUsd = positive(row.monthlyCreditUsd, `${name}.monthlyCreditUsd`);
+    Object.assign(config.providers[name].models, row.models ?? {});
+  }
+  return config;
+}
+
+/** A provider's daily cap: an explicit override, else its monthly credit over the days in a month. */
+export function dailyCapUsd(config, provider, override) {
+  return override ?? config.providers[provider].monthlyCreditUsd / config.daysPerMonth;
+}
+
+/** `review-tier: core` in the Item (or its comments) marks a core-path, queue, security or root-cause Lane. */
+export function tierFromText(text) {
+  const match = /review[- ]tier:\s*(core|standard)/i.exec(text ?? '');
+  return match ? match[1].toLowerCase() : null;
+}
+
+/** Providers to try, in order, as [{provider, model, pinned}]. The reviewer's model family should differ from
+ * the builder's: a Claude builder (or an unknown one) goes to OpenAI first, any other builder to Claude first;
+ * the other provider takes the review when the first is at its daily cap. Claude uses Opus for tier `core` and
+ * Sonnet otherwise (config). `--provider` or `--model` pins one provider and never spills. */
+export function planRoute({ builderModel, tier = 'standard', provider, model, config }) {
+  if (!['core', 'standard'].includes(tier))
+    throw new ReviewError('REVIEW_ARGS', '--tier must be core or standard.');
+  const builder = builderModel ? familyOf(builderModel) : 'anthropic';
+  const order =
+    builder === 'anthropic' || builder === null ? ['openai', 'anthropic'] : ['anthropic', 'openai'];
+  const modelOf = name => config.providers[name].models[tier];
+  if (provider && !KEYCHAIN[provider])
+    throw new ReviewError('REVIEW_PROVIDER', `Unknown provider ${provider}; use anthropic or openai.`);
+  if (provider || model) {
+    const name = provider ?? familyOf(model) ?? order[0];
+    if (!KEYCHAIN[name])
+      throw new ReviewError('REVIEW_PROVIDER', `Cannot tell the provider of ${model}; pass --provider.`);
+    return [{ provider: name, model: model ?? modelOf(name), pinned: true }];
+  }
+  return order.map(name => ({ provider: name, model: modelOf(name), pinned: false }));
 }
 
 export const FINDINGS_SCHEMA = {
@@ -326,19 +435,26 @@ export function formatReport({ summary, findings }, meta) {
     );
   const u = meta.usage;
   lines.push(
-    `${meta.provider}/${meta.model}: ${u.input} in + ${u.cacheRead} cached + ${u.cacheWrite} cache-write, ${u.output} out tokens; $${meta.usd.toFixed(4)} this call, $${meta.spentTodayUsd.toFixed(4)} today.`,
+    `${meta.provider}/${meta.model}: ${u.input} in + ${u.cacheRead} cached + ${u.cacheWrite} cache-write, ${u.output} out tokens; $${meta.usd.toFixed(4)} this call, $${meta.spentTodayUsd.toFixed(4)} today on ${meta.provider}.`,
   );
+  if (meta.route) lines.push(meta.route);
   return lines.join('\n');
 }
 
-/** Spend today in USD from log text. A reservation counts until its call row (same id) settles it. */
-export function spentOn(day, logText) {
+/** Spend in USD for a UTC day ('2026-11-23') or month ('2026-11') from log text, optionally for one
+ * provider. A reservation counts at its worst case until its call row (same id) settles it. */
+export function spentOn(period, logText, provider) {
   const settled = new Set();
   const rows = [];
   for (const line of logText.split('\n')) {
     try {
       const row = JSON.parse(line);
-      if (typeof row.time === 'string' && row.time.startsWith(day)) rows.push(row);
+      if (
+        typeof row.time === 'string' &&
+        row.time.startsWith(period) &&
+        (provider === undefined || row.provider === provider)
+      )
+        rows.push(row);
       if (row.kind === 'call') settled.add(row.id);
     } catch {
       /* a torn or empty line is not a spend we can count */
@@ -348,6 +464,69 @@ export function spentOn(day, logText) {
     (sum, row) => (row.kind === 'reserve' && settled.has(row.id) ? sum : sum + (Number(row.usd) || 0)),
     0,
   );
+}
+
+const dayOfLine = line => {
+  try {
+    return JSON.parse(line).time?.slice(0, 10);
+  } catch {
+    return undefined;
+  }
+};
+
+/** What `--spend` prints: per provider, today against its daily cap and this month against its credit,
+ * plus each day of the month the log has spend for. */
+export function spendReport(logText, now, config, dayCapOverride) {
+  const day = now.toISOString().slice(0, 10);
+  const month = day.slice(0, 7);
+  const names = Object.keys(config.providers);
+  const providers = Object.fromEntries(
+    names.map(name => [
+      name,
+      {
+        today: spentOn(day, logText, name),
+        month: spentOn(month, logText, name),
+        dayCap: dailyCapUsd(config, name, dayCapOverride),
+        credit: config.providers[name].monthlyCreditUsd,
+      },
+    ]),
+  );
+  const days = [
+    ...new Set(
+      logText
+        .split('\n')
+        .map(dayOfLine)
+        .filter(d => d?.startsWith(month)),
+    ),
+  ].sort();
+  return {
+    day,
+    month,
+    providers,
+    days: days.map(d => ({
+      day: d,
+      ...Object.fromEntries(names.map(name => [name, spentOn(d, logText, name)])),
+    })),
+  };
+}
+
+export function formatSpend(report) {
+  const usd = value => `$${value.toFixed(2)}`;
+  const names = Object.keys(report.providers);
+  const lines = [`Review spend (UTC), ${report.day}:`];
+  for (const name of names) {
+    const p = report.providers[name];
+    lines.push(
+      `  ${name.padEnd(9)} today ${usd(p.today)} of ${usd(p.dayCap)} daily cap; ${report.month} ${usd(p.month)} of ${usd(p.credit)} credit (${((p.month / p.credit) * 100).toFixed(1)}%)`,
+    );
+  }
+  lines.push(
+    `  all       ${report.month} ${usd(names.reduce((sum, name) => sum + report.providers[name].month, 0))}`,
+  );
+  if (report.days.length) lines.push('Per day this month:');
+  for (const d of report.days)
+    lines.push(`  ${d.day}  ${names.map(name => `${name} ${usd(d[name])}`).join('  ')}`);
+  return lines.join('\n');
 }
 
 /** Remove a secret (and its trimmed form) from text before it can reach any output. */
