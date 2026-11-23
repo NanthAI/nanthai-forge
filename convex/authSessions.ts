@@ -150,7 +150,7 @@ export const revokeOthers = accountMutation('same')({
     const revoked = await ctx.runMutation(components.auth.public.revokeSessions, {
       sessionIds: sessions.filter(row => row.sessionId !== sessionId).map(row => row.sessionId),
     });
-    if (includeDevices) await endAccountDevices(ctx, user.accountKey, Date.now());
+    if (includeDevices) await endAccountDevices(ctx, user.accountKey, user);
     await ctx.db.patch(user._id, {
       sessionEnd: {
         operationId,

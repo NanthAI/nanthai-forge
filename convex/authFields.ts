@@ -20,6 +20,8 @@ export const authTables = {
     passkeyNotice: v.optional(v.object({ at: v.number(), passkeyId: v.string() })),
     deviceNotice: v.optional(v.object({ at: v.number(), credentialId: v.string(), signInId: v.string() })),
     deviceApprovalProof: v.optional(v.object({ sessionId: v.string(), verifiedUntil: v.number() })),
+    /** CLI device sign-out epoch: each "sign out everywhere" start moves it on (convex/deviceEndAll.ts). */
+    deviceSignOutEpoch: v.optional(v.number()),
     sessionEnd: v.optional(
       v.object({
         sessionId: v.string(),

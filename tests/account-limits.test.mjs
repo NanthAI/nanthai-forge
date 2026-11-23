@@ -429,7 +429,12 @@ test('suspending signs out devices and browser sessions, unlists public projects
   }
   // Browser sessions live in the auth component: record what the switch revokes.
   if (![...f.tables.users.values()].some(user => user.accountKey === owner))
-    f.tables.users.set('writer-user', { _id: 'writer-user', _creationTime: 1, accountKey: owner });
+    f.tables.users.set('writer-user', {
+      _id: 'writer-user',
+      _creationTime: 1,
+      accountKey: owner,
+      emailVerified: false,
+    });
   const revoked = [];
   const runQuery = f.ctx.runQuery,
     runMutation = f.ctx.runMutation;

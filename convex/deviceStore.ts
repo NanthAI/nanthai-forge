@@ -18,6 +18,7 @@ import { accessibleProject } from './projectAuthority';
 import { grantStamp } from './accessPolicy';
 import { freshDeviceApproval } from './authDeviceFresh';
 import { deviceApproval } from './deviceApproval';
+import { accountSignInEpoch, signInEpoch } from './deviceEndAll';
 import { deviceOperation, finishDeviceOperation } from './deviceOperation';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
@@ -187,6 +188,8 @@ export const decide = internalMutation({
     );
     let issuedAt: number | undefined;
     let signInExpiresAt: number | undefined;
+    // Read in this transaction, so a sign-in is ordered against "sign out everywhere" without a clock.
+    let signOutEpoch: number | undefined;
     const credentialId = stable
       ? device!.credentialId
       : row.deviceKey || device?.foreign
@@ -197,15 +200,15 @@ export const decide = internalMutation({
         typeof approver.forgeAuthUser === 'string'
           ? ctx.db.normalizeId('users', approver.forgeAuthUser)
           : null;
-      const accountId =
-        authId ??
-        (
-          await ctx.db
+      const account = authId
+        ? await ctx.db.get(authId)
+        : await ctx.db
             .query('users')
             .withIndex('by_accountKey', q => q.eq('accountKey', args.owner))
-            .unique()
-        )?._id;
-      invariant(accountId, 'AUTH_REQUIRED', 'Sign in to Forge in your browser.');
+            .unique();
+      invariant(account, 'AUTH_REQUIRED', 'Sign in to Forge in your browser.');
+      const accountId = account._id;
+      signOutEpoch = signInEpoch(account);
       invariant(
         (device?.current && !deviceApprovalExpired(device.current)) || freshDeviceApproval(approver),
         'AUTH_REQUIRED',
@@ -253,6 +256,7 @@ export const decide = internalMutation({
         tokenHash: '',
         revoked: false,
         renewal: { operationId: args.operationId, requestHash: receipt!.hash, issuedAt },
+        signOutEpoch,
       };
       await ctx.db.patch(accountId, {
         deviceNotice: { at: Date.now(), credentialId, signInId: args.operationId },
@@ -262,8 +266,10 @@ export const decide = internalMutation({
         await ctx.db.patch(device.removedId, { ...value, ...stamp, removed: undefined });
       else await ctx.db.insert('cliCredentials', { ...value, ...(stamp.grant ? stamp : {}) });
     }
+    if (args.approve && !stable) signOutEpoch = await accountSignInEpoch(ctx, args.owner);
     await ctx.db.patch(row._id, {
       ...(issuedAt !== undefined ? { issuedAt } : {}),
+      ...(signOutEpoch !== undefined ? { signOutEpoch } : {}),
       ...(signInExpiresAt !== undefined ? { signInExpiresAt } : {}),
       ...(!stable ? { deviceKey: undefined } : {}),
       ...(args.approve ? { credentialId } : {}),
@@ -331,6 +337,13 @@ export const issue = internalMutation({
       invariant(!old.revoked, 'AUTH_REVOKED', 'This credential has been revoked.');
       return old;
     }
+    // A keyless sign-in is approved in one transaction and issued in a later one: refuse it when "sign out
+    // everywhere" started in between, even when every page has already run.
+    invariant(
+      (args.signOutEpoch ?? 0) >= (await accountSignInEpoch(ctx, args.owner)),
+      'AUTH_REVOKED',
+      'This account signed out everywhere after this sign-in was approved. Run nforge login.',
+    );
     const { signInId: _signInId, ...credential } = args;
     void _signInId;
     const id = await ctx.db.insert('cliCredentials', credential);

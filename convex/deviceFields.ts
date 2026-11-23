@@ -33,6 +33,8 @@ export const credentialFields = {
   settings: v.optional(deviceSettings),
   /** Clock of a scoped grant (settings.paths): granted at, last renewed by a write. Expiry is computed at check time. */
   grant: v.optional(v.object({ at: v.number(), usedAt: v.number() })),
+  /** The account sign-out epoch this sign-in was issued in; "sign out everywhere" ends every one below its own. */
+  signOutEpoch: v.optional(v.number()),
 };
 export const credentialDocument = v.object({
   _id: v.id('cliCredentials'),
@@ -56,6 +58,8 @@ export const deviceFields = {
   redemptionId: v.optional(v.string()),
   decisionId: v.optional(v.string()),
   deviceKey: v.optional(v.string()),
+  /** The account sign-out epoch at approval; the credential issued from this code records it. */
+  signOutEpoch: v.optional(v.number()),
 };
 export const deviceDocument = v.object({
   _id: v.id('deviceCodes'),

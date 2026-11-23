@@ -753,49 +753,115 @@ test('SI-07: a lost renewal preparation reply reuses its budget reservation and 
   );
 });
 
-test('SI-01: signing out all devices uses bounded pages, retains settings, and a continuation leaves later sign-ins active', async t => {
+test('SI-01: sign out everywhere ends every pre-start device on every page, even one renewed between pages, and keeps a sign-in issued after the start in the same millisecond', async t => {
   const f = fixture(t),
-    before = Date.now();
+    started = Date.now();
   const end = await import(moduleUrl('../convex/deviceEndAll.ts'));
   const settings = { source: 'write', projects: { kind: 'all' } };
-  let later;
-  for (let i = 0; i < 201; i++) {
-    const id = f.insert('cliCredentials', {
+  const synthetic = () =>
+    f.insert('cliCredentials', {
       owner: 'owner',
       credentialId: randomUUID(),
       name: 'Synthetic',
       scope: 'cli',
-      issuedAt: before - 1000,
-      expiresAt: before + 60000,
+      issuedAt: started - 1000,
+      expiresAt: started + 600000,
       tokenHash: 'synthetic',
       revoked: false,
       settings,
-      deviceLastSeen: before - 1000,
+      deviceLastSeen: started - 1000,
     });
-    if (i === 150) later = id;
-  }
-  const start = f.counts.length;
+  for (let i = 0; i < 150; i++) synthetic();
+  // A real pre-start device on the second page.
+  const used = key(),
+    usedFlow = (await f.start(used)).flow;
+  await f.approve(usedFlow);
+  await f.poll(usedFlow);
+  for (let i = 0; i < 50; i++) synthetic();
+  const usedRow = () => [...f.tables.cliCredentials.values()].find(row => row.credentialId === used.id);
+  const owner = [...f.tables.users.values()].find(row => row.accountKey === 'owner');
+  // The start runs at `started`; the clock is then moved, never used to order the sign-ins.
+  let clock = started;
+  t.mock.method(Date, 'now', () => clock);
   await f.call(
-    'end first page',
+    'end all start',
     {
       _handler: async ctx => {
-        await end.endAccountDevices(ctx, 'owner', before);
+        await end.endAccountDevices(ctx, 'owner');
         return null;
       },
     },
     {},
   );
-  f.patch('cliCredentials', later, { deviceLastSeen: before + 1 });
-  for (let i = 0; i < f.scheduled.length; i++)
+  const startCall = f.counts.at(-1);
+  // The start's only extra write is the account's next epoch.
+  assert.equal(startCall.writes, 101);
+  assert.equal([...f.tables.users.values()].find(row => row._id === owner._id).deviceSignOutEpoch, 1);
+  // Used between pages, a minute later: a renewal moves issuedAt and deviceLastSeen past the start, not the epoch.
+  clock = started + 60_000;
+  assert.equal((await f.renew(used)).status, 'approved');
+  assert(usedRow().issuedAt > started && usedRow().deviceLastSeen > started);
+  assert.equal(usedRow().revoked, false);
+  assert.equal(usedRow().signOutEpoch, 0);
+  // Signed in after the start, in the start's own millisecond.
+  clock = started;
+  const later = key(),
+    laterFlow = (await f.start(later)).flow;
+  await f.approve(laterFlow);
+  const laterSignIn = await f.poll(laterFlow);
+  assert.equal(laterSignIn.status, 'approved');
+  assert.equal(
+    [...f.tables.cliCredentials.values()].find(row => row.credentialId === later.id).signOutEpoch,
+    1,
+  );
+  const pages = [startCall];
+  for (let i = 0; i < f.scheduled.length; i++) {
+    if (getFunctionName(f.scheduled[i].fn) !== 'deviceEndAll:next') continue;
     await f.call('continue device sign-out', end.next, f.scheduled[i].args);
-  assert.equal([...f.tables.cliCredentials.values()].filter(row => row.revoked).length, 200);
-  assert.equal(f.tables.cliCredentials.get(later).revoked, false);
-  for (const row of f.tables.cliCredentials.values()) assert.deepEqual(row.settings, settings);
-  assert.equal(f.counts.length - start, 3);
-  for (const page of f.counts.slice(start)) {
-    assert(page.documents <= 100);
-    assert(page.writes <= 100);
+    pages.push(f.counts.at(-1));
   }
+  assert.equal(pages.length, 3);
+  for (const page of pages) assert(page.documents <= 101 && page.writes <= 101);
+  const rows = [...f.tables.cliCredentials.values()];
+  assert.equal(rows.length, 202);
+  assert.equal(usedRow().revoked, true);
+  assert.equal(rows.find(row => row.credentialId === later.id).revoked, false);
+  assert.equal(rows.filter(row => row.revoked).length, 201);
+  for (const row of rows.filter(row => row.name === 'Synthetic')) assert.deepEqual(row.settings, settings);
+  assert.equal((await f.renew(used)).status, 'signed-out');
+  assert.equal((await f.renew(later)).status, 'approved');
+});
+
+test('SI-01: a keyless sign-in approved before sign out everywhere is refused at issue, even after every page ran', async t => {
+  const f = fixture(t);
+  const end = await import(moduleUrl('../convex/deviceEndAll.ts'));
+  const issue = (credentialId, signOutEpoch) =>
+    f.call('legacy issue', modules.deviceStore.issue, {
+      owner: 'owner',
+      name: 'Keyless',
+      scope: 'cli',
+      credentialId,
+      issuedAt: 1_000,
+      expiresAt: 4_102_444_800_000,
+      tokenHash: 'synthetic',
+      revoked: false,
+      ...(signOutEpoch === undefined ? {} : { signOutEpoch }),
+    });
+  await f.call(
+    'end all',
+    {
+      _handler: async ctx => {
+        await end.endAccountDevices(ctx, 'owner');
+        return null;
+      },
+    },
+    {},
+  );
+  await assert.rejects(issue(randomUUID(), 0), code('AUTH_REVOKED'));
+  await assert.rejects(issue(randomUUID()), code('AUTH_REVOKED'));
+  const issued = await issue(randomUUID(), 1);
+  assert.equal(issued.revoked, false);
+  assert.equal(issued.signOutEpoch, 1);
 });
 
 test('SI-07: renewal calls and indexed I/O stay constant at current and doubled device scale', async t => {

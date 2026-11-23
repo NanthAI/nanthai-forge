@@ -158,6 +158,7 @@ export const poll = internalAction({
       expiresAt,
       tokenHash: deviceHash(token),
       revoked: false,
+      ...(row.signOutEpoch !== undefined ? { signOutEpoch: row.signOutEpoch } : {}),
       ...(row.deviceKey ? { deviceKey: row.deviceKey, signInId: row.decisionId } : {}),
     });
     return {

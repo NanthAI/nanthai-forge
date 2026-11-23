@@ -87,7 +87,7 @@ export const completeSignInWithGithub = accountMutation('same')({
           sessionIds: sessions.filter(row => row.sessionId !== freshSession).map(row => row.sessionId),
         });
       if (proof.purpose !== 'device' && proof.includeDevices)
-        await endAccountDevices(ctx, user.accountKey, Date.now());
+        await endAccountDevices(ctx, user.accountKey, user);
       await ctx.db.patch(user._id, { sessionEnd: undefined });
     }
     return result;
