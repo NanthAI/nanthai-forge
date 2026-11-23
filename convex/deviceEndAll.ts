@@ -32,46 +32,37 @@ export async function accountSignInEpoch(ctx: QueryCtx, owner: string) {
 export async function endAccountDevices(
   ctx: MutationCtx,
   owner: string,
-  /** The caller's account row when it has one; a time (callers from before epochs) is ignored. */
-  account?: Doc<'users'> | null | number,
+  /** The caller's account row when it has one; read here otherwise. */
+  account?: Doc<'users'> | null,
 ) {
-  const row = account === undefined || typeof account === 'number' ? await accountRow(ctx, owner) : account;
+  const row = account === undefined ? await accountRow(ctx, owner) : account;
   const epoch = row ? signInEpoch(row) + 1 : NO_ACCOUNT;
   if (row) await ctx.db.patch(row._id, { deviceSignOutEpoch: epoch });
   await endPage(ctx, owner, epoch, null);
 }
-/** `before`: a page scheduled before epochs (deploy of 90b02b72) ends what was issued by then; remove once none can be queued. */
-async function endPage(
-  ctx: MutationCtx,
-  owner: string,
-  epoch: number | undefined,
-  cursor: string | null,
-  before?: number,
-) {
+async function endPage(ctx: MutationCtx, owner: string, epoch: number, cursor: string | null) {
   const page = await ctx.db
     .query('cliCredentials')
     .withIndex('by_owner', q => q.eq('owner', owner))
     .paginate({ cursor, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 64 * 1024 });
   for (const row of page.page)
-    if (!row.revoked && (epoch === undefined ? row.issuedAt <= before! : (row.signOutEpoch ?? 0) < epoch))
-      await ctx.db.patch(row._id, { revoked: true });
+    if (!row.revoked && (row.signOutEpoch ?? 0) < epoch) await ctx.db.patch(row._id, { revoked: true });
   if (!page.isDone)
     await ctx.scheduler.runAfter(0, internal.deviceEndAll.next, {
       owner,
-      ...(epoch === undefined ? { before: before! } : { epoch }),
+      epoch,
       cursor: page.continueCursor,
     });
 }
 export const next = internalMutation({
   args: {
     owner: v.string(),
-    epoch: v.optional(v.number()),
-    before: v.optional(v.number()),
+    epoch: v.number(),
     cursor: v.string(),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
-    await endPage(ctx, input.owner, input.epoch, input.cursor, input.before);
+    await endPage(ctx, input.owner, input.epoch, input.cursor);
     return null;
   },
 });

@@ -97,7 +97,7 @@ export async function applySwitch(ctx: MutationCtx, input: SwitchInput) {
     // The account switch stops every message channel at once (convex/accountLimits.ts). Suspending
     // also signs out its CLI devices and browser sessions; either way its public listing follows.
     if (input.off) {
-      await endAccountDevices(ctx, target.owner, now);
+      await endAccountDevices(ctx, target.owner);
       await endSessions(ctx, target.owner);
     }
     await relistAccount(ctx, target.owner, input.off, null);
