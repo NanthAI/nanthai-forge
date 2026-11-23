@@ -28,6 +28,15 @@ ARMS = {
     "option-b": dict(
         batching=True, skip_stale=False, min_fresh_batch=None, full_recheck_saturated=True, hold_deciding=True
     ),
+    # Option C (Item 196d5e4e, lead 2026-11-23): lever 2 only when a slot holder can land first.
+    "option-c": dict(
+        batching=True,
+        skip_stale=False,
+        min_fresh_batch=None,
+        full_recheck_saturated=True,
+        hold_deciding=True,
+        full_recheck_first_only=True,
+    ),
 }
 
 
@@ -172,12 +181,20 @@ def read(name):
     return json.loads((HERE / name).read_bytes())
 
 
-def bench_replay(arms=None):
-    """Run the bench-30 calibration cell matching Item b9a2cccd comment 0659ee5e."""
+def bench_replay(arms=None, narrow=None, scoped_jobs=1.0, scoped_wall=1.0):
+    """Run the bench-30 calibration cell matching Item b9a2cccd comment 0659ee5e.
+
+    `narrow` replaces the calibrated share of scoped rechecks; `scoped_jobs` and `scoped_wall` scale a
+    scoped recheck's worker-minutes and wall time against a full run (Item 196d5e4e comment 6d898eb6).
+    """
     base = read("base.json")
     station = read("publisher/measurements.json")["service"]
     rows = bench_30_rows()
-    cal = BENCH_30_CALIBRATION
+    cal = BENCH_30_CALIBRATION | ({} if narrow is None else {"scoped_recheck_fraction": narrow})
+    shape = BENCH_30_SHAPE | {
+        "scoped_worker_minutes": BENCH_30_SHAPE["full_worker_minutes"] * scoped_jobs,
+        "scoped_minutes": BENCH_30_SHAPE["full_minutes"] * scoped_wall,
+    }
     bench_arms = {
         "incumbent": dict(batching=False, skip_stale=False, scoped_recheck_fraction=cal["scoped_recheck_fraction"]),
         "strict-8": dict(
@@ -224,6 +241,15 @@ def bench_replay(arms=None):
             full_recheck_saturated=True,
             hold_deciding=True,
         ),
+        "option-c": dict(
+            batching=True,
+            skip_stale=False,
+            min_fresh_batch=None,
+            scoped_recheck_fraction=cal["scoped_recheck_fraction"],
+            full_recheck_saturated=True,
+            hold_deciding=True,
+            full_recheck_first_only=True,
+        ),
     }
     selected = list(bench_arms) if arms is None else arms
     for arm_name in selected:
@@ -235,7 +261,7 @@ def bench_replay(arms=None):
                 seed,
                 station,
                 [],
-                BENCH_30_SHAPE,
+                shape,
                 bench_mode=True,
                 dispatch_order="fifo",
                 capacity_override=cal["capacity"],
@@ -288,6 +314,13 @@ if __name__ == "__main__":
         default="incumbent",
         help="queue rule arm to run (default: incumbent)",
     )
+    parser.add_argument("--narrow", type=float, help="bench: share of rechecks that run scoped")
+    parser.add_argument("--scoped-jobs", type=float, default=1.0, help="bench: scoped worker-minutes / full")
+    parser.add_argument("--scoped-wall", type=float, default=1.0, help="bench: scoped wall time / full")
     args = parser.parse_args()
-    rows = list(bench_replay()) if args.bench else list(replay(args.refit, args.arm, args.uncalibrated))
+    rows = (
+        list(bench_replay(None, args.narrow, args.scoped_jobs, args.scoped_wall))
+        if args.bench
+        else list(replay(args.refit, args.arm, args.uncalibrated))
+    )
     print(json.dumps(rows, indent=2, allow_nan=False))

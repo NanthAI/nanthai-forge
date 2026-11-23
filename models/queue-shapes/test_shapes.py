@@ -247,6 +247,29 @@ class CalibratedArmsTest(unittest.TestCase):
             self.assertGreaterEqual(b["per_hour"], inc["per_hour"])
             self.assertLessEqual(b["hold_wait_p90"], 5.0)
 
+    def test_option_c_keeps_option_b_flow_on_bench_30_and_counts_only_holders_that_land_first(self):
+        # Item 196d5e4e option C (lead 2026-11-23): lever 2 only when a slot holder can land first.
+        # Comment 6d898eb6's cell: 90% of rechecks narrow, a scoped run at 0.47 of a full run's jobs.
+        rows = list(bench_replay(["option-b", "option-c"], narrow=0.9, scoped_jobs=0.47))
+        for seed in read("base.json")["seeds"]:
+            b, c = (next(r for r in rows if r["arm"] == arm and r["seed"] == seed) for arm in ("option-b", "option-c"))
+            self.assertLessEqual(c["p90"], b["p90"], f"p90 at seed {seed}")
+            self.assertGreaterEqual(c["stationary_per_hour"], b["stationary_per_hour"], f"landings/h at seed {seed}")
+        base, station = read("base.json"), read("publisher/measurements.json")["service"]
+        model = CalibratedShapeExperiment(
+            base, bench_30_rows(), 137, station, [], BENCH_30_SHAPE, bench_mode=True,
+            full_recheck_saturated=True, hold_deciding=True, full_recheck_first_only=True,
+        )
+        # Entry 1 rechecks; entry 2 is newer and still checking (no pass yet).
+        model.live, model.running = {0, 1, 2}, {2}
+        self.assertTrue(model.lands_first_holder(1), "its bounded overtake step is unspent")
+        model.overtaken = {1: 1}
+        self.assertFalse(model.lands_first_holder(1), "after the step a newer unpassed holder waits")
+        model.first_pass = {2: 0.0}
+        self.assertTrue(model.lands_first_holder(1), "a pass from before this generation may go ahead")
+        model.first_pass, model.running = {}, {0}
+        self.assertTrue(model.lands_first_holder(1), "an older holder lands first")
+
     def test_arms_do_not_regress_forge_baseline_at_any_seed(self):
         base = read("base.json")
         shape = read("shapes.json")["baseline"]

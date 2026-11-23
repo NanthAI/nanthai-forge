@@ -22,9 +22,12 @@ The default command runs the calibrated `incumbent` arm on all six shapes. Pass
 culprit split on red), `--arm b` (keep disjoint stale passes while slots are
 saturated, full recheck only on intersection), `--arm a+b`, `--arm a-admitted`
 (arm a for landings that already passed their own check; fresh arrivals check
-alone, as in today's admitted cohorts), or `--arm all` to compare all five arms. `--bench` runs the `bench-30` calibration cell fitted to
-the live sustained-load bench (Item `b9a2cccd`, comment `0659ee5e`). `--refit`
-reproduces the measured-load incumbent from the earlier queue refit unchanged.
+alone, as in today's admitted cohorts), or `--arm all` to compare every arm, including
+`option-b` (today's levers) and `option-c` (a saturated recheck runs full only when a slot holder
+can land first, Item `196d5e4e`). `--bench` runs the `bench-30` calibration cell fitted to
+the live sustained-load bench (Item `b9a2cccd`, comment `0659ee5e`); `--narrow`, `--scoped-jobs`
+and `--scoped-wall` set its share of scoped rechecks and a scoped run's jobs and wall time against a
+full run. `--refit` reproduces the measured-load incumbent from the earlier queue refit unchanged.
 
 - [base.json](base.json) retains the Forge profile, measurement counts, hold
   samples and needed columns from the refit's synthetic traces.

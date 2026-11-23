@@ -277,7 +277,7 @@ const effective = (f, runId, value) => {
   run.gate = { ...run.gate, effective: value };
   f.patch('projectHostedCheckRuns', row._id, { gate: run.gate, value: JSON.stringify(run) });
 };
-async function race(t, { mainFiles = overlapping, policy = {}, decidingPeer = false } = {}) {
+async function race(t, { mainFiles = overlapping, policy = {}, decidingPeer, trainPeers, overtaken } = {}) {
   const f = await finishFixture(t, {
     baselineFiles,
     selectedFiles: [
@@ -317,20 +317,46 @@ async function race(t, { mainFiles = overlapping, policy = {}, decidingPeer = fa
     projectId: f.projectId,
     lastGreen: { sequence: main.sourceRevision, head: main.head, runId: parent.id },
   });
-  // An admitted peer still deciding its own Lane run (its `deciding` stamp) fills the free slot.
-  if (decidingPeer) {
-    const { _id, _creationTime, requestBodyId, selectionBodyId, ...own } = [
-      ...f.tables.projectHostedLandingRequests.values(),
-    ][0];
+  // Peers that hold a check slot, placed in landing order around this entry (`after`: newer).
+  const { _id, _creationTime, ...own } = [...f.tables.projectHostedLandingRequests.values()][0];
+  // Each copy owns copies of the entry's stored request and selection bodies.
+  const body = (bodyId, submissionId) =>
+    bodyId &&
+    f.insert('projectHostedLandingBodies', {
+      ...Object.fromEntries(
+        Object.entries(f.tables.projectHostedLandingBodies.get(bodyId)).filter(([k]) => !k.startsWith('_')),
+      ),
+      value: JSON.stringify({
+        ...JSON.parse(f.tables.projectHostedLandingBodies.get(bodyId).value),
+        submissionId,
+      }),
+    });
+  const peer = ({ after = false, ...fields }) => {
+    const submissionId = randomUUID();
     f.insert('projectHostedLandingRequests', {
       ...own,
-      submissionId: randomUUID(),
+      submissionId,
+      value: JSON.stringify({ ...JSON.parse(own.value), id: submissionId }),
+      requestBodyId: body(own.requestBodyId, submissionId),
+      selectionBodyId: body(own.selectionBodyId, submissionId),
       operationId: randomUUID(),
+      sequence: own.sequence + (after ? 1 : -1),
       runnable: false,
       batchable: false,
       orderLive: undefined,
-      deciding: Date.parse('2026-01-01T12:00:00.000Z'),
+      ...fields,
     });
+    return submissionId;
+  };
+  // A newer pass already took main ahead of an earlier generation, so this one holds strict order.
+  if (overtaken) f.patch('projectHostedLandingRequests', _id, { overtaken: `${own.attemptId}:${own.runId}` });
+  // An admitted peer still deciding its own Lane run (its `deciding` stamp) fills the free slot.
+  if (decidingPeer) peer({ ...decidingPeer, deciding: Date.parse('2026-01-01T12:00:00.000Z') });
+  // Passed groups retained in the train fill the pipeline width (6 groups).
+  if (trainPeers) {
+    const train = trainPeers.map(fields => peer({ phase: 'ready', ...fields }));
+    const queue = [...f.tables.projectHostedLandingQueues.values()][0];
+    f.patch('projectHostedLandingQueues', queue._id, { train });
   }
   const calls = f.counts.length;
   for (let n = 0; n < 80 && (await f.current(state.id)).submission.phase !== 'checking'; n++) {
@@ -432,13 +458,62 @@ test("under the full gate a contributor's race keeps the full recheck", async t 
 // Lever 2 (owner 2026-11-22, Item 10b0a94b): with no free check slot (option B: a peer still
 // deciding its own run fills it) the recheck runs full, so its pass carries across the peer's
 // coming disjoint main move. With a free slot the scoped recheck above is unchanged.
-test('a main-race recheck that starts while an admitted peer is still deciding runs full, not scoped', async t => {
-  const { f, state } = await race(t, { decidingPeer: true });
+test('a main-race recheck that starts while an older admitted peer is still deciding runs full, not scoped', async t => {
+  const { f, state } = await race(t, { decidingPeer: {} });
   const { attempt } = await f.status(state.id);
   assert.notEqual(attempt.recheck, undefined, 'the recheck basis is still recorded');
   const run = await f.rawChecks.status(attempt.check.runId);
   // Before: { mode: 'scoped', reason: 'scoped-recheck:<base>' } whatever the slots.
   assert.equal(run.gate.mode, 'full');
+});
+
+// Incident 5180299b (dogfood 2026-11-23, Item 196d5e4e option C): a main-race recheck ran the full
+// check (5,513 job-seconds against a 5,508 median) under Lever 2, yet main never moved under it: every
+// slot was held by peers that had to wait for it. Only a holder that can land first takes the slot now:
+// one older or urgent ahead of it, one that already passed, or any newer one while this entry's
+// bounded overtake step is unspent (`overtakeOlder`).
+const scopedGate = (f, attempt) => f.rawChecks.status(attempt.check.runId).then(run => run.gate);
+const waiting = { after: true, phase: 'checking', passedAt: undefined };
+test('incident 5180299b: a recheck whose slots are held only by newer peers waiting for it stays scoped', async t => {
+  for (const shape of [
+    { overtaken: true, decidingPeer: waiting },
+    { overtaken: true, trainPeers: Array.from({ length: 6 }, () => waiting) },
+  ]) {
+    const { f, state, before, selection } = await race(t, shape);
+    const { attempt } = await f.status(state.id);
+    // Before (Lever 2 on any held slot): { mode: 'full', reason: '... no free check slot ...' }.
+    assert.deepEqual(await scopedGate(f, attempt), {
+      mode: 'scoped',
+      reason: `scoped-recheck:${before.main.head}`,
+    });
+    const run = await f.rawChecks.status(attempt.check.runId);
+    await passWithSelection(f, run.id, selection);
+    effective(f, run.id, 'contract');
+    for (let n = 0; n < 40 && (await f.current(state.id)).submission.phase !== 'landed'; n++)
+      await f.execute();
+    assert.equal((await f.current(state.id)).submission.phase, 'landed', JSON.stringify(Object.keys(shape)));
+  }
+});
+
+test('a slot held by an entry that can land first keeps the full recheck', async t => {
+  const five = Array.from({ length: 5 }, () => waiting);
+  for (const shape of [
+    // Its bounded overtake step is unspent: an independent newer pass may still take main first.
+    { decidingPeer: waiting },
+    { trainPeers: [waiting, ...five] },
+    { overtaken: true, trainPeers: [{ phase: 'checking' }, ...five] },
+    { overtaken: true, trainPeers: [{ ...waiting, priority: 'urgent' }, ...five] },
+    // A pass from before this generation may go ahead of it.
+    {
+      overtaken: true,
+      trainPeers: [{ ...waiting, passedAt: Date.parse('2026-01-01T12:00:00.000Z') }, ...five],
+    },
+  ]) {
+    const { f, state } = await race(t, shape);
+    const gate = await scopedGate(f, (await f.status(state.id)).attempt);
+    assert.equal(gate.mode, 'full', JSON.stringify(shape));
+    assert.match(gate.reason, /no free check slot/, JSON.stringify(shape));
+  }
 });
 
 test('scopedRecheck:false keeps the full recheck; on costs no extra Convex calls or writes', async t => {

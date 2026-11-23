@@ -267,8 +267,14 @@ is enabled; the measured comparison below explains the default.
    A main-race recheck (single or cohort) that starts with no free check slot runs
    the full check instead of the [scoped recheck](workflows.md#hosted-acceptance-gate),
    so its pass can carry across the coming disjoint main moves; with a free slot it
-   stays scoped. Neither rule adds a Convex call; the slot read is one indexed read
-   when a recheck starts.
+   stays scoped. A slot counts as taken only by a change that can land first: one older
+   than the recheck, urgent ahead of a normal one, or already passed, or any newer one
+   while the recheck may still give an independent pass its one overtake step. When the
+   recheck holds strict order (a newer pass already overtook an earlier check of it) and
+   every slot is held by newer changes that have not passed, they must wait for it, no
+   main moves under it and it stays scoped.
+   Neither rule adds a Convex call; the slot read is one indexed read when a recheck
+   starts, plus the recheck's own row once a peer or a full train must be placed in order.
    A Lane run that a moved main has made stale is refused before its turn when
    every older change holding order is itself refused or stale and nothing else
    can move main first, so the wave recomposes in one pass instead of one change

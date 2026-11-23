@@ -277,8 +277,10 @@ export async function enqueueHostedCheck(
     gate = scopedRecheckBatchGate(input.cohortRecheck);
   // Lever 2 (owner 2026-11-22, Item 10b0a94b): a main-race recheck that starts with no free check
   // slot runs full, so its pass carries across later disjoint main moves; the healthy path stays
-  // scoped. Decided here, where every recheck becomes a gate, and read only for a recheck that would
-  // run less than full. A reduced (contract) gate would not carry either; recovery keeps its own.
+  // scoped. Only entries that can land first take the slot (Item 196d5e4e option C): with every slot
+  // held by peers that wait for this one, no main moves under it and it stays scoped. Decided here,
+  // where every recheck becomes a gate, and read only for a recheck that would run less than full.
+  // A reduced (contract) gate would not carry either; recovery keeps its own.
   if (
     direct &&
     (input.recheck || input.cohortRecheck?.length) &&

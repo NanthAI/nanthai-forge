@@ -79,6 +79,7 @@ class CalibratedShapeExperiment(Experiment):
         scoped_recheck_fraction=None,
         full_recheck_saturated=False,
         hold_deciding=False,
+        full_recheck_first_only=False,
     ):
         self.shape = shape
         # Cohort hold (Item 10b0a94b; option B, owner 2026-11-22): a refused entry waits, at most
@@ -90,6 +91,11 @@ class CalibratedShapeExperiment(Experiment):
         # runs full, so its pass can carry across later disjoint main moves.
         self.full_recheck_saturated = full_recheck_saturated
         assert not full_recheck_saturated or shape["full_slots"] == shape["scoped_slots"]
+        # Option C (Item 196d5e4e, lead 2026-11-23): lever 2 counts only slot holders that can land
+        # first; held only by newer peers that must wait for it, the recheck stays scoped.
+        self.full_recheck_first_only = full_recheck_first_only
+        assert not full_recheck_first_only or full_recheck_saturated
+        self.running = set()
         self.batching = batching
         self.skip_stale = skip_stale
         self.max_batch = max_batch
@@ -180,11 +186,26 @@ class CalibratedShapeExperiment(Experiment):
         # Dispatch only sizes the slot request, which the lever needs equal for both kinds.
         if self.full_recheck_saturated and getattr(self, "_starting", False):
             needed = self.shape["full_slots"]
-            if self.waiting or self.pending_checks or self.used + needed >= self.capacity:
-                return "full"
-            if self.hold_deciding and any(peer != i for peer in self.deciding):
+            saturated = self.waiting or self.pending_checks or self.used + needed >= self.capacity
+            deciding = self.hold_deciding and any(peer != i for peer in self.deciding)
+            if (saturated or deciding) and (not self.full_recheck_first_only or self.lands_first_holder(i)):
                 return "full"
         return "scoped"
+
+    def lands_first_holder(self, i):
+        """A slot holder (running, queued for a slot, deciding, or passed and not yet landed, as a
+        Ready train group is) that can take main before `i`.
+
+        The production rule (convex/projectHostedLandingPipeline.ts `pipelineFull`): a holder waits for
+        `i` whatever its paths only when it is newer, `i` already gave its bounded overtake step to an
+        earlier generation (`overtaken`), and the holder has not passed yet (`blocked` below).
+        """
+        holders = set(self.running) | set(self.deciding) | (self.live & self.first_pass.keys())
+        for _, _, _, _, tag, payload in self.pending_checks:
+            holders.update(payload if tag == "fixed" else (payload[0],))
+        strict = i in self.overtaken
+        # Background jobs hold slots but never land; an empty holder set moves no main.
+        return any(j < i or not strict or j in self.first_pass for j in holders - {i})
 
     def enqueue_check(self, order_key, tag, payload, priority=1):
         self.q_seq += 1
@@ -313,11 +334,13 @@ class CalibratedShapeExperiment(Experiment):
         factor = self.timing.lognormvariate(0, self.sigma)
         total_wall = wall * factor + self.check_overhead_min
         total_work = work * factor + self.check_overhead_min * slots
+        self.running.add(i)
         self._start_pool_job(kind, slots, total_wall, total_work, self.incumbent_done, i, bad, transient)
         if i in self.overtaken:
             self.wake_parked()
 
     def incumbent_done(self, i, bad, transient):
+        self.running.discard(i)
         if bad:
             self.reject(i)
             self.wake_parked()
@@ -463,12 +486,14 @@ class CalibratedShapeExperiment(Experiment):
         slots, wall, work = (self.shape[f"full_{key}"] for key in ("slots", "minutes", "worker_minutes"))
         total_wall = wall * factor + self.check_overhead_min
         total_work = work * factor + self.check_overhead_min * slots
+        self.running.update(members)
         self._start_pool_job("batch_full", slots, total_wall, total_work, self.batch_done, bid, bad, bad_members, transient)
         if any(member in self.overtaken for member in members):
             self.wake_parked()
 
     def batch_done(self, bid, bad, bad_members, transient):
         members = self.batches[bid]["members"]
+        self.running.difference_update(members)
         if bad:
             self.batches.pop(bid)
             self.stats["batch_splits"] += 1

@@ -285,10 +285,30 @@ test('425ecd74: a data fixture, its test and a doc retain byte and folder reader
   const walkReaders = plan.tests.filter(
     test => reasons[test]?.detail === recursiveFolderReader && paths.includes(reasons[test].changedPath),
   );
-  assert.ok(walkReaders.includes(at('tests', 'hosted-scoped-recheck.test.mjs')), 'a sourceFiles() reader');
+  assert.ok(walkReaders.includes(at('tests', 'test-import-graph.test.mjs')), 'a sourceFiles() reader');
+  // A registered replay file that also walks tests/ is named by the registry's guard reason (its
+  // reason wins over the walk edge; hosted-scoped-recheck holds replay 5180299b, Item 196d5e4e).
+  const replayGuards = plan.tests.filter(
+    test =>
+      reasons[test]?.kind === 'guard' &&
+      reasons[test].changedPath === at('tests', 'fixtures', 'incident-replays.json'),
+  );
+  assert.ok(
+    replayGuards.includes(at('tests', 'hosted-scoped-recheck.test.mjs')),
+    'a replay file that walks tests/',
+  );
   assert.deepEqual(
     [...plan.tests].sort(),
-    [...new Set([...readers, ...smokeTests, ...scanners, ...directoryReaders, ...walkReaders])].sort(),
+    [
+      ...new Set([
+        ...readers,
+        ...smokeTests,
+        ...scanners,
+        ...directoryReaders,
+        ...walkReaders,
+        ...replayGuards,
+      ]),
+    ].sort(),
     'local tiers hold the fixture reader, folder readers and fixed smoke set only',
   );
   t.diagnostic(`local ${plan.tests.length}, deferred to pre-queue ${plan.deferredTests.length}`);
