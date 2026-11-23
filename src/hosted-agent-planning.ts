@@ -1197,12 +1197,19 @@ export async function executeHostedPlanning(
         });
     try {
       const itemId = await resolvePlanningId(port, comment.itemId!, journal);
+      const { files, ...fields } = comment;
+      const attachments = files
+        ? await (
+            await import('./hosted-agent-planning-attach.js')
+          ).uploadDiscussionFiles(port, itemId, journal.operationId, files)
+        : undefined;
       const { revision } = await writePlanning(
         port,
         {
           action,
           operationId: journal.operationId,
-          ...comment,
+          ...fields,
+          ...(attachments ? { attachments } : {}),
           itemId,
           ...author,
         },

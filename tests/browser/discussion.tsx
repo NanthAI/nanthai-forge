@@ -17,6 +17,8 @@ const reader = params.get('viewer') === 'reader';
 const withThread = params.has('thread');
 const withPages = params.has('pages');
 const withNotePages = params.has('notePages');
+// `?files=1`: one comment carries four attachments (a small image, a large image, a PDF and an HTML file).
+const withFiles = params.has('files');
 // `?versions=N`: the Item has N versions, served newest first in pages of the size asked (Item 686ecdde).
 const versionCount = Number(params.get('versions') ?? 0);
 
@@ -62,6 +64,21 @@ const comments = [
     text: 'Checking the download numbers before the answer.',
   },
 ];
+if (withFiles)
+  comments.push({
+    id: uuid(16),
+    itemId: ITEM,
+    at: minutes(60 * 24 * 7 + 20),
+    authorLabel: '',
+    ...author('sample-two'),
+    text: 'Screenshots and the notes are attached.',
+    attachments: [
+      { id: 'att-small', name: 'shot.png', size: 1200, contentType: 'image/png' },
+      { id: 'att-big', name: 'big.png', size: 2_000_000, contentType: 'image/png' },
+      { id: 'att-pdf', name: 'notes <b>bold</b>.pdf', size: 52_000, contentType: 'application/pdf' },
+      { id: 'att-html', name: 'page.html', size: 90, contentType: 'text/html' },
+    ],
+  } as (typeof comments)[number]);
 if (params.has('review'))
   comments.push({
     id: uuid(15),
@@ -273,12 +290,36 @@ const client = {
     };
   },
   action: async (fn: FunctionReference<'action'>, args: { query: string; request: string }) => {
+    if (getFunctionName(fn) === 'discussionAttachmentUpload:commit') {
+      writes.push([getFunctionName(fn), args]);
+      return null;
+    }
     if (getFunctionName(fn) !== 'projectJournalActions:history') throw new Error('Unexpected archive read');
     const { paginationOpts } = JSON.parse(args.request);
     return JSON.stringify(answer(args.query, undefined, paginationOpts.cursor, true));
   },
   mutation: async (fn: FunctionReference<'mutation'>, args: unknown) => {
     writes.push([getFunctionName(fn), args]);
+    if (getFunctionName(fn) === 'discussionAttachmentUpload:prepare') {
+      const file = args as { digest: string; name: string; size: number; contentType: string };
+      return {
+        attachment: {
+          id: `att-${file.digest.slice(0, 8)}`,
+          name: file.name,
+          size: file.size,
+          contentType: file.contentType,
+        },
+        put: {
+          // Same origin as the page: the bucket's CORS rule (docs/r2-storage-plan.md) is a deployment matter, not this test's.
+          url: `${location.origin}/r2-put/${file.digest}`,
+          headers: {
+            'if-none-match': '*',
+            'x-amz-checksum-sha256': 'AAAA',
+            'content-length': String(file.size),
+          },
+        },
+      };
+    }
     return { on: true };
   },
 } as unknown as ConvexReactClient;

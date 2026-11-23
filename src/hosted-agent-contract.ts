@@ -729,8 +729,16 @@ export const hostedAgentCommandSchemas = {
       'batch: send the entries alone.',
     ),
   'comment-planning-item': planningCommentCommandSchema
-    .omit({ action: true, operationId: true, agent: true, agentClient: true, decidedBy: true }) // Set by the session and server.
-    .extend(planningIssueFields)
+    .omit({
+      action: true,
+      operationId: true,
+      agent: true,
+      agentClient: true,
+      decidedBy: true,
+      attachments: true,
+    }) // Set by the session and server.
+    // Local file paths: the CLI uploads them to R2 and names them on the comment (src/hosted-agent-planning-attach.ts).
+    .extend({ ...planningIssueFields, files: z.array(z.string()).max(4).optional() })
     .strict()
     .refine(
       value => Boolean(value.planningItemId || value.id || value.itemId),

@@ -12,6 +12,7 @@ import type { Id } from '../../../../convex/_generated/dataModel';
 import { useWorkIndex, useWorkPage } from '../../hosted-work-index';
 import type { DiscussionComment, ReactionCount, ReactionKind } from './model';
 import type { PostInput } from './Discussion';
+import { useAttachmentRead, useAttachmentUpload } from './attachment-io';
 
 const reactionsFor = makeFunctionReference<
   'query',
@@ -37,12 +38,20 @@ export function useDiscussion(projectId: Id<'hostedProjects'>, itemId: string) {
   const send = useMutation(workCommand);
   const flip = useMutation(toggleReaction);
   const draft = useRef<{ key: string; operationId: string } | null>(null);
+  const upload = useAttachmentUpload(projectId, itemId);
+  const readAttachment = useAttachmentRead(projectId, itemId);
 
   const post = useCallback(
     async (input: PostInput) => {
-      const key = JSON.stringify(input);
+      const { files, ...fields } = input;
+      // The same words and files keep one operation id until sent, so a retry uploads and posts nothing twice.
+      const key = JSON.stringify({
+        ...fields,
+        files: files?.map(file => [file.name, file.size, file.lastModified]),
+      });
       if (draft.current?.key !== key) draft.current = { key, operationId: crypto.randomUUID() };
       const { operationId } = draft.current;
+      const attachments = files?.length ? await upload(files, operationId) : undefined;
       await send({
         projectId,
         operationId,
@@ -53,11 +62,12 @@ export function useDiscussion(projectId: Id<'hostedProjects'>, itemId: string) {
           text: input.text,
           ...(input.replyTo ? { replyTo: input.replyTo } : {}),
           ...(input.decision ? { decision: true } : {}),
+          ...(attachments ? { attachments } : {}),
         }),
       });
       draft.current = null;
     },
-    [send, projectId, itemId],
+    [send, upload, projectId, itemId],
   );
   const counts = reactions?.counts;
   const react = useCallback(
@@ -77,5 +87,6 @@ export function useDiscussion(projectId: Id<'hostedProjects'>, itemId: string) {
     canWrite,
     post,
     react,
+    readAttachment,
   };
 }

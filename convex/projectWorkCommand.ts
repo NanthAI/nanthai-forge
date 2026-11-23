@@ -92,7 +92,7 @@ export async function executeCommand(
       'Use the planning command’s original operation UUID.',
     );
     // The writer, its agent marker and a decision's body line come from the sign-in, never from client text.
-    if (command.action === 'comment-planning-item') await serverCommentWriter(ctx, command);
+    if (command.action === 'comment-planning-item') await serverCommentWriter(ctx, command, project);
     if (command.action === 'put-planning-item') {
       if (command.agent === undefined && command.agentClient === undefined) {
         rawPutCommand = JSON.stringify(command);

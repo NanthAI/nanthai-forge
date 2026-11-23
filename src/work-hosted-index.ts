@@ -154,6 +154,7 @@ export function indexedRecord(
         'agentClient',
         'replyTo',
         'decision',
+        'attachments',
         'status',
         'at',
         'createdAt',

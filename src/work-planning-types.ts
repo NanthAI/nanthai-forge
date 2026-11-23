@@ -2,6 +2,7 @@
 // Pure planning schemas can be validated in the Convex non-Node runtime.
 import { z } from 'zod';
 import { AGENT_CLIENT } from './agent-slug.js';
+import type { PlanningAttachment } from './discussion-attachment-limits.js';
 import { ForgeError } from './errors.js';
 const id = z.string().uuid();
 const oid = z.string().regex(/^[0-9a-f]{40,64}$/);
@@ -131,6 +132,21 @@ export const planningItemSchema = z.object({
    * was deleted and who purged it. Every later put, comment or restore on it is refused (PLANNING_ITEM_PURGED). */
   purged: z.object({ operationId: id, deletedAt: z.string(), by: z.string().min(1).max(200) }).optional(),
 });
+/** What a comment records about its files (limits: src/discussion-attachment-limits.ts, which this file does not import
+ * at run time, so the CLI loads no extra module; the numbers here are its fileBytes and perComment). */
+const planningAttachmentsSchema = z
+  .array(
+    z
+      .object({
+        id: z.string().min(1).max(64),
+        name: z.string().min(1).max(120),
+        size: z.number().int().nonnegative().max(25_000_000),
+        contentType: z.string().min(1).max(130),
+      })
+      .strict() satisfies z.ZodType<PlanningAttachment>,
+  )
+  .min(1)
+  .max(4);
 /** Discussion fields (Item 9a3d6f5f), all optional so older rows and readers stay valid. `author` is the account the
  * hosted replay observed (public reads map it to a Forge handle); `agent` is the writing agent session's slug from the
  * fixed lists, so it can name no person; `replyTo` is the root comment of its thread; `decision` marks a comment whose
@@ -143,6 +159,8 @@ const discussionFields = {
   agentClient: z.string().regex(AGENT_CLIENT).optional(),
   replyTo: id.optional(),
   decision: z.literal(true).optional(),
+  /** Files stored in R2 under this comment (src/discussion-attachment-limits.ts); the server sets them from committed bindings. */
+  attachments: planningAttachmentsSchema.optional(),
 };
 export const planningCommentSchema = z.object({
   id,
@@ -181,6 +199,8 @@ export const planningCommentCommandSchema = z.object({
   agentClient: z.string().max(100).optional(),
   /** Set by the hosted server for a decision: the writer's public label for the body line. */
   decidedBy: z.string().max(80).optional(),
+  /** Uploaded and committed files (nforge `files`, the web composer); the server checks each against its binding. */
+  attachments: planningAttachmentsSchema.optional(),
 });
 /** Most journal rows one purge may list (an Item's puts, comments, intent row and notes): about 107 bytes each, so a
  * purge row stays near 100 KB, read once per event page that holds its rows. A larger Item is refused by the purge

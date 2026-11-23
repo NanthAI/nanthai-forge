@@ -10,9 +10,9 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 
 // Issue 47558a99: the advertised tool list is per-session context. Budgets are in characters of the
 // tools/list JSON; tokens are about chars / 4. Raise one only with before/after numbers on the Issue.
-const LIST_CHARS = 5_782; // 657d63ee: measured pre-parity tools/list, including array punctuation. 5,758 -> 5,775 (66667155): forge_planning lists tick-planning-item(line,evidence). 5,775 -> 5,782 (6b7d5a79): flat tools name nested object keys again (expected:o(head,sourceVersion,version)), +56 B, 49 B of it paid by shorter text.
-const CLAUDE_CHARS = 5_770; // 5,746 -> 5,763 (66667155); 5,763 -> 5,770 (6b7d5a79, nested keys).
-const CODEX_CHARS = 5_898; // Same baseline as server-prefixed Codex function definitions; 5,874 -> 5,891 (66667155); 5,891 -> 5,898 (6b7d5a79, nested keys).
+const LIST_CHARS = 5_790; // 657d63ee: measured pre-parity tools/list, including array punctuation. 5,758 -> 5,775 (66667155): forge_planning lists tick-planning-item(line,evidence). 5,775 -> 5,782 (6b7d5a79): flat tools name nested object keys again (expected:o(head,sourceVersion,version)), +56 B, 49 B of it paid by shorter text. 5,782 -> 5,790 (9a3d6f5f): comment-planning-item lists `files:a`, the local paths the CLI uploads (+8 bytes).
+const CLAUDE_CHARS = 5_778; // 5,770 -> 5,778 (9a3d6f5f, `files:a`); 5,746 -> 5,763 (66667155); 5,763 -> 5,770 (6b7d5a79, nested keys).
+const CODEX_CHARS = 5_906; // 5,898 -> 5,906 (9a3d6f5f, `files:a`); Same baseline as server-prefixed Codex function definitions; 5,874 -> 5,891 (66667155); 5,891 -> 5,898 (6b7d5a79, nested keys).
 const DESCRIPTION_CHARS = 920;
 const body = response => JSON.parse(response.content[0].text);
 // The listing names fields in a description ("Fields: a b:n c=x|y ...") and required fields per action.

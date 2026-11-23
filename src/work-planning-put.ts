@@ -9,6 +9,7 @@ import {
 } from './work-planning-types.js';
 import { AGENT_CLIENT, isAgentSlug } from './agent-slug.js';
 import { digest } from './state/hash.js';
+import type { PlanningAttachment } from './discussion-attachment-limits.js';
 
 /** Stable within and across projects: a source key names one imported Item, independently of the batch. */
 export function planningImportId(key: string) {
@@ -164,6 +165,7 @@ type Discussed = {
   decision?: boolean | undefined;
   agent?: string | undefined;
   agentClient?: string | undefined;
+  attachments?: readonly PlanningAttachment[] | undefined;
 };
 
 /** Valid agent session slug and declared client/model on a planning write (shared by puts and comments). */
@@ -189,6 +191,7 @@ export function discussionFields(comments: readonly Comment[], itemId: string, c
     ...(replyTo ? { replyTo } : {}),
     ...putAgentFields(command),
     ...(command.decision ? { decision: true as const } : {}),
+    ...(command.attachments?.length ? { attachments: [...command.attachments] } : {}),
   };
 }
 

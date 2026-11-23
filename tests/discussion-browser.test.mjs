@@ -20,6 +20,11 @@ const shots = process.env.FORGE_DISCUSSION_SHOTS || null;
 const DESK = { width: 1440, height: 1000 };
 const PHONE = { width: 390, height: 844 };
 const fixture = join(root, 'tests/browser/discussion.tsx');
+// A one-pixel picture: what the download route answers for an attachment the page asks to show.
+const png = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 /** Build the fixture module as a page script, linking only the stylesheets its own chunks import. */
 async function buildFixture(out) {
@@ -29,6 +34,8 @@ async function buildFixture(out) {
     root: join(root, 'web'),
     mode: 'hosted',
     logLevel: 'error',
+    // The page reads its sign-in token from the auth package; the fixture has no sign-in, so it gets a fixed one.
+    resolve: { alias: { '@convex-dev/auth/react': join(root, 'tests/browser/auth-stub.ts') } },
     build: { outDir: out, emptyOutDir: true, rolldownOptions: { input: { fixture } } },
   });
   const output = (Array.isArray(result) ? result[0] : result).output;
@@ -56,21 +63,32 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
   if (shots) mkdirSync(shots, { recursive: true });
   const html = await buildFixture(out);
   const browser = await chromium.launch(launchOptions);
-  async function open(t, viewport, query = '') {
+  async function open(t, viewport, query = '', handle = null, expected = []) {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    page.on('console', message => message.type() === 'error' && errors.push(message.text()));
+    page.on(
+      'console',
+      message =>
+        message.type() === 'error' &&
+        !expected.some(pattern => pattern.test(message.text())) &&
+        errors.push(message.text()),
+    );
     page.on('dialog', dialog => errors.push(`dialog ${dialog.message()}`));
     page.on('requestfailed', request => {
+      // Chromium reports the CORS preflight of a fulfilled cross-origin PUT as aborted; the PUT itself is checked.
+      if (request.method() === 'OPTIONS') return;
       // The member text's outside image must never be requested; anything else failing is an error.
-      errors.push(`failed ${request.url().slice(0, 80)}`);
+      errors.push(`failed ${request.url().slice(0, 80)} ${request.failure()?.errorText}`);
     });
     await page.route('**/*', async route => {
       const url = new URL(route.request().url());
       if (url.protocol === 'data:') return route.continue();
+      if (handle && (await handle(route, url))) return;
       if (url.hostname !== 'forge.test') return route.abort();
+      if (url.pathname === '/discussion/attachment')
+        return route.fulfill({ status: 200, contentType: 'image/png', body: png });
       if (url.pathname === '/discussion.html') return route.fulfill({ contentType: 'text/html', body: html });
       const file = join(out, url.pathname.slice(1));
       if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
@@ -283,9 +301,131 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
       },
     );
 
+    await t.test(
+      'attachments: inline images by need, forced downloads, the daily-limit message, and an upload that posts once',
+      async t => {
+        const reads = [];
+        const puts = [];
+        let limited = false;
+        const page = await open(
+          t,
+          DESK,
+          'files=1',
+          async (route, url) => {
+            if (url.pathname.startsWith('/r2-put/')) {
+              puts.push({
+                method: route.request().method(),
+                bytes: route.request().postDataBuffer()?.length,
+                header: await route.request().headerValue('x-amz-checksum-sha256'),
+              });
+              await route.fulfill({
+                status: 200,
+                body: '',
+              });
+              return true;
+            }
+            if (url.pathname !== '/discussion/attachment') return false;
+            const id = url.searchParams.get('attachmentId');
+            reads.push({ id, auth: await route.request().headerValue('authorization') });
+            if (limited)
+              await route.fulfill({
+                status: 429,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                  code: 'ATTACHMENT_DOWNLOAD_LIMIT',
+                  message:
+                    "Forge's daily attachment download limit for this project (2 GB) is used up. Downloads resume at 00:00 UTC.",
+                }),
+              });
+            else if (id === 'att-html')
+              await route.fulfill({
+                status: 200,
+                contentType: 'text/html',
+                body: '<script>window.ran = true</script>',
+              });
+            else await route.fulfill({ status: 200, contentType: 'image/png', body: png });
+            return true;
+          },
+          [/status of 429/],
+        );
+        const section = page.locator('section[aria-label="Comments"]');
+        const card = section.locator('article', { hasText: 'Screenshots and the notes' });
+        // The small image shows by itself; the 2 MB one waits for a click, so opening an Item spends nothing on it.
+        await card.locator('img[alt="shot.png"]').waitFor();
+        assert.match(await card.locator('img[alt="shot.png"]').getAttribute('src'), /^blob:/);
+        assert.deepEqual(
+          reads.map(read => read.id),
+          ['att-small'],
+          'one read on open: only the small image, signed in',
+        );
+        assert.equal(reads[0].auth, 'Bearer fixture-token');
+        assert.equal(await card.locator('img[alt="big.png"]').count(), 0);
+        await card.getByRole('button', { name: 'Show big.png (2.0 MB)' }).click();
+        await card.locator('img[alt="big.png"]').waitFor();
+        assert.deepEqual(
+          reads.map(read => read.id),
+          ['att-small', 'att-big'],
+        );
+        // A file name is text: its markup never becomes an element, and a file is never drawn as a page.
+        assert.equal(await card.locator('b, script, iframe, object, embed').count(), 0);
+        const html = card.getByRole('button', { name: 'page.html (1 KB)' });
+        const [download] = await Promise.all([page.waitForEvent('download'), html.click()]);
+        assert.equal(download.suggestedFilename(), 'page.html');
+        assert.equal(await page.evaluate(() => window.ran), undefined, 'downloaded HTML never runs');
+        assert.equal(await card.locator('iframe').count(), 0);
+        // Past the daily allowance the route's own message is shown, with the reset time.
+        limited = true;
+        await card.getByRole('button', { name: /notes <b>bold<\/b>\.pdf/ }).click();
+        assert.match(
+          await card.getByRole('alert').textContent(),
+          /daily attachment download limit for this project \(2 GB\) is used up\. Downloads resume at 00:00 UTC\./,
+        );
+        // The composer: choose files, see them, remove one, and be told when one is over its limit.
+        const composer = section.locator('form.compose').last();
+        await composer.locator('input[type=file]').setInputFiles([
+          { name: 'a.png', mimeType: 'image/png', buffer: png },
+          { name: 'b.txt', mimeType: 'text/plain', buffer: Buffer.from('plain') },
+        ]);
+        assert.equal(await composer.locator('.attached li').count(), 2);
+        await composer.getByRole('button', { name: 'Remove b.txt' }).click();
+        assert.equal(await composer.locator('.attached li').count(), 1);
+        await composer.locator('input[type=file]').setInputFiles({
+          name: 'huge.png',
+          mimeType: 'image/png',
+          buffer: Buffer.alloc(10_000_001),
+        });
+        assert.match(
+          await composer.getByRole('alert').textContent(),
+          /huge\.png is over the 10 MB limit for images/,
+        );
+        assert.equal(await composer.locator('.attached li').count(), 1, 'a refused file is not added');
+        await composer.getByRole('textbox', { name: 'Comment' }).fill('Here is the shot.');
+        await composer.getByRole('button', { name: /^Comment/ }).click();
+        await page.waitForFunction(() => window.__writes.length === 3);
+        const [[prepare, args], [commit, commitArgs], [command, posted]] = await page.evaluate(
+          () => window.__writes,
+        );
+        assert.equal(prepare, 'discussionAttachmentUpload:prepare');
+        assert.deepEqual(
+          { name: args.name, size: args.size, contentType: args.contentType },
+          { name: 'a.png', size: png.length, contentType: 'image/png' },
+        );
+        assert.match(args.digest, /^[0-9a-f]{64}$/);
+        assert.equal(commit, 'discussionAttachmentUpload:commit');
+        assert.equal(commitArgs.commentId, args.commentId, 'the file is bound to the comment it will join');
+        assert.equal(command, 'projectWorkCommand:command');
+        const body = JSON.parse(posted.command);
+        assert.equal(posted.operationId, args.commentId);
+        assert.deepEqual(body.attachments, [
+          { id: commitArgs.attachmentId, name: 'a.png', size: png.length, contentType: 'image/png' },
+        ]);
+        assert.deepEqual(puts, [{ method: 'PUT', bytes: png.length, header: 'AAAA' }]);
+      },
+    );
+
     await t.test('axe and widths: both themes, desk and phone', async t => {
       for (const viewport of [DESK, PHONE])
-        for (const query of ['', 'viewer=reader', 'review=1', 'thread=1']) {
+        for (const query of ['', 'viewer=reader', 'review=1', 'thread=1', 'files=1']) {
           const page = await open(t, viewport, query);
           await page.addScriptTag({ path: axePath });
           for (const theme of ['dark', 'light']) {

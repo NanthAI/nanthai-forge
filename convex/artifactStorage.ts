@@ -12,6 +12,7 @@ import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { legacySystemMetadata } from './legacyStorageRead';
 import { artifactBlobId } from './artifactBlobFields';
+import { refundStored } from './discussionAttachmentStored';
 import { cancelPendingTask } from './schedulerCancel';
 import { r2Config, headObject, checksumOf, presignDelete, putExpiry } from './r2';
 import { invariant } from '../src/errors';
@@ -151,6 +152,7 @@ export async function removeArtifact(
   row: Doc<'artifactBlobs'>,
 ) {
   if (row.removed) return;
+  await refundStored({ db }, row);
   const after = uploadEnds(row);
   await armDelete({ db, scheduler }, row, 0, after > Date.now() ? after : undefined);
 }

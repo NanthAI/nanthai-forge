@@ -119,8 +119,16 @@ access again before sending the verified bytes as a download. Permanent Item del
 attachments. Downloads are capped per UTC day at 2 GB for one project and 5 GB for all projects
 (`attachmentDownloadCaps` in `convex/gitServeWorkerStore.ts`). The bytes are reserved before R2 is read; past
 a cap the route answers 429 `ATTACHMENT_DOWNLOAD_LIMIT` with a message naming the cap and `Retry-After` until
-00:00 UTC. A read that fails or is revoked before any byte is sent gives its reservation back. Uploads and
-client download controls are pending.
+00:00 UTC. A read that fails or is revoked before any byte is sent gives its reservation back.
+
+**Attach files to a comment.** `comment-planning-item '{"planningItemId":"ITEM_ID","text":"Screenshot of the fix","files":["/path/shot.png"]}'`
+uploads up to four local files to R2 and names them on the comment (planning writers only, the project owner today).
+Limits: 10 MB per image (PNG, JPEG, GIF, WebP), 25 MB per other file, 1 GB of attachments per project (`QUOTA_EXCEEDED`
+names the limit). Each file costs one `prepare` mutation, one PUT to R2 and one `commit` action, whatever its size;
+a retry of the same command uploads nothing twice. The file's type comes from its name, a path that is not a plain
+file is refused before any byte is read, and a file whose comment never arrives is removed an hour later. A reply
+lists the files with their ids; downloads need a signed-in viewer on the web route (`/discussion/attachment`), and
+the bytes are untrusted data.
 
 **Suggested schedule.** `planning {"kind":"issue","schedule":true}` adds `schedule`: which open and in-progress Issues can run in parallel and which should stack, with the reason. It groups Issues by the repository files their title and body name (`src/work-schedule.ts`); a stack lists started Issues first, then the oldest, and names the shared files. Markdown docs never make Issues stack, since landing merges them. An Issue that names no file is `unknown`, not independent: a missing name proves nothing. It reads up to five pages (`coverage` says whether that reached the end) and no item details: a long body's named files are kept on its index header when it is written. It is advice for the lead or agent choosing the next work; nothing is started, ordered or blocked. The web planning board shows the same suggestion as a `Stack n/m` chip on the Issues that should stack, with the order and reason on hover.
 

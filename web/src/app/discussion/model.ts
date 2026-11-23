@@ -3,6 +3,7 @@
 // root, who wrote each comment by public identity only, and the reaction counts beside it.
 import type { ThreadEntry } from './conversation';
 import { declaredModel } from '../who-links';
+import type { PlanningAttachment } from '../../../../src/discussion-attachment-limits';
 
 /** A planning comment row as public reads return it: `author` is already the writer's Forge handle (or gone for a
  * reader who may not see people); `agent` is the writing agent session's slug. */
@@ -18,6 +19,8 @@ export type DiscussionComment = {
   agentClient?: string;
   replyTo?: string;
   decision?: true;
+  /** Files stored in R2 under this comment (Item 9a3d6f5f); the page reads each through the download route. */
+  attachments?: PlanningAttachment[];
   /** Written by Forge from a landing receipt (Issue 3a733ee8), never by a member: no reply or reaction. */
   system?: true;
   conversation?: ThreadEntry;

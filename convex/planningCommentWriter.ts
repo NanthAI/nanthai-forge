@@ -9,6 +9,9 @@ import { AGENT_CLIENT, isAgentSlug, slugFromDigest } from '../src/agent-slug';
 import { digest } from '../src/state/hash';
 import { isDeviceIdentity } from './cliServer';
 import { publicActorLabel } from './publicPeople';
+import { boundAttachments } from './discussionAttachmentBind';
+import type { Doc } from './_generated/dataModel';
+import type { PlanningAttachment } from '../src/discussion-attachment-limits';
 
 /** The longest comment a hosted project stores (GitHub's limit); the page draws nothing above it. */
 export const MAX_COMMENT_CHARACTERS = 65_536;
@@ -20,16 +23,35 @@ type CommentCommand = {
   agentClient?: string | undefined;
   decision?: boolean | undefined;
   decidedBy?: string | undefined;
+  itemId: string;
+  operationId: string;
+  attachments?: PlanningAttachment[] | undefined;
 };
 
 /** Normalises a comment command in place before its request digest is taken, so a retry normalises the same way. */
-export async function serverCommentWriter(ctx: MutationCtx, command: CommentCommand) {
+export async function serverCommentWriter(
+  ctx: MutationCtx,
+  command: CommentCommand,
+  project: Pick<Doc<'hostedProjects'>, '_id'>,
+) {
   invariant(
     command.text.length <= MAX_COMMENT_CHARACTERS,
     'BAD_ARGUMENT',
     `Keep a comment to ${MAX_COMMENT_CHARACTERS.toLocaleString('en-US')} characters or fewer.`,
   );
   delete command.decidedBy;
+  // Files are named only by their committed bindings for this comment; a server job attaches none.
+  if (command.attachments) {
+    if (await ctx.auth.getUserIdentity())
+      command.attachments = await boundAttachments(
+        ctx,
+        project._id,
+        command.itemId,
+        command.operationId,
+        command.attachments,
+      );
+    else delete command.attachments;
+  }
   const user = await ctx.auth.getUserIdentity();
   if (!user) {
     // A scheduled Forge job (no sign-in): its label is written by server code, and it is never an agent session.

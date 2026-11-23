@@ -61,7 +61,12 @@ export async function startFakeR2(config = fakeR2Config, { local = false, readTh
         globalThis.fetch = native;
       };
     },
-    close: () => new Promise(resolve => server.close(resolve)),
+    close: () =>
+      new Promise(resolve => {
+        server.close(resolve);
+        // A keep-alive connection from the CLI's fetch would otherwise hold the test process open.
+        server.closeAllConnections();
+      }),
   };
   const server = createServer(async (req, res) => {
     const chunks = [];

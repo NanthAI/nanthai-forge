@@ -1,0 +1,4 @@
+{
+  "issue": "9a3d6f5f-a68c-40ca-a0df-b010f9af35ca",
+  "reason": "toolListBytes 5782 -> 5790 (+8 bytes): comment-planning-item lists the optional files:a field, the local file paths the CLI uploads as discussion attachments (Item 9a3d6f5f). No agent action, module or startup path changes; the upload code loads lazily only when files are named."
+}

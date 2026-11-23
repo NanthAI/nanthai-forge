@@ -94,6 +94,7 @@ test('a reload with sign-in still loading renders nothing and reads nothing; the
     authShim,
     `import { createElement, Fragment } from 'react';
     export const ConvexAuthProvider = ({ children }: any) => createElement(Fragment, null, children);
+    export const useAuthToken = () => null;
     export const useAuthActions = () => ({
       signIn: async () => ({ signingIn: false }),
       signOut: async () => {

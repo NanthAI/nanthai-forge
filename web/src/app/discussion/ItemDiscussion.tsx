@@ -16,8 +16,18 @@ export default function ItemDiscussion({
   itemId: string;
   project?: WhoProject | undefined;
 }) {
-  const { comments, loading, loadEarlier, loadingEarlier, failed, reactions, canWrite, post, react } =
-    useDiscussion(projectId, itemId);
+  const {
+    comments,
+    loading,
+    loadEarlier,
+    loadingEarlier,
+    failed,
+    reactions,
+    canWrite,
+    post,
+    react,
+    readAttachment,
+  } = useDiscussion(projectId, itemId);
   const conversation = useConversation(projectId, 'item', itemId);
   const answer = useAnswer(projectId);
   return (
@@ -34,6 +44,7 @@ export default function ItemDiscussion({
       commentsFailed={failed}
       onPost={post}
       onReact={react}
+      readAttachment={readAttachment}
     />
   );
 }

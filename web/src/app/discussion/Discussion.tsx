@@ -15,6 +15,9 @@ import { ConversationEntry } from './ConversationEntry';
 import type { Answer, ThreadEntry } from './conversation';
 import type { WhoProject } from '../who-links';
 import { SafeMarkdown } from '../../ds/markdown';
+import { Attachments, sizeLabel, type ReadAttachment } from './Attachments';
+import { ATTACHMENT_LIMITS } from '../../../../src/discussion-attachment-limits';
+import { AttachmentProblem, attachmentRefusal } from './attachment-io';
 import { readReview, ReviewFindings } from './ReviewFindings';
 import {
   MAX_COMMENT_CHARACTERS,
@@ -32,7 +35,7 @@ import {
 } from './model';
 import './discussion.css';
 
-export type PostInput = { text: string; replyTo?: string; decision?: boolean };
+export type PostInput = { text: string; replyTo?: string; decision?: boolean; files?: File[] };
 export type DiscussionProps = {
   comments: readonly DiscussionComment[];
   reactions?: readonly ReactionCount[];
@@ -47,6 +50,8 @@ export type DiscussionProps = {
   commentsFailed?: boolean;
   onPost?: (input: PostInput) => Promise<void>;
   onReact?: (commentId: string, kind: ReactionKind) => Promise<void>;
+  /** Reads one attachment's bytes through the authorized download route; absent, files show by name only. */
+  readAttachment?: ReadAttachment;
   /** Threads shown before "Show earlier" (the latest ones). */
   pageSize?: number;
   now?: Date;
@@ -75,6 +80,7 @@ export function Discussion({
   commentsFailed = false,
   onPost,
   onReact,
+  readAttachment,
   pageSize = 20,
   now = new Date(),
   project,
@@ -219,6 +225,7 @@ export function Discussion({
             project={project}
             {...conversationActions}
             {...report}
+            {...(readAttachment ? { readAttachment } : {})}
             {...(onReact ? { onReact } : {})}
             {...(canWrite && onPost && !thread.root.system && !thread.root.conversation
               ? { onReply: () => setReplying(thread.root.id) }
@@ -235,19 +242,21 @@ export function Discussion({
               project={project}
               {...conversationActions}
               {...report}
+              {...(readAttachment ? { readAttachment } : {})}
               {...(onReact ? { onReact } : {})}
             />
           ))}
           {replying === thread.root.id && onPost ? (
             <Composer
               reply
+              attachable={Boolean(readAttachment)}
               onPost={input => onPost({ ...input, replyTo: thread.root.id }).then(() => setReplying(null))}
               onCancel={() => setReplying(null)}
             />
           ) : null}
         </div>
       ))}
-      {canWrite && onPost ? <Composer onPost={onPost} /> : null}
+      {canWrite && onPost ? <Composer attachable={Boolean(readAttachment)} onPost={onPost} /> : null}
     </section>
   );
 }
@@ -263,6 +272,7 @@ function Comment({
   onReply,
   answer,
   reportProjectId,
+  readAttachment,
 }: {
   comment: DiscussionComment;
   reply?: boolean;
@@ -274,6 +284,7 @@ function Comment({
   onReply?: () => void;
   answer?: Answer;
   reportProjectId?: Id<'hostedProjects'> | undefined;
+  readAttachment?: ReadAttachment;
 }) {
   const by = writer(comment);
   const row = comment.conversation;
@@ -327,6 +338,9 @@ function Comment({
       ) : (
         <SafeMarkdown text={comment.text} idPrefix={comment.id} />
       )}
+      {!row && comment.attachments?.length ? (
+        <Attachments commentId={comment.id} files={comment.attachments} read={readAttachment} />
+      ) : null}
       {counts.length || react || onReply || reportTarget ? (
         <div className="acts">
           {counts.map(entry => (
@@ -371,10 +385,13 @@ function Comment({
 
 function Composer({
   reply = false,
+  attachable = false,
   onPost,
   onCancel,
 }: {
   reply?: boolean;
+  /** Offers Attach: only where the comment is a planning comment that can carry files. */
+  attachable?: boolean;
   onPost: (input: PostInput) => Promise<void>;
   onCancel?: () => void;
 }) {
@@ -383,17 +400,35 @@ function Composer({
   const [text, setText] = useState('');
   const [decision, setDecision] = useState(false);
   const [state, setState] = useState<'idle' | 'sending' | 'failed'>('idle');
+  const [files, setFiles] = useState<File[]>([]);
+  const [problem, setProblem] = useState('');
+  const picker = useRef<HTMLInputElement>(null);
+  const attach = (picked: FileList | null) => {
+    const next = [...files, ...(picked ? [...picked] : [])];
+    const refused = next.map(attachmentRefusal).find(Boolean);
+    setProblem(
+      refused ??
+        (next.length > ATTACHMENT_LIMITS.perComment
+          ? `A comment holds at most ${ATTACHMENT_LIMITS.perComment} files.`
+          : ''),
+    );
+    if (!refused && next.length <= ATTACHMENT_LIMITS.perComment) setFiles(next);
+    if (picker.current) picker.current.value = '';
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!text.trim() || state === 'sending') return;
     setState('sending');
+    setProblem('');
     try {
-      await onPost({ text, ...(decision ? { decision: true } : {}) });
+      await onPost({ text, ...(decision ? { decision: true } : {}), ...(files.length ? { files } : {}) });
       setText('');
       setDecision(false);
+      setFiles([]);
       setState('idle');
-    } catch {
-      // The text stays in the box, so nothing typed is lost.
+    } catch (error) {
+      // The text and the files stay, so nothing typed or chosen is lost.
+      setProblem(error instanceof AttachmentProblem ? error.message : '');
       setState('failed');
     }
   };
@@ -429,6 +464,22 @@ function Composer({
             Cancel
           </Key>
         ) : null}
+        {attachable ? (
+          <>
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              className="sr"
+              tabIndex={-1}
+              aria-label="Attach files"
+              onChange={event => attach(event.target.files)}
+            />
+            <Key size="sm" kind="ghost" onClick={() => picker.current?.click()}>
+              Attach
+            </Key>
+          </>
+        ) : null}
         {reply ? null : (
           <label className="t2 decide">
             <input type="checkbox" checked={decision} onChange={event => setDecision(event.target.checked)} />
@@ -436,9 +487,33 @@ function Composer({
           </label>
         )}
       </div>
+      {files.length ? (
+        <ul className="attached" aria-label="Files to attach">
+          {files.map((file, at) => (
+            <li key={`${file.name}-${file.size}-${at}`}>
+              <span>
+                {file.name} ({sizeLabel(file.size)})
+              </span>
+              <Key
+                size="sm"
+                kind="ghost"
+                aria-label={`Remove ${file.name}`}
+                onClick={() => setFiles(files.filter((_, index) => index !== at))}
+              >
+                Remove
+              </Key>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {problem && state !== 'failed' ? (
+        <p className="err" role="alert">
+          {problem}
+        </p>
+      ) : null}
       {state === 'failed' ? (
         <p className="err" id={`${id}-failed`} role="alert">
-          Not sent. Your text is still here; try again.
+          {problem ? `Not sent. ${problem}` : 'Not sent. Your text is still here; try again.'}
         </p>
       ) : null}
     </form>

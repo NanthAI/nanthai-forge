@@ -264,3 +264,16 @@ test('a hand-back in the thread keeps the saved pin and explains who carries it'
   for (const value of ['Tried old client', 'Check user decision', 'b'.repeat(64), 'sample-two', 'Decline'])
     assert(html.includes(value));
 });
+
+test('files show by name where no reader is wired, and Attach is offered only where files can be sent', () => {
+  const withFile = comment(1, {
+    attachments: [{ id: 'att-1', name: '<b>shot</b>.png', size: 1200, contentType: 'image/png' }],
+  });
+  const plain = render({ comments: [withFile] });
+  assert.match(plain, /&lt;b&gt;shot&lt;\/b&gt;\.png \(1 KB\)/, 'a name is text');
+  assert.doesNotMatch(plain, /<b>shot|<img|>Attach</);
+  const wired = render({ comments: [withFile], readAttachment: async () => ({ ok: false, message: '-' }) });
+  assert.match(wired, />Attach</, 'Attach is offered');
+  assert.match(wired, /Show &lt;b&gt;shot&lt;\/b&gt;\.png \(1 KB\)/);
+  assert.doesNotMatch(wired, /<img/, 'nothing loads until the picture is in view');
+});

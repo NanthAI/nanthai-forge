@@ -955,6 +955,11 @@ New deployment settings (names only; values stay in the deployment):
   `https://<dev-deployment>.convex.site/github/oauth/callback`.
 - `FORGE_WEB_URL`: exact HTTPS browser origin and allowed `redirectTo` origin.
   Preserve the original invitation/task URL within that origin.
+- `FORGE_DISCUSSION_UPLOADS`: `1` turns on discussion attachment uploads (Item 9a3d6f5f); off by default. Set it on a
+  deployment only after the 25 MB download there has been verified; downloads of stored files never depend on it.
+  To verify a deployment: set it on that deployment, attach a 25,000,000-byte file with the CLI (`comment-planning-item`
+  with `files`), read it back through `/discussion/attachment` with the sign-in token, compare the SHA-256 and record the
+  time and any Convex limit error on the Item.
 - `FORGE_AUTH_RP_ID`: optional explicit relying-party domain; otherwise the host
   of `FORGE_WEB_URL`. Native associated domains/origins await the native slice.
 - `CONVEX_CLOUD_URL`: supplied by Convex. Tokens use its ES256 issuer and JWKS,

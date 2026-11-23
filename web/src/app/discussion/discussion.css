@@ -24,6 +24,13 @@
   .compose .decide { font-size: var(--t-meta); display: inline-flex; gap: var(--s-2); align-items: center; }
   .compose .decide input { accent-color: var(--text-2); }
   .compose .err { color: var(--failed); font-size: var(--t-meta); }
+  .atts { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: flex-start; min-width: 0; }
+  .att-pic, .att-file { display: inline-flex; flex-direction: column; gap: var(--s-1); max-width: 100%; min-width: 0; }
+  .att-pic img { display: block; max-width: min(100%, var(--m-wide)); max-height: 360px; height: auto; border: var(--rule) solid var(--line); border-radius: var(--r-1, 4px); }
+  .att-pic .err, .att-file .err { color: var(--failed); font-size: var(--t-meta); }
+  .attached { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); font-size: var(--t-meta); color: var(--text-2); }
+  .attached li { display: flex; gap: var(--s-2); align-items: center; min-width: 0; }
+  .attached li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   @media (hover: hover) and (pointer: fine) {
     .react:not(:disabled):hover { background: var(--hover); }
     /* The keys to react and reply stay out of the reading until the pointer or focus reaches the comment. */
