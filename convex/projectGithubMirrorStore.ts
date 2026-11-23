@@ -49,10 +49,9 @@ async function seed(
   const receipt = hostedAcceptanceSchema.parse(JSON.parse(row.value));
   const mapped = queue.staged ?? queue.mapping;
   let binding = mapped ? githubSyncCommitSchema.parse(JSON.parse(mapped)) : null;
-  const publishedRef =
-    queue.staged && queue.mapping
-      ? githubSyncCommitSchema.parse(JSON.parse(queue.mapping)).commit
-      : queue.stagedRef;
+  const publishedMapping =
+    queue.staged && queue.mapping ? githubSyncCommitSchema.parse(JSON.parse(queue.mapping)) : null;
+  const publishedRef = publishedMapping?.commit ?? queue.stagedRef;
   const publish = through === undefined || job.sequence >= through;
   const mergeParent =
     publish && queue.staged && publishedRef && publishedRef !== queue.stagedRef ? publishedRef : undefined;
@@ -150,6 +149,9 @@ async function seed(
         publish,
         ...(publishedRef ? { expectedRef: publishedRef } : {}),
         ...(mergeParent ? { mergeParent } : {}),
+        // The burst tip's token covers workflow paths over the ref's whole move (see mirrorPermissionsFor).
+        ...(publish && publishedMapping ? { refState: publishedMapping.state } : {}),
+        ...(publish && queue.staged && queue.stagedWorkflows ? { workflows: true as const } : {}),
       },
       identity: { name, email },
       ...(imported?.publication
@@ -215,6 +217,8 @@ export const commit = internalMutation({
     verifyError: v.optional(v.string()),
     verifyRetry: v.optional(v.literal(true)),
     blobOnly: v.optional(v.literal(true)),
+    /** The finished plan touched .github/workflows/ (kept for a staged burst member's tip). */
+    workflows: v.optional(v.literal(true)),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
@@ -263,6 +267,7 @@ export const commit = internalMutation({
               staged: canonicalPayload(mapping),
               stagedRef: queue.stagedRef ?? mapping.parent,
               stagedCount: (queue.stagedCount ?? 0) + 1,
+              ...(input.workflows ? { stagedWorkflows: true as const } : {}),
               burstJobId,
             }
           : {
@@ -273,6 +278,7 @@ export const commit = internalMutation({
               staged: undefined,
               stagedCount: undefined,
               stagedRef: undefined,
+              stagedWorkflows: undefined,
               burstJobId: undefined,
               hold: undefined,
               batchThrough: undefined,

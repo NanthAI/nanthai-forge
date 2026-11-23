@@ -8,6 +8,7 @@ import { makeFunctionReference } from 'convex/server';
 import { internalAction, type ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { installationTokenMinter, mirrorPermissionsFor } from './githubAppToken';
+import { planTouchesWorkflows } from '../src/github-mirror-workflows';
 import { githubRequest, GithubMirrorApiError, type GithubRequest } from '../src/hosted-github-api';
 import {
   prepareMirror,
@@ -204,6 +205,7 @@ export const step = internalAction({
         ...(plan.phase === 'blobs' && plan.pending.length - plan.index > mirrorWindow
           ? { blobOnly: true }
           : {}),
+        ...(plan.entry && planTouchesWorkflows(plan) ? { workflows: true } : {}),
       });
     } catch (error) {
       // A failed request must not discard earlier verified blob replies in this

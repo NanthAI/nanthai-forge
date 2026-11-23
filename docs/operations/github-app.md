@@ -234,7 +234,7 @@ this repository, so the table shows what Forge asks of each token.
 | Check dispatch, run lookup, cancel | `actions: write`, `contents: read` | A hosted check on an App runner (dispatch `forge-check.yml` on `main`, list its runs, cancel a run) | `actionsPermissions`; `projectHostedActionsDirect.ts`, `projectHostedActionsWebhook.ts` |
 | Runner setup preflight | None minted; reads the installation's accepted permissions | `configure-runner` | `requireInstallationPermissions`; `projectHostedActionsConfigure.ts` |
 | Runner grant proof | `metadata: read`, one repository by name; reads its ID and one user's role | `configure-runner` without a stored binding or operator pair | `metadataProbeToken`; `githubRunnerGrants.ts` |
-| Mirror push | `contents: write` (Git data API, plus the Git LFS batch API for LFS paths; GitHub adds `metadata: read`), one repository; also `workflows: write` when the step's plan adds, changes or removes a path under `.github/workflows/`, or when no plan exists yet (unverified bootstrap) | One job per accepted landing | `mirrorPermissionsFor`; `projectGithubMirror.ts` `step`, `src/hosted-github-mirror.ts` |
+| Mirror push | `contents: write` (Git data API, plus the Git LFS batch API for LFS paths; GitHub adds `metadata: read`), one repository; also `workflows: write` when the step's plan adds, changes or removes a path under `.github/workflows/`, when a burst tip's ref move does (from GitHub main's State), or when no plan exists yet (unverified bootstrap) | One job per accepted landing | `mirrorPermissionsFor`; `projectGithubMirror.ts` `step`, `src/hosted-github-mirror.ts` |
 | Two-way read | `contents: read` and installed `pull_requests: read`, one repository | A GitHub `push` webhook to `main` on a two-way project | `inboundReadPermissions`; `projectGithubInboundRun.ts` |
 | Two-way PR check | `contents: read`, `statuses: write`, one repository | A `pull_request` webhook (opened, synchronize, reopened) into `main` on a two-way project: reads the head, posts `forge/verify` pending | `pullCheckPermissions`; `projectGithubInboundRun.ts` |
 | PR check result | `statuses: write`, one repository | The PR head's check-only run ends, fails to start, or is superseded | `pullStatusPermissions`; `projectGithubPullStatus.ts` |
@@ -462,10 +462,18 @@ mirror, check and import uses. GitHub refuses a tree that touches
 mirror proves the binding, reads the step's plan (retained cursor or a diff of
 two States), then mints one token: workflow changes get `workflows: write`, every other step
 contents-only. Before an unverified bootstrap has diffed, the paths are unknown
-and both are requested; this costs no extra GitHub call.
+and both are requested; this costs no extra GitHub call. GitHub also checks workflow
+paths over a ref update's whole move (403 "Resource not accessible by integration" on
+`PATCH git/refs`, 2026-11-23): a burst tip moves main across staged commits, so its
+seed pins the Forge State GitHub main is at and the tip reads it with its own two
+(same source read, no extra call); workflows are requested when a staged commit of
+the burst touched one (the queue row's `stagedWorkflows`, so a change later restored
+counts), when that whole move changes one, or when that State is unknown (an older
+cursor, a first burst or an unreadable State).
 `tests/hosted-github-mirror-retry.test.mjs` replays the incident (add, change,
-remove a workflow; docs-only; other `.github/` paths). A token permission change must be tested against all
-of them.
+remove a workflow; docs-only; other `.github/` paths) and
+`tests/hosted-github-mirror-workflows.test.mjs` the burst case. A token permission
+change must be tested against all of them.
 
 ## Protected main on the mirror
 

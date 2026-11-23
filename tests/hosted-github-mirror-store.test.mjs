@@ -245,6 +245,37 @@ test('Every landing keeps separate ref moves when a previous push completes afte
   assert.deepEqual(f.delays, [0, 0]);
 });
 
+test('a staged member that touched a workflow marks its burst until the tip publishes (Item a08b0d3a)', async t => {
+  let now = Date.UTC(2026, 0, 2);
+  t.mock.method(Date, 'now', () => now);
+  const f = fixture();
+  const mirror = timedMirror(f, 'every-landing', now - 120_000, [180_000]);
+  const first = await f.enqueue(mirrorLanding(f, now, 2));
+  const second = await f.enqueue(mirrorLanding(f, now + 1000, 3));
+  now += 3000;
+  const root = mirrorFixture().root;
+  const mapping = id => {
+    const job = f.tables.projectGithubMirrorJobs.get(id);
+    return JSON.stringify({ ...root, acceptanceId: job.receiptId, state: job.state });
+  };
+  f.patch('projectGithubMirrorJobs', first.jobId, { seed: JSON.stringify({ main: { publish: false } }) });
+  await f.run('stageWorkflow', store.commit._handler, {
+    jobId: first.jobId,
+    step: 0,
+    cursor: null,
+    mapping: mapping(first.jobId),
+    workflows: true,
+  });
+  assert.equal(f.tables.projectGithubMirrors.get(mirror).stagedWorkflows, true);
+  await f.run('publishTip', store.commit._handler, {
+    jobId: second.jobId,
+    step: 0,
+    cursor: null,
+    mapping: mapping(second.jobId),
+  });
+  assert.equal(f.tables.projectGithubMirrors.get(mirror).stagedWorkflows, undefined);
+});
+
 test('a replayed commit status keeps one pending post before audit success', async () => {
   const f = mirrorFixture();
   const sha = f.root.commit;
@@ -829,8 +860,8 @@ for (const { files, gitlinks = false } of [
 
 /** Incident d4eb053e: a project that landed before its mirror was turned on has no mapping, so the
  * first job needs the GitHub commit and Forge State the project was imported from. */
-for (const mapped of [false, true])
-  test(`the first mirror job's seed ${mapped ? 'ignores' : 'carries'} the import commit and State when a mapping ${mapped ? 'exists' : 'is missing'}`, async t => {
+for (const mapped of [false, true, 'staged'])
+  test(`the first mirror job's seed ${mapped ? 'ignores' : 'carries'} the import commit and State when a mapping ${mapped ? 'exists' : 'is missing'}${mapped === 'staged' ? ', and a burst tip pins the published State' : ''}`, async t => {
     const f = await acceptanceFixture();
     bindRepository(t, f.projectId, 'synthetic/mirror');
     const project = f.tables.hostedProjects.get(f.projectId);
@@ -889,6 +920,13 @@ for (const mapped of [false, true])
     if (mapped) {
       const queueRow = [...f.tables.projectGithubMirrors.values()][0];
       f.patch('projectGithubMirrors', queueRow._id, { mapping: JSON.stringify(mirrorFixture().root) });
+      // Item a08b0d3a: a staged burst member sits between GitHub main and this tip.
+      if (mapped === 'staged')
+        f.patch('projectGithubMirrors', queueRow._id, {
+          staged: JSON.stringify({ ...mirrorFixture().root, commit: 'a'.repeat(40), state: 'b'.repeat(64) }),
+          stagedRef: mirrorFixture().root.commit,
+          stagedWorkflows: true,
+        });
     }
     const prior = [process.env.FORGE_GITHUB_SYNC_NAME, process.env.FORGE_GITHUB_SYNC_EMAIL];
     Object.assign(process.env, {
@@ -905,6 +943,13 @@ for (const mapped of [false, true])
     });
     const seed = JSON.parse(await f.transaction('mirrorBegin', store.begin, input)).seed;
     assert.deepEqual(seed.import, mapped ? undefined : { commit: imported.commit, state: imported.head });
+    const root = mirrorFixture().root;
+    assert.deepEqual(
+      seed.main,
+      mapped === 'staged'
+        ? { publish: true, expectedRef: root.commit, refState: root.state, workflows: true }
+        : { publish: true },
+    );
   });
 
 const inboundModule = await import(moduleUrl('../convex/projectGithubInboundQueue.ts'));

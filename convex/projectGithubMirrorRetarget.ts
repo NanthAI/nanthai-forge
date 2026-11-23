@@ -56,6 +56,7 @@ export async function retargetGithubMirror(ctx: MutationCtx, projectId: Id<'host
     staged: undefined,
     stagedCount: undefined,
     stagedRef: undefined,
+    stagedWorkflows: undefined,
     batchThrough: undefined,
     burstFirstAt: undefined,
     hold: undefined,

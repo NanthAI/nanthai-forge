@@ -9,6 +9,7 @@ import { gitHash, gitTree, gitMode, githubCommit } from './hosted-github-git.js'
 import { publicationExclusion, sourceExclusion } from './files.js';
 import { ForgeError, invariant } from './errors.js';
 import { noteMessage } from './landing-message.js';
+import { workflowPath } from './github-mirror-workflows.js';
 import {
   createFirstCommit,
   firstCommitPath,
@@ -79,8 +80,17 @@ export type MirrorSeed = {
   /** A Candidate branch (src/ci-status.ts) instead of main: always from a verified binding, created
    * once and never moved; the same commit already there is a replay. */
   branch?: string;
-  /** Hosted main creates one commit per accepted State. A burst moves the ref only at its tip. */
-  main?: { publish: boolean; expectedRef?: string; mergeParent?: string };
+  /** Hosted main creates one commit per accepted State. A burst moves the ref only at its tip.
+   * `refState` is the Forge State of `expectedRef` (GitHub main before the burst), pinned when the
+   * tip moves main across staged commits: GitHub checks workflow paths over the ref's whole move.
+   * `workflows` says a staged commit of this burst touched one (a change later restored included). */
+  main?: {
+    publish: boolean;
+    expectedRef?: string;
+    mergeParent?: string;
+    refState?: string;
+    workflows?: true;
+  };
   /** Item c63c2171: this publish takes a failed inbound GitHub commit out of main. Before main moves,
    * one comment on that commit tells its author what happened and why (pinned with the seed). */
   notice?: { commit: string; text: string };
@@ -133,7 +143,23 @@ export type MirrorPlan = {
    * entries of `changes` and the piece size GitHub last accepted, so a retry or the
    * next step resumes there instead of replaying every piece. */
   treeCursor?: { base: string; done: number; cap: number; built?: Record<string, string | null> };
+  /** The ref move from `seed.main.expectedRef` to this commit changes a path under
+   * .github/workflows/ (set when the tip moves main across staged commits and the published
+   * State is known). Absent on such a move, the token asks for workflows anyway. */
+  refWorkflows?: boolean;
 };
+/** Whether any published path under .github/workflows/ differs between two States. */
+export function workflowsDiffer(before: NativeState, after: NativeState): boolean {
+  const pick = (state: NativeState) =>
+    new Map(
+      state.files
+        .filter(file => workflowPath(file.path) && published('tracked')(file))
+        .map(file => [file.path, `${file.mode}:${file.blob}`]),
+    );
+  const a = pick(before),
+    b = pick(after);
+  return a.size !== b.size || [...a].some(([path, key]) => b.get(path) !== key);
+}
 /** Paths a mirror commit's tree holds: every tracked path except Forge metadata
  * (`tracked`), or, for a commit an older mirror wrote, also without credential-looking
  * names (`legacy`, `sourceExclusion`). Gitlinks are always published. */
@@ -252,11 +278,21 @@ export async function prepareMirror(seed: MirrorSeed, io: MirrorIO): Promise<Mir
     "A Candidate branch is published only on top of main's verified mirror commit.",
   );
   if (seed.verified && seed.binding) {
-    const [baseline, target] = await io.states([seed.binding.state, seed.state]);
+    // A burst tip also reads the State GitHub main is at (same source read), so its one token
+    // asks for workflows when the whole ref move changes one (staged commits included).
+    const refState =
+      seed.main?.publish !== false && seed.main?.refState !== seed.binding.state
+        ? seed.main?.refState
+        : undefined;
+    const [baseline, target, published] = await io.states(
+      refState ? [seed.binding.state, seed.state, refState] : [seed.binding.state, seed.state],
+    );
     invariant(baseline && target, 'SOURCE_UNAVAILABLE', 'Mirror source States are unavailable.');
+    // An unreadable published State leaves refWorkflows unset: the token then asks for workflows.
     return {
       ...diffPlan(seed, seed.binding.commit, seed.binding.tree, baseline, target, false),
       ...lfsPlan(baseline, target),
+      ...(refState && published ? { refWorkflows: workflowsDiffer(published, target) } : {}),
     };
   }
   // An empty repository first gets the one-file commit the Git Data API needs (see that module).

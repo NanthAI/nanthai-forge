@@ -11,6 +11,8 @@ import type { ActionCtx } from './_generated/server';
 import { githubRequest, GithubMirrorApiError } from '../src/hosted-github-api';
 import { ForgeError, invariant } from '../src/errors';
 import { submoduleDecision, type SubmoduleAllow } from '../src/submodule-allowlist';
+import { movesMainAcross, planTouchesWorkflows } from '../src/github-mirror-workflows';
+import type { MirrorPlan } from '../src/hosted-github-mirror';
 export type GithubAppPermissions = Record<string, 'read' | 'write'>;
 /** Least privilege for check dispatch/cancel; checks create no refs or commits. */
 export const actionsPermissions: GithubAppPermissions = { actions: 'write', contents: 'read' };
@@ -32,21 +34,31 @@ export const mirrorPermissions: GithubAppPermissions = { contents: 'write' };
  * a path under .github/workflows/ without the workflows permission (incident
  * 708b6943). Those jobs alone also ask for it. */
 export const mirrorWorkflowPermissions: GithubAppPermissions = { contents: 'write', workflows: 'write' };
-const workflowPath = (path: string) => path.startsWith('.github/workflows/');
 /** Token permissions for one mirror step. The plan (prepared from States or
  * read from the retained cursor) lists every changed and removed path. With no
  * plan yet (the unverified bootstrap reads GitHub main before it can diff),
  * the paths are unknown, so both are requested rather than spending an extra
- * GitHub mint or failing a workflow change. */
-export function mirrorPermissionsFor(
-  plan: { changes: { path: string }[]; pending: { path: string }[] } | undefined,
-): GithubAppPermissions {
+ * GitHub mint or failing a workflow change. A burst tip moves GitHub main across
+ * staged commits, and GitHub checks workflow paths over the whole move (403 on
+ * PATCH git/refs, 2026-11-23): it asks for workflows when a staged commit touched
+ * one, when the whole move changes one, or when the published State was not read
+ * (an older cursor, a first burst, or an unreadable State). */
+export function mirrorPermissionsFor(plan: MirrorPlanPaths | undefined): GithubAppPermissions {
   if (!plan) return mirrorWorkflowPermissions;
-  return plan.changes.some(file => workflowPath(file.path)) ||
-    plan.pending.some(file => workflowPath(file.path))
+  const crossing =
+    !!plan.seed && plan.parent !== undefined && movesMainAcross({ seed: plan.seed, parent: plan.parent });
+  return planTouchesWorkflows(plan) ||
+    (crossing && (!!plan.seed?.main?.workflows || plan.refWorkflows !== false))
     ? mirrorWorkflowPermissions
     : mirrorPermissions;
 }
+type MirrorPlanPaths = {
+  changes: { path: string }[];
+  pending: { path: string }[];
+  seed?: MirrorPlan['seed'];
+  parent?: string;
+  refWorkflows?: boolean;
+};
 const encoder = new TextEncoder();
 const bytes = (value: string) => Uint8Array.from(atob(value), c => c.charCodeAt(0));
 const base64url = (value: Uint8Array) => {

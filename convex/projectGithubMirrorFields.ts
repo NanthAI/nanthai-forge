@@ -16,6 +16,8 @@ export const githubMirrorTables = {
     staged: v.optional(v.string()),
     stagedCount: v.optional(v.number()),
     stagedRef: v.optional(v.string()),
+    /** A staged commit of the active burst touched .github/workflows/: its tip token asks for workflows. */
+    stagedWorkflows: v.optional(v.literal(true)),
     batchThrough: v.optional(v.number()),
     burstFirstAt: v.optional(v.number()),
     /** A bounded wait belongs to the oldest unpublished State. */
