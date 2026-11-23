@@ -194,3 +194,12 @@ test('a package probe that ignores SIGTERM is killed and reaped when its deadlin
     await watcher.return();
   }
 });
+
+test('a change to the web entry runs the build:web smoke before the landing check (friction 00918590)', () => {
+  const smoke = staticChecks(manifestText).find(check => check.name === 'web smoke');
+  assert.deepEqual(smoke?.command, ['npm', 'run', '-s', 'build:web']);
+  for (const input of ['web/src/main.tsx', 'scripts/web-smoke-load.mjs', 'web/vite.config.ts'])
+    assert.deepEqual(selectStaticChecks([smoke], [input]).selected, [smoke], input);
+  for (const input of ['web/src/page.tsx', 'convex/schema.ts', 'tests/ordinary.test.mjs'])
+    assert.deepEqual(selectStaticChecks([smoke], [input]).selected, [], input);
+});

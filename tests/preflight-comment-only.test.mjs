@@ -154,3 +154,46 @@ test('replay: a changed magic comment is code in every language, never comment-o
   assert.equal(commentOnlyEdit('lib/a.rb', '# old note\nputs "x"\n', '# new note\nputs "x"\n'), true);
   assert.equal(commentOnlyEdit('src/a.ts', '// old\nexport {};\n', '// new\nexport {};\n'), true);
 });
+
+test('a changed test with a "Writes N -> M" cost comment is named required in the plan (friction 72c930e1)', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-preflight-cost-'));
+  const root = join(dir, 'lane');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const bytes = graph();
+  bytes.set('package.json', '{"type":"module","scripts":{}}');
+  const store = join(clientCacheRoot(root), 'objects');
+  mkdirSync(store, { recursive: true });
+  const put = body => {
+    writeFileSync(join(store, digest(body)), body);
+    return digest(body);
+  };
+  const entries = () => [...bytes].map(([path, body]) => ({ path, blob: put(body), mode: 'file' }));
+  const base = put(
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-source-state',
+      parents: [],
+      files: entries(),
+      message: 'base',
+      at: '2026-11-07T00:00:00.000Z',
+    }),
+  );
+  bytes.set(
+    'tests/a.test.mjs',
+    "import '../dist/a.js';\n// Writes 3 -> 4: one more row.\nexport const writes = 4;",
+  );
+  for (const [path, body] of bytes) {
+    mkdirSync(join(root, path, '..'), { recursive: true });
+    writeFileSync(join(root, path), body);
+  }
+  const plan = preflightPlan(
+    root,
+    { paths: ['tests/a.test.mjs'], complete: true },
+    { laneId: '11111111-1111-4111-8111-111111111111', files: entries(), base },
+  );
+  assert.match(
+    plan.local.summary,
+    /Cost-test comment \("Writes N -> M"\) in tests\/a\.test\.mjs: a changed test is required/,
+  );
+  assert.ok(plan.tests.includes('tests/a.test.mjs'));
+});

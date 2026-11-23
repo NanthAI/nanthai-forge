@@ -1159,6 +1159,12 @@ function planTests(
     const commentOnly = [...sources]
       .filter(([path, { before, after }]) => commentOnlyEdit(path, before, after))
       .map(([path]) => path);
+    // A changed test that names a cost move ("Writes N -> M") is a cost pin edit: it is a changed test, so
+    // it is required and starts first; the plan says so instead of the landing check teaching it.
+    const costTests = [...sources]
+      .filter(([path, { before, after }]) => isTest(path) && costCommentAdded(before, after))
+      .map(([path]) => path)
+      .sort();
     const productSources = [...sources].filter(([path]) => !isTest(path));
     const removedNames = productSources.flatMap(([path, { before, after }]) =>
       removedNamesOf(path, before, after),
@@ -1374,6 +1380,7 @@ function planTests(
       rerun: context ? rerunCommand(root, context.laneId) : undefined,
       trim,
       commentOnly,
+      costTests,
       only: !!only,
     });
     local.ceiling = runCeiling(options?.budgetSeconds, timeSettings);
@@ -1434,6 +1441,13 @@ function planTests(
       reason: `test selection failed: ${(error as Error).message.slice(0, 200)}`,
     };
   }
+}
+
+/** A cost comment (`Writes 98 -> 99`, `Reads 3 -> 4`) on a line the edit added. */
+const COST_COMMENT = /(?:\/\/|\/\*).*\b(?:Writes|Reads|Calls)\s+\d+\s*(?:->|→)\s*\d+/;
+export function costCommentAdded(before: string, after: string) {
+  const had = new Set(before.split('\n'));
+  return after.split('\n').some(line => !had.has(line) && COST_COMMENT.test(line));
 }
 
 /** The guard entry the learned set adds to `local.guards`. */
@@ -1549,9 +1563,12 @@ function localSelection(input: {
   rerun: string | undefined;
   trim: boolean;
   commentOnly: string[];
+  costTests: string[];
   only: boolean;
 }): LocalSelection {
   const { fit, timing, budgetSeconds } = input;
+  // Only a cost test this run actually starts is named (a retry that left it out does not claim it).
+  const costTests = input.costTests.filter(test => input.kept.has(test));
   const tiers = input.selection.tiers.map(item => ({
     tier: item.tier,
     total: item.tests.length,
@@ -1612,6 +1629,9 @@ function localSelection(input: {
       `${cutNote}${over}${skippedNote}` +
       (input.commentOnly.length
         ? ` ${input.commentOnly.length} comment-only path(s) add only the tests that read them.`
+        : '') +
+      (costTests.length
+        ? ` Cost-test comment ("Writes N -> M") in ${costTests.join(', ')}: a changed test is required, so it runs first here; run it before landing.`
         : '') +
       (input.only ? ' Runs only the files the last run stopped for time.' : '') +
       (input.filler

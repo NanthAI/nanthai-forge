@@ -101,6 +101,16 @@
           ]
         },
         {
+          "name": "web smoke",
+          "script": "build:web",
+          "inputs": [
+            "web/src/main.tsx",
+            "web/vite.config.ts",
+            "scripts/web-smoke-load.mjs",
+            "scripts/web-smoke-stub.mjs"
+          ]
+        },
+        {
           "name": "schema compatibility",
           "command": [
             "node",
