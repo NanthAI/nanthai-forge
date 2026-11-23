@@ -335,7 +335,10 @@ export function buildYard(
     const shown = unsaved ? { ...mark, stage: 'editing' as const } : mark;
     // The queue lists pending entries only, so an ended landing's cause comes from the Lane read.
     const ended = lane?.landing?.cause ? { state: lane.landing.cause } : null;
-    const said = laneState(shown, entry ? landingOf(entry) : ended);
+    // A Lane of a several-Lane review has no queue entry of its own (the entry names one Lane); Needs me's read says it
+    // waits on the reader, which is a landing held for review (Item 9b9057a9).
+    const reviewed = mark.held && waitsOnYou.has(mark.laneId) ? { state: 'held-review' as const } : null;
+    const said = laneState(shown, entry ? landingOf(entry) : (ended ?? reviewed));
     const by = replaced.get(mark.laneId) ?? null;
     const base = {
       laneId: mark.laneId,

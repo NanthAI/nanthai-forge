@@ -67,6 +67,8 @@ export const needsMeResult = v.object({
        * here with the calls the /approve page makes (projectHostedAcceptance:approve, projectHostedOwnerReview:decline).
        * A landing-policy hold (protected paths, supervised) has no Lane approval request to decide instead. */
       attemptId: v.optional(v.string()),
+      /** A review of several Lanes (one submission): every Lane of it, so each shows as waiting on the reader. */
+      laneIds: v.optional(v.array(v.string())),
       /** The owner's page for this decision: the Lane page (Item 0a99ab23), when the deployment has a web address. */
       url: v.optional(v.union(v.string(), v.null())),
       /** When the hold began, as far as the records say (ms). */
@@ -159,7 +161,8 @@ async function reason(
   // Binding stamps the submission on the owner row. A new save clears it in
   // the same transaction that detaches the page.
   const submissionId = owner?.projectId === projectId ? owner.submissionId : undefined;
-  if (submissionId && reviewIds.has(submissionId)) return null;
+  if (submissionId && reviewIds.has(submissionId))
+    return { sibling: submissionId as string, why: undefined } as const;
   const row = submissionId ? await landingRow(ctx, { projectId, submissionId }) : null;
   const parsed = row ? storedLandingStateSchema.safeParse(JSON.parse(row.value)) : null;
   const state = parsed?.success ? parsed.data : null;
@@ -264,12 +267,18 @@ export const read = query({
           .query('projectHostedPresence')
           .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
           .unique();
+      // The Lanes whose marks are bound to each review submission: one decision, but every Lane of it waits on the
+      // reader (Item 9b9057a9). Taken from the marks this read already walks, so no read is added.
+      const reviewLanes = new Map<string, string[]>();
       const marked = await Promise.all(
         shown.map(async mark => {
           const recorded = await reason(ctx, projectId, mark, reviewIds, link);
           // One decision for all the Lane marks on this exact submission.
           // A different submission on the same Lane can still have its own hold.
-          if (!recorded) return null;
+          if (recorded.why === undefined) {
+            reviewLanes.set(recorded.sibling, [...(reviewLanes.get(recorded.sibling) ?? []), mark.laneId]);
+            return null;
+          }
           const { parentLaneId, submitter, ...why } = recorded;
           const presence = await presenceOf(mark.laneId);
           // A review is for the submitted landing; for other holds the byline names who
@@ -295,8 +304,12 @@ export const read = query({
       const reviewRows = await Promise.all(
         reviews.map(async review => {
           const presence = review.laneId ? await presenceOf(review.laneId) : null;
+          const laneIds = [
+            ...new Set([review.laneId, ...(reviewLanes.get(review.submissionId) ?? [])]),
+          ].filter(id => id !== null);
           return {
             ...review,
+            ...(laneIds.length > 1 ? { laneIds } : {}),
             intentId: review.intentId ?? presence?.intentId ?? null,
             title: await titleOf(presence),
             why: 'review' as const,

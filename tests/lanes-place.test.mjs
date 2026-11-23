@@ -1136,3 +1136,41 @@ test('9b9057a9: the yard says Conflict only for a landing Forge observed ending 
   );
   assert.notEqual(row('s').state, 'conflict', 'a saved Lane that only shares a file is no conflict');
 });
+
+test('incident replay 9b9057a9 (Lane 106d1da6): every Lane of a several-Lane review is under Needs you with its own approve word, not "Held · held"', () => {
+  const lanes = [mark('rep', 'ready', { held: true }), mark('sib', 'ready', { held: true })];
+  const needsRead = {
+    held: [
+      {
+        laneId: 'rep',
+        laneIds: ['rep', 'sib'],
+        title: 'Licence',
+        actor: 'mara',
+        agent: null,
+        why: 'review',
+        note: null,
+        submissionId: 's-1',
+        attemptId: 'a-1',
+        since: 0,
+      },
+    ],
+    more: 0,
+    moreIsLowerBound: false,
+    approvals: '{}',
+    canDecide: true,
+  };
+  const yard = model.buildYard(
+    feed(lanes),
+    [meta('rep', 'Licence'), meta('sib', 'Licence')],
+    undefined,
+    0,
+    model.needsYouLanes(needsRead, 0),
+  );
+  assert.deepEqual(
+    yard.rows.map(row => [row.laneId, row.band, row.word]),
+    [
+      ['rep', 'needs', 'Needs you'],
+      ['sib', 'needs', 'Needs you'],
+    ],
+  );
+});

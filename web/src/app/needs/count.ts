@@ -33,6 +33,8 @@ export type HeldLane = {
   submissionId: string | null;
   /** The held attempt of a landing held for review (the owner decides that exact attempt). */
   attemptId?: string;
+  /** A review of several Lanes: every Lane of its one submission (they all wait on the reader). */
+  laneIds?: readonly string[];
   url?: string | null;
   since: number;
   /** A Lane held for a dependency: the Lane it lands after, when the records name it. */
@@ -145,8 +147,11 @@ export function needsYouLanes(read: NeedsRead | undefined, now: number): NeedsYo
   if (!read) return undefined;
   const asked = laneRequests(read.approvals);
   const out = new Set<string>();
-  for (const lane of read.held)
-    if (lane.laneId && waitsOnPerson(lane, asked.has(lane.laneId), read.canDecide)) out.add(lane.laneId);
+  for (const lane of read.held) {
+    if (!waitsOnPerson(lane, asked.has(lane.laneId ?? ''), read.canDecide)) continue;
+    if (lane.laneId) out.add(lane.laneId);
+    for (const id of lane.laneIds ?? []) out.add(id);
+  }
   for (const row of read.parked ?? []) if (parkShown(row, now)) out.add(row.laneId);
   return { lanes: out, known: read.more > 0 || read.parkedMore === true ? 'partial' : 'all' };
 }

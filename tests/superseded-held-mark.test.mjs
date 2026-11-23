@@ -16,7 +16,7 @@ const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const superseded = await import(moduleUrl('../convex/projectHostedSuperseded.ts'));
 const repair = await import(moduleUrl('../convex/projectLiveLineRepair.ts'));
 const liveLanes = await import(moduleUrl('../convex/projectHostedLiveLanes.ts'));
-const { needsCount } = await import(moduleUrl('../web/src/app/needs/count.ts'));
+const { needsCount, needsYouLanes } = await import(moduleUrl('../web/src/app/needs/count.ts'));
 const { baseMark } = await import(moduleUrl('../web/src/app/mark.ts'));
 const { lineStopCounts, lineStops } = await import(moduleUrl('../web/src/app/Line.tsx'));
 const previousEnvironment = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
@@ -419,4 +419,32 @@ test('incident replay 9b9057a9 (Lane 88671ba0): a composition-conflict hold whos
   const feed = await lineRead(f);
   assert.equal(feed.lanes[0].held, true);
   assert.equal(feed.lanes[0].fix, true, 'the line says it is held on the Lane’s own next step');
+});
+
+test('incident replay 9b9057a9 (Licence chain): a review hold on a four-Lane submission reaches Needs you once, with its approve action, and the line agrees', async t => {
+  const f = await finishFixture(t, { inputCount: 4 });
+  const state = await f.enqueue(f.request());
+  await holdWith(f, state, before => ({
+    observation: { ...before.observation, pendingReason: 'waiting-for-review' },
+    error: {
+      code: 'REVIEW_REQUIRED',
+      message: 'needs owner approval: protected paths scripts/forge-check.mjs',
+    },
+  }));
+  const [attention, feed] = await Promise.all([needsRead(f), lineRead(f)]);
+  assert.equal(needsCount(attention).n, 1, 'the owner is asked once for the one submission');
+  const row = attention.held.find(entry => entry.why === 'review');
+  assert.ok(row?.attemptId, 'with the exact attempt to approve');
+  assert.equal(
+    feed.lanes.filter(lane => lane.held && !lane.fix).length,
+    4,
+    'every Lane of it is held on the person',
+  );
+  // Every Lane of the one submission waits on the reader, not only the one the review row names: the owner saw a
+  // sibling as "Held · held" with no way to approve (Lane 106d1da6).
+  const ids = feed.lanes.map(lane => lane.laneId).sort();
+  assert.deepEqual([...row.laneIds].sort(), ids);
+  const waiting = needsYouLanes(attention, 0);
+  assert.deepEqual([...waiting.lanes].sort(), ids);
+  assert.equal(waiting.known, 'all');
 });
