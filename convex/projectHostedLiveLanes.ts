@@ -19,6 +19,7 @@ import { isPlanningUuid } from '../src/planning-id';
 import { presenceMayShare } from '../src/hosted-presence';
 import { saveFailureForViewer } from './projectHostedSaveStore';
 import type { TreeOverlap } from '../src/lanes-tree';
+import { supersededSummary } from '../src/hosted-overlap';
 
 /** One bounded indexed page, selected metadata only; no source objects or idle work. */
 
@@ -163,13 +164,14 @@ export const list = query({
         // Dormant: no record write (save, start, sync, landing) within the project's dormantAfterDays.
         const dormant = cutoff !== null && Date.parse(lane.at) <= cutoff;
         if ((view === 'live' && dormant) || (view === 'dormant' && !dormant)) continue;
-        const overlap =
-          dormant && view === 'dormant'
-            ? await ctx.db
-                .query('projectHostedOverlapLanes')
-                .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', lane.id))
-                .unique()
-            : undefined;
+        // One indexed point read per listed Lane, which also carries the supersede stamp (Item 3f70760d).
+        const overlapRow = await ctx.db
+          .query('projectHostedOverlapLanes')
+          .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', lane.id))
+          .unique();
+        const overlap = dormant && view === 'dormant' ? overlapRow : undefined;
+        // Same rule as `status`: a stamp for an older head means a later save made the Lane live again.
+        const superseded = overlapRow?.superseded?.laneHead === lane.head ? overlapRow.superseded : undefined;
         // Saved work with no landing stamp: ask the receipts (a lost completion tick leaves no stamp).
         const stamped = abandonClass(lane, overlap ?? null);
         const receipt =
@@ -256,6 +258,16 @@ export const list = query({
           landing: landing
             ? { submissionId: landing.submissionId, state: landing.phase, scope: 'intent' }
             : null,
+          ...(superseded
+            ? {
+                superseded: {
+                  by: superseded.by,
+                  receiptId: superseded.receiptId,
+                  at: superseded.at,
+                  summary: supersededSummary(superseded.by, superseded.receiptId),
+                },
+              }
+            : {}),
           ...stale,
           ...(tree
             ? {

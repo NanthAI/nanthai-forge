@@ -1137,3 +1137,33 @@ test('3f70760d: status by Lane id tells a superseded Lane from a live one, with 
   });
   assert.equal(await status(), undefined);
 });
+
+test('3f70760d: lanes lists a superseded Lane as superseded, like status, and a later save makes it live', async t => {
+  const f = await setup(t);
+  const agent = new HostedAgentTransport(
+    f.root,
+    { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    f.exchange,
+  );
+  await agent.dispatch('save', { message: 'split save' });
+  await f.settle(f.scheduled.find(item => item.name === 'projectConvexSource:dispatch').args.jobId);
+  const row0 = async () =>
+    (await agent.dispatch('lanes', {})).result.page.find(row => row.laneId === f.entry.laneId);
+  assert.equal((await row0()).superseded, undefined, 'a live Lane lists no successor');
+  const row = f.overlap(),
+    by = randomUUID(),
+    receiptId = randomUUID(),
+    at = '2026-11-20T12:00:00.000Z';
+  f.s.patch('projectHostedOverlapLanes', row._id, { superseded: { by, receiptId, laneHead: row.head, at } });
+  const listed = (await row0()).superseded;
+  const status = (await agent.dispatch('status', { laneId: f.entry.laneId })).result.superseded;
+  assert.deepEqual(listed, status, 'lanes and status say the same thing');
+  assert.equal(listed.by, by);
+  assert(listed.summary.startsWith(`superseded by Lane ${by} (receipt ${receiptId})`), listed.summary);
+  const tree = (await agent.dispatch('lanes', { view: 'tree' })).result.tree.join('\n');
+  assert(tree.includes('[superseded]'), tree);
+  f.s.patch('projectHostedOverlapLanes', row._id, {
+    superseded: { by, receiptId, laneHead: 'older-head', at },
+  });
+  assert.equal((await row0()).superseded, undefined, 'a stamp for an older head is a live Lane');
+});

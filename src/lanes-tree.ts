@@ -15,6 +15,7 @@ export type TreeLane = {
   lastSaveAt: string | null;
   landing: { state: string } | null;
   dormant?: boolean;
+  superseded?: { by: string };
   stackOn?: string | null;
   held?: string;
   overlaps?: TreeOverlap[];
@@ -23,23 +24,27 @@ export type TreeLane = {
 /** One word per Lane: new, saved, waiting, held, checking, ready, failed, landed (dormant appended). */
 export function treeState(lane: TreeLane) {
   const phase = lane.landing?.state;
-  const state = lane.held
-    ? 'held'
-    : phase === 'queued'
-      ? 'waiting'
-      : phase === 'terminal-failed'
-        ? 'failed'
-        : phase === 'checking' || phase === 'ready' || phase === 'landed'
-          ? phase
-          : lane.lastSaveAt
-            ? 'saved'
-            : 'new';
+  const state = lane.superseded
+    ? 'superseded'
+    : lane.held
+      ? 'held'
+      : phase === 'queued'
+        ? 'waiting'
+        : phase === 'terminal-failed'
+          ? 'failed'
+          : phase === 'checking' || phase === 'ready' || phase === 'landed'
+            ? phase
+            : lane.lastSaveAt
+              ? 'saved'
+              : 'new';
   return lane.dormant ? `${state}, dormant` : state;
 }
 
 function treeNext(lane: TreeLane, byId: ReadonlyMap<string, TreeLane>) {
   const state = treeState(lane).split(',')[0];
   if (state === 'landed') return 'none';
+  if (state === 'superseded')
+    return `abandon, or save to make it live: superseded by ${lane.superseded!.by.slice(0, 8)}`;
   if (state === 'failed') return 'fix, then land --save';
   if (state !== 'saved' && state !== 'new') return `status {"laneId":"${lane.laneId}"} names its wait`;
   if (lane.dormant) return 'resume or abandon: lanes {"view":"dormant"}';
