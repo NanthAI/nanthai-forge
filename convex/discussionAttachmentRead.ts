@@ -19,7 +19,7 @@ const contentType = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+(?:;[\x20-\x7e]*)?$/
 
 /** Permanent deletion retains comment headers. The current Item's durable
  * tombstone ends downloads even before the redaction sweep reaches those rows. */
-async function retainedItem(ctx: QueryCtx, project: Doc<'hostedProjects'>, itemId: string) {
+export async function retainedItem(ctx: QueryCtx, project: Doc<'hostedProjects'>, itemId: string) {
   if (project.workStore === 'records') {
     const item = await storeItem(ctx, project._id, itemId);
     return Boolean(item && !item.purged);

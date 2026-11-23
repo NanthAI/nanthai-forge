@@ -15,6 +15,7 @@ import { hrefFor } from '../app/paths';
 import type { LatestAction, ProfileRead } from '../../../src/person-days';
 import type { ListedProject } from './read';
 import { OwnDevices, Starred } from './PersonOwn';
+import { ReportKey } from '../app/ReportKey';
 
 const nf = new Intl.NumberFormat('en-US');
 const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
@@ -123,6 +124,9 @@ export function Person({
             >
               {asOthers ? 'See it as you do' : 'See it as others do'}
             </button>
+          ) : null}
+          {signedIn && signed?.state === 'ok' && !signed.data.self ? (
+            <ReportKey target={{ target: 'account', handle }} />
           ) : null}
         </div>
       </div>

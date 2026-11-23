@@ -7,6 +7,7 @@
 | `x friction-triage` | `frictionIds, status, reason?, laneId?, planningItemId?, id?, itemId?, operationId?` |
 | `save --decision` | `conversation?, target, decidedBy, what, why, decidedAt?, overrides?, supersedes?, delegation?, actor?, tool?, operationId?` |
 | `decisions` | `target?, cursor?, operationId?` |
+| `report-abuse` | `target, messageId?, planningItemId?, id?, itemId?, commentId?, handle?, reason, operationId?` |
 | `tests` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
 | `save --contract` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
 | `start` | `model?, outcome?, constraints?, intentId?, initialHead?, stackOn?, stackEntry?, planningItemId?, id?, itemId?, scope?, path?, open?, installScripts?, operationId?` |

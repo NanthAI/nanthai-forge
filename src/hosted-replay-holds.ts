@@ -145,6 +145,7 @@ export const replayBindings: Record<keyof typeof hostedAgentCommandSchemas, Bind
   'friction-triage': server,
   decide: server,
   decisions: read,
+  'report-abuse': server,
   tests: server,
   'confirm-tests': server,
   compose: server,

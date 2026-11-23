@@ -92,6 +92,7 @@ export const namedReads = [
   'comment-planning-item',
   'tick-planning-item',
   'preflight',
+  'report-abuse',
 ] as const;
 
 /** Actions of the removed native-owner mode (docs/agents/hosted-parity.md): each names the hosted

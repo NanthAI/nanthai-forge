@@ -165,6 +165,7 @@ export const projectPurgeTables = {
   projectLaneSnapshots: 'by_project_and_lane_and_seq',
   projectSavePurges: 'by_project_and_operation',
   planningReactions: 'by_project_and_item',
+  abuseReports: 'by_project',
 } as const satisfies Record<string, string | { index: string; scope: string }>;
 export type ProjectPurgeTable = keyof typeof projectPurgeTables;
 export const projectPurgeOrder = Object.keys(projectPurgeTables) as ProjectPurgeTable[];

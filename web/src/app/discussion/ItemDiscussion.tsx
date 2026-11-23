@@ -25,6 +25,7 @@ export default function ItemDiscussion({
       comments={comments}
       conversation={{ ...conversation, answer }}
       project={project}
+      reportProjectId={projectId}
       reactions={reactions}
       canWrite={canWrite}
       loading={loading}

@@ -177,13 +177,21 @@ export async function sendBoardAlerts(ctx: MutationCtx, alerts: BoardAlert[]) {
     });
 }
 
+/** Operator alert: the alert webhook (ntfy preset); `email` also mails the operator recipients in
+ * FORGE_ALERT_EMAIL_TO (comma-separated), the same secret the backup alert reads. */
 export const deliver = internalAction({
-  args: { subject: v.string(), text: v.string() },
+  args: { subject: v.string(), text: v.string(), email: v.optional(v.boolean()) },
   returns: v.null(),
-  handler: async (_ctx, input) => {
+  handler: async (_ctx, { email, ...input }) => {
+    const recipients = email
+      ? (process.env.FORGE_ALERT_EMAIL_TO ?? '')
+          .split(',')
+          .map(to => to.trim())
+          .filter(Boolean)
+      : [];
     const results = await deliverStallAlert(
       input,
-      { enabled: true, notifyAfterMinutes: 15, repeatAfterMinutes: 16, email: [], webhook: 'ntfy' },
+      { enabled: true, notifyAfterMinutes: 15, repeatAfterMinutes: 16, email: recipients, webhook: 'ntfy' },
       process.env,
     );
     if (results.length) console.log('board alert delivery', JSON.stringify(results));

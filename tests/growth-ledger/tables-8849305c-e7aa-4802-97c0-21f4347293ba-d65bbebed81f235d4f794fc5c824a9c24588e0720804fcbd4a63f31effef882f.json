@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "b6588425 line 2 report abuse: abuseReports is the operator review queue (one row per report, owner-approved one write per report); boardAudit cannot hold it (no index, immutable audit rows). report-abuse is the one CLI path to that queue; nothing existing reports to the operator, so nothing can go",
+  "date": "2026-11-23"
+}

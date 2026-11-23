@@ -3,7 +3,8 @@
 // in the project's place, no line, the account's places), bare (no rail, no line; before a first project) and the
 // public bar and column. Every control at first paint is a plain link or button; menus and sheets attach with the
 // behaviour layer (decisions.md, shared-base rule 3). Each frame has a skip link, one main landmark and the phone tabs.
-import type { FocusEvent, ReactNode } from 'react';
+import { lazy, Suspense, useState, type FocusEvent, type ReactNode } from 'react';
+import type { Id } from '../../../convex/_generated/dataModel';
 import { Avatar, Count, DockPerson, Menu, State, initials, type MenuAction } from '../ds';
 import { Rail } from '../ds/Rail';
 import { RailControls, useRailState } from '../ds/rail-state';
@@ -21,6 +22,9 @@ import {
   type ProjectRoute,
 } from './project-pages';
 import { followLink, navigate } from './router';
+
+// The report sheet loads only when someone opens it, so the shell's first paint carries none of it.
+const ReportSheet = lazy(() => import('./ReportAbuse').then(module => ({ default: module.ReportSheet })));
 
 export function A({
   href,
@@ -190,8 +194,20 @@ export function ProjectFrame(props: ProjectFrameProps) {
   );
 }
 
-function ProjectShell({ route, name, feed, needs, projects, controls, children }: ProjectFrameProps) {
+function ProjectShell({
+  route,
+  name,
+  feed,
+  needs,
+  projects,
+  controls,
+  children,
+  projectId,
+}: ProjectFrameProps) {
   const rail = useRailState();
+  const [reporting, setReporting] = useState(false);
+  // Report is offered to a signed-in viewer on someone else's project (Item b6588425).
+  const reportable = Boolean(projectId && controls.viewerHandle && controls.viewerHandle !== route.handle);
   const { pages } = useProjectPages()!;
   const address = hrefFor(route) + (typeof location === 'undefined' ? '' : location.search);
   const held = needs?.n;
@@ -213,6 +229,12 @@ function ProjectShell({ route, name, feed, needs, projects, controls, children }
       label: 'All projects',
       onAction: () => navigate(hrefFor({ frame: 'account', place: 'projects' })),
     },
+    ...(reportable
+      ? ([
+          'separator',
+          { id: 'report', label: 'Report this project', onAction: () => setReporting(true) },
+        ] as const)
+      : []),
   ];
   const tabPlaces: readonly ProjectPlace[] = ['needs', 'lanes', 'plan', 'code'];
   return (
@@ -281,6 +303,15 @@ function ProjectShell({ route, name, feed, needs, projects, controls, children }
           ))}
           <ProjectMore icon={<PlaceIcon name="more" size={20} />} />
         </nav>
+        {reporting && projectId ? (
+          <Suspense fallback={null}>
+            <ReportSheet
+              projectId={projectId as Id<'hostedProjects'>}
+              target={{ target: 'project' }}
+              close={() => setReporting(false)}
+            />
+          </Suspense>
+        ) : null}
       </div>
     </RailControls.Provider>
   );

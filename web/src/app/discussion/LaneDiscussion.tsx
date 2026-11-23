@@ -34,6 +34,7 @@ export default function LaneDiscussion({
         title="Thread"
         comments={[]}
         project={route}
+        reportProjectId={projectId}
         canWrite={false}
         conversation={{ ...conversation, answer }}
       />

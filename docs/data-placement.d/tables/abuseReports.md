@@ -1,0 +1,1 @@
+| `abuseReports` | Abuse reports in the operator review queue: target, reported account, reason (at most 1,000 characters), an excerpt of what was reported (at most 1,000 characters) and review state. One row per report; at most 10 or 30 a day per reporting account. Never returned by a public function. | Activity, bounded by the report limit; removed with a purged project |

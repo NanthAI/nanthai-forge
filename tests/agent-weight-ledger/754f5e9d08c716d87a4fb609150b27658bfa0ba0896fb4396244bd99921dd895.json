@@ -1,0 +1,4 @@
+{
+  "issue": "b6588425",
+  "reason": "Report abuse (Item b6588425 line 2): new record action report-abuse sends one existing hosted-record mutation (abuseReports:report) per report or replay, like comment-planning-item; no new startup, install or network path. The Item fixture (tests/abuse-reports.test.mjs) covers its calls: one queue-row write, the shared limiter's counter write and bounded point reads. Re-measured on main with Item 6b7d5a79's MCP ceiling; module, byte and CPU ceilings unchanged."
+}

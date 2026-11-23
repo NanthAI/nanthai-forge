@@ -1378,6 +1378,7 @@
     "records",
     "recover-apply",
     "reopen",
+    "report-abuse",
     "request-approval",
     "resolve",
     "revert",
@@ -1400,235 +1401,235 @@
   ],
   "report": {
     "actual": {
-      "installedBytes": 138905642,
-      "versionCpuMs": 54.622,
+      "installedBytes": 140476013,
+      "versionCpuMs": 33.114,
       "versionModules": 19,
-      "helpCpuMs": 56.541,
+      "helpCpuMs": 33.797,
       "helpModules": 19,
-      "mcpCpuMs": 514.092,
+      "mcpCpuMs": 310.813,
       "mcpModules": 827,
-      "toolListBytes": 5775,
-      "cliAgentStatusCpuMs": 357,
+      "toolListBytes": 5782,
+      "cliAgentStatusCpuMs": 172,
       "cliAgentStatusCpuModules": 170,
-      "cliAgentPlanningCpuMs": 342,
+      "cliAgentPlanningCpuMs": 179,
       "cliAgentPlanningCpuModules": 170,
-      "cliAgentSaveCpuMs": 312,
+      "cliAgentSaveCpuMs": 194,
       "cliAgentSaveCpuModules": 170,
-      "cliAgentLandCpuMs": 334,
-      "cliAgentLandCpuModules": 174,
-      "calibrationCpuMs": 79.493
+      "cliAgentLandCpuMs": 259,
+      "cliAgentLandCpuModules": 175,
+      "calibrationCpuMs": 44.584
     },
     "samples": {
       "version": [
         {
-          "cpuMs": 54.426,
+          "cpuMs": 31.868,
           "modules": 19,
-          "maxRssKiB": 54352
+          "maxRssKiB": 58608
         },
         {
-          "cpuMs": 57.025,
+          "cpuMs": 33.114,
           "modules": 19,
-          "maxRssKiB": 54448
+          "maxRssKiB": 58416
         },
         {
-          "cpuMs": 54.553,
+          "cpuMs": 31.77,
           "modules": 19,
-          "maxRssKiB": 54400
+          "maxRssKiB": 55920
         },
         {
-          "cpuMs": 54.622,
+          "cpuMs": 35.331,
           "modules": 19,
-          "maxRssKiB": 54416
+          "maxRssKiB": 55920
         },
         {
-          "cpuMs": 57.655,
+          "cpuMs": 33.412,
           "modules": 19,
-          "maxRssKiB": 54288
+          "maxRssKiB": 55648
         }
       ],
       "help": [
         {
-          "cpuMs": 56.541,
+          "cpuMs": 33.797,
           "modules": 19,
-          "maxRssKiB": 54176
+          "maxRssKiB": 54496
         },
         {
-          "cpuMs": 57.387,
+          "cpuMs": 31.912,
           "modules": 19,
-          "maxRssKiB": 54192
+          "maxRssKiB": 54448
         },
         {
-          "cpuMs": 52.77,
+          "cpuMs": 34.388,
+          "modules": 19,
+          "maxRssKiB": 54496
+        },
+        {
+          "cpuMs": 34.151,
           "modules": 19,
           "maxRssKiB": 54352
         },
         {
-          "cpuMs": 57.828,
+          "cpuMs": 33.617,
           "modules": 19,
-          "maxRssKiB": 54320
-        },
-        {
-          "cpuMs": 53.381,
-          "modules": 19,
-          "maxRssKiB": 54384
+          "maxRssKiB": 54416
         }
       ],
       "mcp": [
         {
-          "cpuMs": 494.155,
+          "cpuMs": 310.813,
           "modules": 827,
-          "maxRssKiB": 148000
+          "maxRssKiB": 149360
         },
         {
-          "cpuMs": 514.092,
+          "cpuMs": 310.199,
           "modules": 827,
-          "maxRssKiB": 148416
+          "maxRssKiB": 150096
         },
         {
-          "cpuMs": 513.064,
+          "cpuMs": 307.358,
           "modules": 827,
-          "maxRssKiB": 148288
+          "maxRssKiB": 149888
         },
         {
-          "cpuMs": 559.096,
+          "cpuMs": 312.645,
           "modules": 827,
-          "maxRssKiB": 147856
+          "maxRssKiB": 158752
         },
         {
-          "cpuMs": 550.691,
+          "cpuMs": 358.648,
           "modules": 827,
-          "maxRssKiB": 148544
+          "maxRssKiB": 158992
         }
       ],
       "cliAgentStatusCpu": [
         {
-          "cpuMs": 372,
+          "cpuMs": 172,
           "modules": 170,
-          "maxRssKiB": 115152
+          "maxRssKiB": 117360
         },
         {
-          "cpuMs": 357,
+          "cpuMs": 171,
           "modules": 170,
-          "maxRssKiB": 115488
+          "maxRssKiB": 117408
         },
         {
-          "cpuMs": 328,
+          "cpuMs": 171,
           "modules": 170,
-          "maxRssKiB": 114352
+          "maxRssKiB": 115664
         },
         {
-          "cpuMs": 337,
+          "cpuMs": 175,
           "modules": 170,
-          "maxRssKiB": 115296
+          "maxRssKiB": 115456
         },
         {
-          "cpuMs": 416,
+          "cpuMs": 172,
           "modules": 170,
-          "maxRssKiB": 114128
+          "maxRssKiB": 117312
         }
       ],
       "cliAgentPlanningCpu": [
         {
-          "cpuMs": 358,
+          "cpuMs": 178,
           "modules": 170,
-          "maxRssKiB": 115264
+          "maxRssKiB": 115888
         },
         {
-          "cpuMs": 336,
+          "cpuMs": 179,
           "modules": 170,
-          "maxRssKiB": 115440
+          "maxRssKiB": 116560
         },
         {
-          "cpuMs": 342,
+          "cpuMs": 179,
           "modules": 170,
-          "maxRssKiB": 115360
+          "maxRssKiB": 117488
         },
         {
-          "cpuMs": 347,
+          "cpuMs": 187,
           "modules": 170,
-          "maxRssKiB": 114864
+          "maxRssKiB": 116352
         },
         {
-          "cpuMs": 323,
+          "cpuMs": 220,
           "modules": 170,
-          "maxRssKiB": 114048
+          "maxRssKiB": 116112
         }
       ],
       "cliAgentSaveCpu": [
         {
-          "cpuMs": 318,
+          "cpuMs": 191,
           "modules": 170,
-          "maxRssKiB": 114496
+          "maxRssKiB": 115744
         },
         {
-          "cpuMs": 305,
+          "cpuMs": 220,
           "modules": 170,
-          "maxRssKiB": 113968
+          "maxRssKiB": 116256
         },
         {
-          "cpuMs": 315,
+          "cpuMs": 188,
           "modules": 170,
-          "maxRssKiB": 114704
+          "maxRssKiB": 115824
         },
         {
-          "cpuMs": 312,
+          "cpuMs": 194,
           "modules": 170,
-          "maxRssKiB": 114896
+          "maxRssKiB": 117872
         },
         {
-          "cpuMs": 282,
+          "cpuMs": 214,
           "modules": 170,
-          "maxRssKiB": 114080
+          "maxRssKiB": 116048
         }
       ],
       "cliAgentLandCpu": [
         {
-          "cpuMs": 334,
-          "modules": 174,
-          "maxRssKiB": 120176
+          "cpuMs": 191,
+          "modules": 175,
+          "maxRssKiB": 120864
         },
         {
-          "cpuMs": 328,
-          "modules": 174,
-          "maxRssKiB": 119536
+          "cpuMs": 216,
+          "modules": 175,
+          "maxRssKiB": 121200
         },
         {
-          "cpuMs": 404,
-          "modules": 174,
-          "maxRssKiB": 119776
+          "cpuMs": 288,
+          "modules": 175,
+          "maxRssKiB": 121552
         },
         {
-          "cpuMs": 358,
-          "modules": 174,
-          "maxRssKiB": 118496
+          "cpuMs": 269,
+          "modules": 175,
+          "maxRssKiB": 122032
         },
         {
-          "cpuMs": 334,
-          "modules": 174,
-          "maxRssKiB": 118688
+          "cpuMs": 259,
+          "modules": 175,
+          "maxRssKiB": 121184
         }
       ],
       "calibration": [
         {
-          "cpuMs": 79.493
+          "cpuMs": 42.881
         },
         {
-          "cpuMs": 73.413
+          "cpuMs": 43.537
         },
         {
-          "cpuMs": 72.589
+          "cpuMs": 44.449
         },
         {
-          "cpuMs": 72.789
+          "cpuMs": 44.584
         },
         {
-          "cpuMs": 102.387
+          "cpuMs": 44.985
         },
         {
-          "cpuMs": 83.208
+          "cpuMs": 45.013
         },
         {
-          "cpuMs": 80.971
+          "cpuMs": 55.464
         }
       ]
     },
@@ -2511,7 +2512,6 @@
         "dist/cli-bundle-agent-session-HASH.js",
         "dist/cli-bundle-agent-slug-HASH.js",
         "dist/cli-bundle-agent-turn-work-HASH.js",
-        "dist/cli-bundle-agent-verbs-HASH.js",
         "dist/cli-bundle-api-HASH.js",
         "dist/cli-bundle-auth-store-HASH.js",
         "dist/cli-bundle-autonomy-policy-HASH.js",
@@ -2569,6 +2569,7 @@
         "dist/cli-bundle-hosted-agent-journal-HASH.js",
         "dist/cli-bundle-hosted-agent-submission-wait-HASH.js",
         "dist/cli-bundle-hosted-agent-transport-HASH.js",
+        "dist/cli-bundle-hosted-agent-version-HASH.js",
         "dist/cli-bundle-hosted-agent-wait-local-HASH.js",
         "dist/cli-bundle-hosted-capabilities-carried-main-HASH.js",
         "dist/cli-bundle-hosted-capabilities-early-HASH.js",
@@ -2678,7 +2679,6 @@
         "dist/cli-bundle-agent-session-HASH.js",
         "dist/cli-bundle-agent-slug-HASH.js",
         "dist/cli-bundle-agent-turn-work-HASH.js",
-        "dist/cli-bundle-agent-verbs-HASH.js",
         "dist/cli-bundle-api-HASH.js",
         "dist/cli-bundle-auth-store-HASH.js",
         "dist/cli-bundle-autonomy-policy-HASH.js",
@@ -2736,6 +2736,7 @@
         "dist/cli-bundle-hosted-agent-journal-HASH.js",
         "dist/cli-bundle-hosted-agent-submission-wait-HASH.js",
         "dist/cli-bundle-hosted-agent-transport-HASH.js",
+        "dist/cli-bundle-hosted-agent-version-HASH.js",
         "dist/cli-bundle-hosted-agent-wait-local-HASH.js",
         "dist/cli-bundle-hosted-capabilities-carried-main-HASH.js",
         "dist/cli-bundle-hosted-capabilities-early-HASH.js",
@@ -2845,7 +2846,6 @@
         "dist/cli-bundle-agent-session-HASH.js",
         "dist/cli-bundle-agent-slug-HASH.js",
         "dist/cli-bundle-agent-turn-work-HASH.js",
-        "dist/cli-bundle-agent-verbs-HASH.js",
         "dist/cli-bundle-api-HASH.js",
         "dist/cli-bundle-auth-store-HASH.js",
         "dist/cli-bundle-autonomy-policy-HASH.js",
@@ -2903,6 +2903,7 @@
         "dist/cli-bundle-hosted-agent-journal-HASH.js",
         "dist/cli-bundle-hosted-agent-submission-wait-HASH.js",
         "dist/cli-bundle-hosted-agent-transport-HASH.js",
+        "dist/cli-bundle-hosted-agent-version-HASH.js",
         "dist/cli-bundle-hosted-agent-wait-local-HASH.js",
         "dist/cli-bundle-hosted-capabilities-carried-main-HASH.js",
         "dist/cli-bundle-hosted-capabilities-early-HASH.js",
@@ -3014,7 +3015,6 @@
         "dist/cli-bundle-agent-session-HASH.js",
         "dist/cli-bundle-agent-slug-HASH.js",
         "dist/cli-bundle-agent-turn-work-HASH.js",
-        "dist/cli-bundle-agent-verbs-HASH.js",
         "dist/cli-bundle-api-HASH.js",
         "dist/cli-bundle-auth-store-HASH.js",
         "dist/cli-bundle-autonomy-policy-HASH.js",
@@ -3072,6 +3072,7 @@
         "dist/cli-bundle-hosted-agent-journal-HASH.js",
         "dist/cli-bundle-hosted-agent-submission-wait-HASH.js",
         "dist/cli-bundle-hosted-agent-transport-HASH.js",
+        "dist/cli-bundle-hosted-agent-version-HASH.js",
         "dist/cli-bundle-hosted-agent-wait-local-HASH.js",
         "dist/cli-bundle-hosted-capabilities-carried-main-HASH.js",
         "dist/cli-bundle-hosted-capabilities-early-HASH.js",
@@ -3242,6 +3243,7 @@
       "records",
       "recover-apply",
       "reopen",
+      "report-abuse",
       "request-approval",
       "resolve",
       "revert",
@@ -3380,8 +3382,8 @@
     "node": "v24.22.1",
     "platform": "darwin",
     "arch": "arm64",
-    "peakChildRssKiB": 148544,
-    "wallMs": 11526,
-    "maxRssKiB": 69808
+    "peakChildRssKiB": 158992,
+    "wallMs": 15890,
+    "maxRssKiB": 64704
   }
 }

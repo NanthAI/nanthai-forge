@@ -86,6 +86,7 @@ export const hostedAgentRecordActions = [
   'friction-triage',
   'decide',
   'decisions',
+  'report-abuse',
 ] as const;
 /** Project policy: one Convex call each, served before capability discovery. Not advertised;
  * the server enforces owner authority on set-policy. */

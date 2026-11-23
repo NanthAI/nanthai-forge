@@ -37,6 +37,7 @@ import {
   type ProjectPage,
 } from './read';
 import { Person } from './Person';
+import { ReportKey } from '../app/ReportKey';
 import type { VisitorHistory } from '../app/code/code-data';
 
 const PublicCode = lazy(() => import('./PublicCode'));
@@ -683,6 +684,7 @@ function Project({
               Open workspace
             </a>
           ) : null}
+          {signedIn && !owner && id ? <ReportKey projectId={id} target={{ target: 'project' }} /> : null}
         </div>
       </div>
       <div className="glance">

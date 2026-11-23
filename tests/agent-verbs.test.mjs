@@ -113,6 +113,7 @@ const rows = [
   ['planning', null],
   ['put-planning-item', null],
   ['comment-planning-item', null],
+  ['report-abuse', null],
 ];
 
 function captured(stream) {

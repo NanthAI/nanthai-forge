@@ -19,6 +19,7 @@ GitHub login without a conflict mark.
 | Saves | 300 | 3,000 |
 | New projects | 3 a day, 10 active | 50 a day, 100 active |
 | Board notes and coordination messages and handoffs, combined | 100 notes, 24 KB | 1,000 notes, 240 KB |
+| Abuse reports | 10 | 30 |
 
 Coordination status, acks, claims and releases, and an owner importing its own
 friction history (a migration can be thousands of records), only meet the

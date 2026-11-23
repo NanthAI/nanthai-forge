@@ -28,6 +28,8 @@ export const ACCOUNT_LIMITS = {
     start: { label: 'Lane starts and new Intents', new: 60, established: 750, shards: 4 },
     save: { label: 'saves', new: 300, established: 3_000, shards: 16 },
     project: { label: 'new projects', new: 3, established: 50, shards: 1 },
+    /** Owner decision 2026-11-22 (comment 68a3784a): abuse reports 10 / 30 (convex/abuseReports.ts). */
+    report: { label: 'abuse reports', new: 10, established: 30, shards: 1 },
   },
   activeProjects: { new: 10, established: 100 },
 } as const;

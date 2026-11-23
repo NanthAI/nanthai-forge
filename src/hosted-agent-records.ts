@@ -86,7 +86,9 @@ export async function executeHostedRecords(
         ? 'projectHostedFriction:capture'
         : action === 'friction-triage'
           ? 'projectHostedFriction:triage'
-          : 'projectHostedDecisions:decide';
+          : action === 'report-abuse'
+            ? 'abuseReports:report'
+            : 'projectHostedDecisions:decide';
     const result = await transport.mutation(endpoint, { request: canonicalPayload(command) });
     return {
       schema: 1,

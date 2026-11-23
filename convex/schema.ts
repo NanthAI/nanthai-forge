@@ -16,6 +16,7 @@ import { hostedOverlapTables } from './projectHostedOverlapFields';
 import { boardTables } from './projectBoardFields';
 import { laneSnapshotTables } from './projectLaneSnapshotFields';
 import { abuseLimitTables } from './abuseLimitFields';
+import { abuseReportTables } from './abuseReportFields';
 import { connectedApps } from './agentConnectionFields';
 import { hostedFrictionTables } from './projectHostedFrictionFields';
 import { selfMetricBillTables } from './projectSelfMetricBillFields';
@@ -1075,6 +1076,7 @@ export default defineSchema({
   ...boardTables,
   ...laneSnapshotTables,
   ...abuseLimitTables,
+  ...abuseReportTables,
   ...hostedDecisionTables,
   ...hostedTrustTables,
   imports: defineTable(jobFields)

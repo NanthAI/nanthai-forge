@@ -16,6 +16,11 @@ const issueActions = [
   ['tick-planning-item', 'itemId', { line: 1, evidence: 'Synthetic evidence' }],
   ['lanes', 'planningItemId', {}],
   ['friction-triage', 'planningItemId', { frictionIds: [randomUUID()], status: 'planned' }],
+  [
+    'report-abuse',
+    'planningItemId',
+    { target: 'comment', commentId: randomUUID(), reason: 'Synthetic report' },
+  ],
 ];
 
 test('every Issue-taking agent action is covered by the alias contract', () => {

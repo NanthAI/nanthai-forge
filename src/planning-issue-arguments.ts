@@ -24,7 +24,7 @@ export function planningIssueArguments(action: string, input: Record<string, unk
       ? 'id'
       : ['put-planning-item', 'comment-planning-item', 'tick-planning-item'].includes(action)
         ? 'itemId'
-        : ['start', 'lanes', 'friction-triage'].includes(action)
+        : ['start', 'lanes', 'friction-triage', 'report-abuse'].includes(action)
           ? 'planningItemId'
           : undefined;
   if (!target) return input;

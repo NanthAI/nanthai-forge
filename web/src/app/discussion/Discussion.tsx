@@ -5,8 +5,11 @@
 // reads and writes. Who wrote a comment is the server-recorded account by public identity only (Item 2fb69177): `@handle`
 // and "person", or `handle/run`, "agent" and the model its session declared; an older typed label is marked as not
 // verified. An agent's words sit behind a thin rule (DESIGN.md rule 33), so the two kinds read apart.
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { Band, Key, Menu } from '../../ds';
+import { useContext, useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { Band, DockPerson, Key, Menu } from '../../ds';
+import type { Id } from '../../../../convex/_generated/dataModel';
+import { ReportKey } from '../ReportKey';
+import type { ReportTarget } from '../ReportAbuse';
 import { By } from './By';
 import { ConversationEntry } from './ConversationEntry';
 import type { Answer, ThreadEntry } from './conversation';
@@ -49,6 +52,8 @@ export type DiscussionProps = {
   now?: Date;
   project?: WhoProject | undefined;
   title?: 'Comments' | 'Thread';
+  /** Offers Report on each comment and message (Item b6588425) to a signed-in viewer who did not write it. */
+  reportProjectId?: Id<'hostedProjects'> | undefined;
   conversation?: {
     entries: readonly ThreadEntry[];
     loading: boolean;
@@ -75,7 +80,9 @@ export function Discussion({
   project,
   title = 'Comments',
   conversation,
+  reportProjectId,
 }: DiscussionProps) {
+  const report = reportProjectId ? { reportProjectId } : {};
   const all = threads([
     ...comments,
     ...(conversation?.entries.map((row): DiscussionComment => ({
@@ -150,6 +157,7 @@ export function Discussion({
             now={now}
             project={project}
             {...conversationActions}
+            {...report}
           />
           {replies.map(reply => (
             <Comment
@@ -161,6 +169,7 @@ export function Discussion({
               now={now}
               project={project}
               {...conversationActions}
+              {...report}
             />
           ))}
         </div>
@@ -209,6 +218,7 @@ export function Discussion({
             now={now}
             project={project}
             {...conversationActions}
+            {...report}
             {...(onReact ? { onReact } : {})}
             {...(canWrite && onPost && !thread.root.system && !thread.root.conversation
               ? { onReply: () => setReplying(thread.root.id) }
@@ -224,6 +234,7 @@ export function Discussion({
               now={now}
               project={project}
               {...conversationActions}
+              {...report}
               {...(onReact ? { onReact } : {})}
             />
           ))}
@@ -251,6 +262,7 @@ function Comment({
   onReact,
   onReply,
   answer,
+  reportProjectId,
 }: {
   comment: DiscussionComment;
   reply?: boolean;
@@ -261,9 +273,19 @@ function Comment({
   onReact?: (commentId: string, kind: ReactionKind) => Promise<void>;
   onReply?: () => void;
   answer?: Answer;
+  reportProjectId?: Id<'hostedProjects'> | undefined;
 }) {
   const by = writer(comment);
   const row = comment.conversation;
+  const viewer = useContext(DockPerson);
+  // Report is for what someone else wrote; a Forge-written note has no writer to report.
+  const reportable =
+    reportProjectId && viewer && !comment.system && (row ? row.actor : comment.author) !== viewer;
+  const reportTarget: ReportTarget | null = !reportable
+    ? null
+    : row
+      ? { target: 'message', messageId: row.id }
+      : { target: 'comment', planningItemId: comment.itemId, commentId: comment.id };
   const review = row ? null : readReview(comment.text);
   const counts = row ? [] : reactionsFor(reactions, comment.id);
   // A system note (a landing receipt) takes no reaction or reply: nobody wrote it.
@@ -305,7 +327,7 @@ function Comment({
       ) : (
         <SafeMarkdown text={comment.text} idPrefix={comment.id} />
       )}
-      {counts.length || react || onReply ? (
+      {counts.length || react || onReply || reportTarget ? (
         <div className="acts">
           {counts.map(entry => (
             <button
@@ -340,6 +362,7 @@ function Comment({
               Reply
             </Key>
           ) : null}
+          {reportTarget ? <ReportKey projectId={reportProjectId} target={reportTarget} /> : null}
         </div>
       ) : null}
     </article>
