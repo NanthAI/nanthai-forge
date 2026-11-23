@@ -4,7 +4,7 @@
 // state shows only when that read came back with no rows. Read state is per account (convex/projectLandingReads.ts),
 // so every device and the CLI agree; nothing here holds a landing or counts toward Needs you.
 import { useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Band, Key, Region } from '../../ds';
+import { Group, Key, Region } from '../../ds';
 import { A } from '../frames';
 import { RecordedWho } from '../RecordedWho';
 import { recordedIdentity, type WhoProject } from '../who-links';
@@ -302,8 +302,13 @@ export function HistoryView(props: HistoryViewProps) {
             </div>
           ) : null}
           {groupByDay(rows, new Date().toDateString()).map(group => (
-            <div key={group.title} role="list" aria-label={group.title}>
-              <Band title={group.title} count={group.rows.length} />
+            <Group
+              key={group.title}
+              id={`lanes.history.${group.title}`}
+              role="list"
+              title={group.title}
+              count={group.rows.length}
+            >
               {group.rows.map(row => (
                 <HistoryRow
                   key={row.receiptId}
@@ -318,7 +323,7 @@ export function HistoryView(props: HistoryViewProps) {
                   onMark={props.onMark}
                 />
               ))}
-            </div>
+            </Group>
           ))}
           {empty ? (
             <Empty

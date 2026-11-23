@@ -4,9 +4,15 @@
   .agent-guidance .guide { display: grid; gap: var(--s-3); padding: var(--s-3) var(--gut) var(--s-4); }
   .agent-guidance .field { display: grid; gap: 5px; }
   .agent-guidance .field .help { font-size: var(--t-meta); color: var(--text-3); }
-  .agent-guidance .guide .inp { max-width: var(--m-prose); min-height: 8em; }
+  .agent-guidance .guide .inp { max-width: var(--m-wide); min-height: 8em; }
   .agent-guidance .guide .inp[readonly] { background: transparent; }
   .agent-guidance .btns { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); align-items: center; }
   .agent-guidance .meta { color: var(--text-2); font-size: var(--t-meta); }
   .agent-guidance .pf { margin: 0; color: var(--text-2); font-size: var(--t-small); }
+  /* On a wide region the text takes the left and its save, its count and what went wrong sit beside it. */
+  @container (min-width: 880px) {
+    .agent-guidance .guide { grid-template-columns: minmax(0, 1.5fr) minmax(240px, 1fr); column-gap: var(--s-8); align-items: start; }
+    .agent-guidance .guide > .field { grid-column: 1; grid-row: 1 / span 3; }
+    .agent-guidance .guide > :not(.field) { grid-column: 2; }
+  }
 }

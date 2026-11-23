@@ -161,6 +161,53 @@ export function Band({
   );
 }
 
+/** A group of rows under a heading that folds, for a list grouped by state or by person ("Held 1, stopped until its
+ * agent or holder acts"). The heading is a real heading with the whole band as its key; the fold is remembered on this
+ * browser per `id` (`useFold`) and costs no request. Folded, the band keeps its title and count and drops the hint. */
+export function Group({
+  id,
+  title,
+  count,
+  hint,
+  needs,
+  label,
+  role,
+  children,
+}: {
+  /** The fold's id, kept per browser: name the screen and the group ("lanes.held"). */
+  id: string;
+  title: string;
+  count?: number;
+  hint?: ReactNode;
+  needs?: boolean;
+  /** The accessible name of the list the rows form, when it differs from the title. */
+  label?: string;
+  /** The rows' own role (`list` when each is a `listitem`). */
+  role?: 'list';
+  children?: ReactNode;
+}) {
+  const [open, toggle] = useFold(id, true);
+  // An id never holds a space (aria-controls reads it as several), whatever the caller names the group.
+  const bodyId = `fold-${id.replace(/\s+/g, '-')}`;
+  return (
+    <div className={cx('grp', !open && 'shut')} data-fold="">
+      <div className={cx('band', 'fold', needs && 'needs')}>
+        <h3 className="bt">
+          <button type="button" aria-expanded={open} aria-controls={bodyId} onClick={toggle}>
+            <span className="tw" aria-hidden="true" />
+            {title}
+          </button>
+        </h3>
+        {count === undefined ? null : <Count n={count} hot={needs} />}
+        {hint ? <span className="hint">{hint}</span> : null}
+      </div>
+      <div id={bodyId} role={role} aria-label={role ? (label ?? title) : undefined}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 /** The default row columns: a mark, the name taking the room, then the facts at their own width. */
 export const ROW_COLS = 'auto minmax(0, 1fr) auto auto';
 

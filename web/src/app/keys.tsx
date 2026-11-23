@@ -84,6 +84,7 @@ function useGroups(go: Go): PaletteGroup[] {
 const keyList: readonly [string, string][] = [
   ['⌘K or Ctrl+K', 'Go to or run'],
   ['1 to 6', 'Needs me, Lanes, Plan, Code, Stats, Settings'],
+  ['Hold Alt or Option', 'Show the numbers beside the sidebar places'],
   ['[', 'Collapse or expand the sidebar'],
   ['→ or ↓', 'Enter the pages of a collapsed sidebar place'],
   ['↑ or ↓', 'Move between pages in the flyout'],

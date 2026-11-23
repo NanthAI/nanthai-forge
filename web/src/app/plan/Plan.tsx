@@ -1267,18 +1267,20 @@ function ItemPage({
       {toast}
       {row ? (
         <Region title="Item">
-          <dl className="kv">
-            {facts.map(([label, value]) => (
-              <FactRow key={label} label={label}>
-                {value}
-              </FactRow>
-            ))}
-          </dl>
-          {projectId ? (
-            <Suspense fallback={<div className="quietline">Loading the comments…</div>}>
-              <ItemDiscussion key={row.id} projectId={projectId} itemId={row.id} project={route} />
-            </Suspense>
-          ) : null}
+          <div className="plan-item-cols">
+            <dl className="kv">
+              {facts.map(([label, value]) => (
+                <FactRow key={label} label={label}>
+                  {value}
+                </FactRow>
+              ))}
+            </dl>
+            {projectId ? (
+              <Suspense fallback={<div className="quietline">Loading the comments…</div>}>
+                <ItemDiscussion key={row.id} projectId={projectId} itemId={row.id} project={route} />
+              </Suspense>
+            ) : null}
+          </div>
         </Region>
       ) : row === null && shelved ? (
         <Region title="Item">

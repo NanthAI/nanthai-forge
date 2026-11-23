@@ -21,7 +21,20 @@ export {
 } from './marks';
 export type { ItemGlyph, Kind, StateKind, StateWord, WhoProps } from './marks';
 export { useFirstStop } from './first-stop';
-export { Band, Chip, CodeBox, Key, PhoneTabs, Prose, Region, Row, Standing, Table, useFold } from './parts';
+export {
+  Band,
+  Chip,
+  CodeBox,
+  Group,
+  Key,
+  PhoneTabs,
+  Prose,
+  Region,
+  Row,
+  Standing,
+  Table,
+  useFold,
+} from './parts';
 export type { Column, KeyProps, RegionProps, StandingCell, StandingProps } from './parts';
 export { Dock, DockPerson, Menu, Palette, ReorderList, Sheet, useDockLayout } from './interactive';
 export type {

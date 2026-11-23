@@ -227,6 +227,12 @@ test('What landed narrowed to one file: bounded steps, kept rows, exact address,
   await lane.waitFor();
   assert.equal(await lane.getAttribute('href'), '/ada/atlas/lanes/lane-300');
   assert.match(await receipt.textContent(), /6 min 0 s from land/);
+  // Files says how many and lists them under it, never a bare ellipsis (Item 0485fe7d).
+  assert.match(await receipt.locator('.kv').textContent(), /Files1 file, listed below/);
+  assert.deepEqual(
+    await receipt.getByRole('list', { name: 'Files it changed' }).locator('li a').allTextContents(),
+    [PATH],
+  );
   const handles = cells => cells.locator('.who.handle > .mono').allTextContents();
   assert.deepEqual(await handles(list(deep).locator('a.hrow > .who')), ['mara/amber-fox', '@mara']);
   assert.deepEqual(await handles(receipt.locator('.kv')), ['mara/amber-fox']);

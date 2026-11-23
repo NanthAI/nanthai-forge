@@ -35,6 +35,7 @@ export function AgentGuidanceView({
         scope="project"
         title="For this project"
         hint="Included in every agent’s briefing, after the repo’s AGENTS.md or CLAUDE.md."
+        example="keep changes small, run npm run verify before finishing, never touch generated files."
         value={guidance.project}
         editable={guidance.projectEditable}
         save={save}
@@ -43,6 +44,7 @@ export function AgentGuidanceView({
         scope="personal"
         title="Just for me"
         hint="Only for agents you start, in every project."
+        example="answer in my language, explain the plan before a big refactor, ask before deleting files."
         value={guidance.personal}
         editable
         save={save}
@@ -55,6 +57,7 @@ function GuidanceRegion({
   scope,
   title,
   hint,
+  example,
   value,
   editable,
   save,
@@ -62,6 +65,8 @@ function GuidanceRegion({
   scope: Scope;
   title: string;
   hint: string;
+  /** What a text of this kind could say, shown while it is empty; each text has its own. */
+  example: string;
   value: string;
   editable: boolean;
   save: (input: Attempt) => Promise<void>;
@@ -107,9 +112,7 @@ function GuidanceRegion({
             readOnly={!editable}
             aria-describedby={`${id}-hint`}
             placeholder={
-              editable
-                ? 'For example: keep changes small, run npm run verify before finishing, never touch generated files.'
-                : 'No guidance has been written for this project.'
+              editable ? `For example: ${example}` : 'No guidance has been written for this project.'
             }
             onChange={event => {
               setText(event.target.value);

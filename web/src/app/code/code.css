@@ -5,6 +5,14 @@
   .code-h, .code-f { height: max(440px, calc(100dvh - var(--top-h) - var(--code-head, 150px))); }
   .code-h { grid-template: minmax(0, 1fr) / minmax(0, 1fr) 400px; }
   .code-f { grid-template: minmax(0, 1fr) / 250px minmax(0, 1fr) 340px; }
+  /* What landed fills the window: the page is the window's height, the list and the receipt each scroll inside their
+     own pane and the frame takes what the head leaves, never a guessed height (Item 0485fe7d). */
+  @media (min-width: 861px) {
+    .shell > main:has(> .code-h) { height: calc(100dvh - var(--top-h)); }
+    .shell > main > .code-h { height: auto; flex: 1 1 0; min-height: 440px; }
+  }
+  /* A wide window gives the receipt more of it (its message and file paths are text too). */
+  @media (min-width: 1440px) { .code-h { grid-template-columns: minmax(0, 1fr) clamp(400px, 32vw, 560px); } }
   .code-h > .pane, .code-f > .pane { display: flex; flex-direction: column; }
   .code-h .body, .code-f .body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
   /* 96px holds "Yesterday" and "9 Nov 2025" in the mono on one line. */

@@ -14,6 +14,9 @@
   .rail-link[aria-current] { color: var(--text); font-weight: var(--w-bold); }
   .rail-link[data-marked], .page-link[aria-current] { color: var(--text); background: var(--surface-3); font-weight: var(--w-bold); box-shadow: inset 2px 0 0 var(--brand); }
   .rail-link kbd { opacity: .55; border: 0; background: transparent; }
+  /* A place's number is a key, not a count: hidden until Alt is held (Rail.tsx), so the two never read alike. */
+  .rail-link kbd, .rail-fly-title kbd { visibility: hidden; }
+  .rail[data-keys] :is(.rail-link kbd, .rail-fly-title kbd) { visibility: visible; }
   .rail-label { transition: opacity var(--d-quick) var(--ease-out); }
   .rail :is(a, button):focus-visible { outline-offset: -2px; }
   .rail-foot { border-top: var(--rule) solid var(--line); }

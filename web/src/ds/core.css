@@ -204,6 +204,15 @@
   .shell > .rail { grid-area: rail; }
   .shell > main, .shell > .main { grid-area: main; min-width: 0; }
   .shell > .line.phone, .shell > .tabs { display: none; }
+  /* A page fills the window: its last region runs to the bottom edge instead of stopping where its rows end. The
+     page scrolls as one; a region that must scroll inside itself sets its own height (Code's What landed). */
+  @media (min-width: 861px) {
+    .shell > main { display: flex; flex-direction: column; min-height: calc(100dvh - var(--top-h)); }
+    .shell > main > :is(.region, .panes):last-child { flex: 1 0 auto; }
+    /* A screen's own wrapper (the Plan, Agents, Project pages) passes the height on to its last region. */
+    .shell > main > :last-child:not(.region, .panes, .dock, .head, .notice, .pf) { flex: 1 0 auto; display: flex; flex-direction: column; }
+    .shell > main > :last-child:not(.region, .panes, .dock, .head, .notice, .pf) > :is(.region, .panes):last-child { flex: 1 0 auto; }
+  }
   /* Keep four readable stops even when the project name is long. */
   .shell > .top .line { min-width: 360px; }
   .shell[data-frame="bare"] { grid-template: "top" var(--top-h) "main" minmax(0, 1fr) / minmax(0, 1fr); }

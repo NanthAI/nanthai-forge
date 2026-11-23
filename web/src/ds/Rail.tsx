@@ -116,6 +116,23 @@ export function Rail({
 }) {
   const state = useRailFlyout(shut, address);
   const list = useRef<HTMLDivElement>(null);
+  const nav = useRef<HTMLElement>(null);
+  // The place numbers are keys, not counts: they are drawn only while Alt (Option) is held (rail.css), and the Keys
+  // sheet says so. Set on the element itself, so a press redraws nothing and asks for nothing.
+  useEffect(() => {
+    const show = (on: boolean) => nav.current?.toggleAttribute('data-keys', on);
+    const down = (event: globalThis.KeyboardEvent) => event.key === 'Alt' && show(true);
+    const up = (event: globalThis.KeyboardEvent) => event.key === 'Alt' && show(false);
+    const off = () => show(false);
+    addEventListener('keydown', down);
+    addEventListener('keyup', up);
+    addEventListener('blur', off);
+    return () => {
+      removeEventListener('keydown', down);
+      removeEventListener('keyup', up);
+      removeEventListener('blur', off);
+    };
+  }, []);
   useLayoutEffect(() => {
     if (!state.fly) return;
     const group = document.getElementById(state.fly.id);
@@ -168,7 +185,7 @@ export function Rail({
   };
   const toggleLabel = shut ? 'Expand sidebar' : 'Collapse sidebar';
   return (
-    <nav className="rail" aria-label={label} data-fly-ready={state.ready || undefined}>
+    <nav ref={nav} className="rail" aria-label={label} data-fly-ready={state.ready || undefined}>
       <div className="rail-list" id="sidebar-places" ref={list}>
         {heading ? <div className="rail-heading">{heading}</div> : null}
         {places.map(place => (

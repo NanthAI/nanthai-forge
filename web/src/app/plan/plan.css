@@ -62,6 +62,9 @@
   .plan .plan-over .plan-gh { padding: 0; min-width: 0; }
   .plan .plan-over .plan-gn { font-size: var(--t-small); color: var(--text); }
   /* Initiative page: its Items beside its progress and About; one column on a phone. */
+  /* An Item's facts beside its comments on a wide region, so the thread uses the width and the facts stay in view; one
+     column below (the container is the Item's region). */
+  @container (min-width: 880px) { .plan .plan-item-cols { display: grid; grid-template-columns: minmax(260px, 360px) minmax(0, 1fr); align-items: start; } .plan .plan-item-cols > .kv { grid-template-columns: 96px minmax(0, 1fr); } .plan .plan-item-cols > .discussion { border-left: var(--rule) solid var(--line); } }
   .plan-ini .plan-ini-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 320px); gap: var(--s-4); align-items: start; }
   .plan-ini .fig .roll.lg { width: 100%; }
   .plan-ini .plan-about { padding: 0 var(--gut) var(--s-3); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--t-small); }

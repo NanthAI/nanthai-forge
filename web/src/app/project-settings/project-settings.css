@@ -23,7 +23,13 @@
   .project-settings .store { display: grid; gap: var(--s-3); padding: var(--s-3) var(--gut) var(--s-4); }
   .project-settings .pick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); }
   .project-settings .pick-name { min-width: 0; overflow-wrap: anywhere; }
-  .project-settings .store p { margin: 0; max-width: var(--m-prose); }
+  .project-settings .store p { margin: 0; max-width: var(--m-wide); }
+  /* On a wide region the words sit beside the picker and what it chose. */
+  @container (min-width: 880px) {
+    .project-settings .store { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); column-gap: var(--s-8); align-items: start; }
+    .project-settings .store > p:first-child { grid-column: 1; grid-row: 1 / span 4; }
+    .project-settings .store > :not(p:first-child) { grid-column: 2; }
+  }
   .project-settings .quietline code { overflow-wrap: anywhere; }
   .project-settings .proj-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-3); }
   @media (max-width: 560px) {

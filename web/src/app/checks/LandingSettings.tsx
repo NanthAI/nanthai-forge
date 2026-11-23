@@ -33,11 +33,18 @@ export function LandingSettings(props: {
             </span>
             <span className="tw" aria-hidden="true" />
           </summary>
-          <div className="pad gs-stack">
-            <p className="meta t2">{setting.does}</p>
-            <p className="meta t2">{setting.costs}</p>
+          <div className="pad beside">
+            <div className="gs-stack">
+              <p className="meta t2">{setting.does}</p>
+              <p className="meta t2">{setting.costs}</p>
+              <p className="meta">
+                <a className="lk" href={setting.docs}>
+                  How it works, in the docs
+                </a>
+              </p>
+            </div>
             {owner ? (
-              <>
+              <div className="gs-stack">
                 <p className="meta t2">
                   To change it, run this in the project with VALUE as {setting.values}.{' '}
                   {changeWords[setting.change]}
@@ -46,13 +53,8 @@ export function LandingSettings(props: {
                   label={`The command that changes ${setting.title}`}
                   text={settingCommand(setting)}
                 />
-              </>
+              </div>
             ) : null}
-            <p className="meta">
-              <a className="lk" href={setting.docs}>
-                How it works, in the docs
-              </a>
-            </p>
           </div>
         </details>
       ))}

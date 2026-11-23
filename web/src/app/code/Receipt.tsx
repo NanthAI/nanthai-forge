@@ -122,13 +122,17 @@ export function Receipt({
           <dd>{evidence === undefined ? '…' : toMain ? `${toMain} from land` : 'not reported'}</dd>
           <dt>Files</dt>
           <dd>
-            {changes.loading && !changes.value
-              ? '…'
-              : changes.error
-                ? changes.error
-                : changes.value?.available === false
-                  ? (changes.value.reason ?? 'not reported')
-                  : plural(changes.value?.total ?? 0, 'file')}
+            {changes.loading && !changes.value ? (
+              <span className="t2" role="status">
+                Reading the changed files…
+              </span>
+            ) : changes.error ? (
+              changes.error
+            ) : changes.value?.available === false ? (
+              (changes.value.reason ?? 'The changed files were not reported')
+            ) : (
+              `${plural(changes.value?.total ?? 0, 'file')}${list.length ? ', listed below' : ''}`
+            )}
           </dd>
         </dl>
         {shown.length ? (

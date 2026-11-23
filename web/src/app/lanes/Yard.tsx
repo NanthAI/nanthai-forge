@@ -18,7 +18,7 @@
 // it; the yard writes nothing. Return opens the first Review or View conflict, only with focus on the yard or the page
 // itself, never while typing or on a control.
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Avatar, Band, State } from '../../ds';
+import { Avatar, Group, State } from '../../ds';
 import { useReadsAsleep } from '../../live-reads';
 import { A } from '../frames';
 import { navigate } from '../router';
@@ -142,8 +142,13 @@ export function Yard({
     if (!enter) return;
     const onKey = (event: KeyboardEvent) => {
       if (!yardEnter(event, yard.current)) return;
+      // The first Review or View conflict the reader can see: a row in a folded group is not one.
+      const shown = [...(yard.current?.querySelectorAll<HTMLAnchorElement>('a[data-enter]') ?? [])].find(
+        link => link.offsetParent !== null,
+      );
+      if (!shown) return;
       event.preventDefault();
-      navigate(enter);
+      navigate(shown.getAttribute('href') ?? enter);
     };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
@@ -169,19 +174,21 @@ export function Yard({
         const inBand = rows.filter(row => row.band === band);
         if (!inBand.length) return null;
         return (
-          <div key={band} className="grp" role="list" aria-label={bandTitles[band].title}>
-            <Band
-              title={bandTitles[band].title}
-              count={inBand.length}
-              hint={
-                band === 'queue' && checking?.passed
-                  ? `Checking ${checking.count.toLocaleString('en')} · ${passedWaiting(checking.passed)}`
-                  : band === 'held' && needsKnown !== 'all'
-                    ? heldUnsure
-                    : bandTitles[band].hint
-              }
-              needs={band === 'needs'}
-            />
+          <Group
+            key={band}
+            id={`lanes.open.${band}`}
+            role="list"
+            title={bandTitles[band].title}
+            count={inBand.length}
+            hint={
+              band === 'queue' && checking?.passed
+                ? `Checking ${checking.count.toLocaleString('en')} · ${passedWaiting(checking.passed)}`
+                : band === 'held' && needsKnown !== 'all'
+                  ? heldUnsure
+                  : bandTitles[band].hint
+            }
+            needs={band === 'needs'}
+          >
             {inBand.map(row => {
               const shares = sharesHref ? sharesOf?.(row.laneId) : undefined;
               return (
@@ -210,7 +217,7 @@ export function Yard({
                 </div>
               );
             })}
-          </div>
+          </Group>
         );
       })}
     </div>
@@ -337,7 +344,11 @@ function LaneLine({
         </span>
         <span className="sr">. {where}</span>
         {action ? (
-          <A className={action.rec ? 'btn sm rec' : 'btn sm'} href={action.href}>
+          <A
+            className={action.rec ? 'btn sm rec' : 'btn sm'}
+            href={action.href}
+            data-enter={action.enter || undefined}
+          >
             <span>{action.label}</span>
             {keyHint ? <kbd aria-hidden="true">↵</kbd> : null}
             <span className="sr">: {row.title}</span>

@@ -7,7 +7,7 @@
   details.lset > summary .sub { display: block; color: var(--text-2); font-size: var(--t-meta); font-weight: var(--w-regular); }
   details.lset > summary .val { display: flex; gap: var(--s-2); align-items: baseline; min-width: 0; font-size: var(--t-small); }
   details.lset > summary .val > .t3 { font-size: var(--t-meta); }
-  details.lset > .pad { padding-top: 0; max-width: var(--m-prose); }
+  details.lset > .pad { padding-top: 0; }
   details.lset p { margin: 0; }
   @media (hover: hover) and (pointer: fine) { details.lset > summary:hover { background: var(--hover); } details.lset > summary:hover .tw { color: var(--text); } }
   @container (max-width: 620px) {

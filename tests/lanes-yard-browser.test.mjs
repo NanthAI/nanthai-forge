@@ -111,13 +111,43 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
       async t => {
         for (const width of [1440, 390]) {
           const page = await open(t, { width, height: 1000 }, '?stall');
-          const queue = page.getByRole('list', { name: 'In the landing queue' });
-          assert.match(await queue.locator('.band').textContent(), /Checking 4 · 6 passed, waiting/);
+          const group = page.locator('.grp', {
+            has: page.getByRole('heading', { name: 'In the landing queue' }),
+          });
+          const queue = group.getByRole('list', { name: 'In the landing queue' });
+          assert.match(await group.locator('.band').textContent(), /Checking 4 · 6 passed, waiting/);
           const waiting = queue.locator('.actn .st[data-st="waiting"]');
           assert.deepEqual(await waiting.allTextContents(), Array(6).fill('Waiting its turn'));
         }
       },
     );
+
+    await t.test('0485fe7d: a group heading folds its rows, and the fold stays on this browser', async t => {
+      const page = await open(t, DESK);
+      const key = page.getByRole('button', { name: 'In the landing queue' });
+      const group = page.locator('.grp', {
+        has: page.getByRole('heading', { name: 'In the landing queue' }),
+      });
+      assert.equal(await key.getAttribute('aria-expanded'), 'true');
+      assert.ok((await group.locator('.ln').count()) > 0);
+      await key.click();
+      assert.equal(await key.getAttribute('aria-expanded'), 'false');
+      assert.equal(await group.locator('.ln').first().isVisible(), false, 'folded rows are not shown');
+      assert.equal(await group.locator('.band .cnt').isVisible(), true, 'the count stays while folded');
+      assert.equal(await page.evaluate(() => localStorage.getItem('forge.fold.lanes.open.queue')), 'shut');
+      // The whole band is the key, and another group is unaffected.
+      const others = page.locator('.grp:not(.shut) .ln');
+      assert.ok((await others.count()) > 0, 'another group stays open');
+      assert.equal(await others.first().isVisible(), true);
+      await page.reload();
+      await page.locator('.yard .band').first().waitFor();
+      assert.equal(
+        await page.getByRole('button', { name: 'In the landing queue' }).getAttribute('aria-expanded'),
+        'false',
+      );
+      await page.getByRole('button', { name: 'In the landing queue' }).click();
+      assert.equal(await group.locator('.ln').first().isVisible(), true);
+    });
 
     await t.test('held for approval, replaced Lanes below the live one, and the wait named', async t => {
       const page = await open(t, DESK);
