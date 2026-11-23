@@ -22,6 +22,7 @@ import {
   withChildren,
   CODE_DIR_DEPTH,
   CODE_TOUCHED_PAIRS,
+  type CodeSide,
 } from '../src/code-tree';
 import { safeRelative } from '../src/safe-relative';
 import { parseNativeState, type NativeFile } from '../src/state/format';
@@ -32,7 +33,7 @@ const state = /^[a-f0-9]{64}$/;
 type Listed = {
   available: boolean;
   reason?: string;
-  paths?: { path: string; status: string }[];
+  paths?: { path: string; status: string; before?: CodeSide; after?: CodeSide }[];
 };
 
 const readArgs = {
@@ -41,13 +42,15 @@ const readArgs = {
   state: v.string(),
   /** open: a folder and its ancestors, or a file with its folders and first page; more: the next page of one
    * folder; page: the next page of one file; changes: what changed from `base` to `state`; touched: which of up to
-   * eight landings (their base and head States) changed `path`. */
+   * eight landings (their base and head States) changed `path`; entry: a file's blob and mode in the State, with no
+   * bytes read (a Markdown image's address). */
   want: v.union(
     v.literal('open'),
     v.literal('more'),
     v.literal('page'),
     v.literal('changes'),
     v.literal('touched'),
+    v.literal('entry'),
   ),
   path: v.optional(v.string()),
   base: v.optional(v.string()),
@@ -127,7 +130,12 @@ async function readCode(ctx: ActionCtx, input: ReadInput, actor: string): Promis
     const listed = (await review(input.base ?? input.state)) as Listed;
     if (!listed.available)
       return JSON.stringify({ state: input.state, available: false, reason: listed.reason });
-    return JSON.stringify({ state: input.state, base: input.base, ...changedPaths(listed.paths ?? []) });
+    // A signed-in member also gets each file's two blobs, so the page can draw the diff from storage (no visitor can).
+    return JSON.stringify({
+      state: input.state,
+      base: input.base,
+      ...changedPaths(listed.paths ?? [], undefined, actor !== ''),
+    });
   }
   const result = await renderCheckpointSource(
     ctx,
@@ -175,6 +183,12 @@ async function openCode(
       ...(submodule ? { submodule } : {}),
     };
   };
+  if (input.want === 'entry') {
+    const entry = fileAt(files, path);
+    return {
+      file: entry ? { available: true, path, blob: entry.blob, mode: entry.mode } : { available: false },
+    };
+  }
   if (input.want === 'page') return { file: await page() };
   // A folder comes with its subfolders' first pages; `ahead` names the folder whose next level is listed.
   if (input.want === 'more')

@@ -2,13 +2,19 @@
 // A landing's receipt beside What landed: its title and message, who landed it, its check, how long it took to reach
 // main and the files it changed. Two reads, only for the landing the reader opens: its evidence (the existing landings
 // read: its Lane and Item) and what it changed (one source comparison).
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 import { Avatar, State } from '../../ds';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
 import type { CodeProps } from './CodePlace';
 import { between, landedAt, landedBy, plural, titleOf } from './code-words';
-import { useChanges, useEvidence, type CodeHistoryRow, type ProjectId } from './code-data';
+import {
+  useChanges,
+  useEvidence,
+  VisitorCodeContext,
+  type CodeHistoryRow,
+  type ProjectId,
+} from './code-data';
 
 /** Who landed it, as the mock draws it (Item 3968a655): the square and one handle, `@person` or `person/run`, cut
  * at the end with the full handle in its label. "an agent" when people are hidden; "not reported" when unknown. */
@@ -44,6 +50,8 @@ export function Receipt({
   const evidence = useEvidence(projectId, row);
   const changes = useChanges(projectId, row);
   const [all, setAll] = useState(false);
+  // A signed-out visitor cannot download file versions, so their button opens the files at this landing.
+  const visitor = Boolean(useContext(VisitorCodeContext));
   const back = (
     <A className="lk hide-dt" href={listHref}>
       Everything that landed
@@ -166,7 +174,10 @@ export function Receipt({
           </ul>
         ) : null}
         <div className="pad btns" style={{ borderTop: 'var(--rule) solid var(--line)' }}>
-          <A className="btn" href={atHead()}>
+          <A
+            className="btn"
+            href={visitor ? atHead() : `${hrefFor({ ...route, rest: row.receiptId })}?view=changes`}
+          >
             Read the code here
           </A>
           {evidence?.laneId ? (

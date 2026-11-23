@@ -13,10 +13,22 @@
   .code .add .c::before { content: "+"; left: -2px; color: var(--passed); position: absolute; }
   .code .del .c::before { content: "−"; left: -2px; color: var(--failed); position: absolute; }
   .code .hunk { color: var(--text-3); background: var(--surface-2); }
-  .code .kw { color: var(--syn-kw); }
-  .code .str { color: var(--syn-str); }
-  .code .fn { color: var(--syn-fn); }
-  .code .cm { color: var(--text-3); }
+  .code .kw, .md pre .kw { color: var(--syn-kw); }
+  .code .str, .md pre .str { color: var(--syn-str); }
+  .code .fn, .md pre .fn { color: var(--syn-fn); }
+  .code .nu, .md pre .nu { color: var(--syn-nu); }
+  .code .ty, .md pre .ty { color: var(--syn-ty); }
+  .code .cm, .md pre .cm { color: var(--text-3); }
+  /* Side by side: removed on the left, added on the right, each half wraps inside itself (Item 8e847a17). */
+  .code.split .l { grid-template-columns: 38px minmax(0, 1fr) 38px minmax(0, 1fr); min-width: 100%; }
+  .code.split .l.hunk { grid-template-columns: minmax(0, 1fr); }
+  .code.split .c { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .code.split .l > :nth-child(3) { border-left: var(--rule) solid var(--line); }
+  .code.split .removed { background: var(--del-bg); }
+  .code.split .added { background: var(--add-bg); }
+  .code.split .gap { background: var(--surface-2); }
+  .code.split .c.removed::before { content: "−"; left: -2px; color: var(--failed); position: absolute; }
+  .code.split .c.added::before { content: "+"; left: -2px; color: var(--passed); position: absolute; }
   .fstat { font-family: var(--font-mono); font-size: 12px; white-space: nowrap; }
   .fstat .a { color: var(--passed); }
   .fstat .d { color: var(--failed); }

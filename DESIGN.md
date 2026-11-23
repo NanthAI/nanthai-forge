@@ -42,6 +42,8 @@ colors:
   syn-kw: "#8fb4e8"
   syn-str: "#b9c98a"
   syn-fn: "#d6c08c"
+  syn-nu: "#c6a5e6"
+  syn-ty: "#7fcfc4"
   mark-warm: "#ffb347"
   mark-teal: "#23cbff"
   band: "#ff6b3d"

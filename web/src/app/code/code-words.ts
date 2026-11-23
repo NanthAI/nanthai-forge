@@ -68,3 +68,24 @@ export function between(from: string | null | undefined, to: string | null | und
 }
 export const short = (state: string) => state.slice(0, 8);
 export const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+
+/** The repository path a Markdown file's relative link or image names, read from the folder of the file that holds it:
+ * `./a`, `../b` and a leading `/` (the repository root) resolve; a reference that climbs above the root, or names no
+ * path, is null. A `?query` or `#fragment` is dropped. */
+export function repoPathFrom(file: string, reference: string): string | null {
+  let target: string;
+  try {
+    target = decodeURIComponent(reference.split(/[?#]/)[0] ?? '');
+  } catch {
+    return null;
+  }
+  if (!target) return null;
+  const parts = target.startsWith('/') ? [] : file.split('/').slice(0, -1);
+  for (const part of target.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      if (!parts.pop()) return null;
+    } else parts.push(part);
+  }
+  return parts.length ? parts.join('/') : null;
+}

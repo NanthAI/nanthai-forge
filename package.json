@@ -19,7 +19,11 @@
         {
           "name": "format",
           "script": "format:check",
-          "fix": ["npm", "run", "format"],
+          "fix": [
+            "npm",
+            "run",
+            "format"
+          ],
           "inputs": [
             "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}",
             ".oxfmtrc.json",
@@ -29,7 +33,18 @@
         {
           "name": "lint",
           "script": "lint",
-          "inputs": ["src/**", "web/src/**", "convex/**", "site/**", "tests/**", ".oxlintrc.json", "scripts/oxc.mjs", "scripts/lint/**", "package.json", "package-lock.json"]
+          "inputs": [
+            "src/**",
+            "web/src/**",
+            "convex/**",
+            "site/**",
+            "tests/**",
+            ".oxlintrc.json",
+            "scripts/oxc.mjs",
+            "scripts/lint/**",
+            "package.json",
+            "package-lock.json"
+          ]
         },
         {
           "name": "documents",
@@ -47,7 +62,11 @@
         },
         {
           "name": "package installed-byte ceiling",
-          "command": ["node", "scripts/package-ceilings.mjs", "--installed-bytes"],
+          "command": [
+            "node",
+            "scripts/package-ceilings.mjs",
+            "--installed-bytes"
+          ],
           "packageFiles": true,
           "inputs": [
             "src/**",
@@ -325,6 +344,8 @@
   "devDependencies": {
     "@clerk/react": "6.17.3",
     "@convex-dev/auth": "2.0.0",
+    "@pierre/diffs": "1.7.1",
+    "@pierre/highlights": "0.5.2",
     "@react-aria/optimize-locales-plugin": "2.1.0",
     "@types/node": "22.20.0",
     "@types/react": "19.3.0",

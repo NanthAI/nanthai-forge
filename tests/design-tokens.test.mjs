@@ -57,6 +57,9 @@ const text = [
   'stale',
 ];
 const shapes = ['series', 'act', 'k-person'];
+// Syntax colours (Item 8e847a17) are text in the code reader and in diffs: 4.5:1 on a plain, an added and a removed line.
+const syntax = ['syn-kw', 'syn-str', 'syn-fn', 'syn-nu', 'syn-ty'];
+const codeLines = ['surface', 'add-bg', 'del-bg'];
 
 for (const [name, theme] of [
   ['dark', dark],
@@ -66,6 +69,8 @@ for (const [name, theme] of [
     const misses = [];
     for (const fg of text)
       for (const bg of surfaces) if (ratio(theme, fg, bg) < 4.5) misses.push(`--${fg} on --${bg}`);
+    for (const fg of syntax)
+      for (const bg of codeLines) if (ratio(theme, fg, bg) < 4.5) misses.push(`--${fg} on --${bg}`);
     for (const fg of shapes) if (ratio(theme, fg, 'surface') < 3) misses.push(`--${fg} on --surface`);
     if (ratio(theme, 'on-brand', 'brand') < 4.5) misses.push('--on-brand on --brand');
     if (ratio(theme, 'on-person', 'k-person') < 4.5) misses.push('--on-person on --k-person');

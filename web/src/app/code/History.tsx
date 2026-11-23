@@ -12,6 +12,7 @@ import { useSearch } from '../router';
 import { RegionBoundary, type CodeProps } from './CodePlace';
 import { ago, landedAt, landedBy, pathHref, plural, timelinePath, titleOf } from './code-words';
 import { PathBar, PathFoot, PathNotice, pathSentence } from './FileHistory';
+import { Changes } from './Changes';
 import { LandedBy, Receipt } from './Receipt';
 import { useCodeReceipt, useHistory, type CodeHistoryRow } from './code-data';
 import { useFileHistory } from './use-file-history';
@@ -44,6 +45,9 @@ export function History(props: CodeProps) {
   const [cli, setCli] = useState(false);
   const args = JSON.stringify(path ? { op: 'log', path, limit: 50 } : { op: 'log', limit: 50 });
   const command = `nforge agent . history '${args.replace(/'/g, "'\\''")}'`;
+  // "Read the code here" on a receipt opens the landing's own diff first (Item 8e847a17).
+  if (route.rest && !route.rest.startsWith('red/') && !path && search.get('view') === 'changes')
+    return <Changes {...props} row={selected} loading={loading || receipt.loading} />;
   return (
     <>
       <Head trail={crumbsFor(route, projectName)} sentence={sentence}>

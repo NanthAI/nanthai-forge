@@ -268,3 +268,43 @@ test('What landed narrows to one file only by its ?path= address, and its links 
   );
   assert.equal(words.pathHref('/ada/atlas/code', null), '/ada/atlas/code');
 });
+
+test('a signed-in member’s landing changes carry each file’s two blobs; a visitor’s carry only path and status', () => {
+  const side = blob => ({ blob, mode: 'file', size: 9 });
+  const paths = [
+    { path: 'a', status: 'unchanged', before: side('x'), after: side('x') },
+    { path: 'b', status: 'modified', before: side('1'), after: side('2') },
+    { path: 'c', status: 'added', before: null, after: side('3') },
+    { path: 'd', status: 'deleted', before: side('4'), after: null },
+  ];
+  assert.deepEqual(changedPaths(paths, undefined, true).changes, [
+    {
+      path: 'b',
+      status: 'modified',
+      before: { blob: '1', mode: 'file' },
+      after: { blob: '2', mode: 'file' },
+    },
+    { path: 'c', status: 'added', before: null, after: { blob: '3', mode: 'file' } },
+    { path: 'd', status: 'deleted', before: { blob: '4', mode: 'file' }, after: null },
+  ]);
+  assert.deepEqual(
+    changedPaths(paths).changes.map(change => Object.keys(change)),
+    [
+      ['path', 'status'],
+      ['path', 'status'],
+      ['path', 'status'],
+    ],
+  );
+});
+
+test('a Markdown file’s relative link resolves inside the repository and never above its root', () => {
+  const { repoPathFrom } = words;
+  assert.equal(repoPathFrom('docs/guide/a.md', 'b.md'), 'docs/guide/b.md');
+  assert.equal(repoPathFrom('docs/guide/a.md', './img/x.png'), 'docs/guide/img/x.png');
+  assert.equal(repoPathFrom('docs/guide/a.md', '../concepts.md#top'), 'docs/concepts.md');
+  assert.equal(repoPathFrom('docs/guide/a.md', '/README.md'), 'README.md');
+  assert.equal(repoPathFrom('README.md', 'docs/a%20b.md?plain=1'), 'docs/a b.md');
+  assert.equal(repoPathFrom('docs/a.md', '../../escape.md'), null, 'above the root');
+  assert.equal(repoPathFrom('a.md', ''), null);
+  assert.equal(repoPathFrom('a.md', '%E0%A4%A'), null, 'a broken escape names nothing');
+});

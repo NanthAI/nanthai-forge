@@ -1,6 +1,6 @@
 # Pinned npm dependency license inventory
 
-Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 412 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
+Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 436 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
 
 The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Apache-2.0 license](https://github.com/get-convex/convex-backend/blob/precompiled-2026-09-28-5c7cb5b/LICENSE.md), not the npm client license. Its bundled native dependencies are outside this npm inventory; [native license coverage](native-dependency-licenses.md) records the inspected pins and remaining gaps. Forge's own boundaries are in [the licensing map](../LICENSE.md).
 
@@ -117,6 +117,11 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/@peculiar/asn1-x509-post-quantum | 2.11.1 | MIT | development |
 | node_modules/@peculiar/utils | 2.0.3 | MIT | development |
 | node_modules/@peculiar/x509 | 2.2.0 | MIT | development |
+| node_modules/@pierre/diffs | 1.7.1 | apache-2.0 | development |
+| node_modules/@pierre/highlights | 0.5.2 | apache-2.0 | development |
+| node_modules/@pierre/patches | 0.0.1 | apache-2.0 | development |
+| node_modules/@pierre/theme | 2.1.0 | apache-2.0 | development |
+| node_modules/@pierre/theming | 1.0.2 | apache-2.0 | development |
 | node_modules/@react-aria/optimize-locales-plugin | 2.1.0 | Undeclared | development |
 | node_modules/@react-types/shared | 3.37.0 | Apache-2.0 | development |
 | node_modules/@rolldown/binding-android-arm-eabi | 1.2.9 | MIT | development, optional |
@@ -135,6 +140,15 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/@rolldown/binding-win32-arm64-msvc | 1.2.9 | MIT | development, optional |
 | node_modules/@rolldown/binding-win32-x64-msvc | 1.2.9 | MIT | development, optional |
 | node_modules/@rolldown/pluginutils | 1.0.1 | MIT | development |
+| node_modules/@shikijs/core | 4.6.0 | MIT | development |
+| node_modules/@shikijs/core/node_modules/hast-util-to-html | 9.0.7 | MIT | development |
+| node_modules/@shikijs/engine-javascript | 4.6.0 | MIT | development |
+| node_modules/@shikijs/engine-oniguruma | 4.6.0 | MIT | development |
+| node_modules/@shikijs/langs | 4.6.0 | MIT | development |
+| node_modules/@shikijs/primitive | 4.6.0 | MIT | development |
+| node_modules/@shikijs/themes | 4.6.0 | MIT | development |
+| node_modules/@shikijs/types | 4.6.0 | MIT | development |
+| node_modules/@shikijs/vscode-textmate | 10.1.0 | MIT | development |
 | node_modules/@simplewebauthn/browser | 14.0.0 | MIT | development |
 | node_modules/@simplewebauthn/server | 14.1.0 | MIT | development |
 | node_modules/@swc/helpers | 0.5.24 | Apache-2.0 | development |
@@ -208,6 +222,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/dequal | 2.0.3 | MIT | runtime |
 | node_modules/detect-libc | 2.1.2 | Apache-2.0 | development |
 | node_modules/devlop | 1.1.0 | MIT | development |
+| node_modules/diff | 9.0.0 | BSD-3-Clause | development |
 | node_modules/dunder-proto | 1.0.1 | MIT | runtime |
 | node_modules/ee-first | 1.1.1 | MIT | runtime |
 | node_modules/encodeurl | 2.0.0 | MIT | runtime |
@@ -239,10 +254,12 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/gopd | 1.2.0 | MIT | runtime |
 | node_modules/has-symbols | 1.1.0 | MIT | runtime |
 | node_modules/hasown | 2.0.4 | MIT | runtime |
+| node_modules/hast-util-to-html | 9.0.5 | MIT | development |
 | node_modules/hast-util-to-jsx-runtime | 2.3.6 | MIT | development |
 | node_modules/hast-util-whitespace | 3.0.0 | MIT | development |
 | node_modules/hono | 4.13.8 | MIT | runtime |
 | node_modules/html-url-attributes | 3.0.1 | MIT | development |
+| node_modules/html-void-elements | 3.0.0 | MIT | development |
 | node_modules/http-errors | 2.0.1 | MIT | runtime |
 | node_modules/iconv-lite | 0.7.3 | MIT | runtime |
 | node_modules/ignore | 7.0.9 | MIT | runtime |
@@ -274,6 +291,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/lightningcss-win32-arm64-msvc | 1.33.0 | MPL-2.0 | development, optional |
 | node_modules/lightningcss-win32-x64-msvc | 1.33.0 | MPL-2.0 | development, optional |
 | node_modules/longest-streak | 3.1.0 | MIT | development |
+| node_modules/lru_map | 0.4.1 | MIT | development |
 | node_modules/markdown-table | 3.0.4 | MIT | development |
 | node_modules/math-intrinsics | 1.1.0 | MIT | runtime |
 | node_modules/mdast-util-find-and-replace | 3.0.2 | MIT | development |
@@ -331,6 +349,8 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/object-inspect | 1.13.4 | MIT | runtime |
 | node_modules/on-finished | 2.4.1 | MIT | runtime |
 | node_modules/once | 1.4.0 | ISC | runtime |
+| node_modules/oniguruma-parser | 0.12.2 | MIT | development |
+| node_modules/oniguruma-to-es | 4.3.6 | MIT | development |
 | node_modules/oxfmt | 0.74.0 | MIT | development |
 | node_modules/oxlint | 1.89.0 | MIT | development |
 | node_modules/parse-entities | 4.0.2 | MIT | development |
@@ -360,6 +380,9 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/react-markdown | 10.1.0 | MIT | development |
 | node_modules/react-stately | 3.51.0 | Apache-2.0 | development |
 | node_modules/reflect-metadata | 0.2.2 | Apache-2.0 | development |
+| node_modules/regex | 6.1.0 | MIT | development |
+| node_modules/regex-recursion | 6.0.2 | MIT | development |
+| node_modules/regex-utilities | 2.3.0 | MIT | development |
 | node_modules/remark-gfm | 4.0.1 | MIT | development |
 | node_modules/remark-parse | 11.0.0 | MIT | development |
 | node_modules/remark-rehype | 11.1.2 | MIT | development |
@@ -374,6 +397,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/setprototypeof | 1.2.0 | ISC | runtime |
 | node_modules/shebang-command | 2.0.0 | MIT | runtime |
 | node_modules/shebang-regex | 3.0.0 | MIT | runtime |
+| node_modules/shiki | 4.6.0 | MIT | development |
 | node_modules/side-channel | 1.1.1 | MIT | runtime |
 | node_modules/side-channel-list | 1.0.1 | MIT | runtime |
 | node_modules/side-channel-map | 1.0.1 | MIT | runtime |

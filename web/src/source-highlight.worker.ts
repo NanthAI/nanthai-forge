@@ -11,7 +11,7 @@ self.onmessage = async (
       new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))),
       n => n.toString(16).padStart(2, '0'),
     ).join('');
-    const key = `${file.split('.').at(-1)}:${blob ?? digest}:${range ?? ''}:${digest}`;
+    const key = `${file.split('/').at(-1)}:${blob ?? digest}:${range ?? ''}:${digest}`;
     const tokens = cache.get(key) ?? (await highlightSource(file, text));
     cache.delete(key);
     cache.set(key, tokens);

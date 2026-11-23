@@ -904,7 +904,9 @@ The Timeline/Conversation column and file list collapse to 36px rails on desktop
 
 Changes keeps the file list it verified for the selected checkpoint. Opening a file reuses that list and checks checkpoint access again before and after downloading the file versions.
 
-Syntax highlighting loads the JavaScript/TypeScript, Python, Java or Rust grammar only when visible code requests it. Parsing and the blob/range token cache run in a module worker. Source appears immediately as plain text; unknown languages, worker failures, truncated comparisons and files above the highlighting threshold keep readable plain text. Syntax classes are scoped to `.diff` and `.source`.
+Syntax highlighting uses Pierre's `@pierre/highlights` WebAssembly highlighter in a module worker: its module loads when a file is first coloured, the language comes from the file name (`@pierre/diffs`'s table, so every major language and Dockerfile, Makefile and similar names), and the blob/range token cache lives in the worker. Source appears immediately as plain text; unknown languages, worker failures, truncated comparisons and files above the highlighting threshold keep readable plain text. Colours are the design system's code roles (keyword, string, number, function, type, comment) in both themes.
+
+A receipt's **Read the code here** opens the landing's own diff (`?view=changes` on the receipt address): the changed files, unified or split (`forge.diff-mode` in browser storage), each file's bytes read when it is opened. **Browse the repo at this landing** opens the Files view pinned to that landing's State. A Markdown file in the Files view opens rendered, with a Source toggle; the renderer drops raw HTML and links only http(s), mailto and files of the same State.
 
 ## Planning, Activity and Code
 

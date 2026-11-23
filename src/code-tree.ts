@@ -19,7 +19,16 @@ export type CodeEntry = {
   files?: number;
 };
 export type CodeDir = { path: string; entries: CodeEntry[]; total: number; next: number | null };
-export type CodeChange = { path: string; status: 'added' | 'deleted' | 'modified' };
+/** The exact side of a changed file: its blob and mode, or null where it does not exist. */
+export type CodeSide = { blob: string; mode: string } | null;
+/** `before` and `after` are present only for a signed-in member's read: the reader can draw the file's diff from
+ * them, which a signed-out visitor cannot. */
+export type CodeChange = {
+  path: string;
+  status: 'added' | 'deleted' | 'modified';
+  before?: CodeSide;
+  after?: CodeSide;
+};
 
 type Path = { path: string; mode: string };
 const kindOf = (mode: string): CodeEntry['kind'] =>
@@ -114,14 +123,21 @@ export function pathKind(paths: readonly Path[], path: string): 'dir' | 'file' |
   return paths[lowerBound(paths, prefix)]?.path.startsWith(prefix) ? 'dir' : null;
 }
 
-/** The paths one landing changed, in path order, at most one page. */
+/** The paths one landing changed, in path order, at most one page. `sides` adds each file's before and after blob. */
 export function changedPaths(
-  paths: readonly { path: string; status: string }[],
+  paths: readonly { path: string; status: string; before?: CodeSide; after?: CodeSide }[],
   limit = CODE_CHANGES_PAGE,
+  sides = false,
 ): { changes: CodeChange[]; total: number } {
   const changed = paths.filter(path => path.status !== 'unchanged') as CodeChange[];
+  const side = (value: CodeSide | undefined): CodeSide =>
+    value ? { blob: value.blob, mode: value.mode } : null;
   return {
-    changes: changed.slice(0, limit).map(({ path, status }) => ({ path, status })),
+    changes: changed
+      .slice(0, limit)
+      .map(({ path, status, before, after }) =>
+        sides ? { path, status, before: side(before), after: side(after) } : { path, status },
+      ),
     total: changed.length,
   };
 }

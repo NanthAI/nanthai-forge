@@ -20,7 +20,7 @@ export type Source = {
   dirs: ReadonlyMap<string, CodeDir>;
   files: number | null;
   kind: 'dir' | 'file' | 'missing' | null;
-  file: { path: string; head: CodeFile; pages: Extract<FilePage, { kind: 'text' }>[] } | null;
+  file: { path: string; state: string; head: CodeFile; pages: Extract<FilePage, { kind: 'text' }>[] } | null;
   loading: boolean;
   error: string;
   unavailable: string;
@@ -99,7 +99,9 @@ export function useSource(projectId: ProjectId, state: string | null, path: stri
       setKind(opened.kind ?? 'file');
       const head = opened.file ?? null;
       setFile(
-        head ? { path, head, pages: head.available && head.page?.kind === 'text' ? [head.page] : [] } : null,
+        head
+          ? { path, state, head, pages: head.available && head.page?.kind === 'text' ? [head.page] : [] }
+          : null,
       );
     }, fail);
     return () => void (current = false);

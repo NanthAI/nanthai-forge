@@ -49,6 +49,7 @@
   .codefile a.n { color: var(--text-3); text-decoration: none; }
   .codefile a.n:focus-visible { color: var(--text); }
   .codefile { padding-block: var(--s-1); }
+  .mdbar { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
   /* Every line number is a link (#L42), so a line is a full 24px target (WCAG 2.5.8). */
   .codefile .l { grid-template-columns: 52px minmax(0, 1fr); line-height: 24px; }
   .codefile a.n { display: block; min-height: 24px; }

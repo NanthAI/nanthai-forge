@@ -36,10 +36,15 @@ function firstLoadSources() {
 
 test('first load does not statically reach the source reader or the language parsers', () => {
   const { files, external } = firstLoadSources();
-  for (const heavy of ['web/src/browser-source.ts', 'src/code-imports.ts', 'web/src/source-highlight.ts'])
+  for (const heavy of [
+    'web/src/browser-source.ts',
+    'src/code-imports.ts',
+    'web/src/source-highlight.ts',
+    'web/src/diff-view.tsx',
+  ])
     assert(!files.includes(heavy), `${heavy} must load on demand, not with the first page`);
   assert.deepEqual(
-    [...external].filter(name => name.startsWith('@lezer/')),
+    [...external].filter(name => name.startsWith('@lezer/') || name.startsWith('@pierre/')),
     [],
   );
 });

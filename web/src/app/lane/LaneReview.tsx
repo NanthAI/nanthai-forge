@@ -20,8 +20,7 @@ import type { Id } from '../../../../convex/_generated/dataModel';
 import { isPlanningUuid } from '../../../../src/planning-id';
 import { reviewGroupLabels, reviewGroups, type ReviewGroup } from '../../../../src/review-order';
 import { Avatar, Band, CodeBox, Key, State } from '../../ds';
-import { requestHighlight } from '../../highlight-client';
-import type { SourceToken } from '../../source-highlight';
+import { DiffView } from '../../diff-view';
 import { A } from '../frames';
 import { RecordedWho } from '../RecordedWho';
 import { declaredModel, recordedIdentity } from '../who-links';
@@ -739,40 +738,6 @@ function Body({
   return <DiffBox path={file.path} hunks={body.hunks} rough={!!body.rough} encoding={body.encoding} />;
 }
 
-const syntax: Record<string, string> = { k: 'kw', s: 'str', n: 'str', c: 'cm', t: 'fn' };
-
-/** Highlight each side once per opened file: the after side's lines, then the before side's, each as one text. */
-function useTokens(path: string, hunks: Hunk[]) {
-  const [tokens, setTokens] = useState<Map<string, SourceToken[]> | null>(null);
-  useEffect(() => {
-    let live = true;
-    const sides = { after: [] as string[], before: [] as string[] };
-    const keys = { after: [] as string[], before: [] as string[] };
-    hunks.forEach((hunk, h) =>
-      hunk.lines.forEach((line, l) => {
-        if (line.escaped) return;
-        const side = line.kind === 'removed' ? 'before' : 'after';
-        sides[side].push(line.text);
-        keys[side].push(`${h}:${l}`);
-      }),
-    );
-    void Promise.all([
-      requestHighlight(path, sides.after.join('\n')),
-      sides.before.length ? requestHighlight(path, sides.before.join('\n')) : Promise.resolve([]),
-    ]).then(([after, before]) => {
-      if (!live) return;
-      const map = new Map<string, SourceToken[]>();
-      keys.after.forEach((key, i) => after[i] && map.set(key, after[i]!));
-      keys.before.forEach((key, i) => before[i] && map.set(key, before[i]!));
-      setTokens(map);
-    });
-    return () => {
-      live = false;
-    };
-  }, [path, hunks]);
-  return tokens;
-}
-
 function DiffBox({
   path,
   hunks,
@@ -784,8 +749,8 @@ function DiffBox({
   rough: boolean;
   encoding?: 'not-utf-8' | undefined;
 }) {
-  const tokens = useTokens(path, hunks);
-  usePageCritical('Lane first diff', { sourceDiff: tokens !== null && hunks.length > 0 });
+  const [coloured, setColoured] = useState(false);
+  usePageCritical('Lane first diff', { sourceDiff: coloured && hunks.length > 0 });
   return (
     <>
       {rough || encoding ? (
@@ -794,48 +759,7 @@ function DiffBox({
           {encoding ? 'Not UTF-8: bytes that are not text are shown escaped.' : ''}
         </p>
       ) : null}
-      <CodeBox label={`Changes to ${path}`}>
-        {hunks.map((hunk, h) => {
-          let before = hunk.beforeStart,
-            after = hunk.afterStart;
-          return (
-            <div key={h}>
-              <div className="l hunk">
-                <span className="n" />
-                <span className="n" />
-                <span className="c">line {hunk.afterStart.toLocaleString()}</span>
-              </div>
-              {hunk.lines.map((line, l) => {
-                const b = line.kind === 'added' ? '' : before++;
-                const a = line.kind === 'removed' ? '' : after++;
-                const parts = tokens?.get(`${h}:${l}`);
-                return (
-                  <div
-                    key={l}
-                    className={cls('l', line.kind === 'added' && 'add', line.kind === 'removed' && 'del')}
-                  >
-                    <span className="n">{b}</span>
-                    <span className="n">{a}</span>
-                    <span className="c">
-                      {parts
-                        ? parts.map((part, p) =>
-                            syntax[part.className] ? (
-                              <span key={p} className={syntax[part.className]}>
-                                {part.text}
-                              </span>
-                            ) : (
-                              part.text
-                            ),
-                          )
-                        : line.text}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
-      </CodeBox>
+      <DiffView path={path} hunks={hunks} mode="unified" onColoured={setColoured} />
     </>
   );
 }

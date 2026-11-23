@@ -140,7 +140,12 @@ export function Files(props: CodeProps) {
                 </button>
               </div>
             ) : source.file ? (
-              <FileBody file={source.file} onMore={source.morePage} />
+              <FileBody
+                key={`${source.file.state}:${source.file.path}`}
+                file={source.file}
+                onMore={source.morePage}
+                repo={{ projectId, state: source.file.state, href }}
+              />
             ) : source.loading ? (
               <p className="pad t3" aria-busy="true">
                 Reading…

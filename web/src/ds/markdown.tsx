@@ -3,6 +3,7 @@
 // only for http(s) and mailto, name their destination host on hover, and in-page anchors stay in place; images from
 // outside are not loaded. Footnote ids carry the text's own prefix, so a footnote link never jumps to another comment.
 // Kept out of the ds index so react-markdown loads with the screen that draws text, never at first paint.
+import { useMemo, type ReactNode } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prose } from './parts';
@@ -26,42 +27,105 @@ function destination(href: string) {
   }
 }
 
+// `id` is kept on in-page anchors only: footnote references, whose ids carry the text's prefix.
+function SafeLink({
+  children,
+  href,
+  id,
+}: {
+  children?: ReactNode;
+  href?: string | undefined;
+  id?: string | undefined;
+}) {
+  const target = safeHref(href);
+  if (!target) return <span>{children}</span>;
+  return target.external ? (
+    <a
+      href={target.href}
+      rel="noreferrer noopener nofollow ugc"
+      target="_blank"
+      title={`Opens ${destination(target.href)}`}
+    >
+      {children}
+    </a>
+  ) : (
+    <a href={target.href} id={id}>
+      {children}
+    </a>
+  );
+}
+const OutsideImage = ({ alt }: { alt?: string | undefined }) => (
+  <span className="t2">[Image: {alt || 'image'}. Outside images are not loaded.]</span>
+);
+
 const components: Components = {
-  // `id` is kept on in-page anchors only: footnote references, whose ids carry the text's prefix.
-  a: ({ children, href, id }) => {
-    const target = safeHref(href);
-    if (!target) return <span>{children}</span>;
-    return target.external ? (
-      <a
-        href={target.href}
-        rel="noreferrer noopener nofollow ugc"
-        target="_blank"
-        title={`Opens ${destination(target.href)}`}
-      >
-        {children}
-      </a>
-    ) : (
-      <a href={target.href} id={id}>
-        {children}
-      </a>
-    );
-  },
-  img: ({ alt }) => <span className="t2">[Image: {alt || 'image'}. Outside images are not loaded.]</span>,
+  a: SafeLink,
+  img: OutsideImage,
   // Headings in member text sit under the screen's own headings.
   h1: ({ children }) => <h3>{children}</h3>,
   h2: ({ children }) => <h3>{children}</h3>,
 };
 
+/** A Markdown file read inside its repository (the Code reader): links and images that name another file of the same
+ * State, and fenced code the caller colours. Each returns null when the reference is not drawn (it leaves the
+ * repository, or no reader can load it), and the text falls back to the plain, safe rendering. */
+export type RepoMarkdown = {
+  link: (href: string, children: ReactNode) => ReactNode | null;
+  image: (src: string, alt: string) => ReactNode | null;
+  code: (text: string, lang: string | undefined) => ReactNode;
+};
+
+const fenceLanguage = (className: string | undefined) =>
+  /(?:^|\s)language-([\w+#-]+)/.exec(className ?? '')?.[1];
+
+function repoComponents(repo: RepoMarkdown): Components {
+  return {
+    ...components,
+    a: ({ children, href, id }) =>
+      (href && !safeHref(href) && !/^\s*(#|[a-z][a-z0-9+.-]*:)/i.test(href)
+        ? repo.link(href, children)
+        : null) ?? (
+        <SafeLink href={href} id={id}>
+          {children}
+        </SafeLink>
+      ),
+    img: ({ src, alt }) =>
+      (typeof src === 'string' && !/^\s*([a-z][a-z0-9+.-]*:|\/\/)/i.test(src)
+        ? repo.image(src, alt ?? '')
+        : null) ?? <OutsideImage alt={alt} />,
+    code: ({ children, className }) => {
+      const text = String(children ?? '');
+      const lang = fenceLanguage(className);
+      return lang !== undefined || text.includes('\n') ? (
+        <code>{repo.code(text.replace(/\n$/, ''), lang)}</code>
+      ) : (
+        <code>{children}</code>
+      );
+    },
+  };
+}
+
 /** `idPrefix` (letters, digits and dashes) keeps footnote ids apart when several texts share a page. */
-export function SafeMarkdown({ text, label, idPrefix }: { text: string; label?: string; idPrefix?: string }) {
+export function SafeMarkdown({
+  text,
+  label,
+  idPrefix,
+  repo,
+}: {
+  text: string;
+  label?: string;
+  idPrefix?: string;
+  repo?: RepoMarkdown;
+}) {
   const prefix = idPrefix?.replace(/[^\w-]/g, '');
+  const repoParts = useMemo(() => (repo ? repoComponents(repo) : components), [repo]);
   return (
     <Prose {...(label ? { label } : {})}>
       <Markdown
         skipHtml
         remarkPlugins={[remarkGfm]}
         remarkRehypeOptions={prefix ? { clobberPrefix: `user-content-${prefix}-` } : {}}
-        components={components}
+        components={repoParts}
       >
         {text}
       </Markdown>
