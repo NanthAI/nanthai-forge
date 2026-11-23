@@ -131,6 +131,14 @@ const linkBackend = fakeConvex({
     if (name === 'projectPlanWorkers:read') return '{"lanes":[]}';
     if (name === 'projectDiscussionThread:read') return { canRead: true, entries: [], before: null };
     if (name === 'projectItemWork:read') return window.readItemWork?.(args) ?? '{"role":false}';
+    if (name === 'projectHostedPlanning:itemHistory') return JSON.stringify({
+      historyStartsAt: '2026-10-02T09:00:00.000Z', completeFromCreation: true, nextCursor: null,
+      events: [
+        { kind: 'version', id: 'v3', at: '2026-11-23T10:00:00.000Z', summary: 'closed: all Done-when lines ticked', actor: 'example-builder/cobalt-fox', actorKind: 'agent', model: 'claude-opus-5-5' },
+        { kind: 'version', id: 'v2', at: '2026-11-22T09:00:00.000Z', summary: 'status open → in-progress', actor: 'example-builder', actorKind: 'person', model: null },
+        { kind: 'version', id: 'v1', at: '2026-11-20T09:00:00.000Z', summary: 'created issue (open)', actorKind: 'unknown', model: null },
+      ],
+    });
     if (name === 'projectPlanSettled:page') return {
       page: settledRows.filter(row => row.status === args.status).map(row => JSON.stringify(row)),
       isDone: true, continueCursor: '',
@@ -1288,6 +1296,26 @@ test('plan views and bulk bar: real components keep the view in the address and 
             'projectItemWork:read',
             'projectItemWork:read',
           ]);
+          // History is a closed disclosure: it reads one bounded page only when opened, and says who and which model.
+          assert.equal(
+            await work.getByRole('button', { name: 'History', exact: true }).getAttribute('aria-expanded'),
+            'false',
+          );
+          await work.getByRole('button', { name: 'History', exact: true }).click();
+          await work.getByText('closed: all Done-when lines ticked').waitFor();
+          assert.equal(await work.getByText('status open → in-progress').count(), 1);
+          assert.match(
+            await work.getByText('closed: all Done-when lines ticked').locator('..').textContent(),
+            /cobalt-fox/,
+          );
+          assert.deepEqual((await page.evaluate(() => window.planQueries)).slice(2), [
+            'projectHostedPlanning:itemHistory',
+          ]);
+          if (shots)
+            await page.screenshot({
+              path: join(shots, `item-history-${width}-${theme}.png`),
+              fullPage: true,
+            });
           assert.equal(calls.at(-1).itemId, itemId);
           assert.equal(calls.at(-1).limit, 10);
           assert.equal(calls.at(-1).details, true);

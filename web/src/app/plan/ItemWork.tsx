@@ -8,6 +8,7 @@ import type { ProjectRoute } from '../screen-route';
 import { whoLinks, type WhoProject } from '../who-links';
 
 export type ReadItemWork = (itemId: string, cursor: string | null) => Promise<string>;
+export type ReadItemHistory = (itemId: string, cursor: string | null) => Promise<string>;
 
 const stateWords = {
   open: 'Working',
@@ -65,12 +66,15 @@ function Part({
   fold,
   count,
   atLeast,
+  lazy,
   children,
 }: {
   name: string;
   fold: string;
   count?: number;
   atLeast?: boolean;
+  /** Mounts the body only once the part is open, so a closed part reads nothing. */
+  lazy?: boolean;
   children: ReactNode;
 }) {
   const [open, toggle] = useFold(fold, name === 'Lanes');
@@ -94,7 +98,7 @@ function Part({
         />
       </div>
       <div id={id} hidden={!open}>
-        {children}
+        {lazy && !open ? null : children}
       </div>
     </div>
   );
@@ -123,15 +127,140 @@ function WhoWorked({ lane, project }: { lane: Lane; project: WhoProject }) {
   );
 }
 
+type HistoryEvent = {
+  kind: 'version' | 'comment' | 'lane' | 'landing' | 'revert';
+  id: string;
+  at: string;
+  summary: string;
+  actor?: string;
+  actorKind: 'person' | 'agent' | 'system' | 'unknown';
+  model?: string | null;
+};
+type History = {
+  events: HistoryEvent[];
+  nextCursor: string | null;
+  historyStartsAt: string | null;
+  completeFromCreation: boolean;
+};
+
+/** Who changed the Item: a person's handle, or an agent with the model it declared ('not declared' says so). */
+function HistoryWho({ event, project }: { event: HistoryEvent; project: WhoProject }) {
+  if (!event.actor) return <span className="t2">Unknown</span>;
+  return (
+    <Who
+      handle={event.actor}
+      layout="line"
+      {...(event.actorKind === 'agent' ? { model: event.model === 'not declared' ? null : event.model } : {})}
+      {...whoLinks(event.actor, project)}
+    />
+  );
+}
+
+/** One bounded page (25 events) read when the part is first opened; older events only on an explicit request. */
+function ItemHistory({
+  itemId,
+  read,
+  project,
+}: {
+  itemId: string;
+  read: ReadItemHistory;
+  project: WhoProject;
+}) {
+  const [history, setHistory] = useState<History | 'failed' | null>(null);
+  const [paging, setPaging] = useState(false);
+  const [pageFailed, setPageFailed] = useState(false);
+  const [attempt, retry] = useState(0);
+  useEffect(() => {
+    let current = true;
+    read(itemId, null)
+      .then(raw => {
+        if (current) setHistory(JSON.parse(raw) as History);
+      })
+      .catch(() => {
+        if (current) setHistory('failed');
+      });
+    return () => {
+      current = false;
+    };
+  }, [itemId, read, attempt]);
+  if (history === null || history === 'failed' || !Array.isArray(history.events))
+    return (
+      <div className="quietline" role="status">
+        {history === null ? 'Loading history…' : 'History could not be loaded.'}
+        {history === 'failed' || history ? (
+          <Key
+            size="sm"
+            onClick={() => {
+              setHistory(null);
+              retry(value => value + 1);
+            }}
+          >
+            Retry
+          </Key>
+        ) : null}
+      </div>
+    );
+  const more = async () => {
+    if (paging || !history.nextCursor) return;
+    setPaging(true);
+    setPageFailed(false);
+    try {
+      const next = JSON.parse(await read(itemId, history.nextCursor)) as History;
+      setHistory({ ...next, events: [...history.events, ...next.events] });
+    } catch {
+      setPageFailed(true);
+    } finally {
+      setPaging(false);
+    }
+  };
+  return (
+    <>
+      {history.events.length ? (
+        history.events.map(event => (
+          <Row key={`${event.kind}:${event.id}`} cols="minmax(0, 1fr) auto">
+            <div dir="auto">{event.summary}</div>
+            <div className="meta">
+              <WorkTime at={event.at} />
+            </div>
+            <div className="meta t2" style={{ gridColumn: '1 / -1' }}>
+              {new Date(event.at).toLocaleString()}
+            </div>
+            <div className="meta" style={{ gridColumn: '1 / -1' }}>
+              <HistoryWho event={event} project={project} />
+            </div>
+          </Row>
+        ))
+      ) : (
+        <div className="quietline">No changes recorded.</div>
+      )}
+      {!history.completeFromCreation && history.historyStartsAt ? (
+        <div className="quietline">
+          History starts {new Date(history.historyStartsAt).toLocaleDateString()}.
+        </div>
+      ) : null}
+      {history.nextCursor ? (
+        <div className="pad">
+          <Key size="sm" onClick={() => void more()} disabled={paging}>
+            {paging ? 'Loading older changes…' : 'Show older changes'}
+          </Key>
+          {pageFailed ? <p role="status">Older changes could not be loaded. Try again.</p> : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 /** One page on open. Further pages use the same reader's cursor and an explicit request. */
 export function ItemWork({
   itemId,
   read,
+  readHistory,
   at,
   project,
 }: {
   itemId: string;
   read: ReadItemWork;
+  readHistory?: ReadItemHistory | undefined;
   at: (patch: Partial<ProjectRoute>) => string;
   project: WhoProject;
 }) {
@@ -324,6 +453,11 @@ export function ItemWork({
           <div className="quietline">{work.moreRelated ? 'No links in this page.' : 'No related Items.'}</div>
         )}
       </Part>
+      {readHistory ? (
+        <Part name="History" fold={`${fold}:history`} lazy>
+          <ItemHistory itemId={itemId} read={readHistory} project={project} />
+        </Part>
+      ) : null}
       {more}
     </Region>
   );

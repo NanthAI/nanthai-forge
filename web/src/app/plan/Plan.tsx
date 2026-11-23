@@ -73,7 +73,7 @@ import {
 import { filtered, keeps, readQuery, sortRows, writeQuery, type PlanQuery } from './query';
 import { Toolbar } from './Views';
 import { useProjectPages } from '../project-pages';
-import { ItemWork, type ReadItemWork } from './ItemWork';
+import { ItemWork, type ReadItemHistory, type ReadItemWork } from './ItemWork';
 import './plan.css';
 
 const planRead = makeFunctionReference<
@@ -191,6 +191,11 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle, needsRe
       client.query(api.projectItemWork.read, { projectId, itemId, limit: 10, cursor, details: true }),
     [client, projectId],
   );
+  const readItemHistory = useCallback<ReadItemHistory>(
+    (itemId, cursor) =>
+      client.query(api.projectHostedPlanning.itemHistory, { projectId, itemId, limit: 25, cursor }),
+    [client, projectId],
+  );
   const readInitiativeWork = useCallback<ReadInitiativeWork>(
     initiativeId => client.query(api.projectInitiativeWork.read, { projectId, initiativeId }),
     [client, projectId],
@@ -240,6 +245,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle, needsRe
       purge={input => deleteForever({ projectId, ...input })}
       reads={reads}
       readItemWork={readItemWork}
+      readItemHistory={readItemHistory}
       readInitiativeWork={readInitiativeWork}
       query={query}
       go={go}
@@ -287,6 +293,7 @@ export function PlanScreenView({
   purge,
   reads,
   readItemWork,
+  readItemHistory,
   readInitiativeWork,
   query = readQuery(new URLSearchParams()),
   go = () => undefined,
@@ -321,6 +328,7 @@ export function PlanScreenView({
   purge?: PurgeItem;
   reads?: Reads;
   readItemWork?: ReadItemWork | undefined;
+  readItemHistory?: ReadItemHistory | undefined;
   readInitiativeWork?: ReadInitiativeWork | undefined;
   query?: PlanQuery;
   go?: (patch: Partial<PlanQuery>) => void;
@@ -500,6 +508,7 @@ export function PlanScreenView({
         at={at}
         projectId={projectId}
         readItemWork={readItemWork}
+        readItemHistory={readItemHistory}
         onSplit={whole?.canEdit && reads && run ? () => setSplit(true) : undefined}
         onVersions={projectId ? () => setVersions(true) : undefined}
         onShelve={whole?.canEdit && run ? (row, to) => void shelfMove(shelve([row], to), row, to) : undefined}
@@ -1138,6 +1147,7 @@ function ItemPage({
   at,
   projectId,
   readItemWork,
+  readItemHistory,
   onSplit,
   onVersions,
   onShelve,
@@ -1159,6 +1169,7 @@ function ItemPage({
   at: (patch: Partial<PlaceProps['route']>) => string;
   projectId: Id<'hostedProjects'> | undefined;
   readItemWork?: ReadItemWork | undefined;
+  readItemHistory?: ReadItemHistory | undefined;
   onSplit?: (() => void) | undefined;
   onVersions?: (() => void) | undefined;
   /** Archive or Delete this Item (the owner only). */
@@ -1310,6 +1321,7 @@ function ItemPage({
           key={`${projectId}:${workItem}`}
           itemId={workItem}
           read={readItemWork}
+          readHistory={readItemHistory}
           at={at}
           project={route}
         />
