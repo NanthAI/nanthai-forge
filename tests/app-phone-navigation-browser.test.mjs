@@ -132,10 +132,31 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
     });
   }
 
-  async function axe(page) {
+  // An open modal makes the page behind it inert, so page-level rules (one main, one h1) cannot hold there and differ by
+  // browser build; check the dialog itself. A page check first proves no sheet is left open.
+  async function axe(page, { modal = false } = {}) {
     await settleBrowserPage(page);
     await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
-    assert.deepEqual(await page.evaluate(async () => (await window.axe.run()).violations.map(v => v.id)), []);
+    if (!modal) {
+      assert.equal(await page.locator('[role=dialog]').count(), 0, 'no sheet is open');
+      assert.equal(
+        await page.evaluate(() => document.documentElement.style.overflow),
+        '',
+        'page scroll is restored',
+      );
+      assert.equal(
+        await page.evaluate(() => document.getElementById('root')?.hasAttribute('inert')),
+        false,
+        'page is not inert',
+      );
+    }
+    assert.deepEqual(
+      await page.evaluate(async modal => {
+        const context = modal ? document.querySelector('[role=dialog]') : document;
+        return (await window.axe.run(context)).violations.map(v => v.id);
+      }, modal),
+      [],
+    );
   }
 
   for (const theme of ['dark', 'light']) {
@@ -164,13 +185,20 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
       for (const width of [1440, 1024]) {
         await page.setViewportSize({ width, height: 800 });
         await page.goto(origin + project);
-        const heading = page.getByRole('heading', { level: 1, name: 'Now', exact: true });
+        const heading = page.getByRole('heading', {
+          level: 1,
+          name: 'Now',
+          exact: true,
+        });
         await heading.waitFor();
         const { width: headingWidth, height: headingHeight } = await heading.boundingBox();
         assert.deepEqual([headingWidth, headingHeight], [1, 1], 'the top-level heading is visually hidden');
         assert.equal(await heading.getByRole('link').count(), 0, 'the hidden heading adds no Tab stops');
         assert.equal(await heading.evaluate(node => getComputedStyle(node).clipPath), 'inset(50%)');
-        if (shots) await page.screenshot({ path: join(shots, `head-place-${width}-${theme}.png`) });
+        if (shots)
+          await page.screenshot({
+            path: join(shots, `head-place-${width}-${theme}.png`),
+          });
 
         await page.goto(origin + project + detail);
         const parent = page
@@ -179,7 +207,10 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
         await parent.waitFor();
         assert.equal(await parent.getAttribute('href'), project + '/lanes');
         assert.ok((await parent.boundingBox()).width > 1, 'detail pages keep the trail back to the place');
-        if (shots) await page.screenshot({ path: join(shots, `head-detail-${width}-${theme}.png`) });
+        if (shots)
+          await page.screenshot({
+            path: join(shots, `head-detail-${width}-${theme}.png`),
+          });
       }
       await page.setViewportSize({ width: 1440, height: 800 });
       await page.goto(origin + project + '/lanes/history');
@@ -229,7 +260,10 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
       await lanes.hover();
       await history.waitFor();
       await axe(page);
-      if (shots) await page.screenshot({ path: join(shots, `collapsed-${theme}.png`) });
+      if (shots)
+        await page.screenshot({
+          path: join(shots, `collapsed-${theme}.png`),
+        });
       await nav.getByRole('link', { name: 'Who is touching what' }).click();
       await page.waitForURL(origin + project + '/lanes/touching');
       await page.locator('main:focus').waitFor();
@@ -380,7 +414,9 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
 
         if (name === 'Project') {
           await nav.getByRole('link', { name: 'Lanes', exact: true }).tap();
-          const title = page.getByRole('button', { name: 'Lanes: Open. Choose a page' });
+          const title = page.getByRole('button', {
+            name: 'Lanes: Open. Choose a page',
+          });
           await title.tap();
           const pages = page.getByRole('dialog', { name: 'Lanes' });
           assert.equal(await pages.count(), 0, 'the first press arrives before the behaviour layer');
@@ -393,13 +429,16 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
           if (shots) await page.screenshot({ path: join(shots, `phone-${theme}.png`) });
           await page.getByRole('button', { name: 'Lanes: History. Choose a page' }).tap();
           await pages.waitFor();
-          await axe(page);
+          await axe(page, { modal: true });
           assert.equal(
             await pages.getByRole('link', { name: 'History' }).getAttribute('aria-current'),
             'page',
           );
           assert.match(await pages.ariaSnapshot(), /dialog "Lanes":[\s\S]*link "History"/);
-          if (shots) await page.screenshot({ path: join(shots, `phone-pages-${theme}.png`) });
+          if (shots)
+            await page.screenshot({
+              path: join(shots, `phone-pages-${theme}.png`),
+            });
           await pages.getByRole('button', { name: 'Close' }).click();
           await page
             .getByRole('button', { name: 'Lanes: History. Choose a page' })
@@ -413,7 +452,7 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
             await sheet.getByRole('link').allTextContents(),
             more.map(([label]) => label),
           );
-          await axe(page);
+          await axe(page, { modal: true });
           await page.keyboard.press('Escape');
           await trigger.and(page.locator(':focus')).waitFor();
           for (const [label, path] of more) {
@@ -436,7 +475,9 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
               const scrim = document.querySelector('.scrim');
               return scrim && getComputedStyle(scrim).opacity === '1';
             });
-            await page.screenshot({ path: join(shots, `phone-more-${theme}.png`) });
+            await page.screenshot({
+              path: join(shots, `phone-more-${theme}.png`),
+            });
           }
           return;
         }
@@ -454,7 +495,10 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
           await import(path);
           await new Promise(resolve => requestAnimationFrame(resolve));
         }, layerPath);
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchEnd',
+          touchPoints: [],
+        });
         await menu.waitFor();
         await settleBrowserPage(page);
         assert.equal(page.url(), origin + base + tabs.at(-1)[1]);
@@ -468,7 +512,9 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
           more.map(([label]) => label),
         );
         assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
-        await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+        await page.addScriptTag({
+          path: require.resolve('axe-core/axe.min.js'),
+        });
         const violations = await page.evaluate(async () =>
           (await window.axe.run()).violations.map(v => v.id),
         );
