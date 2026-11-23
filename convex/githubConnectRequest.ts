@@ -29,7 +29,7 @@ const reply = (row: ApprovalRow) => {
     id,
     status,
     url,
-    next: `Connecting GitHub needs the project owner. ${url ? 'Hand them this link; they open it signed in, read your request and allow it, then authorize on GitHub. ' : 'Ask them to allow it in Forge → Needs me. '}This command waits for the result.`,
+    next: `Connecting GitHub needs the project owner. ${url ? 'Hand them this link; they open it signed in, read your request and allow it, then authorize on GitHub. ' : 'Ask them to allow it in Forge → Needs me. '}Tell your user in your own app that it waits for the owner. This command waits for the result.`,
   };
 };
 

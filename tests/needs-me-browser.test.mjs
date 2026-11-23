@@ -624,8 +624,52 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       },
     );
 
+    await t.test(
+      '12fde646: work reverted from main and a stopped mirror are in Needs you, counted, and link to where to act',
+      async t => {
+        const page = await open(t, DESK, 'notices');
+        const shell = await page.locator('header.top a.needs .cnt').textContent();
+        const needs = region(page, 'Needs you');
+        assert.equal(
+          await needs.locator('.ph .cnt').textContent(),
+          shell,
+          'the shell count is the page count',
+        );
+        assert.equal(shell, '7', 'the 4 other decisions plus the revert, the fix and the mirror');
+        const rows = needs.locator('.dec');
+        // Notices come first, so they are among the rows shown before "Show more".
+        const tags = await rows.locator('.dtop').allTextContents();
+        for (const tag of ['Reverted from main', 'Fix needed', 'GitHub mirror'])
+          assert.ok(
+            tags.some(text => text.includes(tag)),
+            `${tag} is a Needs you row`,
+          );
+        const reverted = rows.filter({ hasText: 'Reverted receipt 3f2a9c10' });
+        assert.match(await reverted.locator('.why').textContent(), /^Next: nforge agent ROOT start/);
+        assert.match(
+          await reverted.getByRole('link', { name: 'Open the Item' }).getAttribute('href'),
+          /\/plan\//,
+        );
+        const mirror = rows.filter({ hasText: 'moved without Forge' });
+        assert.match(
+          await mirror.getByRole('link', { name: 'Open the mirror' }).getAttribute('href'),
+          /\/settings\/mirror/,
+        );
+        assert.equal(
+          await mirror.getByRole('button', { name: 'Later' }).count(),
+          0,
+          'a notice stays until its state changes',
+        );
+        assert.equal(
+          await page.evaluate(() => window.intervals),
+          0,
+          'no repeating timer: idle costs nothing',
+        );
+      },
+    );
+
     await t.test('axe and widths: busy and first day, both themes, desk and phone', async t => {
-      for (const data of ['busy', 'first', 'connect'])
+      for (const data of ['busy', 'first', 'connect', 'notices'])
         for (const viewport of [DESK, PHONE]) {
           const page = await open(t, viewport, data); // Loose ends is open by default
           await page.addScriptTag({ path: axePath });

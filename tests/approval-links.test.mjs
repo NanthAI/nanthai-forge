@@ -227,6 +227,10 @@ test('0a99ab23: a settings request opens Needs me; /approve answers only a reade
     settingReply(row).url,
     `${web}/approve?project=${encodeURIComponent(f.projectId)}&lane=setting%3Apolicy`,
   );
+  // Item 12fde646: Forge is not a chat channel, so the reply sends the agent to tell its own user and names where the owner acts.
+  const { next } = settingReply(row);
+  assert.match(next, /Tell your user in your own app that it waits for the owner/);
+  assert.match(next, /Forge → Needs me/);
   const lookup = (args, who = 'owner') =>
     f.tx('target', urls.approvalTarget, { projectId: f.projectId, ...args }, who);
   assert.deepEqual(await lookup({ lane: 'setting:policy' }), {

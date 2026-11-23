@@ -83,6 +83,7 @@ test('an agent connect holds a Forge decision in its words; allowing it continue
     /^https:\/\/forge\.example\/approve\?project=.+&lane=setting%3Agithub-connect$/,
   );
   assert.match(reply.approval.next, /needs the project owner/);
+  assert.match(reply.approval.next, /Tell your user in your own app/);
   const row = f.request();
   assert.equal(row.setting.origin, 'github-connect');
   assert.equal(row.reason, words, 'the owner reads the agent’s own words');

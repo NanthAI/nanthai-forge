@@ -119,7 +119,17 @@ function fieldToken(key: string, seen: Json[]): string {
   return `${key}${typeof type === 'string' ? (TYPE_MARK[type] ?? '') : ''}`;
 }
 
-const LEGEND = ':b bool :n num :o obj :a arr';
+const LEGEND: [string, string][] = [
+  [':b', 'bool'],
+  [':n', 'num'],
+  [':o', 'obj'],
+  [':a', 'arr'],
+];
+/** The legend names only the marks this listing uses, so a tool with no object field does not pay for `:o obj`. */
+const legendFor = (fields: string[]): string =>
+  LEGEND.filter(([mark]) => fields.some(field => new RegExp(`${mark}(\\(|$)`).test(field)))
+    .map(entry => entry.join(' '))
+    .join(' ');
 
 /** Required fields of a nested object, as `head,sourceVersion?`: the names, not its schema. */
 const nestedKeys = (value: Json): string => {
@@ -142,7 +152,7 @@ function flatSchema(schema: Json): Json {
   const required = Array.isArray(stripped.required) ? (stripped.required as string[]) : [];
   return {
     type: 'object',
-    description: `Fields: ${fields.join(' ')} (${LEGEND})${required.length ? `. Required: ${required.join(',')}` : ''}`,
+    description: `Fields: ${fields.join(' ')} (${legendFor(fields)})${required.length ? `. Required: ${required.join(',')}` : ''}`,
     properties: {},
     ...(required.length ? { required } : {}),
   };
@@ -172,7 +182,7 @@ function compactCommand(tool: Tool): Tool {
         command: {
           ...(stripSchemaNoise(rest) as Json),
           type: 'object',
-          description: `${signatures.length ? `Required: ${signatures.join(' ')}. ` : ''}Fields: ${fields.join(' ')} (${LEGEND})${actions.includes('help') ? '. forge_work_overview help' : ''}`,
+          description: `${signatures.length ? `Required: ${signatures.join(' ')}. ` : ''}Fields: ${fields.join(' ')} (${legendFor(fields)})${actions.includes('help') ? '. forge_work_overview help' : ''}`,
           properties: { action: { enum: actions } },
           required: ['action'],
         },

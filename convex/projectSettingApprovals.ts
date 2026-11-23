@@ -72,7 +72,8 @@ const requestHead = (request: string, base?: string) =>
   digest(canonicalPayload({ request, base: base ?? null }));
 
 /** The /approve form, with no read: that page looks the project up and opens Needs me, where a settings request is
- * decided (Item 0a99ab23). Lists and observe link to Needs me directly. */
+ * decided (Item 0a99ab23). Lists and observe link to Needs me directly. The reply tells the agent to inform its own
+ * user ("Forge is not a chat channel", Item 12fde646) and names where the owner acts. */
 export function settingReply(row: ApprovalRow) {
   const url = opaqueApproveUrl(row.projectId, row.laneId);
   return {
@@ -80,7 +81,7 @@ export function settingReply(row: ApprovalRow) {
     status: row.status,
     live: openSettingRequest(row),
     url,
-    next: `This settings change needs the project owner. ${url ? 'Hand them this link; they open it signed in and approve or decline. ' : 'Ask them to approve it on the approve page. '}Approving applies exactly this change. Wait for the decision: nforge agent ROOT wait '{"approval":"${row.laneId}"}'.`,
+    next: `This settings change needs the project owner. ${url ? 'Hand them this link; they open it signed in and approve or decline it in Forge → Needs me. ' : 'Ask them to approve it in Forge → Needs me. '}Approving applies exactly this change. Tell your user in your own app that it waits for the owner, then wait for the decision: nforge agent ROOT wait '{"approval":"${row.laneId}"}'.`,
   };
 }
 

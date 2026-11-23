@@ -61,6 +61,7 @@ import {
   type AheadRow,
   type AskRow,
   type NeedsRead,
+  type NoticeRow,
   type NowRow,
   type ParkedRow,
 } from './model';
@@ -252,8 +253,12 @@ export function NeedsMeView({
     return () => cancelAnimationFrame(afterClose);
   }, [reveal]);
   const activityAt = (row: NowRow | AskRow | ParkedRow) => ('choices' in row ? row.at : row.since);
-  const heldRows = view
-    ? [...view.now, ...view.asks, ...view.parked].sort((a, b) => activityAt(a) - activityAt(b))
+  // Shared-state decisions (work reverted from main, a stopped mirror) carry no hold time and come first.
+  const heldRows: (NoticeRow | NowRow | AskRow | ParkedRow)[] = view
+    ? [
+        ...view.notices,
+        ...[...view.now, ...view.asks, ...view.parked].sort((a, b) => activityAt(a) - activityAt(b)),
+      ]
     : [];
   const asksAhead = view?.askedAhead ?? [];
   const conversationHref = (row: AskRow) =>
@@ -263,7 +268,7 @@ export function NeedsMeView({
         ? at({ place: 'plan', rest: row.planningItemId }) + '#discussion'
         : undefined;
   const rowToReveal = heldRows.findIndex(
-    row => !('choices' in row) && !('park' in row) && row.laneId === reveal?.laneId,
+    row => !('choices' in row) && !('park' in row) && !('summary' in row) && row.laneId === reveal?.laneId,
   );
   const laneHref = (laneId: string) => at({ place: 'lanes', rest: laneId });
   const drawerContent =
@@ -337,6 +342,7 @@ export function NeedsMeView({
                     ...view.now.map(r => r.landing?.submissionId ?? r.laneId),
                     ...view.asks.map(r => r.id),
                     ...view.parked.map(r => r.laneId),
+                    ...view.notices.map(r => `${r.kind}:${r.id}`),
                   ].join()
                 : 0
             }
@@ -357,11 +363,21 @@ export function NeedsMeView({
                       rows={heldRows}
                       cap={Math.max(CAP, rowToReveal + 1)}
                       more={read!.more}
-                      atLeast={view.atLeast}
+                      atLeast={view.countAtLeast}
                     >
                       {row => {
                         const decision =
-                          'park' in row ? (
+                          'summary' in row ? (
+                            <NoticeCard
+                              key={`${row.kind}:${row.id}`}
+                              row={row}
+                              href={
+                                row.kind === 'mirror'
+                                  ? at({ place: 'settings', section: 'mirror' })
+                                  : at({ place: 'plan', rest: row.id })
+                              }
+                            />
+                          ) : 'park' in row ? (
                             <Parked
                               project={route}
                               key={`park:${row.laneId}`}
@@ -399,11 +415,13 @@ export function NeedsMeView({
                         return drawerContent && !phone ? (
                           <details
                             key={
-                              'choices' in row
-                                ? row.id
-                                : 'park' in row
-                                  ? `park:${row.laneId}`
-                                  : (row.landing?.submissionId ?? row.laneId)
+                              'summary' in row
+                                ? `${row.kind}:${row.id}`
+                                : 'choices' in row
+                                  ? row.id
+                                  : 'park' in row
+                                    ? `park:${row.laneId}`
+                                    : (row.landing?.submissionId ?? row.laneId)
                             }
                             className="sumdec"
                           >
@@ -457,7 +475,7 @@ export function NeedsMeView({
                     </Capped>
                   </div>
                 ) : null}
-                {!waiting && !view.ahead.length && !asksAhead.length && !view.atLeast ? (
+                {!waiting && !view.ahead.length && !asksAhead.length && !view.countAtLeast ? (
                   <div className="quietline">Nothing waits on you. Agents go on without you.</div>
                 ) : null}
                 {read?.asksMore ? (
@@ -656,6 +674,29 @@ function Held({
         <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
           Later
         </Key>
+      </div>
+    </div>
+  );
+}
+
+/** Work reverted from main, work that needs a fix, or a stopped GitHub mirror (Item 12fde646): a shared-state decision
+ * only a person settles. It stays until the state changes, so it has no Later. */
+function NoticeCard({ row, href }: { row: NoticeRow; href: string }) {
+  return (
+    <div className="dec">
+      <div className="dtop">
+        <State word={row.word}>{row.tag}</State>
+      </div>
+      <h3 dir="auto">{row.head}</h3>
+      {row.next ? (
+        <p className="why" dir="auto">
+          Next: {row.next}
+        </p>
+      ) : null}
+      <div className="btns">
+        <A className="btn ghost sm" href={href}>
+          {row.kind === 'mirror' ? 'Open the mirror' : 'Open the Item'}
+        </A>
       </div>
     </div>
   );

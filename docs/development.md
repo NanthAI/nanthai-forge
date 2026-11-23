@@ -871,7 +871,10 @@ design-system behaviour layer out of the first paint.
   on `projectHostedPresence.by_project_and_parked_for`, at most 30; a park is
   one optional field on the Lane record, mirrored onto its presence row). A
   Lane parked with no one named shows once its stored last-activity time is 4 h
-  old, compared when the page draws (`needs/count.ts` `parkShown`). A held Lane is in Needs you only when the reader
+  old, compared when the page draws (`needs/count.ts` `parkShown`). Shared-state decisions come from rows the read
+  already holds, for team members only: `notices` lists the project row's revert and fix-needed notices (at most 20, the
+  rest counted by `noticesMore`) and, for the owner, the GitHub mirror when it stopped on a conflict (the Mirror
+  screen's three status rows and words); they count in Needs you and leave when the state changes. A held Lane is in Needs you only when the reader
   decides it (an approval or a landing held for review, for the owner;
   `needs/count.ts` `waitsOnPerson`); every other hold is an FYI row naming who
   acts next. The top bar's Needs you count subscribes to the same read and

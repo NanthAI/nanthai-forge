@@ -5,7 +5,8 @@
 // approval Forge enforces, or a person's own Lane that is stuck (choose an order, retry, update, set aside). An agent's
 // conflict, failed check or moved main is its agent's next step; a refusal, a withdrawn landing and a Lane waiting
 // for the one it depends on ask nobody. Those go to FYI. A question with choices addressed to the reader waits on
-// the reader, and so does a Lane parked for the reader (Item e1633718). Pure and small: the frame imports it eagerly.
+// the reader, and so does a Lane parked for the reader (Item e1633718); work reverted from main and a stopped mirror
+// are shared-state decisions (Item 12fde646). Pure and small: the frame imports it eagerly.
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { makeFunctionReference } from 'convex/server';
 
@@ -86,6 +87,15 @@ export type Ask = {
   ahead?: true;
   handBack?: { head: string; left: string; to: string };
 };
+/** A shared-state decision a person settles (convex/projectNeedsMe.ts `notices`, Item 12fde646): work reverted from main,
+ * work that still needs a fix, or a GitHub mirror that stopped. It stays until the state changes. */
+export type Notice = {
+  kind: 'reverted' | 'needs-fix' | 'mirror';
+  /** The reverted Intent's id, or `mirror`. */
+  id: string;
+  summary: string;
+  next: string | null;
+};
 export type NeedsRead = {
   held: readonly HeldLane[];
   more: number;
@@ -96,6 +106,8 @@ export type NeedsRead = {
   asksMore?: true;
   parked?: readonly ParkedLane[];
   parkedMore?: boolean;
+  notices?: readonly Notice[];
+  noticesMore?: true;
 };
 
 export const needsRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, NeedsRead>(
@@ -135,8 +147,8 @@ export function needsCount(
   const parked = (read.parked ?? []).filter(row => parkShown(row, now)).length;
   const asks = (read.asks ?? []).filter(row => !row.ahead).length;
   return {
-    n: held + asks + parked,
-    atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true,
+    n: held + asks + parked + (read.notices?.length ?? 0),
+    atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true || read.noticesMore === true,
   };
 }
 

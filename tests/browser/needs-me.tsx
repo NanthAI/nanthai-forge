@@ -401,45 +401,72 @@ const conversationRead: NeedsRead = {
     },
   ],
 };
+// Item 12fde646: `?data=notices` is the busy project plus the shared-state decisions the rule keeps in Needs you: work
+// reverted from main, work still needing a fix, and a GitHub mirror that stopped.
+const noticesRead: NeedsRead = {
+  ...baseRead,
+  notices: [
+    {
+      kind: 'reverted',
+      id: uuid(700),
+      summary: 'Reverted receipt 3f2a9c10: parser.test.mjs failed on main (run 7d41).',
+      next: `nforge agent ROOT start '{"intentId":"${uuid(700)}"}'`,
+    },
+    {
+      kind: 'needs-fix',
+      id: uuid(701),
+      summary: 'Fix needed for receipt 81c0d2aa: queue.test.mjs failed on main.',
+      next: null,
+    },
+    {
+      kind: 'mirror',
+      id: 'mirror',
+      summary: 'GitHub’s main moved without Forge, so the mirror to synthetic/mirror stopped.',
+      next: 'the owner person brings GitHub’s commit into Forge in Settings → GitHub mirror',
+    },
+  ],
+};
 const read: NeedsRead =
-  variant === 'conversation'
-    ? conversationRead
-    : variant === 'held-more'
-      ? extraRead
-      : worst || variant === 'towers'
-        ? worstRead
-        : calm || quiet || unavailable
-          ? {
-              held: [],
-              more: 0,
-              moreIsLowerBound: false,
-              approvals: JSON.stringify({ requests: [], complete: true }),
-              canDecide: true,
-              asks: [],
-            }
-          : connect
+  variant === 'notices'
+    ? noticesRead
+    : variant === 'conversation'
+      ? conversationRead
+      : variant === 'held-more'
+        ? extraRead
+        : worst || variant === 'towers'
+          ? worstRead
+          : calm || quiet || unavailable
             ? {
                 held: [],
                 more: 0,
                 moreIsLowerBound: false,
-                approvals: JSON.stringify({
-                  requests: [
-                    {
-                      ...approval(
-                        'setting:github-connect',
-                        'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
-                        4,
-                      ),
-                      kind: 'setting',
-                      setting: { origin: 'github-connect' },
-                    },
-                  ],
-                  complete: true,
-                }),
+                approvals: JSON.stringify({ requests: [], complete: true }),
                 canDecide: true,
                 asks: [],
               }
-            : baseRead;
+            : connect
+              ? {
+                  held: [],
+                  more: 0,
+                  moreIsLowerBound: false,
+                  approvals: JSON.stringify({
+                    requests: [
+                      {
+                        ...approval(
+                          'setting:github-connect',
+                          'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
+                          4,
+                        ),
+                        kind: 'setting',
+                        setting: { origin: 'github-connect' },
+                      },
+                    ],
+                    complete: true,
+                  }),
+                  canDecide: true,
+                  asks: [],
+                }
+              : baseRead;
 type Mark = LineFeed['lanes'][number];
 const moving = (n: number, stage: Mark['stage'], minutes: number, check?: string): Mark => ({
   laneId: uuid(400 + n),

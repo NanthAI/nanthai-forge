@@ -99,7 +99,8 @@ export function registerHostedAgentWorkflow(
   const groups = [
     {
       name: 'forge_task',
-      short: 'Start, save, land Lanes.',
+      short:
+        'Start, save, land Lanes. Forge is not a chat channel: ask the person running you in your own app.',
       actions: [
         'start',
         'open',
@@ -334,7 +335,7 @@ export function registerHostedAgentWorkflow(
     'forge_wait',
     {
       description:
-        'Block on runId, operationIds, peer or approval up to maxWaitMs (default 540000). IN_PROGRESS gives a resume command: call it until terminal.',
+        'Block on runId, operationIds, peer or approval up to maxWaitMs. IN_PROGRESS gives a resume command: call it until terminal.',
       inputSchema: {
         ...hostedWaitSchema.shape,
         replyDetail: z.boolean().optional(),

@@ -16,11 +16,12 @@ import {
   type HeldLane,
   type HeldWhy,
   type NeedsRead,
+  type Notice,
   type Park,
   type ParkedLane,
 } from './count';
 
-export type { Ask, HeldLane, HeldWhy, NeedsRead, Park, ParkedLane } from './count';
+export type { Ask, HeldLane, HeldWhy, NeedsRead, Notice, Park, ParkedLane } from './count';
 /** One open request from the approvals payload (projectHostedApprovals `openApprovalRequests`). */
 export type Approval = {
   laneId: string;
@@ -55,6 +56,8 @@ export type NowRow = HeldLane & {
   next: string | null;
 };
 export type AskRow = Ask & { who: string | null };
+/** Work reverted from main, work that needs a fix, or a stopped mirror (Item 12fde646): a shared-state decision. */
+export type NoticeRow = Notice & { word: StateWord; tag: string; head: string };
 /** A Lane parked for the reader (Item e1633718): named to the reader, or the reader's own Lane parked with no one
  * named and idle 4 h. `since` is when it was parked (named) or last active (no one named). */
 export type ParkedRow = ParkedLane & {
@@ -73,13 +76,18 @@ export type NeedsView = {
   askedAhead?: AskRow[];
   /** Lanes parked for the reader that show now (count.ts `parkShown`): counted. */
   parked: ParkedRow[];
+  /** Shared-state decisions (work reverted from main, a stopped mirror): counted, and kept until the state changes. */
+  notices: NoticeRow[];
   /** Held, but nothing for a person to decide (count.ts `waitsOnPerson`): FYI rows, never counted. */
   fyi: NowRow[];
   ahead: AheadRow[];
   /** What waits on the reader: held rows that wait on a person plus questions. The shell's number (count.ts). */
   count: number;
-  /** True when `count` is a lower bound (the read stopped at its limit). */
+  /** True when the held, question or parked rows stopped at the read's limit. */
   atLeast: boolean;
+  /** True when `count` is a lower bound: `atLeast`, or more recovery notices than the read lists. The Held page
+   * counts Lanes only, so it keeps `atLeast`. */
+  countAtLeast: boolean;
   /** False when the approvals read hit its bound: a missing request is "can't confirm", never "none". */
   approvalsComplete: boolean;
 };
@@ -205,6 +213,20 @@ function parkedRow(row: ParkedLane): ParkedRow {
   };
 }
 
+const noticeTags = {
+  reverted: 'Reverted from main',
+  'needs-fix': 'Fix needed',
+  mirror: 'GitHub mirror',
+} as const;
+function noticeRow(notice: Notice): NoticeRow {
+  return {
+    ...notice,
+    word: notice.kind === 'reverted' ? 'Check failed' : 'Needs you',
+    tag: noticeTags[notice.kind],
+    head: notice.summary || `${noticeTags[notice.kind]}.`,
+  };
+}
+
 /** `now` decides only which Lanes parked with no one named show (count.ts `parkShown`); the page passes the time
  * its reads arrived, so nothing ticks. */
 export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
@@ -273,10 +295,13 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
     asks,
     ...(askedAhead.length ? { askedAhead } : {}),
     parked,
+    notices: (read.notices ?? []).map(noticeRow),
     fyi,
     ahead,
-    count: waiting.length + asks.length + parked.length,
+    count: waiting.length + asks.length + parked.length + (read.notices?.length ?? 0),
     atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true,
+    countAtLeast:
+      read.more > 0 || read.parkedMore === true || read.asksMore === true || read.noticesMore === true,
     approvalsComplete: complete,
   };
 }
@@ -304,14 +329,14 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString
 
 /** The page sentence: the answer first, then at most one more clause (DESIGN.md rule 45). */
 export function needsSentence(view: NeedsView): { bold: string; rest: string } {
-  const lanes = `${view.atLeast ? 'At least ' : ''}${plural(view.count, 'thing')}`;
+  const lanes = `${view.countAtLeast ? 'At least ' : ''}${plural(view.count, 'thing')}`;
   const aheadCount = view.ahead.length + (view.askedAhead?.length ?? 0);
   const ahead = aheadCount
     ? `${plural(aheadCount, 'request')} asked ahead ${aheadCount === 1 ? 'holds' : 'hold'} nothing yet.`
     : '';
   if (view.count)
     return { bold: `${lanes} ${view.count === 1 ? 'holds' : 'hold'} work until you decide.`, rest: ahead };
-  if (view.atLeast) return { bold: 'Some requests could not be listed.', rest: ahead };
+  if (view.countAtLeast) return { bold: 'Some requests could not be listed.', rest: ahead };
   // A hold that asks nobody is still a hold: never "nothing is held" while one is (Item 9b9057a9).
   const stuck = view.fyi.length;
   return {

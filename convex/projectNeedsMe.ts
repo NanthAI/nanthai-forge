@@ -10,7 +10,11 @@ import { v } from 'convex/values';
 import { query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, coordinationAccess } from './projectAuthority';
+import { githubMirrorStatus } from './projectGithubMirrorStatus.idle';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { mirrorSummary } from '../src/github-mirror-sentence';
+import { needsFix } from '../src/culprit-bisect';
 import { lineOwner } from './projectLiveLineOwners';
 import { landingRow } from './projectHostedLandingStore';
 import { finishRow } from './projectHostedFinishWake';
@@ -33,6 +37,9 @@ export const NEEDS_ME_HELD_LIMIT = 30;
 /** The most parked Lanes one read lists for the reader (Item e1633718); one index range of at most this plus one. */
 const NEEDS_ME_PARKED_LIMIT = 30;
 const NOTE_CHARS = 240;
+/** The most revert / fix-needed notices one read lists (Item 12fde646): they sit on the project row this read already
+ * holds, so listing them adds no read; the rest are counted by `noticesMore`. */
+const NEEDS_ME_NOTICE_LIMIT = 20;
 
 export const needsMeWhy = v.union(
   v.literal('conflict'),
@@ -111,6 +118,20 @@ export const needsMeResult = v.object({
     ),
   ),
   parkedMore: v.optional(v.boolean()),
+  /** Shared-state decisions a person settles (Item 12fde646): work reverted from main (or still needing a fix) and a
+   * GitHub mirror that stopped. Team members only; the mirror one is the owner's. Each stays until the state changes. */
+  notices: v.optional(
+    v.array(
+      v.object({
+        kind: v.union(v.literal('reverted'), v.literal('needs-fix'), v.literal('mirror')),
+        /** The reverted Intent's id, or `mirror`. */
+        id: v.string(),
+        summary: v.string(),
+        next: v.union(v.string(), v.null()),
+      }),
+    ),
+  ),
+  noticesMore: v.optional(v.literal(true)),
   /** Questions with choices addressed to the viewer, unanswered, on an open Lane (Items 12fde646, 48049998). */
   asksMore: v.optional(v.literal(true)),
   asks: v.optional(
@@ -219,6 +240,27 @@ async function dependencyLane(ctx: QueryCtx, projectId: Id<'hostedProjects'>, su
     )
     .take(2);
   return composed.length === 1 ? composed[0]!.key : null;
+}
+
+type Notice = {
+  kind: 'reverted' | 'needs-fix' | 'mirror';
+  id: string;
+  summary: string;
+  next: string | null;
+};
+
+/** The GitHub mirror, only when it stopped on a conflict a person settles (GitHub's main moved, GitHub refused the push,
+ * or the push failed): the same words as Settings → GitHub mirror. A mirror that is level, behind or retrying asks
+ * nobody. One status read of three rows, so nothing here for a project with no mirror. */
+async function stoppedMirror(ctx: QueryCtx, project: Doc<'hostedProjects'>): Promise<Notice | null> {
+  const policy = effectivePolicy(project).githubMirror;
+  if (!policy?.autoPush) return null;
+  const summary = mirrorSummary(
+    { ...policy, paused: project.githubMirrorPausedInbound !== undefined },
+    await githubMirrorStatus(ctx, project),
+  );
+  if (!['moved', 'refused', 'stopped'].includes(summary.state)) return null;
+  return { kind: 'mirror', id: 'mirror', summary: summary.sentence, next: summary.next };
 }
 
 export const read = query({
@@ -338,9 +380,33 @@ export const read = query({
           at: row.at,
         });
       }
+      // Shared-state decisions (Item 12fde646): the notices sit on the project row already read; the mirror reads its
+      // three status rows only for the owner of a project with a mirror, as the Mirror screen does.
+      const fixes = needsFix(project);
+      const owner = project.owner === user.subject;
+      // The team check reads a role only for a project with notices to show or for its owner's mirror.
+      const team = fixes.length > 0 || owner ? await coordinationAccess(ctx, project, user.subject) : false;
+      const notices: Notice[] = [];
+      let noticesMore = false;
+      if (team) {
+        noticesMore = fixes.length > NEEDS_ME_NOTICE_LIMIT;
+        for (const fix of fixes.slice(0, NEEDS_ME_NOTICE_LIMIT))
+          notices.push({
+            kind: fix.state === 'reverted' ? 'reverted' : 'needs-fix',
+            id: fix.intentId,
+            summary: String(fix.summary ?? '')
+              .replace(/\s+/g, ' ')
+              .slice(0, NOTE_CHARS),
+            next: typeof fix.undo === 'string' ? fix.undo.slice(0, NOTE_CHARS) : null,
+          });
+      }
+      const mirror = team && owner ? await stoppedMirror(ctx, project) : null;
+      if (mirror) notices.push(mirror);
       return {
         held,
         parked,
+        ...(notices.length ? { notices } : {}),
+        ...(noticesMore ? { noticesMore: true as const } : {}),
         parkedMore: parks.length > NEEDS_ME_PARKED_LIMIT,
         more: Math.max(0, marks.length - NEEDS_ME_HELD_LIMIT),
         moreIsLowerBound: marks.length > NEEDS_ME_HELD_LIMIT,
