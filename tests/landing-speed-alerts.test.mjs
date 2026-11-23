@@ -924,3 +924,148 @@ test('Item 1018d0f8: the discarded budget counts thrown-away checks per window o
   // A count budget never ratchets.
   assert.equal(state.ratchet?.[budget.id], undefined);
 });
+
+test('incident fa2c1383 economics: rechecks outlive the 40-landing window and a late usage correction, so the keep rule measures them', async t => {
+  const { measuredCheckCosts } = await import('../dist/stale-check-economics.js');
+  const { RECHECK_BASIS_SINCE, RECHECK_RESERVE, currentRecheckSample, landingSpeedStateSchema, speedWindow } =
+    await import('../dist/landing-speed-alerts.js');
+  // 53c9a388 (2026-11-23): a landing about every 13 min, so the 40-landing row covered 8.5 h and held
+  // 2 rechecks; the keep rule needs 3, so every overlapping run cancelled `scoped-unmeasured`. Replay a
+  // day and a half of it: a recheck every 18th landing (about one every 4 h), a whole check otherwise.
+  const kindOf = i => (i % 18 === 9 ? 'scoped' : 'full');
+  const landing = (i, start = RECHECK_BASIS_SINCE) => {
+    const kind = kindOf(i),
+      jobs = kind === 'full' ? 5500 : 2400;
+    return {
+      at: start + (i + 1) * 13 * minute,
+      id: `econ${String(i).padStart(4, '0')}`,
+      toMain: 20,
+      check: kind === 'full' ? 12 : 6,
+      settle: 30,
+      attempts: 2,
+      writes: 9,
+      counts: [1, 1, 1, jobs, 0, 0, ...(kind === 'full' ? [jobs] : [])],
+      passToLand: 3,
+      kind,
+      stages: { queue: 7, check: kind === 'full' ? 12 : 6, settle: 0.5 },
+    };
+  };
+  let state = null,
+    windowOnly = null;
+  const events = [],
+    windowEvents = [];
+  for (let i = 0; i < 140; i++) {
+    const out = observeLandingSpeed(state, landing(i), budgets);
+    state = out.state;
+    events.push(...out.events);
+    // What the row did before the reserve: the window alone.
+    const before = observeLandingSpeed(windowOnly, landing(i), budgets);
+    windowOnly = { ...before.state, samples: speedWindow(before.state.samples) };
+    windowEvents.push(...before.events);
+  }
+  const window = speedWindow(state.samples);
+  assert.equal(window.filter(row => row[11] === 'scoped').length, 2, 'the window alone holds two rechecks');
+  assert.equal(measuredCheckCosts(window), null, 'the incident: the window alone leaves the keep unmeasured');
+  const reserve = state.samples.slice(0, -window.length);
+  assert.equal(reserve.length, RECHECK_RESERVE);
+  assert.ok(reserve.every(row => row[11] === 'scoped' && row[0] < window[0][0]));
+  assert.deepEqual(measuredCheckCosts(state.samples), {
+    wholeWallMinutes: 12,
+    scopedShare: { jobs: 2400 / 5500, wall: 6 / 12 },
+  });
+  // Every budget judges the same window as before: same events, same window rows, same flags.
+  assert.deepEqual(events, windowEvents);
+  assert.deepEqual(window, windowOnly.samples);
+  assert.deepEqual({ ...state, samples: window }, windowOnly);
+  // Rollback: the row still parses on the unchanged schema, so a server without the reserve keeps the
+  // window and drops the reserve at its next landing.
+  assert.deepEqual(landingSpeedStateSchema.parse(JSON.parse(JSON.stringify(state))), state);
+  assert.ok(
+    JSON.stringify(state).length - JSON.stringify(windowOnly).length <= 600,
+    'about 550 bytes more with 8-character ids (about 760 with receipt UUIDs)',
+  );
+
+  // Rechecks reserved before the selector narrowed (9e3ba8ba) measured a wider recheck: they never count.
+  let old = null;
+  for (let i = 0; i < 140; i++)
+    old = observeLandingSpeed(old, landing(i, RECHECK_BASIS_SINCE - 150 * 13 * minute), budgets).state;
+  assert.equal(old.samples.length, 40, 'no reserve from rechecks before the basis');
+  assert.equal(measuredCheckCosts(old.samples), null);
+
+  // A late usage correction re-observes the newest landing: it keeps its check kind and pass-to-land.
+  const f = await finishFixture(t);
+  const newest = window.at(-1);
+  const recheckRow = [...newest.slice(0, 10), 3, 'scoped'];
+  const stored = { ...state, samples: [...state.samples.slice(0, -1), recheckRow] };
+  await f.tx('seedLandingSpeed', {
+    _handler: ctx =>
+      ctx.db.insert('projectLandingSpeed', { projectId: f.projectId, value: JSON.stringify(stored) }),
+  });
+  await f.tx('correct', {
+    _handler: ctx =>
+      speedApi.correctLandingRunnerCosts(ctx, f.projectId, [
+        {
+          phase: 'landed',
+          acceptance: { receiptId: newest[3] },
+          counts: { runnerSeconds: 2400, discardedRunnerSeconds: 700 },
+        },
+      ]),
+  });
+  const [row] = f.tables.projectLandingSpeed.values();
+  const corrected = JSON.parse(row.value).samples;
+  assert.equal(corrected.at(-1)[7][4], 700, 'the late usage joins the newest sample');
+  assert.equal(corrected.at(-1)[10], 3, 'pass-to-land kept');
+  assert.equal(corrected.at(-1)[11], 'scoped', 'check kind kept');
+  assert.equal(corrected.length, state.samples.length, 'the reserve is kept, not duplicated');
+  // Review finding 4: late usage for a reserve receipt writes nothing (economics reads accepted seconds).
+  const before = row.value;
+  await f.tx('correctReserve', {
+    _handler: ctx =>
+      speedApi.correctLandingRunnerCosts(ctx, f.projectId, [
+        {
+          phase: 'landed',
+          acceptance: { receiptId: reserve[0][3] },
+          counts: { discardedRunnerSeconds: 900 },
+        },
+      ]),
+  });
+  assert.equal([...f.tables.projectLandingSpeed.values()][0].value, before);
+
+  // Review finding 1: rechecks the estimator cannot use (no check time) never evict usable ones.
+  let mixed = null;
+  const feed = (i, patch = {}) =>
+    (mixed = observeLandingSpeed(
+      mixed,
+      { ...landing(i), id: `mix${String(i).padStart(4, '0')}`, ...patch },
+      budgets,
+    ).state);
+  for (let i = 0; i < 3; i++) feed(i, { kind: 'scoped', check: 6, counts: [1, 1, 1, 2400, 0, 0] });
+  for (let i = 3; i < 8; i++) feed(i, { kind: 'scoped', check: null, counts: [1, 1, 1, 2400, 0, 0] });
+  for (let i = 8; i < 50; i++) feed(i, { kind: 'full', check: 12, counts: [1, 1, 1, 5500, 0, 0, 5500] });
+  assert.equal(mixed.samples.length, 43, 'only the three usable rechecks are reserved');
+  assert.deepEqual(measuredCheckCosts(mixed.samples)?.scopedShare, { jobs: 2400 / 5500, wall: 0.5 });
+
+  // Review finding 2: a reservation within the rounding of the cutoff, or with no settle time, is before it.
+  // Check time is stored rounded to a tenth of a minute, as `span` stores it.
+  const edge = (reservedAt, checkSeconds, settle) => [
+    reservedAt + checkSeconds * 1000 + (settle ?? 0) * 1000,
+    10,
+    Math.round((checkSeconds / 60) * 10) / 10,
+    'edge0000',
+    settle,
+    1,
+    1,
+    [1, 1, 1, 2400, 0, 0],
+    null,
+    null,
+    1,
+    'scoped',
+  ];
+  assert.equal(currentRecheckSample(edge(RECHECK_BASIS_SINCE - 1000, 62, 30)), false, 'reserved 1 s before');
+  assert.equal(currentRecheckSample(edge(RECHECK_BASIS_SINCE + 10_000, 58, 30)), true, 'reserved 10 s after');
+  assert.equal(
+    currentRecheckSample(edge(RECHECK_BASIS_SINCE + 3_600_000, 60, null)),
+    false,
+    'no settle time',
+  );
+});

@@ -345,6 +345,41 @@ export const discardedChecks = (
 const minute = 60_000;
 /** Retained samples per project (about 3.7 KB with counts): the window plus gaps where a stamp was missing. */
 const MAX_SAMPLES = 40;
+/** Recheck reserve (keep the run, fa2c1383 comment 53c9a388): the keep rule's measured scoped share
+ * needs ECONOMICS_MIN_SAMPLES rechecks, but a few a day arrive and the 40-landing window (about 12 h on
+ * dogfood) rotated each one out before a third came. So the newest RECHECK_RESERVE recheck samples that
+ * leave the window stay on the row, older than it, at the front of `samples` (at most about 800 bytes with receipt ids).
+ * The window is always the last MAX_SAMPLES rows: every window reader takes `speedWindow`, and only the
+ * keep economics reads the reserve. A server without the reserve drops it at its next landing. */
+export const RECHECK_RESERVE = 5;
+/** Rechecks whose check was reserved before the recheck selector narrowed (receipt 9e3ba8ba, Item
+ * 196d5e4e) measured a wider recheck than today's, so they never join the reserve or the measured share.
+ * Move it to the landing of the next selector change that alters what a recheck runs. */
+export const RECHECK_BASIS_SINCE = Date.parse('2026-11-23T11:45:34.000Z');
+/** The most the reservation estimate below can be late: check minutes and settle seconds are each
+ * rounded to a tenth (`span`). */
+const RESERVED_ROUNDING_MS = 0.05 * minute + 50;
+/** A recheck (scoped, or scoped that fell back to the whole suite) the keep economics can use: its check
+ * wall and accepted-run seconds are known (an unusable row must never take a reserve slot), and its check
+ * was surely reserved on the current selector. The reservation is the commit less settle and check time,
+ * as `wholeCheckShift` places checks; an unknown settle or a reservation within the rounding of the
+ * cutoff counts as before it (economics review, findings 1 and 2). */
+export const currentRecheckSample = (row: LandingSpeedState['samples'][number]) => {
+  const check = row[2],
+    settle = row[4],
+    jobs = row[7]?.[3];
+  return (
+    (row[11] === 'scoped' || row[11] === 'scoped-full') &&
+    check != null &&
+    check > 0 &&
+    jobs != null &&
+    jobs > 0 &&
+    settle != null &&
+    row[0] - settle * 1000 - check * minute - RESERVED_ROUNDING_MS >= RECHECK_BASIS_SINCE
+  );
+};
+/** The landing window: the last MAX_SAMPLES rows, without the recheck reserve in front of them. */
+export const speedWindow = <T>(samples: readonly T[]) => samples.slice(-MAX_SAMPLES);
 /** R2 requests signed by its composes (class A, class B, bytes put), then the shard execution seconds of
  * the accepted check run, of the runs its attempts discarded, and of the main audit run that followed it;
  * last, the accepted run's seconds again when it was a full check (null for a scoped check), absent on
@@ -667,7 +702,7 @@ export function observeLandingSpeed(
   sample: LandingSpeedSample,
   budgets: SpeedBudgets,
 ): { state: LandingSpeedState; events: SpeedBudgetEvent[] } {
-  const samples = [
+  const rows = [
     ...(previous?.samples ?? []),
     [
       sample.at,
@@ -688,7 +723,6 @@ export function observeLandingSpeed(
     ] as const,
   ]
     .sort((a, b) => a[0] - b[0])
-    .slice(-MAX_SAMPLES)
     .map(
       ([at, toMain, check, id, settle, attempts, writes, counts, ...durations]) =>
         [
@@ -703,6 +737,12 @@ export function observeLandingSpeed(
           ...durations,
         ] as Row,
     );
+  // Every budget judges the window only; the recheck reserve rides in front of it (RECHECK_RESERVE).
+  const samples = speedWindow(rows);
+  const reserve = rows
+    .slice(0, rows.length - samples.length)
+    .filter(currentRecheckSample)
+    .slice(-RECHECK_RESERVE);
   const judged = landingBudgets(budgets);
   const ids = new Set(judged.map(b => b.id));
   const keep = <T>(record?: Record<string, T>) =>
@@ -835,7 +875,7 @@ export function observeLandingSpeed(
   return {
     state: {
       schema: 2,
-      samples,
+      samples: [...reserve, ...samples],
       broken,
       ...(Object.keys(ratchet).length ? { ratchet } : {}),
       ...(Object.keys(short).length ? { short } : {}),

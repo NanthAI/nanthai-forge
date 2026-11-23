@@ -1671,7 +1671,8 @@ the latest twenty: 2.55 A and 1.00 B per landing. These are signed requests, not
 bucket operations or an invoice.
 
 **Live drift alert.** Each landing's accept mutation adds its counts to the `projectLandingSpeed` row it
-already writes (the row keeps the last 40 landings, about 3.7 KB, so it does not grow). The `budgets`
+already writes (the row keeps the last 40 landings plus at most 5 older recheck samples for the keep
+rule, about 4.5 KB, so it does not grow). The `budgets`
 below are judged as the mean over the last 20 landings, exactly like the speed budgets: one alert and
 one P0 Issue per break, a recovery message, nothing while it stays broken
 ([speed budgets](agents/speed-budgets.md)). Idle cost is zero and a landing adds no call.

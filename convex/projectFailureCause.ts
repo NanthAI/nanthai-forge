@@ -18,7 +18,7 @@ import {
 } from './projectFailureCauseRead';
 import { report } from './errors';
 import { landingStateOf, type LandingStateName } from '../src/landing-state';
-import { landingSpeedStateSchema } from '../src/landing-speed-alerts';
+import { landingSpeedStateSchema, speedWindow } from '../src/landing-speed-alerts';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import type { QueryCtx } from './server';
@@ -40,7 +40,7 @@ async function checkSamples(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
     .withIndex('by_project', q => q.eq('projectId', projectId))
     .unique();
   const parsed = row ? landingSpeedStateSchema.safeParse(JSON.parse(row.value)) : null;
-  return parsed?.success ? parsed.data.samples : [];
+  return parsed?.success ? speedWindow(parsed.data.samples) : [];
 }
 /** The project's usual check time (the median), as the check screen says it. Null when fewer than
  * EXPECTED_MIN_SAMPLES landings reported a check time. */

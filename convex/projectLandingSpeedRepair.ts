@@ -3,10 +3,11 @@ import type { MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { discardedRunnerSeconds } from '../src/cost-budgets';
-import { landingSpeedStateSchema } from '../src/landing-speed-alerts';
+import { landingSpeedStateSchema, speedWindow } from '../src/landing-speed-alerts';
 
-/** One retained sample per maintenance page: <= 40 pages/project, one speed row, one receipt and
- * one operation row read, at most one speed-row patch. No landing-path call or idle timer. */
+/** One retained sample per maintenance page: <= 40 pages/project (the window; the recheck reserve in
+ * front of it keeps no discarded stamp anyone reads), one speed row, one receipt and one operation row
+ * read, at most one speed-row patch. No landing-path call or idle timer. */
 export async function repairLandingSpeedPage(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -28,7 +29,7 @@ export async function repairLandingSpeedPage(
   if (!parsed.success) return { after, done: true, readBytes: row.value.length };
   const state = parsed.data;
   // Seek by immutable receipt id, rather than offsets that shift as new samples arrive.
-  const sample = state.samples
+  const sample = speedWindow(state.samples)
     .filter(s => s[0] <= cutoff && s[3] > after)
     .sort((a, b) => (a[3] < b[3] ? -1 : 1))[0];
   if (!sample) return { after, done: true, readBytes: row.value.length };

@@ -6,13 +6,16 @@
  * - Whole: accepted checks that ran the whole suite on their own (`full`).
  * - Scoped: accepted main-race rechecks (`scoped`), plus the ones that fell back to the whole suite
  *   (`scoped-full`) at what they really cost, so the share is not optimistic by the fallback rate
- *   (review 563c595b).
+ *   (review 563c595b). Only rechecks reserved on the current selector (`currentRecheckSample`), from
+ *   the window and the row's recheck reserve, so a few a day add up instead of rotating out (53c9a388).
+ *   The seed is every recheck after a pass that main moved under: the same scoped recheck a kept pass
+ *   seeds, so measuring it costs no kept run, call or read.
  * - Elapsed (review 563c595b F2): from the first test shard's start (its runner's first session after
  *   the plan), never from when the run was queued or planned, so waiting for runners is not progress.
  *   Before any shard starts, elapsed is 0. The whole-check median it is divided by includes the
  *   runner wait, which can only understate elapsed: it never over-keeps.
  * - redShare stays 0 (never over-keeps); the first-check red share is a later refinement. */
-import type { LandingSpeedState } from './landing-speed-alerts.js';
+import { currentRecheckSample, speedWindow, type LandingSpeedState } from './landing-speed-alerts.js';
 import type { StaleCheckEconomics } from './stale-check-keep.js';
 
 /** Fewer samples of either kind than this: unmeasured, so no scoped keep. */
@@ -28,13 +31,13 @@ const median = (values: number[]) => {
 export function measuredCheckCosts(samples: LandingSpeedState['samples'] | null | undefined) {
   const whole: { wall: number; jobs: number }[] = [];
   const scoped: { wall: number; jobs: number }[] = [];
+  const window = new Set(speedWindow(samples ?? []));
   for (const row of samples ?? []) {
     const wall = row[2];
     const jobs = row[7]?.[3];
-    const kind = row[11];
-    if (wall == null || jobs == null || wall <= 0 || jobs <= 0 || !kind) continue;
-    if (kind === 'full') whole.push({ wall, jobs });
-    else if (kind === 'scoped' || kind === 'scoped-full') scoped.push({ wall, jobs });
+    if (wall == null || jobs == null || wall <= 0 || jobs <= 0) continue;
+    if (row[11] === 'full' && window.has(row)) whole.push({ wall, jobs });
+    else if (currentRecheckSample(row)) scoped.push({ wall, jobs });
   }
   if (whole.length < ECONOMICS_MIN_SAMPLES || scoped.length < ECONOMICS_MIN_SAMPLES) return null;
   const wall = median(whole.map(w => w.wall));

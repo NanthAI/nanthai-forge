@@ -8585,6 +8585,34 @@
       "test": "incident fa2c1383 wiring: the guards fail on the incident, stranded followers, a parked kept run, a stale-base restart and a dropped conflict"
     },
     {
+      "incident": "fa2c1383",
+      "what": "With the keep switch on (2026-11-23, comment 53c9a388) the 40-landing speed row held 2 rechecks and the keep rule needs 3, so every overlapping run cancelled scoped-unmeasured; a late usage correction also erased the newest landing's check kind",
+      "file": "tests/landing-speed-alerts.test.mjs",
+      "paths": [
+        "convex/projectHostedCheckDefinitions.ts",
+        "convex/projectHostedCheckEntries.ts",
+        "convex/projectHostedCheckStore.ts",
+        "convex/projectHostedCompose.ts",
+        "convex/projectHostedComposeJobs.ts",
+        "convex/projectHostedComposePublish.ts",
+        "convex/projectHostedComposeStore.ts",
+        "convex/projectHostedFinishWake.ts",
+        "convex/projectHostedLandingDesiredWake.ts",
+        "convex/projectHostedLandingEnvironmentHold.ts",
+        "convex/projectHostedLandingEvents.ts",
+        "convex/projectMetricAliasWriter.ts",
+        "convex/projectMetricComposeMembership.ts",
+        "convex/projectSourceJobs.ts",
+        "src/first-check-risk.ts",
+        "src/hosted-check.ts",
+        "src/hosted-compose-syntax.ts",
+        "src/hosted-compose-worker.ts",
+        "src/hosted-compose.ts",
+        "src/landing-speed-alerts.ts"
+      ],
+      "test": "incident fa2c1383 economics: rechecks outlive the 40-landing window and a late usage correction, so the keep rule measures them"
+    },
+    {
       "incident": "ad80e037",
       "what": "Queue-cap race (Item 593fc2d7 friction): two builders read the queue, both saw room under the project's check cap and both submitted; with land {maxChecks:N} the server judges each submit inside its mutation, counting the other one still preparing",
       "file": "tests/land-when-room.test.mjs",

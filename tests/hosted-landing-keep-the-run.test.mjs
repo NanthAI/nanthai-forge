@@ -45,10 +45,11 @@ const switchOff = t => {
 };
 
 /** The project's measured check costs: a scoped recheck is 2/3 of a whole check's runner jobs and
- * 10/13 of its wall (src/stale-check-economics.ts reads the landing-speed samples). */
+ * 10/13 of its wall (src/stale-check-economics.ts reads the landing-speed samples). The landings
+ * commit after the recheck selector's basis (RECHECK_BASIS_SINCE), an hour apart. */
 const seedCosts = f => {
   const sample = (i, wall, jobs, kind) => [
-    i,
+    Date.parse('2026-11-24T00:00:00.000Z') + i * 3_600_000,
     30,
     wall,
     `l${i}`,

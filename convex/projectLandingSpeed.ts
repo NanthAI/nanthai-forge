@@ -15,6 +15,7 @@ import {
   landingSpeedStateSchema,
   observeLandingSpeed,
   speedBudgetIssue,
+  speedWindow,
   speedBudgetMessage,
   type LandingSpeedState,
 } from '../src/landing-speed-alerts';
@@ -98,7 +99,9 @@ export async function guardSetReply(ctx: QueryCtx, projectId: Id<'hostedProjects
       .unique();
     let at: number[] = [];
     try {
-      at = row ? landingSpeedStateSchema.parse(JSON.parse(row.value)).samples.map(sample => sample[0]) : [];
+      at = row
+        ? speedWindow(landingSpeedStateSchema.parse(JSON.parse(row.value)).samples).map(sample => sample[0])
+        : [];
     } catch {
       at = [];
     }
@@ -192,8 +195,10 @@ export async function correctLandingRunnerCosts(
   if (!parsed.success) return;
   const state = parsed.data;
   let changed = false;
+  // The window only: a recheck reserve row is read for its accepted-run seconds, never its discarded ones.
+  const window = speedWindow(state.samples);
   for (const landing of landings) {
-    const sample = state.samples.find(s => s[3] === landing.acceptance?.receiptId);
+    const sample = window.find(s => s[3] === landing.acceptance?.receiptId);
     if (!sample) continue;
     sample[7] ??= [null, null, null, null, null, null];
     sample[7][4] = discardedRunnerSeconds(landing);
@@ -214,6 +219,10 @@ export async function correctLandingRunnerCosts(
       counts: latest[7],
       saveMs: latest[8],
       preflightMs: latest[9],
+      // Re-observed as stored (fa2c1383): dropping these erased the newest landing's check kind, so a
+      // recheck whose late usage came in never counted toward the keep rule's measured costs.
+      passToLand: latest[10],
+      kind: latest[11],
       stages: { queue: null, check: null, settle: null },
     },
     speedBudgets,

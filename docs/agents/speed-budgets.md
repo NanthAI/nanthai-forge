@@ -54,7 +54,9 @@ ids leave the retained broken map at the next observation; no migration call is 
 ## Cost
 
 No new polling, cron or subscription, and idle costs zero. A landing already reads and writes the row (about 3 KB,
-the last 40 samples). A transition (rare: a break or a recovery, never while a budget stays broken) schedules one
+the last 40 samples). In front of those 40 the row keeps up to 5 older recheck samples measured on the current
+recheck selector (`RECHECK_RESERVE`, at most about 800 bytes): the keep rule needs 3 rechecks to measure its scoped share
+and the window alone rotated them out (Item fa2c1383, 53c9a388). Budgets judge only the window (`speedWindow`). A transition (rare: a break or a recovery, never while a budget stays broken) schedules one
 alert delivery and one Issue write action (about six Convex round trips through the ordinary Work command path).
 
 ## Seeing values
