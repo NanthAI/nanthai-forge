@@ -418,6 +418,18 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       assert.ok(![...needs, ...fyi].some(text => uuid.test(text)), 'no raw id as a title, anywhere');
       // Owner 2026-11-23 14:16Z: the FYI tile row is gone (its figures duplicated the Now tiles in a different, capped window).
       assert.equal(await region(page, 'FYI').locator('.nums').count(), 0);
+      // Item 9e748e41: every stuck-landing row links to that Lane's wait chain (Lanes > Touching, ?lane=).
+      const waits = region(page, 'FYI').getByRole('link', { name: 'What it waits on' });
+      assert.ok((await waits.count()) > 0, 'held FYI rows link to what they wait on');
+      // Each link names the same Lane as its own row's "Open the Lane" link.
+      for (const row of await region(page, 'FYI').locator('.fyi-row').all()) {
+        const wait = row.getByRole('link', { name: 'What it waits on' });
+        if (!(await wait.count())) continue;
+        const lane = (await row.getByRole('link', { name: 'Open the Lane' }).getAttribute('href'))
+          .split('/')
+          .pop();
+        assert.match((await wait.getAttribute('href')) ?? '', new RegExp(`/touching\\?lane=${lane}$`));
+      }
       assert.doesNotMatch(
         await region(page, 'FYI').innerText(),
         /\b\d[\d,]*\+(?!\w)/,

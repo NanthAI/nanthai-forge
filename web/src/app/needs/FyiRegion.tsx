@@ -7,7 +7,7 @@ import { useState, type ReactNode } from 'react';
 import { Key, Region, Row, Segment, State, Who } from '../../ds';
 import { A } from '../frames';
 import { Capped } from './Capped';
-import { fyiSum, sinceText, type Area, type FyiRow, type FyiState, type fyiView } from './fyi';
+import { focusHref, fyiSum, sinceText, type Area, type FyiRow, type FyiState, type fyiView } from './fyi';
 import type { Dismiss } from './NeedsMe';
 
 /** FYI rows shown before "Show more". */
@@ -154,7 +154,11 @@ export function Fyi({
                   </span>
                   <span className="fyi-links">
                     {row.links.map(link => (
-                      <A key={link.label} className="lk" href={href(link.to)}>
+                      <A
+                        key={link.label}
+                        className="lk"
+                        href={link.focusLane ? focusHref(href(link.to), link.focusLane) : href(link.to)}
+                      >
                         {link.label}
                       </A>
                     ))}

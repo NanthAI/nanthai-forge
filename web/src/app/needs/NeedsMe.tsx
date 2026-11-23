@@ -48,7 +48,7 @@ import { AnswerKeys, HandBackDetails } from '../discussion/ConversationEntry';
 import type { Answer } from '../discussion/conversation';
 import { useAnswer } from '../discussion/useConversation';
 import { needsRead } from './count';
-import { fyiView, type FyiRead, type FyiState } from './fyi';
+import { focusHref, fyiView, type FyiRead, type FyiState } from './fyi';
 import { Capped, CAP } from './Capped';
 import { fyiDismiss, fyiRead } from './fyi-reads';
 import { Fyi } from './FyiRegion';
@@ -392,6 +392,11 @@ export function NeedsMeView({
                               key={row.laneId}
                               row={row}
                               detail={row.kind === 'setting' ? settingDetail : undefined}
+                              waitsHref={
+                                row.kind === 'lane'
+                                  ? focusHref(at({ place: 'lanes', section: 'touching' }), row.laneId)
+                                  : null
+                              }
                               drawnAt={drawnAt}
                               decide={decide}
                               canDecide={read!.canDecide}
@@ -422,6 +427,11 @@ export function NeedsMeView({
                               row={row}
                               drawnAt={drawnAt}
                               laneHref={row.laneId ? at({ place: 'lanes', rest: row.laneId }) : null}
+                              waitsHref={
+                                row.laneId
+                                  ? focusHref(at({ place: 'lanes', section: 'touching' }), row.laneId)
+                                  : null
+                              }
                               anchor={
                                 view.now.find(entry => entry.laneId === row.laneId) === row
                                   ? (row.laneId ?? row.submissionId)
@@ -623,6 +633,7 @@ function Held({
   project,
   drawnAt,
   laneHref,
+  waitsHref,
   anchor,
   decide,
   canDecide,
@@ -632,6 +643,8 @@ function Held({
   project: WhoProject;
   drawnAt: number;
   laneHref: string | null;
+  /** Who is touching what for this Lane (Lanes > Touching, its wait chain): where the cause line leads. */
+  waitsHref: string | null;
   anchor: string | null;
   decide: Decide;
   canDecide: boolean;
@@ -686,6 +699,11 @@ function Held({
         {row.url ? (
           <A className="btn ghost sm" href={row.url}>
             Open approval
+          </A>
+        ) : null}
+        {waitsHref ? (
+          <A className="btn ghost sm" href={waitsHref}>
+            What it waits on
           </A>
         ) : null}
         {laneHref ? (
@@ -831,6 +849,7 @@ function Ahead({
   row,
   project,
   detail,
+  waitsHref = null,
   drawnAt,
   decide,
   canDecide,
@@ -839,6 +858,8 @@ function Ahead({
   row: AheadRow;
   project: WhoProject;
   detail?: (laneId: string) => ReactNode;
+  /** Set only on a request that blocks its Lane's landing (Holding work now): where that Lane's wait chain is. */
+  waitsHref?: string | null;
   drawnAt: number;
   decide: Decide;
   canDecide: boolean;
@@ -859,7 +880,7 @@ function Ahead({
       </summary>
       <div className="dec">
         <div className="dtop">
-          <span>holds nothing yet</span>
+          <span>{waitsHref ? 'holds its Lane' : 'holds nothing yet'}</span>
           {row.who ? (
             <RecordedWho
               handle={recordedIdentity(row.who)}
@@ -873,6 +894,13 @@ function Ahead({
           {row.label}. {row.nextStep}
         </p>
         {open && detail ? detail(row.laneId) : null}
+        {waitsHref ? (
+          <div className="btns">
+            <A className="btn ghost sm" href={waitsHref}>
+              What it waits on
+            </A>
+          </div>
+        ) : null}
         {row.needsOwner && canDecide ? (
           <div className="btns">
             {row.kind === 'lane' ? (

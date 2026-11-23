@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
 const { needsView } = await import(moduleUrl('../web/src/app/needs/model.ts'));
-const { fyiView, sinceText, startOfDay } = await import(moduleUrl('../web/src/app/needs/fyi.ts'));
+const { fyiView, focusHref, sinceText, startOfDay } = await import(moduleUrl('../web/src/app/needs/fyi.ts'));
 const { hrefFor, parseAppPath } = await import(moduleUrl('../web/src/app/paths.ts'));
 
 const NOW = new Date(2026, 10, 17, 15, 0).getTime();
@@ -256,4 +256,13 @@ test('incident ae068e0c: a red row’s Why opens that red (its sequence), never 
     ],
     'a landing with no Lane opens its own receipt',
   );
+});
+
+test("a held FYI row carries its cause line and a link to that Lane's wait chain", () => {
+  const rows = fyiView(fyiRead(), needs([held('c', 'conflict', minutesAgo(10))]).fyi, NOW).rows;
+  assert.match(rows[0].fact, /^next: /);
+  const wait = rows[0].links.find(link => link.label === 'What it waits on');
+  assert.deepEqual(wait.to, { place: 'lanes', section: 'touching' });
+  assert.equal(wait.focusLane, 'c');
+  assert.equal(focusHref('/x/touching', 'c'), '/x/touching?lane=c');
 });

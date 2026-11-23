@@ -60,7 +60,14 @@ export type FyiRead = {
 };
 
 export type Area = 'code' | 'outside';
-export type Link = { label: string; to: { place: string; section?: string; rest?: string } };
+/** Lanes > Touching for one Lane (its `?lane=` read by lanes/model.ts LANE_FOCUS), kept here so Now loads none of Lanes. */
+export const focusHref = (touching: string, laneId: string) =>
+  `${touching}?${new URLSearchParams({ lane: laneId })}`;
+export type Link = {
+  label: string;
+  to: { place: string; section?: string; rest?: string };
+  focusLane?: string;
+};
 export type FyiRow = {
   /** `kind:id@version`: what a dismissal stores. */
   key: string;
@@ -138,7 +145,12 @@ function heldRows(held: readonly NowRow[]): FyiRow[] {
     title: row.head,
     who: row.who,
     fact: [row.next ? `next: ${row.next}` : '', row.note ?? ''].filter(Boolean).join(' · '),
-    links: row.laneId ? [{ label: 'Open the Lane', to: { place: 'lanes', rest: row.laneId } }] : [],
+    links: row.laneId
+      ? [
+          { label: 'What it waits on', to: { place: 'lanes', section: 'touching' }, focusLane: row.laneId },
+          { label: 'Open the Lane', to: { place: 'lanes', rest: row.laneId } },
+        ]
+      : [],
   }));
 }
 
