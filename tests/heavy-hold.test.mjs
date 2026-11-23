@@ -17,7 +17,7 @@ import {
 } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { commandKind, holdSummary, testWorkersPerSlot, treeCpu } from '../dist/heavy-hold.js';
+import { commandKind, holdSummary, slotCapEnv, testWorkersPerSlot, treeCpu } from '../dist/heavy-hold.js';
 import { readHoldHistory, readHolds, recordHold } from '../dist/heavy-queue.js';
 
 const cli = resolve('dist/cli-entry.js');
@@ -336,4 +336,35 @@ test('friction 24456142: heavy warns when --test-name-pattern matches no top-lev
     noSlotsUnmatched.stderr,
     /heavy: warning: --test-name-pattern \(inner subtest only\) matched no top-level test/,
   );
+});
+
+test('review of 08d794a2: zero-match warning ignores non-frame output, honours NODE_OPTIONS patterns, stays silent in-process; a caller preload under a forge-heavy-cap- folder survives', t => {
+  const { cwd, heavy } = project(t);
+  writeFileSync(
+    join(cwd, 't', 'bytes.test.mjs'),
+    "import test from 'node:test'; process.stdout.write(Buffer.from('setup output\\n')); test('exists', () => {});\n",
+  );
+  const unmatched = heavy([process.execPath, '--test', '--test-name-pattern=missing', 't/bytes.test.mjs']);
+  assert.match(unmatched.stderr, /matched no top-level test/, 'binary setup output is not a match');
+  const matched = heavy([process.execPath, '--test', '--test-name-pattern=exists', 't/bytes.test.mjs']);
+  assert.doesNotMatch(matched.stderr, /matched no top-level test/);
+  const viaOptions = heavy([process.execPath, '--test', 't/bytes.test.mjs'], {
+    NODE_OPTIONS: '--test-name-pattern=missing',
+  });
+  assert.match(viaOptions.stderr, /matched no top-level test/);
+  const inProcess = heavy([
+    process.execPath,
+    '--test',
+    '--test-isolation=none',
+    '--test-name-pattern=missing',
+    't/bytes.test.mjs',
+  ]);
+  assert.doesNotMatch(inProcess.stderr, /matched no top-level test/, 'no guess without per-file children');
+
+  const own = `--require="${join(tmpdir(), 'forge-heavy-cap-fixtures', 'setup.cjs')}"`;
+  const kept = slotCapEnv({ NODE_OPTIONS: own }, 8, 2).env.NODE_OPTIONS;
+  assert(kept.includes(own), kept);
+  const stale = `--require="${join(tmpdir(), 'forge-heavy-cap-501', 'preload-0123456789ab.cjs')}"`;
+  const replaced = slotCapEnv({ NODE_OPTIONS: `${own} ${stale}` }, 8, 2).env.NODE_OPTIONS;
+  assert(replaced.includes(own) && !replaced.includes('preload-0123456789ab'), replaced);
 });

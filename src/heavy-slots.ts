@@ -565,12 +565,26 @@ export function nodeTestPathCount(args: string[]): number | null {
 
 const SHELL = /^(?:sh|bash|zsh)(?:\.exe)?$/i;
 const SHELL_KEYWORD = /^(?:do|then|else|elif|while|until|\{|[A-Za-z_]\w*=.*)$/;
+const SHELL_WORD = /(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|[^\s'"\\])+/g;
+const ENV_BIN = /^(?:\/usr\/bin\/)?env$/;
 const NODE_BIN = /(?:^|[\/\\])node(?:\.exe)?$/i;
 
 function shellRunsNodeTest(command: string): boolean {
   for (const segment of command.split(/&&|\|\||[;|\n()]/)) {
-    const tokens: string[] = segment.match(/'[^']*'|"(?:\\.|[^"])*"|\S+/g) ?? [];
-    while (tokens.length && SHELL_KEYWORD.test(tokens[0]!)) tokens.shift();
+    const tokens: string[] = segment.match(SHELL_WORD) ?? [];
+    // Prefixes before the program: keywords, VAR=value words (quoted values stay one word) and
+    // `env [-i|-u NAME|VAR=value]...`.
+    for (;;) {
+      const first = tokens[0];
+      if (first === undefined) break;
+      if (SHELL_KEYWORD.test(first)) tokens.shift();
+      else if (ENV_BIN.test(first)) {
+        tokens.shift();
+        while (tokens[0] !== undefined && /^-/.test(tokens[0])) {
+          if (tokens.shift() === '-u') tokens.shift();
+        }
+      } else break;
+    }
     if (!tokens.length) continue;
     const head = tokens[0]!.replace(/^(['"])(.*)\1$/, '$2');
     if (head !== process.execPath && !NODE_BIN.test(head)) continue;

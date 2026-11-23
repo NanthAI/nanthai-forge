@@ -16,6 +16,9 @@ export const testWorkersPerSlot = (cores: number, slots: number) =>
   Math.max(1, Math.floor(cores / Math.max(1, slots)));
 
 const PRELOAD_PREFIX = 'forge-heavy-cap-';
+/** Only a preload heavy itself wrote: `<tmp>/forge-heavy-cap-<id>/preload-<12 hex>.cjs`, so a caller's own `--require` that merely sits under a folder of that name stays. */
+const HEAVY_PRELOAD_OPTION =
+  /(?:^|\s+)--require="(?:[^"\\]|\\.)*[\/\\]forge-heavy-cap-[^"\\\/]*(?:\\\\|\/)preload-[0-9a-f]{12}\.cjs"/g;
 /** Loaded with --require by every Node process in the slot (a `--import` never runs in the test
  * runner's own process). An uncapped `node --test` restarts in place with the slot's cap; its own
  * --test-concurrency wins; the runner's per-file children (NODE_TEST_CONTEXT) and Node before
@@ -39,29 +42,20 @@ if (/^[1-9][0-9]*$/.test(n || '') && !process.env.NODE_TEST_CONTEXT && isTest &&
   process.exit(run.status === null ? 1 : run.status);
 }
 if (!process.env.NODE_TEST_CONTEXT && isTest) {
-  const patterns = [];
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] === '--test-name-pattern' && a[i + 1] !== undefined) patterns.push(a[++i]);
-    else if (a[i].startsWith('--test-name-pattern=')) patterns.push(a[i].slice(20));
+  const words = a.concat((process.env.NODE_OPTIONS || '').split(/\\s+/).filter(Boolean)), patterns = [];
+  for (let i = 0; i < words.length; i++) {
+    if (words[i] === '--test-name-pattern' && words[i + 1] !== undefined) patterns.push(words[++i]);
+    else if (words[i].startsWith('--test-name-pattern=')) patterns.push(words[i].slice(20));
   }
-  if (patterns.length) {
+  // Without per-file children (--test-isolation=none) no frame says what matched: stay silent
+  // rather than guess.
+  const inProcess = words.includes('--test-isolation=none') || words.some((x, i) => x === '--test-isolation' && words[i + 1] === 'none');
+  if (patterns.length && !inProcess) {
     const fs = require('node:fs'), marker = require('node:path').join(__dirname, 'pat-' + process.pid);
     try { fs.rmSync(marker, { force: true }); } catch {}
     process.env.FORGE_HEAVY_PATTERN_MATCH = marker;
-    let hit = false;
-    const mark = () => { hit = true; };
-    if (a.includes('--test-isolation=none') || a.some((x, i) => x === '--test-isolation' && a[i + 1] === 'none')) {
-      const nt = require('node:test');
-      nt.beforeEach(mark);
-      for (const fn of [nt, nt.describe, nt.it, nt.suite])
-        for (const k of ['skip', 'todo', 'only'])
-          if (typeof fn?.[k] === 'function') {
-            const orig = fn[k];
-            fn[k] = function(...args) { mark(); return orig.apply(this, args); };
-          }
-    }
     process.once('exit', () => {
-      const matched = hit || fs.existsSync(marker);
+      const matched = fs.existsSync(marker);
       try { fs.rmSync(marker, { force: true }); } catch {}
       if (!matched)
         process.stderr.write(
@@ -72,16 +66,22 @@ if (!process.env.NODE_TEST_CONTEXT && isTest) {
 } else if (process.env.NODE_TEST_CONTEXT && process.env.FORGE_HEAVY_PATTERN_MATCH) {
   const marker = process.env.FORGE_HEAVY_PATTERN_MATCH;
   delete process.env.FORGE_HEAVY_PATTERN_MATCH;
-  let ended = false, hit = false;
-  // Registered before the test file loads node:test, so it runs before node:test's own beforeExit
-  // flushes the final 0..0 test:plan frame. Any Uint8Array frame before then is a matched test
-  // (runnable, skipped or todo).
-  process.once('beforeExit', () => { ended = true; });
-  const write = process.stdout.write;
+  let hit = false;
+  // The runner's per-file child writes one V8-serialized frame per event (a 4-byte size, then
+  // ff 0f 6f ...). A top-level test that was selected enqueues (runnable, skipped or todo);
+  // setup output, nested tests and diagnostics do not count. Frames before the first match are
+  // few (plan, diagnostics), so decoding stops at the first hit.
+  const write = process.stdout.write, mark = Buffer.from([0xff, 0x0f, 0x6f]);
   process.stdout.write = function(chunk, ...rest) {
-    if (!ended && !hit && chunk instanceof Uint8Array) {
-      hit = true;
-      try { require('node:fs').writeFileSync(marker, ''); } catch {}
+    if (!hit && chunk instanceof Uint8Array) {
+      try {
+        const at = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength).indexOf(mark);
+        const event = at < 0 ? null : require('node:v8').deserialize(Buffer.from(chunk.buffer, chunk.byteOffset + at, chunk.byteLength - at));
+        if (event && event.type === 'test:enqueue' && event.data && event.data.nesting === 0) {
+          hit = true;
+          require('node:fs').writeFileSync(marker, '');
+        }
+      } catch {}
     }
     return write.call(this, chunk, ...rest);
   };
@@ -137,9 +137,7 @@ export function slotCapEnv(env: NodeJS.ProcessEnv, cores: number, slots: number,
       : /^[1-9][0-9]*$/.test(env.FORGE_HEAVY_TEST_CONCURRENCY ?? '')
         ? env.FORGE_HEAVY_TEST_CONCURRENCY!
         : String(testWorkersPerSlot(cores, slots));
-  const options = (env.NODE_OPTIONS ?? '')
-    .replace(/(?:^|\s+)--require="(?:[^"\\]|\\.)*forge-heavy-cap-(?:[^"\\]|\\.)*"/g, '')
-    .trim();
+  const options = (env.NODE_OPTIONS ?? '').replace(HEAVY_PRELOAD_OPTION, '').trim();
   let owned: string | null = null;
   let nodeOptions = env.NODE_OPTIONS ?? '';
   const preload = nodeOptions.includes(PRELOAD_NAME) ? null : preloadFile();
