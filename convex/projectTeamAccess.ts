@@ -6,6 +6,7 @@ import { mutation, query } from './cliServer';
 import { activeOwnedProject, ownedProject } from './projectAuthority';
 import { requireOwnerPerson } from './ownerPerson';
 import { PROJECT_TEAM_LINKS } from './teamGrant';
+import { continueMarking, markTeamPage } from './sealedSecretMarkers';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
@@ -69,6 +70,13 @@ export const set = mutation({
       } else {
         await ctx.db.patch(link._id, { role: input.role });
         await ctx.db.patch(project._id, { teamRevision: revision + 1 });
+      }
+      // Unlinking a write team or lowering it to read: its members who no longer write are marked for sealed-secret
+      // removal, as a direct removal is (convex/sealedSecretMarkers.ts). A team larger than one step continues in a
+      // scheduled step.
+      if (link?.role === 'write') {
+        const step = await markTeamPage(ctx, project, input.teamId, null);
+        if (step.next !== null) await continueMarking(ctx, project._id, input.teamId, step.next);
       }
       return null;
     } catch (error) {

@@ -1027,6 +1027,9 @@ export default defineSchema({
     removal: v.optional(v.union(v.literal('deleting'), v.literal('deleted'))),
     removalOperation: v.optional(v.string()),
     task: v.optional(v.id('_scheduled_functions')),
+    /** While a deleted team's purge marks the members of a write link for sealed-secret removal: that link and the
+     * last member checked (convex/teamLifecycle.ts). */
+    marking: v.optional(v.object({ link: v.id('projectTeams'), after: v.string() })),
   })
     .index('by_owner_and_operationId', ['owner', 'operationId'])
     .index('by_owner_and_name', ['owner', 'name']),

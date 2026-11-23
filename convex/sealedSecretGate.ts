@@ -5,7 +5,7 @@
 import { invariant } from '../src/errors';
 import { checkSealedPart } from '../src/sealed-schema';
 import { decodeSealedWire } from '../src/sealed-wire';
-import { equalBytes, forgeSecretId, framedHash } from '../src/sealed-portable';
+import { equalBytes, forgeSecretId, framedHash, hex } from '../src/sealed-portable';
 import { headBytes, rosterBytes, type Head, type Roster, type Transition } from '../src/sealed-records';
 import { AUTOMATIC_SET_KIND, decodeJoinRequest, type JoinRequest } from '../src/sealed-join';
 
@@ -143,22 +143,38 @@ export function nextSealedState(input: {
 /** GB-10: when a person leaves the project, Forge asks holders to remove that account's entries (they see it).
  * Marks each of the account's entries in this set once and drops its waiting join request; a marker lasts until
  * the holder step that removes the entry. Null when nothing changes. Markers only ever name listed entries, so
- * they stay within the roster bound. */
-export function markersForRemovedAccount(set: StoredSealedSet, accountId: Uint8Array) {
+ * they stay within the roster bound. A team change that removes several people marks them in one call. */
+export function markersForRemovedAccount(set: StoredSealedSet, ...accountIds: Uint8Array[]) {
+  const removed = (id: Uint8Array) => accountIds.some(account => equalBytes(id, account));
   const roster = (decodeSealedWire(u8(set.payload)) as Payload).roster,
     before = set.revoked ?? [],
     revoked = [...before];
   for (const entry of roster.entries)
-    if (equalBytes(entry.accountId, accountId) && !revoked.some(id => equalBytes(u8(id), entry.id)))
+    if (removed(entry.accountId) && !revoked.some(id => equalBytes(u8(id), entry.id)))
       revoked.push(Uint8Array.from(entry.id).buffer);
   const waiting = set.joinRequests ?? [],
     joinRequests = waiting.filter(j => {
-      const id = (decodeSealedWire(u8(j.request)) as Partial<JoinRequest>).accountId;
-      return !id || !equalBytes(id, accountId);
+      const id = joinAccount(j);
+      return !id || !removed(id);
     });
   return revoked.length === before.length && joinRequests.length === waiting.length
     ? null
     : { revoked, joinRequests };
+}
+const joinAccount = (j: SealedJoinRequest) =>
+  (decodeSealedWire(u8(j.request)) as Partial<JoinRequest>).accountId;
+
+/** The accounts a removal could mark in this set (an entry or a waiting join request), as hex ids: a team change
+ * checks write access only for its members listed here. One decode of the roster. */
+export function markableAccounts(set: StoredSealedSet) {
+  const ids: Uint8Array[] = (decodeSealedWire(u8(set.payload)) as Payload).roster.entries.map(
+    entry => entry.accountId,
+  );
+  for (const j of set.joinRequests ?? []) {
+    const id = joinAccount(j);
+    if (id) ids.push(id);
+  }
+  return ids.map(id => hex(id));
 }
 
 /** Design 5.1 join request, stored for the next holder device's run (no timer, no polling). The request must

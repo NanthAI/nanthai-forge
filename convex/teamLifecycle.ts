@@ -5,6 +5,7 @@ import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { markTeamPage } from './sealedSecretMarkers';
 async function schedule(ctx: MutationCtx, team: Doc<'teams'>) {
   if (team.task) {
     const old = await ctx.db.system.get(team.task);
@@ -61,7 +62,44 @@ export const purge = internalMutation({
   handler: async (ctx, { id }) => {
     const team = await ctx.db.get(id);
     if (team?.removal !== 'deleting') return null;
+    // Links go first, while the members are still listed: each write link marks its members who no longer write
+    // that project for sealed-secret removal (convex/sealedSecretMarkers.ts), one bounded step per purge run, and the
+    // link goes once its members are all checked (`marking` keeps the place). Access already ended when the team was
+    // marked for deletion (teamGrant skips it), and a person without write cannot read a sealed set meanwhile.
+    let partial = false,
+      cursor = team.marking;
     const pages = [
+      async () => {
+        const links = await ctx.db
+          .query('projectTeams')
+          .withIndex('by_teamId_and_projectId', q => q.eq('teamId', id))
+          .take(50);
+        const done = [];
+        let stepped = false;
+        for (const link of links) {
+          const project = await ctx.db.get(link.projectId);
+          if (project && link.role === 'write' && project.owner === team.owner) {
+            if (stepped) {
+              partial = true;
+              break;
+            }
+            const after = cursor?.link === link._id ? cursor.after : null;
+            const step = await markTeamPage(ctx, project, id, after);
+            stepped = step.sealed;
+            if (step.next !== null) {
+              cursor = { link: link._id, after: step.next };
+              partial = true;
+              break;
+            }
+            if (cursor?.link === link._id) cursor = undefined;
+          }
+          // Each link also lowers its project's link count (the role check's no-teams fast path).
+          if (project?.teamLinks) await ctx.db.patch(project._id, { teamLinks: project.teamLinks - 1 });
+          done.push(link);
+        }
+        if (cursor !== team.marking) await ctx.db.patch(id, { marking: cursor });
+        return done;
+      },
       () =>
         ctx.db
           .query('teamMembers')
@@ -77,23 +115,11 @@ export const purge = internalMutation({
           .query('projectInvites')
           .withIndex('by_teamId_and_state', q => q.eq('teamId', id))
           .take(50),
-      async () => {
-        const links = await ctx.db
-          .query('projectTeams')
-          .withIndex('by_teamId_and_projectId', q => q.eq('teamId', id))
-          .take(50);
-        // Each link also lowers its project's link count (the role check's no-teams fast path).
-        for (const link of links) {
-          const project = await ctx.db.get(link.projectId);
-          if (project?.teamLinks) await ctx.db.patch(project._id, { teamLinks: project.teamLinks - 1 });
-        }
-        return links;
-      },
     ];
     for (const page of pages) {
       const rows = await page();
       for (const row of rows) await ctx.db.delete(row._id);
-      if (rows.length === 50) {
+      if (rows.length === 50 || partial) {
         await ctx.db.patch(id, { task: undefined });
         await schedule(ctx, (await ctx.db.get(id))!);
         return null;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { retainMembership } from './projectActorNames';
+import { markLeftTeam } from './sealedSecretMarkers';
 import { report } from './errors';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
@@ -213,6 +214,14 @@ async function leave(ctx: MutationCtx, item: Doc<'accountItems'>, actor: string)
   } else if (item.kind === 'projects') {
     const row = await ctx.db.get(item.resourceId as Id<'projectContributors'>);
     if (row) await retainMembership(ctx, row.projectId, actor);
+  } else if (item.kind === 'teams') {
+    // Leaving a team ends the write it gave: marked for sealed-secret removal where nothing else gives it. A team
+    // being deleted already gives none, and its purge reads only members still listed, so this marks now too.
+    const row = await ctx.db.get(item.resourceId as Id<'teamMembers'>),
+      team = row && (await ctx.db.get(row.teamId));
+    if (row) await ctx.db.delete(row._id);
+    if (team) await markLeftTeam(ctx, team, actor);
+    return;
   } else if (item.kind === 'projectReaders') {
     // As the owner removing a reader does (projectReaders.setReader): their name is kept, the read goes, their
     // project order follows.

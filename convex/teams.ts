@@ -18,6 +18,7 @@ import {
   teamInvitationOperation,
 } from './teamInvitationMembership';
 import { teamEmailInvitationsEnabled } from './projectInvitationPolicy';
+import { markLeftTeam } from './sealedSecretMarkers';
 
 const item = v.object({ id: v.id('teams'), name: v.string(), owner: v.string() });
 export async function teamOwner(ctx: QueryCtx | MutationCtx, id: Id<'teams'>, owner: string | undefined) {
@@ -205,6 +206,7 @@ export const removeMember = accountMutation('write')({
       if (row) {
         await endTeamInvitations(ctx, team, member);
         await ctx.db.delete(row._id);
+        await markLeftTeam(ctx, team, member);
       }
       return null;
     } catch (error) {

@@ -21,6 +21,16 @@ There are three routes to that one write:
   rotate list. `nforge secret unshare --marked` does the same at once. An agent's
   write is refused with `SECRETS_REKEY_PENDING` while markers name entries, and
   automatic sharing waits until they are removed.
+- A team change marks the same way: removing a member or the member leaving the
+  team, unlinking a write team or lowering it to read, and deleting the team. Each
+  member who has an entry or a waiting join request and no longer writes the
+  project is marked; a member who still writes through a direct grant or another
+  write team is not. Removing or leaving marks in the same mutation. Unlinking or
+  lowering checks the first 100 team members in the same mutation and the rest in
+  scheduled steps of 100. Deleting is the exception: the team stops granting at
+  once, and its purge marks each write link's members in steps of 100 before that
+  link goes. In both delayed cases the people already lack write access, so they
+  cannot read a sealed set meanwhile.
 - A marker that names no entry of the roster asks for nothing. A marker on the
   holder's own account (it still has access) or on a machine is never acted on:
   the notice names it, and only `nforge secret unshare DEVICE_ID` removes it.
@@ -51,5 +61,8 @@ d1) arrives with Checks delivery; today only Development converts markers.
 
 Cost: removing a write member adds one indexed read for their grant, one per set
 kind (at most three) and one patch per set it marks; removing a reader adds only the
-grant read. A removal write is one read and one write, at most once
-per marked batch. Idle costs nothing.
+grant read. A team change adds, per project it gives write to, one empty
+indexed read per set kind when the project has no sealed set, and reads no team
+member. Only a project with a set reads team members, at most 100 per mutation,
+and checks write access only for the members its sets list. A removal write is one read
+and one write, at most once per marked batch. Idle costs nothing.
