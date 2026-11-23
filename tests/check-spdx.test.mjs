@@ -77,6 +77,7 @@ test('Item ffb6cc49: the copyright line follows the header; other licences and k
     'docs/a.md',
     'package.json',
     'convex/_generated/api.js',
+    'convex/components/authPasskey/_generated/api.ts',
     'docs/vendor-notices/x/a.js',
     'tests/fixtures/a.py',
   ])

@@ -14,12 +14,12 @@ export const SPDX_SOURCE = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx'
 const COMMENT = { '.css': ['/* ', ' */'], '.py': ['# ', ''], '.sh': ['# ', ''] };
 export const COPYRIGHT = 'Copyright 2026 Ferdinando Valsecchi';
 export const LICENSE_ID = 'AGPL-3.0-only';
-// Convex writes these; they are regenerated on every codegen. Vendored third-party notices keep their own text.
+// Convex writes these (convex/_generated/ and each component's _generated/); they are regenerated on every codegen. Vendored third-party notices keep their own text.
 // The brand mark styles and component stay all-rights-reserved (web/src/assets/NOTICE.md).
 // Temporary: core queue paths (Guard 4, scripts/core-queue-paths.mjs) need a replay proof and review per path
 // for any edit, so their headers move in their own Item; the exemption goes away with it (Item ffb6cc49).
 const EXEMPT =
-  /^(?:convex\/_generated\/|docs\/vendor-notices\/|node_modules\/|web\/src\/ui\/(?:mark\.css|brand\.tsx)$)/;
+  /^(?:(?:[^/]+\/)*_generated\/|docs\/vendor-notices\/|node_modules\/|web\/src\/ui\/(?:mark\.css|brand\.tsx)$)/;
 const exempt = path => EXEMPT.test(path) || coreQueuePath(path);
 
 const wrap = path => COMMENT[extname(path)] ?? ['// ', ''];
