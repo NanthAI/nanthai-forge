@@ -142,7 +142,15 @@ export function staticChecks(packageJson: string | undefined, forgeJson?: string
  * (declared as `preflight.guards` in forge.json or `forge.preflight.guards` in package.json:
  * `{name, tests: [path, ...], inputs?: [glob, ...]}`).
  * Guards join the protected mandatory tier: the local time budget never trims or stops them. */
-export type PreflightGuard = { name: string; tests: string[]; inputs: string[] | null };
+export type PreflightGuard = {
+  name: string;
+  tests: string[];
+  inputs: string[] | null;
+  /** `demote: true`: the guard still joins the plan when its inputs are touched, but it ranks below the
+   * learned guard set, takes no room from it and is stopped by the wall clock like any other file
+   * (the landing check still runs it). For a guard that has not failed a landing in a long window. */
+  demote?: boolean;
+};
 
 /** The project's declared guards. A malformed entry or a test file the project lacks throws, so a
  * renamed guard test cannot silently stop guarding. */
@@ -159,7 +167,12 @@ export function preflightGuards(
     const tests = strings(entry.tests);
     if (typeof entry.name !== 'string' || !entry.name || !tests?.every(test => hasFile(test)))
       throw new Error(`${found!.label} names a guard that cannot run: ${JSON.stringify(item).slice(0, 120)}`);
-    return { name: entry.name, tests, inputs: strings(entry.inputs) };
+    return {
+      name: entry.name,
+      tests,
+      inputs: strings(entry.inputs),
+      ...(entry.demote === true ? { demote: true } : {}),
+    };
   });
 }
 

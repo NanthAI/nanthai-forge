@@ -376,6 +376,21 @@ test('a triggered guard runs first and the time budget never trims it, even wher
   assert.ok(!plan.local.tierTests.mandatory.includes('tests/b.test.mjs'), 'an untouched guard stays out');
 });
 
+test("a demoted guard stays in the plan, outside local.guards, reserving none of the learned set's room", t => {
+  const has = path => path === 'tests/runtime-guard.test.mjs';
+  const demoted = { ...runtimeGuard, demote: true };
+  assert.deepEqual(preflightGuards(guardManifest([demoted]), has), [demoted]);
+  assert.deepEqual(preflightGuards(guardManifest([{ ...runtimeGuard, demote: 'yes' }]), has), [runtimeGuard]);
+  const f = fixture(t, [], {
+    'package.json': guardManifest([demoted]),
+    'src/size.ts': 'export const size = (s: string) => s.length;',
+    'tests/runtime-guard.test.mjs': runtimeGuardTest,
+  });
+  const plan = f.plan(['src/a.ts'], { budgetSeconds: 0 });
+  assert.ok(plan.local.tierTests.mandatory.includes('tests/runtime-guard.test.mjs'), 'still planned');
+  assert.ok(!(plan.local.guards ?? []).some(item => item.name === 'runtime'), 'not a never-stopped guard');
+});
+
 test('replay (b78ca196): a Node global in a Convex-loaded src file fails preflight locally, before the budget', t => {
   const f = fixture(t, [], {
     'package.json': guardManifest([runtimeGuard]),

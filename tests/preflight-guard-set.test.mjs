@@ -283,6 +283,32 @@ test("learned guards get only what declared guards and the change's own tests le
   assert.doesNotMatch(odd.reason, /\d\.\d{2,} s budget/);
 });
 
+test("a demoted declared guard reserves none of the learned set's room and still runs after it", t => {
+  const decl = 'tests/decl.test.mjs';
+  const body = "import test from 'node:test'; test('d', () => {});";
+  const make = demote => {
+    const guards = [{ name: 'decl', tests: [decl], inputs: ['src/**'], ...(demote ? { demote: true } : {}) }];
+    const made = lane(t, {
+      'package.json': JSON.stringify({ type: 'module', scripts: {}, forge: { preflight: { guards } } }),
+      [decl]: body,
+    });
+    storeGuardCandidates(made.root, candidates([{ file: GUARD, failures: 2, checkSeconds: 2 }]));
+    return made;
+  };
+  const changed = ['src/a.ts', 'tests/a.test.mjs'];
+  const reserved = 180 - make(true).plan({}, changed).local.guardSet.capSeconds;
+  // A budget that fits the change's own test and the learned file, but not a firm guard besides.
+  const budgetSeconds = reserved + 3;
+  const firm = make(false).plan({ budgetSeconds }, changed);
+  assert.deepEqual(firm.local.guardSet.tests, [], 'a firm guard takes the room');
+  assert.ok(firm.local.guards.some(item => item.name === 'decl'));
+  const demoted = make(true).plan({ budgetSeconds }, changed);
+  assert.deepEqual(demoted.local.guardSet.tests, [GUARD], 'a demoted guard leaves it to the learned set');
+  assert.ok(!demoted.local.guards.some(item => item.name === 'decl'), 'not a never-stopped guard');
+  assert.ok(demoted.tests.includes(decl), 'it still runs');
+  assert.ok(demoted.tests.indexOf(GUARD) < demoted.tests.indexOf(decl), 'after the learned set');
+});
+
 test('every checkout of a project finds its set: the clone, its Lanes and a Lane at a custom path', t => {
   const dir = mkdtempSync(join(tmpdir(), 'forge-guard-cache-'));
   const state = process.env.XDG_STATE_HOME;

@@ -769,7 +769,12 @@ function runnerPlan(
   const secondsFor = (test: string) => (stats[test] ? stats[test].ms / 1000 : timing.secondsPerFile);
   const budgetSeconds =
     timeSettings?.budget.seconds ?? options.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
-  const declaredTests = new Set(guards.flatMap(guard => guard.tests));
+  const declaredTests = new Set(guards.filter(guard => !guard.demote).flatMap(guard => guard.tests));
+  // Demoted guards (`demote: true`) rank below the learned set and reserve none of its room.
+  const demotedTests = guards
+    .filter(guard => guard.demote)
+    .flatMap(guard => guard.tests)
+    .filter(test => !declaredTests.has(test));
   // The learned guard set joins the declared guards for every runner (13ea93bf), inside what they and
   // the change's own tests leave of the budget.
   const guardSet = only
@@ -789,7 +794,9 @@ function runnerPlan(
         },
       );
   const learnedGuards = (guardSet?.tests ?? []).filter(test => !declaredTests.has(test));
-  const mandatory = [...new Set([...declaredTests, ...learnedGuards, ...selection.changedTests])];
+  const mandatory = [
+    ...new Set([...declaredTests, ...learnedGuards, ...selection.changedTests, ...demotedTests]),
+  ];
   const named = new Set([...mandatory, ...selection.namedTests, ...learned]);
   const tiers = [
     { tier: 'mandatory', tests: keep(mandatory) },
@@ -1106,7 +1113,15 @@ function planTests(
     const secondsFor = (test: string) => (stats[test] ? stats[test].ms / 1000 : timing.secondsPerFile);
     const declaredGuards = preflightGuards(packageJson, path => files.has(path), forgeJson);
     const guards = selectGuards(declaredGuards, changed.paths);
-    const declaredTests = new Set(guards.selected.flatMap(guard => guard.tests));
+    const declaredTests = new Set(
+      guards.selected.filter(guard => !guard.demote).flatMap(guard => guard.tests),
+    );
+    // Demoted guards (`demote: true`) stay mandatory but rank below the learned set, never trimmed from
+    // the plan, stopped by the wall clock, and they reserve none of the learned set's room.
+    const demotedTests = guards.selected
+      .filter(guard => guard.demote)
+      .flatMap(guard => guard.tests)
+      .filter(test => !declaredTests.has(test));
     const isTest = (test: string) => files.has(test) && runnerTestPath(resolved.runner, test);
     // The learned guard set runs first with the declared guards (13ea93bf), inside what they and the
     // change's own tests leave of the budget, so it never pushes the change's tests out.
@@ -1166,7 +1181,7 @@ function planTests(
     const selection = selectPreflightTests({
       files,
       paths: changed.paths,
-      guards: guardTests,
+      guards: [...guardTests, ...demotedTests],
       removedNames,
       changedExports: alteredExports,
       learned: learnedForPaths,
@@ -1326,11 +1341,13 @@ function planTests(
       protected: tests.filter(test => guarded.has(test)).length,
       deferred: deferredTests.length,
       guards: [
-        ...guards.selected.map(guard => ({
-          name: guard.name,
-          tests: guard.tests,
-          seconds: Math.round(guard.tests.reduce((sum, test) => sum + secondsFor(test), 0) * 10) / 10,
-        })),
+        ...guards.selected
+          .filter(guard => !guard.demote)
+          .map(guard => ({
+            name: guard.name,
+            tests: guard.tests,
+            seconds: Math.round(guard.tests.reduce((sum, test) => sum + secondsFor(test), 0) * 10) / 10,
+          })),
         ...(selection.pins?.length
           ? [
               {

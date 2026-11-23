@@ -215,6 +215,7 @@
           "tests": [
             "tests/account-registration.test.mjs"
           ],
+          "demote": true,
           "inputs": [
             "convex/**",
             "tests/account-registration.test.mjs",
@@ -227,6 +228,7 @@
           "tests": [
             "tests/convex-runtime-imports.test.mjs"
           ],
+          "demote": true,
           "inputs": [
             "src/**",
             "convex/**",
