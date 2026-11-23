@@ -16,6 +16,7 @@ import { exchangeFetch } from '../src/exchange-request';
 import { invariant } from '../src/errors';
 import { readExactObject, type ExactGrant } from './projectR2ExactRead';
 import { candidateFileListSchema } from '../src/hosted-compose';
+import { protectedEntries, type ReviewProtect } from '../src/protected-review';
 import { hostedWriteProject } from './projectHostedRecords';
 import { findObject } from './projectObjectFind';
 import { isStored } from './projectObjectFields';
@@ -36,11 +37,9 @@ export const reviewFiles = internalQuery({
     return Promise.all(
       files.map(async pin => {
         const object = await findObject(ctx, input.projectId, pin.sha256);
-        invariant(
-          object && !object.removed && object.size === pin.size && isStored(object) && object.r2Key,
-          'SOURCE_UNAVAILABLE',
-          'Exact reviewed Candidate files are unavailable.',
-        );
+        // Item fe2b0a86: a listing that is gone cannot prove the approval still holds, so it re-asks.
+        if (!(object && !object.removed && object.size === pin.size && isStored(object) && object.r2Key))
+          return null;
         const range = packRange(object);
         return {
           url: await presignGet(r2Config(), object.r2Key, packHeaders(range, pin.size)),
@@ -52,18 +51,44 @@ export const reviewFiles = internalQuery({
   },
 });
 
-async function reviewedFiles(grant: ExactGrant, sha256: string) {
+/** One reviewed listing reduced to its digests before the next is read (one listing in memory at a
+ * time): every changed file, and with a protected scope its protected entries. Null when the listing
+ * is gone, differs from its pin or does not parse: the approval cannot be proven. A failed read
+ * throws, so the finish retries as before instead of asking the owner again during an outage. */
+async function reviewedDigests(grant: ExactGrant | null, sha256: string, protect: ReviewProtect | undefined) {
+  if (!grant) return null;
   const bytes = await readExactObject(grant, {
     failed: 'Exact reviewed Candidate files could not be read.',
     exceeds: 'Reviewed Candidate files exceed their exact size.',
   });
-  invariant(
-    bytes.length === grant.size && digest(bytes) === sha256,
-    'SOURCE_HASH_MISMATCH',
-    'Reviewed Candidate files differ from their exact bytes.',
-  );
-  const { files } = candidateFileListSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
-  return digest(canonicalPayload(files, true));
+  try {
+    invariant(
+      bytes.length === grant.size && digest(bytes) === sha256,
+      'SOURCE_HASH_MISMATCH',
+      'Reviewed Candidate files differ from their exact bytes.',
+    );
+    const { files } = candidateFileListSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
+    const scoped = protect ? protectedEntries(files, protect) : [];
+    return {
+      all: digest(canonicalPayload(files, true)),
+      scoped: scoped.length ? digest(canonicalPayload(scoped, true)) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+/** Item fe2b0a86: whether the recomposed Candidate keeps what the owner approved. With a protected
+ * scope only the protected entries (before and after content) must match; otherwise, or when the
+ * approved Candidate has no protected entry under it, every changed file must. Unreadable: no. */
+async function sameReviewedFiles(
+  grants: [ExactGrant | null, ExactGrant | null],
+  pins: [string, string],
+  protect: ReviewProtect | undefined,
+) {
+  const approved = await reviewedDigests(grants[0], pins[0], protect);
+  const current = approved && (await reviewedDigests(grants[1], pins[1], protect));
+  if (!approved || !current) return false;
+  return approved.scoped ? approved.scoped === current.scoped : approved.all === current.all;
 }
 // `attempt`: mutation retries in a row since the last drive step (L2 budget, retryFinish);
 // absent on a first retry.
@@ -218,7 +243,7 @@ export const drive = internalAction({
     }
     if (command.kind === 'review') {
       const { before, after } = command;
-      const grants: [ExactGrant, ExactGrant] | null = await ctx.runQuery(
+      const grants: [ExactGrant | null, ExactGrant | null] | null = await ctx.runQuery(
         makeFunctionReference<'query'>('projectHostedFinishDriver:reviewFiles'),
         {
           projectId: input.projectId,
@@ -228,8 +253,7 @@ export const drive = internalAction({
         },
       );
       if (!grants) return null;
-      const same =
-        (await reviewedFiles(grants[0], before.sha256)) === (await reviewedFiles(grants[1], after.sha256));
+      const same = await sameReviewedFiles(grants, [before.sha256, after.sha256], command.protect);
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedFinishDriver:resume'), {
         ...input,
         command: raw,

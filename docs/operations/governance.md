@@ -132,8 +132,13 @@ decision with no polling.
 Approval names one exact attempt. A current exact pass can publish once it has its
 turn. If main moved, the finish composes on current main. It compares the pinned file
 listings for the change the owner saw and the new Candidate, including each path,
-before and after content hashes, and file modes. The grant carries when the reviewed
-change, the selected inputs and dependencies, the owner and policy are the same.
+before and after content hashes, and file modes. When the hold is about protected paths
+alone, only the protected entries (and the secret-allow file) are compared, so main
+landing work in other files the Lane also changed keeps the approval; anything else, or
+anything that cannot be proven, compares every changed file
+([binding rule](../access.md#protected-path-approvals)). The grant carries when that
+comparison, the selected inputs and dependencies, the owner and policy are the same, and
+the receipt names the main it was checked against (`previous`; the submission's `acceptedBy.carried` is true).
 The replacement takes a publication turn while its exact full check runs. CI does not
 hold a publication lease. A changed reviewed diff gets a fresh approval link for the
 current attempt. Agents cannot create a grant.

@@ -108,6 +108,19 @@ requires the person in a browser: the existing membership approval store is
 project-bound, so team additions use the refusal alternative and grant nothing
 from a device. Project membership additions retain their existing held request.
 
+## Protected-path approvals
+
+An owner's approval of a held landing (`projectHostedAcceptance:approve`, the owner person in a browser; agents never) is bound to what the protected paths will contain when it lands, not to the main head (Item `fe2b0a86`).
+
+- **Binding key.** The protected entries of the Candidate's changed-file listing: each path the current policy protects (owner-approval paths, `acceptance.protectedPaths` and derived check entries, by the same matcher as the hold), with its status and before and after content hash and mode, plus `.forge-secret-allow.json`. The listing is the pinned R2 object compose already writes; no file contents are read.
+- **Equality rule.** When main moves under a held or approved submission, the recomposed Candidate keeps the approval only if its binding key equals the approved one and the owner, Lane inputs, dependencies and policy digest are unchanged. Before-content is part of the key, so main changing an approved file asks again even when the merged result is the same.
+- **Fail closed.** The whole changed-file list must match, as before, when the hold has any reason besides protected paths (supervised review, auto-accept list, unknown coverage), for a folder-grant landing (the owner's acceptance also stands in for its grant check), when either Candidate's changed paths are unknown, when the project has no derived check-entry list, or when the approved Candidate has no protected entry. A removed or mismatched listing, an unparsable one or a changed Candidate record asks again. A failed R2 read retries the finish instead, so an outage does not ask the owner again.
+- **Audit.** The receipt's `previous` names the main the carry was checked against (the accepted attempt's base), and the landed submission's `acceptance.acceptedBy.carried` is true.
+- **What a carried acceptance covers.** The owner approved the protected entries. The rest of the merged result is main's already-accepted content plus the Lane's unchanged content, so `acceptedBy` names the owner for the protected paths only.
+- **Not yet carried:** a new submission, including one from a conflict-resolution Lane, starts without an approval.
+
+Scale: no Convex call, read or write is added. The scope comes from the project row the finish step already reads; the comparison reuses its two R2 listing reads. Idle work stays at zero.
+
 ## Private projects answer not found
 
 Without a role, a private project answers exactly like a missing one: `PROJECT_UNAVAILABLE` from every function, and "No project here" on the page. An agent refusal reads the same. A visitor can never learn that a private project exists from an address, an invitation link, or the error.

@@ -41,6 +41,8 @@ import { reuseDecision } from './projectHostedReuseStore';
 import { findObject, ownRow } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 import { ownerReviewFiles } from './projectHostedOwnerGrant';
+import { reviewProtect } from '../src/protected-review';
+import { effectivePolicy } from '../src/autonomy-policy';
 export type FinishIdentity = LandingIdentity & { wakeId: string; attempt?: number };
 export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promise<FinishCommand | null> {
   const { row, value } = await loadFinish(ctx, input);
@@ -55,7 +57,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
     }
     if (state.phase === 'landed' || state.phase === 'terminal-failed') return null;
     const reviewHeld = landing.earlyReview && state.observation.pendingReason === 'waiting-for-review';
-    await hostedWriteProject(ctx, input.projectId, state.actor, state.request.authorityEpoch);
+    const project = await hostedWriteProject(ctx, input.projectId, state.actor, state.request.authorityEpoch);
     if (value.recoveryRunId) {
       const audit = await ctx.db
         .query('projectHostedMainAudits')
@@ -125,6 +127,17 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
               : null;
           if (files) {
             await retryFinish(ctx, row, input);
+            // Item fe2b0a86: a hold about protected paths alone binds only those entries. A folder-grant
+            // landing keeps the whole-list rule: the owner's acceptance also stands in for its grant check.
+            const protect = landing.grant
+              ? undefined
+              : reviewProtect(
+                  project,
+                  effectivePolicy(project),
+                  state.actor,
+                  files.paths,
+                  project.checkEntries,
+                );
             return {
               kind: 'review',
               pendingId: value.pending.id,
@@ -132,6 +145,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
               candidateDigest: files.digest,
               before: files.before,
               after: files.after,
+              ...(protect ? { protect } : {}),
             };
           }
           await installFinishCompose(ctx, row, value, undefined, source);

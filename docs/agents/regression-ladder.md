@@ -137,6 +137,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `5c2b5e1b` | A resolution Lane landed with keepOpen left its conflicted original active, so overlap and conflict notices kept naming work already on main (friction 5c2b5e1b, Item 3f70760d). Acceptance completion now completes the origin when the resolution lands kept open; the resolution itself stays open (`tests/hosted-conflict-recovery-cases.test.mjs`) |
 | `9bc8204c` | Friction (Item 0f76b07e): withdraw by submissionId refused a reason, so a withdrawn landing said nothing about why. The cancel mutation now records the reason (feature `landing-cancel-reason`); an older server refuses the reason before any mutation. |
 | `b5e8e2d5` | Friction (Item 0f76b07e): a second sync conflict in a resolution Lane drafted another resolution Lane, so its folder, ids and resolve commands moved to a third Lane. The server now puts the new draft in the caller's own live resolution Lane (same id, first origin kept) and the folder rebases onto it with a fresh resolve. |
+| `c49fae56` | The licence submission (Item ffb6cc49, 2026-11-23) asked the owner again after each of four main moves through files the Lane also changed, though its approved protected file never changed. The approval now binds to the protected entries' before and after content (Item fe2b0a86, `tests/protected-approval-carry.test.mjs`) |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

@@ -6,6 +6,7 @@ import { readHostedRecord } from './projectHostedRecords';
 import type { HostedLandingAttempt } from '../src/hosted-landing';
 import type { LandingRow } from './projectHostedLandingStore';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import { hostedRecordSchema } from '../src/hosted-records';
 import type { AcceptanceActor } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
 
@@ -34,7 +35,23 @@ export async function ownerReviewFiles(
   const [before, after] = await Promise.all([read(approved.candidate.id), read(candidateId)]);
   if (before?.digest !== approved.candidate.digest || !before.candidateFiles || !after?.candidateFiles)
     return null;
-  return { before: before.candidateFiles, after: after.candidateFiles, digest: after.digest };
+  // Item fe2b0a86: each Candidate's changed paths, from the records already read (null when unknown).
+  const paths = (value: string) => {
+    try {
+      const record = hostedRecordSchema.safeParse(JSON.parse(value));
+      return record.success && record.data.kind === 'candidate'
+        ? (record.data.governance?.paths ?? null)
+        : null;
+    } catch {
+      return null;
+    }
+  };
+  return {
+    before: before.candidateFiles,
+    after: after.candidateFiles,
+    digest: after.digest,
+    paths: [paths(before.value), paths(after.value)],
+  };
 }
 
 export async function grantOwnerApproval(

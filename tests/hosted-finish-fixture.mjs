@@ -634,7 +634,8 @@ export async function finishFixture(
       if (run.status === 'queued') await f.rawChecks.pass(await f.rawChecks.activate(run.id));
     }
   };
-  const moveMain = ({ overlap = false, sameHead = false } = {}) => {
+  // `files`: this move's main edits (default: the fixture's mainFiles), so a replay can move main more than once.
+  const moveMain = ({ overlap = false, sameHead = false, files = mainFiles } = {}) => {
     const old = f.currentMain(),
       state = sameHead
         ? { sha256: old.head }
@@ -642,7 +643,7 @@ export async function finishFixture(
             [
               overlap ? c.file('a.txt', 'theirs\nb\nc\n') : c.baseFile,
               c.hidden,
-              ...apply(extraBase, mainFiles ?? [['accepted.txt', 'already accepted\n']]),
+              ...apply(extraBase, files ?? [['accepted.txt', 'already accepted\n']]),
             ],
             [old.head],
           );

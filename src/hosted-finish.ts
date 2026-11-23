@@ -61,6 +61,8 @@ export type FinishCommand =
       candidateDigest: string;
       before: { sha256: string; size: number };
       after: { sha256: string; size: number };
+      /** Item fe2b0a86: compare only the protected entries; absent compares every changed file. */
+      protect?: import('./protected-review.js').ReviewProtect;
     }
   | {
       kind: 'page';
