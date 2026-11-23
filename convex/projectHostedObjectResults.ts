@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cancelPendingTask } from './schedulerCancel';
 import { z } from 'zod';
+import { noJobEvidenceReason } from '../src/ci-provider-recovery';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { MutationCtx } from './_generated/server';
 import type { LoadedHostedCheck } from './projectHostedCheckStore';
@@ -142,7 +143,13 @@ export async function settleObjectBatch(
         ctx,
         selected,
         failed ? 'failed' : 'runner-unavailable',
-        all && 'reason' in verdict ? verdict.reason : 'Actions completed without complete job evidence.',
+        all && 'reason' in verdict
+          ? verdict.reason
+          : noJobEvidenceReason({
+              reported: run.counts.completed,
+              shardCount: run.plan!.shardCount,
+              failed,
+            }),
         Date.now(),
         true,
       );

@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "src/hosted-actions-job-client.ts": "f3e8f1332abb1853fea64519186d74197f82cdf2c889261d5df0e11ad4f85b00"
+  },
+  "replay": {
+    "incident": "1018d0f8",
+    "test": "incident 1018d0f8: planning adds only placement evidence with no extra source or Convex requests",
+    "receipt": "e0a33c98-8b78-405e-8978-664c00ad4470"
+  },
+  "authorModel": "claude-sonnet-5-5",
+  "authorSession": "cd902933-35ac-45d2-bf4f-c4a38343d5ff",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "209184c3-897c-47e0-a7c8-bc304ee10222",
+    "receipt": "d903d2d9-a6ba-49d4-b1f4-8d3a1445bd40"
+  },
+  "exercised": {
+    "src/hosted-actions-job-client.ts": {
+      "executed": [
+        "ActionsJobClient"
+      ],
+      "digest": "6e7dc6dd6c2c153412c148d26c86da49503602f7595c6f10705534f14362ab17",
+      "units": [
+        [
+          "ActionsJobClient",
+          "73b97425571cfefc346dc3d121b5f1bfd843ed2d7f6771891cef38a9346c4048"
+        ],
+        [
+          "ForgeError",
+          "80782ffe370115376243f742db60843dd45ba6c24c25340d4092b697f7ab8a84"
+        ],
+        [
+          "SourceWorkerReader",
+          "a5274e20965c9ddea7ff094167e98cb750673ca6bc1cc1877f8e2da923bb83ac"
+        ],
+        [
+          "actionsCommandForCapabilities",
+          "6a7e18b14f5d2f2266d4e57c57a76f168544dc147238dba9f3ee2acffb7a9482"
+        ],
+        [
+          "actionsDeliveryDeadlineMs",
+          "1a9e47f4198f687be3c0081da29d560cf10524fb1fcf15b9aae27f923a407ae7"
+        ],
+        [
+          "actionsDeliveryPolicy",
+          "678c4c31b327c43d8e0bdef997c00d12d77b7be8fdefde31ab8995a49e9ec9ac"
+        ],
+        [
+          "actionsInfrastructurePolicy",
+          "b5b3f3aeb3e7454c3034c7e7f0f88cc6518a67d2354d5a3db07679543c822746"
+        ],
+        [
+          "actionsInfrastructureResponse",
+          "dd0776a7fe68c360498803c1eab881230ed48b0b8c9135b0924d7dc50ef8e9ab"
+        ],
+        [
+          "actionsPreflightCapability",
+          "5aadd7fc8c253c83c59c942ab605329e2f0b2913d81899487cc9cfd4b196178e"
+        ],
+        [
+          "actionsPreflightTicketSchema",
+          "32a24c5e5287213561eb35e8f0ff18fa1309f4fbe653754a671fafb4cf7c2bd5"
+        ],
+        [
+          "actionsRefusalReasons",
+          "be4f857c66e2039ea85322a72e7226a90b2a9c5f267e49e452f6af41f055bb2b"
+        ],
+        [
+          "actionsSourceBatchCapability",
+          "ed0e09985143a7c07d642a9dc10d52504c7da237398e8ed6c5263a21199c9c4f"
+        ],
+        [
+          "actionsSourceClosureCapability",
+          "3b07b2cb0a4999f3b5090d45f2c0e2c68a7428051da5d916f3e741f230fc07f1"
+        ],
+        [
+          "actionsSourceRunsCapability",
+          "f1d54b26666ac65e5b9322c26ab510f6c937f0748a846a7d6921c4217ec34548"
+        ],
+        [
+          "actionsSourceStateCapability",
+          "83b9bcf9b9eb06ca7a809051125fd2c0c217f11a84854372a70d3f28f29bae44"
+        ],
+        [
+          "actionsSourceStateV2Capability",
+          "3d59a7532fa51302e667642edd376be4fc32df1956d717c93c1467ee71ae6704"
+        ],
+        [
+          "createReadStream",
+          "8bcc8bc4a1d1ed051066637f6e01b140cca6d4e61330a8e2de85477be92262a4"
+        ],
+        [
+          "digest",
+          "6b5c226c96fc3fd1c75f186363aa03a82129b684bf16922bf9f2ee670975218d"
+        ],
+        [
+          "directSourceBatch",
+          "68fe02ada7082d4e32ee93c206e90a6c6d91b64777b8112ed7ec72c865d699cd"
+        ],
+        [
+          "directSourceWindow",
+          "58ff2bd7f7374ca101831c4ff3002f665e1690020a96e0ed11b4a155d5ec9a84"
+        ],
+        [
+          "expandSourceGrants",
+          "9f493a7da499cf86e34ed65059c84607c0efd3de59e499073e0b8d47681ffd9b"
+        ],
+        [
+          "invariant",
+          "fb5fbff612c49715a7a83d1db218f54589e8865f9f0bb1b36b1ebb32d1f3051d"
+        ],
+        [
+          "join",
+          "d2b4f32fed3260968c50dc03ea4836bc843295aeb0b579257ef7bf64ed19401a"
+        ],
+        [
+          "mapSourceOrdered",
+          "6afc06f71a340f045703d4a81000fa02d65c77eab55b290e5c94ec44ca54036f"
+        ],
+        [
+          "mkdir",
+          "f0746a9b3fe20eaa7d4a777ced5df1c42b47f883c170bd3e6364f3e47a98dd9f"
+        ],
+        [
+          "networkFetch",
+          "fecb225d5a8a7c463b1ac03d9bf85ed61376817a202b4c480431059c0a3305f1"
+        ],
+        [
+          "objectChunkPageSchema",
+          "a3b63f0f219e97c8c5f172408addbe755b784d561184b4e4ab2ce8c5dd930493"
+        ],
+        [
+          "objectRecipeSchema",
+          "6e61e59808bff2c9d666f5ea788b9b6ffbab50dcc425bd2d258421cb7e12d700"
+        ],
+        [
+          "packHeaders",
+          "c9612e343c06be67494cc3bd0d08b054a01acba29d519e2c165df79c16e55f1b"
+        ],
+        [
+          "parseTimingHistory",
+          "4f609132674c5771ac5080858146bb825804065fdf97ed4a69ff6c748a985730"
+        ],
+        [
+          "randomUUID",
+          "94dd7c4a4018b4926d41d51073039205583452eb8f2de691ef7e75fce658ac61"
+        ],
+        [
+          "readCompleteRuns",
+          "60ed92be03b6b0ff37fa295f11628244d16db0f48d0bc51809dfaaa87453288c"
+        ],
+        [
+          "refreshPhysicalManifest",
+          "d088af37cfd336e75d76e8ef33454c2ff50a9913ce64677b531474cb89d291a4"
+        ],
+        [
+          "retryActionsInfrastructure",
+          "3ee8be149bbb9cbf99c367171d77251bdde00c6e8f4cdc681cbf7401022f5b9a"
+        ],
+        [
+          "rm",
+          "87be6c2eeee00d43596e8f8b74db6be67f3698a43251bcafa2340d8d2f62e992"
+        ],
+        [
+          "rowsFromPhysicalRuns",
+          "f4caf1ed3435f45f18bd8a60f468e12484c1863a2b41dc25e9c657430e5dabc4"
+        ],
+        [
+          "runnerTokenNames",
+          "c91f1a121896b4c0c003c78addbe3fe27ba522e63c80782039b08cd1eecebc00"
+        ],
+        [
+          "sourcePackDownloadSchema",
+          "efc2529aed1f2f345322559f43b35d82c2994042e24dcd4258b39ac540441d5b"
+        ],
+        [
+          "timingDurations",
+          "b4b28c496b248776ab3f7c432879a3252f4cc639fb0bd6a715b782db9c9c7a09"
+        ],
+        [
+          "verifyPackRange",
+          "bb19857dbff11da775581be8336f60be8271e32a7a19c4f2afbe2297c49095d4"
+        ]
+      ]
+    }
+  }
+}

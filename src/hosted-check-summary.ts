@@ -9,8 +9,11 @@ export const CHECK_SUMMARY_BYTES = 8 * 1024;
 const NAMES = 40;
 const ERROR_CHARS = 160;
 const SLOWEST = 5;
+/** Flaky files whose retried failure the summary quotes (the stored summary keeps the same five). */
+const RETRIED = 5;
 const clip = (text: string, length: number) => (text.length > length ? `${text.slice(0, length)}…` : text);
-const bytes = (value: unknown) => JSON.stringify(value).length;
+const encoder = new TextEncoder();
+const bytes = (value: unknown) => encoder.encode(JSON.stringify(value)).length;
 const seconds = (from: string, to: string | null) =>
   to === null ? null : Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 100) / 10);
 
@@ -24,9 +27,11 @@ export function summarizeCheckRun(run: HostedCheckRun) {
   const failedAll = summary
     ? summary.failed.map(item => ({ file: item.file, error: item.report.firstError }))
     : reported.filter(([, r]) => r.failed).map(([file, r]) => ({ file, error: r.firstError }));
-  const flakyAll = summary
-    ? summary.flaky.map(item => item.file)
-    : reported.filter(([, r]) => r.flaky && !r.failed).map(([file]) => file);
+  // A flaky file failed, was retried and passed: its first error is the retried failure (Item 0d14c456).
+  const flakyItems = summary
+    ? summary.flaky.map(item => ({ file: item.file, error: item.report.firstError }))
+    : reported.filter(([, r]) => r.flaky && !r.failed).map(([file, r]) => ({ file, error: r.firstError }));
+  const flakyAll = flakyItems.map(item => item.file);
   const slowest =
     run.reportSummary?.slowest ??
     reported
@@ -56,6 +61,18 @@ export function summarizeCheckRun(run: HostedCheckRun) {
       ...(item.error ? { firstError: clip(item.error.replace(/\s+/g, ' '), ERROR_CHARS) } : {}),
     })),
     flaky: flakyAll.slice(0, names),
+    // The retried failure of a passed run, kept so nobody reads the provider's log for it.
+    ...(flakyItems.some(item => item.error)
+      ? {
+          retried: flakyItems
+            .filter(item => item.error)
+            .slice(0, Math.min(names, RETRIED))
+            .map(item => ({
+              file: item.file,
+              firstError: clip(item.error!.replace(/\s+/g, ' '), ERROR_CHARS),
+            })),
+        }
+      : {}),
     ...((summary?.counts.failed ?? failedAll.length) > names ||
     (summary?.counts.flaky ?? flakyAll.length) > names
       ? {

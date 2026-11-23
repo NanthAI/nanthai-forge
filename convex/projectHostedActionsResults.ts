@@ -5,6 +5,7 @@ import type { Doc } from './_generated/dataModel';
 import { settleObjectBatch } from './projectHostedObjectResults';
 import { batchArgs, batchSession } from './projectHostedActionsBatchStore';
 import { z } from 'zod';
+import { noJobEvidenceReason } from '../src/ci-provider-recovery';
 import { resultPageBytes } from '../src/hosted-actions-result-batch';
 import { v } from 'convex/values';
 import { internalMutation } from './server';
@@ -279,7 +280,11 @@ export const batch = internalMutation({
             : run.counts.failed || run.testFiles?.counts.failed
               ? 'failed'
               : 'runner-unavailable',
-          'Actions completed without complete job evidence.',
+          noJobEvidenceReason({
+            reported: run.counts.completed,
+            shardCount: run.plan?.shardCount,
+            failed: run.counts.failed > 0 || Boolean(run.testFiles?.counts.failed),
+          }),
         );
       }
     }

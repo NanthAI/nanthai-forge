@@ -16,8 +16,8 @@ export const actionsDeliveryPolicy = {
   maxDelayMs: 60_000,
   label: 'Actions result delivery',
 };
-type RetryPolicy = { attempts: number; maxDelayMs: number; label: string };
-const infrastructurePolicy: RetryPolicy = {
+export type RetryPolicy = { attempts: number; maxDelayMs: number; label: string };
+export const actionsInfrastructurePolicy: RetryPolicy = {
   attempts: actionsInfrastructureAttempts,
   maxDelayMs: Number.POSITIVE_INFINITY,
   label: 'Actions infrastructure',
@@ -37,7 +37,7 @@ export async function retryActionsInfrastructure<T>(
   operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs = 60_000,
   deadlineMs = actionsInfrastructureDeadlineMs,
-  policy: RetryPolicy = infrastructurePolicy,
+  policy: RetryPolicy = actionsInfrastructurePolicy,
 ) {
   const deadline = Date.now() + deadlineMs;
   for (let attempt = 0; ; attempt++) {

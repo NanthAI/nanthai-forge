@@ -36,6 +36,7 @@ import {
   actionsInfrastructureResponse,
   actionsDeliveryDeadlineMs,
   actionsDeliveryPolicy,
+  actionsInfrastructurePolicy,
 } from './hosted-actions-retry.js';
 import { parseTimingHistory, timingDurations } from '../scripts/test-shards.mjs';
 import { createReadStream } from 'node:fs';
@@ -134,7 +135,10 @@ export class ActionsJobClient {
       },
       60_000,
       delivery ? actionsDeliveryDeadlineMs : undefined,
-      delivery ? actionsDeliveryPolicy : undefined,
+      // The label is what the runner prints when Forge's job API stays unreachable: the log names Forge's side.
+      delivery
+        ? { ...actionsDeliveryPolicy, label: `Forge job API ${command.kind} delivery` }
+        : { ...actionsInfrastructurePolicy, label: `Forge job API ${command.kind}` },
     );
     if (
       command.kind === 'session' &&

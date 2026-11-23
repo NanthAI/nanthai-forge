@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { checkInfrastructure } from './check-run-state.js';
 
 /** Two-way GitHub sync, pull request side (portable, V8-safe): the webhook filter, the
  * `forge/verify` commit status and the ruleset a person imports once (Forge never writes it). */
@@ -76,6 +77,7 @@ export function pullRequestEvent(payload: Record<string, unknown>) {
     repository,
     number: number as number,
     head,
+    ...(payload.action === 'reopened' ? { reopened: true } : {}),
     // A deleted fork has no head repository; it is still not this repository.
     fork: typeof from !== 'string' || from.toLowerCase() !== repository.toLowerCase(),
     ...(Number.isSafeInteger(repo?.id) && Number(repo?.id) > 0 && pr.head?.repo?.id === repo?.id
@@ -115,6 +117,7 @@ const codedPrivate = new RegExp(
 export const isPrivateSafeDescription = (description: string) =>
   (Object.values(pullOutcomeDescriptions) as string[]).includes(description) ||
   (Object.values(forkStatus) as string[]).includes(description) ||
+  (Object.values(unjudgedStatusDescriptions) as string[]).includes(description) ||
   codedPrivate.test(description);
 /** The approval request the owner reads on the approve page and the board. */
 export const forkApprovalReason = (number: number, head: string) =>
@@ -122,10 +125,35 @@ export const forkApprovalReason = (number: number, head: string) =>
 export type PullStatus = { state: 'pending' | 'success' | 'failure' | 'error'; description: string };
 const clip = (text: string) => (text.length > 140 ? `${text.slice(0, 139)}…` : text);
 /** The commit status for a check run's terminal status (GitHub caps descriptions at 140). */
-export function checkRunStatus(status: string): PullStatus {
+export function checkRunStatus(status: string, failureReason?: string): PullStatus {
   if (status === 'passed') return { state: 'success', description: 'Forge check passed.' };
   if (status === 'failed') return { state: 'failure', description: 'Forge check failed.' };
-  return { state: 'error', description: clip(`Forge check ended ${status}. Push again to retry.`) };
+  return { state: 'error', description: unjudgedStatus(status, failureReason) };
+}
+/** Re-running the same head needs no new commit: a close and reopen of the pull request re-runs it. */
+const rerun = 'Close and reopen the pull request to re-run it.';
+/** The fixed forge/verify sentences for a check that ended without judging the code: each names the
+ * cause and who acts, and none carries run detail, so a private project may post them. Item 0d14c456. */
+export const unjudgedStatusDescriptions = {
+  providerOutage: `GitHub Actions was unavailable, so the code was not judged. ${rerun}`,
+  infrastructure: `Forge's check runner failed before the code was judged. ${rerun}`,
+  interrupted: `The Forge runner stopped mid-run; the code was not judged. ${rerun}`,
+  budget: 'The Forge runner budget ran out; the code was not judged. A project owner can raise it.',
+  cancelled: `The Forge check was cancelled. ${rerun}`,
+  other: `Forge could not check this head. ${rerun}`,
+} as const;
+function unjudgedStatus(status: string, failureReason: string | undefined) {
+  const text = unjudgedStatusDescriptions;
+  const named: Record<string, string> = {
+    interrupted: text.interrupted,
+    'runner-budget-exhausted': text.budget,
+    cancelled: text.cancelled,
+  };
+  if (named[status]) return named[status];
+  // No runner took it: GitHub's outage and Forge's own runner setup read differently.
+  if (checkInfrastructure(status))
+    return failureReason?.startsWith('Provider outage:') ? text.providerOutage : text.infrastructure;
+  return text.other;
 }
 export const pullStatus = (state: PullStatus['state'], description: string): PullStatus => ({
   state,

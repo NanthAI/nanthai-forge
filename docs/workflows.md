@@ -74,7 +74,10 @@ output so far**: the newest chunk each runner has published, read once when pres
 (one streams query, one signing mutation, one object read per output stream).
 **Read newer lines** reads again. Nothing is pushed or polled, so an open page
 nobody presses, or a hidden tab, makes no calls. Agents read the same data with
-`nforge agent ROOT log {runId}` ([workflow](agents/workflow.md)).
+`nforge agent ROOT log {runId}` ([workflow](agents/workflow.md)). A running check that has published
+nothing yet answers with what Forge knows (since when, how many shards reported) and the provider's
+link, not an empty log; the check summary of a passed run quotes the failure each flaky file retried
+(`retried`, at most five), so the provider's log is not needed for it.
 
 ## Who can land without a check
 

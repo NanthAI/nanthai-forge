@@ -1063,12 +1063,13 @@ test('two-way: the inbound landing settles with the acceptance that landed it', 
   }
 });
 const pullQueue = await import(moduleUrl('../convex/projectGithubPullQueue.ts'));
-const prHead = (f, head, number = 7) =>
+const prHead = (f, head, number = 7, extra = {}) =>
   f.run('pullReceive', pullQueue.receive._handler, {
     repository: 'Synthetic/Mirror',
     number,
     head,
     fork: true,
+    ...extra,
   });
 const pullJobs = (f, number) => f.jobs().filter(job => job.pullKey === String(number));
 const pullOf = job => JSON.parse(job.inbound).pull;
@@ -1551,4 +1552,72 @@ test('ci-status: mirror commit wakes indexed waiters in bounded pages and replay
       (count.readBytesByTable.projectHostedCheckRuns ?? 0) < 1100 * 1024,
       'each page reads at most eight 128 KiB legacy run rows, not the waiting cohort',
     );
+});
+test('0d14c456 (a5d51c3e): a check that never judged the code says whose failure it was and how to re-run the same head', async () => {
+  const { checkRunStatus, isPrivateSafeDescription, unjudgedStatusDescriptions } = await import(
+    moduleUrl('../src/github-pull-check.ts')
+  );
+  const outage = 'Provider outage: GitHub concluded failure before any runner acknowledged the check.';
+  const ended = (status, failureReason) => checkRunStatus(status, failureReason);
+  assert.equal(ended('runner-unavailable', outage).description, unjudgedStatusDescriptions.providerOutage);
+  assert.match(ended('runner-unavailable', outage).description, /GitHub Actions was unavailable/);
+  assert.equal(
+    ended(
+      'runner-unavailable',
+      'Check infrastructure: the runner ended (failure) before Forge recorded its plan.',
+    ).description,
+    unjudgedStatusDescriptions.infrastructure,
+  );
+  assert.equal(ended('runner-unavailable').description, unjudgedStatusDescriptions.infrastructure);
+  for (const status of [
+    'runner-unavailable',
+    'interrupted',
+    'runner-budget-exhausted',
+    'cancelled',
+    'unknown',
+  ]) {
+    const { state, description } = ended(status, outage);
+    assert.equal(state, 'error');
+    assert(description.length <= 140, `${status}: ${description.length}`);
+    assert.doesNotMatch(description, /Push again/, status);
+    assert(isPrivateSafeDescription(description), `${status} is a fixed sentence a private project may post`);
+  }
+  assert.equal(ended('passed').state, 'success');
+  assert.equal(ended('failed').state, 'failure');
+});
+test('0d14c456 (a5d51c3e): a head whose check was not judged runs again only when the pull request is reopened; a judged head or a redelivery does not', async () => {
+  const f = await twoWayFixture();
+  const { pullRequestEvent } = await import(moduleUrl('../src/github-pull-check.ts'));
+  const event = action =>
+    pullRequestEvent({
+      action,
+      repository: { full_name: 'Synthetic/Mirror' },
+      pull_request: { number: 7, head: { sha: 'b'.repeat(40) }, base: { ref: 'main' } },
+    });
+  assert.equal(event('reopened').reopened, true);
+  assert.equal(event('opened').reopened, undefined);
+  assert.equal(event('synchronize').reopened, undefined);
+  await prHead(f, 'b'.repeat(40));
+  const [first] = pullJobs(f, 7);
+  const settleAs = outcome =>
+    f.patch('projectGithubMirrorJobs', first._id, {
+      status: 'done',
+      inbound: JSON.stringify({
+        phase: 'pending',
+        pull: { number: 7, head: 'b'.repeat(40), fork: true, outcome },
+      }),
+    });
+  settleAs('failure');
+  await prHead(f, 'b'.repeat(40), 7, { reopened: true });
+  assert.equal(pullJobs(f, 7).length, 1, 'a head that failed its tests is not re-run by a reopen');
+  settleAs('success');
+  await prHead(f, 'b'.repeat(40), 7, { reopened: true });
+  assert.equal(pullJobs(f, 7).length, 1, 'a passed head is not re-run');
+  settleAs('error');
+  await prHead(f, 'b'.repeat(40));
+  assert.equal(pullJobs(f, 7).length, 1, 'a redelivered opened or synchronize event is not a reopen');
+  await prHead(f, 'b'.repeat(40), 7, { reopened: true });
+  assert.equal(pullJobs(f, 7).length, 2, 'a reopened head that ended in error (not judged) runs once more');
+  await prHead(f, 'b'.repeat(40), 7, { reopened: true });
+  assert.equal(pullJobs(f, 7).length, 2, 'redelivery of that reopen is one run');
 });

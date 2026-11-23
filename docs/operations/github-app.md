@@ -418,7 +418,10 @@ first pull request or push is seen at once; no landing has to come first.
   status on the head: success, failure (the check failed, or the PR does not
   compose onto Forge `main`), or error (the job or check could not run, the check
   ended cancelled or without a runner, no check is configured). It links to the
-  Lane when `FORGE_WEB_URL` is set. A newer head of the same PR supersedes the
+  Lane when `FORGE_WEB_URL` is set. An error that did not judge the code says whose failure it was in a
+  fixed sentence (GitHub Actions unavailable, Forge's check runner failed, runner stopped, budget ran out,
+  cancelled) and never "push again": reopening the pull request runs the same head once more, because a
+  head that ended in error is not a duplicate. A head that passed or failed is never re-run that way. A newer head of the same PR supersedes the
   older one: an unstarted job is dropped without a status; a checking one gets
   error "Superseded" and its run is cancelled. A failed status write retries twice
   (30 s, 60 s). If every attempt fails, GitHub keeps the last status it accepted

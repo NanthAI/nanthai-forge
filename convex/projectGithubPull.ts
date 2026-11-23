@@ -153,7 +153,7 @@ export const startCheck = internalMutation({
       inbound: canonicalPayload({ ...inbound, pull: { ...pull, runId: run.id } } satisfies InboundJob),
     });
     if (hostedCheckTerminal(run)) {
-      const status = checkRunStatus(run.status);
+      const status = checkRunStatus(run.status, run.failureReason);
       await settlePull(
         ctx,
         (await ctx.db.get(job._id))!,

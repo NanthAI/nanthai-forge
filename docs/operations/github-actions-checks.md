@@ -769,6 +769,13 @@ Checking. The wait ends when Forge takes the retry's plan, not on GitHub's `requ
 step ends it once the run runs. A CI-down hold's landing reads the hold's own start. Healthy checks
 read nothing new: the label comes from the run reason status already reads for a waiting check.
 
+When the plan is recorded and the provider run ends but no shard reports, the check also settles
+`runner-unavailable`, and its reason reads `Actions completed (failure) without complete job evidence`
+followed by the candidates (source download, Forge's job API or the runner), "the code was not judged" and
+the one log line that tells Forge's side from GitHub's: the runner prints `Forge job API <call>
+unavailable after bounded retries` when its calls to Forge's job API keep failing (Item 0d14c456, the
+2026-11-20 job-API timeouts after the source-pack download).
+
 For legacy 400-descriptor servers, success uses
 `17 + 2 * ceil(sourceObjects / 400) + 6 * jobs` Convex calls,
 including HTTP/nested calls, enqueue, dispatch, webhook and Candidate/base manifest.

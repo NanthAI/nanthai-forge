@@ -57,6 +57,12 @@ export const manifest = query({
               ? 'https://modal.com/apps'
               : httpsLink(run.ci?.link),
         complete: head?.final !== null && head?.final !== undefined,
+        // What Forge knows of a run that has published nothing yet (Item 0d14c456); the run is already loaded.
+        progress: {
+          startedAt: run.at,
+          shardsReported: run.counts.completed,
+          shardCount: run.plan?.shardCount ?? null,
+        },
         sealed: head?.sealed ?? 0,
         root: run.executionId ? rootForOutput(input, run.executionId, head) : null,
       });

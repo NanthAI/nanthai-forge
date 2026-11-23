@@ -174,7 +174,7 @@ export async function notifyPullCheck(ctx: MutationCtx, run: HostedCheckRun) {
   if (!isPullOperation(run.request.operationId)) return;
   const [job] = await waiting(ctx, run.projectId as Id<'hostedProjects'>, run.id);
   if (!job) return;
-  const status = checkRunStatus(run.status);
+  const status = checkRunStatus(run.status, run.failureReason);
   await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectGithubPullQueue:settle'), {
     jobId: job._id,
     outcome: status.state === 'pending' ? 'error' : status.state,
@@ -218,6 +218,7 @@ export const receive = internalMutation({
     repository: v.string(),
     number: v.number(),
     head: v.string(),
+    reopened: v.optional(v.boolean()),
     fork: v.boolean(),
     repositoryId: v.optional(v.number()),
     senderId: v.optional(v.string()),
@@ -238,7 +239,15 @@ export const receive = internalMutation({
         .withIndex('by_project_and_pull', q => q.eq('projectId', queue.projectId).eq('pullKey', pullKey))
         .order('desc')
         .take(10);
-      if (older.some(job => pullOf(job)?.head === input.head)) continue;
+      // A redelivered head is one run. A head whose check ended in error (a provider outage or runner
+      // failure: the code was not judged) runs again only when its pull request is reopened; a later
+      // job for the head, queued by that reopen, makes its redelivery a duplicate again.
+      if (
+        older.some(
+          job => pullOf(job)?.head === input.head && (!input.reopened || pullOf(job)?.outcome !== 'error'),
+        )
+      )
+        continue;
       // A newer head replaces an older head's unposted final status as what decides the merge.
       if (queue.verifyFailedId && older.some(job => job._id === queue.verifyFailedId))
         await ctx.db.patch(queue._id, { verifyFailedId: undefined });

@@ -70,6 +70,25 @@ export function prePlanFailureReason(
     : undefined;
 }
 
+/** The run reason when a provider run ended and shard evidence is incomplete, built from what Forge
+ * recorded (Item 0d14c456, friction 061c0461: job-API timeouts after the source-pack download look the
+ * same from here). A shard that reported a failing test is a verdict, so the reason never says the code
+ * was not judged then. Kept under the 200 characters a check summary shows, marker first. */
+export function noJobEvidenceReason(facts: {
+  conclusion?: string | null | undefined;
+  reported?: number | undefined;
+  shardCount?: number | null | undefined;
+  /** A shard reported a failing test (a verdict). */
+  failed?: boolean | undefined;
+}) {
+  const head = `Actions completed${facts.conclusion ? ` (${facts.conclusion})` : ''} without complete job evidence`;
+  const reported = facts.shardCount
+    ? `${facts.reported ?? 0} of ${facts.shardCount} shards reported`
+    : 'no shard plan was recorded';
+  return facts.failed
+    ? `${head}: ${reported}; one reported a failing test, the others never reported.`
+    : `${head}: ${reported}, code not judged. A job-log line "Forge job API" names Forge's side; else source download or the runner.`;
+}
 /** The failure text carries forward an earlier retry's wait start. */
 export function jobApiReason(conclusion: string | null | undefined, waitingSince?: string) {
   return `Check infrastructure: the runner ended (${conclusion ?? 'unknown'}) before Forge recorded its plan (runner setup, OIDC or Forge's job API); the code was not judged.${

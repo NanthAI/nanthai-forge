@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
 import { networkFetch } from './network-fetch.js';
 import { outputSealSchema, outputStreamSchema } from './hosted-check-output.js';
+import { checkTerminal } from './check-run-state.js';
 
 /** Default and largest tail, in bytes; Forge retains at most 64 KiB of redacted output per job. */
 export const CHECK_LOG_TAIL = 8 * 1024;
@@ -48,10 +49,28 @@ const pageSchema = z.object({
 const manifestSchema = z.object({
   status: z.string(),
   complete: z.boolean(),
+  progress: z
+    .object({
+      startedAt: z.string(),
+      shardsReported: z.number(),
+      shardCount: z.number().nullable(),
+    })
+    .optional(),
   fullLogs: z.string().optional(),
   // https only (review R-09); anything else reads as no link.
   providerUrl: z.string().nullable().optional().transform(httpsLink),
 });
+type Manifest = z.infer<typeof manifestSchema>;
+/** Why the selection is empty. A run still in flight says what Forge knows of it (since when, how many
+ * shards reported) and where to look next, instead of reading as "nothing is happening" (Item 0d14c456). */
+export function emptyLogNote(manifest: Manifest, filtered = false) {
+  const provider = manifest.providerUrl ? ` The provider's full log: ${manifest.providerUrl}` : '';
+  if (checkTerminal(manifest.status) || !manifest.progress)
+    return `Forge holds no retained output for this selection.${provider}`;
+  const { startedAt, shardsReported, shardCount } = manifest.progress;
+  const shards = shardCount === null ? '' : `, ${shardsReported} of ${shardCount} shards reported`;
+  return `The check is ${manifest.status} (started ${startedAt}${shards}); ${filtered ? 'nothing is published for this selection yet' : 'no shard has published output yet'}. A shard publishes as it runs: read this again for new lines.${provider}`;
+}
 const isNotFound = (error: unknown) =>
   (error as { code?: string; data?: { code?: string } })?.code === 'NOT_FOUND' ||
   (error as { data?: { code?: string } })?.data?.code === 'NOT_FOUND';
@@ -98,6 +117,8 @@ export async function hostedCheckLog(input: unknown, transport: CheckLogTranspor
     runId: command.runId,
     status: manifest.status,
     providerUrl: manifest.providerUrl,
+    // What Forge knows of the run, so a read that finds other shards' output still shows how far it is.
+    progress: manifest.progress ?? null,
     streams: chosen.map(row => ({
       shard: row.stream.shard,
       attempt: row.stream.attempt,
@@ -114,9 +135,10 @@ export async function hostedCheckLog(input: unknown, transport: CheckLogTranspor
       ...base,
       text: '',
       truncated: false,
-      note: manifest.providerUrl
-        ? `Forge holds no retained output for this selection. The provider's full log: ${manifest.providerUrl}`
-        : 'Forge holds no retained output for this selection.',
+      note: emptyLogNote(
+        manifest,
+        command.stream !== undefined || command.shard !== undefined || command.attempt !== undefined,
+      ),
     };
   invariant(
     chosen.some(row => !row.retired),

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { prePlanFailureReason } from '../src/ci-provider-recovery';
+import { noJobEvidenceReason, prePlanFailureReason } from '../src/ci-provider-recovery';
 import { cancelledUsageTarget } from './projectCancelledRunUsage';
 import { prepareReportCollection } from './projectHostedReportCollection';
 import { resultBatchIndex } from '../src/hosted-actions-result-batch';
@@ -166,7 +166,12 @@ export const receive = internalMutation({
         selected,
         conclusion === 'cancelled' ? 'cancelled' : testsFailed ? 'failed' : 'runner-unavailable',
         infrastructureReason ??
-          `Actions completed (${conclusion ?? 'unknown'}) without complete job evidence.`,
+          noJobEvidenceReason({
+            conclusion: conclusion ?? 'unknown',
+            reported: run.counts.completed,
+            shardCount: run.plan?.shardCount,
+            failed: testsFailed,
+          }),
       );
     } else {
       await writeHostedCheck(ctx, selected.row._id, run);
