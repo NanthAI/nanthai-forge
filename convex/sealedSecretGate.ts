@@ -164,18 +164,19 @@ export function markersForRemovedAccount(set: StoredSealedSet, ...accountIds: Ui
 const joinAccount = (j: SealedJoinRequest) =>
   (decodeSealedWire(u8(j.request)) as Partial<JoinRequest>).accountId;
 
-/** The accounts a removal could mark in this set (an entry or a waiting join request), as hex ids: a team change
- * checks write access only for its members listed here. One decode of the roster. */
-export function markableAccounts(set: StoredSealedSet) {
-  const ids: Uint8Array[] = (decodeSealedWire(u8(set.payload)) as Payload).roster.entries.map(
-    entry => entry.accountId,
-  );
-  for (const j of set.joinRequests ?? []) {
-    const id = joinAccount(j);
-    if (id) ids.push(id);
-  }
-  return ids.map(id => hex(id));
+/** The accounts a removal could mark in this set (an entry or a waiting join request), each once. One decode of the
+ * roster. A machine entry has no account (an empty id) and is never listed: no removal marks a machine. */
+export function markableAccountIds(set: StoredSealedSet) {
+  const ids = new Map<string, Uint8Array>();
+  const add = (id: Uint8Array | undefined) => {
+    if (id?.length) ids.set(hex(id), id);
+  };
+  for (const entry of (decodeSealedWire(u8(set.payload)) as Payload).roster.entries) add(entry.accountId);
+  for (const j of set.joinRequests ?? []) add(joinAccount(j));
+  return [...ids.values()];
 }
+/** The same accounts as hex ids: a team change checks write access only for its members listed here. */
+export const markableAccounts = (set: StoredSealedSet) => markableAccountIds(set).map(id => hex(id));
 
 /** Design 5.1 join request, stored for the next holder device's run (no timer, no polling). The request must
  * name this project and the caller's own account, and Development must be in Automatic mode with no entry for

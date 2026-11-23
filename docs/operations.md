@@ -1118,7 +1118,9 @@ Account, Projects, Trash shows the deleted date, the restore deadline and the re
 
 The owner can restore the project until the deadline. Restore brings back source,
 Work and settings but **not** grants, invitations, runners or tokens; re-share
-and re-register them. Restore is refused after the deadline and while revocation
+and re-register them. Sealed secrets come back marked for every listed person but
+the owner, whose next person write (or `nforge secret unshare --marked`) removes
+them and re-keys ([sealed removal](security.md)). Restore is refused after the deadline and while revocation
 is still paging. Restore on a project that is not deleted, and delete on one that
 is already deleted, change nothing and do not bump the revision, so a stale second
 tab cannot fail other holders.

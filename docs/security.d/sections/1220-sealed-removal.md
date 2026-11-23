@@ -31,6 +31,13 @@ There are three routes to that one write:
   once, and its purge marks each write link's members in steps of 100 before that
   link goes. In both delayed cases the people already lack write access, so they
   cannot read a sealed set meanwhile.
+- Trashing a project revokes every grant but the owner's, and a restore brings
+  none back, so the trash marks every other account its sealed sets list (an
+  entry or a waiting join request) in the same mutation. The markers outlive the
+  restore: a marked device opens nothing even if its person is invited back, and
+  the owner's next person write removes and re-keys. Machine entries name no
+  account and are never marked. Permanent deletion purges the sets and their
+  history with the project's rows.
 - A marker that names no entry of the roster asks for nothing. A marker on the
   holder's own account (it still has access) or on a machine is never acted on:
   the notice names it, and only `nforge secret unshare DEVICE_ID` removes it.
@@ -64,5 +71,7 @@ kind (at most three) and one patch per set it marks; removing a reader adds only
 grant read. A team change adds, per project it gives write to, one empty
 indexed read per set kind when the project has no sealed set, and reads no team
 member. Only a project with a set reads team members, at most 100 per mutation,
-and checks write access only for the members its sets list. A removal write is one read
+and checks write access only for the members its sets list. Trashing a project
+adds one empty indexed read per set kind when it has no sealed set; with sets, it
+reads no grant or member and patches each set it marks. A removal write is one read
 and one write, at most once per marked batch. Idle costs nothing.

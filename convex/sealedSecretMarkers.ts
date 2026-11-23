@@ -2,13 +2,14 @@
 // Removal markers: when a person loses write access to a project, every active sealed set of the project marks
 // that account's entries. Holders see the marker on their next read, and a person's next write on an owner device
 // removes the entries and re-keys (design 5.5). The server opens nothing and changes no signed record. A direct
-// removal (projectActorNames.retainMembership) and a team change (below) both end here, in the same mutation.
+// removal (projectActorNames.retainMembership), a team change and a project trash (below) end here, in the same
+// mutation.
 import { internalMutation, type MutationCtx } from './server';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { forgeSecretId, hex } from '../src/sealed-portable';
-import { markableAccounts, markersForRemovedAccount } from './sealedSecretGate';
+import { markableAccountIds, markableAccounts, markersForRemovedAccount } from './sealedSecretGate';
 import { hasWriteRole } from './projectRole';
 
 /** The project's active sets: one indexed read per set kind (at most three rows). */
@@ -40,6 +41,20 @@ async function mark(ctx: MutationCtx, sets: Doc<'sealedSecretSets'>[], accountId
 /** One indexed read per set kind (at most three rows) and one patch per set that changes; no other call. */
 export async function markRemovedAccount(ctx: MutationCtx, projectId: Id<'hostedProjects'>, account: string) {
   await mark(ctx, await activeSets(ctx, projectId), [forgeSecretId('account', account)]);
+}
+
+/** Trashing a project removes every grant but its owner's, and a restore brings none back (projectRetention
+ * `revokedTables`): every other account an active set lists (an entry or a waiting join request) is marked, in the
+ * trash mutation, so a restored project's owner removes and re-keys on their next write. Permanent deletion purges
+ * the sets with the project (projectPurgeInventory). A project with no active set reads only its three empty set
+ * ranges; one with sets reads no grant or member, and patches each set that changes. */
+export async function markTrashedProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>, owner: string) {
+  const sets = await activeSets(ctx, projectId);
+  if (!sets.length) return;
+  const self = hex(forgeSecretId('account', owner)),
+    others = new Map<string, Uint8Array>();
+  for (const id of sets.flatMap(markableAccountIds)) if (hex(id) !== self) others.set(hex(id), id);
+  if (others.size) await mark(ctx, sets, [...others.values()]);
 }
 
 /** Team members one step reads: with the write check of each listed one (a direct grant read and the team lookup,

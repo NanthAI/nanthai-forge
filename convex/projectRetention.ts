@@ -10,6 +10,7 @@ import { projectRows } from './projectPurgeRows';
 import { projectExecution } from './projectExecution';
 import { referenceArgs, referencePage, referenceResult } from './projectPurgeReferences';
 import { invariant } from '../src/errors';
+import { markTrashedProject } from './sealedSecretMarkers';
 
 /** Owner decision 2026-11-05: deleted projects stay restorable for 90 days (GitHub parity). */
 export const projectRetentionMs = 90 * 24 * 60 * 60 * 1000;
@@ -55,10 +56,13 @@ async function revokePage(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
   return done;
 }
 /** Tombstone bookkeeping for a just-deleted project: revoke access now, schedule the one
- * expiry at the end of the window, and start a bounded retained-size measurement. */
+ * expiry at the end of the window, and start a bounded retained-size measurement. Every
+ * person losing a grant is marked for sealed-secret removal first, so a restore gives none
+ * of them back a value (Item 41a0df87). */
 export async function startRetention(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
   const project = (await ctx.db.get(projectId))!;
   await stopRetention(ctx, project);
+  await markTrashedProject(ctx, projectId, project.owner);
   const removedAt = project.removedAt ?? Date.now(),
     purgeAt = removedAt + projectRetentionMs;
   const task = await ctx.scheduler.runAt(purgeAt, fn('expire'), { projectId, removedAt });
