@@ -253,12 +253,15 @@ export function NeedsMeView({
     const afterClose = requestAnimationFrame(() => jumpToRow(reveal.laneId));
     return () => cancelAnimationFrame(afterClose);
   }, [reveal]);
-  const activityAt = (row: NowRow | AskRow | ParkedRow) => ('choices' in row ? row.at : row.since);
+  const activityAt = (row: NowRow | AskRow | ParkedRow | AheadRow) =>
+    'question' in row ? Date.parse(row.at) || 0 : 'choices' in row ? row.at : row.since;
   // Shared-state decisions (work reverted from main, a stopped mirror) carry no hold time and come first.
-  const heldRows: (NoticeRow | NowRow | AskRow | ParkedRow)[] = view
+  const heldRows: (NoticeRow | NowRow | AskRow | ParkedRow | AheadRow)[] = view
     ? [
         ...view.notices,
-        ...[...view.now, ...view.asks, ...view.parked].sort((a, b) => activityAt(a) - activityAt(b)),
+        ...[...view.now, ...view.asks, ...view.parked, ...view.blocked].sort(
+          (a, b) => activityAt(a) - activityAt(b),
+        ),
       ]
     : [];
   const asksAhead = view?.askedAhead ?? [];
@@ -269,7 +272,12 @@ export function NeedsMeView({
         ? at({ place: 'plan', rest: row.planningItemId }) + '#discussion'
         : undefined;
   const rowToReveal = heldRows.findIndex(
-    row => !('choices' in row) && !('park' in row) && !('summary' in row) && row.laneId === reveal?.laneId,
+    row =>
+      !('choices' in row) &&
+      !('park' in row) &&
+      !('summary' in row) &&
+      !('question' in row) &&
+      row.laneId === reveal?.laneId,
   );
   const laneHref = (laneId: string) => at({ place: 'lanes', rest: laneId });
   const drawerContent =
@@ -378,6 +386,17 @@ export function NeedsMeView({
                                   : at({ place: 'plan', rest: row.id })
                               }
                             />
+                          ) : 'question' in row ? (
+                            <Ahead
+                              project={route}
+                              key={row.laneId}
+                              row={row}
+                              detail={row.kind === 'setting' ? settingDetail : undefined}
+                              drawnAt={drawnAt}
+                              decide={decide}
+                              canDecide={read!.canDecide}
+                              announce={announce}
+                            />
                           ) : 'park' in row ? (
                             <Parked
                               project={route}
@@ -418,17 +437,19 @@ export function NeedsMeView({
                             key={
                               'summary' in row
                                 ? `${row.kind}:${row.id}`
-                                : 'choices' in row
-                                  ? row.id
-                                  : 'park' in row
-                                    ? `park:${row.laneId}`
-                                    : (row.landing?.submissionId ?? row.laneId)
+                                : 'question' in row
+                                  ? row.laneId
+                                  : 'choices' in row
+                                    ? row.id
+                                    : 'park' in row
+                                      ? `park:${row.laneId}`
+                                      : (row.landing?.submissionId ?? row.laneId)
                             }
                             className="sumdec"
                           >
                             <summary>
                               <span className="ttl" dir="auto">
-                                {'choices' in row ? row.text : row.head}
+                                {'choices' in row ? row.text : 'question' in row ? row.question : row.head}
                               </span>
                             </summary>
                             {decision}

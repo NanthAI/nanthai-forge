@@ -18,6 +18,7 @@ import { hostedAgentAddressSchema } from './hosted-address.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
+import { markWaiting } from './hosted-agent-approval.js';
 import { ForgeError, invariant } from './errors.js';
 import { parseHostedResponse } from './hosted-response.js';
 const statusSchema = z.object({
@@ -59,6 +60,8 @@ export async function waitForGithubConnection(
   subscribe: () => HostedRunSubscription = () => hostedRunSubscription(address),
 ) {
   const client = subscribe();
+  const mark = Date.now() + 6 * 3600 * 1000;
+  void markWaiting(client, address.projectId, 'setting:github-connect', mark);
   let unsubscribe: (() => void) | undefined;
   let stop: (() => void) | undefined;
   try {
@@ -98,6 +101,7 @@ export async function waitForGithubConnection(
     try {
       unsubscribe?.();
     } finally {
+      await markWaiting(client, address.projectId, 'setting:github-connect', { clear: mark });
       await client.close();
     }
   }

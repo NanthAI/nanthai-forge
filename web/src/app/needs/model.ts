@@ -7,6 +7,8 @@
 import type { StateWord } from '../../ds';
 import { heldState, heldWhyState } from '../lane-state';
 import {
+  approvalsTruncated,
+  blockedRequestIds,
   laneRequests,
   parkHolder,
   parkShown,
@@ -36,6 +38,8 @@ export type Approval = {
   at: string;
   membership?: boolean;
   setting?: { origin: string };
+  /** Until when an agent's wait holds this settings request (ms); future = an agent is blocked on it. */
+  waitUntil?: number;
 };
 export type NowRow = HeldLane & {
   word: StateWord;
@@ -81,6 +85,9 @@ export type NeedsView = {
   /** Held, but nothing for a person to decide (count.ts `waitsOnPerson`): FYI rows, never counted. */
   fyi: NowRow[];
   ahead: AheadRow[];
+  /** Settings and GitHub-connect requests an agent is blocked on: they wait on the reader, so they are counted
+   * (Item 12fde646). */
+  blocked: AheadRow[];
   /** What waits on the reader: held rows that wait on a person plus questions. The shell's number (count.ts). */
   count: number;
   /** True when the held, question or parked rows stopped at the read's limit. */
@@ -285,11 +292,13 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
   // A Lane request holds that Lane's landing, so it is drawn on the held row, never twice (rule 9). Asked before the
   // Lane holds a landing (request-approval, then wait), it holds nothing yet and is listed ahead (Item 0a99ab23).
   const heldLanes = new Set(read.held.map(lane => lane.laneId));
-  const ahead = requests
+  const blockedIds = blockedRequestIds(read.approvals, now, read.canDecide);
+  const listed = requests
     // Only a request still waiting for the owner is listed: a granted or declined one is the Lane page's to show
     // (Item 4f1f7984).
-    .filter(request => request.needsOwner && (request.kind !== 'lane' || !heldLanes.has(request.laneId)))
-    .map(aheadRow);
+    .filter(request => request.needsOwner && (request.kind !== 'lane' || !heldLanes.has(request.laneId)));
+  const ahead = listed.filter(request => !blockedIds.has(request.laneId)).map(aheadRow);
+  const blocked = listed.filter(request => blockedIds.has(request.laneId)).map(aheadRow);
   return {
     now: waiting,
     asks,
@@ -298,10 +307,15 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
     notices: (read.notices ?? []).map(noticeRow),
     fyi,
     ahead,
-    count: waiting.length + asks.length + parked.length + (read.notices?.length ?? 0),
+    blocked,
+    count: waiting.length + asks.length + parked.length + blocked.length + (read.notices?.length ?? 0),
     atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true,
     countAtLeast:
-      read.more > 0 || read.parkedMore === true || read.asksMore === true || read.noticesMore === true,
+      read.more > 0 ||
+      read.parkedMore === true ||
+      read.asksMore === true ||
+      read.noticesMore === true ||
+      approvalsTruncated(read.approvals),
     approvalsComplete: complete,
   };
 }

@@ -305,6 +305,40 @@ export const withdraw = mutation({
   },
 });
 
+/** Longest a waiter may hold a request in Needs you without renewing it. */
+const WAIT_MARK_MS = 6 * 60 * 60_000;
+/** Item 12fde646: the agent that asked for a settings change (or a GitHub connect) tells Forge it is blocked on the
+ * decision (`until`, at most an hour ahead) and clears it when its wait ends, so Needs me counts the request
+ * only while something waits. One indexed read, one write only when the mark changes; never on a view. */
+export const waiting = mutation({
+  args: {
+    projectId: v.id('hostedProjects'),
+    laneId: v.string(),
+    until: v.union(v.number(), v.null()),
+    /** Clearing: the mark this waiter set; another waiter's newer mark is left alone. */
+    clear: v.optional(v.number()),
+  },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    try {
+      const actor = await acceptanceActor(ctx, true);
+      await activeProject(ctx, input.projectId, actor.id);
+      const row = await approvalRow(ctx, input.projectId, input.laneId);
+      if (!row || !openSettingRequest(row)) return canonicalPayload({ waiting: false });
+      await requireMemberAuthorityById(ctx, input.projectId, row.requester, actor.id, 'Lane');
+      if (input.until === null && input.clear !== undefined && row.waitUntil !== input.clear)
+        return canonicalPayload({ waiting: row.waitUntil !== undefined });
+      const now = Date.now();
+      const until =
+        input.until === null ? undefined : Math.min(Math.max(input.until, now), now + WAIT_MARK_MS);
+      if (row.waitUntil !== until) await writeApproval(ctx, row, { waitUntil: until });
+      return canonicalPayload({ waiting: until !== undefined });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
 /** One indexed row, for `wait {approval}` (a live subscription re-runs only when this row changes).
  * `detail` (the owner's page only) adds the Lane's current head and its held landing. Any project
  * reader; idle costs nothing. */

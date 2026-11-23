@@ -59,6 +59,25 @@ export type ApprovalOutcome = {
   status: 'decided' | 'none' | 'timeout' | 'cancelled';
   approval: z.infer<typeof decisionSchema> | null;
 };
+/** Item 12fde646: tells Forge this agent is blocked on a settings request (or clears it), so Needs me counts it
+ * only while something waits. Best effort: a failed mark leaves the request under "Asked ahead". */
+export async function markWaiting(
+  client: HostedRunSubscription,
+  projectId: string,
+  laneId: string,
+  mark: number | { clear: number },
+) {
+  if (!laneId.startsWith('setting:') || !client.mutation) return;
+  try {
+    await client.mutation(makeFunctionReference<'mutation'>('projectHostedApprovals:waiting'), {
+      projectId,
+      laneId,
+      ...(typeof mark === 'number' ? { until: mark } : { until: null, clear: mark.clear }),
+    });
+  } catch {
+    /* the request stays asked ahead */
+  }
+}
 /** Replaceable in tests; production subscribes with the live Convex client. */
 export const approvalWaitHooks: {
   subscribe?: (address: HostedAgentTransport['address']) => HostedRunSubscription;
@@ -80,6 +99,9 @@ export async function observeApproval(
   if (signal?.aborted) return { status: 'cancelled', approval: latest };
   const client = subscribe();
   let release = () => {};
+  const marked = input.laneId.startsWith('setting:');
+  const mark = Date.now() + Math.min(input.timeoutSeconds, 6 * 3600) * 1000;
+  if (marked) void markWaiting(client, transport.address.projectId, input.laneId, mark);
   try {
     return await new Promise<ApprovalOutcome>((resolve, reject) => {
       const settle = (value: ApprovalOutcome) => {
@@ -130,6 +152,7 @@ export async function observeApproval(
     });
   } finally {
     release();
+    if (marked) await markWaiting(client, transport.address.projectId, input.laneId, { clear: mark });
     await client.close();
   }
 }

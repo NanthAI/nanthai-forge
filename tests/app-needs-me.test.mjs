@@ -434,3 +434,40 @@ test('4f1f7984: Asked ahead lists only requests that still wait for the owner; a
   assert.equal(needsSentence(none).bold, 'Nothing needs you.');
   assert.doesNotMatch(needsSentence(none).rest, /asked ahead/);
 });
+
+test('12fde646: a settings request an agent is blocked on counts in Needs you and the shell number; otherwise it stays asked ahead', () => {
+  const now = Date.parse('2026-11-23T17:00:00.000Z');
+  const blocked = request('setting:policy', 'setting', {
+    waitUntil: now + 60_000,
+  });
+  const idle = request('setting:runner', 'setting');
+  const view = needsView(read([], [blocked, idle]), now);
+  assert.deepEqual(
+    view.blocked.map(row => row.laneId),
+    ['setting:policy'],
+  );
+  assert.deepEqual(
+    view.ahead.map(row => row.laneId),
+    ['setting:runner'],
+  );
+  assert.equal(view.count, 1);
+  assert.equal(needsCount(read([], [blocked, idle]), now).n, 1);
+  assert.equal(needsView(read([], [idle]), now).count, 0);
+});
+
+test('12fde646: a blocked agent that gave up drops out of the count (mark cleared or past)', () => {
+  const now = Date.parse('2026-11-23T17:00:00.000Z');
+  const gaveUp = request('setting:github-connect', 'setting', {
+    waitUntil: now - 1,
+  });
+  const cleared = request('setting:policy', 'setting');
+  const both = read([], [gaveUp, cleared]);
+  assert.equal(needsView(both, now).count, 0);
+  assert.equal(needsView(both, now).ahead.length, 2);
+  assert.equal(needsCount(both, now).n, 0);
+  // A reader who cannot decide is not counted for a request they cannot act on.
+  const blocked = request('setting:policy', 'setting', {
+    waitUntil: now + 1000,
+  });
+  assert.equal(needsCount({ ...read([], [blocked]), canDecide: false }, now).n, 0);
+});

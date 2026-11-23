@@ -126,6 +126,7 @@ export async function holdSetting(
     live: false,
     decision: undefined,
     ended: undefined,
+    waitUntil: undefined,
     agent: undefined,
     setting: {
       origin: input.origin,

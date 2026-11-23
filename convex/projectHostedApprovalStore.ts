@@ -108,6 +108,7 @@ export function approvalView(row: ApprovalRow | null, laneId: string) {
       : row.setting
         ? { setting: { origin: row.setting.origin } }
         : {}),
+    ...(row.setting && !row.ended && row.waitUntil ? { waitUntil: row.waitUntil } : {}),
     version: row.version,
   };
 }

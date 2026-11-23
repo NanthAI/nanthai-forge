@@ -73,6 +73,9 @@ export const hostedApprovalTables = {
         base: v.optional(v.string()),
       }),
     ),
+    /** A settings request an agent is blocked on: until when its `wait` (or `github connect`) holds the line.
+     * Set and cleared by that waiter; Needs me counts the request while it is in the future (Item 12fde646). */
+    waitUntil: v.optional(v.number()),
     version: v.number(),
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])

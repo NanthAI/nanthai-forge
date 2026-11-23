@@ -122,6 +122,36 @@ export function waitsOnPerson(lane: Pick<HeldLane, 'why'>, approval: boolean, ca
   return canDecide && (approval || lane.why === 'review');
 }
 
+/** Item 12fde646: open settings and GitHub-connect requests an agent is blocked on right now (its waiter marked
+ * `waitUntil` ahead of `now`). They wait on the person, so they count; a request no agent waits on stays asked
+ * ahead. Read from the approvals payload the read already holds, compared at draw time (no timer, no call). */
+export function blockedRequestIds(payload: string, now: number, canDecide: boolean): ReadonlySet<string> {
+  if (!canDecide) return new Set();
+  try {
+    const parsed = JSON.parse(payload) as {
+      requests?: { kind: string; laneId: string; needsOwner?: boolean; waitUntil?: number }[];
+    };
+    return new Set(
+      (parsed.requests ?? [])
+        .filter(
+          r => r.kind === 'setting' && r.needsOwner && typeof r.waitUntil === 'number' && r.waitUntil > now,
+        )
+        .map(r => r.laneId),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+/** The approvals read stopped at its bound: a blocked request may be missing, so a count is a lower bound. */
+export function approvalsTruncated(payload: string): boolean {
+  try {
+    return (JSON.parse(payload) as { complete?: boolean }).complete === false;
+  } catch {
+    return true;
+  }
+}
+
 /** Lane ids with an open Lane approval request in the approvals payload. */
 export function laneRequests(payload: string): ReadonlySet<string> {
   try {
@@ -146,9 +176,15 @@ export function needsCount(
   ).length;
   const parked = (read.parked ?? []).filter(row => parkShown(row, now)).length;
   const asks = (read.asks ?? []).filter(row => !row.ahead).length;
+  const blocked = blockedRequestIds(read.approvals, now, read.canDecide).size;
   return {
-    n: held + asks + parked + (read.notices?.length ?? 0),
-    atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true || read.noticesMore === true,
+    n: held + asks + parked + blocked + (read.notices?.length ?? 0),
+    atLeast:
+      read.more > 0 ||
+      read.parkedMore === true ||
+      read.asksMore === true ||
+      read.noticesMore === true ||
+      approvalsTruncated(read.approvals),
   };
 }
 

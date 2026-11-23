@@ -37,6 +37,8 @@ export interface HostedRunSubscription {
     update: (value: unknown) => void,
     error: (error: Error) => void,
   ): () => void;
+  /** Present on the live client; used only to mark a blocked wait (projectHostedApprovals:waiting). */
+  mutation?(reference: FunctionReference<'mutation'>, args: Record<string, unknown>): Promise<unknown>;
   close(): Promise<void>;
 }
 /** Test transport only; production uses the same live client for run and operation waits. */

@@ -305,3 +305,41 @@ test("0a99ab23: a fork run status on GitHub keeps a private project's address ou
   const note = [...f.tables.projectBoardMessages.values()].at(-1);
   assert.ok(note.body.includes(laneUrl(laneId)), 'the board note, inside the project, links the Lane page');
 });
+
+test('12fde646: the waiter marks a settings request blocked and clears it; the owner list carries the mark, no extra read', async t => {
+  const f = await addressed(t);
+  const instant = 1_790_000_000_000;
+  t.mock.method(Date, 'now', () => instant);
+  f.insert('projectHostedApprovals', {
+    projectId: f.projectId,
+    laneId: 'setting:policy',
+    operationId: randomUUID(),
+    requester: 'owner',
+    reason: 'change it',
+    head: 'a'.repeat(64),
+    at: instant,
+    status: 'requested',
+    live: false,
+    setting: { origin: 'policy', request: '{}' },
+    version: 1,
+  });
+  const mark = until =>
+    f.tx('mark', approvals.waiting, { projectId: f.projectId, laneId: 'setting:policy', until }, owner);
+  const listed = async () =>
+    JSON.parse(await f.tx('list', approvals.list, { projectId: f.projectId }, owner)).requests[0];
+  assert.equal(JSON.parse(await mark(instant + 60_000)).waiting, true);
+  assert.ok((await listed()).waitUntil > instant);
+  const first = instant + 60_000;
+  await mark(first);
+  const second = first + 5_000;
+  await mark(second);
+  const stale = await f.tx(
+    'clear',
+    approvals.waiting,
+    { projectId: f.projectId, laneId: 'setting:policy', until: null, clear: first },
+    owner,
+  );
+  assert.equal(JSON.parse(stale).waiting, true, "one waiter giving up leaves another waiter's mark");
+  assert.equal(JSON.parse(await mark(null)).waiting, false);
+  assert.equal((await listed()).waitUntil, undefined, 'a waiter that gave up leaves no mark');
+});
