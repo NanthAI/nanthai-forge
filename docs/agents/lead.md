@@ -97,6 +97,12 @@ incident 5e3c3a3c). While it is broken the Guard 6 rule above applies (863c85ab)
 alert says so and names the next commands. Resume launches after the recovery message, or once
 the Speed budgets block shows it passing.
 
+Read the alarm narrowly: `nforge metrics ROOT --text --from <24 hours ago> --context-days 0.25`.
+The p90 needs only the last 20 landings in the window, so a day that has 20 landings gives the same
+value. The default window (7 days plus 2 days of context) cost 150 to 270 MB of database reads per
+read on 2026-11-21/22, and about 40 such reads a day were the largest recurring reader (Item 411727ba).
+Keep the default window for stage-close and weekly reports.
+
 Prefer a builder with available capacity for specified implementation, and reserve
 design judgment for the designated reviewer. Exact providers and machine budgets belong in the current brief, not a permanent phase assumption.
 
@@ -198,7 +204,7 @@ and any landing failure an agent could not recover from (`--failures --checks` l
 checks with their files or step and a `runner`/`budget`/`flake`/`real` tag in one read). A rising or new code gets a
 planning search and a comment or new Issue, like a flaky file.
 Before launching more than one test-heavy builder, a check-in also reads the
-[queue health alarm](#queue-health-alarm) state (`pass-to-land-p90` in `nforge metrics ROOT --text`);
+[queue health alarm](#queue-health-alarm) state (`pass-to-land-p90` in the narrow read that section gives);
 if it is breaking, fix the queue first and launch after it recovers (Guard 6, 863c85ab).
 At stage close, list evidence and every open acceptance line, including the Issue
 that owns a moved line. Never silently carry incomplete work forward.
@@ -232,6 +238,16 @@ deltas. Check again during heavy dogfooding. Distinguish cumulative invoices,
 measured deltas, estimates and uncovered cost. Tests and call estimates alone do
 not prove the cost target. An opt-in migration is not complete while the old
 path or migration flag remains. Seek approval for any removal that needs it.
+
+One-off jobs (migrations, backfills, rebuilds, dry runs, compactions, purges) state an I/O
+budget before they run: the rows and bytes they read and write, from the table's row count and
+row size, and the budget in GB and dollars at $0.20/GB. Run a dry run only when its answer
+changes the decision. Afterwards, compare the budget with the meter
+([Convex spend](../operations/convex-spend.md)). From 2026-11-10 to 11-23, one-offs were 11.8
+of 57 logged GB on the dogfood deployment (Item 411727ba). Do not run ad-hoc queries against a
+shared deployment (dashboard custom queries, Convex MCP one-off queries, logged as
+`testQuery`). They bypass the bounded repository reads; use a repository read or CLI command
+with a stated budget instead.
 
 ## Runtime and release hygiene
 
