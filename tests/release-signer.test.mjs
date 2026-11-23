@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Automated release signer: signed-out signatures verified by the store, the key-proof read, and a
-// mirror backlog replay through the workflow's own tip step (docs/operations/cli-update.md).
+// burst of Forge-dispatched States where only main's newest signs (docs/operations/cli-update.md).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { moduleUrl } from './convex-module.mjs';
 import { forgeStateTrailer, signRelease } from '../scripts/release-sign-ci.mjs';
 import { cliReleaseStatement, cliReleaseReadStatement } from '../src/cli-release-statement.ts';
@@ -208,32 +205,6 @@ test('signer read: a key proof returns main and its release number; bad or stale
   assert.equal((await read(proof(state(7)))).signed, true);
 });
 
-const tipScript = () => {
-  const workflow = readFileSync('.github/workflows/release-sign.yml', 'utf8');
-  const block = workflow.match(/- id: tip\n[\s\S]*?run: \|\n((?: {10}.*\n)+)/);
-  assert(block, 'the tip step keeps its run block');
-  return block[1].replace(/^ {10}/gm, '');
-};
-
-/** The real tip step, with a stub `gh` that answers GitHub's compare for each commit. */
-function runTip(sha, status) {
-  const dir = mkdtempSync(join(tmpdir(), 'forge-release-tip-'));
-  try {
-    const gh = join(dir, 'gh');
-    writeFileSync(gh, status === null ? '#!/bin/sh\nexit 1\n' : `#!/bin/sh\necho ${status}\n`);
-    chmodSync(gh, 0o755);
-    const output = join(dir, 'output');
-    writeFileSync(output, '');
-    execFileSync('bash', ['-c', tipScript()], {
-      env: { PATH: `${dir}:/usr/bin:/bin`, GH_TOKEN: 'x', REPO: 'o/r', SHA: sha, GITHUB_OUTPUT: output },
-      stdio: ['ignore', 'ignore', 'ignore'],
-    });
-    return readFileSync(output, 'utf8').trim();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
 test('workflow: one concurrency group that queues, never cancels a running signer', () => {
   const workflow = readFileSync('.github/workflows/release-sign.yml', 'utf8');
   assert.match(workflow, /^concurrency:\n  group: release-sign\n  cancel-in-progress: false$/m);
@@ -243,9 +214,15 @@ test('workflow: one concurrency group that queues, never cancels a running signe
   const jobs = workflow.slice(workflow.indexOf('\njobs:\n')).match(/^ {2}[\w-]+:$/gm);
   assert.deepEqual(jobs, ['  sign:'], 'exactly one job per signing');
   assert.equal((workflow.match(/secrets\.FORGE_RELEASE_SIGNING_KEY/g) ?? []).length, 1);
+  // Item 17ce38ba: Forge dispatches the signer after each landing; a mirror push starts nothing, and the
+  // dispatched State reaches the script only as an environment value, never inside a shell line.
+  assert.match(workflow, /^on:\n  workflow_dispatch:\n    inputs:\n      state:/m);
+  assert.doesNotMatch(workflow, /^  push:/m);
+  assert.match(workflow, /^ {10}FORGE_RELEASE_STATE: \$\{\{ inputs\.state \}\}$/m);
+  assert.equal((workflow.match(/inputs\.state/g) ?? []).length, 1);
 });
 
-test('mirror backlog replay: only the head commit signs, with two Convex calls; older runs cost none', async () => {
+test('landing burst: any surviving dispatch signs the newest main State, even an older or out-of-order one; no GitHub commit needed', async () => {
   const s = context({ main: state(25), revision: 125 }),
     key = releaseKey(),
     keys = [key.listed],
@@ -270,44 +247,51 @@ test('mirror backlog replay: only the head commit signs, with two Convex calls; 
       };
     }
   };
-  const commit = n => ({
-    sha: n.toString(16).padStart(40, 'c'),
-    message: `Change ${n}\n\nForge-State: ${state(n)}\nForge-Acceptance: a\n`,
-  });
-  const backlog = Array.from({ length: 6 }, (_, i) => commit(20 + i));
-  const head = backlog.at(-1);
-  // GitHub's concurrency keeps one running and one pending run; the drain runs the first and the
-  // last. Replay every commit anyway, as if each run reached the tip step.
+  // GitHub's concurrency keeps one running and one queued run, and dispatches can arrive out of order,
+  // so the run that survives may carry an older State. Replay every dispatch, oldest first: the first
+  // moves to main's newest and signs it, the rest find it signed.
   const results = [];
-  for (const c of backlog) {
-    const tip = runTip(c.sha, c === head ? 'identical' : 'ahead');
-    if (tip !== 'sign=true') {
-      results.push('skipped by tip');
-      continue;
-    }
+  for (let n = 20; n <= 25; n++)
     results.push(
-      (
-        await signRelease({
-          message: c.message,
-          url: 'https://forge.example',
-          projectId: project,
-          privateKeyPem: key.pem,
-          request: fetch,
-          keys,
-        })
-      ).action,
+      await signRelease({
+        state: state(n),
+        message: 'GitHub main commit without the new State',
+        url: 'https://forge.example',
+        projectId: project,
+        privateKeyPem: key.pem,
+        request: fetch,
+        keys,
+      }),
     );
-  }
-  assert.deepEqual(results, [...Array(5).fill('skipped by tip'), 'signed']);
-  assert.deepEqual(calls, ['projectReleaseSignatures:signerMain', 'projectReleaseSignatures:put']);
+  assert.deepEqual(
+    results.map(r => r.action),
+    ['signed', ...Array(5).fill('skipped')],
+  );
+  assert.equal(results[0].from, state(20));
+  assert.equal(results[0].head, state(25));
+  const read = 'projectReleaseSignatures:signerMain';
+  assert.deepEqual(calls, [read, read, 'projectReleaseSignatures:put', ...Array(8).fill(read), read]);
   assert.equal(s.rows.length, 1);
   assert.equal(s.rows[0].head, state(25));
   assert.equal(s.rows[0].release, 125);
   // The stored signature verifies with the v2 statement for that project id.
   assert.equal(s.rows[0].signature, key.sign(cliReleaseStatement(project, state(25), 125)));
+  await assert.rejects(
+    signRelease({
+      state: 'not-a-state',
+      message: '',
+      url: 'https://forge.example',
+      projectId: project,
+      privateKeyPem: key.pem,
+      request: fetch,
+      keys,
+    }),
+    /full Forge State hash/,
+  );
+  assert.equal(calls.length, 12);
 });
 
-test('signer: an unreadable compare still refuses a State that is no longer main, and a signed State is skipped', async () => {
+test("signer: a manual run on an older GitHub main signs Forge main's newest State, and a signed State is skipped", async () => {
   const s = context({ main: state(9), revision: 10 }),
     key = releaseKey(),
     keys = [key.listed],
@@ -330,11 +314,8 @@ test('signer: an unreadable compare still refuses a State that is no longer main
       request: fetch,
       keys,
     });
-  assert.equal(runTip('c'.repeat(40), null), 'sign=true');
   const stale = await run(8);
-  assert.equal(stale.action, 'skipped');
-  assert.match(stale.reason, /no longer main's newest/);
-  assert.equal((await run(9)).action, 'signed');
+  assert.deepEqual([stale.action, stale.from, stale.head], ['signed', state(8), state(9)]);
   assert.equal((await run(9)).action, 'skipped');
   assert.deepEqual(calls, [
     'projectReleaseSignatures:signerMain',

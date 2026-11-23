@@ -10,6 +10,7 @@ import { settleInbound } from './projectGithubInboundQueue';
 import { ensureMirrorRow } from './projectGithubMirrorRows';
 import { mirrorAudit, startMirrorPublish, wakeHeldMirror } from './projectGithubMirrorCadence';
 import { notifyMirrorCoverage } from './projectGithubMirrorVerify';
+import { scheduleReleaseSign } from './projectReleaseSignDispatch';
 export { ensureMirrorRow, mirrorJob, mirrorRow, scheduleMirror } from './projectGithubMirrorRows';
 /** Publication and wake are one transaction. No watcher, timer or idle job. */
 export async function enqueueGithubMirror(
@@ -24,7 +25,7 @@ export async function enqueueGithubMirror(
   },
 ) {
   const policy = effectivePolicy(project).githubMirror;
-  if (project.sourceAuthority?.mode !== 'server' || !policy?.autoPush) return;
+  if (project.sourceAuthority?.mode !== 'server' || !policy) return;
   const old = await ctx.db
     .query('projectGithubMirrorJobs')
     .withIndex('by_project_and_receipt', q => q.eq('projectId', project._id).eq('receiptId', receipt.id))
@@ -34,6 +35,10 @@ export async function enqueueGithubMirror(
   // receipt's latest target; a retry for that target reuses it, including case-only renames.
   if (old?.repository.toLowerCase() === policy.repo.toLowerCase())
     return { jobId: old._id, scheduled: false };
+  // Release signing starts from the landing, before and whatever the mirror does: paused (no
+  // auto-push), held, failing or refused (Item 17ce38ba). A retry of a queued publish returned above.
+  await scheduleReleaseSign(ctx, project, receipt);
+  if (!policy.autoPush) return;
   let queue = await ensureMirrorRow(ctx, project._id, policy.repo);
   if (queue.repositoryKey !== queue.repository.toLowerCase())
     await ctx.db.patch(queue._id, { repositoryKey: queue.repository.toLowerCase() });

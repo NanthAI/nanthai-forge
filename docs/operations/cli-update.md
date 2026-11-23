@@ -274,7 +274,8 @@ moved, and idle costs nothing. The verdict is written to `DIR/release-signature.
   after `CLI_RELEASE_SIGNATURE_RETRY_MS` (1 minute) until the signature appears or main moves.
   Every command keeps running on the current build, and `nforge` prints one line that the new
   build is held until its release signature is published. If signing stops (signer job off,
-  mirror stuck), the machine stays on its current build.
+  GitHub Actions down or the App's Actions grant removed), the machine stays on its current build.
+  A stopped GitHub mirror does not stop signing.
 - An explicit `nforge update --state STATE` selection skips the check and leaves the recorded
   release number as it is; it is the owner's own rollback and recovery path.
 
@@ -290,32 +291,58 @@ The first release key is listed (key id `f3b8ac47a969d73d`), and signatures are 
 
 ### Automated signer
 
-`.github/workflows/release-sign.yml` signs main on every push of the GitHub mirror (and on
-`workflow_dispatch`), so no one signs by hand. It runs one job on a GitHub-hosted runner in the
-`release-sign` environment, which deploys from `main` only and holds the key as the secret
-`FORGE_RELEASE_SIGNING_KEY`. The job has `contents: read`, pins every action by SHA, and runs
-`scripts/release-sign-ci.mjs` with plain Node from a sparse checkout (no install, no build):
+`.github/workflows/release-sign.yml` signs main after every landing, so no one signs by hand.
+Forge starts it itself: the transaction that publishes a landing (or a landing batch) to main
+schedules one `workflow_dispatch` of `release-sign.yml` on the mirror repository's `main`, with
+the new Forge State and its release number as inputs (`convex/projectReleaseSignDispatch.ts`). It
+runs where the mirror publication is enqueued but before the auto-push check and the mirror queue, so a mirror that is paused, held, failing or refused still
+gets main signed; the signer signs Forge States, not GitHub commits. It needs only the mirror's
+repository name, and only a project that already has a stored release signature dispatches (one
+indexed read per landing); a fork turns it on with its first manual run (below). The dispatch
+uses the Forge GitHub App with Actions write on the mirror repository, the same grant hosted
+checks use. A failure is logged (`FORGE_RELEASE_SIGN_DISPATCH_FAILED`, code and status only); a
+5xx, rate limit, network loss or token failure is retried after 1, 5 and 15 minutes, while a 4xx
+refusal (no grant, workflow missing or older) waits for the next landing or a manual run.
 
-1. Skip when a newer main commit has passed this one (GitHub compare, no Convex call). The
-   workflow's concurrency group keeps one run going and one queued, and a newer push replaces the
-   queued run, so a mirror backlog drain signs only the newest head.
-2. Read the commit's `Forge-State` trailer (none: nothing to sign).
+GitHub runs the workflow file and the signer script as they are on GitHub's `main`, so a change to
+either takes effect once the mirror has pushed it. Until then GitHub refuses a dispatch whose
+inputs the older workflow does not declare (HTTP 422, logged). After such a change reaches GitHub,
+start one manual run (`gh workflow run release-sign.yml --ref main`) so the newest main is signed
+without waiting for the next landing; a contract test keeps Forge's dispatch inputs equal to the
+workflow's.
+
+It runs one job on a GitHub-hosted runner in the `release-sign` environment, which deploys from
+`main` only and holds the key as the secret `FORGE_RELEASE_SIGNING_KEY`. The job has
+`contents: read`, pins every action by SHA, and runs `scripts/release-sign-ci.mjs` with plain Node
+from a sparse checkout (no install, no build):
+
+1. The workflow's concurrency group keeps one run going and one queued, and a newer dispatch
+   replaces the queued run, so a burst of landings starts at most two signers. Dispatches can
+   reach GitHub out of order, so the surviving run may carry an older State; step 3 covers that.
+2. Take the dispatched State (`FORGE_RELEASE_STATE`, passed as an environment value). A manual
+   run without one (`gh workflow run release-sign.yml`) reads the `Forge-State` trailer of
+   GitHub's `main` instead (none: nothing to sign).
 3. One Convex read, `projectReleaseSignatures:signerMain`, without a sign-in: the job signs a
    short read proof (`forge-cli-release-read/v1`, project, State, time within 5 minutes) with
    the release key, and the server answers only if a listed key made it. It returns main's head,
    its release number (the source revision) and whether this State already has a v2 signature
-   from this key. A State that is no longer main's newest, or is already signed, is skipped.
+   from this key. When a newer main has passed the State, the job reads again for that newest
+   State (one more read), so whichever run goes last leaves main signed. A State that is already
+   signed is skipped; the release number in the dispatch only names the run.
 4. Sign `forge-cli-release/v2` with that number and store it with `projectReleaseSignatures:put`.
 
-Cost: two Convex calls per signing (one when skipped at step 3, none at step 1), one job of about
-30 s on a free public runner, nothing when main does not move. The key reaches only the signing
+Cost: per landing, one indexed read and one scheduled action in Forge (GitHub App token and one
+dispatch request); per signing, two Convex calls (three when it moves to a newer main, one when
+skipped at step 3) and one job of about
+30 s on a free public runner. No polling and nothing at all when main does not move. The key reaches only the signing
 step, as an environment value the script removes before it starts any child process; it stays in
 memory and is never printed or written to disk. The read proof and the store refuse wrong
 signatures before any database read.
 
 The trade-off: CI holds a release key, so anyone who can run code in the `release-sign`
 environment can sign. That is limited to workflow runs on `main`, so keep `main` writable only by the Forge
-mirror. The store is still untrusted: the updater verifies every signature
+mirror. The dispatched State is not trusted either: anyone who may start the workflow can name
+any State, but the job signs only the State that Forge main reports as its newest. The store is still untrusted: the updater verifies every signature
 with its installed keys and refuses lower release numbers. If the key is exposed, rotate it as
 below and replace the secret.
 
@@ -335,8 +362,8 @@ The URL and project id are the ones the CLI release source uses (`source.json` i
 installation). The job stays off (skipped, no runner) until
 `FORGE_RELEASE_PROJECT` is set. `gh secret set` reads the key from the file without printing it.
 
-The signer skips a commit when a newer main commit has already reached GitHub, so in a burst of
-landings only the newest one is signed. Updaters install main's head: one that read a skipped
+In a burst of landings only the newest State is signed: a run that starts from an older State
+signs main's newest, and a later run finds it signed. Updaters install main's head: one that read a skipped
 State finds the newer head at its next attempt a minute later.
 
 Turning the switch on (it is on; this is the order for a fork, or after it was turned off):

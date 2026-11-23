@@ -2,9 +2,11 @@
 // Copyright 2026 Ferdinando Valsecchi
 // Automated CLI release signer (docs/operations/cli-update.md, "Automated signer"). Run by
 // .github/workflows/release-sign.yml in the `release-sign` environment with plain Node: no install,
-// no build. It signs only the State named by the commit's Forge-State trailer, and only while that
-// State is still main's newest. Two Convex calls per signing (one read, one write), one when it
-// skips. The private key arrives in FORGE_RELEASE_SIGNING_KEY, is removed from the environment
+// no build. It signs the Forge State that Forge dispatched it with (FORGE_RELEASE_STATE), or on a
+// manual run the State named by the checked-out commit's Forge-State trailer, and only while that
+// State is still main's newest; when a newer main has passed it, it signs that newest State instead.
+// Two Convex calls per signing (one read, one write), one more when it moves to a newer main, one
+// when it skips. The private key arrives in FORGE_RELEASE_SIGNING_KEY, is removed from the environment
 // before anything else runs, stays in memory and is never printed or written to disk.
 import { execFileSync } from 'node:child_process';
 import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto';
@@ -54,8 +56,10 @@ async function convexCall(request, url, kind, path, args) {
   return typeof body.value === 'string' ? JSON.parse(body.value) : body.value;
 }
 
-/** Sign one commit's State. Returns what it did; throws a coded error on refusal or failure. */
+/** Sign one State: `state` when Forge dispatched it, else the commit message's trailer. Returns what
+ * it did; throws a coded error on refusal or failure. */
 export async function signRelease({
+  state,
   message,
   url,
   projectId,
@@ -64,7 +68,9 @@ export async function signRelease({
   now = Date.now,
   keys = CLI_RELEASE_KEYS,
 }) {
-  const head = forgeStateTrailer(message);
+  if (state && !/^[0-9a-f]{64}$/.test(state))
+    throw fail('BAD_ARGUMENT', 'FORGE_RELEASE_STATE must be a full Forge State hash.');
+  let head = state || forgeStateTrailer(message);
   if (!head) return { action: 'skipped', reason: 'the commit has no Forge-State trailer' };
   if (!/^https:\/\/[^/\s]+$/.test(url ?? ''))
     throw fail('BAD_ARGUMENT', 'Set FORGE_RELEASE_URL to the https Convex deployment URL.');
@@ -73,15 +79,27 @@ export async function signRelease({
   const { key, keyId } = releaseKey(privateKeyPem);
   if (!keys.some(entry => entry.id === keyId))
     throw fail('CLI_RELEASE_KEY_UNLISTED', `Release key ${keyId} is not in CLI_RELEASE_KEYS.`);
-  const at = Math.floor(now() / 1000);
-  const proof = sign(null, Buffer.from(cliReleaseReadStatement(projectId, head, at)), key).toString('base64');
-  const main = await convexCall(request, url, 'query', 'projectReleaseSignatures:signerMain', {
-    projectId,
-    head,
-    keyId,
-    at,
-    proof,
-  });
+  const read = async state => {
+    const at = Math.floor(now() / 1000);
+    const proof = sign(null, Buffer.from(cliReleaseReadStatement(projectId, state, at)), key).toString(
+      'base64',
+    );
+    return convexCall(request, url, 'query', 'projectReleaseSignatures:signerMain', {
+      projectId,
+      head: state,
+      keyId,
+      at,
+      proof,
+    });
+  };
+  let main = await read(head);
+  // A newer main passed the State this run started from (a late or replaced dispatch, a manual run
+  // on GitHub's older main): sign the newest instead, so whichever run goes last leaves main signed.
+  const from = head;
+  if (!main.newest && /^[0-9a-f]{64}$/.test(main.main ?? '')) {
+    head = main.main;
+    main = await read(head);
+  }
   if (!main.newest)
     return {
       action: 'skipped',
@@ -103,7 +121,13 @@ export async function signRelease({
     signature,
     release,
   });
-  return { action: put.stored ? 'signed' : 'unchanged', head, release, keyId };
+  return {
+    action: put.stored ? 'signed' : 'unchanged',
+    head,
+    release,
+    keyId,
+    ...(from === head ? {} : { from }),
+  };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
@@ -113,8 +137,12 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   try {
     if (!privateKeyPem)
       throw fail('CLI_RELEASE_KEY_MISSING', 'The release-sign environment has no FORGE_RELEASE_SIGNING_KEY.');
-    const message = execFileSync('git', ['log', '-1', '--format=%B', 'HEAD'], { encoding: 'utf8' });
+    const state = process.env.FORGE_RELEASE_STATE ?? '';
+    const message = state
+      ? ''
+      : execFileSync('git', ['log', '-1', '--format=%B', 'HEAD'], { encoding: 'utf8' });
     const result = await signRelease({
+      state,
       message,
       url: process.env.FORGE_RELEASE_URL,
       projectId: process.env.FORGE_RELEASE_PROJECT,
