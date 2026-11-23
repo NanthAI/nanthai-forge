@@ -42,8 +42,14 @@ export const personKeys = new Set([
 export const nameKeys = new Set(['actorDisplayName']);
 /** Email addresses are returned only to the project owner who entered them, or on account reads. */
 export const emailKeys = new Set(['email', 'emails']);
+/** Owner-only settings, removed for everyone else like emails (Item 5ba7c7f9): check-runner credential references
+ * name the owner's secrets and local paths. Every policy copy (policy reads, workspace, pinned landing attempts,
+ * capsules, briefings) carries them, so the boundary rather than each read removes them. */
+export const ownerOnlyKeys = new Set(['credentialsRef']);
 const privateProvenance = new Set(['holder']);
-const keyPattern = new RegExp(`\\\\?"(?:${[...personKeys, ...nameKeys, ...emailKeys].join('|')})\\\\?"\\s*:`);
+const keyPattern = new RegExp(
+  `\\\\?"(?:${[...personKeys, ...nameKeys, ...emailKeys, ...ownerOnlyKeys].join('|')})\\\\?"\\s*:`,
+);
 /** Clerk account ids. Any other provider's subjects are recognised by their account row, which
  * every web sign-in and CLI device approval creates (urlAccounts.ensure). */
 const subjectShape = /^user_[A-Za-z0-9]{8,}$/;
@@ -58,7 +64,7 @@ type Role = { writer: boolean; owner: boolean };
 /** `viewer` always sees their own handle; `role` is read only when another person or an
  * email address is named, so self-describing reads add no project read. */
 type View = { viewer: string | null; role: () => Promise<Role>; lookup: Lookup };
-const emailPattern = /\\?"emails?\\?"\s*:/;
+const emailPattern = /\\?"(?:emails?|credentialsRef)\\?"\s*:/;
 function once<T>(run: () => Promise<T>): () => Promise<T> {
   let pending: Promise<T> | undefined;
   return () => (pending ??= run());
@@ -176,7 +182,7 @@ async function mapNode(view: View, node: unknown, person: boolean, shape?: Shape
       }
     }
     const mapped =
-      nameKeys.has(key) || (emailKeys.has(key) && !(await view.role()).owner)
+      nameKeys.has(key) || ((emailKeys.has(key) || ownerOnlyKeys.has(key)) && !(await view.role()).owner)
         ? REMOVE
         : await mapNode(view, projected, personKeys.has(key), field?.fieldType);
     if (mapped !== REMOVE) out[key] = mapped;

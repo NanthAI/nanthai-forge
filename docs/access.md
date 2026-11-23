@@ -112,6 +112,12 @@ from a device. Project membership additions retain their existing held request.
 
 Without a role, a private project answers exactly like a missing one: `PROJECT_UNAVAILABLE` from every function, and "No project here" on the page. An agent refusal reads the same. A visitor can never learn that a private project exists from an address, an invitation link, or the error.
 
+## What leaves Convex
+
+The owner reads their whole project row. Everyone else, members and signed-in readers of a public project, gets an allowlist from `projectWork.state`: id, creation time, owner, key, name, address, visibility, selected source, revision, Work pointer and removal state ([convex/projectViewerFields.ts](../convex/projectViewerFields.ts)). Policy, purges, retention, pending owner operations, project guidance and storage internals stay in Convex. A new project field stays owner-only until it is added to that list.
+
+Policy copies (the `policy` read, landing settings, agent capabilities, the workspace, pinned landing attempts, capsules and briefings) still show the project's rules to every reader. The public boundary ([convex/publicPeople.ts](../convex/publicPeople.ts)) removes stall-alert addresses (`email`) and check-runner credential references (`credentialsRef`) from every public result for anyone but the owner. Changing policy is owner-only, so no reader needs them for a compare-and-swap. Both projections use rows the read already loaded, so they cost no Convex read. Guard: `tests/project-viewer-fields.test.mjs`.
+
 
 ## Invitations
 

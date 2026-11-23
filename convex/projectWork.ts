@@ -47,8 +47,10 @@ import { emitChange, workChange } from './coordinationWrite';
 import { movePlanLaneMark } from './projectPlanLaneMarks';
 import { storeProjection } from './projectWorkStore';
 import { workStoreMigrationActive } from './projectWorkStoreFingerprintWrites';
+import { projectForViewer } from './projectViewerFields';
 
-/** The project record every open tab subscribes to (name, owner, selected source). It does not read the
+/** The project record every open tab subscribes to (name, owner, selected source). A non-owner gets only the
+ * fields the screens read (convex/projectViewerFields.ts, Item 5ba7c7f9). It does not read the
  * Work head row, so a journal write does not re-run it for each tab; `work.revision` here is the seed
  * value, not the live one. The live revision is `projectWorkIndex:workspace` (and the internal `get`). */
 export const state = query({
@@ -58,7 +60,7 @@ export const state = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
-      return await accessibleProject(ctx, projectId, user.subject);
+      return projectForViewer(await accessibleProject(ctx, projectId, user.subject), user.subject);
     } catch (error) {
       return report(error);
     }
