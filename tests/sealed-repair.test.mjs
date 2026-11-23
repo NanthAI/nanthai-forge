@@ -10,6 +10,7 @@ import { repairSet } from '../dist/sealed-repair.js';
 import { verifySealedReply } from '../dist/sealed-verify.js';
 import { fixture } from './helpers/sealed-fixture.mjs';
 import { newAccountDevice } from './helpers/sealed-code-journey.mjs';
+import { assertNoPlaintext, deviceSecrets } from './helpers/sealed-no-plaintext.mjs';
 
 const clone = value => deserialize(serialize(value));
 const clear = result => {
@@ -171,7 +172,13 @@ test('d5 C10 repair removes the offender and everything it added, re-keys, and e
   const read = verifySealedReply(checks.reply, pin, request);
   assert.equal(read.secrets[0].value.toString(), value.toString());
   assert.equal(read.pin.head.headVersion, pin.head.headVersion + 1);
+  // T18 (Gate B2 M2): the repair write holds neither value nor the old or new set key nor a device key.
+  const newKey = Buffer.from(read.key);
   clear(read);
+  assertNoPlaintext('repair write', repaired, {
+    values: [value],
+    keys: [checks.key, newKey, ...deviceSecrets(checks.keys), ...deviceSecrets(b.keys)],
+  });
   // A fresh reader walks genesis -> broken roster -> repaired roster.
   const fresh = verifySealedReply(checks.reply, null, { ...request, firstContact: true });
   assert.equal(fresh.secrets[0].value.toString(), value.toString());

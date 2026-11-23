@@ -343,7 +343,9 @@ function verifyCore(
       'SECRETS_FORK',
       'Current roster differs from the trusted chain.',
     );
-    // A code confirms the view R; an existing pin must have walked through exactly that roster.
+    // A code confirms what the holder signed; the served chain, from a pin or from the anchor, passes through it.
+    if (code)
+      rollback(r.rosterVersion >= code.roster.rosterVersion, 'Roster is older than the code-confirmed one.');
     if (code)
       invariant(
         hashes.some(
@@ -391,14 +393,14 @@ function verifyCore(
     );
     if (pin && h.headVersion === pin.head.headVersion)
       invariant(sameHead, 'SECRETS_FORK', 'Different head at the pinned version.');
-    // 4.13 step 7 (GB-08 a): after a re-pin the holder's verified head is the floor, exactly like a pinned head.
+    // 4.13 step 7 (GB-08 a): after a proposer or re-pin code the holder's head is the floor, like a pinned head.
     if (code?.headFloor) {
-      rollback(h.headVersion >= code.headFloor.version, 'Head is older than the re-pin floor.');
+      rollback(h.headVersion >= code.headFloor.version, 'Head is older than the code-confirmed floor.');
       if (h.headVersion === code.headFloor.version)
         invariant(
           sameId(headHash, code.headFloor.hash),
           'SECRETS_FORK',
-          'Different head at the re-pin floor version.',
+          'Different head at the code-confirmed floor version.',
         );
     }
     if (adjacent)

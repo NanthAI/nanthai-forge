@@ -15,13 +15,14 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serialize, deserialize } from 'node:v8';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { getConvexSize } from 'convex/values';
 import { moduleUrl } from './convex-module.mjs';
 import { state, projectRow } from './hosted-fixture.mjs';
 import { headBytes } from '../dist/sealed-records.js';
 import { forgeSecretId, framedHash } from '../dist/sealed-format.js';
 import { fixture } from './helpers/sealed-fixture.mjs';
+import { assertNoPlaintext, deviceSecrets } from './helpers/sealed-no-plaintext.mjs';
 import { clone, server, setup } from './helpers/sealed-hosted.mjs';
 import { FileKeyStore } from '../dist/sealed-local.js';
 import { deviceKeys } from '../dist/sealed-keys.js';
@@ -264,22 +265,19 @@ test('T18 all slice-1 journey writes, reads, rm, retry, cached and child deliver
   const discardedUnknown = readFileSync(join(directory, 'operations', discardedOperation + '.bin'));
   transport.write = originalWrite;
   assert.equal((await client.resolve(discardedOperation, async () => true)).resolved, 'discarded');
-  const dump = serialize({
-    rows: Object.fromEntries(Object.entries(s.tables).map(([k, v]) => [k, [...v.values()]])),
-    calls,
-    retainedUnknown,
-    discardedUnknown,
-    journal: readdirSync(join(directory, 'operations')).map(n =>
-      readFileSync(join(directory, 'operations', n)),
-    ),
-  });
-  for (const key of [keys.sign, keys.enc, keys.pinKey]) assert(!dump.includes(key));
-  for (const value of values) {
-    for (const encoding of ['utf8', 'hex', 'base64', 'base64url'])
-      assert(!dump.includes(Buffer.from(value.toString(encoding))), encoding);
-    assert(!dump.includes(createHash('sha256').update(value).digest()));
-    assert(!dump.includes(Buffer.from(createHash('sha256').update(value).digest('hex'))));
-  }
+  assertNoPlaintext(
+    'slice-1 rows, calls and journal',
+    {
+      rows: Object.fromEntries(Object.entries(s.tables).map(([k, v]) => [k, [...v.values()]])),
+      calls,
+      retainedUnknown,
+      discardedUnknown,
+      journal: readdirSync(join(directory, 'operations')).map(n =>
+        readFileSync(join(directory, 'operations', n)),
+      ),
+    },
+    { values, keys: deviceSecrets(keys) },
+  );
   for (const call of calls.filter(c => c.action === 'write')) {
     const reply = decodeSealedWire(new Uint8Array(call.input.payload), bytes => Buffer.from(bytes));
     for (const c of reply.ciphertexts)

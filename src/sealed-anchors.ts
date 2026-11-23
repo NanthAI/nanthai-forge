@@ -15,11 +15,12 @@ export type PersonCheckpointAnchor = {
   person: { id: Buffer; accountId: Buffer; signPub: Buffer; encPub: Buffer };
 };
 export type DeviceHeadAnchor = { id: Buffer; signPub: Buffer };
-/** The roster view R a requester fixed before its nonce, confirmed by a matched two-word reply (4.13). */
+/** What the holder signed, confirmed by a matched two-word reply (4.13, Gate B2 H1): for add and raise the roster
+ * after the approved step; for proposer and re-pin the roster the signed head names (the requester's view R). */
 export type CodeAnchor = {
   purpose: 1 | 2 | 3 | 4;
   roster: Roster;
-  /** Purpose re-pin only: the holder's own verified head becomes this device's head floor. */
+  /** Proposer and re-pin: the head the holder signed or verified becomes this device's head floor. */
   headFloor: { version: number; hash: Buffer } | null;
 };
 /** Gate B1 M2: this device's own keys and the time it posted its own Automatic join request. Only the client

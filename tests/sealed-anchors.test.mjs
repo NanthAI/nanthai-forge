@@ -14,7 +14,7 @@ import { verifySealedReply } from '../dist/sealed-verify.js';
 import { FileKeyStore } from '../dist/sealed-local.js';
 import { SecretPins } from '../dist/sealed-pins.js';
 import { fixture } from './helpers/sealed-fixture.mjs';
-import { codeDevice, runCode } from './helpers/sealed-code-journey.mjs';
+import { codeDevice, freshPin, runCode } from './helpers/sealed-code-journey.mjs';
 
 const clone = value => deserialize(serialize(value));
 const clear = result => {
@@ -39,14 +39,14 @@ test('F1 an unanchored joined Development device is refused even with a complete
   );
 });
 
-test('F1/d4 a non-genesis Checks holder starts at its add code, walks from trusted Development and refuses a missing transition', () => {
+test('F1/d4 a non-genesis Checks holder starts at its add code, walks from trusted Development and refuses a missing transition', async t => {
   const f = fixture(17, 'fixture-project', 2),
     owner = deviceKeys(f.account, f.random);
   const { anchor } = runCode(f, {
     purpose: 1,
     device: codeDevice(owner, f.account),
-    holderPin: f.pin(),
-    development: f.request.development,
+    holderPin: await freshPin(t, f),
+    development: await freshPin(t, f.dev),
   });
   const request = { ...f.request, recipient: recipient(owner), anchor };
   clear(verifySealedReply(f.reply, null, request));
@@ -54,7 +54,10 @@ test('F1/d4 a non-genesis Checks holder starts at its add code, walks from trust
   assert.throws(() => verifySealedReply(f.reply, null, { ...request, anchor: { kind: 'checks-genesis' } }), {
     code: 'SECRETS_CODE_NEEDED',
   });
-  f.reply.transitions = [];
+  // The code pins the roster after the approved step (Gate B2 H1); a later step the server withholds is a gap.
+  f.transition({});
+  f.wrap();
+  f.reply.transitions = f.reply.transitions.slice(0, -1);
   assert.throws(() => verifySealedReply(f.reply, null, request), { code: 'SECRETS_PIN_TOO_OLD' });
 });
 
@@ -234,8 +237,8 @@ test('F1 a non-creator Checks holder and a passkey contact each pin through thei
   const { anchor } = runCode(checks, {
     purpose: 1,
     device: codeDevice(holder, checks.account),
-    holderPin: checks.pin(),
-    development: checks.request.development,
+    holderPin: await freshPin(t, checks),
+    development: await freshPin(t, checks.dev),
   });
   const c = pinStore(t, holder);
   clear(

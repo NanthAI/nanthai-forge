@@ -8,9 +8,14 @@ import { equalBytes, forgeSecretId } from './sealed-format.js';
 import { headBytes } from './sealed-records.js';
 import { verifyBytes } from './sealed-keys.js';
 import { atomicPrivate, secretLocked, wipeDeviceKeys, type KeyStore } from './sealed-local.js';
-import { verifySealedReply, type SealedReply, type VerifyRequest } from './sealed-verify.js';
+import { verifySealedReply, type SealedReply, type SecretPin, type VerifyRequest } from './sealed-verify.js';
 import { knownKinds, lost, packed, unpack, type Index, type PinFile } from './sealed-pin-store.js';
 
+// Gate B2 H1: pins from a server read (`fresh`) that this process verified and saved. A code holder approves only
+// on one of these, once: never on a pin loaded from disk, from the offline cache or from this device's own write.
+const freshReads = new WeakSet<SecretPin>();
+/** True once per fresh read: the approval that uses it reads again before the next one. */
+export const takeFreshRead = (pin: SecretPin | undefined) => !!pin && freshReads.delete(pin);
 function discard(result: ReturnType<typeof verifySealedReply> | undefined) {
   result?.key?.fill(0);
   for (const secret of result?.secrets ?? []) secret.value.fill(0);
@@ -79,7 +84,7 @@ export class SecretPins {
       });
     }
   }
-  async verifyAndSave(reply: SealedReply, request: VerifyRequest, fetchedAt: number) {
+  async verifyAndSave(reply: SealedReply, request: VerifyRequest, fetchedAt: number, fresh = false) {
     // Fetching occurred before this lock. Re-read and verify against the latest pin here.
     return secretLocked(this.lock, () => {
       const s = this.snapshot(request.forgeProjectId, request.setKind);
@@ -90,7 +95,10 @@ export class SecretPins {
           firstContact: !s.current,
         });
         const next = { pin: result.pin, cache: reply, fetchedAt };
-        if (s.current && isDeepStrictEqual(s.current.pin, result.pin)) return result;
+        if (s.current && isDeepStrictEqual(s.current.pin, result.pin)) {
+          if (fresh) freshReads.add(result.pin);
+          return result;
+        }
         // Repair a permitted +1 crash state before beginning another publication.
         if (
           s.file.counter !== (s.index.files[s.name]?.counter ?? 0) ||
@@ -121,6 +129,7 @@ export class SecretPins {
           pinCounter: index.counter,
           pinned: { ...s.keys.pinned, [s.name]: knownKinds(file) },
         });
+        if (fresh) freshReads.add(result.pin);
         return result;
       } catch (error) {
         discard(result);

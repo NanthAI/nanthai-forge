@@ -57,7 +57,7 @@ export class SealedClient {
   ): Promise<Awaited<ReturnType<SealedClient['read']>>> {
     try {
       const anchor = current ? undefined : await firstContactAnchor(this, reply, wire);
-      const result = await this.pins.verifyAndSave(reply, this.request(anchor), Date.now());
+      const result = await this.pins.verifyAndSave(reply, this.request(anchor), Date.now(), true);
       for (const line of result.notices) this.notice(line);
       try {
         for (const line of await afterVerified(this, reply, result, current?.pin ?? null, anchor, wire))

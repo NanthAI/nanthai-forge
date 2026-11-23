@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Design 4.13: the four-word code and two-word reply, for all four purposes. Pure: no IO, no network call;
-// transport and the `nforge secret share` command come later. One scrypt runs per request on each side.
+// Design 4.13: the four-word code and two-word reply, for all four purposes. No IO or network call runs here (the
+// fresh-read check is an in-memory mark); transport and `nforge secret share` come later. One scrypt per side.
 import { randomBytes } from 'node:crypto';
 import { ForgeError, invariant } from './errors.js';
 import { codeBytes, equalBytes, framedHash, replyBytes, type Framed } from './sealed-format.js';
@@ -21,6 +21,7 @@ import { findEntry, ownerDevice, sameId, walkTransition, writeDevice } from './s
 import { createTransition } from './sealed-transition.js';
 import { codeConfirmedAnchor, requireConfirmedBase, type JourneyAnchor } from './sealed-anchors.js';
 import { codeWords } from './sealed-words.js';
+import { takeFreshRead } from './sealed-pins.js';
 import type { SecretPin } from './sealed-verify.js';
 
 /** 1 add, 2 raise, 3 proposer, 4 re-pin. */
@@ -115,18 +116,6 @@ const delta = (changes: Partial<Delta>): Delta => ({
   epochBumped: 0,
   ...changes,
 });
-/** Walk a fixed view forward through served transitions to `version`, with every reader check per step. */
-function rosterAt(view: Roster, ring: readonly Transition[], version: number) {
-  let at = view;
-  while (at.rosterVersion < version) {
-    const next = ring.find(t => t.fromVersion === at.rosterVersion);
-    invariant(next, 'SECRETS_PIN_TOO_OLD', 'Secret roster history has a gap. Start a new request.');
-    at = walkTransition(at, next, []);
-  }
-  invariant(at.rosterVersion === version, 'SECRETS_ROSTER_REFUSED', 'Approval predates this request.');
-  return at;
-}
-
 /** The new (or lost) device's side: steps 1-3 and 7. */
 export class CodeRequester {
   readonly request: CodeRequest;
@@ -181,12 +170,8 @@ export class CodeRequester {
     this.#open = false;
     this.request.nonce.fill(0);
   }
-  /** Step 7. `ring` is the served transition ring. A match returns the only anchor that marks a pin `code`. */
-  confirm(
-    typed: string,
-    approval: CodeApproval,
-    ring: readonly Transition[],
-  ): { matched: true; anchor: JourneyAnchor } | Attempt {
+  /** Step 7. A match returns the only anchor that marks a pin `code`: what the holder signed, never R alone. */
+  confirm(typed: string, approval: CodeApproval): { matched: true; anchor: JourneyAnchor } | Attempt {
     if (!this.#open) throw closed();
     invariant(
       sameId(framedHash(rosterBytes(this.#view)), this.#viewHash) &&
@@ -194,33 +179,41 @@ export class CodeRequester {
       'SECRETS_ROSTER_REFUSED',
       'Approval does not answer this request.',
     );
-    const expected = this.#expected(approval, ring),
+    const expected = this.#expected(approval),
       entered = parseWords(typed, 2);
     if (!entered) return { matched: false, attemptsLeft: this.#attempts };
-    if (!equalBytes(entered, expected)) {
+    if (!equalBytes(entered, expected.reply)) {
       this.#attempts--;
       if (this.#attempts > 0) return { matched: false, attemptsLeft: this.#attempts };
       this.close();
       throw closed();
     }
     this.close();
+    // Gate B2 H1: pin what the holder signed. Add and raise: the roster after the approved step. Proposer and
+    // re-pin: the roster the signed head names (R itself, since the holder approves only its current view),
+    // with that head as the floor. The verifier then requires the served chain to pass through both.
     const floor =
-      approval.purpose === 4
+      approval.purpose === 3 || approval.purpose === 4
         ? { version: approval.head.headVersion, hash: framedHash(headBytes(approval.head)) }
         : null;
     return {
       matched: true,
-      anchor: codeConfirmedAnchor({ purpose: this.request.purpose, roster: this.#view, headFloor: floor }),
+      anchor: codeConfirmedAnchor({
+        purpose: this.request.purpose,
+        roster: expected.roster,
+        headFloor: floor,
+      }),
     };
   }
-  #expected(approval: CodeApproval, ring: readonly Transition[]) {
+  #expected(approval: CodeApproval): { reply: Buffer; roster: Roster } {
     const device = this.request.device,
+      view = this.#view,
       refuse = (ok: unknown) =>
         invariant(ok, 'SECRETS_ROSTER_REFUSED', 'Approval does not answer this request.');
     if (approval.purpose === 1 || approval.purpose === 2) {
+      // The holder signs only on its current roster, which is this request's view R: the step chains from R.
       const t = approval.transition,
-        from = rosterAt(this.#view, ring, t.fromVersion);
-      walkTransition(from, t, []);
+        roster = walkTransition(view, t, []);
       refuse(
         approval.purpose === 1
           ? t.delta.added.some(
@@ -232,41 +225,35 @@ export class CodeRequester {
             )
           : t.delta.roles.some(r => sameId(r.id, device.id) && r.role === 1),
       );
-      return replyOf(approval.purpose, transitionBytes(from, t), t.signature);
+      return { reply: replyOf(approval.purpose, transitionBytes(view, t), t.signature), roster };
     }
-    const h = approval.head,
-      at = rosterAt(this.#view, ring, h.rosterVersion);
+    const h = approval.head;
     refuse(
       sameId(h.projectId, this.request.projectId) &&
         sameId(h.setId, this.request.setId) &&
         h.setKind === this.request.setKind &&
-        sameId(h.rosterHash, framedHash(rosterBytes(at))),
+        h.rosterVersion === view.rosterVersion &&
+        sameId(h.rosterHash, this.#viewHash),
     );
     if (approval.purpose === 3) {
-      const signer = findEntry(at, h.signerId);
+      const signer = findEntry(view, h.signerId);
       refuse(
         ownerDevice(signer) &&
           verifyBytes(headBytes(h), h.signature, signer!.signPub) &&
           h.proposers.some(p => sameId(p.deviceId, device.id) && sameId(p.accountId, device.accountId)),
       );
-      return replyOf(3, headBytes(h), h.signature);
+      return { reply: replyOf(3, headBytes(h), h.signature), roster: view };
     }
-    const signer = findEntry(at, approval.signerId),
-      signed = repinBytes(
-        this.#view,
-        this.#viewHash,
-        h,
-        framedHash(headBytes(h)),
-        device.id,
-        this.request.nonce,
-      );
+    const signer = findEntry(view, approval.signerId),
+      signed = repinBytes(view, this.#viewHash, h, framedHash(headBytes(h)), device.id, this.request.nonce);
     refuse(signer?.entryKind === 1 && verifyBytes(signed, approval.signature, signer.signPub));
-    return replyOf(4, signed, approval.signature);
+    return { reply: replyOf(4, signed, approval.signature), roster: view };
   }
 }
 
 export type CodeSigner = { id: Buffer; sign: Buffer };
-/** The holder's side: steps 5 and 6. Its pin is this set's verified pin; Checks also needs trusted Development. */
+/** The holder's side: steps 5 and 6. Its pin comes from this device's fresh read of the set, verified and saved
+ * in this process for this approval (Gate B2 H1); Checks also needs trusted Development. */
 export class CodeApprover {
   readonly #request: CodeRequest;
   readonly #pin: SecretPin;
@@ -339,17 +326,20 @@ export class CodeApprover {
       4: self?.entryKind === 1 && target?.entryKind === 1,
     }[request.purpose];
     invariant(may, 'SECRETS_NOT_ALLOWED', 'This device has no authority to approve this request.');
-    // Step 5: the requester must see exactly this device's trusted roster at R.
-    const known = pin.rosterHashes.find(e => e.version === request.rosterVersion);
+    // Step 5 (Gate B2 H1): the requester must see exactly this device's current roster, read fresh. An older view,
+    // even one this device once trusted, could still list a device removed since.
+    // Each read approves once; a Checks approval also rests on a fresh Development read (who owns, who is listed).
+    const fresh = takeFreshRead(pin),
+      freshDevelopment = r.setKind === 1 || takeFreshRead(input.development);
     invariant(
-      known,
-      'SECRETS_PIN_TOO_OLD',
-      "The request names a roster outside this device's history. The new device starts again.",
+      fresh && freshDevelopment,
+      'SECRETS_NOT_ALLOWED',
+      'Approve only on a fresh read of this set: nforge secret share reads it again before each approval.',
     );
     invariant(
-      equalBytes(known.hash, request.rosterHash),
+      request.rosterVersion === r.rosterVersion && equalBytes(request.rosterHash, framedHash(rosterBytes(r))),
       'SECRETS_CODE_ROSTER_MISMATCH',
-      'The requester sees a different roster. Nothing to type; the new device fetches again.',
+      'The requester sees another roster than this device. Nothing to type; both read again and the new device starts a new request.',
     );
     this.grant = {
       purpose: request.purpose,
@@ -432,7 +422,7 @@ export class CodeApprover {
       };
     }
     const signed = repinBytes(
-      { ...pin.roster, rosterVersion: request.rosterVersion },
+      pin.roster,
       request.rosterHash,
       pin.head,
       framedHash(headBytes(pin.head)),

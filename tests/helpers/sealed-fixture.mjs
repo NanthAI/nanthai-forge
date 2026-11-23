@@ -235,6 +235,7 @@ export function fixture(seed = 17, project = 'fixture-project', kind = 1) {
       newChecksPointer: { checksSetId: setId, checksGenesisHash: framedHash(rosterBytes(roster)) },
     });
     f.request.development = dev.pin();
+    f.dev = dev;
   }
   return f;
 }

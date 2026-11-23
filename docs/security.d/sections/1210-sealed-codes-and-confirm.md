@@ -12,15 +12,20 @@ costs no attempt. A wrong entry costs one, and the third closes that side
 (`SECRETS_CODE_CLOSED`). A closed request keeps no nonce; the person starts a new one.
 
 The holder must be a person (`PERSON_REQUIRED`) at a terminal with a confirmed pin of the
-same set. It refuses a request whose roster hash at the requester's version differs from
-its own history (`SECRETS_CODE_ROSTER_MISMATCH`). A version older than its retained
-history gets `SECRETS_PIN_TOO_OLD`. Only on a matching code does the holder sign the
-transition, proposer head or re-pin statement. The requester checks the signature, then
-derives the reply from those exact bytes. A staged approval on any other roster gives a
-different reply. Only a matched reply mints a code anchor for the verifier. The verifier
-also requires the served chain to pass through the requester's fixed view. A re-pin
-treats the holder's head as a floor: a lower head is `SECRETS_ROLLBACK`, and another hash
-at that version is `SECRETS_FORK`. A re-pin replaces only a lost or too-old pin. A pin
+same set. It approves only on its own current roster, from a server read verified in that
+process, and each read approves once; a Checks approval also needs a fresh Development read. A
+stored, offline, already used or self-written pin is refused (`SECRETS_NOT_ALLOWED`).
+A request at any other roster version or hash is refused (`SECRETS_CODE_ROSTER_MISMATCH`)
+and the new device starts a new request after both read again. An older view the holder
+once trusted is refused too: it could still list a device removed since. Only on a
+matching code does the holder sign the transition, proposer head or re-pin statement. The
+requester checks the signature, then derives the reply from those exact bytes. A staged
+approval on any other roster gives a different reply. Only a matched reply mints a code
+anchor for the verifier, and the anchor is what the holder signed: for add and raise the
+roster after the approved step, for proposer and re-pin the roster the signed head names.
+The verifier requires the served chain to pass through that roster; an older one is
+`SECRETS_ROLLBACK`. Proposer and re-pin also treat the holder's head as a floor: a lower
+head is `SECRETS_ROLLBACK`, and another hash at that version is `SECRETS_FORK`. A re-pin replaces only a lost or too-old pin. A pin
 that still verifies is never replaced (`SECRETS_NOT_ALLOWED`). "Too old" is judged
 against the holder-confirmed view, which must be more than 64 roster versions ahead,
 never against the served history alone. A server that drops one transition cannot make
