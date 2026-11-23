@@ -154,12 +154,12 @@ function checkAdded(from: Roster, entry: Entry, signer: Entry, transition: Trans
           !from.entries.some(e => sameId(e.accountId, entry.accountId)),
         'First-device addition is invalid.',
       );
-      if (entry.how === 3)
-        refuse(
-          from.sharingMode === 1 &&
-            transition.delta.added.filter(e => sameId(e.accountId, entry.accountId)).length === 1,
-          'Automatic addition is invalid.',
-        );
+      // Gate B2 nit: a new account's first device is one addition per step, for Confirm as for Automatic.
+      refuse(
+        transition.delta.added.filter(e => sameId(e.accountId, entry.accountId)).length === 1,
+        'One new account takes one first-device addition per step.',
+      );
+      if (entry.how === 3) refuse(from.sharingMode === 1, 'Automatic addition is invalid.');
       break;
     case 4:
       refuse(

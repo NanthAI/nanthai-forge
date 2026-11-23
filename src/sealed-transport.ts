@@ -74,6 +74,12 @@ const refusals = new Set([
   'HOSTED_SCHEMA_REJECTED',
   'BAD_ARGUMENT',
 ]);
+const fixedSealedReasons: Record<string, string> = {
+  SECRETS_FORMAT_REFUSED: 'the stored record is outside the secret format or its size limits',
+  SECRETS_SET_REPLACED: 'this set was replaced; read it again and start over',
+  SECRETS_NOT_ALLOWED: 'this device or account is not allowed to make that change here',
+  SECRETS_NOT_SET_UP: 'this set is not set up yet',
+};
 /** A storage reply that proves the mutation stored nothing, as a terminal error; null when the outcome is unknown.
  * Convex checks arguments before a mutation runs, so an argument-validation failure (a CLI build whose request
  * shape the deployment does not take) is a refusal, never an unknown outcome to retry for ever. */
@@ -81,18 +87,9 @@ export function sealedRefusal(error: unknown): ForgeError | null {
   const code =
     error instanceof ForgeError ? error.code : (error as { data?: { code?: unknown } })?.data?.code;
   if (typeof code === 'string' && refusals.has(code)) {
-    // The server's own reason for a sealed refusal is shown as untrusted text: printable, one line, bounded.
-    const raw =
-      error instanceof ForgeError
-        ? error.message
-        : (error as { data?: { message?: unknown } })?.data?.message;
-    const reason =
-      code.startsWith('SECRETS_') && typeof raw === 'string'
-        ? raw
-            .replace(/[^\x20-\x7e]/g, ' ')
-            .trim()
-            .slice(0, 240)
-        : '';
+    // Gate B2 L1: the refusal text is the client's own, fixed per code. A server's wording never reaches a person or
+    // an agent (a compromised server could write instructions there); the code names the reason.
+    const reason = fixedSealedReasons[code] ?? '';
     return new ForgeError(
       code,
       `Secret storage refused this operation${reason ? `: ${reason}` : ''}; local trust was not changed.`,

@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "Gate B2 L6 (14314add): SECRETS_LOCK_UNSUPPORTED names a state folder on a file system without hard links; no existing code means that, and reusing SECRETS_PIN_LOST taught a repin that fails the same way.",
+  "date": "2026-11-23"
+}

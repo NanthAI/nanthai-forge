@@ -796,11 +796,14 @@ test('review 8: a refused share pauses automatic sharing on that holder for a da
   assert.equal(notices.filter(l => /refused by Forge \(AUTH_SCOPE_DENIED\)/.test(l)).length, 1);
 });
 
-test('review 3 and 11: SECRETS_WAITING teaches no replay loop; a sealed refusal keeps the server reason as safe text', () => {
+test('review 3 and Gate B2 L1: SECRETS_WAITING teaches no replay loop; a sealed refusal shows fixed client text, never the server wording', () => {
   assert.equal(teachingByCode.SECRETS_WAITING.next, undefined);
   const refused = sealedRefusal(new ForgeError('SECRETS_NOT_ALLOWED', '32 devices are waiting\u001b[2J.'));
   assert.equal(refused.code, 'SECRETS_NOT_ALLOWED');
-  assert.match(refused.message, /: 32 devices are waiting \[2J\.; local trust was not changed\.$/);
-  assert.doesNotMatch(refused.message, /\u001b/);
+  assert.equal(
+    refused.message,
+    'Secret storage refused this operation: this device or account is not allowed to make that change here; local trust was not changed.',
+  );
+  assert.doesNotMatch(refused.message, /waiting|\u001b/);
   assert.equal(sealedRefusal(new ForgeError('AUTH_REQUIRED', 'x')).message.includes('x'), false);
 });

@@ -28,6 +28,7 @@ import { FileKeyStore } from '../dist/sealed-local.js';
 import { deviceKeys } from '../dist/sealed-keys.js';
 import { SealedJournal } from '../dist/sealed-journal.js';
 import { SecretPins } from '../dist/sealed-pins.js';
+import { pipedValue } from '../dist/sealed-cli.js';
 import { NetworkTransportError } from '../dist/network-fetch.js';
 import { SealedClient } from '../dist/sealed-client.js';
 import { sealedWrite, sealedWriteArgs } from '../dist/sealed-transport.js';
@@ -683,4 +684,16 @@ test('L7 a valid CAS cannot replace the first stored genesis and changes neither
     }),
     before,
   );
+});
+
+test('Gate B2 nit: a piped env value drops exactly one trailing newline; a file value keeps every byte', () => {
+  const env = text => pipedValue(Buffer.from(text), false).toString(),
+    file = text => pipedValue(Buffer.from(text), true).toString();
+  assert.equal(env('TOKEN\n'), 'TOKEN');
+  assert.equal(env('TOKEN\r\n'), 'TOKEN');
+  assert.equal(env('TOKEN\n\n'), 'TOKEN\n', 'only one newline goes');
+  assert.equal(env('TOKEN'), 'TOKEN');
+  assert.equal(env('A\nB'), 'A\nB');
+  assert.equal(env('\n'), '');
+  for (const text of ['TOKEN\n', 'TOKEN\n\n', 'TOKEN\r\n', 'TOKEN']) assert.equal(file(text), text);
 });

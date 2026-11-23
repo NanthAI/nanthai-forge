@@ -12,7 +12,8 @@ import { device, owner } from './helpers/sealed-devices.mjs';
 import { deviceFingerprint } from '../dist/sealed-join.js';
 import { forgeSecretId } from '../dist/sealed-format.js';
 import { encodeSealedWire } from '../dist/sealed-wire.js';
-import { markerNotice, removeMarked, rotateList } from '../dist/sealed-unshare.js';
+import { droppableFormers, markerNotice, removeMarked, rotateList } from '../dist/sealed-unshare.js';
+import { verifySealedReply } from '../dist/sealed-verify.js';
 import { markedEntries } from '../dist/sealed-roster.js';
 import { SealedClient } from '../dist/sealed-client.js';
 
@@ -165,6 +166,84 @@ test('unshare --marked removes every marked entry in one write, and automatic sh
   } finally {
     clear(read);
   }
+});
+
+test('Gate B2 L5: a removal drops former signers nothing needs, keeps the device just removed, and a reader with an older pin accepts the step', async t => {
+  const h = setup(t),
+    o = owner(h);
+  await o.client.write('API_TOKEN', VALUE);
+  const a = await joined(h, t, o, 'fixture-a'),
+    b = await joined(h, t, o, 'fixture-b');
+  await removePerson(h, 'fixture-a');
+  await removeMarked(o.client);
+  const read = async () => {
+    const state = await o.client.read();
+    try {
+      return {
+        former: state.pin.roster.former.map(e => e.deviceId.toString('hex')),
+        rotate: rotateList(state.pin.roster, state.pin.head),
+        reply: state.reply,
+      };
+    } finally {
+      clear(state);
+    }
+  };
+  // The removed device could still open API_TOKEN, so the rotate list needs it: it stays a former signer.
+  assert.deepEqual((await read()).former, [a.keys.id.toString('hex')]);
+  // The value changes after its removal: nothing needs the old entry any more.
+  await o.client.write('API_TOKEN', ROTATED);
+  const older = await o.client.pins.load(h.project, 1); // a reader whose pin still lists the old former signer
+  await removePerson(h, 'fixture-b');
+  await removeMarked(o.client);
+  const after = await read();
+  // The old entry is dropped; the device removed in this step stays (a retry after an unknown outcome finds it).
+  assert.deepEqual(after.former, [b.keys.id.toString('hex')]);
+  assert.deepEqual(after.rotate, [{ name: 'API_TOKEN', devices: [deviceFingerprint(b.keys.id)] }]);
+  // Every reader walks the dropping step: the one with the older pin and a fresh read from the owner's own pin.
+  clear(verifySealedReply(after.reply, older.pin, o.client.request()));
+});
+
+test('Gate B2 L5 a former signer a head record names, or a live value still needs, is never dropped', () => {
+  const id = n => Buffer.alloc(16, n),
+    former = (n, lastEpoch) => ({ deviceId: id(n), signPub: Buffer.alloc(32, n), lastEpoch }),
+    roster = { former: [former(1, 1), former(2, 1), former(3, 5)] },
+    // id(1) authored a name whose value was changed after its removal; id(3)'s epoch still covers API_TOKEN.
+    head = {
+      names: [
+        { kind: 1, name: 'OLD', changedBy: id(1), valueEpoch: 3 },
+        { kind: 1, name: 'API_TOKEN', changedBy: id(9), valueEpoch: 5 },
+        { kind: 3, name: 'GONE', changedBy: id(2), valueEpoch: 1 },
+      ],
+    };
+  // id(1) is named (kept), id(2) authored only a deleted name (a head record still names it: kept), id(3) covers a value.
+  assert.deepEqual(droppableFormers(roster, head), []);
+  head.names.splice(2, 1); // the deleted-name record goes
+  assert.deepEqual(droppableFormers(roster, head), [id(2)]);
+});
+
+test('Gate B2 L7 a device whose pin is trust on first use does not write or remove as an owner', async t => {
+  const h = setup(t),
+    o = owner(h);
+  await o.client.write('API_TOKEN', VALUE);
+  await joined(h, t, o, 'fixture-m');
+  await removePerson(h, 'fixture-m');
+  const tofuOwner = () => {
+    const client = o.make(),
+      read = client.read.bind(client);
+    client.read = async (...args) => {
+      const state = await read(...args);
+      if (state) state.pin = { ...state.pin, confirmed: 'tofu' };
+      return state;
+    };
+    return client;
+  };
+  const before = set(h).headHash;
+  await assert.rejects(tofuOwner().write('OTHER_TOKEN', OTHER), code('SECRETS_CODE_NEEDED'));
+  await assert.rejects(removeMarked(tofuOwner()), code('SECRETS_CODE_NEEDED'));
+  assert.deepEqual(set(h).headHash, before, 'nothing was written');
+  // The same owner on its own confirmed pin still writes and removes.
+  await o.client.write('OTHER_TOKEN', OTHER);
+  assert.equal(set(h).revoked, undefined, 'the confirmed owner removed the marked device first');
 });
 
 test('a marker that names no entry asks for nothing; a marked device can neither read nor remove itself', async t => {

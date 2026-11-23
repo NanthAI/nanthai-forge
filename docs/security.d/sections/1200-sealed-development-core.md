@@ -3,8 +3,9 @@
 `nforge secret set NAME [--file]`, `nforge secret list`, `nforge secret rm NAME`
 and `nforge secret repin` use a stable device sign-in. Values never belong in
 arguments or replies. `--file` makes the stdin/prompt value a file-shaped secret;
-`run` supplies its private temporary path. Stdin bytes are kept exactly, including
-any trailing newline. Agent markers and non-interactive input permit new names
+`run` supplies its private temporary path. A piped value (not `--file`) loses exactly
+one trailing newline, so `echo TOKEN | nforge secret set X` stores `TOKEN`; a second
+newline is kept. With `--file` stdin bytes are kept exactly. Agent markers and non-interactive input permit new names
 only; changes/removals require a person until the proposals slice. The server's
 storage gate requires the owner account's unrestricted stable device credential;
 value authority is the owner device signature in the verified roster. Legacy
@@ -97,6 +98,13 @@ bytes; if the server's 50-event window can no longer establish the outcome, it
 returns `SECRETS_WRITE_UNKNOWN`, never an automatic new seal. Run
 `nforge secret list` to see the current head, then repeat the change as a new
 operation if it is missing. This bounded local journal is also a Gate B item.
+
+Restoring the whole Forge client state folder from a backup returns the device to an earlier consistent
+state: its pins and its pin counter go back together, so the rollback is not detected locally. The next
+verified read walks the server's chain from that older pin, and a server that hid a later removal could
+still hide it from this device until a holder confirms it; the counter protects against restoring pin
+files alone, not against restoring the key store with them. Local state files are read by a same-user
+process before any check; that process already holds the device's reach (see the keychain scope above).
 
 Deleting or restoring old pin files does not reset first-contact trust. A person
 can use `secret repin` only when loading that project/kind under the lock reports

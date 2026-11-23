@@ -154,6 +154,20 @@ test('L3 interrupted lock publication and a dead reclaim gate cannot permanently
   assert.equal(await secretLocked(path, () => true), true);
   assert.equal(await secretLocked(path, () => true), true);
 });
+test('Gate B2 L6 a lock whose holder has no recorded start time is reclaimed once older than any holder keeps it', async t => {
+  const { directory } = local(t),
+    path = join(directory, 'pins.lock'),
+    token = '00000000-0000-4000-8000-000000000042';
+  // A live pid with no start identity: it cannot be told from a reused pid, so only its age can free the lock.
+  writeFileSync(path, serialize({ pid: process.pid, token }), { mode: 0o600 });
+  await assert.rejects(
+    secretLocked(path, () => true, 0),
+    { code: 'SECRETS_PIN_BUSY' },
+  );
+  const old = new Date(0); // far older than any holder keeps the lock
+  utimesSync(path, old, old);
+  assert.equal(await secretLocked(path, () => true), true);
+});
 test('L4 names printed by lists and missing-name notices cannot contain terminal controls', () => {
   const f = fixture(),
     name = 'API_\u001b[31mTOKEN';

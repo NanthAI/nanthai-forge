@@ -167,11 +167,12 @@ export function unwrapSetKey(
     'SECRETS_WRAP_REFUSED',
     'Wrap recipient does not match this device.',
   );
-  const pub = x25519.getPublicKey(recipient.enc),
-    shared = agree(recipient.enc, wrap.ephPub);
-  const kek = wrapKey(shared, wrap.ephPub, pub, c, recipient.id, recipient.kind);
-  let key: Buffer | undefined;
+  // Gate B2 nit: `shared` and `kek` are zeroed even when the key derivation itself throws.
+  let shared: Buffer | undefined, kek: Buffer | undefined, key: Buffer | undefined;
   try {
+    const pub = x25519.getPublicKey(recipient.enc);
+    shared = agree(recipient.enc, wrap.ephPub);
+    kek = wrapKey(shared, wrap.ephPub, pub, c, recipient.id, recipient.kind);
     key = decrypt(kek, Buffer.alloc(12), wrap.ciphertext, wrapAad(c, recipient.id, recipient.kind, commit));
     invariant(
       equalBytes(keyCommit(key, c), commit),
@@ -183,7 +184,7 @@ export function unwrapSetKey(
     key?.fill(0);
     throw error;
   } finally {
-    shared.fill(0);
-    kek.fill(0);
+    shared?.fill(0);
+    kek?.fill(0);
   }
 }

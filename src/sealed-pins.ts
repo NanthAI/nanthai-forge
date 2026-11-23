@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { ForgeError, invariant } from './errors.js';
 import { equalBytes, forgeSecretId } from './sealed-format.js';
 import { headBytes } from './sealed-records.js';
+import { deviceFingerprint } from './sealed-join.js';
 import { verifyBytes } from './sealed-keys.js';
 import { atomicPrivate, secretLocked, wipeDeviceKeys, type KeyStore } from './sealed-local.js';
 import { verifySealedReply, type SealedReply, type SecretPin, type VerifyRequest } from './sealed-verify.js';
@@ -193,7 +194,7 @@ export class SecretPins {
     }
     const devices = reply.roster.entries
       .filter(e => e.entryKind === 1)
-      .map(e => `${e.displayName} (${e.id.toString('hex')})`)
+      .map(e => `${e.displayName} (fp ${deviceFingerprint(e.id)})`)
       .join(', ');
     const kind = { 1: 'Development', 2: 'Checks', 3: 'Production' }[request.setKind];
     const summary = `${kind} as of ${new Date(reply.head.signedAt).toISOString()}. Devices: ${devices}. This set may be older than what this device last saw. Correct?`;

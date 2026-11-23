@@ -11,7 +11,7 @@ import {
   ownDevicesNotice,
   planAutomaticShares,
 } from './sealed-auto.js';
-import { requireConfirmedBase, type JourneyAnchor } from './sealed-anchors.js';
+import { pinConfirmation, requireConfirmedBase, type JourneyAnchor } from './sealed-anchors.js';
 import { AUTOMATIC_SHARES_PER_DAY, deviceFingerprint } from './sealed-join.js';
 import { headBytes } from './sealed-records.js';
 import { findEntry, ownerDevice, sameId } from './sealed-roster.js';
@@ -136,6 +136,16 @@ async function shareWaiting(
   // Server gate stage 3 (member writes) is not enabled, so today only owner devices write and wrap.
   const unchanged = (lines: string[]) => ({ lines, roster: result.pin.roster });
   if (!ownerDevice(findEntry(result.pin.roster, client.keys.id))) return unchanged([]);
+  // Gate B2 L7: an owner device on a trust-on-first-use pin shares nobody until its own code journey (a read must
+  // not fail for it, so this waits instead of refusing).
+  if (pinConfirmation(result.pin) === 'tofu')
+    return unchanged(
+      wire.joinRequests?.length
+        ? [
+            'Devices are waiting for Development, but this device has not confirmed it with a holder, so it shares nobody yet.',
+          ]
+        : [],
+    );
   // GB-08 d4 (a no-op for Development, the only kind planAutomaticShares ever fills).
   requireConfirmedBase(result.pin, 'wrap');
   const now = Date.now();

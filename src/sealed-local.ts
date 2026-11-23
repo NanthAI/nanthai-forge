@@ -2,7 +2,9 @@
 import {
   chmodSync,
   closeSync,
+  constants,
   existsSync,
+  fstatSync,
   fsyncSync,
   lstatSync,
   linkSync,
@@ -63,6 +65,24 @@ export function atomicPrivate(path: string, bytes: Uint8Array) {
     if (existsSync(temporary)) unlinkSync(temporary);
   }
 }
+const UNIDENTIFIED_LOCK_MS = 120_000;
+/** Gate B2 L9: best effort. The plain key file is overwritten before it is unlinked; a copy-on-write or journaling
+ * file system can still keep old blocks, which is why the keychain protects against disk copies only. */
+export function unlinkWiped(path: string) {
+  try {
+    // O_NOFOLLOW: a symlink is never written through.
+    const fd = openSync(path, constants.O_RDWR | constants.O_NOFOLLOW);
+    try {
+      writeFileSync(fd, Buffer.alloc(fstatSync(fd).size));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    /* Removal below still runs. */
+  }
+  unlinkSync(path);
+}
 type Lock = { pid: number; startTime?: string; token: string };
 const readLock = (path: string): Lock | undefined => {
   try {
@@ -84,7 +104,17 @@ const staleLock = (path: string) => {
   const lock = readLock(path);
   try {
     const stat = lstatSync(path);
-    return { lock, stat, stale: lock ? !processAliveCached(lock) : Date.now() - stat.mtimeMs > 30_000 };
+    // Gate B2 L6: a lock whose owner start time could not be recorded cannot tell a live holder from a reused pid,
+    // so it is also reclaimable once older than any holder keeps it: holders run synchronous work bounded by two
+    // keychain calls of 5 s. The age is the lock file's write time, up to the caller's wait (10 s) before it was taken.
+    const aged = (limit: number) => Date.now() - stat.mtimeMs > limit;
+    return {
+      lock,
+      stat,
+      stale: lock
+        ? !processAliveCached(lock) || (lock.startTime === undefined && aged(UNIDENTIFIED_LOCK_MS))
+        : aged(30_000),
+    };
   } catch {
     return undefined;
   }
@@ -146,7 +176,19 @@ export async function secretLocked<T>(path: string, run: () => T, waitMs = 10_00
         acquired = true;
         break;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        const errno = (error as NodeJS.ErrnoException).code;
+        if (
+          errno === 'EPERM' ||
+          errno === 'ENOTSUP' ||
+          errno === 'EOPNOTSUPP' ||
+          errno === 'ENOSYS' ||
+          errno === 'EXDEV'
+        )
+          throw new ForgeError(
+            'SECRETS_LOCK_UNSUPPORTED',
+            'This file system does not allow hard links, which the secret lock needs. Keep the Forge client state folder on a local disk.',
+          );
+        if (errno !== 'EEXIST') throw error;
       }
       const stale = staleLock(path);
       if (stale?.stale) {
@@ -386,7 +428,7 @@ function reconcile(
     // Identical: the move finished except for removing the private file.
     if (useKeychain && sameKeys(plain, kept)) {
       wipeDeviceKeys(plain);
-      unlinkSync(file.path);
+      unlinkWiped(file.path);
       syncDirectory(directory);
       return { keys: kept, store: sealed };
     }
@@ -396,7 +438,7 @@ function reconcile(
   }
   // An older private copy came back (backup or sync): the keychain record is newer.
   wipeDeviceKeys(plain);
-  unlinkSync(file.path);
+  unlinkWiped(file.path);
   syncDirectory(directory);
   return useKeychain ? { keys: kept, store: sealed } : toFile(file, sealed, kept, directory);
 }
@@ -435,7 +477,7 @@ export async function openSecretDevice(
         const sealed = keychain && useKeychain ? intoKeychain(directory, keychain, keys) : null;
         if (sealed) {
           if (existing) {
-            unlinkSync(file.path);
+            unlinkWiped(file.path);
             syncDirectory(directory);
           }
           return { keys, store: sealed };

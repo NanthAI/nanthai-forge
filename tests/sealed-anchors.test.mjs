@@ -39,6 +39,21 @@ test('F1 an unanchored joined Development device is refused even with a complete
   );
 });
 
+test('Gate B2 nit: one new account takes one first-device addition per step, Confirm as for Automatic', () => {
+  const f = fixture(),
+    accountId = forgeSecretId('account', 'joining-member'),
+    first = deviceKeys(accountId, f.random),
+    second = deviceKeys(accountId, f.random);
+  f.transition({
+    added: [
+      f.entry(first, { accountId, role: 2, how: 2, addedAtRosterVersion: 2 }),
+      f.entry(second, { accountId, role: 2, how: 2, addedAtRosterVersion: 2 }),
+    ],
+  });
+  f.wrap();
+  assert.throws(() => verifySealedReply(f.reply, null, f.request), { code: 'SECRETS_ROSTER_REFUSED' });
+});
+
 test('F1/d4 a non-genesis Checks holder starts at its add code, walks from trusted Development and refuses a missing transition', async t => {
   const f = fixture(17, 'fixture-project', 2),
     owner = deviceKeys(f.account, f.random);

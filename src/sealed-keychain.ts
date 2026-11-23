@@ -164,11 +164,29 @@ export function platformKeychain(): Keychain | null {
   return null;
 }
 
-// One keychain read per wrapping key per process; the key never changes after creation.
+// One keychain read per wrapping key per few minutes; the key never changes after creation. Gate B2 L9: a cached key
+// is zeroed after CACHE_MS, so a long-lived process (nforge mcp) does not hold it for ever. Callers use the key only
+// inside one synchronous load or save, so a timer never wipes a key in use.
+const CACHE_MS = 5 * 60 * 1000;
 const cache = new Map<string, Buffer>();
+const timers = new Map<string, NodeJS.Timeout>();
+function remember(id: string, key: Buffer) {
+  clearTimeout(timers.get(id));
+  cache.get(id)?.fill(0);
+  cache.set(id, key);
+  const timer = setTimeout(() => {
+    cache.get(id)?.fill(0);
+    cache.delete(id);
+    timers.delete(id);
+  }, CACHE_MS);
+  timer.unref();
+  timers.set(id, timer);
+}
 export const forgetKeychainCache = () => {
   for (const key of cache.values()) key.fill(0);
   cache.clear();
+  for (const timer of timers.values()) clearTimeout(timer);
+  timers.clear();
 };
 
 type Envelope = { v: 1; keychain: KeychainName; account: string; nonce: Buffer; data: Buffer; tag: Buffer };
@@ -210,7 +228,7 @@ export class KeychainKeyStore implements KeyStore {
       throw unavailable(
         'The OS keychain returned no key for this device. Unlock the keychain or run from the signed-in desktop session; enrol this device again only if its keychain item was deleted.',
       );
-    cache.set(id, key);
+    remember(id, key);
     return key;
   }
   /** Creates the wrapping key, proves the keychain returns it, then encrypts the record. A failure
@@ -231,7 +249,7 @@ export class KeychainKeyStore implements KeyStore {
       } finally {
         back?.fill(0);
       }
-      cache.set(`${this.keychain.name}:${this.account}`, Buffer.from(key));
+      remember(`${this.keychain.name}:${this.account}`, Buffer.from(key));
       this.save(keys);
     } catch (error) {
       if (written) this.forget();
@@ -245,6 +263,8 @@ export class KeychainKeyStore implements KeyStore {
     const id = `${this.keychain.name}:${this.account}`;
     cache.get(id)?.fill(0);
     cache.delete(id);
+    clearTimeout(timers.get(id));
+    timers.delete(id);
     this.keychain.remove(this.account);
   }
   load(): StoredDeviceKeys | null {

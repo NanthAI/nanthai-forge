@@ -12,6 +12,7 @@ import { deviceFingerprint } from './sealed-join.js';
 import { headBytes, type Entry, type Head, type Roster } from './sealed-records.js';
 import { rekeySet } from './sealed-rekey.js';
 import { findEntry, markedEntries, ownerDevice, sameId } from './sealed-roster.js';
+import { requireConfirmedOwner } from './sealed-anchors.js';
 import { createTransition } from './sealed-transition.js';
 import { sealedRefusal, sealedWrite, sealedWriteArgs } from './sealed-transport.js';
 import { verifySealedReply, type SealedReply } from './sealed-verify.js';
@@ -32,6 +33,22 @@ const liveNames = (head: Head, lastEpoch: number) =>
     .filter(n => n.kind !== 3 && n.valueEpoch <= lastEpoch)
     .map(n => n.name)
     .sort();
+/** Gate B2 L5, design 4.6: former signers that nothing needs leave the list in a removal step, so the list cannot
+ * reach its 400 cap and refuse removals. A former signer is needed while a head record names it as an author or a
+ * live value is old enough for the rotate list (5.5) to name it. Only signers already on the list are dropped: the
+ * device removed in this step stays, so a retry after an unknown outcome still finds it. This reads the Development
+ * head only: when Checks proposals land, their authors are looked up in this former list (sealed-verify), so this
+ * must also consider the Checks head records before they ship. */
+export function droppableFormers(roster: Roster, head: Head): Buffer[] {
+  const named = new Set(head.names.map(n => n.changedBy.toString('hex')));
+  return roster.former
+    .filter(
+      e =>
+        !named.has(e.deviceId.toString('hex')) &&
+        !head.names.some(n => n.kind !== 3 && n.valueEpoch <= e.lastEpoch),
+    )
+    .map(e => e.deviceId);
+}
 /** The rotate list, derived from signed records only: each live name a removed device could open, because its
  * value has not changed since that device's last epoch, with the fingerprints of those devices. A new value
  * (sealed at a later epoch) takes the name off the list. Nothing is stored for it. */
@@ -94,6 +111,7 @@ async function removeAndRekey<T>(
         'SECRETS_NOT_ALLOWED',
         'Removing a device needs an owner device of Development in this slice.',
       );
+      requireConfirmedOwner(state.pin);
       invariant(
         !chosen.remove.some(e => sameId(e.id, client.keys.id)),
         'SECRETS_ROSTER_REFUSED',
@@ -105,7 +123,7 @@ async function removeAndRekey<T>(
           added: [],
           removed: chosen.remove.map(e => e.id),
           roles: [],
-          droppedFormer: [],
+          droppedFormer: droppableFormers(roster, state.pin.head),
           newSharingMode: null,
           newChecksPointer: null,
           supersede: null,

@@ -195,9 +195,18 @@ test('T16 stdout and stderr mask injected values for pipes, agent terminals and 
   await runWithSecrets(
     { root, show: true, command: [process.execPath, '-e', 'process.stdout.write(process.env.TOKEN)'] },
     supplied({ TOKEN: 'synthetic-credential' }),
-    { source: {}, tempRoot, stdout: out.stream, stderr: sink().stream },
+    { source: {}, tempRoot, stdout: out.stream, stderr: sink().stream, terminal: true },
   );
   assert.equal(out.text(), 'synthetic-credential');
+  // Gate B2 L2: --show without a terminal (a pipe or file, no agent marker) is refused, never unmasked.
+  await assert.rejects(
+    runWithSecrets(
+      { root, show: true, command: [process.execPath, '-e', 'process.stdout.write(process.env.TOKEN)'] },
+      supplied({ TOKEN: 'synthetic-credential' }),
+      { source: {}, tempRoot, stdout: sink().stream, stderr: sink().stream, terminal: false },
+    ),
+    { code: 'PERSON_REQUIRED', message: /terminal/ },
+  );
   await assert.rejects(
     runWithSecrets({ root, show: true, command: ['unused'] }, supplied({}), { agent: true }),
     { code: 'PERSON_REQUIRED' },

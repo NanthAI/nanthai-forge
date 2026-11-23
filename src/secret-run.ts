@@ -49,6 +49,14 @@ export async function runWithSecrets(
     'PERSON_REQUIRED',
     '--show needs a person running nforge run.',
   );
+  // Gate B2 L2: --show is tied to a terminal, so piped or redirected output is never unmasked on the strength of
+  // "no agent marker found".
+  const terminal = options.terminal ?? Boolean(process.stdout.isTTY && process.stderr.isTTY);
+  invariant(
+    !input.show || terminal,
+    'PERSON_REQUIRED',
+    '--show works only when stdout and stderr are a terminal; piped output stays masked.',
+  );
   const example = readSecretExample(input.root);
   const set = input.set ?? 'development';
   const result = await provider({ root: input.root, set });
@@ -117,7 +125,6 @@ export async function runWithSecrets(
         selected.env[secret.name] = folder.write(secret.name, secret.value);
       } else selected.env[secret.name] = secret.value.toString('utf8');
     }
-    const terminal = options.terminal ?? Boolean(process.stdout.isTTY && process.stderr.isTTY);
     const mask = !input.show && (!terminal || agent || (options.entryPoint && options.entryPoint !== 'cli'));
     child = spawn(input.command[0]!, [...input.command.slice(1)], {
       cwd: input.root,

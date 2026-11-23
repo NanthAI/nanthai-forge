@@ -12,7 +12,7 @@ import { safeSecretName } from './sealed-display.js';
 import { checkSecretWriteName } from './secret-names.js';
 
 export const sealedUsage =
-  'nforge secret set NAME [--file] [--root ROOT] [--operation-id UUID]\nnforge secret list [--root ROOT]\nnforge secret rm NAME [--root ROOT] [--operation-id UUID]\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID|--marked [--root ROOT]';
+  'nforge secret set NAME [--file] [--root ROOT] [--operation-id UUID]   (a piped value loses one trailing newline; --file keeps exact bytes)\nnforge secret list [--root ROOT]\nnforge secret rm NAME [--root ROOT] [--operation-id UUID]\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID|--marked [--root ROOT]';
 export function sealedAgent() {
   const source = process.env;
   return (
@@ -44,7 +44,15 @@ export async function sealedClientForRoot(root: string, agent = sealedAgent()) {
   );
   return client;
 }
-async function readValue(): Promise<Buffer> {
+/** A piped env value drops exactly one trailing LF or CRLF; a file value (`--file`) keeps its exact bytes. */
+export function pipedValue(bytes: Buffer, file: boolean): Buffer {
+  if (file) return bytes;
+  const end = bytes.length;
+  const cut = bytes[end - 1] === 0x0a ? (bytes[end - 2] === 0x0d ? 2 : 1) : 0;
+  return cut ? bytes.subarray(0, end - cut) : bytes;
+}
+/** `file`: exact bytes. A piped env value drops exactly one trailing newline (`echo TOKEN | nforge secret set X`). */
+async function readValue(file = false): Promise<Buffer> {
   if (!process.stdin.isTTY) {
     const parts: Buffer[] = [];
     let length = 0;
@@ -55,7 +63,8 @@ async function readValue(): Promise<Buffer> {
         parts.push(bytes);
         invariant(length <= 65536, 'SECRETS_FORMAT_REFUSED', 'Value exceeds the format size.');
       }
-      return Buffer.concat(parts);
+      const all = Buffer.concat(parts);
+      return pipedValue(all, file);
     } finally {
       for (const part of parts) part.fill(0);
     }
@@ -151,7 +160,7 @@ export async function sealedCli(args: string[]) {
   const client = await sealedClientForRoot(secretRunRoot(resolve(root)), agent);
   try {
     if (command === 'set' || command === 'rm') {
-      const value = command === 'set' ? await readValue() : null;
+      const value = command === 'set' ? await readValue(file) : null;
       try {
         const receipt = await client.write(name!, value, { file, ...(operationId ? { operationId } : {}) });
         process.stdout.write(

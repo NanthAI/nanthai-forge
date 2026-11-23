@@ -171,6 +171,9 @@ test('T94 solo owner explicitly rebuilds only its own signed view; agents and re
     }),
   );
   assert(summary.includes('may be older') && summary.includes('Devices:') && summary.includes('1970-'));
+  // Gate B2 nit: devices are shown by short fingerprint, never by their full ids.
+  assert(summary.includes('(fp '));
+  assert.equal(summary.includes(f.keys.id.toString('hex')), false);
   assert(await pins.load('fixture-project', 1));
   unlinkSync(pinPath(directory, f.request.forgeProjectId));
   const bad = clone(f.reply);

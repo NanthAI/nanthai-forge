@@ -2,12 +2,18 @@
 // OS keychain device key store (Item a9f9b608). The keychain tools are mocked: no test reaches the
 // real login keychain or a real Secret Service. All keys are synthetic.
 import './check-runtime.mjs';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FileKeyStore, ensureSecretDevice, openSecretDevice, wipeDeviceKeys } from '../dist/sealed-local.js';
+import {
+  FileKeyStore,
+  ensureSecretDevice,
+  openSecretDevice,
+  unlinkWiped,
+  wipeDeviceKeys,
+} from '../dist/sealed-local.js';
 import {
   KEYCHAIN_TIMEOUT_MS,
   forgetKeychainCache,
@@ -138,6 +144,35 @@ for (const kind of ['mac', 'linux'])
     assert.deepEqual(again.keys.sign, original.sign);
     for (const keys of [original, opened.keys, again.keys]) wipeDeviceKeys(keys);
   });
+
+test('Gate B2 L9 the cached wrapping key is zeroed after five minutes, so a long-lived process does not keep it', async t => {
+  const dir = directory(t),
+    { keychain, calls } = fakeTool('mac');
+  mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(() => mock.timers.reset());
+  const first = await openSecretDevice(dir, account, keychain);
+  forgetKeychainCache();
+  calls.length = 0;
+  const opened = await openSecretDevice(dir, account, keychain);
+  wipeDeviceKeys(opened.store.load());
+  wipeDeviceKeys(opened.store.load());
+  assert.equal(calls.length, 1, 'inside the window the key is read once');
+  mock.timers.tick(5 * 60 * 1000 + 1);
+  wipeDeviceKeys(opened.store.load());
+  assert.equal(calls.length, 2, 'after the window the key is read from the keychain again');
+  for (const keys of [first.keys, opened.keys]) wipeDeviceKeys(keys);
+});
+
+test('Gate B2 L9 the plain key file is overwritten before it is unlinked', t => {
+  const dir = directory(t),
+    path = join(dir, 'device.bin'),
+    other = join(dir, 'kept-link');
+  writeFileSync(path, Buffer.alloc(64, 7), { mode: 0o600 });
+  linkSync(path, other); // a second name keeps the inode, so what the unlink left behind can be read
+  unlinkWiped(path);
+  assert.equal(existsSync(path), false);
+  assert.deepEqual(readFileSync(other), Buffer.alloc(64, 0));
+});
 
 test('a new device created with a keychain never writes a plain key file', async t => {
   const dir = directory(t),

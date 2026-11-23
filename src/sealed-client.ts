@@ -18,7 +18,7 @@ import {
   type SealedReadWire,
   type SealedTransport,
 } from './sealed-transport.js';
-import type { JourneyAnchor } from './sealed-anchors.js';
+import { requireConfirmedOwner, type JourneyAnchor } from './sealed-anchors.js';
 import { afterVerified, firstContactAnchor } from './sealed-auto-client.js';
 import { SecretPins } from './sealed-pins.js';
 import { sealValue } from './sealed-value.js';
@@ -188,6 +188,8 @@ export class SealedClient {
             'SECRETS_NOT_ALLOWED',
             'This slice writes from an owner device.',
           );
+          // Gate B2 L7: an owner write rests on a roster this device confirmed, not one it only trusted on first use.
+          if (state) requireConfirmedOwner(state.pin);
           const old = reply.head.names.find(n => n.name === name);
           invariant(
             !this.agent || !old,

@@ -68,6 +68,16 @@ export function requireConfirmedBase(pin: SecretPin, use: keyof typeof route) {
   );
 }
 
+/** Gate B2 L7: a device on a `tofu` pin (it joined Development automatically) that was raised to owner since has
+ * not confirmed that roster with a holder; it writes as an owner only after its own code journey. */
+export function requireConfirmedOwner(pin: SecretPin) {
+  invariant(
+    pinConfirmation(pin) !== 'tofu',
+    'SECRETS_CODE_NEEDED',
+    'This device joined Development automatically and has not confirmed it with a holder, so it does not write, remove or share as an owner yet. Confirming by code is not available in this CLI build.',
+  );
+}
+
 // The confirmed roster hash travels beside the anchor, so a view mutated after its reply matched is refused.
 const matchedReplies = new WeakMap<CodeAnchor, Buffer>();
 /** Only the requester's code journey calls this, after its two-word reply matched (source-guarded). */
