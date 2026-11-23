@@ -6,7 +6,12 @@ import type { Id } from './_generated/dataModel';
 import { requireOwnerPerson } from './ownerPerson';
 import { teamOwner } from './teams';
 import { pendingTeamInvitation } from './teamInvitationReads';
-import { setInvitationBlock, invitationBlock, recipientEmailProof } from './projectInvitationRecipient';
+import {
+  setInvitationBlock,
+  invitationBlock,
+  recipientEmail,
+  recipientEmailProof,
+} from './projectInvitationRecipient';
 import { assertInvitationTarget, emailShape, invitationBudget } from './projectInvitationPolicy';
 import {
   addTeamMembership,
@@ -68,6 +73,98 @@ export const create = internalMutation({
   },
 });
 
+/** A Forge handle invitation binds the account but grants nothing until that account accepts on Home. */
+export const createForHandle = internalMutation({
+  args: { teamId: v.id('teams'), target: v.string(), operationId: v.optional(v.string()) },
+  returns: v.union(v.literal('member'), v.literal('pending')),
+  handler: async (ctx, { teamId, target, operationId }) => {
+    const user = await requireOwnerPerson(ctx, 'invite people to a team');
+    const typed = target.trim();
+    assertInvitationTarget(typed);
+    invariant(typed, 'BAD_ARGUMENT', 'Enter a Forge handle.');
+    assertTeamEmailOperation(operationId);
+    const team = await teamOwner(ctx, teamId, user.subject);
+    const handleOf = (value: string) => value.toLowerCase().replace(/^@/, '');
+    // The public wrapper turns an exact bare handle into its account id; `@handle` arrives as typed.
+    // An explicit retry answers from its retained row first, so a later rename or membership change cannot alter it.
+    if (operationId) {
+      const replay = await teamInvitationOperation(ctx, teamId, operationId);
+      if (replay) {
+        invariant(
+          replay.kind === 'handle' &&
+            (handleOf(replay.target ?? '') === handleOf(typed) || replay.recipient === typed),
+          'WORK_OPERATION_CHANGED',
+          'Retry the original team invitation.',
+        );
+        return 'pending' as const;
+      }
+    }
+    const handle = handleOf(typed);
+    const account =
+      (/^[a-z0-9][a-z0-9-]*$/.test(handle)
+        ? await ctx.db
+            .query('forgeAccounts')
+            .withIndex('by_handle', q => q.eq('handle', handle))
+            .unique()
+        : null) ??
+      (await ctx.db
+        .query('forgeAccounts')
+        .withIndex('by_owner', q => q.eq('owner', typed))
+        .unique());
+    const member = (person: string) =>
+      ctx.db
+        .query('teamMembers')
+        .withIndex('by_teamId_and_member', q => q.eq('teamId', teamId).eq('member', person))
+        .unique();
+    // A current member (the owner, or an original direct add retried by its account id) replays: no grant, charge or row.
+    // Direct adds kept no receipt, so a retry after the member left is a new request: a pending invitation.
+    if (!account?.handle) {
+      invariant(await member(typed), 'BAD_ARGUMENT', 'No Forge account has that handle.');
+      return 'member' as const;
+    }
+    if (account.owner === team.owner || (await member(account.owner))) return 'member' as const;
+    const key = operationId ?? 'team-handle:' + account.owner;
+    if (!operationId) {
+      const replay = await teamInvitationOperation(ctx, teamId, key);
+      if (replay) {
+        invariant(
+          pendingTeamInvitation(replay),
+          'BAD_ARGUMENT',
+          'This invitation ended. Send a new invitation with a new operation id.',
+        );
+        return 'pending' as const;
+      }
+    }
+    // Never store an account id as the owner's typed target: a bare handle arrives resolved.
+    const shown = account.owner === typed ? account.handle : typed;
+    const [older] = await ctx.db
+      .query('projectInvites')
+      .withIndex('by_teamId_and_email_and_state', q =>
+        q
+          .eq('teamId', teamId)
+          .eq('email', '@' + account.handle)
+          .eq('state', 'pending'),
+      )
+      .take(1);
+    const charge = await invitationBudget(ctx, team.owner);
+    await charge();
+    if (older) await ctx.db.patch(older._id, { state: 'replaced', endedAt: Date.now() });
+    if (team.invitationEpoch === undefined) await ctx.db.patch(teamId, { invitationEpoch: 0 });
+    await ctx.db.insert('projectInvites', {
+      teamId,
+      email: '@' + account.handle,
+      target: shown,
+      kind: 'handle',
+      inviter: team.owner,
+      recipient: account.owner,
+      state: 'pending',
+      operationId: key,
+      invitationEpoch: team.invitationEpoch ?? 0,
+    });
+    return 'pending' as const;
+  },
+});
+
 export const teamInvitationAnswerArgs = {
   invitationId: v.id('projectInvites'),
   operationId: v.string(),
@@ -99,8 +196,14 @@ async function teamInvitationAnswer(
     );
     return null;
   }
-  const proof = await recipientEmailProof(ctx, user);
-  invariant(proof?.email === row.email, 'PROJECT_UNAVAILABLE', 'This team invitation is unavailable.');
+  // A handle invitation is bound to its account; an address one to the current verified address.
+  const handle = row.kind === 'handle';
+  const proof = handle ? null : await recipientEmailProof(ctx, user);
+  invariant(
+    handle ? row.recipient === user.subject : proof?.email === row.email,
+    'PROJECT_UNAVAILABLE',
+    'This team invitation is unavailable.',
+  );
   invariant(
     pendingTeamInvitation(row) && !(await teamInvitationWasRevoked(ctx, row, user.subject)),
     'BAD_ARGUMENT',
@@ -119,8 +222,16 @@ async function teamInvitationAnswer(
 
 export const prepareAccept = internalQuery({
   args: teamInvitationAnswerArgs,
-  returns: v.union(v.null(), v.object({ email: v.string(), native: v.union(v.string(), v.null()) })),
-  handler: async (ctx, input) => (await teamInvitationAnswer(ctx, input))?.proof ?? null,
+  returns: v.union(
+    v.null(),
+    v.literal('handle'),
+    v.object({ email: v.string(), native: v.union(v.string(), v.null()) }),
+  ),
+  handler: async (ctx, input) => {
+    const result = await teamInvitationAnswer(ctx, input);
+    if (!result) return null;
+    return result.proof ?? ('handle' as const);
+  },
 });
 
 export const answer = internalMutation({
@@ -132,13 +243,21 @@ export const answer = internalMutation({
     const { row, team, user, block, answerId } = result;
     if (input.choice === 'accept') {
       invariant(
-        input.providerSubject === user.subject,
+        row.kind === 'handle' || input.providerSubject === user.subject,
         'PROJECT_UNAVAILABLE',
         'This team invitation is unavailable.',
       );
       await addTeamMembership(ctx, team._id, user.subject);
     }
-    if (input.choice === 'block') await setInvitationBlock(ctx, user.subject, team.owner, block, row.email);
+    if (input.choice === 'block')
+      await setInvitationBlock(
+        ctx,
+        user.subject,
+        team.owner,
+        block,
+        // As for project handle blocks: the verified address lets the same preference suppress later mail.
+        row.kind === 'handle' ? await recipientEmail(ctx, user, { anyAge: true }) : row.email,
+      );
     await ctx.db.patch(row._id, {
       state: input.choice === 'accept' ? 'accepted' : 'declined',
       endedAt: Date.now(),

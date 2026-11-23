@@ -108,7 +108,6 @@ test('SI-03: every device scope gets the web handle message; unrestricted device
   for (const work of [
     () => actions.addMember._handler(s.ctx, { id: 'team', member: 'other' }),
     () => actions.addByEmail._handler(s.ctx, { id: 'team', email: 'synthetic@example.com' }),
-    () => teams.add._handler(s.ctx, { id: 'team', owner: 'owner', member: 'other' }),
   ])
     await assert.rejects(work(), refused);
   assert.equal(s.tables.teamMembers.size, 0);

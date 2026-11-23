@@ -60,7 +60,9 @@ export const inbox = query({
     const revoked: InvitationRevocations = new Map();
     for (const row of page.page) {
       if (row.teamId) {
-        if (input.includeTeams && email && pendingTeamInvitation(row)) {
+        // Address invitations reach the verified address; handle invitations the bound account.
+        const reached = row.kind === 'handle' ? row.recipient === user.subject : Boolean(email);
+        if (input.includeTeams && reached && pendingTeamInvitation(row)) {
           const teamRow = await teamInboxRow(ctx, row, user.subject);
           if (teamRow) rows.push(teamRow);
         }

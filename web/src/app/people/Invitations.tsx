@@ -72,7 +72,11 @@ function InvitationRows({
 export default function Invitations({ onJoinTeam }: { onJoinTeam?: () => void }) {
   const [handleCursor, setHandleCursor] = useState<string | null>(null),
     [emailCursor, setEmailCursor] = useState<string | null>(null);
-  const handles = useQuery(api.projectInvitationInbox.inbox, { kind: 'handle', cursor: handleCursor });
+  const handles = useQuery(api.projectInvitationInbox.inbox, {
+    kind: 'handle',
+    cursor: handleCursor,
+    includeTeams: true,
+  });
   const emails = useQuery(api.projectInvitationInbox.inbox, {
     kind: 'email',
     cursor: emailCursor,

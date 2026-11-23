@@ -206,7 +206,11 @@ after their first one ends; they return `BAD_ARGUMENT` with the next step to sen
 a new invitation in People using a new operation id. Explicit invitation and
 answer operation ids retain their original retry behavior.
 
-### Team invitations by address
+### Team invitations
+
+Adding someone to a team, by address or by Forge handle, is an invitation:
+nothing is granted until that person accepts on Home. Teams carry project roles
+([Teams](#teams)), so a direct add could give project access the person never chose.
 
 An owner invites an email address to a team in **People and teams**. Creating
 the invitation looks up no account and asks no identity provider. The owner sees
@@ -222,6 +226,20 @@ and 100 per UTC day for an inviter, owner-approved 2026-11-21). The team path
 uses Home for delivery and sends no mail. Before address invitations became
 pending, an address could be added directly; a retry of such an original add
 replays its retained receipt and grants, charges and invites nothing.
+
+An invitation by Forge handle (`teamActions.addMember`, `@handle` or the bare
+handle) binds to that account and asks no identity provider. It charges the same
+inviter counters, and the owner sees the typed target and "pending". It appears
+on that account's Home with **Accept**, **Decline** and **Decline and block
+inviter**; another account neither sees nor answers it. A block also keeps the
+person's verified address, as for project handle invitations, so it suppresses
+later invitation mail too. A handle that is already a member (the owner
+included) writes nothing. An exact retry with the same operation id returns its
+first answer from the retained row, even after a rename or acceptance; the same
+id naming anyone else is refused (`WORK_OPERATION_CHANGED`). Before handle
+invitations became pending, `addMember` granted at once and kept no receipt. A
+retry naming a current member grants, charges and invites nothing; after that
+member left, the retry is a new request and becomes a pending invitation.
 
 ## Teams
 

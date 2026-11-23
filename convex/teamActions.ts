@@ -9,21 +9,23 @@ import { assertTeamEmailOperation } from './teamInvitationMembership';
 import { api, internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { currentAccess } from './access';
-import { checkForgeUser } from './sharingActions';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 
 export const addMember = accountAction('person')({
-  args: { id: v.id('teams'), member: v.string() },
-  returns: v.null(),
-  handler: async (ctx, { id, member }): Promise<null> => {
+  args: { id: v.id('teams'), member: v.string(), operationId: v.optional(v.string()) },
+  returns: v.union(v.null(), v.literal('pending')),
+  handler: async (ctx, { id, member, operationId }): Promise<null | 'pending'> => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'GITHUB_UNAVAILABLE', 'Sign in to manage a team.');
-      await ctx.runQuery(internal.teams.owned, { id, owner: user.subject });
-      member = await checkForgeUser(member);
-      await ctx.runMutation(internal.teams.add, { id, owner: user.subject, member });
-      return null;
+      // A handle never becomes membership here: it stays pending until that account accepts on Home.
+      const result = await ctx.runMutation(internal.teamInvitationWrites.createForHandle, {
+        teamId: id,
+        target: member,
+        ...(operationId === undefined ? {} : { operationId }),
+      });
+      return operationId !== undefined && result === 'pending' ? 'pending' : null;
     } catch (error) {
       return report(error);
     }
@@ -105,6 +107,7 @@ export const answerInvitation = accountAction('person')({
         return await ctx.runMutation(internal.teamInvitationWrites.answer, input);
       const proof = await ctx.runQuery(internal.teamInvitationWrites.prepareAccept, input);
       if (!proof) return null;
+      if (proof === 'handle') return await ctx.runMutation(internal.teamInvitationWrites.answer, input);
       const recipient = await emailRecipient(proof.email, proof.native, true);
       return await ctx.runMutation(internal.teamInvitationWrites.answer, {
         ...input,

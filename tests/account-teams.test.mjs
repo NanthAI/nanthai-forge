@@ -13,6 +13,7 @@ import { state } from './hosted-fixture.mjs';
 const accountTeams = await import(moduleUrl('../convex/accountTeams.ts'));
 const teamHandles = await import(moduleUrl('../convex/teamHandles.ts'));
 const teams = await import(moduleUrl('../convex/teams.ts'));
+const membership = await import(moduleUrl('../convex/teamInvitationMembership.ts'));
 const page = (numItems = 20, cursor = null) => ({ paginationOpts: { cursor, numItems } });
 // Private values that must never leave the read: an address, a real name, a machine name.
 const CANARY = /canary-mail@example\.test|Canary Realname|canary-laptop\.local/;
@@ -205,7 +206,8 @@ test('handles stay current: set on insert, patched on a change, and backfilled o
     ['sample-owner', 'renamed-peer'],
   );
   // A new membership takes the current handle when it is written.
-  await s.transaction(() => teams.add._handler(s.ctx, { id: 'core', owner: 'owner', member: 'third' }));
+  // Membership is written only by an accepted invitation, through this writer.
+  await s.transaction(() => membership.addTeamMembership(s.ctx, 'core', 'third'));
   const added = [...s.tables.teamMembers.values()].find(r => r.teamId === 'core' && r.member === 'third');
   assert.equal(added.handle, 'sample-third');
 });

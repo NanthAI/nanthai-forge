@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import { query, internalQuery, internalMutation, accountMutation } from './cliServer';
+import { query, internalQuery, accountMutation } from './cliServer';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { isDeviceIdentity } from './cliServer';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { memberHandle } from './teamHandles';
-import { addTeamMembership, endTeamInvitations } from './teamInvitationMembership';
+import { endTeamInvitations } from './teamInvitationMembership';
 import { markLeftTeam } from './sealedSecretMarkers';
 
 const item = v.object({ id: v.id('teams'), name: v.string(), owner: v.string() });
@@ -120,20 +119,6 @@ export const owned = internalQuery({
   returns: v.null(),
   handler: async (ctx, { id, owner }) => {
     await teamOwner(ctx, id, owner);
-    return null;
-  },
-});
-export const add = internalMutation({
-  args: { id: v.id('teams'), owner: v.string(), member: v.string() },
-  returns: v.null(),
-  handler: async (ctx, { id, owner, member }) => {
-    invariant(
-      !isDeviceIdentity((await ctx.auth.getUserIdentity()) ?? {}),
-      'AUTH_SCOPE_DENIED',
-      'Add team members in your Forge browser.',
-    );
-    await teamOwner(ctx, id, owner);
-    await addTeamMembership(ctx, id, member);
     return null;
   },
 });

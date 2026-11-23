@@ -21,7 +21,11 @@ const paginationOpts = { cursor: null, numItems: 20 },
 const make = s =>
   teams.create._handler(s.ctx, { name: 'Team <img src=x onerror=untrusted>', operationId: randomUUID() });
 const link = (s, id, importId = 'own', shared = true) => teams.link._handler(s.ctx, { id, importId, shared });
-const add = (s, id, member = 'reader') => actions.addMember._handler(s.ctx, { id, member });
+const membership = await import(moduleUrl('../convex/teamInvitationMembership.ts'));
+// Membership comes only from an accepted invitation (tests/team-invitations.test.mjs covers handle and address
+// invitations, including who may send them); these tests seed the accepted member through the same writer.
+const add = (s, id, member = 'reader') =>
+  s.transaction(() => membership.addTeamMembership(s.ctx, id, member));
 const list = (s, id, page = paginationOpts) =>
   actions.codescapes._handler(s.ctx, { id, paginationOpts: page });
 
@@ -74,11 +78,10 @@ test('reader teams reconcile creation/membership/import links and keep creator a
       teams.create._handler(s.ctx, { name: ' ', operationId: randomUUID() }),
       e => e.data.code === 'BAD_ARGUMENT',
     );
-    await assert.rejects(add(s, id, 'missing'), e => e.data.code === 'BAD_ARGUMENT');
-    await add(s, id, ' reader ');
+    await add(s, id);
     await add(s, id);
     await add(s, id, 'owner');
-    assert.equal(s.tables.teamMembers.size, 2);
+    assert.equal(s.tables.teamMembers.size, 2, 'the membership writer never duplicates a member');
     await link(s, id);
     await link(s, id);
     assert.equal(s.tables.teamImports.size, 1);
@@ -87,7 +90,6 @@ test('reader teams reconcile creation/membership/import links and keep creator a
     s.caller('reader');
     assert.equal((await teams.list._handler(s.ctx, { paginationOpts })).page[0].name, 'Engineering');
     await assert.rejects(teams.members._handler(s.ctx, { id, paginationOpts }), denied);
-    await assert.rejects(add(s, id, 'new'), denied);
     await assert.rejects(link(s, id), denied);
     await assert.rejects(teams.removeMember._handler(s.ctx, { id, member: 'owner' }), denied);
     s.caller('stranger');
@@ -280,8 +282,7 @@ test('team handle labels preserve owner authorization, never call the identity p
     originalFetch = globalThis.fetch;
   globalThis.fetch = () => assert.fail('labels never look up the identity provider');
   try {
-    // Membership by address is a pending invitation now (tests/team-invitations.test.mjs); seed an accepted member.
-    await teams.add._handler(s.ctx, { id, owner: 'owner', member: 'reader' });
+    await add(s, id);
     assert.equal(s.tables.teamMembers.size, 2);
     s.tables.forgeAccounts.set('a-owner', { _id: 'a-owner', owner: 'owner', handle: 'team-owner' });
     s.tables.forgeAccounts.set('a-reader', { _id: 'a-reader', owner: 'reader', handle: 'team-reader' });
