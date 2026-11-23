@@ -1,7 +1,7 @@
 # Agent briefings
 
 Forge has one client mode (hosted), and the checkout CLI and MCP do not expose `brief`.
-For builder context use `planning {"id":"ISSUE_ID","reconcile":false}`,
+For builder context use `planning {"id":"ISSUE_ID"}`,
 `status {"laneId":"LANE_ID"}` and the repository's brief and rules; fetch fresh context
 before acting. Detected repository instructions win over project guidance, then Forge steps.
 
@@ -53,21 +53,10 @@ Do not start local dev servers or pipe a read into a write.
 Read first, then pass a literal argument to the write command.
 If a command waits for approval and nobody can answer, cancel it and use the routes above.
 
-1. Read Lane AGENTS.md, DESIGN.md, the Issue body and **every comment**
-   (`planning {"planningItemId":"ISSUE_ID","reconcile":false}`); comments can amend Done-when. Own one
-   finite task. Builders on one machine share a root and identity, so generate your own
-   fresh `operationId` (`uuidgen`) and pass it:
-   `start {planningItemId,operationId}`, with your model set (`export FORGE_AGENT_MODEL=<model id>`
-   first, or the `model` field; start refuses without one, and takes `"unknown"` when unknown); a start without the id can return another builder's
-   open Lane. Reuse the same id only to retry your own lost start. Edit only the returned
-   Lane path; never edit or commit in the project folder or mirror, or in another
-   builder's Lane. Check for earlier open work with `lanes {"planningItemId":"ISSUE_ID"}` (full UUID;
-   follow `continueCursor`; `intentId` selects one execution Intent). Continue or abandon
-   it, never redo work already on main. Starting from an Item with no owner claims it for you: the
-   write that marks it in progress also sets its owner to your public identity (`@handle/agent`). An
-   owner someone already set is kept, and a member who cannot edit the plan claims nothing (the server
-   still moves an open Item to in progress after their start; a proposed Item stays proposed until the
-   owner approves it); to hand an Item on, change its owner with `put-planning-item`.
+1. Read Lane AGENTS.md, DESIGN.md, the Issue body and **every comment** (`planning {"planningItemId":"ISSUE_ID"}`);
+   comments can amend Done-when. Own one finite task: `start {planningItemId}`, then follow what the start
+   reply and Forge's own output say (the Lane path, `openLanes`, `previousLane`, hook warnings). Continue or
+   abandon earlier open work it names; never redo work already on main.
 2. Follow AGENTS.md secret handling and owner decision rights. Never print secrets
    or environment values, read credentials raw into output, use production or
    deploy/publish/change accounts/backfill without the stated authorization.
@@ -79,96 +68,42 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
    bytes. V8 Convex functions use no Node-only globals. Assert relevant budgets.
 4. Fix root causes for every project, never tune to a benchmark. Search for every
    instance; fix or list them. [Repeated classes and reverted fixes need a build-failing guard](improvement-loop.md#fix-the-class).
-5. Use the approved installed CLI and patched Node. Check disk before start,
-   builds and tests against the reserve in the brief. Inspect reclaimable copies with
-   `nforge prune` (or `nforge prune --scan DIRECTORY`); `--apply` removes eligible
-   regenerable roots. Live processes, unknown coverage, pins and unresolved state
-   retain their copies; the result explains unresolved state and recovery. Never
-   remove another builder's files to meet the floor. Run builds and test batches
-   through `nforge heavy` ([what it bounds](../parallel-work-defaults.md#localheavyslots)); start browsers
-   or attended local dev servers only when needed and stop them afterwards. Slot count, disk reserve and
-   builder count come from local machine setup and the brief, not from the repo. Format only with `npm run format` (oxfmt);
-   never `npx prettier`, which rewrites files in another style.
-6. Save after each meaningful step (at least every ~30 minutes): each save runs the exact conflict check; read the head and capture coverage. Use `mktemp`
-   logs, never shared fixed paths. Keep a private handoff with observation time,
-   saved head, operation id and next action for interruption recovery.
-7. Read hosted `behindMain` and `presence` notices before editing and coordinate
-   shared scope; native owners can use `peers`. List your owned files in your first
-   save message. Each save trial-merges your saved files with peers; a real conflict
-   comes back as `conflictNotice` (nothing to answer: coordinate, stack or split).
-   Saved-path windows exclude unsaved peer edits; no notice never proves
-   independence. Record conflicts. Missing alerts mean friction, not independence.
-   Use optional `notVerified` on `save` or `land --save` to report verification limits
-   on that operation. Omit the field if you have no report. Send `[]` only if you
-   verified everything you changed. This claim is separate from [run evidence](../run-evidence.md).
-8. Add a test only for a behaviour, contract or incident you can name, and put that name in the test (a brief
-   asks for the guarded behaviour, not for "tests"; [test signal](lint-rules.md#test-signal)).
-   Save then `preflight {laneId}`. Run all affected tests: tests you add, direct and
-   transitive consumers of changed/deleted modules and changed literal paths.
-   No arbitrary file cap. Include relevant docs/format/lint/type checks. Re-select
-   after sync or main changes. A near-full set belongs to the landing runner;
-   never run it, or the full suite, locally: if preflight selects one, let `finish`
-   proceed with the advisory preflight status. The landing check is full verification.
-   Hosted preflight can take a few minutes; when your shell stops commands after
-   120 s, run it in the background and wait for it, never re-run it in a loop.
-   Any one local test run stops at 600 s (finish, retry and trim:false too); the
-   landing check runs the rest. Pass `budgetSeconds` above 600 only when a longer
-   local run is worth the slot time; the receipt names the override.
-9. Never weaken, skip or quarantine tests or raise timeouts to hide races. Explain
-   any correction to an impossible assertion. Preflight and `land --save` flag a
-   changed existing test (`weakenedTests`: removed or loosened assertions, added skips
-   or name filters, a removed test, a changed input under the same assertions) by file
-   and test; a flag never fails the Lane. Fix it, or put one line
-   `Weakened-tests: <why>` in the `land --save` message to clear it
-   ([how](../parallel-work-defaults.md#preflight)). Report observed commands, exit codes
-   and counts; label unrun work. Runtime/storage changes also need real billed
-   usage and byte-placement evidence; otherwise that acceptance stays open.
-   Perf/cost claims: [perf-claims](perf-claims.md).
-10. Finish your own Lane unless review is required first.
-    The reviewer prompt must include the AGENTS.md safety line verbatim.
-    Copy the full line starting with “Never print environment values or secrets”
-    from [AGENTS.md](../../AGENTS.md#hard-rules).
-    Check the benchmark hold before each submission; wait without touching it.
-    No routine urgent priority.
-    Freeze edits/saves/sync until terminal. Stay with your own landing, dry run or
-    wait and all dependent work: never end the turn while one runs, and never end on a
-    status line. Resume a killed shell with the receipt's blocking `waitCommand`:
-    `nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance"}'`
-    (check-only: `{"runId":"RUN_ID"}`). It blocks up to
-    540 s, under agent shell limits; run it in the foreground, never sleep or end on
-    a background task. Exception: when land prints `SUBMITTED` with `wake.command`,
-    run that one settle wait in the background and block on it with your harness
-    wait tool ([asynchronous land](workflow.md#asynchronous-land-one-wake-no-waiting-turns)). If the turn-end hook blocks a stop, run its `nforge wait ID`.
-    Repeat on IN PROGRESS; follow terminal recovery on failure/conflict. A passed
-    check alone is not a landing. Your finish `message` is the GitHub commit message
-    (at most 16 KiB of UTF-8, checked before any server call; pass the same
-    `--message-file` to preflight to check it before the tests run): end it with the commit trailers your harness asks for (for example `Co-Authored-By:`). Before admission, replay the full original request. Retryable source work follows its returned recovery.
-11. Fix failures in the same Lane and land again; never cancel and recreate.
-    Follow exact conflict/stale/stalled continuations; replay unknown outcomes.
-    Before filing an Issue or friction, search planning and comment on an existing
-    match instead. One `planning {"search":"relevant words","limit":10}` is
-    enough (no `nextCursor` paging); add `status:"all"` to include closed work. Log action/code/Lane/cost/workaround, then fix or link a slice.
-12. Match your receipt to your Lane/operation and verify files on accepted main:
-    after landing, `nforge pull` (its own shell call; it resets the working directory)
-    and grep for a named symbol or file of your change before reporting LANDED. A
-    receipt alone is not proof. Convex changes also need deployment success at that
-    commit; tell the lead the accepted State and do not deploy yourself.
-    Comment evidence per acceptance line; unmet lines stay open or name their next
-    Issue. The landing note and commit message also say what the change removes or
-    merges, or why nothing can go (growth guard: `node scripts/check-growth.mjs`). After landing (and `complete` when the Lane stays open), read
-    `planning {"id":"ISSUE_ID"}` once: a closed Issue is done; a held one
-    (`reconciled.held`, or the "N Done-when line(s) still open" comment) names the open
-    lines and the one `put-planning-item … "status":"closed"` command. Tick each proven line
-    with its evidence in one call: `tick-planning-item {"planningItemId":"ISSUE_ID","line":2,"evidence":"…"}`
-    (`line` is the checkbox's 1-based position or a unique text prefix; it ticks the box and posts the
-    evidence as a decision comment, retrying a version race). Run the close command once every line is
-    ticked (the next planning read also closes it); never leave the Issue
-    in-progress and never close with lines unmet. Handoff files/choices/tests/counts/actual verification/receipt/head,
-    unverified work and next action. Abandon unused Lanes with work preserved;
-    remove only your own regenerable temporary output.
-13. Convex: any `mutation` or `internalMutation` you add or touch imports from
+5. Use the approved installed CLI and patched Node. Check disk before start, builds and tests against the
+   reserve in the brief; `nforge prune` shows reclaimable copies. Never remove another builder's files to
+   meet the floor. Run builds and test batches through `nforge heavy`
+   ([what it bounds](../parallel-work-defaults.md#localheavyslots)); start browsers or attended local dev
+   servers only when needed and stop them afterwards. Format only with `npm run format` (oxfmt), never
+   `npx prettier`.
+6. Save after each meaningful step and list your owned files in your first save message. Coordinate on
+   `conflictNotice` and overlap notices (coordinate, stack or split); no notice never proves independence.
+   Record conflicts; missing alerts are friction.
+7. Add a test only for a behaviour, contract or incident you can name, and put that name in the test
+   ([test signal](lint-rules.md#test-signal)). Run all affected tests (tests you add, direct and transitive
+   consumers of changed or deleted modules, changed literal paths) plus the relevant docs, format, lint and
+   type checks; never the full suite locally: the landing check is full verification.
+8. Never weaken, skip or quarantine tests or raise timeouts to hide races; explain any correction to an
+   impossible assertion (the land message's `Weakened-tests:` line). Report observed commands, exit codes and
+   counts; label unrun work. Runtime/storage changes also need real billed usage and byte-placement
+   evidence; otherwise that acceptance stays open. Perf/cost claims: [perf-claims](perf-claims.md).
+9. Land your own Lane (`land --save`) unless review is required first.
+   The reviewer prompt must include the AGENTS.md safety line verbatim.
+   Copy the full line starting with “Never print environment values or
+   secrets” from [AGENTS.md](../../AGENTS.md#hard-rules). Check the benchmark hold before each submission.
+   Never end the turn while your landing, dry run or wait runs; follow the command land prints. End the
+   land message with the commit trailers your harness asks for (for example `Co-Authored-By:`).
+10. Fix failures in the same Lane and land again; never cancel and recreate. Before filing an Issue or
+    friction, run one `planning {"search":"relevant words","limit":10}` and comment on a match instead. Log
+    action/code/Lane/cost/workaround, then fix or link a slice.
+11. Verify on accepted main: after landing, `nforge pull` (its own shell call) and grep for a named symbol
+    or file of your change before reporting LANDED; a receipt alone is not proof. Convex changes also need
+    deployment success at that commit; tell the lead the accepted State and do not deploy yourself. Tick
+    each proven Done-when line with its evidence (`tick-planning-item`); unmet lines stay open or name their
+    next Issue. The landing message says what the change removes or merges, or why nothing can go (growth
+    guard: `node scripts/check-growth.mjs`). Abandon unused Lanes with work preserved; remove only your own
+    regenerable temporary output.
+12. Convex: any `mutation` or `internalMutation` you add or touch imports from
     `./server` (the `finishReadWriter` wrapper), never `./_generated/server`.
-14. Final report, short and plain: receipt and accepted State; files changed; what the
+13. Final report, short and plain: receipt and accepted State; files changed; what the
     change removes or merges, or why nothing can go; tests
     run with exact counts; per-operation call/byte budgets; friction filed; what stays
     unverified; follow-ups found, each either done under the Item's Done-when list or

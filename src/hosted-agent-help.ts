@@ -33,7 +33,7 @@ export const hostedAgentHelpEntries = [
     json.properties.operationId = { type: 'string', format: 'uuid' };
   const required = new Set(json.required ?? []);
   const parameters = Object.keys(json.properties ?? {}).map(
-    name => `${name}${action === 'start' && name === 'model' ? '*' : required.has(name) ? '' : '?'}`,
+    name => `${name}${required.has(name) ? '' : '?'}`,
   );
   return {
     action,
@@ -101,7 +101,7 @@ export function hostedAgentHelp(action?: string) {
     'Forge hosted agent workflow',
     'nforge agent ROOT ACTION [JSON | --command-file FILE]; actions listed as `x ACTION` run as nforge x ROOT ACTION [JSON | --command-file FILE].',
     'Hosted ROOT, retained address, or url + projectId. Guide: nforge docs agent.',
-    'Parameters (? = optional, * = required for a new agent session unless FORGE_AGENT_MODEL supplies it):',
+    'Parameters (? = optional):',
     ...entries.map(entry => {
       // The overview explains operationId once. Action help and generated docs list every field.
       const parameters = canonical
@@ -187,7 +187,7 @@ export const allHelpTopics = () =>
 export function hostedAgentHelpMarkdown() {
   return [
     '<!-- hosted-agent-contract:start -->',
-    '| Hosted command | Accepted parameters (`?` = optional, `*` = required for a new agent session unless `FORGE_AGENT_MODEL` supplies it) |',
+    '| Hosted command | Accepted parameters (`?` = optional) |',
     '| --- | --- |',
     ...hostedAgentHelpEntries.map(
       entry => `| \`${entry.command}\` | ${`\`${entry.parameters.join(', ') || '{}'}\``} |`,

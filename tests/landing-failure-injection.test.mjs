@@ -73,7 +73,7 @@ function assertOutcome(f, run, allowed, label) {
     const selection = { laneId: randomUUID(), operationId: state.operationId };
     const next = normalizeHostedFinishResult(root, selection, { submission: state });
     assert.equal(next.terminal, true, label);
-    assert.match(next.command, /^nforge agent '\/synthetic\/root' finish '\{.*"retry":true/, label);
+    assert.match(next.command, /^nforge agent '\/synthetic\/root' land --save '\{.*"retry":true/, label);
     assert(!next.command.includes(state.operationId), `${label}: a retry is a new operation`);
   }
   const landed = ended.filter(s => s.phase === 'landed').length;
@@ -452,7 +452,7 @@ test('submit: an unknown outcome names the exact replay of the same operation', 
   );
   assert.equal(pending.result.inProgress, true);
   assert.equal(pending.result.next.operationId, operationId, 'replay, never a new attempt');
-  assert.match(pending.result.command, new RegExp(`finish '.*"operationId":"${operationId}"`));
+  assert.match(pending.result.command, new RegExp(`land --save '.*"operationId":"${operationId}"`));
 });
 
 test('check callback: a re-delivered result (lost reply) is reconciled; the landing lands once', async t => {

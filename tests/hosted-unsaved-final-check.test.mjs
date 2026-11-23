@@ -126,7 +126,7 @@ test('48835eea: an edit written while a sync runs on a path main changed goes to
     assert.match(error.message, /not in the Lane head/);
     // The retained sync is the next step, never a bare save that would skip it.
     assert.equal(error.recovery.next.action, 'sync');
-    assert.match(error.recovery.command, / sync /);
+    assert.match(error.recovery.command, / save --sync /);
     handoff = error.recovery.next;
     return true;
   });
@@ -249,7 +249,7 @@ test('48835eea review: a save-first refused for conflict markers names the same 
     assert.equal(error.code, 'CONFLICT_MARKERS');
     assert.match(error.message, /^The sync did not run: /);
     assert.equal(error.recovery.next.action, 'sync');
-    assert.match(error.recovery.command, / sync /);
+    assert.match(error.recovery.command, / save --sync /);
     return true;
   });
 });

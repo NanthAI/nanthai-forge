@@ -228,7 +228,9 @@ test('agent discovery teaches current contract verbs and shares measured B1.5d/P
     assert.doesNotMatch(text, /Let `finish`|contributors propose and cannot write|R3\) is pending/);
   }
   assert.match(llms, /Lifecycle verbs: `start`, `save`, `land`/);
-  assert.match(llms, /preflight \{laneId\}/);
+  // 6b7d5a79: land runs the affected preflight itself; no manual preflight step is taught.
+  assert.match(llms, /bare `land`/);
+  assert.doesNotMatch(llms, /Run `preflight \{laneId\}`/);
   assert.match(llms, /tests \{candidateId\}/);
   assert.doesNotMatch(llms, /nforge agent ROOT tests`/);
   const retired = skill.split('- Removed with native mode:')[1].split('## Working')[0];

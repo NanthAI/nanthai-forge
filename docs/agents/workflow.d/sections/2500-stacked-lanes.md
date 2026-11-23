@@ -19,10 +19,10 @@ in a cumulative batch Candidate belonging to another Intent. This retargeting do
 not rewrite a child working copy while its agent is editing: `sync`, or the existing automatic sync during `finish`,
 brings in the accepted source. Status identifies the landing receipt; a later
 main advance is included on sync. An abandoned parent remains visible until an
-explicit `sync {"laneId":"CHILD_LANE_ID","ontoMain":true}` detaches the child.
+explicit `save --sync {"laneId":"CHILD_LANE_ID","ontoMain":true}` detaches the child.
 This reapplies only the child's delta onto main (or the native bootstrap source
 when main has no receipt yet); parent-only changes are omitted and overlaps remain
-conflicts. `undo-sync` restores the pre-sync source base and stack pin.
+conflicts. `x undo` restores the Lane save from before the sync, with its source base and stack pin.
 
 When `land` picks up a saved child after its parent has landed, both single and
 batch landing compose the child's aggregate delta from its saved parent base onto
@@ -34,10 +34,9 @@ main and exact checked source. A deeper chain retargets each child after its own
 parent lands, without a manual sync. Real conflicts retain the original States
 and identify accepted Lane deltas touching the conflicting paths.
 
-Child `finish` and `land` use the existing dependency wait until the parent has an
-accepted input in the destination Channel. `land {"laneIds":["PARENT","CHILD"]}`
-can process the chain in order; `land-ready` resumes waiting finishes after their
-parents land. A child never supplies its parent's acceptance merely by containing
+A child's `land --save` uses the existing dependency wait until the parent has an
+accepted input in the destination Channel; replaying its original request (or
+`wait {operationIds}`) resumes it after the parent lands. A child never supplies its parent's acceptance merely by containing
 its source. Operation IDs retain the original start/sync selection on replay,
 including interruption after working files were applied.
 
@@ -55,7 +54,7 @@ Hosted parent notices (Issue dc62b120). A Lane stacked on another is told when i
 so it never lands on or waits for a parent that moved. Each direct dependent gets one board note from
 the parent (`board.notices` on its next Lane action, and a blocked `wait` returns early with
 `reason:"message"`), naming the event and the exact command: the parent **saved** a new head (`Your next
-save restacks onto it if clean; now: nforge agent . sync '{"laneId":"CHILD"}'`), was **abandoned** (`Unstack onto main: ... sync
+save restacks onto it if clean; now: nforge agent . save --sync '{"laneId":"CHILD"}'`), was **abandoned** (`Unstack onto main: ... save --sync
 '{"laneId":"CHILD","ontoMain":true}'`), or its **landing failed or was cancelled** (unstack, or restack
 after the fix). One note per event per dependent: further parent saves stay quiet until the child
 restacks, an abandonment is announced once (the landing it cancels adds nothing), and a landing failure

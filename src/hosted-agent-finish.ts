@@ -644,7 +644,7 @@ export async function refuseFailedStackParent(session: HostedAgentSession, laneI
     undefined,
     {
       next: { action: 'sync', ...sync },
-      command: `nforge agent ${shellQuote(session.root)} sync ${shellQuote(JSON.stringify(sync))}`,
+      command: `nforge agent ${shellQuote(session.root)} save --sync ${shellQuote(JSON.stringify(sync))}`,
     },
   );
 }

@@ -86,11 +86,11 @@ export function agentAuthorship(
     fallbackSession?: string;
   },
   env: NodeJS.ProcessEnv = process.env,
-): { authorship: AuthorshipClaim; agentClient?: string; agentRun?: string } {
+): { authorship: AuthorshipClaim; agentClient?: string; agentRun?: string; modelDefaulted?: true } {
   const session = resolveAgentSession(env, undefined, input.session);
   if (env.FORGE_HUMAN === '1' || (!session && !input.run && input.session === null))
     return { authorship: { kind: 'person' } };
-  const declared = input.model ?? env.FORGE_AGENT_MODEL;
+  const declared = input.model ?? env.FORGE_AGENT_MODEL ?? clientModel(env, session?.harness);
   invariant(
     declared === undefined || AGENT_STAMP_VALUE.test(declared),
     'BAD_ARGUMENT',
@@ -99,13 +99,11 @@ export function agentAuthorship(
   // Only detected agent apps inherit declarations. A one-off model in a plain shell
   // must not turn later commands in that shell into agent commands.
   const key = session?.harness ? session.key : undefined;
-  const model = key ? sessionModel(key, declared) : declared;
+  let model = key ? sessionModel(key, declared) : declared;
   if (!session && !input.run && model === undefined) return { authorship: { kind: 'person' } };
-  invariant(
-    !input.required || model !== undefined,
-    'BAD_ARGUMENT',
-    'Agent start requires model. Set model or FORGE_AGENT_MODEL; use "unknown" when unknown.',
-  );
+  // A start never refuses for a missing model (6b7d5a79): it records "unknown" and the caller tips once.
+  const defaulted = input.required === true && model === undefined;
+  if (defaulted) model = 'unknown';
   const app = session?.harness;
   const runKey =
     session?.key ??
@@ -126,7 +124,29 @@ export function agentAuthorship(
         ? { agentClient: app }
         : {}),
     ...(run ? { agentRun: run } : {}),
+    ...(defaulted ? { modelDefaulted: true as const } : {}),
   };
+}
+/** The model an agent app's own setting names, where the app exposes one to shell commands: Claude Code's
+ * ANTHROPIC_MODEL and Gemini CLI's GEMINI_MODEL. A value Forge cannot stamp is ignored, never guessed at. */
+function clientModel(env: NodeJS.ProcessEnv, harness: string | undefined) {
+  const value =
+    harness === 'claude-code' ? env.ANTHROPIC_MODEL : harness === 'gemini' ? env.GEMINI_MODEL : undefined;
+  return value && AGENT_STAMP_VALUE.test(value) ? value : undefined;
+}
+export const MODEL_TIP =
+  'Tip: this start recorded model "unknown". Set FORGE_AGENT_MODEL=<your model id> (or pass "model") so receipts and stats name it.';
+/** The missing-model tip, once per machine; an unwritable marker shows nothing. */
+export function modelTipOnce(): string | undefined {
+  if (disabled()) return undefined;
+  const file = join(turnLedgerDirectory(), '..', 'model-tip.json');
+  try {
+    mkdirSync(join(turnLedgerDirectory(), '..'), { recursive: true, mode: 0o700 });
+    writeFileSync(file, JSON.stringify({ shownAt: new Date().toISOString() }), { flag: 'wx', mode: 0o600 });
+    return MODEL_TIP;
+  } catch {
+    return undefined;
+  }
 }
 /** Test processes never touch the developer's real state unless they select one. */
 const disabled = () => Boolean(process.env.NODE_TEST_CONTEXT) && !process.env.XDG_STATE_HOME;

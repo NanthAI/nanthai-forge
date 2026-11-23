@@ -4,6 +4,7 @@ import { ForgeError } from './errors.js';
 import { shellQuote } from './shell-quote.js';
 import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentJournal } from './hosted-agent-journal.js';
+import { cliVerb } from './agent-verbs.js';
 
 /** Refresh only the epoch after the first transaction refused it, keeping every other pin and the
  * operation id. Send must return a replay (including an unfinished one) before checking its epoch. */
@@ -109,7 +110,7 @@ export function freshOperationRefusal(
   continuation: { action: string; parameters: Record<string, unknown> },
 ) {
   const parameters = { ...continuation.parameters, operationId: randomUUID() };
-  const command = `nforge agent ${shellQuote(root)} ${continuation.action} ${shellQuote(JSON.stringify(parameters))}`;
+  const command = `nforge agent ${shellQuote(root)} ${cliVerb(continuation.action, parameters)} ${shellQuote(JSON.stringify(parameters))}`;
   return new ForgeError(code, `${message} Run it again as a new operation: ${command}`, undefined, {
     root,
     next: { action: continuation.action, ...parameters },

@@ -157,7 +157,7 @@ test('case 2: an abandoned resolution Lane yields one fresh resolution command',
   assert.equal(step.next.action, 'sync');
   assert(step.next.candidateId);
   assert.notEqual(step.next.operationId, undefined, 'a new operation, never the dropped draft');
-  assert.match(step.command, / sync /);
+  assert.match(step.command, / save --sync /);
 });
 
 test('case 4 (2e264cd6, 5b1c7e0e): the resolution happens in the original Lane folder, with the whole tree', async t => {

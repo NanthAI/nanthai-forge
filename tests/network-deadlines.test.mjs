@@ -383,7 +383,7 @@ for (const [phase, kind, name, args] of phases)
     assert.equal(pending.result.inProgress, true);
     assert.equal(pending.result.next.operationId, command.operationId);
     assert.deepEqual(pending.result.replayParameters, command);
-    assert.match(pending.result.command, /finish/);
+    assert.match(pending.result.command, / land --save /);
     assert(!pending.result.next.retry);
   });
 

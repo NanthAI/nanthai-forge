@@ -79,7 +79,7 @@ export function stackOffer(input: {
     peerLaneId: peer.laneId,
     submissionId: peer.landing!.submissionId,
     mode: input.mode,
-    command: `nforge agent . sync '${body}'`,
+    command: `nforge agent . save --sync '${body}'`,
     text:
       input.mode === 'auto'
         ? `Lane ${peer.laneId.slice(0, 8)} touches your files and is admitted; your next sync stacks this Lane on its pending head (project setting stacking:auto). If it fails, your next land re-pins to main and checks once.`

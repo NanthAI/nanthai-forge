@@ -115,13 +115,27 @@ async function autoWorker(input: Record<string, unknown>) {
   }
   const contexts: string[] = [];
   const seen = new Set<string>();
+  const session = String(input.session_id ?? input.tool_use_id ?? randomUUID());
+  // Local teaching (6b7d5a79): an edit in the project folder, during a live landing, or long unsaved.
+  const { cloneRootOf, cloneRootHint, laneEditHints } = await import('./agent-edit-local-hints.js');
+  const lanes = new Set<string>();
   for (const path of raw) {
-    const target = editTarget(resolve(cwd, path));
-    if (!target || !editHooksEnabled(target.project)) continue;
+    const absolute = resolve(cwd, path);
+    const target = editTarget(absolute);
+    if (!target) {
+      const clone = cloneRootOf(absolute);
+      const hint = clone && editHooksEnabled(clone.projectId) ? cloneRootHint(clone, session) : '';
+      if (hint) contexts.push(hint);
+      continue;
+    }
+    if (!editHooksEnabled(target.project)) continue;
+    if (!lanes.has(target.laneId)) {
+      lanes.add(target.laneId);
+      contexts.push(...laneEditHints(target));
+    }
     const key = JSON.stringify([target.root, target.path]);
     if (seen.has(key)) continue;
     seen.add(key);
-    const session = String(input.session_id ?? input.tool_use_id ?? randomUUID());
     const context = hostedEditContext(await preEditHosted(target, session));
     if (context) contexts.push(context);
   }

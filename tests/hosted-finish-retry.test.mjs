@@ -58,7 +58,7 @@ for (const shorthand of [false, true])
     assert.equal(refused.operationId, first.operationId);
     assert.equal(refused.result.submission.phase, 'terminal-failed');
     assert.equal(refused.result.next.action, 'finish');
-    assert.match(refused.result.retryCommand, /finish .*"retry":true.*"reason":"other"/);
+    assert.match(refused.result.retryCommand, /land --save .*"retry":true.*"reason":"other"/);
     assert.equal(s.calls.length - before, 2, 'shorthand failure is discovery plus exact replay');
     const laterMessage = await s.transport().dispatch('finish', {
       ...command,

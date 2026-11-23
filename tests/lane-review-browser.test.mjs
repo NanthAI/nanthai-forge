@@ -364,7 +364,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
       );
       assert.match(
         await page.locator('.cmd').first().textContent(),
-        /^nforge agent \. sync '\{"laneId":.*"predecessor":\{/,
+        /^nforge agent \. save --sync '\{"laneId":.*"predecessor":\{/,
       );
       // An older save's row counts the body it opened.
       const docs = page.locator('.lr-file', { hasText: 'docs/parser.md' });

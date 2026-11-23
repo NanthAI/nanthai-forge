@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "src/hosted-would-conflict.ts": "7fd7237b777bc626e4e2d67feb7b3173aa93665d4c153a6f7ad43cfe43bea0bf"
+  },
+  "replay": {
+    "incident": "39a68046",
+    "test": "39a68046: a conflict draft retires only the origin queued sync-required entry at publication",
+    "receipt": "c70ffedf-22c5-41aa-9810-7a340de6a4c2"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "76834587-83f6-41d3-84d8-f4b23eb28ad2",
+  "review": {
+    "model": "gemini-4-neon",
+    "session": "thread:delegated-task:command%3Amcp%3A0ea736c7-cba5-44f2-91e5-4e93572b8a35%3Adelegate-task%3A239dc80b-9fe0-4677-bcfb-55d8f1485a8b",
+    "receipt": "4fea725d-8df0-4f3f-87dd-39ba044621ae"
+  },
+  "exercised": {
+    "src/hosted-would-conflict.ts": {
+      "executed": [
+        "predecessorConflictAdvice",
+        "syncRequiredAdvice",
+        "syncRequiredNext",
+        "syncRequiredSummary"
+      ],
+      "digest": "3439b532d83bc64ad4931d2af9c77a16dd9d6a80c12b1adbf355d92213b38346",
+      "units": [
+        [
+          "SAME_BYTES_LISTING_BYTES",
+          "32af1afccc377145bb9b5ce9dc7e8257f444b211f71878fda2039b54a0ae00c0"
+        ],
+        [
+          "detail",
+          "f698126fad352531a5ff7c3655a1b6313aa6d9713bd0b85c54cd3029cf2f8182"
+        ],
+        [
+          "predecessorConflictAdvice",
+          "c8673f269524001a81027928e2c0d22da3de87317b4fb95ccea45428c23bfd5e"
+        ],
+        [
+          "sameBytesPaths",
+          "7aab6d3ec90f33501892f42c81f80b7246f89830cb79c3e11489c5ab6880e86a"
+        ],
+        [
+          "shellQuote",
+          "5298851f4c8211780b29057b283a3ca3ed58fe90955dd95bd4912059c331950b"
+        ],
+        [
+          "syncRequiredAdvice",
+          "eb963581808221bcb4195367730749579d6bf4232f827798ac8b6b6e63564b56"
+        ],
+        [
+          "syncRequiredContinuation",
+          "1c7247ba793d577d5a833da80b59d8e06942bc62d0e4bec53ecae6441b838c3f"
+        ],
+        [
+          "syncRequiredNext",
+          "0ef99822b864440856100994d31324b4be0b5c5aa76f81efabee4269b8565a91"
+        ],
+        [
+          "syncRequiredSummary",
+          "7c97ec7de53424bc77a1ef8757372befa5a43dd8585efa721c8a7c7a7ed465d3"
+        ],
+        [
+          "wouldConflictSchema",
+          "18c21a811bfbaab72fbd2ccac51b8d26a1e2cdba86577a78e1e9e7325992b277"
+        ],
+        [
+          "z",
+          "0be8b14a719fbad954f3dc9bb19b1716bed3a588afba2e97f0a99e168ee0a700"
+        ]
+      ]
+    }
+  }
+}

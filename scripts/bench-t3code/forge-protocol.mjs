@@ -46,6 +46,24 @@ export function printedCommand(text, cwd) {
   return { root: resolve(cwd, root), action, body, flags: args.slice(0, -1) };
 }
 
+const wireAction = {
+  'land --save': 'finish',
+  land: 'finish',
+  'land --withdraw': 'withdraw',
+  'save --sync': 'sync',
+  'save --candidate': 'compose',
+  'save --check': 'check',
+  'save --contract': 'confirm-tests',
+  'save --friction': 'friction',
+  'save --decision': 'decide',
+  'start --open': 'open',
+  'start --reopen': 'reopen',
+};
+
+/** The wire action a printed command reaches (`land --save` → finish): printed commands use current verb forms. */
+export const wire = command =>
+  wireAction[`${command.action} ${command.flags?.[0] ?? ''}`.trim()] ?? command.action;
+
 export function continuation(value, root) {
   // Brief submits advertise one wait or wake command. Older releases advertised
   // next:"retry", retry parameters and retryCommand for the same documented action.
@@ -64,12 +82,16 @@ export function continuation(value, root) {
     const command = printedCommand(advertised, root);
     if (expected && typeof expected === 'object') {
       for (const [key, wanted] of Object.entries(expected)) {
+        // A printed command uses the current verb form (`land --save`, `save --sync`); `next` keeps the wire action.
+        // `next` may name a verb form too ({action:"land",save:true}): compare the wire actions both reach.
+        if (key === 'action') {
+          const flags = wanted === 'land' && expected.save ? ['--save'] : [];
+          if (wire(command) !== wire({ action: wanted, flags }))
+            friction('Advertised next and command disagree on action');
+          continue;
+        }
         const actual =
-          key === 'action'
-            ? command.action
-            : key === 'save' && command.action === 'land'
-              ? command.flags.includes('--save')
-              : command.body[key];
+          key === 'save' && command.action === 'land' ? command.flags.includes('--save') : command.body[key];
         if (JSON.stringify(actual) !== JSON.stringify(wanted))
           friction(`Advertised next and command disagree on ${key}`);
       }
@@ -218,8 +240,8 @@ export async function driveForge({
     if (sourceFailed(recovery) && !terminalFailure) friction(`Source failed: ${JSON.stringify(recovery)}`);
     if (!next) friction(`Action ${command.action} returned no terminal result or continuation`);
     if (
-      ['sync', 'resolve'].includes(command.action) &&
-      next.action === command.action &&
+      ['sync', 'resolve'].includes(wire(command)) &&
+      wire(next) === wire(command) &&
       command.body.operationId &&
       next.body.operationId !== command.body.operationId
     )

@@ -2,7 +2,7 @@
 import { protectedPathNotice, type ProtectedPathPolicy } from './public-governance.js';
 import type { SaveContract } from './hosted-save-client.js';
 import { capsuleHistoryQueries, hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
-import { agentClient, agentAuthorship } from './agent-turn-work.js';
+import { agentClient, agentAuthorship, modelTipOnce } from './agent-turn-work.js';
 import { workIndexRecovery } from './error-teaching.js';
 import { suppliedLandingMessage } from './landing-message.js';
 import { keptApplyEnvelope } from './hosted-apply-kept.js';
@@ -123,15 +123,10 @@ import { START_COMPLETION_SECONDS, boundedStep, startContinuation } from './host
 import { gcNestedLanesHourly } from './client-cache-gc.js';
 import { hostedStartResultSchema, replacedOpenLanes } from './hosted-lane.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
-import {
-  HostedAgentJournal,
-  agentSessionKey,
-  finishCommandLaneIds,
-  hostedAgentRoot,
-} from './hosted-agent-journal.js';
+import { HostedAgentJournal, finishCommandLaneIds, hostedAgentRoot } from './hosted-agent-journal.js';
+import { shellQuote } from './shell-quote.js';
 import { landPhase } from './hosted-land-summary.js';
 import { sessionAgentSlug, sessionAgentIdentity } from './agent-slug-session.js';
-import { detectedClientProcess } from './agent-client-process.js';
 import {
   hostedAgentAction,
   hostedAgentAddressSchema,
@@ -422,24 +417,15 @@ export class HostedAgentTransport {
     const current = this.operationContext.getStore();
     if (current) current.id = id;
   }
-  /** The agent session an identical start replays within; undefined reads it from the client
-   * environment (agentSessionKey), null declares none. */
+  /** This agent session (run slug, Lane holder); undefined reads it from the client environment
+   * (agentSessionKey), null declares none. */
   agentSession?: string | null;
-  /** The client process an identical start replays within, with the session id; undefined detects
-   * it (agentClientProcess, cached per process), null declares none. */
-  agentProcess?: string | null;
   /** This session's agent slug (c29d0780), sent only to a server that advertised agent-slug. */
   agentSlug() {
     return sessionAgentSlug(this.agentSession);
   }
   private sentAgent() {
     return this.serverFeatures?.includes('agent-slug') ? this.agentSlug() : undefined;
-  }
-  private startScope(): string | undefined {
-    const session = agentSessionKey(process.env, this.agentSession);
-    if (!session) return undefined;
-    const client = this.agentProcess === undefined ? detectedClientProcess() : this.agentProcess;
-    return client ? `${session}\u0000${client}` : session;
   }
   /** CLI only: start reports the new Lane before its checkout downloads. */
   onStarted?: (lane: { laneId: string; path: string | null }) => void;
@@ -587,6 +573,7 @@ export class HostedAgentTransport {
         operationId: null,
         resolved: null,
         ...(await diffHostedSource(this, input)),
+        ...this.unsavedDiffNotice(input),
       };
     if (requestedAction === 'landings')
       return {
@@ -1430,11 +1417,7 @@ export class HostedAgentTransport {
           : null;
       if (pendingSave)
         return this.response(action, typeof operationId === 'string' ? operationId : null, pendingSave);
-      // An identical start replays only within the agent session that made it (issue b6ba9219).
-      // Where the client's own environment gave the session id, the client process narrows it:
-      // two processes sharing one session id never replay each other's start (issue 3676f3e1).
-      const startSession = action === 'start' && !operationId ? this.startScope() : undefined;
-      const authorship =
+      const declaredAuthorship =
         this.serverFeatures?.includes('source-authorship-v1') &&
         ['start', 'save', 'finish', 'resolve', 'abandon', 'complete', 'reopen'].includes(action)
           ? agentAuthorship({
@@ -1447,10 +1430,15 @@ export class HostedAgentTransport {
               ...(this.agentSlug() ? { run: this.agentSlug()! } : {}),
             })
           : undefined;
+      // A start without a model records "unknown" and says once per machine how to name it (6b7d5a79).
+      const { modelDefaulted, ...stamp } = declaredAuthorship ?? {};
+      const authorship = declaredAuthorship ? (stamp as ReturnType<typeof agentAuthorship>) : undefined;
+      if (modelDefaulted) {
+        const tip = modelTipOnce();
+        if (tip) process.stderr.write(`${tip}\n`);
+      }
       const previousStart =
-        action === 'start' && !operationId
-          ? await this.closedStart(root, capabilities.actor, command.data, startSession)
-          : null;
+        action === 'start' && !operationId ? this.earlierStart(root, capabilities.actor, command.data) : null;
       const undoReplay =
         action === 'undo' && !operationId && capabilities.features?.includes(laneUndo)
           ? await (
@@ -1498,8 +1486,9 @@ export class HostedAgentTransport {
               action,
               command.data,
               operationId as string | undefined,
-              previousStart !== null || supersededReplay || undoReplay?.fresh === true,
-              startSession,
+              // A start without an operationId is always new work (6b7d5a79), even when the earlier
+              // identical start's journal was pruned and only its index remains.
+              action === 'start' || previousStart !== null || supersededReplay || undoReplay?.fresh === true,
             );
       metricOperationId(journal.operationId);
       this.callerOperationId = journal.operationId;
@@ -1890,8 +1879,9 @@ export class HostedAgentTransport {
           if (started.lane)
             result = {
               ...(result as object),
+              // Where to work is the one rule a new agent must learn at start (6b7d5a79).
               rules:
-                'nforge agent ROOT capabilities or MCP forge_work_overview {command:{action:"capabilities"}}.',
+                'Edit only in this path; save and land from it. More: nforge agent ROOT capabilities or MCP forge_work_overview {command:{action:"capabilities"}}.',
             };
         }
         if (planning) result = { ...(result as object), planning };
@@ -1906,14 +1896,11 @@ export class HostedAgentTransport {
             },
           };
         if (action === 'start' && previousStart) {
-          const { unscoped, ...previousLane } = previousStart;
           result = {
             ...(result as object),
             previousLane: {
-              ...previousLane,
-              note: unscoped
-                ? `An identical start on this machine ran before (${'operationId' in previousStart ? `operation ${previousStart.operationId}` : `Lane ${previousStart.laneId}`}). No agent session id (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID or the MCP session) shows it was yours, so this opened a new Lane instead of replaying it; openLanes lists the open ones. To retry a lost start, pass its operationId.`
-                : `The Lane from your earlier identical start is ${previousStart.state}; this opened a new Lane.`,
+              ...previousStart,
+              note: `An identical start on this machine ran before (${previousStart.laneId ? `Lane ${previousStart.laneId}, ${previousStart.state}` : `operation ${(previousStart as { operationId: string }).operationId}`}); this opened a new Lane. If that start was yours and its reply was lost, use its Lane (start --open {laneId}) and abandon this one, or retry with its operationId.`,
             },
           };
         }
@@ -2381,6 +2368,27 @@ export class HostedAgentTransport {
     return value;
   }
   /** unsavedFor and the checkpoint nudge, on Lane calls only; a local stat walk, no timers. */
+  /** A diff of this checkout's own Lane compares saved bytes: say so when local edits are unsaved (6b7d5a79).
+   * Local file times only, the same scan as the checkpoint nudge; no call. */
+  private unsavedDiffNotice(input: Record<string, unknown>): { unsaved?: string } {
+    const root = hostedAgentRoot(this.root);
+    const laneId = readHostedLaneCheckout(root)?.selection.laneId;
+    if (
+      !laneId ||
+      (input.laneId !== undefined && input.laneId !== laneId) ||
+      input.state ||
+      input.candidateId
+    )
+      return {};
+    try {
+      if (unsavedMinutes(root) === null) return {};
+    } catch {
+      return {};
+    }
+    return {
+      unsaved: `Unsaved local edits are not in this diff (it compares saved bytes). Save first: nforge agent ${shellQuote(root)} save '{}', or list them: status '{"files":true}'.`,
+    };
+  }
   private nudge(action: HostedAgentAction, result: unknown) {
     if (!this.defaults || ['save', 'capabilities', 'metrics', 'check-settings'].includes(action)) return {};
     const root = hostedAgentRoot(this.root);
@@ -2402,35 +2410,16 @@ export class HostedAgentTransport {
    * (that replay is the idempotent retry). Without a session id nothing proves the earlier start was
    * this agent's, so any earlier Lane is reported and never replayed (no read). Local registry first;
    * one Lane read only when an earlier same-session start exists, so a first start makes no extra call. */
-  private async closedStart(root: string, actor: string, command: unknown, session: string | undefined) {
-    const previous = HostedAgentJournal.previous(root, this.address, actor, 'start', command, session);
-    const laneId = previous?.values['started-lane'];
-    if (previous && session === undefined)
-      return typeof laneId === 'string'
-        ? {
-            laneId,
-            state: readLaneEntry(laneId)?.state ?? 'unknown',
-            unscoped: true,
-          }
-        : {
-            laneId: null,
-            operationId: previous.operationId,
-            state: 'unknown',
-            unscoped: true,
-          };
-    if (typeof laneId !== 'string') return null;
-    const local = readLaneEntry(laneId)?.state;
-    if (local) return { laneId, state: local, unscoped: false };
-    try {
-      const lane = await this.query<{ state?: string }>('projectHostedLanes:select', { laneId });
-      return lane.state === 'completed' || lane.state === 'abandoned'
-        ? { laneId, state: lane.state, unscoped: false }
-        : null;
-    } catch (error) {
-      if (hostedActionError(error, 'start').code === 'NOT_FOUND')
-        return { laneId, state: 'missing', unscoped: false };
-      throw error;
-    }
+  /** A start without an operationId is always new work (6b7d5a79): no agent needs to make up an id, and
+   * builders sharing one client session never get each other's Lane (b6ba9219, 3676f3e1). An identical
+   * earlier start on this machine is named as `previousLane` so a lost reply is never silent. */
+  private earlierStart(root: string, actor: string, command: unknown) {
+    const previous = HostedAgentJournal.previous(root, this.address, actor, 'start', command);
+    if (!previous) return null;
+    const laneId = previous.values['started-lane'];
+    return typeof laneId === 'string'
+      ? { laneId, state: readLaneEntry(laneId)?.state ?? 'unknown' }
+      : { laneId: null, operationId: previous.operationId, state: 'unknown' };
   }
   private async clientAction(
     action: 'preflight',

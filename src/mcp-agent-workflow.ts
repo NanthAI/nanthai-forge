@@ -12,7 +12,7 @@ export function registerAgentWorkflow(server: McpServer, root: string, hosted?: 
   const address = hosted ? null : hostedAgentAddress(root, {});
   if (!hosted && !address) throw hostedRootRequired(root);
   const transport = hosted ?? new HostedAgentTransport(root, address!);
-  // One MCP server serves one agent session for its life: an identical start replays only here.
+  // One MCP server serves one agent session for its life (run slug and Lane holder).
   transport.agentSession ??= agentSessionKey() ?? `mcp:${randomUUID()}`;
   return registerHostedAgentWorkflow(server, transport);
 }

@@ -98,7 +98,7 @@ export function registerHostedAgentWorkflow(
   const groups = [
     {
       name: 'forge_task',
-      short: 'Start with model or FORGE_AGENT_MODEL.',
+      short: 'Start, save, land Lanes.',
       actions: [
         'start',
         'open',
@@ -255,7 +255,7 @@ export function registerHostedAgentWorkflow(
       }),
   );
   prose.forge_planning =
-    'Planning: indexed title/body search; active by default, status:all includes history. Filter kind/status/initiativeId/waitingOn/type/owner/relation; cursor pages or id+comments. reconcile:false skips Intent updates. New Issues/friction return advisory likelyDuplicates. put-planning-item sets only named fields (0 creates); model fields (order, type, parentId, owner, waitingOn, relations, hidden) go in `fields`, docs/planning.md; comment-planning-item adds discussion. tick-planning-item {planningItemId,line,evidence} ticks one Done-when checkbox (line = 1-based checkbox position or unique text prefix) and posts the evidence as a decision comment; use it instead of hand-editing the body (a version race retries only that tick). batch:[…] ≤100 puts/comments: one call, per-Item results, one undo. Issue key: planningItemId; id/itemId are aliases. Full UUID or unique 8+ hex prefix. Start via forge_task {action:start,planningItemId,model:"unknown"}; use the model ID when known.';
+    'Planning: indexed title/body search; active by default, status:all includes history. Filter kind/status/initiativeId/waitingOn/type/owner/relation; cursor pages or id+comments. An Item read changes nothing; list reads close Issues whose Intent finished (reconcile:false skips, reconcile:true on an Item read). New Issues/friction return advisory likelyDuplicates. put-planning-item sets only named fields (0 creates); model fields (order, type, parentId, owner, waitingOn, relations, hidden) go in `fields`, docs/planning.md; comment-planning-item adds discussion. tick-planning-item {planningItemId,line,evidence} ticks one Done-when checkbox (line = 1-based checkbox position or unique text prefix) and posts the evidence as a decision comment; use it instead of hand-editing the body (a version race retries only that tick); the last tick closes an Issue whose Intent finished. batch:[…] ≤100 puts/comments: one call, per-Item results, one undo. Issue key: planningItemId; id/itemId are aliases. Full UUID or unique 8+ hex prefix. Start via forge_task {action:start,planningItemId,model?} (model: your model ID when known).';
   prose.forge_planning +=
     ' history:true with planningItemId returns the Item audit timeline (who, when, diffs, ticks, waits, moves, comments, Lanes/landings); history:{from,to?,change?} lists Items closed, reopened or changed in a UTC window (optionally per initiativeId). Import attribution goes in fields.imported. planning.transfer {mode:import,rows,apply} prepares or applies source-keyed pages; docs/planning.md.';
   server.registerTool(

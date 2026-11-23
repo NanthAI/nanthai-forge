@@ -106,6 +106,13 @@ its retained replies. MCP uses `forge_work_overview` action `board`.
   quoted-data lines inside its existing context, from the query it already makes.
   It sends the board argument only after a Lane action learned that the server has
   the board (a small local marker), so it never adds a capability call.
+- Local working-rule hints (Item 6b7d5a79; local reads only, no server call): the hook
+  warns once per session when an edit is in the project's copy of main (a clone root,
+  never saved or landed) and names the start command; on every edit while this machine
+  has a live landing of the Lane (registry `landing`, under 6 h old) it names the
+  `wait` and `land --withdraw` commands; and after 30 minutes of unsaved edits (from
+  the first write after the last save) it names the save command, at most once per 30
+  minutes and never during a live landing.
 - Automatic file claims (on by default): the first time a session writes a file that
   your Lane has not saved, Forge records "touching PATH" for your Lane, so other agents
   see your unsaved edit. Their first write to that file shows `Claim on PATH: @handle

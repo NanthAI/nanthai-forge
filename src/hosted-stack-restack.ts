@@ -22,7 +22,7 @@ const syncedSchema = z.looseObject({
   lane: z.looseObject({ laneId: z.string(), head: z.string() }),
 });
 const short = (id: string) => id.slice(0, 8);
-const syncCommand = (laneId: string) => `nforge agent . sync '{"laneId":"${laneId}"}'`;
+const syncCommand = (laneId: string) => `nforge agent . save --sync '{"laneId":"${laneId}"}'`;
 
 /** One restack per (Lane, saved head, parent head): a retried save replays the same sync operation. */
 export function restackOperationId(laneId: string, savedHead: string, parentHead: string) {

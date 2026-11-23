@@ -8,21 +8,18 @@ Use ordinary file tools for source questions. For delivery, use the installed `n
 `nforge agent ROOT VERB [--MODE] --help` gives parameters; `help TOPIC` gives one how-to. `nforge docs agents/hosted` is generated from the enforced contract. Use `--command-file FILE` for nested JSON. Refusals name `{code,message,next,learn}`: follow `next`, reading `learn` once. First-write hooks are advisory; `help hosted` explains opting out.
 
 <!-- agent-workflow:start -->
-Lifecycle verbs: `start`, `save`, `land`, `abandon`, `revert`, `cancel`. Use `land --save` to save, update from main, check and land under project policy. Run `preflight {laneId}` for affected checks of a saved Lane; `tests {candidateId}` reads a Candidate's test selection.
+Lifecycle verbs: `start`, `save`, `land`, `abandon`, `revert`, `cancel`. Use `land --save` (bare `land`) to save, run affected checks, update from main, check and land under project policy; follow the commands it prints. `tests {candidateId}` reads a Candidate's test selection.
 <!-- agent-workflow:end -->
 
 Before picking what to land next, `lanes {"view":"tree"}` shows stacks, overlaps, each Lane's state and its next step in one read.
 
 Optionally send `tokens` with `land --save`: a whole number, the tokens your own work on this landing used as your harness counts them. Stats shows the measured figure from the landings that report it; it is never billed.
 
-Report verification limits in the optional `notVerified` array on `save` or `land --save` (MCP `forge_task` takes the same field). Omit it if you have no report. Use `[]` only to claim you verified everything you changed. The claim belongs to that operation, separate from recorded checks. See [Run evidence](../../docs/run-evidence.md).
-
 ## Hosted checkouts
 
-- Start with a fresh operation id; edit only its returned Lane path. A new Lane that replaces one of the Issue's `openLanes` (for example a resolution Lane) abandons the old one: `abandon {laneId,reason:"Replaced by Lane NEW"}`. Save after meaningful steps. Read `behindMain`, presence and `conflictNotice`: saves trial-merge against main and peers, but unsaved peer edits are excluded. `peers {laneId,path?,detail?}` reads saved overlap evidence; missing evidence never proves independence.
+- `start {planningItemId}` (or `{outcome}`) prints the Lane path to edit in and the Issue's other `openLanes`. A new Lane that replaces one of them abandons the old one: `abandon {laneId,reason:"Replaced by Lane NEW"}`. Save after meaningful steps and act on `behindMain` and `conflictNotice` (saved files only: unsaved peer edits are excluded). `peers {laneId,path?,detail?}` reads saved overlap evidence; missing evidence never proves independence.
 - `diff {laneId,paths?,byteBudget?,cursor?}` compares pinned base to saved head. `show {state?,candidateId?,laneId?,path}` reads exact bytes, never unsaved files or a substituted revision. Follow `nextCursor` on the original pair.
 - `history {op:"log",path:"FILE"}` reads file history (Git commits when imported from GitHub, otherwise the landings that changed it; continue with `cursor`); `history {op:"blame",path:"FILE",start:1,end:100}` answers who changed lines; `op:"show",commit,path` reads an old file. MCP: `forge_review` action `history`.
-- Declare your model with `FORGE_AGENT_MODEL` in the launcher or shell (for example `export FORGE_AGENT_MODEL=gpt-6.1-sol`); receipts retain harness/model as declared attribution.
 - Read `protectedPathNotice` before checks and `policy` for the full rules. Never bypass a held review by changing policy.
 - Removed with native mode: `brief`, `review`, `candidate`/`candidates`, `link`, `handoff`, `report`, `making-of`, `improve`, `save --preview` and `x undo-sync`. See [hosted parity](../../docs/agents/hosted-parity.md).
 
@@ -30,7 +27,7 @@ Report verification limits in the optional `notVerified` array on `save` or `lan
 
 Follow [land it](../../docs/guides/agents.md#land-it) for start, proof, saved-diff review, landing, exact waits, main verification and Item evidence. [Stop at ready](../../docs/guides/agents.md#land-it-stop-at-ready) uses `land --save --check-only` and stops at the checked Candidate without acceptance. [Pull-request habits](../../docs/guides/review.md#coming-from-pull-requests) map to Forge commands; [review findings](../../docs/guides/review.md#structured-review-findings) live in Item discussion.
 
-Keep the complete original request and operation id after an unknown reply; replay them together. After submission freeze edits/saves/sync. Keep the turn active with the printed `waitCommand`, repeating `IN_PROGRESS` in the foreground without sleeping. If the receipt supplies `wake.command`, run it once in the background and block on it with the harness wait tool. The Stop hook's `nforge wait ID` resumes interrupted work. LANDED is acceptance; CHECK PASSED alone is not. Follow failure/conflict recovery in the same Lane.
+Never end the turn while your landing runs: follow the command land prints (its `waitCommand`, or `wake.command` once in the background with the harness wait tool). LANDED is acceptance; CHECK PASSED alone is not. Fix failures in the same Lane.
 
 Forge is not a chat channel: ask the person running you in your own app; message through Forge only someone else who must decide (an owner approval, a real choice between options, a handoff to another Lane’s owner).
 

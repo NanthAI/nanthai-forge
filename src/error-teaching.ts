@@ -16,7 +16,7 @@ const land = `nforge agent <root> land --save '{"message":"MESSAGE"}'`;
 
 /** The codes agents hit and repeat most (bench transcripts, frictions, the weaker-model trial), by hand. */
 export const teachingByCode: Record<string, Entry> = {
-  COMPOSITION_CONFLICT: { learn: 'conflict', next: `nforge agent <root> sync '<lane>'` },
+  COMPOSITION_CONFLICT: { learn: 'conflict', next: `nforge agent <root> save --sync '<lane>'` },
   BAD_ARGUMENT: { learn: 'arguments', next: '<command> --help' },
   SECRETS_ENV_EXAMPLE_NOT_FILE: { learn: 'arguments', next: 'nforge run --help' },
   SECRETS_PIN_LOST: { learn: 'auth', next: 'nforge secret repin' },
@@ -120,7 +120,10 @@ export const teachingFamilies: readonly (readonly [RegExp, string])[] = [
 
 /** A refusal whose code is generic but whose message pins the one right command (5a22ee20). */
 const teachingByMessage: readonly (readonly [RegExp, Entry])[] = [
-  [/^cleanOnly restacks a stacked Lane/, { learn: 'lanes', next: `nforge agent <root> sync '<lane>'` }],
+  [
+    /^cleanOnly restacks a stacked Lane/,
+    { learn: 'lanes', next: `nforge agent <root> save --sync '<lane>'` },
+  ],
 ];
 
 export function teachingEntry(code: string): Entry | undefined {

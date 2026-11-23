@@ -8,7 +8,7 @@ Open Plan for the project's backlog. Read the Item and its comments before start
 
 ```sh
 nforge agent ROOT planning '{"status":"active","limit":50}'
-nforge agent ROOT planning '{"id":"ITEM_ID","reconcile":false}'
+nforge agent ROOT planning '{"id":"ITEM_ID"}'
 nforge agent ROOT lanes '{"planningItemId":"ITEM_ID"}'
 ```
 
@@ -19,20 +19,20 @@ An empty Plan read shows how to propose an Item. A fresh Forge-native host prepa
 ## Start from the outcome
 
 ```sh
-nforge agent ROOT start '{"planningItemId":"ITEM_ID","operationId":"UUID","model":"unknown"}'
+nforge agent ROOT start '{"planningItemId":"ITEM_ID"}'
 ```
 
-Supply the model ID in `model` or set `FORGE_AGENT_MODEL` in the launcher. Use `"unknown"` if you don't know the ID. The returned Lane stays linked to its Item. Save the work, run affected checks and land. Record evidence for each Done-when line. Keep unmet lines explicit: a landing is not proof of a walkthrough, live cost capture or owner decision that did not happen.
+Forge detects the model from the client where it can, or from `model` or `FORGE_AGENT_MODEL` in the launcher; otherwise it records `"unknown"`. The returned Lane stays linked to its Item. Save the work, run affected checks and land. Record evidence for each Done-when line. Keep unmet lines explicit: a landing is not proof of a walkthrough, live cost capture or owner decision that did not happen.
 
 ## Record Done-when evidence
 
 Use the Item discussion to name the line, the result you observed and the receipt, run or walkthrough that proves it.
 
 ```sh
-nforge agent ROOT comment-planning-item '{"planningItemId":"ITEM_ID","text":"Name the Done-when line and its observed evidence."}'
-nforge agent ROOT planning '{"planningItemId":"ITEM_ID","reconcile":false}'
+nforge agent ROOT tick-planning-item '{"planningItemId":"ITEM_ID","line":1,"evidence":"The result you observed and its receipt."}'
+nforge agent ROOT comment-planning-item '{"planningItemId":"ITEM_ID","text":"Evidence that is not one line."}'
 ```
 
-If you can edit the Item, use `put-planning-item` with `planningItemId`, the current `expectedVersion`, and the full `body` with only the proven lines ticked. Preserve the other text. Read `planning {id}` to reconcile closure. A held Item names the lines still open.
+`tick-planning-item` ticks one line (its 1-based position or a unique text prefix) and posts the evidence as a decision comment. The last tick closes the Item once its work finished; otherwise the Item closes on the next Plan list read after it lands. A held Item names the lines still open.
 
 See [the complete planning workflow](../agents/workflow.md) for filtering, versions, comments, grouped work and lifecycle commands. The [capability status](../status.md) distinguishes delivered behavior from work in the phase plan.

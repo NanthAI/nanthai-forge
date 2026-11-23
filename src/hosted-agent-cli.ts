@@ -635,7 +635,9 @@ async function dispatchHostedAgentCli(
   // Retain only after an authorized successful response. An invalid/incomplete
   // address never silently turns into a local owner/listener dependency. A
   // read-only planning read writes nothing, and an unchanged receipt is not rewritten.
-  if (!(action === 'planning' && command.reconcile === false)) {
+  const itemRead =
+    command.id !== undefined || command.planningItemId !== undefined || command.itemId !== undefined;
+  if (!(action === 'planning' && (command.reconcile === false || (command.reconcile !== true && itemRead)))) {
     const receipt = join(hostedAgentDirectory(root), 'address.json'),
       body = JSON.stringify(address);
     if (!receiptMatches(receipt, body)) durableReplace(receipt, body);

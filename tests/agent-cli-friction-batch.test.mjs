@@ -34,7 +34,7 @@ test('a cleanOnly refusal on a non-stacked Lane names plain sync (friction 330dc
     undefined,
     'cleanOnly restacks a stacked Lane onto its parent; this Lane is not stacked.',
   );
-  assert.equal(taught.next, `nforge agent /work/clone sync '{"laneId":"${laneId}"}'`);
+  assert.equal(taught.next, `nforge agent /work/clone save --sync '{"laneId":"${laneId}"}'`);
   // Other BAD_ARGUMENT refusals keep the generic help command.
   assert.match(teach('BAD_ARGUMENT', context, undefined, 'Other.').next, /--help$/);
 });

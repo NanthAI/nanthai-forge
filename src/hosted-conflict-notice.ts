@@ -54,7 +54,9 @@ export function exactConflictNotice(laneId: string, conflicts: ExactConflicts) {
   const early = conflicts.find(conflict => conflict.earlyResolution)?.earlyResolution;
   const continuation = early ? syncRequiredContinuation('.', early, { laneId }) : undefined;
   const next = [
-    main ? `Sync now; your saved files conflict with main: nforge agent . sync '{"laneId":"${laneId}"}'` : '',
+    main
+      ? `Sync now; your saved files conflict with main: nforge agent . save --sync '{"laneId":"${laneId}"}'`
+      : '',
     continuation ? `${continuation.instruction} Run: ${continuation.command}` : '',
     peers.length && !continuation
       ? `Your saved files conflict with Lane ${peers.join(', ')}. Agree an order or split with that Lane, or change your edit, then save.`

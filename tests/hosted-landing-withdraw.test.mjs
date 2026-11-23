@@ -452,7 +452,10 @@ test('D1 replay: the Lane’s new head supersedes its queued sync-required entry
       assert.equal(error.code, 'STACK_PARENT_FAILED');
       assert.match(error.message, /CHECK_FAILED/);
       assert.deepEqual(error.recovery.next, { action: 'sync', laneId });
-      assert.equal(error.recovery.command, `nforge agent '/lane' sync '${JSON.stringify({ laneId })}'`);
+      assert.equal(
+        error.recovery.command,
+        `nforge agent '/lane' save --sync '${JSON.stringify({ laneId })}'`,
+      );
       return true;
     });
     // An unreadable status never blocks: the landing's own dependency wait decides.

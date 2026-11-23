@@ -5,9 +5,8 @@ append independent records through the existing owner transaction; source sync
 never merges a shared friction paragraph. Reports and triage decisions are retained.
 
 ```sh
-nforge agent ROOT friction '{"laneId":"LANE_ID","title":"Check interrupted","detail":"Runner stopped during validation","area":"checks","cost":{"minutes":8,"retries":1},"workaround":"Ran the affected tests locally","evidence":["RUN_ID"]}'
-nforge improve ROOT
-nforge improve ROOT --json
+nforge agent ROOT save --friction '{"laneId":"LANE_ID","title":"Check interrupted","detail":"Runner stopped during validation","area":"checks","cost":{"minutes":8,"retries":1},"workaround":"Ran the affected tests locally","evidence":["RUN_ID"]}'
+nforge agent ROOT friction-list '{}'
 nforge x ROOT friction-triage '{"frictionIds":["FRICTION_ID"],"status":"planned","reason":"Next runner slice"}'
 ```
 
@@ -15,8 +14,8 @@ nforge x ROOT friction-triage '{"frictionIds":["FRICTION_ID"],"status":"planned"
 missing cost stays unknown. Keep sensitive source and credentials out of reports.
 Every mutation accepts `operationId`; after an unknown reply, replay the same
 request with its returned `resolved.operationId`. Changed inputs with the same id
-fail explicitly. CLI and MCP use the same actions: `forge_task` handles `friction`
-and `friction-triage`; `forge_work_overview` handles `improve`.
+fail explicitly. CLI and MCP use the same actions: `forge_task` handles `save` mode `friction`
+and `friction-triage`; `forge_work_overview` handles `friction-list`.
 
 Groups use area and title after Unicode normalization, lowercasing, punctuation
 removal and word sorting. They make no model calls. Open groups rank before

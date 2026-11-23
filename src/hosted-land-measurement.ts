@@ -304,7 +304,7 @@ export async function observeMeasurementLand(root: string, command: Command, add
   }
   if (code === 0 || code === 3)
     return { command: { ...command, timeoutSeconds: Math.max(0, (deadline - Date.now()) / 1000) } };
-  const replay = `nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify(record.command))}`;
+  const replay = `nforge agent ${shellQuote(root)} land --save ${shellQuote(JSON.stringify(record.command))}`;
   const errors = readFileSync(`${base}.err`, 'utf8').trim().split('\n');
   for (const diagnostic of [line, ...errors.reverse()]) {
     if (!diagnostic?.startsWith('{"error":')) continue;

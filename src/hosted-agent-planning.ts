@@ -512,6 +512,7 @@ async function reconcile(
           openLines: unmet,
           version: item.reason === marker ? item.version : item.version + 1,
           lines: advice.lines,
+          tick: advice.tick,
           close: advice.close,
           reason: `${marker.replace('still open', 'are not ticked')}. ${advice.text}`,
         });
@@ -612,9 +613,24 @@ const holdAdvice = (id: string, version: number, lines: string[]) => {
   return {
     lines: shown,
     close: `nforge agent . put-planning-item '{"itemId":"${id}","expectedVersion":${version},"status":"closed","reason":"Done-when met, evidence in comments"}'`,
-    text: `Open: ${shown.map(line => `"${line}"`).join('; ')}${more > 0 ? `; and ${more} more` : ''}. Comment the evidence for each line, then close with: nforge agent . put-planning-item '{"itemId":"${id}","expectedVersion":${version},"status":"closed","reason":"Done-when met, evidence in comments"}'. Or tick the boxes (re-send the body with [x]) and the next planning read closes it.`,
+    tick: `nforge agent . tick-planning-item '{"planningItemId":"${id}","line":1,"evidence":"…"}'`,
+    text: `Open: ${shown.map(line => `"${line}"`).join('; ')}${more > 0 ? `; and ${more} more` : ''}. Tick each line with its evidence: nforge agent . tick-planning-item '{"planningItemId":"${id}","line":1,"evidence":"…"}' (line: the checkbox's position or a unique text prefix); the last tick closes the Issue.`,
   };
 };
+
+/** After the last Done-when tick: close (or abandon) the Issue when its Intent finished, as a reconciling read
+ * would. Nothing when the Intent is still running; the Issue then closes on the next list read after landing. */
+async function closeTicked(port: PlanningPort, itemId: string, version: number) {
+  const states = await intentStates(port, [itemId]);
+  if (!['completed', 'abandoned'].includes(states[itemId] ?? '')) return undefined;
+  const sync = await reconcile(
+    port,
+    await workspace(port),
+    [{ id: itemId, status: 'in-progress', version }],
+    states,
+  );
+  return sync.changed.length || sync.failed ? { reconciled: sync } : undefined;
+}
 
 /** The type, owner and relation filters (src/planning-filter.ts), loaded only when a read names one. */
 async function rowFilter(input: {
@@ -857,7 +873,9 @@ async function readPlanning(
             ? { [item.id]: work.intent }
             : {}
           : await intentStates(port, [item.id]);
-    const sync = input.reconcile ? await reconcile(port, ws, [item], states) : undefined;
+    // An Item read changes nothing unless asked (6b7d5a79): ticking its last Done-when line closes a
+    // finished Issue, and list reads still reconcile.
+    const sync = input.reconcile === true ? await reconcile(port, ws, [item], states) : undefined;
     // The item shows what the reconcile just wrote (the list read does the same): a closed Issue reads closed at its
     // new version, and a held one carries the version the printed close command names.
     const closed = sync?.changed.find(change => change.id === item.id);
@@ -930,7 +948,7 @@ async function readPlanning(
     port,
     issues.map(item => item.id),
   );
-  const sync = input.reconcile ? await reconcile(port, ws, issues, states) : undefined;
+  const sync = input.reconcile !== false ? await reconcile(port, ws, issues, states) : undefined;
   const closed = new Map(sync?.changed.map(entry => [entry.id, entry]));
   // An indexed filter can return zero rows even when the Plan has Items.
   const emptyPlan =
@@ -1250,7 +1268,10 @@ export async function executeHostedPlanning(
         return posted.result;
       },
     });
-    return { operationId: journal.operationId, result: { itemId, ...ticked } };
+    // The last tick closes an Issue whose Intent already finished (6b7d5a79), so no close command or
+    // reconciling read is left to remember. One Intent-state read, only when no line is left open.
+    const closed = ticked.openLines === 0 ? await closeTicked(port, itemId, ticked.version) : undefined;
+    return { operationId: journal.operationId, result: { itemId, ...ticked, ...closed } };
   }
   if (input.batch !== undefined) {
     const { batch } = hostedAgentCommandSchemas['put-planning-item'].parse(input);

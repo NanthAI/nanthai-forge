@@ -165,6 +165,7 @@ test('planned start links the Issue to its Intent although the legacy intentIds 
   assert.equal(item.intent, 'active', 'the link shows as the Intent state, not as intentIds');
 });
 
+// An Item read reconciles only when asked (6b7d5a79); list reads and the last tick close by default.
 test('closes + every Done-when box ticked: landing (completeOnAccept off) completes the Intent, the read closes the Issue once, replays add nothing', async t => {
   const w = await world(t, { ticks: ['x', 'x'], completeOnAccept: false });
   const started = await w.begin();
@@ -176,7 +177,7 @@ test('closes + every Done-when box ticked: landing (completeOnAccept off) comple
     'completeOnAccept off keeps the Lane open',
   );
   w.p.calls.length = 0;
-  const first = await read(w.p, { id: w.issue });
+  const first = await read(w.p, { id: w.issue, reconcile: true });
   assert.equal(first.item.intent, 'completed');
   assert.deepEqual(
     first.reconciled.changed.map(c => [c.id, c.to]),
@@ -195,7 +196,7 @@ test('closes + every Done-when box ticked: landing (completeOnAccept off) comple
   assert.equal(first.work.lanes[0].receipt.receiptId, receipt.id, 'and it still names its landing');
   // Idempotent: another read, and a replayed completion tick, change nothing.
   await w.f.materialize(receipt.id);
-  const again = await read(w.p, { id: w.issue });
+  const again = await read(w.p, { id: w.issue, reconcile: true });
   assert.equal(again.item.status, 'closed');
   assert.equal(again.reconciled, undefined);
   assert.equal(w.s.tables.projectWorkEvents.size, events);
@@ -205,7 +206,7 @@ test('closes + open Done-when lines: the Issue holds, names the open lines and t
   const w = await world(t, { ticks: ['x', ' ', ' '], completeOnAccept: false });
   const started = await w.begin();
   await w.land(started.lane);
-  const first = await read(w.p, { id: w.issue });
+  const first = await read(w.p, { id: w.issue, reconcile: true });
   assert.equal(first.item.status, 'in-progress', 'a landing alone never closes an Issue with open lines');
   assert.equal(first.item.intent, 'completed');
   const [held] = first.reconciled.held;
@@ -217,7 +218,7 @@ test('closes + open Done-when lines: the Issue holds, names the open lines and t
   assert.equal(after.comments.filter(c => /still open/.test(c.text)).length, 1);
   // Retry: still held, no second comment or write.
   const events = w.s.tables.projectWorkEvents.size;
-  assert.equal((await read(w.p, { id: w.issue })).reconciled.held.length, 1);
+  assert.equal((await read(w.p, { id: w.issue, reconcile: true })).reconciled.held.length, 1);
   assert.equal(w.s.tables.projectWorkEvents.size, events);
   // The builder runs the printed close with its evidence: done.
   await run(w.p, 'put-planning-item', {
@@ -226,7 +227,7 @@ test('closes + open Done-when lines: the Issue holds, names the open lines and t
     status: 'closed',
     reason: 'Done-when met, evidence in comments',
   });
-  const done = await read(w.p, { id: w.issue });
+  const done = await read(w.p, { id: w.issue, reconcile: true });
   assert.equal(done.item.status, 'closed');
   assert.equal(done.reconciled, undefined);
 });
@@ -237,7 +238,7 @@ test('completeOnAccept on: the Lane completes with the Intent and the Issue clos
   const receipt = await w.land(started.lane);
   assert.equal(await intentStatus(w, started.intentId), 'completed');
   assert.equal((await w.f.readLane(started.laneId)).state, 'completed');
-  const seen = await read(w.p, { id: w.issue });
+  const seen = await read(w.p, { id: w.issue, reconcile: true });
   assert.equal(seen.item.status, 'closed');
   // The closed Item still names what landed (1c2ab97a): the Lane, landed, with its receipt.
   assert.deepEqual(
@@ -254,13 +255,13 @@ test('an active sibling Lane keeps the Intent and the Issue open until it lands 
   assert.notEqual(sibling.laneId, first.laneId);
   await w.land(first.lane);
   assert.equal(await intentStatus(w, first.intentId), 'active', 'a pinned or unlanded sibling keeps it open');
-  const mid = await read(w.p, { id: w.issue });
+  const mid = await read(w.p, { id: w.issue, reconcile: true });
   assert.equal(mid.item.status, 'in-progress');
   assert.equal(mid.item.intent, 'active');
   assert.equal(mid.reconciled, undefined, 'no hold comment while work is running');
   await w.land(sibling.lane);
   assert.equal(await intentStatus(w, first.intentId), 'completed');
-  assert.equal((await read(w.p, { id: w.issue })).item.status, 'closed');
+  assert.equal((await read(w.p, { id: w.issue, reconcile: true })).item.status, 'closed');
 });
 
 test('every planning read shows the planned link: id read, list and search, empty legacy intentIds notwithstanding (30a4d75d)', async t => {

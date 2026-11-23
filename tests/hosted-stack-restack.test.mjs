@@ -236,7 +236,7 @@ test('a conflict or a failure keeps the save and names the manual sync', async (
     result: syncResult('conflict'),
   }));
   assert.equal(conflict.restack.status, 'conflict');
-  assert.match(conflict.restack.next, /nforge agent \. sync/);
+  assert.match(conflict.restack.next, /nforge agent \. save --sync/);
   assert.equal(conflict.result.outcome.status, 'completed', 'the save receipt is kept');
   const failed = await restackAfterSave(savedResponse(), LANE, async () => {
     throw Object.assign(new Error('boom'), { code: 'WORK_STALE' });

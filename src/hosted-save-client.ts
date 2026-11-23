@@ -58,6 +58,7 @@ import type { ConvexExchange } from './exchange-client.js';
 import type { SaveChange, SaveRequest } from './hosted-save.js';
 import type { ContentPin } from './native-exchange.js';
 import { markLandStep, saveTimingMs } from './land-timing.js';
+import { cliVerb } from './agent-verbs.js';
 import { buildUploadPack, uploadPackMembers } from './object-pack-upload.js';
 import {
   AuthorityPinRefused,
@@ -1335,7 +1336,7 @@ function secretFoundError(
 ) {
   const parameters = continuation?.parameters ?? { laneId };
   const next = { action: continuation?.action ?? 'save', ...parameters };
-  const command = `nforge agent ${shellQuote(root)} ${next.action} ${shellQuote(JSON.stringify(parameters))}`;
+  const command = `nforge agent ${shellQuote(root)} ${cliVerb(next.action, parameters)} ${shellQuote(JSON.stringify(parameters))}`;
   const findings = result.findings.map(({ path, line, kind, fingerprint }) => ({
     path,
     line,

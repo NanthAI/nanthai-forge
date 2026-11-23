@@ -647,7 +647,7 @@ function requireNativeAcceptance(store: StoreAccess, epoch: number): void {
     requireSourceAuthority(binding, { mode: 'native-owner', epoch });
     return;
   }
-  const command = `nforge agent ROOT finish '${JSON.stringify({
+  const command = `nforge agent ROOT land --save '${JSON.stringify({
     url: binding.deployment,
     projectId: binding.projectId,
     laneId: 'HOSTED_LANE_ID',

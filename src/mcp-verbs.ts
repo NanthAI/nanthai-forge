@@ -17,7 +17,8 @@ export function mcpModes(verb: Verb, hosted: boolean, wireActions: readonly stri
 /**
  * Compact input for one start/save/land form; every other field is the lowered action's own field, so
  * the existing action schemas stay the one source of truth and the tool listing stays small. `mode` is
- * optional only where the bare verb is itself an action (`save`).
+ * optional where the bare verb is itself an action (`save`) or lowers to one (`land` is `land --save`,
+ * only on the tool that carries it).
  */
 export function verbInputSchemas(
   hosted: boolean,
@@ -26,7 +27,7 @@ export function verbInputSchemas(
 ): z.ZodObject[] {
   return lifecycleVerbs.flatMap(verb => {
     const modes = mcpModes(verb, hosted, wireActions);
-    const plain = verb === 'save' && withPlainSave;
+    const plain = (verb === 'save' && withPlainSave) || (verb === 'land' && modes.includes('save'));
     if (!modes.length && !plain) return [];
     const mode = modes.length ? z.enum(modes as [string, ...string[]]) : undefined;
     return [
@@ -53,7 +54,12 @@ export function lowerMcpCommand(
   retained?: (operationId: string) => Record<string, unknown> | undefined,
 ): Record<string, unknown> {
   const { action, mode, checkOnly, ...rest } = command;
-  if (!isVerb(action) || (action !== 'save' && mode === undefined && checkOnly === undefined)) return command;
+  // Bare `land` is `land` mode `save`, as on the CLI (6b7d5a79).
+  if (
+    !isVerb(action) ||
+    (action !== 'save' && action !== 'land' && mode === undefined && checkOnly === undefined)
+  )
+    return command;
   invariant(
     mode === undefined || (typeof mode === 'string' && Object.hasOwn(verbModes[action], `--${mode}`)),
     'BAD_ARGUMENT',

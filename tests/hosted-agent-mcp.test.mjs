@@ -303,12 +303,13 @@ for (const action of [
     // The same journal: the MCP save's own operation replays from the CLI. A bare identical save
     // with nothing new now answers nothing-to-save instead (ad80e037), so the replay names it.
     const replay = slimReceipt(
-      await s
-        .transport()
-        .dispatch(
-          requested,
-          saving && input.operationId === undefined ? { ...input, operationId: actual.operationId } : input,
-        ),
+      await s.transport().dispatch(
+        requested,
+        // A start without its operationId is new work (6b7d5a79): the replay names the MCP start's id.
+        (saving || action === 'start') && input.operationId === undefined
+          ? { ...input, operationId: actual.operationId }
+          : input,
+      ),
     );
     // A save answered from its settled receipt says it replayed (Issue ca49dc6c); all else is the same.
     if (saving) {
@@ -338,14 +339,20 @@ for (const [action, api] of [
   test(`MCP ${action} lost response reconciles through the actual CLI with the original UUID`, async t => {
     const s = agentFixture(t),
       tools = registry(t, s);
-    const input =
+    let input =
       action === 'finish'
         ? { candidateId: s.candidate.id, composeOperationId: randomUUID() }
         : parameters(s)[action];
     const tool = tools.get(action === 'check' ? 'forge_check' : 'forge_task');
     s.lose(api);
-    assert.equal((await tool.call({ command: { action, ...input } })).isError, true);
+    const lost = await tool.call({ command: { action, ...input } });
+    assert.equal(lost.isError, true);
     const original = structuredClone(s.calls.filter(call => call.name === api).at(-1).args);
+    // A start without an operationId is new work (6b7d5a79): the lost reply names the id to retry with.
+    if (action === 'start') {
+      assert.match(lost.content[0].text, new RegExp(original.operationId));
+      input = { ...input, operationId: original.operationId };
+    }
     // Synthetic HTTP adapter exercises the real CLI/ConvexHttpClient without any network.
     t.mock.method(globalThis, 'fetch', async (url, init) => {
       assert(String(url).startsWith(s.address.url));
@@ -580,7 +587,7 @@ test('MCP hosted metrics uses eight finite metadata streams, one bill page and i
   assert(!existsSync(`${s.root}.forge-metrics.jsonl`));
 });
 
-test('MCP start accepts model and gives the same single missing-model error as CLI', async t => {
+test('MCP start accepts model and, like the CLI, records "unknown" without one instead of refusing (6b7d5a79)', async t => {
   const s = agentFixture(t);
   s.caps.features = ['source-authorship-v1', 'agent-slug'];
   const prior = process.env.FORGE_AGENT_MODEL;
@@ -602,13 +609,15 @@ test('MCP start accepts model and gives the same single missing-model error as C
   const tool = tools.get('forge_task');
   const command = { action: 'start', outcome: 'MCP declared builder' };
   const missing = await tool.call({ command });
-  assert.equal(missing.isError, true);
-  assert.match(missing.content[0].text, /model/);
-  assert.match(missing.content[0].text, /FORGE_AGENT_MODEL/);
+  assert(!missing.isError, missing.content[0].text);
+  assert.deepEqual(s.calls.find(c => c.name === 'projectHostedStart:start').args.authorship, {
+    kind: 'agent',
+    declaration: 'unknown',
+  });
   const input = z.object(tool.inputSchema).parse({ command: { ...command, model: 'model-one' } });
   const declared = await tool.call(input);
   assert(!declared.isError, declared.content[0].text);
-  const request = s.calls.find(c => c.name === 'projectHostedStart:start').args;
+  const request = s.calls.filter(c => c.name === 'projectHostedStart:start').at(-1).args;
   assert.equal(request.authorship.kind, 'agent');
   assert.match(request.agentClient, /:model-one$/);
 });

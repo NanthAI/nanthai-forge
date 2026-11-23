@@ -1181,7 +1181,7 @@ function Advice({ reply }: { reply: Reply }) {
           Resolve now on top of {ahead}’s exact save, so both can land without waiting for it. The result is
           provisional: if {ahead} does not land, this Lane goes back to its own save and you resolve again.
         </p>
-        <pre className="cmd mono">{`nforge agent . sync ${q({ laneId: reply.lane.laneId, predecessor })}`}</pre>
+        <pre className="cmd mono">{`nforge agent . save --sync ${q({ laneId: reply.lane.laneId, predecessor })}`}</pre>
       </div>
     </div>
   );

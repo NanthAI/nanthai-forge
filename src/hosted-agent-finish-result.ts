@@ -66,7 +66,7 @@ export function finishRetryContinuation(root: string, selection: Reply) {
     retry: true,
     reason: 'other',
   };
-  const command = `nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify(retry))}`;
+  const command = `nforge agent ${shellQuote(root)} land --save ${shellQuote(JSON.stringify(retry))}`;
   return { next: { action: 'finish', ...retry }, command, retry, retryCommand: command };
 }
 

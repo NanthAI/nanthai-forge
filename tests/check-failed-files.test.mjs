@@ -57,6 +57,24 @@ test('three failed files: the message names the first, the output lists the othe
   assert.doesNotMatch(lines.join('\n'), /abcdef123456/);
 });
 
+test('a failed check names its log read after the failing files (6b7d5a79)', () => {
+  const { response } = landing(1);
+  const runId = '11111111-2222-4333-8444-555555555555';
+  // With the run in the reply: the exact log command, last.
+  const withRun = landSummary({
+    ...response,
+    result: { ...response.result, run: { id: runId, status: 'failed' } },
+  });
+  assert.equal(withRun.at(-1), `Failing output: nforge agent ROOT log '{"runId":"${runId}"}'`);
+  // No run and no failing file listed: the status command that gives the run id.
+  const bare = structuredClone(response);
+  bare.result.submission.testFiles = undefined;
+  assert.match(
+    landSummary(bare).at(-1),
+    /^Failing output: log '\{"runId":"RUN_ID"\}' \(RUN_ID: nforge agent ROOT status '\{"operationId":"op-1"\}' --detail\)$/,
+  );
+});
+
 test('many failed files: capped list, an N more line with the full-list command, bounded size', () => {
   const { testFiles, response } = landing(120);
   assert.equal(testFiles.counts.failed, 120);

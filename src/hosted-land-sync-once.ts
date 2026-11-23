@@ -61,7 +61,7 @@ export async function syncRequiredOnce(
   const syncOnce = { submissionId: stale, ...(syncOperationId ? { syncOperationId } : {}) };
   const sync = (parameters: Record<string, unknown>) => ({
     next: { action: 'sync', ...parameters },
-    command: `nforge agent ${shellQuote(root)} sync ${shellQuote(JSON.stringify(parameters))}`,
+    command: `nforge agent ${shellQuote(root)} save --sync ${shellQuote(JSON.stringify(parameters))}`,
   });
   if (outcome.state === 'unfinished') {
     // Still changing the Lane: resume this exact sync, then land --save (MUST 2, review 73d4db6d).

@@ -31,7 +31,7 @@ function hosted(error) {
   assert.equal(error.code, 'HOSTED_AUTHORITY');
   assert.ok(error.message.includes(binding.projectUrl));
   assert.match(error.message, /projectHostedLanding \/ projectHostedAcceptance/);
-  const command = JSON.parse(error.message.match(/finish '([^']+)'/)[1]);
+  const command = JSON.parse(error.message.match(/land --save '([^']+)'/)[1]);
   assert.equal(command.url, binding.deployment);
   assert.equal(command.projectId, binding.projectId);
   assert.equal(command.accept, true);

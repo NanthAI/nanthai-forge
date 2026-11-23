@@ -78,7 +78,7 @@ test('Issue 9a04d916: a failed compose without a recorded retry time reports an 
   assert.deepEqual(report.stall.sourceFailure, failure);
   assert.equal(
     report.stall.replayCommand,
-    `nforge agent '/repo with spaces' finish '{"laneId":"386a0edf-a9d9-47d2-b412-59051075b45f","message":"Keep the original capture","accept":true,"operationId":"77054f3e-87a7-4030-97c3-487c8434650e"}'`,
+    `nforge agent '/repo with spaces' land --save '{"laneId":"386a0edf-a9d9-47d2-b412-59051075b45f","message":"Keep the original capture","accept":true,"operationId":"77054f3e-87a7-4030-97c3-487c8434650e"}'`,
   );
   assert(report.lines[2].endsWith(report.stall.replayCommand));
 });

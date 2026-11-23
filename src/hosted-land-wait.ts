@@ -93,7 +93,7 @@ export function landResumeCommand(
     ...command,
     operationId: response.operationId,
   };
-  return `nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify(replay))}`;
+  return `nforge agent ${shellQuote(root)} land --save ${shellQuote(JSON.stringify(replay))}`;
 }
 
 /** The first line for any other journaled operation (save, sync, start...): its id

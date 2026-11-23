@@ -6,7 +6,7 @@ import { operationWait } from '../dist/agent-operation-wait.js';
 import { normalizeHostedFinishResult } from '../dist/hosted-agent-finish-result.js';
 import { landAnnouncement, landWaitCommand } from '../dist/hosted-land-wait.js';
 import { landSummary } from '../dist/hosted-land-summary.js';
-import { continuation } from '../scripts/bench-t3code/forge-protocol.mjs';
+import { continuation, wire } from '../scripts/bench-t3code/forge-protocol.mjs';
 
 const root = "/synthetic/owner's project";
 function pending(operationId = randomUUID()) {
@@ -82,7 +82,10 @@ for (const state of ['landed', 'superseded', 'terminal-failed'])
     assert.equal(terminal.instruction, undefined);
     assert.equal(terminal.waitCommand, undefined);
     if (state === 'terminal-failed') {
-      assert.equal(continuation(terminal, root).action, 'finish');
+      const retry = continuation(terminal, root);
+      assert.equal(wire(retry), 'finish');
+      if (terminal.command)
+        assert.deepEqual([retry.action, retry.flags], ['land', ['--save']], 'current verb form');
       assert.equal(terminal.next.operationId, undefined, 'a failed operation is never resubmitted');
     } else {
       assert.equal(terminal.next, undefined);

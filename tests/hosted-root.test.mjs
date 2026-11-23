@@ -63,10 +63,6 @@ test('second and third Lane use independent paths and locks, retain drafts, repl
   await clone(f);
   const agent = new HostedAgentTransport(f.root, f.address, f.exchange);
   agent.agentSession = `root-${digest(f.root)}`; // replay within this test, never another test's cache
-  await assert.rejects(
-    agent.dispatch('start', { outcome: 'Missing fixture declaration' }),
-    error => error.code === 'BAD_ARGUMENT' && /FORGE_AGENT_MODEL/.test(error.message),
-  );
   const first = await agent.dispatch('start', { outcome: 'First', model: 'fixture-model' });
   writeFileSync(join(first.result.path, 'draft'), 'keep');
   const [second, third] = await Promise.all([
@@ -79,8 +75,15 @@ test('second and third Lane use independent paths and locks, retain drafts, repl
     assert.equal(readFileSync(join(r.result.path, 'large.bin')).length, 4 * 1024 * 1024);
   }
   assert.equal(readFileSync(join(first.result.path, 'draft'), 'utf8'), 'keep');
+  // A retry names the start's own operationId (6b7d5a79: a start without one is new work).
   assert.equal(
-    (await agent.dispatch('start', { outcome: 'First', model: 'fixture-model' })).result.path,
+    (
+      await agent.dispatch('start', {
+        outcome: 'First',
+        model: 'fixture-model',
+        operationId: first.operationId,
+      })
+    ).result.path,
     first.result.path,
   );
   const reopened = await agent.dispatch('open', { laneId: second.result.lane.laneId });
@@ -375,7 +378,11 @@ test('open and a replayed start into a deleted Lane folder install the Lane agai
   assert.equal(readFileSync(join(path, 'large.bin')).length, 4 * 1024 * 1024);
   assert.equal(readHostedLaneCheckout(path).selection.laneId, laneId);
   rmSync(path, { recursive: true, force: true });
-  const replayed = await agent.dispatch('start', { outcome: 'Deleted folder', model: 'fixture-model' });
+  const replayed = await agent.dispatch('start', {
+    outcome: 'Deleted folder',
+    model: 'fixture-model',
+    operationId: started.operationId,
+  });
   assert.equal(replayed.operationId, started.operationId, 'the same start replays');
   assert.equal(replayed.result.lane.laneId, laneId);
   assert.equal(replayed.result.checkout.replayed, false);

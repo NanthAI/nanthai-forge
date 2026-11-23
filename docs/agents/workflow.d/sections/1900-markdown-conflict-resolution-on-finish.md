@@ -46,7 +46,7 @@ a `./x.md` link in added text, a link added inside an existing code fence, delet
 whole entry or the blank line between entries.
 
 The `Sync main` checkpoint records the resolved paths and rule in its automatic
-summary and undo instructions (`undo-sync`); the finish receipt's `sync` has
+summary and undo instructions (`x undo` restores the Lane save before it); the finish receipt's `sync` has
 `docsResolution:{paths,rule}`. A retried sync or finish replays the same bytes.
 Native standalone `sync` still writes markers.
 

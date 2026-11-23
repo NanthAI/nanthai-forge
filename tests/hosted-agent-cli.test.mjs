@@ -88,8 +88,13 @@ test('an address-only call whose ROOT does not exist writes nothing beside ROOT 
     addressed.some(name => name.endsWith('.forge-client')),
     'client state lives in Forge state',
   );
-  // The retained address still serves a later call without url + projectId from the same ROOT.
-  const next = await agentCli([s.root, 'start', JSON.stringify({ outcome: 'Address only' })]);
+  // The retained address still serves a later call without url + projectId from the same ROOT. A start
+  // without its operationId is new work (6b7d5a79), so the replay names it.
+  const next = await agentCli([
+    s.root,
+    'start',
+    JSON.stringify({ outcome: 'Address only', operationId: first.operationId }),
+  ]);
   assert.equal(next.operationId, first.operationId);
   assert.deepEqual(readdirSync(folder).sort(), before);
 });
@@ -102,7 +107,11 @@ test('the actual agent CLI routes explicit hosted addressing before native owner
   assert.equal(first.transport, 'hosted');
   assert.equal(first.action, 'start');
   assert(!existsSync(s.root));
-  const next = await agentCli([s.root, 'start', JSON.stringify({ outcome: 'CLI synthetic' })]);
+  const next = await agentCli([
+    s.root,
+    'start',
+    JSON.stringify({ outcome: 'CLI synthetic', operationId: first.operationId }),
+  ]);
   assert.equal(next.operationId, first.operationId);
   assert.deepEqual(next.result, first.result);
   const file = join(s.root, '..', 'command.json');
@@ -605,15 +614,16 @@ test('response-shape guard itself rejects dead ends, stale terminal advice and i
   );
 });
 
-test('CLI help names the required agent declaration and explicit unknown', async () => {
+test('CLI help shows model as optional with FORGE_AGENT_MODEL and the recorded unknown (6b7d5a79)', async () => {
   const { hostedAgentHelp } = await import('../dist/hosted-agent-help.js');
   const help = hostedAgentHelp('start');
-  assert.match(help, /\* = required for a new agent session unless FORGE_AGENT_MODEL supplies it/);
-  assert.match(help, /start: model\*/);
+  assert.match(help, /Parameters \(\? = optional\)/);
+  assert.match(help, /start: model\?/);
+  assert.match(help, /FORGE_AGENT_MODEL/);
   assert.match(help, /\\"unknown\\"/);
 });
 
-test('CLI agent start requires model once and accepts explicit unknown through the negotiated contract', async t => {
+test('CLI agent start without a model records "unknown" instead of refusing (6b7d5a79), as an explicit unknown does', async t => {
   const s = agentFixture(t);
   s.caps.features = ['source-authorship-v1', 'agent-slug'];
   http(t, s);
@@ -625,17 +635,15 @@ test('CLI agent start requires model once and accepts explicit unknown through t
     else process.env.FORGE_AGENT_MODEL = prior;
   });
   const input = { ...s.address, outcome: 'CLI declared builder', open: false };
-  await assert.rejects(
-    agentCli([s.root, 'start', JSON.stringify(input)]),
-    e => e.code === 'BAD_ARGUMENT' && /model/.test(e.message) && /FORGE_AGENT_MODEL/.test(e.message),
-  );
-  assert.equal(s.calls.filter(c => c.name === 'projectHostedStart:start').length, 0);
+  await agentCli([s.root, 'start', JSON.stringify(input)]);
+  const missing = s.calls.find(c => c.name === 'projectHostedStart:start').args;
+  assert.deepEqual(missing.authorship, { kind: 'agent', declaration: 'unknown' });
   const help = hostedAgentHelp('start');
-  assert.match(help, /Required for a new agent start unless FORGE_AGENT_MODEL is set/);
+  assert.match(help, /FORGE_AGENT_MODEL/);
   const example = JSON.parse(/^Example: nforge agent ROOT start '(.*)'$/m.exec(help)[1]);
   const start = await agentCli([s.root, 'start', JSON.stringify({ ...input, ...example })]);
   const reply = slimReceipt(start);
-  const request = s.calls.find(c => c.name === 'projectHostedStart:start').args;
+  const request = s.calls.filter(c => c.name === 'projectHostedStart:start').at(-1).args;
   assert.deepEqual(request.authorship, { kind: 'agent', declaration: 'unknown' });
   assert.match(reply.result.rules, /nforge agent ROOT capabilities.*forge_work_overview/);
   const withoutRules = structuredClone(reply);

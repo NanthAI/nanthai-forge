@@ -282,7 +282,12 @@ async function runAgentCli(
   try {
     parameters = JSON.parse(text);
   } catch {
-    invariant(false, 'BAD_ARGUMENT', 'Command parameters must be JSON.');
+    // Shell quoting breaks most JSON (apostrophes, newlines in a message): name the file forms that need none.
+    invariant(
+      false,
+      'BAD_ARGUMENT',
+      'Command parameters must be JSON. To avoid shell quoting, put the JSON in a file: --command-file FILE (- reads stdin); a landing message can come from --message-file FILE.',
+    );
   }
   invariant(
     parameters && typeof parameters === 'object' && !Array.isArray(parameters),

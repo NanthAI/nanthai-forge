@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { observedConflictRecovery } from '../dist/hosted-observed-conflict.js';
-import { printedCommand } from '../scripts/bench-t3code/forge-protocol.mjs';
+import { printedCommand, wire } from '../scripts/bench-t3code/forge-protocol.mjs';
 
 function fixture() {
   const submission = {
@@ -43,7 +43,8 @@ test('observed conflicts read the rejected attempt once and advertise its sync w
   assert.deepEqual(conflict.candidate, s.candidate);
   assert.deepEqual(conflict.error, s.submission.error);
   const next = printedCommand(conflict.command, s.transport.root);
-  assert.equal(next.action, 'sync');
+  // The printed command is the current form (`save --sync`); it reaches the sync wire action.
+  assert.equal(wire(next), 'sync');
   assert.deepEqual(next.body, { ...s.transport.address, candidateId: s.candidate.id });
   assert.deepEqual(
     conflict.next,

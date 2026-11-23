@@ -254,3 +254,11 @@ test('593fc2d7: a land reason that is not a retry code names the codes, and with
   );
   assert.equal(s.calls.length, before, 'refused before any call');
 });
+
+// 6b7d5a79 (replayed builder transcript): an unknown start key ("goal") cost a refusal and a --help call.
+test('an unknown top-level key names the accepted keys in the refusal, so no --help call is needed (6b7d5a79)', () => {
+  const message = refused('start', { goal: 'my words' });
+  assert.match(message, /Unrecognized key: "goal"/);
+  assert.match(message, /Accepted: model, outcome, constraints, intentId/);
+  assert.doesNotMatch(refused('start', { planningItemId: 'short' }), /Accepted:/, 'only on an unknown key');
+});

@@ -13,8 +13,8 @@ export type StackEvent =
   | { kind: 'landing'; outcome: 'failed' | 'cancelled'; operationId: string; code?: string };
 
 const short = (id: string) => id.slice(0, 8);
-const restack = (child: string) => `nforge agent . sync '{"laneId":"${child}"}'`;
-const unstack = (child: string) => `nforge agent . sync '{"laneId":"${child}","ontoMain":true}'`;
+const restack = (child: string) => `nforge agent . save --sync '{"laneId":"${child}"}'`;
+const unstack = (child: string) => `nforge agent . save --sync '{"laneId":"${child}","ontoMain":true}'`;
 
 /** The one-line board note a dependent receives: the event and the exact next command. Under the
  * board's 240-character limit, no machine paths, no names (the sender shows as a Forge handle). */
@@ -26,7 +26,7 @@ export function stackNoticeText(event: StackEvent, parentLaneId: string, childLa
     return `${parent} was abandoned. Unstack onto main: ${unstack(childLaneId)}`;
   const what = event.outcome === 'cancelled' ? 'landing was cancelled' : 'landing failed';
   const code = event.code ? ` (${event.code.slice(0, 30)})` : '';
-  return `${parent} ${what}${code}. Unstack onto main: ${unstack(childLaneId)}; or restack after its fix: same command without ontoMain`;
+  return `${parent} ${what}${code}. Unstack onto main: ${unstack(childLaneId)}; after its fix, restack: drop ontoMain`;
 }
 
 /** Board message id: a UUID derived from the event, so a replay of the same event writes nothing new. */

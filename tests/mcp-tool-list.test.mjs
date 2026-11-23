@@ -10,9 +10,9 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 
 // Issue 47558a99: the advertised tool list is per-session context. Budgets are in characters of the
 // tools/list JSON; tokens are about chars / 4. Raise one only with before/after numbers on the Issue.
-const LIST_CHARS = 5_775; // 657d63ee: measured pre-parity tools/list, including array punctuation. 5,758 -> 5,775 (66667155): forge_planning lists tick-planning-item(line,evidence).
-const CLAUDE_CHARS = 5_763; // 5,746 -> 5,763 (66667155).
-const CODEX_CHARS = 5_891; // Same baseline as server-prefixed Codex function definitions; 5,874 -> 5,891 (66667155).
+const LIST_CHARS = 5_782; // 657d63ee: measured pre-parity tools/list, including array punctuation. 5,758 -> 5,775 (66667155): forge_planning lists tick-planning-item(line,evidence). 5,775 -> 5,782 (6b7d5a79): flat tools name nested object keys again (expected:o(head,sourceVersion,version)), +56 B, 49 B of it paid by shorter text.
+const CLAUDE_CHARS = 5_770; // 5,746 -> 5,763 (66667155); 5,763 -> 5,770 (6b7d5a79, nested keys).
+const CODEX_CHARS = 5_898; // Same baseline as server-prefixed Codex function definitions; 5,874 -> 5,891 (66667155); 5,891 -> 5,898 (6b7d5a79, nested keys).
 const DESCRIPTION_CHARS = 920;
 const body = response => JSON.parse(response.content[0].text);
 // The listing names fields in a description ("Fields: a b:n c=x|y ...") and required fields per action.
@@ -55,7 +55,8 @@ test('the hosted tool list stays inside its context budget', async t => {
   const { client } = await connect(t);
   const tools = (await client.listTools()).tools;
   assert.equal(tools.length, 8);
-  assert.match(tools.find(tool => tool.name === 'forge_task').description, /model or FORGE_AGENT_MODEL/);
+  // 6b7d5a79: start detects the model or records "unknown", so forge_task no longer says to supply one.
+  assert.equal(tools.find(tool => tool.name === 'forge_task').description, 'Start, save, land Lanes.');
   const chars = JSON.stringify(tools).length;
   const listBytes = Buffer.byteLength(JSON.stringify(tools), 'utf8');
   const descriptions = tools.reduce((n, tool) => n + tool.description.length, 0);
@@ -79,7 +80,8 @@ test('the hosted tool list stays inside its context budget', async t => {
   // 442 -> 423 (e7812d8f): forge_task drops the repeated wait hint to fit the undo action.
   // 423 -> 387 (b54a14c0): shorter summaries pay for the hand-back and question fields.
   // 387 -> 354 (7327bdff): the planning description leaves the start example to help and pays for waitingOn.
-  assert.equal(descriptionBytes, 354, 'per-session MCP description bytes');
+  // 354 -> 340 (6b7d5a79): forge_task says 'Start, save, land Lanes.'; start needs no model any more.
+  assert.equal(descriptionBytes, 340, 'per-session MCP description bytes');
   assert(listBytes <= LIST_CHARS, 'tool list UTF-8 byte budget');
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);
@@ -196,4 +198,15 @@ test('the compact listing changes nothing about validation', async t => {
       JSON.stringify(command),
     );
   assert.equal(s.calls.length, 0, 'invalid commands reach no remote function');
+});
+
+// 6b7d5a79: receipt 90cb7ee6 dropped nested key names from flat tools to fit the ceiling; agents then had to
+// call help to learn an object's fields. The listing names them again, required ones bare and optional ones `?`.
+test('flat tools name the keys of a nested object field in the listing (6b7d5a79)', async t => {
+  const { client } = await connect(t);
+  const tools = (await client.listTools()).tools;
+  const flat = tools.filter(tool => !tool.inputSchema.properties.command);
+  assert(flat.length, 'flat tools exist');
+  const text = flat.map(tool => tool.inputSchema.description).join('\n');
+  assert.match(text, /\bexpected:o\(head,sourceVersion,version\)/);
 });

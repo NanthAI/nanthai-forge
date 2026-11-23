@@ -1642,7 +1642,7 @@ test('drift nudge: none below N own-path landings, named once N is reached, up t
   );
   assert(nudge.includes(`${entries[0][1]} (Lane ${entries[0][2]}, owner/calm-fox)`));
   assert(!nudge.includes(entries[1][1]), 'the unrelated landing is not named');
-  assert(nudge.includes(`nforge agent . sync '{"laneId":"${two.lane.id}"}'`));
+  assert(nudge.includes(`nforge agent . save --sync '{"laneId":"${two.lane.id}"}'`));
   assert(!nudge.includes('@') && !nudge.includes('.com'), 'public identities only');
   const five = await driftRead(
     t,

@@ -162,7 +162,7 @@ for (const [action, api] of [
   test(`${action}: unknown response retains UUID, pins and original result without an owner/listener`, async t => {
     const s = agentFixture(t);
     if (['save', 'abandon'].includes(action)) await s.transport().dispatch('open', { laneId: s.lane.laneId });
-    const command = {
+    let command = {
       start: { outcome: 'Synthetic hosted agent' },
       open: { laneId: s.lane.laneId },
       save: { message: 'Clean save' },
@@ -185,6 +185,12 @@ for (const [action, api] of [
         ? await s.transport().dispatch(action, command)
         : await assert.rejects(s.transport().dispatch(action, command), errorCode('HOSTED_ACTION_FAILED'));
     const firstCalls = structuredClone(s.calls);
+    // A start without an operationId is new work (6b7d5a79): its lost-reply retry names the start's own id.
+    if (action === 'start')
+      command = {
+        ...command,
+        operationId: firstCalls.filter(call => call.name === api).at(-1).args.operationId,
+      };
     const first = answered ?? (await s.transport().dispatch(action, command));
     // A bare identical save with nothing new answers nothing-to-save with the saved head (ad80e037);
     // the save's own operation still replays its original result.

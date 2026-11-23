@@ -295,7 +295,7 @@ export function driftNudge(
         : `landing #${sequence}`;
     });
   const rest = conflictSequences.size - named.length;
-  return `Behind main on your own paths: ${conflictSequences.size} landings changed them since your base: ${named.join('; ')}${rest > 0 ? `; and ${rest} more` : ''}. Sync now: nforge agent . sync '{"laneId":"${laneId}"}'`;
+  return `Behind main on your own paths: ${conflictSequences.size} landings changed them since your base: ${named.join('; ')}${rest > 0 ? `; and ${rest} more` : ''}. Sync now: nforge agent . save --sync '{"laneId":"${laneId}"}'`;
 }
 
 /** The Lane a resolution Lane resolves, and every Lane of one resolution: their shared paths are one

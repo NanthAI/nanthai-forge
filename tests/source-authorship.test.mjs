@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentAuthorship, recordTurnWork } from '../dist/agent-turn-work.js';
 import { agentSlug } from '../dist/agent-slug-session.js';
+import { AGENT_CLIENTS, nearestAgentProcess } from '../dist/agent-session.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 
 function session(t) {
@@ -55,13 +56,13 @@ test(
   },
 );
 
-test('unknown is explicit, missing agent model is refused once, and a person is never asked', t => {
+test('unknown is explicit, a missing agent model defaults to unknown (6b7d5a79), and a person is never asked', t => {
   const { env, run } = session(t);
-  assert.throws(
-    () => agentAuthorship({ required: true, run }, env),
-    e => e.code === 'BAD_ARGUMENT' && /model/.test(e.message) && /FORGE_AGENT_MODEL/.test(e.message),
-  );
+  // A start never refuses for a missing model: it records "unknown" and says it defaulted (the caller tips once).
+  const defaulted = agentAuthorship({ required: true, run }, env);
+  assert.equal(defaulted.modelDefaulted, true);
   const unknown = agentAuthorship({ required: true, run, model: 'unknown' }, env);
+  assert.deepEqual(defaulted, { ...unknown, modelDefaulted: true });
   assert.deepEqual(unknown, {
     authorship: { kind: 'agent', declaration: 'unknown' },
     agentClient: 'codex',
@@ -265,10 +266,27 @@ test('a later plain command in the same shell stays a person after a one-off env
 });
 
 test('a lost landing reply pins its original model while new work inherits a switch', async t => {
-  const { env } = session(t);
-  for (const [name, value] of Object.entries({ ...env, FORGE_HUMAN: '0' })) {
+  const { key } = session(t);
+  // Hermetic in any shell (preflight's clean environment, CI, or an agent's terminal): the session belongs to the
+  // agent client that runs this test (Codex when none does), every other client's session variable is cleared,
+  // and the outer shell's model (FORGE_AGENT_MODEL, or a client's model variable) never stands in for the
+  // session's own declarations.
+  const ancestor = nearestAgentProcess();
+  const own =
+    AGENT_CLIENTS.find(client => client.harness === ancestor?.harness)?.sessionVariable ?? 'CODEX_THREAD_ID';
+  const cleared = Object.fromEntries(
+    [
+      'FORGE_AGENT_MODEL',
+      'ANTHROPIC_MODEL',
+      'GEMINI_MODEL',
+      ...AGENT_CLIENTS.map(client => client.sessionVariable).filter(Boolean),
+    ].map(name => [name, undefined]),
+  );
+  const env = { FORGE_AGENT_SESSION: key, [own]: key };
+  for (const [name, value] of Object.entries({ ...cleared, ...env, FORGE_HUMAN: '0' })) {
     const prior = process.env[name];
-    process.env[name] = value;
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
     t.after(() => {
       if (prior === undefined) delete process.env[name];
       else process.env[name] = prior;

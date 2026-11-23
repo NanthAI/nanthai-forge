@@ -291,9 +291,13 @@ test('0f3d44e1: a docs-only change runs only the tests that read those documents
   for (const test of plan.tests) assert.ok(docs.includes(plan.docsReaders[test].doc), test);
   // The retired-wording guard walks docs/agents/ by relative path (preflight-miss fix 4, d3357f40): a
   // reader of every document there. The bound on the other readers stays.
-  const walker = at('tests', 'approve-land-wording.test.mjs');
-  assert.ok(plan.tests.includes(walker), `${walker} walks docs/agents/`);
-  const others = plan.tests.filter(test => test !== walker);
+  // The teaching guard (6b7d5a79) walks docs/agents/ the same way, for removed rules and deprecated verbs.
+  const walkers = [
+    at('tests', 'approve-land-wording.test.mjs'),
+    at('tests', 'agent-teaching-guard.test.mjs'),
+  ];
+  for (const walker of walkers) assert.ok(plan.tests.includes(walker), `${walker} walks docs/agents/`);
+  const others = plan.tests.filter(test => !walkers.includes(test));
   assert.ok(others.length <= 6, `${others.length} readers`);
   assert.deepEqual(plan.tiers, [{ tier: 'mandatory', tests: plan.tests }]);
   t.diagnostic(`readers ${plan.tests.join(' ')}; selection ${ms.toFixed(0)} ms`);

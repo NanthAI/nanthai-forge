@@ -63,10 +63,17 @@ export function validateHostedCliCommand(
     requestedAction === 'status' && ['limit', 'view'].some(key => Object.hasOwn(parameters, key))
       ? ` To list open Lanes, run ${actionRoot('lanes')} lanes '{"limit":20}'.`
       : '';
+  // An unknown top-level key names the accepted ones, so the fix needs no --help call (6b7d5a79).
+  const accepted =
+    !parsed.success &&
+    schema instanceof z.ZodObject &&
+    parsed.error.issues.some(issue => issue.code === 'unrecognized_keys' && issue.path.length === 0)
+      ? ` Accepted: ${Object.keys(schema.shape).join(', ')}.`
+      : '';
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    `Invalid ${requestedAction} parameters: ${parsed.success ? '' : describeIssues(parsed.error.issues, parameters)}. Run ${actionRoot(requestedAction)} ${requestedAction} --help, correct the named fields and retry.${listed}`,
+    `Invalid ${requestedAction} parameters: ${parsed.success ? '' : describeIssues(parsed.error.issues, parameters)}.${accepted} Run ${actionRoot(requestedAction)} ${requestedAction} --help, correct the named fields and retry.${listed}`,
   );
   // A bare start has nothing to start (Issue ec7bd1b5): refused before any call, as dispatch does.
   if (requestedAction === 'start') {

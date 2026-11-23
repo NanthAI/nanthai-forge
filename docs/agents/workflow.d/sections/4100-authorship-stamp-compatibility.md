@@ -17,9 +17,10 @@ Attribution is excluded from start, save and landing retry identity; a resumed
 operation retains the original source request and its first declaration.
 
 The writer negotiates `source-authorship-v1`, deployed after compatible readers.
-On the first CLI or MCP agent `start`, supply `model` or set `FORGE_AGENT_MODEL` in
-the launcher. Use the exact model ID, or `unknown`. If no model is declared or
-retained for the session, the error names the field and environment variable. A person
+On the first CLI or MCP agent `start`, `model` or `FORGE_AGENT_MODEL` names the exact
+model ID, or `unknown`. Without either, the client's own model (`ANTHROPIC_MODEL` or
+`GEMINI_MODEL`, when it is a valid stamp) is used, else `unknown` with a one-time tip;
+`start` never refuses for a missing model. A person
 outside an agent session is never asked for a model. Without the feature, clients
 keep the previous wire format; older clients that send no stamp stay readable as
 “not declared”.

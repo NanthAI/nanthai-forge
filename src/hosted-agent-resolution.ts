@@ -47,12 +47,13 @@ import { readLaneEntry, recordLane } from './lane-registry.js';
 import { sessionAgentSlug } from './agent-slug-session.js';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
+import { cliVerb } from './agent-verbs.js';
 /** Why Forge reports a file the line merge accepted (it no longer parses) or declined (too large). */
 export const conflictReasons = (files: readonly { path: string; reason?: string | undefined }[]) =>
   files.flatMap(file => (file.reason ? [{ path: file.path, reason: file.reason }] : []));
 const quote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 export function hostedRecoveryCommand(root: string, action: string, command: object) {
-  return `nforge agent ${quote(root)} ${action} ${quote(JSON.stringify(command))}`;
+  return `nforge agent ${quote(root)} ${cliVerb(action, command as Record<string, unknown>)} ${quote(JSON.stringify(command))}`;
 }
 const completed = (value: unknown) => {
   const parsed = z

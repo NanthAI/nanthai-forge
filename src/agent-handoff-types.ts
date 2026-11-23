@@ -94,7 +94,10 @@ export const notVerifiedInput = z
     }),
   )
   .max(200, 'notVerified accepts at most 200 lines.')
-  .optional();
+  .optional()
+  .describe(
+    'Optional: one line per thing you changed but did not verify (unrun tests, untried platforms). Omit when you have nothing to report; [] claims you verified everything you changed.',
+  );
 
 export function validateNotVerified(value: unknown) {
   if (value === undefined) return;

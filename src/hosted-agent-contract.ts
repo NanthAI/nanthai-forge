@@ -218,7 +218,7 @@ export const hostedAgentCommandSchemas = {
         .string()
         .optional()
         .describe(
-          'Required for a new agent start unless FORGE_AGENT_MODEL is set or the agent session already has a model declaration. Use "unknown" if unknown.',
+          'Your model ID, or set FORGE_AGENT_MODEL. Missing: the start records "unknown" and tips once.',
         ),
       outcome: z.string().min(1).optional(),
       constraints: z.string().optional(),
@@ -644,8 +644,9 @@ export const hostedAgentCommandSchemas = {
         .optional(),
       limit: z.number().int().min(1).max(100).default(50),
       cursor: z.string().nullable().default(null),
-      /** Close or abandon Issues whose Intent finished; reports what it changed. */
-      reconcile: z.boolean().default(true),
+      /** Close or abandon Issues whose Intent finished; reports what it changed. Default: list reads
+       * reconcile; search and Item (id/planningItemId) reads do not. */
+      reconcile: z.boolean().optional(),
       /** Also suggest which open Issues can run in parallel and which should stack, from the files
        * each names (src/work-schedule.ts). Advice only; reads up to 5 pages to cover the backlog. */
       schedule: z.boolean().optional(),

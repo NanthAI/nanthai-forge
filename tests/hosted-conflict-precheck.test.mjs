@@ -368,7 +368,7 @@ test('finite conflict status names the sync recovery, never a wait on the ended 
     const recovery = result.result.recovery.conflict;
     assert.equal(recovery.next.action, 'sync');
     assert.equal(recovery.next.candidateId, state.request.candidateId);
-    assert.match(recovery.command, / sync /);
+    assert.match(recovery.command, / save --sync /);
     assert.equal(s.calls.length - before, 3, 'capabilities, canonical status and one landing status read');
   }
 });

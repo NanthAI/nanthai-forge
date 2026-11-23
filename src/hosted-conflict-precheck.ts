@@ -10,6 +10,7 @@ import { conflictMarkerScan, scanConflictMarkers, conflictMarkersFound } from '.
 import { shellQuote } from './shell-quote.js';
 import { ForgeError } from './errors.js';
 import { conflictFinishOptions, type ConflictFinishOptions } from './hosted-conflict-finish-options.js';
+import { cliVerb } from './agent-verbs.js';
 
 const pathFor = (root: string) => join(clientCacheRoot(root), 'conflict-paths.json');
 export type ConflictContinuation = {
@@ -133,7 +134,7 @@ export function resolvedFinishContinuation(root: string, laneId: string) {
   const saved = context(root, laneId);
   if (!saved?.resolved || !saved.finishParameters) return undefined;
   const parameters = saved.finishParameters;
-  const command = `nforge agent ${shellQuote(root)} finish ${shellQuote(JSON.stringify(parameters))}`;
+  const command = `nforge agent ${shellQuote(root)} land --save ${shellQuote(JSON.stringify(parameters))}`;
   return {
     root,
     paths: [] as string[],
@@ -213,7 +214,7 @@ export function assertNoConflictMarkers(
     ? (context(root, laneId)?.resolveParameters ?? { laneId })
     : (continuation?.parameters ?? { laneId });
   const next = { action: resolve ? 'resolve' : (continuation?.action ?? 'save'), ...parameters };
-  const command = `nforge agent ${shellQuote(root)} ${next.action} ${shellQuote(JSON.stringify(parameters))}`;
+  const command = `nforge agent ${shellQuote(root)} ${cliVerb(next.action, parameters)} ${shellQuote(JSON.stringify(parameters))}`;
   const instruction = `Edit ${paths.join(', ')} in ${root} to resolve each conflict hunk, then run: ${command}`;
   throw new ForgeError('CONFLICT_MARKERS', instruction, undefined, {
     root,

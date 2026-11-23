@@ -37,7 +37,8 @@ test('docs are static, contract-generated and usable without account or backend 
   // Every docs page links the draft Terms and Privacy pages (a9f4654f).
   assert.match(home, /<a href="\/terms">Terms<\/a><a href="\/privacy">Privacy policy<\/a>/);
   const cli = read(out, 'docs/reference/cli.md');
-  const modelRequirement = 'Required for a new agent start unless FORGE_AGENT_MODEL is set';
+  // 6b7d5a79: a missing model is recorded as unknown, never refused; the generated references say so.
+  const modelRequirement = 'Your model ID, or set FORGE_AGENT_MODEL. Missing: the start records';
   assert(cli.includes(modelRequirement));
   for (const entry of hostedAgentHelpEntries) {
     assert.ok(cli.includes(`## ${entry.command}\n`), entry.command);

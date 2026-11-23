@@ -21,7 +21,7 @@ Walked: `help conflict`, `help overlap`, `help queue`, `policy`, `capabilities`,
 
 The advice field `wouldConflict.next` (built on the server, `predecessorConflictAdvice`) names the files and the Lane ahead, gives one recommended action with its complete command, and says what a resolution made now depends on (Item 577927f1, J3-1, J3-2, J3-4):
 
-- **Early resolution on**: "Recommended: Resolve now against this exact predecessor, so both land without waiting for it. Run: `nforge agent . sync '{"predecessor":{…}}'`."
+- **Early resolution on**: "Recommended: Resolve now against this exact predecessor, so both land without waiting for it. Run: `nforge agent . save --sync '{"predecessor":{…}}'`."
 - **Off**: "the recommended action is to keep waiting: if it lands, this landing stops with COMPOSITION_CONFLICT and land --save syncs main in and lands again. Or choose sync to resolve now: `COMMAND`."
 
 Both end with the provisional rule: a resolution is built on that Lane exactly as saved (State, receipt) and lands only after it lands; if it fails or is replaced, this Lane goes back to its own last save, the combined save stays in history, and the agent resolves again. The web Lane page shows the same recommendation and command, and marks a combined result Provisional with the save it is pinned to. Reason enums are no longer printed (J3-3). The owner kept this rule on 2026-11-19 (question E20, option A): resolve now unless early resolution is switched off, wait when it is off, and the reply says which it chose and why. The generated agent rule now reads "follow the reply's Recommended command", so the rule and the reply no longer disagree (J3-2).

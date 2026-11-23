@@ -324,7 +324,7 @@ test('a stack member whose row predates the link fields still excludes its stack
     const ready = offer('ready');
     assert.equal(ready.peerLaneId, peer);
     assert.equal(ready.submissionId, submissionId);
-    assert.equal(ready.command, `nforge agent . sync '${JSON.stringify({ laneId, stackOn: peer })}'`);
+    assert.equal(ready.command, `nforge agent . save --sync '${JSON.stringify({ laneId, stackOn: peer })}'`);
     assert.equal(
       stackOffer({
         laneId,

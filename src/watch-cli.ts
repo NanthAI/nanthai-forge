@@ -16,6 +16,7 @@ import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { shellQuote } from './shell-quote.js';
 import { watchHooks } from './watch-hooks.js';
 import { watchStateFile } from './watch-state.js';
+import { cliVerb } from './agent-verbs.js';
 
 const usage =
   'nforge watch ROOT [--lanes ID,… | --mine] [--kinds K,…] [--queue] [--json] [--on-event CMD] [--on-landing CMD]';
@@ -68,7 +69,7 @@ function watchArguments(args: string[]) {
 
 function printEvent(root: string, json: boolean, event: Pick<ProjectFeedEvent, 'kind' | 'id' | 'resume'>) {
   const { action, input } = event.resume;
-  const command = `nforge agent ${shellQuote(root)} ${action} ${shellQuote(JSON.stringify(input))}`;
+  const command = `nforge agent ${shellQuote(root)} ${cliVerb(action, input as Record<string, unknown>)} ${shellQuote(JSON.stringify(input))}`;
   process.stdout.write(
     json ? `${JSON.stringify({ ...event, command })}\n` : `${event.kind} ${event.id}\n  ${command}\n`,
   );

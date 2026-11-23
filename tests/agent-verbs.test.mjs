@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { coreVerbs } from '../scripts/agent-verb-forms.mjs';
 import {
+  cliVerb,
   lowerVerb,
   namedReads,
   newForm,
@@ -230,6 +231,31 @@ test('retired native mode spellings name the typed form and its hosted replaceme
         error.code === 'HOSTED_ACTION_UNSUPPORTED' &&
         error.message === `${verb} ${flag} was removed with native mode. Use ${retiredActions[action]}.`,
     );
+});
+
+// Item 6b7d5a79: the one way to land needs no flag, and printed commands teach only current forms.
+test('bare land is land --save (help too), and printed recovery commands name current verb forms (6b7d5a79)', async () => {
+  for (const [rest, flags] of [
+    [['{}'], ['--save']],
+    [
+      ['--check-only', '{}'],
+      ['--save', '--check-only'],
+    ],
+    [['--withdraw', '{}'], ['--withdraw']],
+  ]) {
+    const [form] = parseVerbForm('land', [...rest]);
+    assert.deepEqual(form.flags, flags);
+  }
+  assert.equal(lowerVerb(parseVerbForm('land', ['{}'])[0], true), 'finish');
+  const { stdout } = await help(['land']);
+  assert.match(stdout, /land --save: /);
+  assert.equal((await help(['land', '--save'])).stdout, stdout);
+  assert.equal(cliVerb('finish'), 'land --save');
+  assert.equal(cliVerb('finish', { accept: false }), 'land --save --check-only');
+  assert.equal(cliVerb('sync'), 'save --sync');
+  assert.equal(cliVerb('checkpoint'), 'save');
+  assert.equal(cliVerb('open'), 'start --open');
+  assert.equal(cliVerb('resolve'), 'resolve');
 });
 
 test('finish without accept maps to land --save --check-only natively; hosted mirrors its accept:false', () => {

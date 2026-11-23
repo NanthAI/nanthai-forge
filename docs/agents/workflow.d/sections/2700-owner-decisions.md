@@ -1,11 +1,11 @@
 ## Owner decisions
 
-Record a decision on this project or an Intent with `decide`; read records with
-`decisions`. MCP uses `forge_task` action `decide` and `forge_work_overview` action
+Record a decision on this project or an Intent with `save --decision`; read records with
+`decisions`. MCP uses `forge_task` action `save` mode `decision` and `forge_work_overview` action
 `decisions`, with the same command fields and native Work records.
 
 ```sh
-nforge agent OWNER decide '{"operationId":"UUID","target":{"kind":"intent","intentId":"INTENT_ID"},"decidedBy":"Owner","what":"Use the focused contract check","why":"Keep the implementation loop short","overrides":{"kind":"default","description":"Full-suite landing gate","link":"docs/workflows.md"}}'
+nforge agent OWNER save --decision '{"operationId":"UUID","target":{"kind":"intent","intentId":"INTENT_ID"},"decidedBy":"Owner","what":"Use the focused contract check","why":"Keep the implementation loop short","overrides":{"kind":"default","description":"Full-suite landing gate","link":"docs/workflows.md"}}'
 nforge agent OWNER decisions '{"target":{"kind":"intent","intentId":"INTENT_ID"}}'
 ```
 

@@ -96,7 +96,7 @@ test('a parent save tells its dependent once, with the restack command, and wake
     note.text,
     /^Stack: parent Lane \w{8} saved new work \(head 22222222\)\. Your next save restacks onto it if clean; now: /,
   );
-  assert.ok(note.text.includes(`nforge agent . sync '{"laneId":"${child}"}'`));
+  assert.ok(note.text.includes(`nforge agent . save --sync '{"laneId":"${child}"}'`));
   assert.equal(boardTextProblem(note.text), null);
   assert.ok(note.text.length <= 240);
 
@@ -175,8 +175,13 @@ test('a failed or cancelled landing tells the dependents of the Lane it carried,
   for (const lane of [child, sibling]) {
     const [note, ...rest] = await f.inbox(lane);
     assert.equal(rest.length, 0);
-    assert.match(note.text, /landing failed \(CHECK_FAILED\)\. Unstack onto main: nforge agent \. sync/);
-    assert.ok(note.text.includes('"ontoMain":true') && note.text.includes('restack after its fix'));
+    assert.match(
+      note.text,
+      /landing failed \(CHECK_FAILED\)\. Unstack onto main: nforge agent \. save --sync/,
+    );
+    assert.ok(
+      note.text.includes('"ontoMain":true') && note.text.includes('after its fix, restack: drop ontoMain'),
+    );
     assert.equal(boardTextProblem(note.text), null);
     assert.ok(note.text.length <= 240);
   }

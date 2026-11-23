@@ -174,6 +174,9 @@ export function parseVerbForm(verb: string, rest: string[], operator = false): [
     invariant(!flags.includes(rest[0]), 'BAD_ARGUMENT', `Repeated ${rest[0]}.`);
     flags.push(rest.shift()!);
   }
+  // Bare `land` is `land --save` (Item 6b7d5a79): the one way to land needs no flag to learn, and
+  // `land --help` prints its help.
+  if (verb === 'land' && !operator && !flags.some(flag => flag !== '--check-only')) flags.unshift('--save');
   const mode = flags.filter(flag => flag !== '--check-only');
   invariant(mode.length <= 1, 'BAD_ARGUMENT', `Choose one ${verb} mode.`);
   invariant(
@@ -258,6 +261,13 @@ export function newForm(
     if (Object.hasOwn(boardModes, flag)) return `board ${flag}`;
   }
   return undefined;
+}
+
+/** The current spelling of a wire action inside a printed command (`finish` → `land --save`, `sync` →
+ * `save --sync`): recovery and next-step lines never teach an alias that prints a deprecation notice. */
+export function cliVerb(action: string, parameters: Record<string, unknown> = {}): string {
+  if (action === 'finish') return parameters.accept === false ? `${landSaveForm} --check-only` : landSaveForm;
+  return Object.hasOwn(lifecycleAliases, action) ? lifecycleAliases[action]! : action;
 }
 
 /** The CLI prefix that reaches an action: operator actions live under `nforge x`, the rest under `nforge agent`. */

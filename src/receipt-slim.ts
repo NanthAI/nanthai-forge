@@ -146,6 +146,11 @@ function briefStart(result: Json): Json {
   if (planning && planning.updated !== false) out.planning = planning;
   // The replaced-Lane hint is the next step, so the compact reply keeps it (d9e1ac62).
   if (Array.isArray(result.replaced)) out.replaced = result.replaced;
+  // Other open Lanes on the Issue, an earlier identical start and a follow-up Intent are each a decision
+  // before editing, so the compact reply keeps them (6b7d5a79); none of them is present on a plain start.
+  if (Array.isArray(result.openLanes) && result.openLanes.length) out.openLanes = result.openLanes;
+  if (obj(result.previousLane)) out.previousLane = result.previousLane;
+  if (obj(result.continued)) out.continued = result.continued;
   return out;
 }
 

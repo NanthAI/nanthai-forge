@@ -6,6 +6,8 @@ import { assertCommandWeight } from '../scripts/agent-weight.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
+import { rmSync } from 'node:fs';
+import { hostedAgentDirectory } from '../dist/hosted-agent-journal.js';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { setup } from './hosted-planning-fixture.mjs';
@@ -1036,20 +1038,23 @@ test('a completed Intent holds an Issue with unticked or untickable Done-when li
     assert.match(comments[0], /^Intent completed; \d Done-when line\(s\) still open/);
   }
   assert.deepEqual(await commentsOf(ids.allTicked), []);
-  // The end state is clear (d56dfe49 replay): the comment and the held entry name the open lines and the
-  // one close command with the version the reason write leaves behind; ticked lines are not listed.
+  // The end state is clear (d56dfe49 replay): the comment names the open lines and the one tick command
+  // (6b7d5a79: tick-planning-item, never a hand-edited body); the held entry also keeps the explicit close
+  // with the version the reason write leaves behind; ticked lines are not listed.
   const boxesItem = (await list(p, { id: ids.boxes, reconcile: false })).item;
   const boxesComment = (await commentsOf(ids.boxes))[0];
   assert.match(boxesComment, /Open: "b"; "c"\./);
   assert(!boxesComment.includes('"a"'));
+  assert(boxesComment.includes(`tick-planning-item '{"planningItemId":"${ids.boxes}","line":1,`));
+  assert(!boxesComment.includes('[x]'));
+  const heldBoxes = read.reconciled.held.find(h => h.id === ids.boxes);
+  assert.deepEqual(heldBoxes.lines, ['b', 'c']);
+  assert.match(heldBoxes.tick, /tick-planning-item/);
   assert(
-    boxesComment.includes(
+    heldBoxes.close.includes(
       `put-planning-item '{"itemId":"${ids.boxes}","expectedVersion":${boxesItem.version},"status":"closed"`,
     ),
   );
-  const heldBoxes = read.reconciled.held.find(h => h.id === ids.boxes);
-  assert.deepEqual(heldBoxes.lines, ['b', 'c']);
-  assert.match(heldBoxes.close, /"expectedVersion":\d+,"status":"closed"/);
   assert.match(
     (await commentsOf(ids.bullets))[0],
     /Open: "the root cause is fixed;"; "the live queue drains;"\./,
@@ -1845,7 +1850,9 @@ test('start {planningItemId} starts the Issue as a planned Intent and links it o
   assert.equal(commands[0].expectedVersion, 1);
   assert.equal(commands[0].itemId, item.id);
 
-  const again = await s.transport().dispatch('start', { planningItemId: item.id });
+  const again = await s
+    .transport()
+    .dispatch('start', { planningItemId: item.id, operationId: started.operationId });
   assert.equal(again.operationId, started.operationId);
   assert.equal(commands.length, 2);
   assert.equal(commands[1].operationId, commands[0].operationId, 'the link replays its original operation');
@@ -1904,38 +1911,36 @@ function plannedStartFixture(t) {
   return { s, item, starts, reads };
 }
 
-test('a follow-up start after the Issue landed opens a new Lane; a first start and an open Lane add no calls', async t => {
+test('every start without an operationId is new work and names the earlier identical start; none reads a Lane (6b7d5a79)', async t => {
   const { s, item, starts, reads } = plannedStartFixture(t);
   const first = await s.transport().dispatch('start', { planningItemId: item.id });
-  assert.equal(reads().length, 0, 'a first start reads no Lane');
   assert.equal(first.result.previousLane, undefined);
-  // The Lane is still open: the identical start is the idempotent retry and replays it.
-  const retry = await s.transport().dispatch('start', { planningItemId: item.id });
-  assert.equal(retry.operationId, first.operationId);
-  assert.equal(starts().length, 2);
-  assert.equal(starts()[0].args.operationId, starts()[1].args.operationId);
-  assert.equal(reads().length, 1, 'one Lane read decides the replay');
-  assert.equal(retry.result.previousLane, undefined);
-  // The Lane landed: the same start now opens a new Lane linked to the same Issue, and says so.
-  s.lane.state = 'completed';
-  const followUp = await s.transport().dispatch('start', { planningItemId: item.id });
-  assert.notEqual(followUp.operationId, first.operationId);
-  assert.notEqual(starts()[2].args.operationId, starts()[0].args.operationId);
-  assert.deepEqual(starts()[2].args.intent, starts()[0].args.intent, 'same Issue Intent');
-  assert.equal(followUp.result.previousLane.laneId, s.lane.laneId);
-  assert.equal(followUp.result.previousLane.state, 'completed');
-  assert.match(followUp.result.previousLane.note, /completed; this opened a new Lane/);
-  // Replaying the original operation explicitly still returns the original result.
+  // Builders sharing one client session never get each other's Lane: an identical start opens its own,
+  // and its reply names the earlier one, so a lost reply is never silent.
+  const second = await s.transport().dispatch('start', { planningItemId: item.id });
+  assert.notEqual(second.operationId, first.operationId);
+  assert.notEqual(starts()[1].args.operationId, starts()[0].args.operationId);
+  assert.deepEqual(starts()[1].args.intent, starts()[0].args.intent, 'same Issue Intent');
+  assert.equal(second.result.previousLane.laneId, s.lane.laneId);
+  assert.match(second.result.previousLane.note, /this opened a new Lane.*start --open.*operationId/);
+  assert.equal(reads().length, 0, 'no start reads a Lane');
+  // Replaying an operation explicitly still returns its original result.
   const replay = await s.transport().dispatch('start', {
     planningItemId: item.id,
     operationId: first.operationId,
   });
   assert.equal(replay.operationId, first.operationId);
   assert.equal(starts().at(-1).args.operationId, first.operationId);
-  // The new Lane is itself replayable only while open.
-  s.lane.state = 'active';
-  const again = await s.transport().dispatch('start', { planningItemId: item.id });
-  assert.equal(again.operationId, followUp.operationId);
+});
+
+test("a start without an operationId is new work even when the earlier start's journal was pruned (6b7d5a79)", async t => {
+  const { s, item, starts } = plannedStartFixture(t);
+  const first = await s.transport().dispatch('start', { planningItemId: item.id });
+  // Only the auto index survives: the earlier operation's journal file is gone.
+  rmSync(join(hostedAgentDirectory(s.root), `${first.operationId}.json`));
+  const second = await s.transport().dispatch('start', { planningItemId: item.id });
+  assert.notEqual(second.operationId, first.operationId);
+  assert.notEqual(starts().at(-1).args.operationId, first.operationId);
 });
 
 // e4a71127: an open Issue whose first Intent landed starts a follow-up Intent (the server answers with a
@@ -2008,25 +2013,22 @@ test('incident replay 20b91e86: an identical start from another agent session op
     'the second agent sees the first Lane in its reply',
   );
   assert.equal(reads().length, 0, 'a first start in each session reads no Lane');
-  // The lost-reply retry in the same session still returns its own Lane and opens none.
+  // A retry in the same session is new work too (6b7d5a79); its reply names the earlier Lane, and the
+  // original operationId still replays exactly.
   for (const [session, original] of [
     ['agent-a', a],
     ['agent-b', b],
   ]) {
-    const retry = await s.transport(session).dispatch('start', { planningItemId: item.id });
-    assert.equal(retry.operationId, original.operationId);
-    assert.equal(retry.result.lane.laneId, original.result.lane.laneId);
-    assert.equal(retry.result.previousLane, undefined);
+    const replay = await s
+      .transport(session)
+      .dispatch('start', { planningItemId: item.id, operationId: original.operationId });
+    assert.equal(replay.result.lane.laneId, original.result.lane.laneId);
   }
-  assert.equal(created.size, 2, 'retries opened no Lane');
-  // With no session id, an open Lane another process started is never replayed: a new Lane, and why.
-  const anonymous = await s.transport(null).dispatch('start', { planningItemId: item.id });
-  const again = await s.transport(null).dispatch('start', { planningItemId: item.id });
-  assert.notEqual(again.operationId, anonymous.operationId);
-  assert.equal(again.result.previousLane.laneId, anonymous.result.lane.laneId);
-  assert.match(again.result.previousLane.note, /No agent session id/);
-  assert.equal(again.result.previousLane.unscoped, undefined);
-  assert.equal(reads().length, 2, 'only the two same-session retries read their Lane state');
+  assert.equal(created.size, 2, 'exact replays opened no Lane');
+  const again = await s.transport('agent-a').dispatch('start', { planningItemId: item.id });
+  assert.notEqual(again.result.lane.laneId, a.result.lane.laneId);
+  assert.ok(again.result.previousLane.laneId);
+  assert.equal(reads().length, 0, 'no start reads a Lane');
 });
 
 // Item d9e1ac62 (real case: Item 1dd4e095): a start beside an open resolution Lane and the open Lane it resolves names
@@ -2070,10 +2072,9 @@ test('d9e1ac62: start names the Lane an open resolution Lane replaces, with the 
   }
 });
 
-// Follow-up 3676f3e1: native subagents of one client share its session id. No per-subagent identity
-// is exposed to the CLI, so the client process narrows the scope: two processes with one session id
-// open their own Lanes, and a same-process retry (another shell of that client) still replays.
-test('two client processes sharing one session id each get their own Lane; a same-process retry replays', async t => {
+// Follow-up 3676f3e1: native subagents of one client share its session id and client process, so no
+// session scope can tell them apart. A start without an operationId is new work (6b7d5a79): each gets its own Lane.
+test('3676f3e1: two subagents sharing one client session and process each get their own Lane', async t => {
   const { s, item, starts } = plannedStartFixture(t);
   const created = new Map(),
     mutation = s.exchange.client.mutation;
@@ -2085,42 +2086,12 @@ test('two client processes sharing one session id each get their own Lane; a sam
     result.lane.laneId = created.get(args.operationId);
     return JSON.stringify(result);
   };
-  const previous = process.env.CLAUDE_CODE_SESSION_ID;
-  const previousExplicit = process.env.FORGE_AGENT_SESSION;
-  process.env.CLAUDE_CODE_SESSION_ID = 'shared-client-session';
-  process.env.FORGE_AGENT_SESSION = 'shared-client-session';
-  t.after(() => {
-    if (previousExplicit === undefined) delete process.env.FORGE_AGENT_SESSION;
-    else process.env.FORGE_AGENT_SESSION = previousExplicit;
-    if (previous === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
-    else process.env.CLAUDE_CODE_SESSION_ID = previous;
-  });
-  // The session id comes from the environment (agentSession undefined); the process is detected or declared.
-  const process_ = agentProcess => Object.assign(s.transport(), { agentSession: undefined, agentProcess });
-  const a = await process_('100@Thu Nov  5 10:00:00 2026').dispatch('start', {
-    planningItemId: item.id,
-  });
-  const b = await process_('200@Thu Nov  5 10:00:01 2026').dispatch('start', {
-    planningItemId: item.id,
-  });
-  assert.notEqual(b.operationId, a.operationId, 'another process never replays this start');
+  const a = await s.transport('shared-client-session').dispatch('start', { planningItemId: item.id });
+  const b = await s.transport('shared-client-session').dispatch('start', { planningItemId: item.id });
+  assert.notEqual(b.operationId, a.operationId);
   assert.notEqual(b.result.lane.laneId, a.result.lane.laneId);
   assert.equal(starts().length, 2);
-  for (const [client, original] of [
-    ['100@Thu Nov  5 10:00:00 2026', a],
-    ['200@Thu Nov  5 10:00:01 2026', b],
-  ]) {
-    const retry = await process_(client).dispatch('start', {
-      planningItemId: item.id,
-    });
-    assert.equal(retry.operationId, original.operationId);
-    assert.equal(retry.result.lane.laneId, original.result.lane.laneId);
-  }
-  assert.equal(created.size, 2, 'same-process retries opened no Lane');
-  // No readable client process: the session id alone still scopes, as before.
-  const c = await process_(null).dispatch('start', { planningItemId: item.id });
-  const d = await process_(null).dispatch('start', { planningItemId: item.id });
-  assert.equal(d.operationId, c.operationId);
+  assert.equal(b.result.previousLane.laneId, a.result.lane.laneId, 'the second names the first');
 });
 
 test('start reads the local registry first and skips the Lane read when this machine saw the Lane end', async t => {
@@ -3116,7 +3087,8 @@ test('incident 1018d0f8: alert refresh preserves every outstanding Done-when lin
   await send(speedBudgetIssue({ ...event, kind: 'recovered', landing: 'second' }, s.projectId, speedBudgets));
   assert.equal((await list(p, { id: issue.itemId, reconcile: false })).item.body, body);
   p.states.set(issue.itemId, 'completed');
-  const read = await list(p, { id: issue.itemId });
+  // An Item read reconciles only when asked (6b7d5a79).
+  const read = await list(p, { id: issue.itemId, reconcile: true });
   assert.equal(read.item.status, 'open');
   assert.equal(read.reconciled.held[0].openLines, 3);
   // Any writer can supply a body with a bare unchecked line; ticked lists must not hide it.
@@ -3125,7 +3097,7 @@ test('incident 1018d0f8: alert refresh preserves every outstanding Done-when lin
     expectedVersion: read.item.version,
     body: 'Done when:\n- [x] Code fixed\n[ ] Evidence pending',
   });
-  const held = await list(p, { id: issue.itemId });
+  const held = await list(p, { id: issue.itemId, reconcile: true });
   assert.equal(held.item.status, 'open');
   assert.deepEqual(held.reconciled.held[0].lines, ['Evidence pending']);
 });
@@ -3550,6 +3522,37 @@ test('tick-planning-item ticks the line by position or text prefix and posts the
     read.comments.map(comment => comment.text),
     ['Evidence two', 'Evidence four'],
   );
+});
+
+// Item 6b7d5a79: an Item read changes nothing by default, and the last tick closes an Issue whose Intent finished,
+// so a builder needs neither reconcile:false on reads nor a close command after landing.
+test('an Item read never reconciles unless asked; the last Done-when tick closes a finished Issue (6b7d5a79)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const itemId = await tickIssue(p);
+  p.states.set(itemId, 'completed');
+  const events = s.tables.projectWorkEvents.size;
+  const read = await list(p, { id: itemId });
+  assert.equal(read.reconciled, undefined);
+  assert.equal(read.item.status, 'open');
+  assert.equal(s.tables.projectWorkEvents.size, events, 'an Item read writes nothing');
+  for (const line of [1, 2]) {
+    const ticked = await tick(p, { planningItemId: itemId, line, evidence: `Evidence ${line}` });
+    assert.equal(ticked.result.reconciled, undefined, 'a line is still open');
+  }
+  const last = await tick(p, { planningItemId: itemId, line: 4, evidence: 'Evidence 4' });
+  assert.equal(last.result.openLines, 0);
+  assert.deepEqual(
+    last.result.reconciled.changed.map(change => [change.id, change.to]),
+    [[itemId, 'closed']],
+  );
+  assert.equal((await stored(p, itemId)).status, 'closed');
+  // An Intent still running: the last tick only ticks; the Issue closes on a list read after it lands.
+  const running = (await put(p, { kind: 'issue', title: 'Still running', body: tickBody })).result.itemId;
+  assert.notEqual(running, itemId);
+  p.states.set(running, 'active');
+  for (const line of [1, 2, 4]) await tick(p, { planningItemId: running, line, evidence: 'e' });
+  assert.equal((await stored(p, running)).status, 'open');
 });
 
 test('tick-planning-item refuses zero or several matches and lists the candidates (66667155)', async t => {

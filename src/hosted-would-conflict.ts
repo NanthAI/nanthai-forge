@@ -115,7 +115,7 @@ export function syncRequiredContinuation(
     const { groupId: _group, ...predecessor } = advice.predecessor;
     void _group;
     const parameters = { ...(input.laneId ? { laneId: input.laneId } : {}), predecessor };
-    const command = `nforge agent ${shellQuote(root)} sync ${shellQuote(JSON.stringify(parameters))}`;
+    const command = `nforge agent ${shellQuote(root)} save --sync ${shellQuote(JSON.stringify(parameters))}`;
     return {
       code: 'COMPOSITION_CONFLICT' as const,
       earlyResolution: true,
@@ -170,7 +170,7 @@ export function predecessorConflictAdvice(input: {
   const files = `${input.paths.length ? input.paths.join(', ') : 'the retained conflict files'}${input.more ? ` (and ${input.more} more files)` : ''}`;
   // Item 577927f1: one recommended action with its plain reason and a complete command, and what a resolution made
   // now depends on. Run inside this Lane's checkout, the command needs no other argument.
-  const command = `nforge agent . sync ${shellQuote(JSON.stringify({ predecessor: pin }))}`;
+  const command = `nforge agent . save --sync ${shellQuote(JSON.stringify({ predecessor: pin }))}`;
   const provisional =
     `A resolution made now is provisional: it is built on ${target} exactly as saved (State ${pin.head}, ` +
     `receipt ${pin.receiptId}) and lands only after that lands. If it fails or is replaced, this Lane goes back to ` +

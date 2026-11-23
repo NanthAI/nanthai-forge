@@ -87,9 +87,13 @@ test('replay: a docs-only change to the brief rules selects the check-brief fixt
   assert.deepEqual(selection.tests, [...docsReaders(files, [doc]).keys()].sort());
   // The retired-wording guard walks docs/agents/ by relative path (preflight-miss fix 4, d3357f40): a
   // reader of every document there. The bound on the other readers stays.
-  const walker = at('tests', 'approve-land-wording.test.mjs');
-  assert.ok(selection.tests.includes(walker), `${walker} walks docs/agents/`);
-  const others = selection.tests.filter(test => test !== walker);
+  // The teaching guard (6b7d5a79) walks the same folder for removed rules.
+  const walkers = [
+    at('tests', 'approve-land-wording.test.mjs'),
+    at('tests', 'agent-teaching-guard.test.mjs'),
+  ];
+  for (const walker of walkers) assert.ok(selection.tests.includes(walker), `${walker} walks docs/agents/`);
+  const others = selection.tests.filter(test => !walkers.includes(test));
   assert.ok(others.length <= 6, `${others.length} readers`);
   // A document no test names adds only the repo-wide guards that scan its folder (Issue ec7960f9).
   const unnamed = at('docs', 'no-test-reads-this-document.md');

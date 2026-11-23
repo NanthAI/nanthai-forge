@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
-import { continuation } from '../scripts/bench-t3code/forge-protocol.mjs';
+import { continuation, wire } from '../scripts/bench-t3code/forge-protocol.mjs';
 import { canonicalRoot } from '../dist/root-paths.js';
 
 /** Build-failing dead-end guard, shared by production CLI, wait, bound and MCP tests. */
@@ -48,7 +48,9 @@ export function assertAgentResponseShape(response, root, retained = {}) {
     ) ||
     ['passed', 'failed', 'cancelled', 'runner-unavailable', 'interrupted'].includes(result.run?.status);
   const advice = result.recovery?.conflict ?? result.conflict ?? result.recovery ?? result;
-  const next = continuation(advice, root);
+  // The printed command uses the current verb form (`land --save`); callers compare the wire action it reaches.
+  const printed = continuation(advice, root);
+  const next = printed && { ...printed, action: wire(printed) };
   assert(terminal || next, 'Agent response has neither a terminal outcome nor a followable continuation');
   if (terminal) {
     assert(!['submitted', 'retryable'].includes(result.status), 'Terminal outcome retained pending status');

@@ -1,0 +1,4 @@
+{
+  "issue": "6b7d5a79",
+  "reason": "Item 6b7d5a79 restores nested field names on flat MCP tools (forge_current/forge_source list expected:o(head,sourceVersion,version) again), which receipt 90cb7ee6 removed to fit the 5,775 B tools/list ceiling. Measured with scripts/perf/mcp-startup.mjs on this Lane: nested names add 56 B; forge_task now says \"Start, save, land Lanes.\" (start needs no model; -14 B) and other Lane text pays the rest, so tools/list is 5,782 B. Ceiling raised by the 7 B needed, 5,775 -> 5,782. Per-session listing only; 0 calls, idle unchanged."
+}

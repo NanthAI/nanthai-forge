@@ -44,14 +44,14 @@ export const llmsFullWarnBytes = 400 * 1024;
 
 // The measured-results block comes from Why Forge, also retained verbatim in the skill.
 // Commands derive from the same verb contract as CLI dispatch.
-const workflow = `Lifecycle verbs: ${coreVerbs.map(verb => `\`${verb}\``).join(', ')}. Use \`${landSaveForm}\` to save, update from main, check and land under project policy. Run \`preflight {laneId}\` for affected checks of a saved Lane; \`tests {candidateId}\` reads a Candidate's test selection.`;
+const workflow = `Lifecycle verbs: ${coreVerbs.map(verb => `\`${verb}\``).join(', ')}. Use \`${landSaveForm}\` (bare \`land\`) to save, run affected checks, update from main, check and land under project policy; follow the commands it prints. \`tests {candidateId}\` reads a Candidate's test selection.`;
 
 const agentRules = [
   workflow,
   'Hosted CLI actions and parameters come from the enforced contract: run `nforge agent ROOT --help` in the hosted checkout or `nforge docs agents/hosted`. Keep this turn active on unfinished work. After admission use the receipt command: `wait {operationIds:[ORIGINAL_UUID],until:"acceptance"}`; it blocks up to its budget (540 s agent mode, --budget/maxWaitMs); repeat on IN PROGRESS. Before admission replay the full original request including message.',
 
   'Hosted automatic-accept projects group landings by default and pipeline up to six exact-source groups (checks.concurrency overrides, 1–16); acceptance.landing: serial opts out. Pre-queue admission (acceptance.admissionCheck, default "full") checks each change before it joins a group; a failed shared check splits the group to isolate the failing changes.',
-  'Run the affected checks selected by `preflight {laneId}`, plus typecheck, lint and format. Do not run the full suite locally.',
+  'Run affected checks plus typecheck, lint and format (`land --save` runs the affected preflight itself). Do not run the full suite locally.',
   'Let `land --save` compose concurrent Lanes into one check on the project runner. A failing Lane is dropped from the batch and the others still land after passing. Do not rebase or babysit a merge queue.',
   'For hosted Lanes, read start/save/status behindMain and any save conflictNotice (a real trial-merge conflict; nothing to answer); saved-path windows exclude unsaved peer edits and never prove independence. Hosted `peers {laneId,path?,detail?}` reads the same saved overlap evidence in one query and `diff {laneId,paths?}` compares the pinned base to the saved head (MCP `forge_review`); show {channel:"main",path} or show {laneId,path} reads exact accepted or saved bytes. Announce paths and resolve overlap early.',
   BOARD_LINE,

@@ -13,6 +13,7 @@ import { syncRequiredSummary } from './hosted-would-conflict.js';
 import { acceptedByLine } from './landing-accepted-by.js';
 import type { CheckTime } from './hosted-check.js';
 import type { LandingStall } from './landing-stall.js';
+import { cliVerb } from './agent-verbs.js';
 
 /** The self-review step a passed preflight names before land (593fc2d7): what will land, by path then hunk. */
 /** The failure line is cut at 900 characters; a failed check's next step ends the message and is kept whole. */
@@ -211,6 +212,20 @@ function classifyLand(
       `FAILED${error ? ` ${error.code}: ${clipKeepingNext(recovery ? error.message.split(' Run nforge agent ')[0]! : error.message)}` : ''}`,
     );
   }
+  // A failed check's output is one read away (6b7d5a79): named after the failing files, with the run when the
+  // reply carries one; without a run or failing files, where to find the run.
+  let logLine: string | undefined;
+  if (
+    error?.code === 'CHECK_FAILED' ||
+    (result.phase === 'check' && checkUnsuccessful(result.run?.status ?? ''))
+  ) {
+    const runId =
+      result.run?.id ??
+      /\brun ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.exec(error?.message ?? '')?.[1];
+    if (runId) logLine = `Failing output: nforge agent ROOT log '{"runId":"${runId}"}'`;
+    else if (!submission?.testFiles?.failed?.length)
+      logLine = `Failing output: log '{"runId":"RUN_ID"}' (RUN_ID: nforge agent ROOT status${response.operationId ? ` '{"operationId":"${response.operationId}"}'` : ''} --detail)`;
+  }
   if (result.phase === 'conflict') {
     failed = true;
     lines.push('FAILED COMPOSITION_CONFLICT');
@@ -249,6 +264,7 @@ function classifyLand(
       `  ... ${more} more failing file${more === 1 ? '' : 's'}${response.operationId ? `; ${label}: nforge agent ROOT status '{"operationId":"${response.operationId}"}' --detail` : `; ${label}: status --detail`}`,
     );
   }
+  if (logLine) lines.push(logLine);
   return out(failed ? 'failed' : 'other', lines);
 }
 
@@ -306,7 +322,7 @@ export function landingStallReport(
   const failure = (entry.sourceFailure ?? undefined) as SourceFailure | undefined;
   const replayCommand =
     replay && stall.step === 'composing'
-      ? `nforge agent ${shellQuote(replay.root)} ${replay.action} ${shellQuote(
+      ? `nforge agent ${shellQuote(replay.root)} ${cliVerb(replay.action, replay.command)} ${shellQuote(
           JSON.stringify({ ...replay.command, operationId: replay.operationId }),
         )}`
       : undefined;
@@ -326,7 +342,7 @@ export function landingStallReport(
     lines.push(
       `If the Lane is far behind main, sync it onto main and land again: nforge agent ${shellQuote(
         replay!.root,
-      )} sync ${shellQuote(JSON.stringify({ laneId }))}`,
+      )} save --sync ${shellQuote(JSON.stringify({ laneId }))}`,
     );
   return {
     lines,

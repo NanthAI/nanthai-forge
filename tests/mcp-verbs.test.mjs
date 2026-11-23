@@ -60,9 +60,14 @@ test('lowering: every start/save/land form maps to its existing wire action and 
   for (const old of [
     { action: 'finish', laneId: 'L' },
     { action: 'start', outcome: 'o' },
-    { action: 'land' },
   ])
     assert.equal(lowerMcpCommand(old, false), old);
+  // 6b7d5a79: bare land is land mode save, with or without checkOnly, as on the CLI.
+  assert.deepEqual(lowerMcpCommand({ action: 'land', laneId: 'L' }, true), { action: 'finish', laneId: 'L' });
+  assert.deepEqual(lowerMcpCommand({ action: 'land', checkOnly: true }, true), {
+    action: 'finish',
+    accept: false,
+  });
 });
 
 test('lowering refuses ambiguous land --save requests instead of reinterpreting them', () => {
@@ -70,7 +75,6 @@ test('lowering refuses ambiguous land --save requests instead of reinterpreting 
   for (const command of [
     { ...save, accept: false },
     { ...save, checkOnly: true, accept: true },
-    { action: 'land', checkOnly: true },
     { action: 'save', mode: 'nope' },
     { action: 'start', mode: 'sync' },
     { action: 'save', mode: 'sync', checkOnly: true },
@@ -208,6 +212,8 @@ test('hosted MCP: each new form reaches the transport exactly like its old actio
     ['forge_task', { action: 'save', mode: 'friction' }, 'friction', lane],
     ['forge_task', { action: 'save', mode: 'decision' }, 'decide', lane],
     ['forge_task', { action: 'land', mode: 'save' }, 'finish', lane],
+    // 6b7d5a79: bare land passes the listed schema (mode optional) and lowers like land mode save.
+    ['forge_task', { action: 'land' }, 'finish', lane],
     ['forge_check', { action: 'save', mode: 'check' }, 'check', lane],
     ['forge_check', { action: 'save', mode: 'contract' }, 'confirm-tests', lane],
   ];

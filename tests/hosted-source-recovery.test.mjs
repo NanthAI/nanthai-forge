@@ -93,7 +93,7 @@ for (const status of ['submitted', 'retryable', 'failed'])
     assert.equal(result.result.replay.operationId, operationId);
     assert.equal(result.result.replay.action, 'compose');
     assert.equal(result.result.replay.url, s.address.url);
-    assert.match(result.result.replay.command, /nforge agent .* compose /);
+    assert.match(result.result.replay.command, /nforge agent .* save --candidate /);
     assert(result.result.replay.command.includes(operationId));
     assert.equal(result.result.failedPhase, 'source-step:17');
     const tools = new Map();
