@@ -11,6 +11,7 @@ import { useConvex, useMutation } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { useSafeQuery } from '../../safe-query';
+import { namePeers } from '../lane-state';
 import type { LaneMeta, QueueView, SharedFiles } from './model';
 
 /** The same window the line feed shows (convex/projectLiveLine.ts: 100 marks), so every mark has its title and person:
@@ -27,7 +28,10 @@ export function useLaneMeta(projectId: Id<'hostedProjects'>, byline?: true) {
     limit: LANE_PAGE,
     ...(byline ? { byline } : {}),
   });
-  const page = parse<{ page: LaneMeta[]; isDone: boolean }>(read.value);
+  const page = useMemo(() => {
+    const parsed = parse<{ page: LaneMeta[]; isDone: boolean }>(read.value);
+    return parsed && { ...parsed, page: namePeers(parsed.page) };
+  }, [read.value]);
   return { lanes: page?.page, complete: page?.isDone ?? false, error: read.error };
 }
 
@@ -40,7 +44,10 @@ export function useConflictNotes(projectId: Id<'hostedProjects'>, enabled: boole
     enabled ? { projectId, cursor: null, limit: LANE_PAGE } : 'skip',
   );
   const page = parse<{ page: LaneMeta[] }>(read.value);
-  return useMemo(() => new Map(page?.page.map(lane => [lane.laneId, lane.conflicts] as const)), [read.value]);
+  return useMemo(
+    () => new Map(page && namePeers(page.page).map(lane => [lane.laneId, lane.conflicts] as const)),
+    [read.value],
+  );
 }
 
 export function useQueue(projectId: Id<'hostedProjects'>) {

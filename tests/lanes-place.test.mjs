@@ -1082,6 +1082,18 @@ test('9b9057a9: a saved Lane with an open conflict notice reads Conflict on its 
     [block('a').colour, block('a').shape, block('a').word, block('a').why],
     ['conflict', 'conflict', 'Conflict', 'Conflicts with Rework the queue in 3 files: src/queue.ts…'],
   );
+  // A held Lane whose Needs you row says Conflict is purple with the notice's words, not the bare word.
+  const heldBlock = flow
+    .flowStations(
+      feed([mark('a', 'saved', { held: true, overlap: true })]),
+      [{ laneId: 'a', word: 'Conflict', tag: 'Conflict', head: 'Mine', who: null }],
+      new Map([['a', notes]]),
+    )
+    .flatMap(station => station.blocks)[0];
+  assert.deepEqual(
+    [heldBlock.colour, heldBlock.why],
+    ['conflict', 'Conflicts with Rework the queue in 3 files: src/queue.ts…'],
+  );
   assert.equal(block('b').colour, 'active');
   // A saved Lane in conflict is drawn on its own but is not a hold: the Saved drawer counts no held Lane.
   const { laneDrawer } = await import(moduleUrl('../web/src/app/flow/drawer-model.ts'));
@@ -1092,12 +1104,53 @@ test('9b9057a9: a saved Lane with an open conflict notice reads Conflict on its 
     .flatMap(station => station.blocks)
     .find(entry => entry.laneId === 'a');
   assert.match(bare.why, /^Conflict: this Lane’s changes clash with another Lane’s on the same lines/);
+  // The legend says one word per look; the meaning is a hover (title), never text on the page (owner 2026-11-23 14:09Z).
   const legend = renderToStaticMarkup(h(FlowLegend));
+  const shown = legend.replace(/ title="[^"]*"/g, '').replace(/<[^>]+>/g, '|');
+  assert.deepEqual(shown.split('|').filter(Boolean), [
+    'Working',
+    'Waiting its turn',
+    'Held',
+    'Check failed',
+    'Conflict',
+  ]);
   assert.match(
     legend,
-    /clash with another Lane’s on the same lines; one must be redone before both can land/,
+    /title="This Lane’s changes clash with another Lane’s on the same lines; one must be redone before both can land\. Lanes that only share a file/,
   );
-  assert.match(legend, /only share a file, with no clash, are not marked: both can land/);
+});
+
+test('9b9057a9: the Flow legend has an entry for every look the picture can draw, and none it cannot', async () => {
+  // Owner 2026-11-23 14:35Z: the legend draws each distinct block look. It is checked against the one rule the picture
+  // draws with (blockLook), over every input that rule takes, so adding a look without a legend entry fails here.
+  const flow = await import(moduleUrl('../web/src/app/flow/model.ts'));
+  const { stateWords } = await import(moduleUrl('../web/src/ds/marks.tsx'));
+  const stages = ['editing', 'saved', 'queued', 'checking', 'ready'];
+  const rows = [undefined, ...Object.keys(stateWords)];
+  const drawn = new Set();
+  for (const mainRed of [false, true])
+    for (const held of [false, true])
+      for (const conflict of [false, true])
+        for (const stage of stages)
+          for (const row of rows) {
+            const { colour, shape } = flow.blockLook({ mainRed, held, conflict, stage, row });
+            drawn.add(`${colour}/${shape}`);
+          }
+  assert.deepEqual(
+    [...flow.looks.map(look => `${look.colour}/${look.shape}`)].sort(),
+    [...drawn].sort(),
+    'each drawn look has one legend entry and the legend lists no other',
+  );
+  assert.equal(new Set(flow.looks.map(look => look.word)).size, flow.looks.length, 'one word each');
+  // And the picture's blocks use that same rule: a held Lane with no row is the hole, a plain queued Lane is not.
+  const station = flow
+    .flowStations(feed([mark('h', 'saved', { held: true }), mark('q', 'queued'), mark('w', 'editing')]), [])
+    .flatMap(entry => entry.blocks);
+  assert.deepEqual(station.map(block => `${block.colour}/${block.shape}`).sort(), [
+    'active/',
+    'waiting/',
+    'waiting/waiting',
+  ]);
 });
 
 test('e1633718: a parked Lane’s yard row says who it waits on and since when, with the parker’s reason under it', () => {

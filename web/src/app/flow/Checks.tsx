@@ -1,37 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 import { passedWaiting, type LineFeed } from '../Line';
 import { Glyph, KindMark } from '../../ds';
-import { CONFLICT_MEANING, SHARED_FILE_MEANING } from '../lane-state';
-import { duration, type flowFigures } from './model';
+import { CubeFaces } from './blocks';
+import { cubeArt } from './geometry';
+import { duration, looks, type flowFigures } from './model';
 
-/** The last word is the meaning, said on hover; Conflict says it in the legend itself (owner 2026-11-23): its changes
- * clash with another Lane's, and a Lane that only shares a file is not marked. */
-const legend = [
-  ['Working', 'active', 'dot', 'A Lane is being worked on or its check is running.'],
-  ['Waiting its turn', 'waiting', 'dot', 'A Lane is queued or waits for another to land.'],
-  ['Needs you', 'waiting', 'ring', 'A Lane waits for your approval or an answer.'],
-  [
-    'Conflict',
-    'conflict',
-    'diamond',
-    `${CONFLICT_MEANING[0]!.toUpperCase()}${CONFLICT_MEANING.slice(1)}. ${SHARED_FILE_MEANING}`,
-  ],
-  ['Check failed', 'failed', 'square', 'A Lane’s check failed; its agent fixes it.'],
-] as const;
+const LEGEND_BLOCK = 10;
+const legendArt = cubeArt(LEGEND_BLOCK);
 
+/** One small block for each look the picture can draw (`looks`, model.ts: the same rule the picture draws with), its
+ * glyph as drawn, one short word; what it means is the hover, never permanent text (owner 2026-11-23). */
 export function FlowLegend() {
   return (
     <ul className="legend flow-legend" role="list" aria-label="Lane states">
-      {legend.map(([word, state, shape, meaning]) => (
-        <li key={word} data-st={state} title={meaning}>
-          <span className={shape} aria-hidden="true" />
+      {looks.map(({ word, colour, shape, meaning }) => (
+        <li key={word} data-look={`${colour}/${shape}`} data-st={colour} title={meaning}>
+          <svg
+            className="fv-cube"
+            data-st={colour}
+            width="18"
+            height="21"
+            viewBox="-9 -15.5 18 21"
+            aria-hidden="true"
+          >
+            <CubeFaces art={legendArt} shape={shape} />
+          </svg>
           {word}
-          {state === 'conflict' ? (
-            <>
-              {' '}
-              <small>· {meaning}</small>
-            </>
-          ) : null}
         </li>
       ))}
     </ul>

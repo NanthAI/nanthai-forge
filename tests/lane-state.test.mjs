@@ -526,6 +526,36 @@ test('9b9057a9: a Lane in conflict says with whom and in how many files, on its 
     'conflicts with Lane f0e1d2c3 in at least 10 files',
   );
   assert.equal(state.conflictWords([{ with: 'x', goal: 'g'.repeat(100), files: 2 }]).length < 90, true);
+  // Owner 2026-11-23 14:09Z: a peer whose goal is only an Item id is named by its handle, never by the id.
+  const id = 'ffb6cc49-9a3f-4b0c-8d11-0a2b3c4d5e6f';
+  assert.equal(
+    state.conflictWords([{ with: 'f0e1d2c3-aaaa', goal: id, peer: 'sample-one/quiet-otter', files: 2 }]),
+    'conflicts with sample-one/quiet-otter in 2 files',
+  );
+  assert.equal(
+    state.conflictWords([{ with: 'f0e1d2c3-aaaa', goal: `${id} Licence header sweep`, files: 2 }]),
+    'conflicts with Licence header sweep in 2 files',
+  );
+  assert.doesNotMatch(
+    state.conflictTip([{ with: 'f0e1d2c3-aaaa', goal: id, files: 2, path: 'a.ts' }]),
+    /[0-9a-f]{8}-[0-9a-f]{4}/,
+  );
+  // The Lanes page names each notice's peer by the handle of that Lane, from the page already read.
+  const named = state.namePeers([
+    { laneId: 'p1', actor: 'sample-one', agentRun: 'quiet-otter' },
+    {
+      laneId: 'm1',
+      actor: 'sample-two',
+      conflicts: [
+        { with: 'p1', goal: id, files: 1 },
+        { with: 'main', files: 1 },
+      ],
+    },
+  ]);
+  assert.deepEqual(
+    named[1].conflicts.map(note => note.peer),
+    ['quiet-otter', undefined],
+  );
   // The notice ended (the peer landed, or the Lane re-synced clean): the server clears the flag, so the row is quiet again.
   const cleared = state.laneState({ stage: 'saved', held: false, overlap: false }, null, notes);
   assert.deepEqual([cleared.kind, cleared.glyph], ['active', 'Working']);

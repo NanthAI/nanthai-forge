@@ -23,7 +23,15 @@ export type CurrentLanding = {
 };
 /** One open trial-merge conflict notice, in brief (convex/projectHostedLiveLanes.ts `conflicts`, the Lane page's
  * `conflicts`): the peer ('main' or a Lane id), that peer's goal, how many files cross; `atLeast` when its list was cut. */
-export type ConflictNote = { with: string; goal?: string; files: number; path?: string; atLeast?: boolean };
+export type ConflictNote = {
+  with: string;
+  goal?: string;
+  /** The peer Lane's handle, from the Lanes read the reader already holds (`namePeers`); said when its goal names nothing. */
+  peer?: string;
+  files: number;
+  path?: string;
+  atLeast?: boolean;
+};
 export type LaneState = {
   stage: LineStage | 'main';
   held: boolean;
@@ -63,20 +71,42 @@ export function conflictNote(conflict: {
 }
 
 const GOAL_CHARS = 60;
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+/** Who a conflict is with, never an id: the peer's goal without any UUID (a Lane started on an Item can carry the Item's
+ * id as its outcome), else its handle, else its short Lane mark (owner 2026-11-23: "name the other Lane by its short
+ * title, never a UUID"). */
+function peerName(note: ConflictNote) {
+  const goal = (note.goal ?? '')
+    .replace(UUID, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s:·–—-]+|[\s:·–—-]+$/g, '');
+  if ((goal.match(/\p{L}/gu)?.length ?? 0) >= 3) return goal;
+  return note.peer ?? `Lane ${note.with.slice(0, 8)}`;
+}
+/** Give each Lane's notices their peer's handle, from the one Lanes page (no read): a notice's peer is a Lane id. */
+export function namePeers<
+  T extends { laneId: string; actor?: string; agentRun?: string; conflicts?: ConflictNote[] },
+>(lanes: readonly T[]): T[] {
+  const handle = new Map(lanes.map(lane => [lane.laneId, lane.agentRun ?? lane.actor] as const));
+  return lanes.map(lane =>
+    lane.conflicts?.length
+      ? {
+          ...lane,
+          conflicts: lane.conflicts.map(note => {
+            const peer = handle.get(note.with);
+            return peer ? { ...note, peer } : note;
+          }),
+        }
+      : lane,
+  );
+}
 /** "conflicts with <peer Item or Lane> in N files", then "and M more" for further peers: who and where, in one clause.
  * `path` adds the first crossing file, for a hover: "conflicts with <peer> in N files: <first path>…". */
 export function conflictWords(notes: readonly ConflictNote[] | undefined, path = false) {
   const first = notes?.[0];
   if (!first) return null;
-  const goal = first.goal?.trim();
-  const who =
-    first.with === 'main'
-      ? 'main'
-      : goal
-        ? goal.length > GOAL_CHARS
-          ? `${goal.slice(0, GOAL_CHARS - 1).trimEnd()}…`
-          : goal
-        : `Lane ${first.with.slice(0, 8)}`;
+  const goal = first.with === 'main' ? 'main' : peerName(first);
+  const who = goal.length > GOAL_CHARS ? `${goal.slice(0, GOAL_CHARS - 1).trimEnd()}…` : goal;
   const count = `${first.atLeast ? 'at least ' : ''}${first.files.toLocaleString()} ${first.files === 1 ? 'file' : 'files'}`;
   const more = notes.length - 1;
   const where = path && first.path ? `: ${first.path}${first.files > 1 ? '…' : ''}` : '';
@@ -94,6 +124,8 @@ export function conflictTip(notes: readonly ConflictNote[] | undefined) {
 }
 export const SHARED_FILE_MEANING =
   'Lanes that only share a file, with no clash, are not marked: both can land.';
+/** The Conflict legend entry's hover, in full. */
+export const CONFLICT_HOVER = `${CONFLICT_MEANING[0]!.toUpperCase()}${CONFLICT_MEANING.slice(1)}. ${SHARED_FILE_MEANING}`;
 
 type Held = { glyph: StateWord; why: string; note: string; word?: string };
 /** Why it is held, by the current submission's state. Only a landing held for review is "Needs you": the one hold

@@ -159,14 +159,27 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
         const page = await open(t, width, 'busy');
         const legend = page.getByRole('list', { name: 'Lane states' });
         const words = await legend.getByRole('listitem').allTextContents();
-        // Item 9b9057a9, owner 2026-11-23: Conflict says what it means, and that a shared file alone is not marked.
+        // Item 9b9057a9, owner 2026-11-23: one word per look, drawn as its block; the meaning is a hover, not text.
+        assert.deepEqual(words, ['Working', 'Waiting its turn', 'Held', 'Check failed', 'Conflict']);
+        const drawn = await legend
+          .getByRole('listitem')
+          .evaluateAll(items =>
+            items.map(item => [
+              item.querySelector('svg.fv-cube').dataset.st,
+              item.querySelectorAll('path.hole').length,
+              item.querySelectorAll('path.g').length,
+            ]),
+          );
+        assert.deepEqual(drawn, [
+          ['active', 0, 0],
+          ['waiting', 0, 0],
+          ['waiting', 1, 0],
+          ['failed', 0, 1],
+          ['conflict', 0, 1],
+        ]);
         assert.match(
-          words[3],
-          /^Conflict · This Lane’s changes clash with another Lane’s on the same lines; one must be redone before both can land\. Lanes that only share a file, with no clash, are not marked: both can land\.$/,
-        );
-        assert.deepEqual(
-          words.map((word, at) => (at === 3 ? 'Conflict' : word)),
-          ['Working', 'Waiting its turn', 'Needs you', 'Conflict', 'Check failed'],
+          await legend.getByRole('listitem').nth(4).getAttribute('title'),
+          /^This Lane’s changes clash with another Lane’s on the same lines/,
         );
         assert.match(await page.locator('.flow-check').nth(0).textContent(), /Check 1\s*2 Lanes\s*4 min/);
         assert.match(await page.locator('.flow-check').nth(1).textContent(), /Check 2\s*1 Lane\s*2 min/);
@@ -329,10 +342,9 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
                 ? station.locator('.flow-marks [data-st="waiting"]')
                 : page.locator('.fv-pic g[data-stop="checking"] .fv-cube[data-st="waiting"]');
             assert.equal(await waiting.count(), 6);
-            const hovers =
-              width === 390
-                ? await waiting.evaluateAll(marks => marks.map(mark => mark.title))
-                : await waiting.locator('title').allTextContents();
+            const hovers = await waiting.evaluateAll(marks =>
+              marks.map(mark => mark.title || mark.getAttribute('aria-label')),
+            );
             assert.equal(hovers.length, 6);
             assert.ok(hovers.every(title => title.endsWith('Passed, waiting to land')));
             const loose = region(page, 'Loose ends');
@@ -468,7 +480,7 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
         await page.keyboard.press('Tab');
         await page.keyboard.press('Shift+Tab');
         assert.equal(await cube.evaluate(el => el.matches(':focus-visible')), true);
-        await cube.locator('.fv-cube-hint').waitFor();
+        await page.locator('.fv-hint').waitFor();
         await page.keyboard.press('Enter');
         assert.equal(new URL(page.url()).pathname, `${HOME}/lanes/${id}`);
 
@@ -532,9 +544,93 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
         await page.evaluate(() => window.advanceFlow('unrelated'));
         await page.locator('.fv-strata.red').waitFor();
         assert.equal(await cube.evaluate(el => el.matches(':focus-visible')), true);
-        await cube.locator('.fv-cube-hint').waitFor();
+        await page.locator('.fv-hint').waitFor();
         await page.keyboard.press('Enter');
         assert.equal(new URL(page.url()).pathname, `${HOME}/lanes/${id}`);
+      },
+    );
+
+    await t.test(
+      'a block hover draws above every cube and label, inside the picture, and names no id (9b9057a9)',
+      async t => {
+        for (const [width, data] of [
+          [1440, 'busy'],
+          [1440, 'towers'],
+          [900, 'busy'],
+        ]) {
+          const page = await open(t, width, data, { reducedMotion: 'reduce' });
+          // The hover takes no pointer in use; the test lets it, to ask what is on top at its centre.
+          await page.addStyleTag({ content: '.fv-hint { pointer-events: auto !important; }' });
+          const cubes = page.locator('a.fv-cube');
+          const total = await cubes.count();
+          let tried = 0;
+          for (let i = total - 1; i >= 0 && tried < 12; i--) {
+            const at = await cubes.nth(i).evaluate(el => {
+              const r = el.querySelector('.t').getBoundingClientRect();
+              const x = r.left + r.width / 2;
+              const y = r.top + r.height / 2;
+              return document.elementFromPoint(x, y)?.closest('a.fv-cube') === el ? [x, y] : null;
+            });
+            if (!at) continue; // another block stands in front of this one's top
+            tried++;
+            await page.mouse.move(...at);
+            const hint = page.locator('.fv-hint');
+            await hint.waitFor();
+            const seen = await hint.evaluate(el => {
+              const pic = el.closest('.fv-pic').getBoundingClientRect();
+              const r = el.getBoundingClientRect();
+              const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+              return {
+                text: el.textContent,
+                inside:
+                  r.left >= pic.left - 0.5 &&
+                  r.right <= pic.right + 0.5 &&
+                  r.top >= pic.top - 0.5 &&
+                  r.bottom <= pic.bottom + 0.5,
+                onTop: top === el,
+              };
+            });
+            assert.equal(
+              seen.onTop,
+              true,
+              `hover over every cube and label at ${width} ${data}: ${seen.text}`,
+            );
+            assert.equal(seen.inside, true, `hover inside the picture at ${width} ${data}: ${seen.text}`);
+            assert.doesNotMatch(
+              seen.text,
+              /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/,
+              'a hover never names an id',
+            );
+            if (shots && tried === 3)
+              await page.screenshot({ path: join(shots, `hover-${data}-${width}.png`) });
+          }
+          assert.ok(tried >= 3, `hovered ${tried} blocks at ${width} ${data}`);
+          await page.mouse.move(2, 2);
+          await page.locator('.fv-hint').waitFor({ state: 'detached' });
+        }
+        // Keyboard focus on a block wins over a pointer left on another one: the hover says what has the focus.
+        const both = await open(t, 1440, 'busy', { reducedMotion: 'reduce' });
+        const first = both.locator('a.fv-cube').first();
+        const [x, y] = await first.evaluate(el => {
+          const r = el.querySelector('.t').getBoundingClientRect();
+          return [r.left + r.width / 2, r.top + r.height / 2];
+        });
+        await both.mouse.move(x, y);
+        await both.locator('.fv-hint').waitFor();
+        const other = both.locator('a.fv-cube').last();
+        await other.focus();
+        await both.keyboard.press('Tab');
+        await both.keyboard.press('Shift+Tab');
+        assert.equal(await other.evaluate(el => el.matches(':focus-visible')), true);
+        await both.waitForFunction(
+          label => document.querySelector('.fv-hint')?.textContent === label,
+          await other.getAttribute('aria-label'),
+        );
+        // Under 860px the picture is rows: no block, no hover.
+        const phone = await open(t, 390, 'busy');
+        if (shots) await phone.screenshot({ path: join(shots, 'hover-rows-390.png') });
+        assert.equal(await phone.locator('.fv-pic').isVisible(), false);
+        assert.equal(await phone.locator('.fv-hint').count(), 0);
       },
     );
 
@@ -581,7 +677,7 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
         );
         for (const cube of [cubes.nth(6), cubes.last()]) {
           await cube.focus();
-          const hint = cube.locator('.fv-cube-hint');
+          const hint = page.locator('.fv-hint');
           await hint.waitFor();
           assert.equal(
             await hint.evaluate(

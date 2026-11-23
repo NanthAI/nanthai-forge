@@ -12,6 +12,7 @@ import { followLink } from '../router';
 import type { LineFeed } from '../Line';
 import { useFlowArrival } from './motion';
 import { Blocks, CubeFaces, CubeFocus, motionStyle } from './blocks';
+import { blockLabel, CubeHint } from './hint';
 import { BackLabel, StationLabel, Tag } from './labels';
 import type { DrawerStop } from './drawer-model';
 import { cubeArt, config, layout, placeBlocks, platform, strata, ISO } from './geometry';
@@ -90,6 +91,15 @@ export function Picture({
     [feed, width, blocks, mainTop, facts.today],
   );
   const arrival = useFlowArrival(frame);
+  const labels = useMemo(
+    () =>
+      new Map(
+        stations.flatMap(station =>
+          station.blocks.map(block => [block.laneId, blockLabel(block, station.name)] as const),
+        ),
+      ),
+    [stations],
+  );
   const half = c.half;
   const fe = C[0]![1] + half + 12;
   const rail = (from: number, x1: number, y: number, live: boolean) => (
@@ -331,6 +341,7 @@ export function Picture({
           />
         </>
       ) : null}
+      <CubeHint labels={labels} blocks={blocks} size={c.s} width={width} height={height} />
     </div>
   );
 }

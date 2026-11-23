@@ -5,8 +5,8 @@
 // No read, timer or clock of its own: "today" and elapsed times are worked out from the feed's timestamps against the
 // time the page was drawn. Pure.
 import { flowToday, flowVerdict, mainFailedToday, utcDayStart } from '../../../../src/flow-day';
-import { lineStopCounts, lineStops, type LineFeed, type LineStop } from '../Line';
-import { conflictTip, isConflict, type ConflictNote } from '../lane-state';
+import { lineStopCounts, lineStops, type LineFeed, type LineStage, type LineStop } from '../Line';
+import { CONFLICT_HOVER, conflictTip, isConflict, type ConflictNote } from '../lane-state';
 import type { StateWord } from '../../ds';
 
 /** A block's colour (the state tokens) and the glyph cut into its top. */
@@ -59,6 +59,66 @@ export type HeldRow = {
 const colourOf = (word: StateWord): BlockState =>
   word === 'Check failed' || word === 'Not run' ? 'failed' : word === 'Conflict' ? 'conflict' : 'waiting';
 
+/** How a block looks: its colour and the glyph cut into its top. */
+export type Look = { colour: BlockState; shape: Block['shape'] };
+
+/** THE rule for how a Lane's block looks; `flowStations` draws with it and the legend (`looks`) is checked against
+ * every input it can take (tests/lanes-place.test.mjs), so a look the picture draws always has a legend entry and the
+ * legend has none the picture never draws. `row` is the word of the Lane's Needs you row, for a held Lane that has one. */
+export function blockLook(lane: {
+  mainRed: boolean;
+  held: boolean;
+  conflict: boolean;
+  stage: LineStage;
+  row?: StateWord | undefined;
+}): Look {
+  // A Needs you row is only ever a held Lane's.
+  const row = lane.held && !lane.mainRed ? lane.row : undefined;
+  const colour: BlockState = lane.mainRed
+    ? 'waiting'
+    : row
+      ? colourOf(row)
+      : lane.conflict
+        ? 'conflict'
+        : lane.held || lane.stage === 'queued' || lane.stage === 'ready'
+          ? 'waiting'
+          : 'active';
+  return {
+    colour,
+    shape: (lane.held || colour === 'conflict') && !lane.mainRed && colour !== 'active' ? colour : '',
+  };
+}
+
+/** The Flow legend: every look `blockLook` can give, one short word each, the meaning said on hover only. */
+export const looks = [
+  {
+    word: 'Working',
+    colour: 'active',
+    shape: '',
+    meaning: 'A Lane is being worked on or its check is running.',
+  },
+  {
+    word: 'Waiting its turn',
+    colour: 'waiting',
+    shape: '',
+    meaning: 'A Lane is queued, passed and waits to land, or waits for another Lane to land.',
+  },
+  {
+    word: 'Held',
+    colour: 'waiting',
+    shape: 'waiting',
+    meaning:
+      'A Lane is held: it waits for your approval or an answer (Needs you lists these), or for its agent.',
+  },
+  {
+    word: 'Check failed',
+    colour: 'failed',
+    shape: 'failed',
+    meaning: 'A Lane’s check failed; its agent fixes it.',
+  },
+  { word: 'Conflict', colour: 'conflict', shape: 'conflict', meaning: CONFLICT_HOVER },
+] as const satisfies readonly (Look & { word: string; meaning: string })[];
+
 /** The picture's stations, from the feed and the Needs you rows. Moving work first (oldest first), held work last, so
  * a held block stands in front. */
 export function flowStations(
@@ -76,27 +136,26 @@ export function flowStations(
       .sort((a, b) => Number(a.held) - Number(b.held) || a.changedAt - b.changedAt);
     const blocks = at.map((lane): Block => {
       const row = lane.held && !lane.mainRed ? byLane.get(lane.laneId) : undefined;
-      const colour: BlockState = lane.mainRed
-        ? 'waiting'
-        : row
-          ? colourOf(row.word)
-          : isConflict(lane)
-            ? 'conflict'
-            : lane.held || lane.stage === 'queued' || lane.stage === 'ready'
-              ? 'waiting'
-              : 'active';
+      const conflict = isConflict(lane);
+      const { colour, shape } = blockLook({
+        mainRed: !!lane.mainRed,
+        held: lane.held,
+        conflict,
+        stage: lane.stage,
+        row: row?.word,
+      });
       return {
         laneId: lane.laneId,
         colour,
-        shape: (lane.held || colour === 'conflict') && !lane.mainRed && colour !== 'active' ? colour : '',
+        shape,
         needsYou: !!row,
         held: lane.held,
-        why: !row && !lane.mainRed && isConflict(lane) ? conflictTip(notes?.get(lane.laneId)) : null,
+        why: colour === 'conflict' && !lane.mainRed ? conflictTip(notes?.get(lane.laneId)) : null,
         word: lane.mainRed
           ? 'main is failing'
           : row
             ? row.tag
-            : isConflict(lane)
+            : conflict
               ? 'Conflict'
               : lane.held
                 ? 'Held'

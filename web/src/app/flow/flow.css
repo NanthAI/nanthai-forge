@@ -104,12 +104,8 @@
     }
   }
   .flow-legend { margin: 0; list-style: none; background: var(--surface); }
-  .flow-legend li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-  .flow-legend li > small { white-space: normal; color: var(--text-3); font-size: var(--t-meta); max-width: 46ch; }
-  .flow-legend li > span { display: block; width: 12px; height: 12px; background: var(--st); }
-  .flow-legend .dot, .flow-legend .ring { border-radius: 50%; }
-  .flow-legend .ring { background: transparent; border: 3px solid var(--st); }
-  .flow-legend .diamond { width: 9px; height: 9px; margin-inline: 1.5px; transform: rotate(45deg); }
+  .flow-legend li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: help; }
+  .flow-legend li > svg { flex: none; }
 
   .flow-chk { border-top: var(--rule) solid var(--line); background: var(--surface); }
   .flow-check-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--s-3); width: 100%; min-height: var(--row-h); padding: var(--s-2) var(--gut); border: 0; background: transparent; text-align: start; color: var(--text-2); font-size: var(--t-meta); }
@@ -182,18 +178,18 @@
   .fv-pic svg a { cursor: pointer; }
   .fv-pic svg a:focus-visible { outline: none; }
   .fv-pic svg a:is(:hover, :focus-visible) > :is(.t, .l, .r) { stroke: var(--text); stroke-width: 1.6; }
-  .fv-cube-hint { display: none; pointer-events: none; }
-  .fv-cube:is(:hover, :focus-visible) .fv-cube-hint { display: block; }
-  .fv-cube-hint span {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    overflow: hidden;
-    overflow-wrap: anywhere;
+  /* the one hover, drawn after every block and label of the picture and kept inside it (hint.tsx) */
+  .fv-hint-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+  .fv-hint {
+    position: absolute;
+    box-sizing: border-box;
+    width: max-content;
+    max-width: min(260px, calc(100% - 8px));
     padding: 2px 4px;
     background: var(--surface);
     border: var(--rule) solid var(--line-strong);
     color: var(--text);
+    overflow-wrap: anywhere;
     font: var(--t-meta)/1.25 var(--font-sans);
   }
 

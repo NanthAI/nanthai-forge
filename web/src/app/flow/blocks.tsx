@@ -3,7 +3,8 @@ import { Component, createRef, type CSSProperties, type SVGProps } from 'react';
 import { followLink } from '../router';
 import { cubeArt, solid, solidHeight, type Config } from './geometry';
 import type { DrawnBlock, useFlowArrival } from './motion';
-import type { Block, Station } from './model';
+import { blockLabel } from './hint';
+import type { Look, Station } from './model';
 
 /** Preserve focus when a live move reparents a Lane's link to its new platform. */
 export class CubeFocus extends Component<SVGProps<SVGSVGElement>> {
@@ -26,7 +27,7 @@ export class CubeFocus extends Component<SVGProps<SVGSVGElement>> {
   }
 }
 
-export function CubeFaces({ art, shape }: { art: ReturnType<typeof cubeArt>; shape: Block['shape'] }) {
+export function CubeFaces({ art, shape }: { art: ReturnType<typeof cubeArt>; shape: Look['shape'] }) {
   return (
     <>
       <path className="l" d={art.l} />
@@ -88,14 +89,7 @@ export function Blocks({
       {station.blocks.map((block, i) => {
         const p = where.get(block.laneId)!;
         const moving = arrival?.blocks.get(block.laneId);
-        const label = [
-          block.head ?? `Lane ${block.laneId.slice(0, 8)}`,
-          station.name,
-          block.why ?? (block.word === station.name ? null : block.word),
-          block.who,
-        ]
-          .filter(Boolean)
-          .join(' · ');
+        const label = blockLabel(block, station.name);
         return (
           <g key={block.laneId} transform={`translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`}>
             <g
@@ -111,20 +105,7 @@ export function Blocks({
                 onClick={followLink}
                 aria-label={label}
               >
-                <title>{label}</title>
                 <CubeFaces art={art} shape={block.shape} />
-                <foreignObject
-                  className="fv-cube-hint"
-                  x={cx > c.mL ? 8 - 168 : 8}
-                  y={-c.s - 41}
-                  width={168}
-                  height={37}
-                  aria-hidden="true"
-                >
-                  <span title={label} dir="auto">
-                    {label}
-                  </span>
-                </foreignObject>
               </a>
             </g>
           </g>

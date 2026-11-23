@@ -4,7 +4,7 @@
   passed Lanes waiting to land, using the same counts in the top bar, Flow and Lanes. The top bar keeps
   each count with its stop name and stacks the single-count stops on phones. A `+` marks figures from
   the capped feed. Passed Lanes waiting to land are amber. The picture shows five figures
-  (landed this hour, land to main, needs fix, reverted, main green or red), a state legend and a
+  (landed this hour, land to main, needs fix, reverted, main green or red), a state legend (one small block per look the picture draws, one word each, the meaning on hover) and a
   strip for running checks. The green hover dates the latest full pass when the existing FYI audit
   page reports its finish time. The strip
   shows the Lanes in each recorded run, its elapsed time, speculative queue room where recorded and
