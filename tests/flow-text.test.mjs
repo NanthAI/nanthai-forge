@@ -140,3 +140,16 @@ test('the Flow text distinguishes reconstructed landings, partial coverage and a
   assert.match(measured.text, /middle 6 min/);
   assert.match(measured.text, /Partial coverage today: land-to-main times/);
 });
+
+test('f5c4d136: a Lane held on its own next step (fix) is held but needs no person, and the next step does not point at it', () => {
+  const agent = lane('saved', { held: true, overlap: true, fix: true });
+  const person = lane('ready', { held: true });
+  const only = flowText({ lanes: [agent], more: 0, moreIsLowerBound: false, main: null }, now);
+  assert.match(only.text, /none needs a person/);
+  assert.match(only.text, /1 held: \w{8} \(conflict, its agent fixes it\)/);
+  assert.match(only.text, /Next: Nothing waits on a person\./);
+  const both = flowText({ lanes: [agent, person], more: 0, moreIsLowerBound: false, main: null }, now);
+  assert.match(both.text, /1 needs a person/);
+  assert.match(both.text, new RegExp(`status .*${person.laneId}`));
+  assert.doesNotMatch(both.text.split('Next:')[1], new RegExp(agent.laneId));
+});

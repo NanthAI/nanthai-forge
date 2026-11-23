@@ -166,7 +166,9 @@ async function lanesOf(
     overlap = 0;
   for (const mark of marks) {
     stops[mark.stage]++;
-    if (mark.held) held++;
+    // Only a hold that waits on a person counts as held; a Lane held on its own next step (`fix`) is agent work
+    // (Issue f5c4d136), as on the project list and the top bar.
+    if (mark.held && !mark.fix) held++;
     if (mark.overlap) overlap++;
   }
   let titled: Array<{ stage: string; held?: true; title?: string }> = [];
@@ -183,7 +185,7 @@ async function lanesOf(
       rows.push({
         laneId: mark.laneId,
         stage: mark.stage,
-        ...(mark.held ? { held: true as const } : {}),
+        ...(mark.held && !mark.fix ? { held: true as const } : {}),
         ...(name ? { title: name.slice(0, 200) } : {}),
       });
     }

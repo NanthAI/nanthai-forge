@@ -61,7 +61,9 @@ export const lineStops: readonly {
   { stage: 'checking', label: 'Checking', short: 'Check', of: ['checking', 'ready'] },
 ];
 
-/** Count Lanes in the check phase and passed Lanes separately. A recorded run can check several Lanes together. */
+/** Count Lanes in the check phase and passed Lanes separately. A recorded run can check several Lanes together.
+ * `held` counts only holds that wait on a person; a Lane held on its own next step (`fix`) is agent work, as on the
+ * project list and the top bar's F (Issue f5c4d136). */
 export function lineStopCounts(feed: LineFeed | undefined, stop: (typeof lineStops)[number]) {
   let total = 0;
   let held = 0;
@@ -70,7 +72,7 @@ export function lineStopCounts(feed: LineFeed | undefined, stop: (typeof lineSto
   for (const lane of feed?.lanes ?? []) {
     if (!stop.of.includes(lane.stage)) continue;
     total++;
-    if (lane.held) held++;
+    if (lane.held && !lane.fix) held++;
     if (lane.stage === 'ready') passed++;
     else if (lane.stage !== 'checking' || !lane.held) count++;
   }

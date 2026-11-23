@@ -144,6 +144,27 @@ test('open Lane titles reach visitors only when the project opts in, and Lane id
   assert.doesNotMatch(JSON.stringify(open), /lane-1|lane-2/);
 });
 
+test('f5c4d136: the public page counts only holds that wait on a person; a Lane held on its own next step is agent work', async () => {
+  const s = fixture({ laneTitles: true });
+  const mark = [...s.tables.projectLiveLineLanes.values()].find(row => row.held);
+  mark.fix = true;
+  const agent = await page(s);
+  assert.equal(agent.lanes.open, 2, 'the Lane is still open on the page');
+  assert.equal(agent.lanes.held, 0, 'a failed check or conflict is not a hold that waits on anyone');
+  assert.deepEqual(agent.lanes.titles, [
+    { stage: 'editing', title: 'Secret Lane title' },
+    { stage: 'checking' },
+  ]);
+  delete mark.fix;
+  const person = await page(s);
+  assert.equal(
+    person.lanes.held,
+    1,
+    'a hold with no `fix` (review, or a mark from before the flag) still counts',
+  );
+  assert.equal(person.lanes.titles[1].held, true);
+});
+
 test('a private project answers exactly like a missing one on every public read', async t => {
   const previous = process.env.FORGE_PUBLIC_READ_SECRET;
   process.env.FORGE_PUBLIC_READ_SECRET = 'synthetic-site-key';

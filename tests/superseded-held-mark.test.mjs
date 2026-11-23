@@ -17,6 +17,7 @@ const superseded = await import(moduleUrl('../convex/projectHostedSuperseded.ts'
 const repair = await import(moduleUrl('../convex/projectLiveLineRepair.ts'));
 const { needsCount } = await import(moduleUrl('../web/src/app/needs/count.ts'));
 const { baseMark } = await import(moduleUrl('../web/src/app/mark.ts'));
+const { lineStopCounts, lineStops } = await import(moduleUrl('../web/src/app/Line.tsx'));
 const previousEnvironment = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -246,4 +247,92 @@ test('Needs you counts only holds that wait on a person: review on the project l
   await writeLane(failed, () => ({ head: 'ef'.repeat(32) }));
   assert.equal(marks(failed)[0].held, false);
   assert.equal(marks(failed)[0].fix, undefined);
+});
+
+test('the top bar line counts only person holds as held: a failed check reads as agent work, review as held', async t => {
+  const stop = lineStops.find(entry => entry.stage === 'saved');
+  const feed = lanes => ({ lanes, more: 0, moreIsLowerBound: false, main: null });
+  const lane = (held, fix) => ({
+    laneId: 'a',
+    stage: 'saved',
+    held,
+    overlap: false,
+    changedAt: 1,
+    ...(fix ? { fix } : {}),
+  });
+  assert.equal(lineStopCounts(feed([lane(true)]), stop).held, 1, 'a hold that waits on a person');
+  assert.equal(lineStopCounts(feed([lane(true, true)]), stop).held, 0, 'a hold on the Lane’s own next step');
+  assert.equal(lineStopCounts(feed([lane(true, true)]), stop).total, 1, 'the Lane still stands at its stop');
+
+  // The same through the real feed: a failed-check hold leaves `fix` on its mark, so the line says nothing is held.
+  const f = await finishFixture(t);
+  const submission = await f.enqueue(f.request());
+  await holdWith(f, submission, before => ({
+    phase: 'terminal-failed',
+    observation: { ...before.observation, cause: 'check-failed', pendingReason: null },
+    error: { code: 'CHECK_FAILED', message: 'Check failed.' },
+  }));
+  const read = await lineRead(f);
+  assert.equal(lineStopCounts(read, stop).total, 1);
+  assert.equal(lineStopCounts(read, stop).held, 0);
+});
+
+test('the legacy repair resolves holds written before `fix`: agent-fixable ones become agent work, a review hold stays a person’s', async t => {
+  const legacy = await finishFixture(t);
+  const failedSubmission = await legacy.enqueue(legacy.request());
+  await holdWith(legacy, failedSubmission, before => ({
+    phase: 'terminal-failed',
+    observation: { ...before.observation, cause: 'check-failed', pendingReason: null },
+    error: { code: 'CHECK_FAILED', message: 'Check failed.' },
+  }));
+  // A mark from before the flag existed: held, no `fix`.
+  await run(legacy, 'preFlag', ctx => ctx.db.patch(marks(legacy)[0]._id, { fix: undefined }));
+  assert.equal((await surfaces(legacy)).projectListHeld, 1, 'before the repair it reads as Needs you');
+  const repairRun = (f, dryRun) =>
+    f.tx('legacyHolds', repair.legacyHolds, { projectId: f.projectId, cursor: null, dryRun });
+  const dry = await repairRun(legacy, true);
+  assert.deepEqual(dry.marked, [legacy.lane.laneId]);
+  assert.equal(marks(legacy)[0].fix, undefined, 'a dry run writes nothing');
+  const applied = await repairRun(legacy, false);
+  assert.deepEqual(applied.marked, dry.marked);
+  assert.equal(marks(legacy)[0].fix, true);
+  const after = await surfaces(legacy);
+  assert.equal(after.projectListHeld, 0);
+  assert.equal(after.projectListLanes, 1);
+  assert.notEqual(after.topBarMark, 'waiting');
+  assert.equal(marks(legacy)[0].held, true, 'the hold itself stays: Needs me still lists it for its agent');
+  assert.deepEqual((await repairRun(legacy, false)).marked, [], 'a replay finds nothing left');
+
+  const review = await finishFixture(t);
+  const queued = await review.enqueue(review.request());
+  await holdWith(review, queued, before => ({
+    observation: { ...before.observation, pendingReason: 'waiting-for-review' },
+  }));
+  const kept = await repairRun(review, false);
+  assert.deepEqual(kept.marked, [], 'a hold that waits for review is left as a person’s');
+  assert.equal(marks(review)[0].fix, undefined);
+});
+
+test('the legacy repair marks a hold whose submission is gone, reads each submission once and pages by `limit`', async t => {
+  const f = await finishFixture(t);
+  const submission = await f.enqueue(f.request());
+  await holdWith(f, submission, before => ({
+    phase: 'terminal-failed',
+    observation: { ...before.observation, cause: 'check-failed', pendingReason: null },
+    error: { code: 'CHECK_FAILED', message: 'Check failed.' },
+  }));
+  await run(f, 'preFlag', ctx => ctx.db.patch(marks(f)[0]._id, { fix: undefined }));
+  const owner = [...f.tables.projectFinishReadRows.values()].find(
+    row => row.kind === 'projectLiveLineOwner' && row.sourceId === f.lane.laneId,
+  );
+  await run(f, 'gone', ctx => ctx.db.patch(owner._id, { submissionId: randomUUID() }));
+  const first = await f.tx('legacyHolds', repair.legacyHolds, {
+    projectId: f.projectId,
+    cursor: null,
+    dryRun: false,
+    limit: 1,
+  });
+  assert.deepEqual(first.marked, [f.lane.laneId], 'a hold whose submission is gone waits on nobody');
+  assert.deepEqual(first.unread, []);
+  assert.equal(marks(f)[0].fix, true);
 });

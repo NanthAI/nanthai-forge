@@ -29,6 +29,8 @@ export type FlowFeed = {
     changedAt: number;
     check?: string;
     mainRed?: true;
+    /** Held on its own next step: no person is asked (Issue f5c4d136). */
+    fix?: true;
   }[];
   more: number;
   moreIsLowerBound: boolean;
@@ -60,8 +62,9 @@ const short = (laneId: string) => laneId.slice(0, 8);
 const clock = (ms: number, day?: number) =>
   `${day !== undefined && ms < day ? `${new Date(ms).toISOString().slice(0, 10)} ` : ''}${new Date(ms).toISOString().slice(11, 16)} UTC`;
 
-/** One stop's figures, as the picture and the text both read them. A Lane held only because main is failing
- * waits on no person, so it is held but not "needs you". */
+/** One stop's figures, as the picture and the text both read them. A Lane held only because main is failing, or on
+ * its own next step (a failed check, a conflict, a wait: `fix`), waits on no person, so it is held but not "needs
+ * you" (Issue f5c4d136). */
 export function flowStations(feed: FlowFeed, now: number) {
   return flowStops.map(({ stop, word, of }) => {
     const at = feed.lanes.filter(lane => of.includes(lane.stage));
@@ -75,12 +78,20 @@ export function flowStations(feed: FlowFeed, now: number) {
       held: held.length,
       /** Checks that passed and wait to land (stage 'ready'). */
       passed: at.filter(lane => lane.stage === 'ready' && !lane.held).length,
-      needsYou: held.filter(lane => !lane.mainRed).length,
+      needsYou: held.filter(lane => !lane.mainRed && !lane.fix).length,
       mainRed: held.filter(lane => lane.mainRed).length,
       longestMs: at.length ? Math.max(...at.map(lane => now - lane.changedAt)) : null,
       heldLanes: held.map(lane => ({
         laneId: lane.laneId,
-        why: lane.mainRed ? 'main is failing' : lane.overlap ? 'conflict' : 'held',
+        why: lane.mainRed
+          ? 'main is failing'
+          : lane.fix
+            ? lane.overlap
+              ? 'conflict, its agent fixes it'
+              : 'its agent fixes it'
+            : lane.overlap
+              ? 'conflict'
+              : 'held',
       })),
       /** Lanes checked together, one size per check, largest first. */
       checks: [...checks.values()].sort((a, b) => b - a),
@@ -151,7 +162,8 @@ export function flowText(feed: FlowFeed, now: number, root = '.') {
     };
     lines.push(`Partial coverage today: ${today.partial.map(figure => labels[figure]).join(', ')}.`);
   }
-  const person = stations.flatMap(s => s.heldLanes).find(lane => lane.why !== 'main is failing');
+  const agentWork = new Set(feed.lanes.filter(lane => lane.mainRed || lane.fix).map(lane => lane.laneId));
+  const person = stations.flatMap(s => s.heldLanes).find(lane => !agentWork.has(lane.laneId));
   const next = red
     ? `main is failing: Lanes held for it land when it passes again. Read nforge agent ${root} queue '{}' for the order.`
     : person
