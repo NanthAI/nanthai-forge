@@ -49,8 +49,7 @@ export const itemStatusLabel: Record<ItemStatus, string> = {
   archived: 'Archived',
   deleted: 'Deleted',
 };
-/** The visible noun of each stored kind. "Issue" stays only as a help-search alias. */
-export const kindLabel = { issue: 'Item', initiative: 'Initiative' } as const;
+
 /** Owner decision 2026-11-12: three default types. Projects may add their own labels (at most 32 characters). */
 export const defaultItemTypes = ['idea', 'task', 'bug'] as const;
 /** Why an Item was abandoned; free text stays allowed in `reason`, these are the one-press choices. */

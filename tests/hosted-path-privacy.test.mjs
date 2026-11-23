@@ -2,7 +2,7 @@
 import { setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -13,7 +13,6 @@ import { hostedPaths, hostedText } from '../dist/hosted-paths.js';
 import { metadataRequest, applyHostedEvent } from '../dist/work-metadata.js';
 import { moduleUrl } from './convex-module.mjs';
 import { state, providers } from './hosted-fixture.mjs';
-const zones = await import(moduleUrl('../convex/sourceZones.ts'));
 const grants = await import(moduleUrl('../convex/agentGrants.ts'));
 const saved = await import(moduleUrl('../convex/savedViews.ts'));
 const interests = await import(moduleUrl('../convex/interests.ts'));
@@ -144,11 +143,8 @@ function cleanupFixture() {
 }
 async function lists(f) {
   return [
-    await zones.list._handler(f.ctx, { importId: 'own', paginationOpts }),
     await grants.list._handler(f.ctx, { paginationOpts }),
     await saved.list._handler(f.ctx, { paginationOpts }),
-    await interests.list._handler(f.ctx, { paginationOpts }),
-    { page: [await interests.current._handler(f.ctx, { importId: 'own' })] },
     ...(await Promise.all(
       ['agent', 'view', 'interest'].map(kind => account.inventory._handler(f.ctx, { kind, paginationOpts })),
     )),

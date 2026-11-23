@@ -60,18 +60,11 @@ import { useSyncExternalStore } from ${JSON.stringify(require.resolve('react'))}
 import { getFunctionName } from ${JSON.stringify(require.resolve('convex/server'))};
 let version=0; const listeners=new Set(); const emit=()=>{version++;listeners.forEach(fn=>fn());};
 const people=${JSON.stringify(data)};
-let olderInvitation={id:'old-handle',email:'@older-person',state:'pending'};
 let rows=[{ invitationId:'recipient', projectName:'Compiler tools and documentation', inviterHandle:'olive', role:'read', state:'pending', expiresAt:Date.now()+5*86400000, href:'/olive/tools' },
 { invitationId:'old', projectName:'Old project', inviterHandle:'wren', role:'write', state:'expired', expiresAt:Date.now()-2*86400000, href:'/wren/old' }];
 let teamRows=[{ invitationId:'team-invite', teamName:'Documentation team', inviterHandle:'olive', state:'pending', href:'/account/people' }];
 export function useQuery(ref,args){useSyncExternalStore(fn=>{listeners.add(fn);return()=>listeners.delete(fn);},()=>version); const name=getFunctionName(ref);
 if(args==='skip')return undefined;
-if(name==='projectContributors:list')return [];
-if(name==='projectAccess:people'&&args.limit===1){
-  if(args.invitationCursor==='older')return {...people,invited:[olderInvitation]};
-  if(args.invitationCursor==='ended')return {...people,invited:[people.invited[1]],invitationCursor:'older'};
-  return {...people,invited:[people.invited[0]],invitationCursor:'ended'};
-}
 if(name==='projectAccess:people')return people;
 if(name==='projectInvitationInbox:inbox'){
   const team=location.pathname.endsWith('/team-recipient');
@@ -106,8 +99,6 @@ const mutation=async(ref,args)=>{
     rows=rows.filter(row=>row.invitationId!==args.invitationId);
     teamRows=teamRows.filter(row=>row.invitationId!==args.invitationId);
   }
-  if(name==='projectContributors:cancelInvite'&&args.id===olderInvitation.id)
-    olderInvitation={...olderInvitation,state:'cancelled'};
   emit();
 };
 export function useMutation(ref){return args=>mutation(ref,args);}
@@ -126,21 +117,14 @@ export const useAction=useMutation;
     `
 import React from 'react'; import {createRoot} from 'react-dom/client';
 import People from ${JSON.stringify(join(root, 'web/src/app/people/PeopleAccess.tsx'))};
-import LegacyPeople from ${JSON.stringify(join(root, 'web/src/ProjectContributors.tsx'))};
 import Home from ${JSON.stringify(join(root, 'web/src/app/people/InvitationHome.tsx'))};
 import {ProjectFrame,AccountFrame} from ${JSON.stringify(join(root, 'web/src/app/frames.tsx'))};
 import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
 const route={frame:'project',handle:'olive',project:'tools',place:'settings',section:'',rest:''};
 const owner=location.pathname.endsWith('/owner');
-const legacy=location.pathname.endsWith('/legacy');
 const controls={viewerHandle:owner?'olive':'wren',onPicker(){},onPalette(){},onKeys(){}};
 const root=createRoot(document.getElementById('root'));
-if(legacy){
-  Promise.all([
-    import(${JSON.stringify(join(root, 'web/src/legacy.css'))}),
-    import(${JSON.stringify(join(root, 'web/src/settings/settings.css'))}),
-  ]).then(()=>root.render(<main className="fx fx-settings-existing"><LegacyPeople projectId="project" /></main>));
-}else root.render(owner?
+root.render(owner?
 <ProjectFrame route={route} name="Synthetic project" feed={undefined} projects={null} controls={controls}><People route={route} projectId="project" projectName="Synthetic project" viewerHandle="olive" /></ProjectFrame>:
 <AccountFrame place="people" back={null} controls={controls}><Home handle="wren" leave={()=>undefined} /></AccountFrame>);
 `,
@@ -166,7 +150,7 @@ if(legacy){
   t.after(() => browser.close());
   for (const width of [1440, 390])
     for (const theme of ['dark', 'light'])
-      for (const mode of ['owner', 'recipient', 'team-recipient', 'legacy']) {
+      for (const mode of ['owner', 'recipient', 'team-recipient']) {
         const context = await browser.newContext({
           viewport: { width, height: width === 390 ? 844 : 1000 },
           colorScheme: theme,
@@ -193,11 +177,9 @@ if(legacy){
           });
         });
         await page.goto(`https://forge.test/${mode}`);
-        if (mode === 'legacy') await page.getByRole('list', { name: 'Pending invitations' }).waitFor();
-        else
-          await page
-            .getByRole('heading', { name: mode === 'owner' ? 'Who can do what' : 'Home', exact: true })
-            .waitFor();
+        await page
+          .getByRole('heading', { name: mode === 'owner' ? 'Who can do what' : 'Home', exact: true })
+          .waitFor();
         await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
         if (mode === 'owner') {
           for (const state of ['Pending', 'Expired', 'Accepted'])
@@ -327,21 +309,6 @@ if(legacy){
             [['teamActions:answerInvitation', 'team-invite', 'accept']],
           );
           assert.equal(await page.getByRole('button', { name: 'Accept', exact: true }).count(), 0);
-        }
-        if (mode === 'legacy') {
-          const more = page.getByRole('button', { name: 'More invitations', exact: true });
-          await more.click();
-          await page.getByRole('list', { name: 'Pending invitations' }).waitFor({ state: 'hidden' });
-          await more.click();
-          await page.getByText('@older-person', { exact: false }).waitFor();
-          assert.equal(await more.count(), 0);
-          await page.getByRole('button', { name: 'Cancel invitation', exact: true }).click();
-          assert.deepEqual(await page.evaluate(() => window.calls), [
-            { name: 'projectContributors:cancelInvite', args: { projectId: 'project', id: 'old-handle' } },
-          ]);
-          await page.getByText('@older-person', { exact: false }).waitFor({ state: 'hidden' });
-          await page.getByRole('button', { name: 'Newest invitations', exact: true }).click();
-          await page.getByText('pending@example.test', { exact: false }).waitFor();
         }
         assert.deepEqual(errors, [], 'no framework/runtime errors');
         await context.close();

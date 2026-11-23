@@ -667,8 +667,8 @@ Imports store gzip JSON in R2 (`r2blob:` references, see [data placement](data-p
 The redesigned app (DESIGN.md frames) is served at the site root by `app.html`;
 `/` stays the static public page (`web/index.html`), and `/docs/`, `/assets/` and
 files are static. `web/src/main.tsx` starts only `web/src/app/App.tsx` (Item
-b0704959); the earlier screens (`Hosted.tsx` and its imports) are no longer
-served and go with the old-shell removal. The app lived under `/-` before; every
+b0704959); the earlier screens (`Hosted.tsx` and its imports) were removed
+(Item 88a20e56). The app lived under `/-` before; every
 `/-` and `/-/*` address moves for good (301, kept forever: mails, CLI output, board
 text and GitHub statuses carry those links) to the same address without `/-`. The
 cached public read answers them (`netlify/functions/public-read.mts`, path `/-/*`)
@@ -1260,7 +1260,7 @@ node scripts/ui-shots.mjs --base https://<your-site>.netlify.app \
   --widths 1500,390 --themes dark,light
 ```
 
-`--base` also accepts a draft origin or `http://localhost:5179`. Lane captures also accept `--variants unified,split,inline,side-closed,files-closed,map`; each variant starts from an explicit diff/rail state and gets its own filename. `--project ID` overrides the project stored with the credentials; `--height` defaults to 1000. Include specific retained records with `--pages 'now,intents,lane:LANE_ID,review:VIEW_ID,settings,device'`. The tool resolves a Candidate's parent Intent through the same site's authorized Work query. It seeds its route codec from the access-checked project identity before validating readable-URL redirects. Add `--diff-file src/example.ts` to select a specific file in Lane/Review screenshots. `settings` opens the shared Settings destination's Contributors page; owner-only lifecycle settings are unavailable to the reader. `device` captures the signed-in code-entry screen without approving any login.
+`--base` also accepts a draft origin or `http://localhost:5179`. Lane captures also accept `--variants unified,split,inline,side-closed,files-closed,map`; each variant starts from an explicit diff/rail state and gets its own filename. `--project ID` overrides the project stored with the credentials; `--height` defaults to 1000. Include specific retained records with `--pages 'now,intents,lane:LANE_ID,settings,device'`. The tool seeds its route codec from the access-checked project identity before validating readable-URL redirects. Add `--diff-file src/example.ts` to select a specific file in Lane/Review screenshots. `settings` opens the shared Settings destination's Contributors page; owner-only lifecycle settings are unavailable to the reader. `device` captures the rebuilt code-entry screen without approving any login. Every capture needs the passkey credential below: the earlier screens and their Clerk sign-in flow are no longer served, so a Clerk credential file is refused.
 
 Intent Review actions require a passing check matching the current Candidate head and exclude accepted or superseded Candidates. Intent detail work maps cluster dense save histories and show the latest five Candidates when more than six exist; the earlier link leads to the expandable Candidates list. Candidate detail uses Intent-relative numbering, and lists larger than 50 files group each loaded page by top-level folder. Folder rows count their visible files and show a diffstat when available. The final row expands the remaining paginated files; file/save provenance remains expandable. Hosted read models do not currently supply line diff totals, so those values remain absent rather than estimated.
 
@@ -1272,7 +1272,7 @@ Setup allows per-user `.forge` and `.nforge` directories directly in the resolve
 
 To use Convex Auth, point either tool at the private file with `--credentials`. A top-level `passkey` entry selects the native flow. The entry contains `origin` (the exact HTTPS site origin), `deployment` (the HTTPS Convex origin) and `credential` (Chromium's resident WebAuthn credential with `credentialId`, `privateKey`, `userHandle`, `rpId` and `isResidentCredential: true`). The binary fields use standard base64, as returned by Chromium. Keep the optional top-level `projectId` or supply `--project`. Native sign-in uses a Chromium virtual authenticator and the existing Forge sign-in page. The tools verify the authenticated handle and keep the web session in memory.
 
-The passkey path opens the rebuilt screens. Use `now,intents,settings` for Needs me, Plan and People and access. It also supports `lane:ID` with the default variant and an optional `--diff-file`, plus native project, device and account pages. Captures of an execution Intent, retained Candidate Review and View pages, the Code graph, Activity, the classic Lane variants and classic-only Settings sections use the Clerk credential file during coexistence. A malformed or mismatched passkey file fails in the native flow. Signed-in runs disable Playwright wire logging because browser protocol frames carry credentials.
+The passkey path opens the rebuilt screens. Use `now,intents,settings` for Needs me, Plan and People and access. It also supports `lane:ID` with the default variant and an optional `--diff-file`, plus native project, device and account pages. Captures of an execution Intent, retained Candidate Review and View pages, the Code graph, Activity, the classic Lane variants and classic-only Settings sections were Clerk-only and are gone with the earlier screens. A malformed or mismatched passkey file fails in the native flow. Signed-in runs disable Playwright wire logging because browser protocol frames carry credentials.
 
 From a built checkout with Chromium installed and a current owner `nforge login` for dev, run:
 

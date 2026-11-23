@@ -7,7 +7,7 @@ import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
-import { agentFixture } from './hosted-agent-fixture.mjs';
+
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { digest } from '../dist/hash.js';
 import { prepareMirror } from '../dist/hosted-github-mirror.js';
@@ -15,9 +15,12 @@ import { githubRequest } from '../dist/hosted-github-api.js';
 import { gitHash } from '../dist/hosted-github-git.js';
 import { unexpectedMirrorFailure } from '../dist/hosted-github-retry.js';
 import { hostedMirrorStatusText } from '../dist/hosted-github-mirror-status.js';
+import { agentFixture } from './hosted-agent-fixture.mjs';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
+
 import { interceptDefaultR2 } from './default-r2.mjs';
 import { workflowTreeRefusal } from './github-api-fake.mjs';
+const agent = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const queue = await import(moduleUrl('../convex/projectGithubMirrorQueue.ts'));
 const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
 const action = await import(moduleUrl('../convex/projectGithubMirror.ts'));
@@ -26,10 +29,6 @@ const { githubMirrorStatus } = await import(moduleUrl('../convex/projectGithubMi
 const { stoppedMirror, mirrorRow } = await import(moduleUrl('../convex/projectGithubMirrorRows.ts'));
 const { retargetGithubMirror } = await import(moduleUrl('../convex/projectGithubMirrorRetarget.ts'));
 const { yieldToInbound } = await import(moduleUrl('../convex/projectGithubInboundQueue.ts'));
-const agent = await import(moduleUrl('../convex/projectHostedAgent.ts'));
-const { HostedMirrorStatus } = await import(moduleUrl('../web/src/cockpit/HostedMirrorStatus.tsx'));
-const { createElement } = await import('react');
-const { renderToStaticMarkup } = await import('react-dom/server');
 
 test('unconfigured server projects do not read mirror storage or require mirror tables', async () => {
   const status = await githubMirrorStatus(
@@ -543,20 +542,8 @@ test('real action: five persistent 500s end terminal, visible in CLI and Now, wi
   const status = await f.status();
   assert.equal(status.status, 'failed');
   assert.equal(status.lagging, true);
-  assert.match(
-    hostedMirrorStatusText(status, Date.now()),
-    /failed.*behind.* 5 failed attempts.*HTTP 500.*request bytes/,
-  );
-  const html = renderToStaticMarkup(createElement(HostedMirrorStatus, { status, now: Date.now() }));
-  assert.match(html, /role="status"/);
-  assert.match(html, /failed.* 5 failed attempts.*HTTP 500/);
-  // SM-E: a stopped mirror names its next step; only the owner's view (a resume handler) offers the button.
+  // SM-E: a stopped mirror names its next step.
   assert.match(status.nextStep, /nforge github resume PROJECT/);
-  assert(!/Resume mirror/.test(html), 'a non-owner view has no button');
-  const owner = renderToStaticMarkup(
-    createElement(HostedMirrorStatus, { status, now: Date.now(), resume: async () => undefined }),
-  );
-  assert.match(owner, /Resume mirror/);
   const capabilities = JSON.parse(
     await f.run(agent.capabilities, { projectId: f.projectId, mirrorVersion: 1 }),
   );

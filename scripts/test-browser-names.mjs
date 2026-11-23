@@ -16,8 +16,6 @@ export const browserTests = [
   'stats-screen',
   'ui-account-sessions',
   'ui-agent-sessions',
-  'ui-code-index',
-  'ui-code-labels',
 ].map(name => `tests/${name}.test.mjs`);
 const browserSet = new Set(browserTests);
 export const isBrowserTest = file => browserSet.has(file) || browserName.test(file);

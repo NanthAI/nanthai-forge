@@ -343,13 +343,3 @@ export function projectNavigationHref(
   } else url.searchParams.set('tab', tab);
   return cleanUrl(url, href);
 }
-
-/** Install once, before React. Both old page controls and new links use the same canonical codec. */
-export function installRoutes(hosted: boolean) {
-  routeMode(hosted ? 'hosted' : 'local');
-  for (const key of ['pushState', 'replaceState'] as const) {
-    const original = history[key].bind(history);
-    history[key] = (data, unused, url) => original(data, unused, url == null ? url : cleanUrl(String(url)));
-  }
-  history.replaceState(history.state, '', cleanUrl(location.href));
-}

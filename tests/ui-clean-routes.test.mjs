@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
-const r = await import(moduleUrl('../web/src/shell/location.ts'));
+const r = await import(moduleUrl('../src/project-routes.ts'));
 const id = '63b67c40-d744-441d-9d7e-e8b5bbde9c52';
 const base = 'https://forge.example/';
 test('short Work IDs round trip without a lossy prefix lookup', () => {
@@ -174,27 +174,6 @@ test('a changed line anchor wins over a legacy line query', () => {
       .searchParams.get('line'),
     '3',
   );
-});
-
-test('shared file links keep the immutable save, checkpoint and exact line anchor', async () => {
-  const { savedLink } = await import(moduleUrl('../web/src/shell/ObjectActions.tsx'));
-  const previous = globalThis.location;
-  globalThis.location = { href: 'https://forge.example/maya/forge~p1/views/v-example?sourceBackup=b1' };
-  try {
-    r.routeMode('hosted');
-    r.projectIdentity('p1', 'maya', 'Forge');
-    const link = new URL(savedLink('saved-head', 'src/a b.ts', 18, false, 'b1'));
-    assert.equal(link.hash, '#L18');
-    const decoded = r.routeUrlState(link.href);
-    assert.equal(decoded.searchParams.get('head'), 'saved-head');
-    assert.equal(decoded.searchParams.get('sourceBackup'), 'b1');
-    assert.equal(decoded.searchParams.get('file'), 'src/a b.ts');
-    assert.equal(decoded.searchParams.get('viewId'), null);
-    assert.equal(decoded.searchParams.get('line'), '18');
-  } finally {
-    if (previous === undefined) delete globalThis.location;
-    else globalThis.location = previous;
-  }
 });
 
 test('retired Views list redirects to Intents while View deep links retain their identity', () => {

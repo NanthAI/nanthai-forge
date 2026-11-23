@@ -8,7 +8,7 @@ import type { Id } from '../../../convex/_generated/dataModel';
 import { Avatar, Count, DockPerson, Menu, State, initials, type MenuAction } from '../ds';
 import { Rail } from '../ds/Rail';
 import { RailControls, useRailState } from '../ds/rail-state';
-import { ForgeMark } from '../shell/brand';
+import { ForgeMark } from '../ui/brand';
 import { Line, type LineFeed } from './Line';
 import { useMark } from './mark';
 import { accountPlaces, hrefFor, projectPlaces, type AccountPlace, type ProjectPlace } from './paths';

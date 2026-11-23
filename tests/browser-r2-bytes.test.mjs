@@ -586,51 +586,6 @@ test('record-based Work is reconstructed byte-for-byte in browser archives', asy
   assert.deepEqual(Buffer.from(result.manifest), manifestBytes);
 });
 
-test('browser logs follow direct pins, redact before paging and recheck the generation', async t => {
-  const { readBrowserLog } = await import(moduleUrl('../web/src/browser-log.ts'));
-  const { s } = await setup(t),
-    bytes = Buffer.from('Retained /workspace/synthetic/private/file.txt\n' + 'x'.repeat(20000)),
-    p = await upload(s, bytes),
-    b = browser(s);
-  let actions = 0;
-  const c = {
-    mutation: b.mutation,
-    action: async () => {
-      actions++;
-      return JSON.stringify({ direct: p, backupId: 'backup', generationId: 'generation', offset: 0 });
-    },
-  };
-  const source = c.mutation;
-  c.mutation = (ref, args) =>
-    getFunctionName(ref).endsWith(':source') ? JSON.stringify({ backupId: 'backup' }) : source(ref, args);
-  const result = JSON.parse(
-    await readBrowserLog(c, {
-      projectId: 'project',
-      generationId: 'generation',
-      runId: randomUUID(),
-      stream: 'stdout',
-      offset: 0,
-    }),
-  );
-  assert(!result.text.includes('/workspace/'));
-  assert.match(result.text, /\[local path\]/);
-  assert.equal(result.nextOffset, 16384);
-  assert(result.more);
-  assert.equal(actions, 2);
-  c.action = async () =>
-    JSON.stringify({ direct: p, backupId: 'backup', generationId: `changed-${++actions}` });
-  await assert.rejects(
-    readBrowserLog(c, {
-      projectId: 'project',
-      generationId: 'generation',
-      runId: randomUUID(),
-      stream: 'stdout',
-      offset: 0,
-    }),
-    code('WORK_STALE'),
-  );
-});
-
 test('a cached hit stays usable when signing a neighbour crosses its expiry boundary', async t => {
   const { s } = await setup(t),
     a = await upload(s, 'cached neighbour'),

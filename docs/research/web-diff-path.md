@@ -68,13 +68,13 @@ No unfavorable valid cell was removed. The throwaway harness is not shipped.
 
 ## Current source path: where the time goes
 
-The existing path is [browser-source.ts](../../web/src/browser-source.ts) →
+The measured path was [browser-source.ts](../../web/src/browser-source.ts) →
 [ObjectDownloadReader](../../src/blob-download.ts) →
-[computeHunks](../../src/review-hunks-core.ts) →
-[ChangesPanel](../../web/src/lane/ChangesPanel.tsx) →
-[Diff](../../web/src/lane/Diff.tsx) / [LazyLines](../../web/src/lane/LazyLines.tsx)
-→ [SyntaxLine](../../web/src/SourceTokens.tsx) →
-[highlight worker](../../web/src/source-highlight.worker.ts).
+[computeHunks](../../src/review-hunks-core.ts) → the old app's `ChangesPanel` →
+`Diff` / `LazyLines` → `SyntaxLine` →
+[highlight worker](../../web/src/source-highlight.worker.ts). The old app's three screen
+components were removed with the old shell; the rebuilt Lane review screen reads files
+through the same reader, as the section below measures.
 
 Two retained dogfood comparisons were pinned, rather than following moving Lane
 heads:
@@ -221,8 +221,8 @@ verified GET and re-checking after paint gives 574/922 ms. Only the last meets t
 target, and it changes the rule that private access is re-checked after a read
 before bytes are shown. That needs an owner decision.
 
-**The old Lane changes view** (`web/src/lane/HostedLaneChanges.tsx`, still served
-outside `/-`) reads both whole State objects. On the same Lane, one sample on
+**The old Lane changes view** (the old app's `HostedLaneChanges`, removed with the
+old shell) read both whole State objects. On the same Lane, one sample on
 main's reader made about 2,300 serial `describe` calls and about 1,160 R2 GETs
 in 9.5 minutes. It then failed with "This source object is not retained in the
 selected checkpoint", because the Lane's States are newer than the project's

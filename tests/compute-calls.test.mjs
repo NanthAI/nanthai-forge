@@ -1,67 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { generateKeyPairSync } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { state, job } from './hosted-fixture.mjs';
 import { tokenKeys } from '../dist/device-token.js';
-const { watchImport } = await import(moduleUrl('../web/src/import-watch.idle.ts'));
 const status = await import(moduleUrl('../convex/importStatus.ts'));
 const sync = await import(moduleUrl('../convex/sync.ts'));
-
-test('idle import subscription makes zero periodic action calls per minute and hour', t => {
-  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
-  const oldWindow = globalThis.window;
-  globalThis.window = new EventTarget();
-  t.after(() => {
-    globalThis.window = oldWindow;
-  });
-  let baseline = 0;
-  const oldPoll = setInterval(() => baseline++, 5000);
-  t.mock.timers.tick(3_600_000);
-  clearInterval(oldPoll);
-  assert.equal(baseline, 720);
-  let listener,
-    value = 'initial',
-    calls = 0,
-    detached = false;
-  const client = {
-    watchQuery: () => ({
-      onUpdate: callback => {
-        listener = callback;
-        return () => {
-          detached = true;
-        };
-      },
-      localQueryResult: () => value,
-    }),
-  };
-  const stop = watchImport(client, 'own', () => calls++);
-  assert.equal(calls, 1); // Initial authorized action is not periodic work.
-  calls = 0;
-  for (let minute = 0; minute < 60; minute++) {
-    t.mock.timers.tick(60_000);
-    listener(); // Duplicate delivery/reconnect with identical value is also quiet.
-    assert.equal(calls, 0, `idle minute ${minute + 1}`);
-  }
-  value = 'changed';
-  listener();
-  assert.equal(calls, 1);
-  window.dispatchEvent(new Event('focus'));
-  window.dispatchEvent(new Event('online'));
-  assert.equal(calls, 3);
-  stop();
-  window.dispatchEvent(new Event('focus'));
-  assert.equal(calls, 3);
-  assert.equal(detached, true);
-  const app = readFileSync(new URL('../web/src/App.tsx', import.meta.url), 'utf8');
-  assert.doesNotMatch(app, /setInterval/);
-  assert.match(app, /hosted\.subscribeStatus/);
-  t.diagnostic(
-    'Same fake clock: before 720 periodic calls/tab-hour; after 0; startup, changed-state and focus calls counted separately.',
-  );
-});
 
 test('invalidation is opaque, excludes read observations, and tracks derivative/head/revocation', async () => {
   const s = state([job()]);

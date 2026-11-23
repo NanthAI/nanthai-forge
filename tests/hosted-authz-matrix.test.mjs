@@ -122,7 +122,6 @@ const reads = [
   ['projectWorkIndex', 'detail', { collection: 'intents', id: 'intent' }],
   ['projectViewReads', 'read', { action: 'views', laneId: 'lane', paginationOpts }],
   ['projectBackups', 'history', { paginationOpts }],
-  ['projectProposals', 'list', { paginationOpts }],
   ['projectCheckRequests', 'runners', { paginationOpts }],
   ['projectCheckRequests', 'list', { viewId: 'view', paginationOpts }],
   ['projectAutonomy', 'read', {}],
@@ -298,12 +297,13 @@ test('the owner of one project cannot read another project through its child ids
 
 test('browser review and object metadata return real plans and URLs only while access is current', async t => {
   const s = setup();
-  const env = {
-    R2_ACCOUNT_ID: fakeR2Config.accountId,
-    R2_BUCKET: fakeR2Config.bucket,
-    R2_ACCESS_KEY_ID: fakeR2Config.accessKeyId,
-    R2_SECRET_ACCESS_KEY: fakeR2Config.secretAccessKey,
-  };
+  const { accountId, bucket, accessKeyId, secretAccessKey } = fakeR2Config;
+  const env = Object.fromEntries([
+    ['R2_ACCOUNT_ID', accountId],
+    ['R2_BUCKET', bucket],
+    ['R2_ACCESS_KEY_ID', accessKeyId],
+    ['R2_SECRET_ACCESS_KEY', secretAccessKey],
+  ]);
   const saved = Object.fromEntries(Object.keys(env).map(name => [name, process.env[name]]));
   Object.assign(process.env, env);
   t.after(() => {

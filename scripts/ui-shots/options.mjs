@@ -13,8 +13,6 @@ Optional: --intent-layout list|board (Intents layout), --diff-file PATH (select 
 --credentials FILE (defaults to ~/.config/forge-ui-bot/credentials.json).
 --pages landing captures the public page (stills per width and theme, keyboard, no-JS, a hero strip), its
 motion lifecycle and cold-load cost; point --base at a built preview. No bot credentials are read.
---pages bootstrap captures synthetic New project and empty-project components,
-including a lost-response retry, without credentials or hosted writes.
 Lane/View variants: --variants unified,split,inline,side-closed,files-closed,map
 Install Chromium once: npx playwright install chromium`;
 
@@ -63,7 +61,7 @@ export function options(args) {
   if (
     pages.some(
       p =>
-        !/^(bootstrap|landing|home|now|intents|lanes|planning|stats|activity|code|code-graph|settings(?::(?:general|agents|autonomy|checks|access|backups|appearance|devices|contributions|transfer|github))?|device|(?:lane|review|intent|view|initiative):[A-Za-z0-9_-]+)$/.test(
+        !/^(landing|home|now|intents|lanes|planning|stats|activity|code|code-graph|settings(?::(?:general|agents|autonomy|checks|access|backups|appearance|devices|contributions|transfer|github))?|device|(?:lane|review|intent|view|initiative):[A-Za-z0-9_-]+)$/.test(
           p,
         ),
     )
@@ -71,8 +69,6 @@ export function options(args) {
     throw new ShotError(
       'Unknown page. Use landing,now,intents,lanes,stats,lane:<id>,review:<id>,settings,device.',
     );
-  if (pages.includes('bootstrap') && pages.length !== 1)
-    throw new ShotError('Capture synthetic bootstrap separately from signed-in pages.');
   if (pages.includes('landing') && pages.length !== 1)
     throw new ShotError('Capture landing separately from signed-in pages.');
   const widths = values.widths.split(',').map(Number),

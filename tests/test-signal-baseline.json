@@ -42,9 +42,6 @@
     "tests/check-environment.test.mjs": {
       "sleep": 1
     },
-    "tests/check-input-ui.test.mjs": {
-      "sleep": 1
-    },
     "tests/check-inputs.test.mjs": {
       "sleep": 4
     },
@@ -61,7 +58,7 @@
       "sleep": 5
     },
     "tests/ci-scope.test.mjs": {
-      "docs": 2
+      "docs": 1
     },
     "tests/cli-canary.test.mjs": {
       "sleep": 4
@@ -71,9 +68,6 @@
     },
     "tests/cli-update.test.mjs": {
       "sleep": 7
-    },
-    "tests/compute-calls.test.mjs": {
-      "sleep": 1
     },
     "tests/convex-function-names.test.mjs": {
       "elapsed": 1
@@ -145,9 +139,6 @@
     "tests/hosted-actions-retry.test.mjs": {
       "sleep": 1
     },
-    "tests/hosted-agent-help.test.mjs": {
-      "docs": 1
-    },
     "tests/hosted-agent-mcp.test.mjs": {
       "sleep": 1
     },
@@ -209,9 +200,6 @@
     "tests/hosted-work.test.mjs": {
       "sleep": 1
     },
-    "tests/hot-storage-invariant.test.mjs": {
-      "docs": 1
-    },
     "tests/import-object-packs.test.mjs": {
       "sleep": 1
     },
@@ -237,7 +225,7 @@
       "sleep": 5
     },
     "tests/local-watcher.test.mjs": {
-      "sleep": 14,
+      "sleep": 13,
       "elapsed": 1
     },
     "tests/mcp-hosted-source.test.mjs": {
@@ -254,7 +242,7 @@
       "sleep": 1
     },
     "tests/native-git-batch.test.mjs": {
-      "sleep": 4
+      "sleep": 3
     },
     "tests/native-git-export-waits.test.mjs": {
       "sleep": 2

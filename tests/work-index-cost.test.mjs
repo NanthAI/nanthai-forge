@@ -326,7 +326,6 @@ test('missing indexes return structured results without automatic full builds, i
 
 test('browser and briefing entry points contain no implicit full-build path', () => {
   for (const file of [
-    'web/src/HostedWork.tsx',
     'web/src/hosted-work-index.ts',
     'src/host-cli.ts',
     'convex/projectWorkIndexedCommand.ts',

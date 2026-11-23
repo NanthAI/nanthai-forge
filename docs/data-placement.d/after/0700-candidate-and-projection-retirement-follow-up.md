@@ -1,17 +1,9 @@
 ### Candidate and projection retirement follow-up
 
 The Candidate page reads its file list once on opening; per-file provenance is
-read when a file is expanded. `tests/candidate-page-measure.mjs` qualifies the
-rendered 4k/29k fixtures over HTTP, including current-access descriptor RPCs,
-object GETs, hash verification and React rendering. Run it through `nforge heavy`;
-`FORGE_CANDIDATE_PAGE_MEASURE=1` selects two warmup pairs followed by eleven
-interleaved legacy/canonical pairs. The baseline reproduces the legacy indexed
-page's second mount-time provenance request and uses saved diffstats. Timing ends
-at the second animation frame after the changed path commits to the DOM. Browser
-and application startup, the outer workspace/conversation subscriptions, live
-Convex/R2 networks and billed usage are outside this local fixture. The browser
-harness is separate from the normal Node suite; the landing runner does not
-install a browser. No time assertion is used as a build gate.
+read when a file is expanded. The local browser harness that timed the old
+Candidate page over HTTP (4k/29k fixtures) was removed with the old app shell;
+no time assertion is used as a build gate.
 
 The remaining projection cutover is separate from Candidate listing publication.
 Revision-free Work mutations still require selected payload attributes in their

@@ -53,7 +53,6 @@ test('selected-project devices receive the native out-of-scope refusal for impor
     () => downloads.restore._handler(s.ctx, { id: 'own' }),
     () => lifecycle.list._handler(s.ctx, { paginationOpts: { cursor: null, numItems: 20 } }),
     () => hosted.start._handler(s.ctx, { url: 'https://github.com/synthetic/repository' }),
-    () => hosted.discover._handler(s.ctx, { paginationOpts: { cursor: null, numItems: 20 } }),
   ])
     await assert.rejects(
       request(),

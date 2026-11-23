@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useSyncExternalStore } from 'react';
-import { Glyph } from './Glyph';
 
 export type ThemeChoice = 'system' | 'light' | 'dark';
 const KEY = 'forge-theme';
-const order: readonly ThemeChoice[] = ['system', 'light', 'dark'];
 const listeners = new Set<() => void>();
 
 export function readTheme(): ThemeChoice {
@@ -50,52 +48,4 @@ export function useTheme() {
     return () => query.removeEventListener('change', follow);
   }, [theme]);
   return [theme, setTheme] as const;
-}
-
-const names: Record<ThemeChoice, string> = {
-  system: 'System theme',
-  light: 'Light theme',
-  dark: 'Dark theme',
-};
-
-/** One button that cycles system → light → dark and always says which theme is active. */
-export function ThemeToggle() {
-  const [theme, choose] = useTheme();
-  const next = order[(order.indexOf(theme) + 1) % order.length]!;
-  return (
-    <button
-      type="button"
-      className="fx-icon-btn"
-      title={`${names[theme]} · switch to ${names[next].toLowerCase()}`}
-      aria-label={`${names[theme]}. Switch to ${names[next].toLowerCase()}`}
-      onClick={() => choose(next)}
-    >
-      <Glyph name={theme === 'system' ? 'system' : theme === 'light' ? 'sun' : 'moon'} size={15} />
-    </button>
-  );
-}
-
-/** Explicit theme choices in the account menu. */
-export function ThemePicker() {
-  const [theme, choose] = useTheme();
-  return (
-    <div className="fx-theme-picker">
-      <span>Theme</span>
-      <div className="fx-seg" role="group" aria-label="Theme">
-        {order.map(choice => (
-          <button
-            key={choice}
-            type="button"
-            role="menuitemradio"
-            aria-checked={theme === choice}
-            title={names[choice]}
-            aria-label={names[choice]}
-            onClick={() => choose(choice)}
-          >
-            <Glyph name={choice === 'system' ? 'system' : choice === 'light' ? 'sun' : 'moon'} size={16} />
-          </button>
-        ))}
-      </div>
-    </div>
-  );
 }

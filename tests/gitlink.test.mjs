@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createElement as h } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { moduleUrl } from './convex-module.mjs';
-import { gitlinkCommit, gitmoduleUrls, readSubmodulePointers, submoduleLabel } from '../dist/gitlink.js';
-import { sourceTreeEntries } from '../dist/source-tree-index.js';
+
+import { gitlinkCommit, gitmoduleUrls, readSubmodulePointers } from '../dist/gitlink.js';
+
 import { digest } from '../dist/hash.js';
-const { SubmodulePointers, SubmodulePointerView } = await import(moduleUrl('../web/src/Submodules.tsx'));
-const { CodeFileTree } = await import(moduleUrl('../web/src/CodeFileTree.tsx'));
 
 test('pointer bytes and inert gitmodules parsing preserve relative and SSH URLs', () => {
   assert.equal(gitlinkCommit(Buffer.from('a'.repeat(40) + '\n')), 'a'.repeat(40));
@@ -27,23 +23,6 @@ test('pointer bytes and inert gitmodules parsing preserve relative and SSH URLs'
       ['vendor/ssh', 'git@example.invalid:org/lib.git'],
     ],
   );
-});
-
-test('Now and Code render submodule URLs and short pins as leaf entries', () => {
-  const pointer = { path: 'vendor/lib', commit: 'a'.repeat(40), url: '../lib.git' };
-  for (const view of [h(SubmodulePointers, { pointers: [pointer] }), h(SubmodulePointerView, { pointer })]) {
-    const html = renderToStaticMarkup(view);
-    assert(html.includes('submodule → ../lib.git @ aaaaaaaa'));
-    assert(!html.includes('<details'));
-  }
-  const tree = renderToStaticMarkup(
-    h(CodeFileTree, { paths: ['vendor/lib'], selected: 'vendor/lib', touched: new Set(), select() {} }),
-  );
-  assert.equal((tree.match(/<details/g) ?? []).length, 1, 'only vendor is a folder');
-  assert(tree.includes('title="vendor/lib"'));
-  assert.equal(submoduleLabel({ ...pointer, url: null }), 'submodule → (URL unavailable) @ aaaaaaaa');
-  const index = sourceTreeEntries('head', [{ path: pointer.path, mode: 'gitlink' }]);
-  assert.equal(JSON.parse(index.at(-1).value).submodules, 1);
 });
 
 test('5,000 pointers resolve in bounded windows without per-entry calls or content reads', async t => {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The docs frame (DESIGN.md rule 47): a left tree and one readable column, without app data or motion.
 import type { ReactNode } from 'react';
-import { ForgeMark } from '../shell/brand';
+import { ForgeMark } from '../ui/brand';
 
 export type DocsGroup = { label: string; pages: readonly { title: string; href: string }[] };
 export function DocsFrame({

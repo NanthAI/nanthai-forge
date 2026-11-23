@@ -5,7 +5,7 @@ import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { errorReporter, installErrorCapture } from './error-capture';
 import { AppLoader } from './ui/AppLoader';
 import './ui/loader.css';
-import './shell/mark.css';
+import './ui/mark.css';
 import { createRoot } from 'react-dom/client';
 
 // Shared by the loader and the app.

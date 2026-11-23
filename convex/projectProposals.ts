@@ -2,8 +2,8 @@
 import { v } from 'convex/values';
 import { archivePut, reserveArchive, commitArchive, archiveTarget } from './archiveUpload';
 import { isStored } from './projectObjectFields';
-import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import { query, mutation, internalMutation, internalQuery } from './cliServer';
+
+import { mutation, internalMutation, internalQuery } from './cliServer';
 import { projectProposalDocument, projectBackupPreview } from './schema';
 import { intentAuthority } from './projectContributors';
 import { accessibleProject, activeProject } from './projectAuthority';
@@ -34,24 +34,7 @@ export const proposalArgs = {
   size: v.number(),
   preview: projectBackupPreview,
 };
-export const list = query({
-  args: { projectId: v.id('hostedProjects'), paginationOpts: paginationOptsValidator },
-  returns: paginationResultValidator(projectProposalDocument),
-  handler: async (ctx, { projectId, paginationOpts }) => {
-    try {
-      const user = await ctx.auth.getUserIdentity();
-      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read project proposals.');
-      await accessibleProject(ctx, projectId, user.subject);
-      return await ctx.db
-        .query('projectProposals')
-        .withIndex('by_project', q => q.eq('projectId', projectId))
-        .order('desc')
-        .paginate(paginationOpts);
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
+
 export const get = internalQuery({
   args: { id: v.id('projectProposals'), actor: v.string() },
   returns: projectProposalDocument,

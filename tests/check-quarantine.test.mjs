@@ -126,26 +126,6 @@ test('only named quarantined failures become nonblocking, static and unrelated f
   );
 });
 
-test('quarantine receipts feed Needs you and an empty later snapshot clears attention', async () => {
-  const { moduleUrl } = await import('./convex-module.mjs');
-  const { quarantineDecisions } = await import(moduleUrl('../web/src/cockpit/attention.ts'));
-  const old = {
-    id: 'old',
-    viewId: 'view',
-    status: 'passed',
-    endedAt: '2026-01-01',
-    checkQuarantine: [{ test: name, consecutivePasses: 19 }],
-  };
-  const items = quarantineDecisions([old]);
-  assert.equal(items.length, 1);
-  assert.match(items[0].title, /intermittent result/);
-  assert.match(items[0].body, /19\/20/);
-  assert.deepEqual(
-    quarantineDecisions([old, { ...old, id: 'new', endedAt: '2026-01-02', checkQuarantine: [] }]),
-    [],
-  );
-});
-
 function evidenceFixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-flake-evidence-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));

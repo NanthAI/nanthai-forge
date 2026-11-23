@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 const work = await import(moduleUrl('../convex/projectWork.ts'));
-const { captureHostedPair, refreshHostedPairTransport } = await import(
-  moduleUrl('../web/src/hosted-handoff.ts')
-);
 
 test('selected source transport observes same-ID migration without Work replay and keeps owner/contributor/reader boundaries', async () => {
   const s = state([]),
@@ -99,54 +96,4 @@ test('selected source transport observes same-ID migration without Work replay a
     work.sourceTransport._handler(s.ctx, { projectId, backupId: 'foreign' }),
     e => e.data.code === 'PROJECT_UNAVAILABLE',
   );
-});
-
-test('retained journal and source pins survive in-place conversion while handoff adopts its matching object manifest', async () => {
-  const snapshot = {
-    key: randomUUID(),
-    name: 'Original pair',
-    backupId: 'original',
-    backupDigest: 'a'.repeat(64),
-    sourceHead: 'b'.repeat(64),
-    sourceKind: 'native',
-  };
-  const journal = JSON.stringify({
-    kind: 'forge-hosted-work-journal',
-    projectKey: snapshot.key,
-    revision: 41,
-    base: { archiveSha256: snapshot.backupDigest, manifestSha256: 'c'.repeat(64) },
-    source: { backupId: snapshot.backupId, head: snapshot.sourceHead, kind: 'native' },
-    events: [{ id: randomUUID(), text: 'Retained pending collaboration' }],
-  });
-  let journalReads = 0;
-  const original = await captureHostedPair(snapshot, async () => {
-      journalReads++;
-      return journal;
-    }),
-    retained = structuredClone(original);
-  const observation = {
-    backupId: snapshot.backupId,
-    digest: snapshot.backupDigest,
-    head: snapshot.sourceHead,
-    kind: 'native',
-    transport: 'objects',
-    manifestDigest: 'c'.repeat(64),
-  };
-  const migrated = refreshHostedPairTransport(original, observation);
-  assert.deepEqual(original, retained);
-  assert.equal(migrated.journal, journal);
-  assert.equal(migrated.journalSha256, createHash('sha256').update(journal).digest('hex'));
-  assert.equal(migrated.revision, 41);
-  assert.equal(journalReads, 1);
-  assert.equal(migrated.archive.transport, 'objects');
-  assert.equal(migrated.archive.manifestDigest, observation.manifestDigest);
-  assert.equal(migrated.archive.digest, snapshot.backupDigest);
-  assert.equal(refreshHostedPairTransport(migrated, observation), migrated);
-  // Another selected backup cannot replace this original pair, even with the same bytes.
-  assert.equal(refreshHostedPairTransport(original, { ...observation, backupId: 'new-current' }), original);
-  for (const patch of [{ digest: 'd'.repeat(64) }, { head: 'e'.repeat(64) }, { kind: 'git' }])
-    assert.throws(
-      () => refreshHostedPairTransport(original, { ...observation, ...patch }),
-      /source identity differs/,
-    );
 });

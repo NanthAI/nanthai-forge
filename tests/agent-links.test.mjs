@@ -4,8 +4,11 @@ import assert from 'node:assert/strict';
 import { buildAgentLinks } from '../dist/agent-links.js';
 import { sourceFilePage } from '../dist/source-file-page.js';
 import { moduleUrl } from './convex-module.mjs';
-const routes = await import(moduleUrl('../web/src/shell/location.ts'));
-const shellRoutes = await import(moduleUrl('../web/src/shell/route.ts'));
+const routes = await import(moduleUrl('../src/project-routes.ts'));
+// The codec resolves readable addresses through the registered project identity.
+routes.routeMode('hosted');
+routes.projectIdentity('p1', 'maya', 'Demo');
+
 const laneId = '63b67c40-d744-441d-9d7e-e8b5bbde9c52';
 const head = 'a'.repeat(64);
 const input = {
@@ -75,7 +78,6 @@ test('generated hosted URL uses the app codec and opens Code source at the exact
   assert.equal(new URL(link).pathname, '/maya/demo/code/src/a%20b%23%3F.ts');
   assert.equal(decoded.searchParams.get('project'), 'p1');
   assert.equal(decoded.searchParams.get('projectTab'), 'delivery');
-  assert.equal(shellRoutes.hostedTab(decoded.searchParams.get('projectTab')), 'code');
   assert.equal(decoded.searchParams.get('view'), 'source');
   assert.equal(decoded.searchParams.get('file'), input.path);
   assert.equal(decoded.searchParams.get('line'), '42');

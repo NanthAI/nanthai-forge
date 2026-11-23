@@ -15,26 +15,7 @@ export const planningIntentStatus = (
  * opens without filling the legacy `intentIds` array (0b12fcfe), so an empty array is not "no link". Static: no call. */
 export const plannedLinkIds = (item: Pick<PlanningItem, 'id' | 'kind' | 'intentIds'>): string[] =>
   item.kind === 'issue' ? [...new Set([item.id, ...item.intentIds])] : [...item.intentIds];
-export const planningLabel = (status: PlanningItem['status']) =>
-  status === 'archived'
-    ? 'Archived'
-    : status === 'deleted'
-      ? 'Deleted'
-      : status === 'closed'
-        ? 'Done'
-        : status === 'abandoned'
-          ? 'Abandoned'
-          : status === 'proposed'
-            ? 'Proposed'
-            : 'Planned';
-export function planningVersionLabel(item: PlanningItem, previous?: PlanningItem) {
-  return item.version === 1 ||
-    (previous
-      ? previous.status !== item.status
-      : ['proposed', 'closed', 'abandoned', 'archived', 'deleted'].includes(item.status))
-    ? planningLabel(item.status)
-    : 'Details edited';
-}
+
 export function planningBriefIntent(item: PlanningItem) {
   if (item.kind !== 'issue') return;
   return {

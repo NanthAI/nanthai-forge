@@ -20,7 +20,6 @@ export type ViewSignals = {
   behindMain: { lane: number; paths: number[]; more?: number }[];
   complete: boolean;
 };
-export type NowOverlapView = { signals: ViewSignals };
 
 export function viewSignals(signals: NowOverlapSignals): ViewSignals {
   const lanes: ViewSignals['lanes'] = [],

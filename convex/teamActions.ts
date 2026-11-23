@@ -7,9 +7,8 @@ import { emailRecipient } from './projectPeople';
 import { teamInvitationAnswerArgs } from './teamInvitationWrites';
 import { assertTeamEmailOperation } from './teamInvitationMembership';
 import { api, internal } from './_generated/api';
-import type { Id } from './_generated/dataModel';
-import { currentAccess } from './access';
-import { ForgeError, invariant } from '../src/errors';
+
+import { invariant } from '../src/errors';
 import { report } from './errors';
 
 export const addMember = accountAction('person')({
@@ -26,46 +25,6 @@ export const addMember = accountAction('person')({
         ...(operationId === undefined ? {} : { operationId }),
       });
       return operationId !== undefined && result === 'pending' ? 'pending' : null;
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
-export const codescapes = accountAction('same')({
-  args: { id: v.id('teams'), paginationOpts: paginationOptsValidator },
-  returns: paginationResultValidator(
-    v.object({ id: v.id('imports'), repository: v.string(), ref: v.string(), phase: v.string() }),
-  ),
-  handler: async (
-    ctx,
-    { id, paginationOpts },
-  ): Promise<{
-    page: { id: Id<'imports'>; repository: string; ref: string; phase: string }[];
-    isDone: boolean;
-    continueCursor: string;
-  }> => {
-    try {
-      const user = await ctx.auth.getUserIdentity();
-      invariant(user, 'GITHUB_UNAVAILABLE', 'Sign in to explore a team.');
-      const candidates: { page: Id<'imports'>[]; isDone: boolean; continueCursor: string } =
-        await ctx.runQuery(internal.teams.candidates, { id, member: user.subject, paginationOpts });
-      const page = [];
-      for (const importId of candidates.page) {
-        try {
-          const { job } = await currentAccess(ctx, importId, user.subject);
-          if (await ctx.runQuery(internal.teams.linked, { id, importId, member: user.subject }))
-            page.push({ id: job._id, repository: job.repository, ref: job.ref, phase: job.phase });
-        } catch (error) {
-          if (!(error instanceof ForgeError) || error.code !== 'GITHUB_UNAVAILABLE') throw error;
-        }
-      }
-      // Recheck the selected team's membership, even if a separate named grant still authorizes source.
-      await ctx.runQuery(internal.teams.candidates, {
-        id,
-        member: user.subject,
-        paginationOpts: { numItems: 1, cursor: null },
-      });
-      return { ...candidates, page };
     } catch (error) {
       return report(error);
     }

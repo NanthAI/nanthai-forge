@@ -134,9 +134,8 @@
   -webkit-font-smoothing: antialiased;
   font-variant-numeric: tabular-nums;
 }
-/* Element defaults for cockpit screens only: the scope stops at hosted legacy screens (.fx-legacy) and
-   restarts at any cockpit screen nested inside one. */
-@scope (.fx) to (.fx-legacy) {
+/* Element defaults inside the toast stack and the loader, the only places that still use .fx. */
+@scope (.fx) {
   :scope :where(h1, h2, h3, h4, p, ul, ol, dl, dd, figure, blockquote) {
     margin: 0;
   }
@@ -183,30 +182,6 @@
   outline: 2px solid var(--fx-focus);
   outline-offset: 2px;
   border-radius: var(--fx-r-1);
-}
-.fx-muted {
-  color: var(--fx-text-2);
-}
-.fx-faint {
-  color: var(--fx-text-3);
-}
-.fx-mono {
-  font-family: var(--fx-font-mono);
-  font-size: 12px;
-}
-.fx-eyebrow {
-  font: 600 var(--fx-t-11) / 1.2 var(--fx-font-ui);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--fx-text-3);
-}
-.fx-sr {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) {
   :root {

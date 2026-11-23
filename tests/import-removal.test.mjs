@@ -83,8 +83,6 @@ test('public and private removals disappear immediately from owner, shared proje
     await removal.removeAsOwner._handler(s.ctx, { ...command, owner: 'owner' });
     assert.deepEqual((await removal.listMine._handler(s.ctx, { paginationOpts })).page, []);
     assert.deepEqual((await saved.list._handler(s.ctx, { paginationOpts })).page, []);
-    assert.deepEqual((await interests.list._handler(s.ctx, { paginationOpts })).page, []);
-    assert.equal(await interests.current._handler(s.ctx, { importId: 'own' }), null);
     assert.deepEqual(await removal.removed._handler(s.ctx, { ids: ['own', 'missing'] }), ['own', 'missing']);
     const cleanup = providers(() => false);
     try {

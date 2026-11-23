@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Settings > Project > Backups (Item 966cb821): the project's stored checkpoints with Download and the recovery request,
-// and, for the owner, storing an archive. Ported from the old project screen (web/src/ProjectBackups.tsx) with the same
+// and, for the owner, storing an archive. Ported from the old project screen with the same
 // server calls. One page of 10 checkpoints per open (a one-off read), more on a press; every action runs on a press.
 import { useCallback, useEffect, useState } from 'react';
 import { useConvex } from 'convex/react';

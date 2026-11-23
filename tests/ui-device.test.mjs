@@ -5,7 +5,6 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
 const code = await import(moduleUrl('../web/src/device/code.ts'));
-const { DeviceListView } = await import(moduleUrl('../web/src/device/DeviceList.tsx'));
 
 test('device codes are paste-tolerant and grouped like the terminal prints them', () => {
   assert.equal(code.formatCode(' qk7pm 2xdht\n'), 'QK7PM-2XDHT');
@@ -18,25 +17,6 @@ test('device codes are paste-tolerant and grouped like the terminal prints them'
   assert.equal(code.codeProblem('AUTH_SLOW_DOWN'), null);
   assert.equal(code.codeProblem(undefined), null);
   assert.equal(code.expiresIn(Date.now() + 8 * 60_000, Date.now()), 'in 8 min');
-});
-
-test('revoking a device takes a second click, and old devices fold away', () => {
-  const now = Date.now();
-  const html = renderToStaticMarkup(
-    h(DeviceListView, {
-      now,
-      revoke: async () => undefined,
-      rows: [
-        { id: '1', credentialId: 'a', name: 'dino-mbp', scope: 'cli', expiresAt: now + 1e9, revoked: false },
-        { id: '2', credentialId: 'b', name: 'old', scope: 'cli', expiresAt: now + 1e9, revoked: true },
-      ],
-    }),
-  );
-  assert.match(html, /dino-mbp/);
-  assert.match(html, />Revoke</);
-  assert.doesNotMatch(html, /Stops working now/);
-  assert.match(html, /1 revoked or expired/);
-  assert.doesNotMatch(html, />old</);
 });
 
 test('a terminal-chosen name is cleaned and capped before it is shown (S-02)', () => {

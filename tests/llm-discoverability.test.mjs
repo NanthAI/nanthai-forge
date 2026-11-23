@@ -14,11 +14,11 @@ import {
   llmsFullSizeReport,
 } from '../scripts/llm-documents.mjs';
 import { retiredActions } from '../dist/agent-verbs.js';
-import { cleanUrl } from '../dist/project-routes.js';
+
 import { moduleUrl } from './convex-module.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const { projectTabs, hostedSections, entryFor } = await import(moduleUrl('../web/src/shell/route.ts'));
+
 const { reservedHandles } = await import(moduleUrl('../src/readable-urls.ts'));
 const read = path => readFileSync(join(root, path), 'utf8');
 const githubBlob = 'https://github.com/NanthAI/nanthai-forge/blob/main/';
@@ -361,40 +361,4 @@ test('robots permits public static resources for all named crawlers without a si
     '/docs/internal-only.txt',
   ])
     assert.equal(crawlable(robots, path), false, path);
-});
-
-test('robots excludes every account and project route derived from the shell route catalog', () => {
-  const robots = read('web/public/robots.txt');
-  const source = read('web/src/shell/route.ts');
-  const accountType = /export type AccountTab = ([^;]+);/.exec(source)?.[1];
-  assert.ok(accountType, 'account route union is present');
-  const accountTabs = [...accountType.matchAll(/'([^']+)'/g)].map(match => match[1]);
-  assert.ok(accountTabs.length > 0);
-  const denied = new Set(['/settings', '/settings/you', '/device', '/api/projects', '/local/project']);
-  for (const tab of accountTabs) {
-    denied.add(`/${tab}`);
-    denied.add(`/?surface=${tab}`);
-  }
-  const project = { id: 'test-project', owner: 'test-owner', name: 'test-project' };
-  for (const section of [...projectTabs, ...Object.values(hostedSections).flat()]) {
-    const query = `/?project=${project.id}&projectTab=${section}`;
-    assert.equal(entryFor(true, new URL(query, 'https://forge.test').search), 'project');
-    denied.add(query);
-    denied.add(`/test-owner/test-project/${section}`);
-    denied.add(`/local/test-project/${section}`);
-    denied.add(cleanUrl(query, 'https://forge.test', { mode: 'hosted', project }));
-  }
-  assert.equal(entryFor(false, '?codescape=example'), 'repository');
-  denied.add('/?codescape=example');
-  // Catch-all coverage also protects future/unknown project sections and query orderings.
-  for (const url of ['/?x=1&project=test', '/?tab=code', '/future-owner/future-project/new-section'])
-    denied.add(url);
-  // b0704959: Explore and a project's front page are the public discovery pages at the root; deeper places stay closed.
-  for (const url of denied)
-    assert.equal(
-      crawlable(robots, url),
-      url === '/explore' || (/^\/[^/?]+\/[^/?]+$/.test(url) && !reservedHandles.has(url.split('/')[1])),
-      url,
-    );
-  assert.ok(crawlable(robots, '/new-handle/new-project'));
 });

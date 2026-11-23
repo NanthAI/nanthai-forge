@@ -16,7 +16,7 @@ const viewport = width => ({ width, height: width === 390 ? 844 : 1000 });
 
 async function page(out) {
   const entry = 'virtual:billing-test';
-  const source = `    import ${JSON.stringify(join(root, 'web/src/shell/mark.css'))};
+  const source = `    import ${JSON.stringify(join(root, 'web/src/ui/mark.css'))};
     import ${JSON.stringify(join(root, 'web/src/ui/tokens.css'))};
     import ${JSON.stringify(join(root, 'web/src/ui/components.css'))};
     import {createElement as h} from 'react';

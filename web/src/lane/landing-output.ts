@@ -2,7 +2,21 @@
 import type { LandingIO, Pin } from './hosted-landing-client';
 import { verifyDownloadedOutput } from '../../../src/hosted-output-reader';
 import { invariant } from '../../../src/errors';
-import { failingTests } from './CheckPanel';
+/** Names of failing tests from a bounded failure summary (node:test spec/TAP lines, deduplicated). */
+export function failingTests(summary: string): string[] {
+  const names = summary
+    .split('\n')
+    .map(line => line.trim())
+    .filter(
+      line =>
+        (line.startsWith('✖') && !/failing tests:?$/.test(line)) || /^(?:\[test\] )?not ok \d+ - /.test(line),
+    )
+    .map(line =>
+      line.replace(/^(?:✖\s*|(?:\[test\] )?not ok \d+ - )/, '').replace(/\s*\(\d+(\.\d+)?ms\)$/, ''),
+    );
+  return [...new Set(names)];
+}
+
 /** A decision excerpt reads one tail chunk per text stream, without a tail loop.
  * These are excerpts, not a claim that complete output was retained. While the check runs, a stream not yet
  * sealed is `live` and its tail chunk is the newest its runner has published (Item 42b8bf0e).

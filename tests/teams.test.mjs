@@ -26,8 +26,6 @@ const membership = await import(moduleUrl('../convex/teamInvitationMembership.ts
 // invitations, including who may send them); these tests seed the accepted member through the same writer.
 const add = (s, id, member = 'reader') =>
   s.transaction(() => membership.addTeamMembership(s.ctx, id, member));
-const list = (s, id, page = paginationOpts) =>
-  actions.codescapes._handler(s.ctx, { id, paginationOpts: page });
 
 test('a team name has a sane length, as on GitHub: the longest is accepted, a longer one creates nothing', async () => {
   const s = state([job()]),
@@ -94,12 +92,12 @@ test('reader teams reconcile creation/membership/import links and keep creator a
     await assert.rejects(teams.removeMember._handler(s.ctx, { id, member: 'owner' }), denied);
     s.caller('stranger');
     assert.deepEqual((await teams.list._handler(s.ctx, { paginationOpts })).page, []);
-    await assert.rejects(list(s, id), denied);
+    await assert.rejects(teams.members._handler(s.ctx, { id, paginationOpts }), denied);
     s.caller('owner');
     await teams.removeMember._handler(s.ctx, { id, member: 'reader' });
     await teams.removeMember._handler(s.ctx, { id, member: 'reader' });
     s.caller('reader');
-    await assert.rejects(list(s, id), denied);
+    await assert.rejects(teams.members._handler(s.ctx, { id, paginationOpts }), denied);
     assert.deepEqual((await teams.list._handler(s.ctx, { paginationOpts })).page, []);
     s.caller('owner');
     await link(s, id, 'own', false);
@@ -158,7 +156,6 @@ test('team source/graph/export/saved views require membership, an active link an
     ])
       assert.equal(typeof (await read(endpoint)), 'string');
     assert.deepEqual(Buffer.from((await part()).data), Buffer.from(await blob.arrayBuffer()));
-    assert.equal((await list(s, id)).page.length, 1);
     const route = { view: 'source', state: captured.source.id, file: 'a.ts', line: 1 };
     const savedId = await saved.put._handler(s.ctx, {
       importId: 'own',
@@ -174,7 +171,6 @@ test('team source/graph/export/saved views require membership, an active link an
       await assert.rejects(read('files'), denied);
       await assert.rejects(part(), denied);
       assert.equal(s.reads(), before);
-      assert.deepEqual((await list(s, id)).page, []);
     }
     revoked = undefined;
     removeDuringRead = true;
@@ -195,11 +191,6 @@ test('team source/graph/export/saved views require membership, an active link an
     await sharing.add._handler(s.ctx, { id: 'own', owner: 'owner', reader: 'reader' });
     s.caller('reader');
     unlinkDuringRead = true;
-    assert.deepEqual(
-      (await list(s, id)).page,
-      [],
-      'A separate named grant does not keep a removed team link visible.',
-    );
     assert.equal(
       typeof (await read('files')),
       'string',
@@ -223,7 +214,7 @@ test('team source/graph/export/saved views require membership, an active link an
   }
 });
 
-test('team/member/import pagination preserves all choices, Trash hides readers and purge removes only the deleted import links', async () => {
+test('team/member pagination preserves all choices, Trash hides readers and purge removes only the deleted import links', async () => {
   const s = state(Array.from({ length: 41 }, (_, i) => job(`import-${i}`))),
     cleanup = providers();
   try {
@@ -239,13 +230,6 @@ test('team/member/import pagination preserves all choices, Trash hides readers a
     assert.equal(firstMembers.page.length, 20);
     assert.equal(secondMembers.page.length, 4);
     s.caller('reader');
-    const a = await list(s, id),
-      b = await list(s, id, { ...paginationOpts, cursor: a.continueCursor }),
-      c = await list(s, id, { ...paginationOpts, cursor: b.continueCursor });
-    assert.equal(a.page.length, 20);
-    assert.equal(b.page.length, 20);
-    assert.equal(c.page.length, 1);
-    assert.equal(c.isDone, true);
     s.caller('owner');
     await lifecycle.trash._handler(s.ctx, { id: 'import-0' });
     s.caller('reader');

@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+
 import ts from 'typescript';
 import { moduleUrl } from './convex-module.mjs';
 const { ToastStore, toastErrorText } = await import(moduleUrl('../web/src/ui/toast-store.ts'));
-const { PendingWrite } = await import(moduleUrl('../web/src/pending-write.ts'));
 
 test('toast queue dedupes identical messages, keeps errors and orders newest first', () => {
   const store = new ToastStore();
@@ -71,71 +70,6 @@ test('transport details and server codes never appear in error toasts', () => {
   ])
     assert.equal(toastErrorText(text), "Couldn't reach Forge. Try again.");
   assert.equal(toastErrorText('Could not copy. Select the command.'), 'Could not copy. Select the command.');
-});
-
-test('actual acknowledge hook reports failure to toast and Retry reuses its operation id', async () => {
-  const source = readFileSync(new URL('../web/src/cockpit/coordination.ts', import.meta.url), 'utf8');
-  const parsed = ts.createSourceFile('coordination.ts', source, 99, true);
-  const fn = parsed.statements.find(
-    node => ts.isFunctionDeclaration(node) && node.name?.text === 'useAnswers',
-  );
-  const store = new ToastStore(),
-    calls = [];
-  let failNextAck = false;
-  const hooks = {
-    // The overlap writer is exercised by the mounted Now overlap fixture; this harness isolates message retries.
-    useOverlapAnswers: () => ({
-      error: '',
-      acknowledgeOverlaps: () => {
-        throw new Error('Unexpected overlap answer in a message retry');
-      },
-    }),
-    useToast: () => store,
-    useRef: value => ({ current: value }),
-    useState: value => [value, () => {}],
-    PendingWrite,
-    hostedError: () => 'Could not acknowledge this message.',
-    api: { projectCoordination: { publish: {} } },
-    useMutation: () => async attempt => {
-      calls.push(attempt);
-      if (calls.length === 1 || (failNextAck && attempt.command.kind === 'ack')) {
-        failNextAck = false;
-        throw new Error('synthetic failure');
-      }
-    },
-  };
-  const key = `__toast_${crypto.randomUUID().replaceAll('-', '')}`;
-  globalThis[key] = hooks;
-  try {
-    const code = ts.transpileModule(
-      `const {${Object.keys(hooks).join(',')}} = globalThis.${key};\n${fn.getText(parsed)}`,
-      { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } },
-    ).outputText;
-    const { useAnswers } = await import(
-      `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
-    );
-    const answers = useAnswers('synthetic');
-    assert.equal(await answers.acknowledge('message', 'Read.'), false);
-    const failure = store.snapshot()[0];
-    assert.equal(failure.message, 'Could not acknowledge this message.');
-    assert.equal(typeof failure.retry, 'function');
-    await store.retry(failure.id);
-    assert.equal(calls.length, 2);
-    assert.equal(calls[0].operationId, calls[1].operationId);
-    assert.deepEqual(calls[0].command, calls[1].command);
-    assert.equal(store.snapshot()[0].tone, 'success');
-    failNextAck = true;
-    assert.equal(await answers.reply('reply-message', 'sender', 'Keep this text'), false);
-    const replyFailure = store.snapshot().find(entry => entry.tone === 'error');
-    await store.retry(replyFailure.id);
-    const replyCalls = calls.filter(call => call.command.kind === 'message');
-    const ackCalls = calls.filter(call => call.command.messageId === 'reply-message');
-    assert.equal(replyCalls.length, 1, 'retrying the ack cannot send the successful reply twice');
-    assert.equal(ackCalls.length, 2);
-    assert.equal(ackCalls[0].operationId, ackCalls[1].operationId);
-  } finally {
-    delete globalThis[key];
-  }
 });
 
 test('provider shares one store with consumers and renders three accessible escaped notifications', async () => {

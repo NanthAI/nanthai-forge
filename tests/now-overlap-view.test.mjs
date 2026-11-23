@@ -9,7 +9,6 @@ import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 const view = await import(moduleUrl('../src/now-overlap-view.ts'));
 const { nowOverlapSignals } = await import(moduleUrl('../src/now-overlap-signals.ts'));
-const { overlapRows, overlapFileCount } = await import(moduleUrl('../web/src/cockpit/overlap-model.ts'));
 
 const hex = (seed, length = 64) => seed.toString(16).repeat(length).slice(0, length);
 const bytes = value => Buffer.byteLength(typeof value === 'string' ? value : JSON.stringify(value));
@@ -90,58 +89,4 @@ test('incident replay: both measured shapes fail the 20 KB budget on the old rep
     assert.ok(before > view.NOW_OVERLAP_VIEW_BUDGET, `${name} replays the incident (${before} bytes)`);
     assert.ok(after < view.NOW_OVERLAP_VIEW_BUDGET, `${name}: Now overlap read is ${after} bytes`);
   }
-});
-
-test('the client reads back every rendered overlap: same edit rows, main rows summarise their count', () => {
-  for (const { lanes, signals } of [broadLane(), busyWave()]) {
-    const read = view.readViewSignals(JSON.parse(JSON.stringify(view.viewSignals(signals))));
-    assert.deepEqual(
-      read.edits.map(edit => [edit.laneId, edit.head]),
-      signals.edits.map(edit => [edit.laneId, edit.head]),
-      'every Lane keeps its pin (id and head)',
-    );
-    assert.equal(read.complete, signals.complete);
-    const lane = id => ({
-      id,
-      name: `Lane ${lanes.indexOf(id)}`,
-      tone: 'running',
-      open: true,
-      byAgent: true,
-    });
-    const editRows = edits =>
-      overlapRows(
-        edits.map(edit => ({ lane: lane(edit.laneId), paths: edit.paths.map(path => ({ path })) })),
-      );
-    assert.deepEqual(editRows(read.edits), editRows(signals.edits));
-    const mainRows = edits =>
-      overlapRows(
-        [],
-        [],
-        edits.map(edit => ({
-          lane: lane(edit.laneId),
-          paths: edit.paths,
-          ...(edit.more ? { more: edit.more } : {}),
-        })),
-      );
-    assert.equal(
-      overlapFileCount(mainRows(read.behindMain)),
-      overlapFileCount(mainRows(signals.behindMain)),
-      'the panel and headline still count every file',
-    );
-  }
-  const { lanes, signals } = broadLane();
-  const rows = overlapRows(
-    [],
-    [],
-    view.readViewSignals(view.viewSignals(signals)).behindMain.map(edit => ({
-      lane: { id: edit.laneId, name: 'Broad' },
-      paths: edit.paths,
-      more: edit.more,
-    })),
-  );
-  assert.equal(rows.length, view.BEHIND_MAIN_PATHS + 1, '20 file rows and one count row');
-  const summary = rows.find(row => row.files);
-  assert.equal(summary.files, 157);
-  assert.equal(summary.action.laneId, lanes[12], 'the count row opens the Lane that lists them all');
-  assert.equal(overlapFileCount(rows), 177);
 });

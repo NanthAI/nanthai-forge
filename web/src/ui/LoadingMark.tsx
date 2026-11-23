@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { ForgeMark } from '../shell/brand';
+import { ForgeMark } from './brand';
 
 export function LoadingMark() {
   return (

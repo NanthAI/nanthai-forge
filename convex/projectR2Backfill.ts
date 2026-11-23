@@ -38,10 +38,15 @@ export const page = query({
               .query('projectObjects')
               .withIndex('by_project_and_digest', q => q.eq('projectId', projectId))
               .paginate({ cursor, numItems: 100 })
-          : await ctx.db
-              .query(kind === 'proposals' ? 'projectProposals' : 'projectBackups')
-              .withIndex('by_project', q => q.eq('projectId', projectId))
-              .paginate({ cursor, numItems: 100 });
+          : kind === 'proposals'
+            ? await ctx.db
+                .query('projectProposals')
+                .withIndex('by_project_and_operation', q => q.eq('projectId', projectId))
+                .paginate({ cursor, numItems: 100 })
+            : await ctx.db
+                .query('projectBackups')
+                .withIndex('by_project', q => q.eq('projectId', projectId))
+                .paginate({ cursor, numItems: 100 });
       const retained = { count: 0, bytes: 0 };
       for (const row of result.page) {
         const pin = pinFor(row, kind),

@@ -3,7 +3,7 @@
 import { ConvexError } from 'convex/values';
 import { getFunctionName } from 'convex/server';
 import { clientErrorLimits as limit, scrubRoute, scrubText } from '../../src/client-error-text';
-import { routeSearch } from './shell/location';
+import { routeSearch } from '../../src/project-routes';
 
 export type ClientErrorKind = 'error' | 'unhandledrejection' | 'render' | 'mutation' | 'action';
 export type ClientErrorReport = {

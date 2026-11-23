@@ -74,12 +74,8 @@ export async function bundleSummary(directory) {
     files.push({ file: `assets/${name}`, bytes: bytes.length, gzipBytes: gzipSync(bytes).length });
   }
   const entry = manifest['app.html'] ? 'app.html' : 'index.html';
-  // Each app's first paint: the old app (Hosted) and, when built, the rebuilt app under /- (src/app/App.tsx). The
-  // budget holds for the heavier of the two.
-  const apps = [
-    manifest['src/Hosted.tsx'] ? 'src/Hosted.tsx' : 'src/shell/LocalApp.tsx',
-    'src/app/App.tsx',
-  ].filter(root => manifest[root]);
+  // The app's first paint (src/app/App.tsx, when built).
+  const apps = ['src/app/App.tsx'].filter(root => manifest[root]);
   const sum = (selected, key) => selected.reduce((total, file) => total + file[key], 0);
   const js = files.filter(f => f.file.endsWith('.js'));
   const perApp = apps.map(root => {

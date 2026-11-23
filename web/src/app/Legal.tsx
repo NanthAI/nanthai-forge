@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { PublicFrame } from './frames';
 import { LEGAL_VERSION } from '../../../src/legal-version';
-import { forgeSupportAddress } from '../upstream-request';
+
+const forgeSupportAddress = 'support@nanthai.tech';
 export default function Legal({ page }: { page: 'terms' | 'privacy' }) {
   return (
     <PublicFrame>

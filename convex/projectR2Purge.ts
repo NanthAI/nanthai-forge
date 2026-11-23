@@ -24,10 +24,15 @@ export const page = internalQuery({
             .query('projectObjects')
             .withIndex('by_project_and_digest', q => q.eq('projectId', projectId))
             .paginate({ cursor, numItems: maintenancePageSize })
-        : await ctx.db
-            .query(kind === 'proposals' ? 'projectProposals' : 'projectBackups')
-            .withIndex('by_project', q => q.eq('projectId', projectId))
-            .paginate({ cursor, numItems: maintenancePageSize });
+        : kind === 'proposals'
+          ? await ctx.db
+              .query('projectProposals')
+              .withIndex('by_project_and_operation', q => q.eq('projectId', projectId))
+              .paginate({ cursor, numItems: maintenancePageSize })
+          : await ctx.db
+              .query('projectBackups')
+              .withIndex('by_project', q => q.eq('projectId', projectId))
+              .paginate({ cursor, numItems: maintenancePageSize });
     return {
       pins: result.page.flatMap(row => {
         const source = selected(row, kind),

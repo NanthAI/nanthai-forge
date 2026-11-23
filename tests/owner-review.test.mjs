@@ -21,13 +21,13 @@ import { openApprovalsReply } from '../dist/hosted-agent-approval.js';
 const acceptance = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
 const review = await import(moduleUrl('../convex/projectHostedOwnerReview.ts'));
 const { grantedApproval } = await import(moduleUrl('../convex/projectHostedOwnerGrant.ts'));
-const { LaneApproval } = await import(moduleUrl('../web/src/review/LaneApproval.tsx'));
+
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const history = await import(moduleUrl('../convex/projectHostedLandingAttemptHistory.ts'));
 const finish = await import(moduleUrl('../convex/projectHostedFinish.ts'));
 const { set: setPolicy } = await import(moduleUrl('../convex/projectAutonomy.ts'));
-const { approvalDecisions } = await import(moduleUrl('../web/src/cockpit/attention.ts'));
+
 const needsMe = await import(moduleUrl('../convex/projectNeedsMe.ts'));
 const { needsView } = await import(moduleUrl('../web/src/app/needs/model.ts'));
 const { decideTarget } = await import(moduleUrl('../web/src/app/needs/decide.ts'));
@@ -1006,42 +1006,6 @@ test('6b6f17e7 replay: held for review, the owner accepts, main moved, it re-che
   assert.equal(f.pending().length, 0, 'nothing left running');
 });
 
-test('the /approve?lane card offers Grant and Decline only for a live request', () => {
-  const noop = { accept() {}, decline() {} };
-  const render = approval =>
-    renderToStaticMarkup(
-      createElement(LaneApproval, { phase: { kind: 'read', approval }, review: noop, signIn: null }),
-    );
-  const base = {
-    laneId: randomUUID(),
-    live: true,
-    reason: 'touches billing',
-    requester: 'thevarsek',
-    agent: 'ready-narwhal',
-    landing: null,
-  };
-  const open = render({ ...base, status: 'requested' });
-  assert.match(open, />Approve</);
-  assert.match(open, /touches billing/);
-  assert.match(open, /@thevarsek\/ready-narwhal/);
-  assert.doesNotMatch(render({ ...base, status: 'granted' }), />Approve</);
-  assert.match(render({ ...base, live: false, status: 'granted', ended: { kind: 'landed' } }), /Landed/);
-  assert.match(render({ ...base, status: 'none', live: false }), /no approval request/);
-  // Issue f7793473: a fork PR's run request names the PR and never promises a landing.
-  const fork = { ...base, pullRequest: 7, requester: 'thevarsek', agent: undefined };
-  const ask = render({ ...fork, status: 'requested' });
-  assert.match(ask, /Run the check of fork PR #7\?/);
-  assert.match(ask, />Approve</);
-  assert.match(ask, /without private submodules/);
-  assert.doesNotMatch(ask, /Landing it holds/);
-  assert.match(render({ ...fork, status: 'granted' }), /forge\/verify on the PR/);
-  assert.match(render({ ...fork, live: false, status: 'declined', ended: { kind: 'settled' } }), /Declined/);
-  assert.match(
-    render({ ...fork, live: false, status: 'requested', ended: { kind: 'settled' } }),
-    /newer push replaced this pull request head, or the request expired/,
-  );
-});
-
 test('a fork PR head asks the owner once; only the owner person grants, which starts its run', async t => {
   syntheticR2(t);
   const f = await finishFixture(t);
@@ -1268,74 +1232,6 @@ test('M3 derive: kind and phase for each request, one row per phase, unknown is 
   row({ status: 'mystery', live: true }, 'lane', 'unknown', false, false);
   row({ status: 'granted', live: false, ended: { kind: 'future-kind' } }, 'lane', 'unknown', false, false);
 });
-test('M3 surfaces: Needs you gets an approval item for the owner and the CLI lists the same requests', () => {
-  const requests = [
-    {
-      laneId: 'fork-open',
-      kind: 'fork',
-      state: 'requested',
-      needsOwner: true,
-      label: 'x',
-      nextStep: 'Open it.',
-      pullRequest: 12,
-      requester: 'builder',
-      reason: 'Fork PR #12',
-      at: '2026-11-09T00:00:00.000Z',
-    },
-    {
-      laneId: 'setting:policy',
-      kind: 'setting',
-      state: 'declined',
-      needsOwner: false,
-      label: 'y',
-      nextStep: 'Leave it.',
-      setting: { origin: 'policy' },
-    },
-    {
-      laneId: '12345678-aaaa-bbbb-cccc-1234567890ab',
-      kind: 'lane',
-      state: 'requested',
-      needsOwner: true,
-      label: 'z',
-      nextStep: 'Grant it.',
-      agent: 'otter',
-      requester: 'owner',
-      reason: 'look first',
-    },
-  ];
-  const items = approvalDecisions('project 1', requests);
-  assert.deepEqual(
-    items.map(item => [item.kind, item.id]),
-    [
-      ['approval', 'approval:fork-open'],
-      ['approval', 'approval:12345678-aaaa-bbbb-cccc-1234567890ab'],
-    ],
-    'only requests that wait for the owner are items',
-  );
-  assert.equal(items[0].approveHref, '/approve?project=project%201&lane=fork-open');
-  assert.equal(items[1].laneId, '12345678-aaaa-bbbb-cccc-1234567890ab');
-  assert.equal(items[1].subtitle, 'Requested by @owner/otter');
-  // The CLI prints the same set; an older server without the derived fields reads through the same derive.
-  const reply = openApprovalsReply({
-    requests: [
-      {
-        laneId: 'fork-open',
-        status: 'requested',
-        live: true,
-        pullRequest: 12,
-        url: 'https://forge.example.invalid/approve?x=1',
-      },
-      { laneId: 'setting:policy', status: 'declined', live: true, setting: { origin: 'policy' } },
-    ],
-    complete: true,
-  });
-  assert.deepEqual(reply.attention, [
-    { laneId: 'fork-open', kind: 'fork', url: 'https://forge.example.invalid/approve?x=1' },
-  ]);
-  assert.match(reply.next, /1 approval request waits for the project owner/);
-  assert.match(openApprovalsReply({ requests: [], complete: false }).next, /can't confirm/);
-  assert.match(openApprovalsReply({ requests: [], complete: true }).next, /No approval request is waiting/);
-});
 
 test('W7: a decision outranks how the request ended, in the same branch order as `wait {approval}`', () => {
   const lane = { status: 'granted', live: false };
@@ -1375,69 +1271,4 @@ test('W7: a decision outranks how the request ended, in the same branch order as
               `wait and page agree on ${JSON.stringify(read)}`,
             );
         }
-});
-
-test('W7: the Lane, fork and setting pages decide in the same order and word every ended.kind correctly', () => {
-  const noop = { accept() {}, decline() {} };
-  const render = approval =>
-    renderToStaticMarkup(
-      createElement(LaneApproval, { phase: { kind: 'read', approval }, review: noop, signIn: null }),
-    );
-  const base = { laneId: randomUUID(), reason: 'why', requester: 'thevarsek', landing: null };
-  const lane = (status, live, ended) => ({
-    ...base,
-    status,
-    live,
-    ...(ended ? { ended: { kind: ended } } : {}),
-  });
-  // Old main read `!live` first on the Lane page, so a granted request that ended said "withdrew".
-  for (const ended of ['settled', 'applied']) {
-    const html = render(lane('granted', false, ended));
-    assert.doesNotMatch(html, /withdrew/, `granted + ${ended}`);
-    assert.match(html, /Approved|Landed/);
-  }
-  assert.match(render(lane('declined', false, 'withdrawn')), /Declined/);
-  assert.doesNotMatch(render(lane('declined', false, 'withdrawn')), /withdrew/);
-  assert.match(render(lane('requested', false, 'withdrawn')), /The builder withdrew this request/);
-  const settled = render(lane('requested', false, 'settled'));
-  assert.doesNotMatch(settled, /withdrew/);
-  assert.match(settled, /Request closed/);
-  assert.match(render(lane('requested', false, 'settled')), /work it covered settled/);
-  assert.match(render(lane('requested', false)), /cannot confirm/);
-  assert.match(render(lane('surprising', true)), /cannot confirm/);
-  // The same row reads the same on the setting page: an approval reads Approved whatever ended it.
-  const setting = (status, live, ended) => ({ ...lane(status, live, ended), setting: { origin: 'policy' } });
-  assert.match(render(setting('granted', false, 'applied')), /Approved/);
-  assert.match(render(setting('granted', false)), /Approved/);
-  assert.match(render(setting('declined', false, 'withdrawn')), /Declined/);
-  assert.match(render(setting('requested', false, 'withdrawn')), /withdrew or replaced/);
-  // And on the fork page: Approved beats ended, as on the Lane page.
-  const fork = (status, live, ended) => ({ ...lane(status, live, ended), pullRequest: 7 });
-  assert.match(render(fork('granted', false, 'settled')), /Approved/);
-  assert.match(render(fork('requested', false, 'withdrawn')), /was withdrawn/);
-});
-
-test('membership approval uses exact-change review without settings or landing instructions', () => {
-  const approval = {
-    laneId: 'setting:membership:synthetic',
-    status: 'requested',
-    live: true,
-    membership: true,
-    requester: 'owner',
-    change: { kind: 'contributor', contributor: 'target' },
-  };
-  const state = deriveApproval(approval);
-  assert.equal(state.kind, 'setting', 'existing reply kind is preserved');
-  assert.match(state.label, /membership/);
-  assert.match(state.nextStep, /membership change/);
-  const html = renderToStaticMarkup(
-    createElement(LaneApproval, {
-      phase: { kind: 'read', approval },
-      review: { accept() {}, decline() {} },
-      signIn: null,
-    }),
-  );
-  assert.match(html, /Apply this project membership change/);
-  assert.match(html, /target/);
-  assert.doesNotMatch(html, /decide what every landing must pass/);
 });

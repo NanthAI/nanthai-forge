@@ -182,7 +182,7 @@ The idle and hot-path guard, including source moves and fixtures, belongs to Iss
 | --- | --- | --- |
 | Hosted agent client | [CLI](../../src/hosted-agent-cli.ts) and [MCP](../../src/mcp-hosted-agent.ts) share the hosted command surface. [Transport](../../src/hosted-agent-transport.ts) also coordinates local materialization and retry state. | Keep protocol validation and dispatch shared across the CLI and MCP. Use `hosted-<area>-client.ts` for remote calls and `local-<area>.ts` for machine-only state or I/O. Put orchestration at the entry point that owns the operation. |
 | Native source and shared contracts | [Native source](../../src/native-source.ts) reads and materializes filesystem States. [State format](../../src/state/format.ts) and [physical manifest codec](../../src/physical-manifest-codec.ts) have runtime-neutral consumers. [Work schemas](../../src/work-types.ts) are used by Node, Convex and the browser. | Keep filesystem and process I/O in the local adapter. Keep portable codecs, validators and rules in shared modules with type-only imports where possible. Prefer a role such as `-schema`, `-codec`, `-selection` or `-runner` when it identifies a specific responsibility. |
-| Hosted authority and storage | [Landing](../../convex/projectHostedLanding.ts) implements server-side authority. [Source storage](../../convex/projectConvexSourceStorage.ts) connects records to R2 data. [Browser](../../web/src/Hosted.tsx) and CLI are clients of that authority. | Keep access checks, current pins, operation replay and durable writes at the hosted boundary. Name adapters by what they select, store or execute. Use `native-` for Forge's native source representation or its existing implementation, and `local-` for the location of execution. An offline Lane remains a checkout of the hosted project. |
+| Hosted authority and storage | [Landing](../../convex/projectHostedLanding.ts) implements server-side authority. [Source storage](../../convex/projectConvexSourceStorage.ts) connects records to R2 data. [Browser](../../web/src/app/App.tsx) and CLI are clients of that authority. | Keep access checks, current pins, operation replay and durable writes at the hosted boundary. Name adapters by what they select, store or execute. Use `native-` for Forge's native source representation or its existing implementation, and `local-` for the location of execution. An offline Lane remains a checkout of the hosted project. |
 | Convex API and server internals | [Mirror read](../../convex/projectGithubMirrorRead.ts) registers a client-facing query with validators and an access check. [Mirror store](../../convex/projectGithubMirrorStore.ts) registers server-only mutations. [Mirror status](../../convex/projectGithubMirrorStatus.idle.ts) exports a plain helper. | Keep new client-facing endpoints in clearly named feature entry modules. Give server-only registrations an `Internal` or narrow worker-role name, and data helpers names such as `Rows`, `Store` or `Status` according to their actual role. Visibility comes from the Convex registration builder. Preserve existing function addresses, scheduled references, authority checks and the [mutation wrappers](../../convex/server.ts) when moving helpers. |
 
 A caller looking for a schema currently has to distinguish the shared [Work record schema](../../src/work-types.ts),
@@ -197,10 +197,10 @@ responsibility boundary.
 **Idle paths.** Use `*.idle.ts` or `*.idle.tsx` for modules on event-driven observation paths
 that initiate zero Convex calls once quiescent. [Mirror status](../../convex/projectGithubMirrorStatus.idle.ts)
 is a tagged helper. Its callers use the existing [authorized query](../../convex/projectGithubMirrorRead.ts),
-which responds to server writes. [Import watch](../../web/src/import-watch.idle.ts) is a tagged browser module.
-It attaches a stable invalidation subscription, refreshes on a changed result, focus or reconnection,
-and removes its subscription and listeners on cleanup. Keep generated API paths stable by tagging or
-moving eligible helpers, with registered handlers retaining their paths.
+which responds to server writes. A tagged browser module attaches a stable invalidation subscription,
+refreshes on a changed result, focus or reconnection, and removes its subscription and listeners on
+cleanup. Keep generated API paths stable by tagging or moving eligible helpers, with registered handlers
+retaining their paths.
 
 The [path convention guard](../../scripts/check-path-conventions.mjs) rejects direct `setTimeout`,
 `setInterval`, `scheduler.runAfter` and `scheduler.runAt` calls in tagged files. Its

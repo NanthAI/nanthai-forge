@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { observerProjectionBudget } from './observer-projection-budget.mjs';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -15,13 +15,11 @@ import { protectedGatePaths } from '../dist/contract-gate-policy.js';
 import { hostedLandingRequestSchema } from '../dist/hosted-landing.js';
 import { hostedLandingDesiredSchema } from '../dist/hosted-landing-desired.js';
 import { z } from 'zod';
-import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
+
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { syncFixture } from './hosted-sync-fixture.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
-const { LandingProgress } = await import(moduleUrl('../web/src/lane/LandingProgress.tsx'));
-const { landingState } = await import(moduleUrl('../web/src/lane/landing-model.ts'));
+
 const modules = {};
 for (const name of [
   'projectAuthority',
@@ -323,68 +321,6 @@ test('signed-in public stranger matrix refuses writes, including forged owner ap
     ),
     code('PROJECT_UNAVAILABLE'),
   );
-});
-
-test('contributor person authority cannot bypass passing checks or protected paths; explicit owner approval works', async () => {
-  const f = await publicFixture();
-  const state = await prepared(f, ['.github/workflows/deploy.yml', 'src/app.ts'], 'contributor', false);
-  const result = await f.accept(state, 'contributor');
-  assert.equal(result.status, 'pending');
-  assert.equal(result.reason, 'needs owner approval: protected paths .github/workflows/deploy.yml');
-  assert.equal((await f.status(state.id)).request.error.message, result.reason);
-  const budget = f.counts.filter(count => count.name === 'acceptanceAccept').at(-1);
-  const source = observerProjectionBudget(budget);
-  assert(source.documents <= 80 && source.ranges <= 80 && source.writes <= 10);
-  assert(!budget.touched.includes('projectHostedAcceptancePages'));
-  console.log(
-    'W8 protected final transaction',
-    JSON.stringify(
-      Object.fromEntries(
-        ['ranges', 'documents', 'readBytes', 'writes', 'writeBytes'].map(key => [key, budget[key]]),
-      ),
-    ),
-  );
-  assert.equal(f.currentMain().sourceRevision, 0);
-  const read = await f.status(state.id);
-  assert.equal(landingState(read).label, 'Waiting for review');
-  assert.equal(landingState(read).tone, 'waiting');
-  assert.match(
-    renderToStaticMarkup(createElement(LandingProgress, { read })),
-    /needs owner approval: protected paths .github\/workflows\/deploy.yml/,
-  );
-  assert.equal(f.pendingTasks().length, 0, 'review wait has no idle tasks');
-  await assert.rejects(
-    f.transaction('contributorApprove', api.approve, f.select(state), 'contributor'),
-    code('PROJECT_UNAVAILABLE'),
-  );
-  f.insert('cliCredentials', {
-    credentialId: 'synthetic-device',
-    owner: 'owner',
-    name: 'Synthetic device',
-    tokenHash: 'synthetic-hash',
-    issuedAt: Date.now(),
-    scope: 'cli',
-    expiresAt: Date.now() + 60_000,
-    revoked: false,
-  });
-  await assert.rejects(
-    f.transaction('deviceApproval', api.approve, f.select(state), {
-      subject: 'owner',
-      forgeCredential: 'synthetic-device',
-    }),
-    code('PROJECT_UNAVAILABLE'),
-  );
-  const approved = JSON.parse(await f.transaction('ownerApprove', api.approve, f.select(state)));
-  assert.equal(approved.status, 'landed');
-  assert.deepEqual(approved.receipt.actor, { id: 'owner', kind: 'person' });
-  assert.equal(approved.receipt.automatic, false);
-  assert.deepEqual(
-    JSON.parse(await f.transaction('ownerApproveReplay', api.approve, f.select(state))),
-    approved,
-  );
-  const g = await publicFixture();
-  const unchecked = await prepared(g, ['src/app.ts'], 'contributor', false, false, false);
-  await assert.rejects(g.accept(unchecked, 'contributor'), code('CHECK_NOT_PASSED'));
 });
 
 // Issue 56bf031f: every project's own check entry files are owner-approval paths by default.

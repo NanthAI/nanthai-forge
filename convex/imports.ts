@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ConvexError, v } from 'convex/values';
-import { paginationOptsValidator } from 'convex/server';
+
 import { internalMutation, internalQuery } from './server';
 import { jobDocument } from './schema';
 import { internal } from './_generated/api';
@@ -164,26 +164,6 @@ export const expire = internalMutation({
       });
     }
     return null;
-  },
-});
-
-// Recent means import creation order, not popularity or source freshness.
-export const publicPage = internalQuery({
-  args: { paginationOpts: paginationOptsValidator },
-  returns: v.object({ page: v.array(v.id('imports')), isDone: v.boolean(), continueCursor: v.string() }),
-  handler: async (ctx, { paginationOpts }) => {
-    const result = await ctx.db
-      .query('imports')
-      .withIndex('by_visibility', q => q.eq('visibility', 'public'))
-      .order('desc')
-      .paginate(paginationOpts);
-    return {
-      page: result.page
-        .filter(job => !job.removal && job.phase === 'ready' && job.artifactKey && job.head)
-        .map(job => job._id),
-      isDone: result.isDone,
-      continueCursor: result.continueCursor,
-    };
   },
 });
 

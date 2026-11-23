@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useReadsAsleep } from '../live-reads';
 import type { StateWord } from '../ds';
-import type { MarkState } from '../shell/brand';
+import type { MarkState } from '../ui/brand';
 import type { LineFeed } from './Line';
 
 const FAILED_MS = 10_000;

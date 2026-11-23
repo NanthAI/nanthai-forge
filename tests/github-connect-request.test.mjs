@@ -12,8 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { policyPreset } from '../dist/autonomy-policy.js';
 const store = await import(moduleUrl('../convex/githubBindingStore.ts'));
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
-const { LaneApproval } = await import(moduleUrl('../web/src/review/LaneApproval.tsx'));
-const { githubContinue } = await import(moduleUrl('../web/src/review/github-continue.ts'));
+
 const device = { subject: 'owner', forgeCredential: 'synthetic-device' };
 const words = 'Mirror main so reviewers on GitHub see each landing.';
 
@@ -137,42 +136,4 @@ test('a person connect asks nothing extra; GitHub authorization without the page
   await f.s.call('consume', store.consume, { state: input.state });
   await f.s.call('fail', store.fail, { state: input.state, code: 'GITHUB_OAUTH_DENIED' });
   assert(f.request().ended, 'the request ends with the connect');
-});
-
-test('the approve page asks in the agent’s words and allows on GitHub; it continues only to GitHub', () => {
-  const html = renderToStaticMarkup(
-    createElement(LaneApproval, {
-      phase: {
-        kind: 'read',
-        approval: {
-          laneId: 'setting:github-connect',
-          status: 'requested',
-          live: true,
-          reason: words,
-          requester: 'sample-one',
-          agent: 'amber-fox',
-          landing: null,
-          setting: { origin: 'github-connect' },
-          change: { direction: 'two-way', operationId: randomUUID(), repository: 'synthetic/repo' },
-          compare: { before: null, after: { direction: 'two-way', repository: 'synthetic/repo' } },
-        },
-      },
-      review: { accept() {}, decline() {} },
-      signIn: null,
-    }),
-  );
-  assert.match(html, /Connect synthetic\/repo\?/);
-  assert(html.includes(words), 'the agent’s words are on the decision');
-  assert.match(html, />Allow on GitHub</);
-  assert.match(html, /@sample-one\/amber-fox/);
-  const github = 'https://github.com/login/oauth/authorize?state=synthetic';
-  assert.equal(githubContinue({ applied: { authorizeUrl: github } }), github);
-  for (const other of [
-    'https://forge.example/x',
-    'http://github.com/login',
-    'javascript:alert(1)',
-    'not a url',
-  ])
-    assert.equal(githubContinue({ applied: { authorizeUrl: other } }), null, other);
-  assert.equal(githubContinue({ applied: { slug: 'x' } }), null);
 });

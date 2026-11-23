@@ -24,10 +24,6 @@ try {
   const config = options(process.argv.slice(2));
   if (config.help) {
     console.log(usage);
-  } else if (config.pages[0] === 'bootstrap') {
-    stage = 'synthetic browser bootstrap';
-    const { captureBootstrap } = await import('./ui-shots/bootstrap.mjs');
-    await captureBootstrap(config);
   } else if (config.pages[0] === 'landing') {
     stage = 'signed-out landing';
     const { captureLanding } = await import('./ui-shots/landing.mjs');
@@ -36,14 +32,15 @@ try {
     stage = 'credentials';
     const credentials = await readBotCredentials(config.credentials, config.base);
     const passkey = credentials.kind === 'passkey';
-    // The Clerk flow drove the earlier screens, which the site no longer serves (Item b0704959).
-    if (!passkey && config.pages.some(p => p !== 'device'))
+    // The Clerk flow drove the earlier screens, which the site no longer serves (Items b0704959, 88a20e56). The
+    // device page is the rebuilt one, so it too needs the passkey sign-in.
+    if (!passkey)
       throw new ShotError(
         'The earlier screens are no longer served. Enroll the bot passkey (scripts/ui-bot-setup.mjs) and capture again.',
       );
     const projectId = config.project || credentials.projectId;
     const needsProject = config.pages.some(
-      p => p !== 'device' && !(passkey && ['home', 'settings:devices'].includes(p)),
+      p => !(passkey && ['home', 'settings:devices', 'device'].includes(p)),
     );
     if (needsProject && !projectId) throw new ShotError('Set --project or credentials.projectId.');
     if (

@@ -48,8 +48,6 @@ export function gitmoduleUrls(text: string): Map<string, string> {
   return urls;
 }
 export type SubmodulePointer = { path: string; commit: string; url: string | null };
-export const submoduleLabel = (pointer: SubmodulePointer) =>
-  `submodule → ${pointer.url ?? '(URL unavailable)'} @ ${pointer.commit.slice(0, 8)}`;
 
 /** One metadata read and bounded object windows, with no per-pointer RPC. */
 export async function readSubmodulePointers(

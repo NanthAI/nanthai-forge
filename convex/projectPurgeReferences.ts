@@ -26,7 +26,7 @@ const candidates = {
   backups: (ctx, projectId) =>
     ctx.db.query('projectBackups').withIndex('by_project', q => q.eq('projectId', projectId)),
   proposals: (ctx, projectId) =>
-    ctx.db.query('projectProposals').withIndex('by_project', q => q.eq('projectId', projectId)),
+    ctx.db.query('projectProposals').withIndex('by_project_and_operation', q => q.eq('projectId', projectId)),
 } satisfies Record<string, (ctx: QueryCtx, projectId: ProjectId) => PageQuery<StorageRow>>;
 
 // Existing cleanup indexes, including the oldest archive receipt alias path.
@@ -63,7 +63,9 @@ const foreignRows = {
   proposalKeys: [
     'projectProposals',
     (ctx, projectId, side) =>
-      ctx.db.query('projectProposals').withIndex('by_project', q => q[side]('projectId', projectId)),
+      ctx.db
+        .query('projectProposals')
+        .withIndex('by_project_and_operation', q => q[side]('projectId', projectId)),
   ],
   uploadKeys: [
     'projectUploadCleanup',

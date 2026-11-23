@@ -21,7 +21,7 @@ import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { FunctionReturnType } from 'convex/server';
 import { Avatar, Glyph, Sheet, Standing, State, initials } from '../ds';
-import { ForgeMark } from '../shell/brand';
+import { ForgeMark } from '../ui/brand';
 import { followLink } from '../app/router';
 import { stopWords } from '../app/lane-state';
 import { lineStops, type LineStage } from '../app/Line';

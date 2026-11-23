@@ -6,7 +6,7 @@ import { useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { SettingChange } from '../../review/SettingChange';
-import type { LaneApprovalRead } from '../../review/LaneApproval';
+import type { LaneApprovalRead } from '../../review/lane-approval-read';
 
 const observe = makeFunctionReference<
   'query',

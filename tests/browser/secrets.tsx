@@ -6,7 +6,7 @@ import { ProjectFrame } from '../../web/src/app/frames';
 import { SecretsScreen } from '../../web/src/app/secrets/Secrets';
 import { secretsView, type SecretsMetadata, type SecretsView } from '../../web/src/app/secrets/secrets-model';
 import '../../web/src/app/app.css';
-import '../../web/src/shell/mark.css';
+import '../../web/src/ui/mark.css';
 
 const data: SecretsMetadata = {
   sets: [

@@ -856,7 +856,7 @@ export const hostedChannelMoveSchema = hostedChannelCommandSchema.omit({ action:
   provenance: z.literal('signed-in-owner-selection'),
   automatic: automaticActionSchema.optional(),
 });
-export type HostedChannelMove = z.infer<typeof hostedChannelMoveSchema>;
+
 export const channelCommandSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('accept-channel'),

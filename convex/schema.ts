@@ -888,8 +888,6 @@ export default defineSchema({
     .index('by_project_and_contributor', ['projectId', 'contributor'])
     .index('by_contributor', ['contributor']),
   projectProposals: defineTable(projectProposalFields)
-    // index-order: caller: convex/projectProposals.ts#list; order: proposal list exposes newest-first creation-time pages.
-    .index('by_project', ['projectId'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_storage', ['storageId']),
   projectItemRetention: defineTable({
@@ -945,11 +943,8 @@ export default defineSchema({
     .index('by_importId', ['importId'])
     .index('by_owner_and_importId', ['owner', 'importId'])
     .index('by_owner_and_active', ['owner', 'active']),
-  interestChanges: defineTable(interestReceipt)
-    .index('by_owner_and_operationId', ['owner', 'operationId'])
-    .index('by_importId', ['importId']),
+  interestChanges: defineTable(interestReceipt).index('by_importId', ['importId']),
   sourceZones: defineTable(zoneFields)
-    .index('by_owner_and_operationId', ['owner', 'operationId'])
     .index('by_owner_and_importId', ['owner', 'importId'])
     .index('by_importId', ['importId']),
   zoneReaders: defineTable({ zoneId: v.id('sourceZones'), reader: v.string() })
@@ -1083,7 +1078,6 @@ export default defineSchema({
     .index('by_scope_and_repository_and_ref', ['scope', 'repository', 'ref'])
     .index('by_repository', ['repository'])
     .index('by_owner_and_visibility', ['owner', 'visibility'])
-    .index('by_visibility', ['visibility'])
     .index('by_artifactKey', ['artifactKey']),
   importArtifacts: defineTable({ importId: v.id('imports'), artifactKey: v.string() })
     .index('by_importId_and_artifactKey', ['importId', 'artifactKey'])

@@ -408,11 +408,6 @@ test('immutable contributor proposal completion, exact upload retry and owner do
     digest: stored.digest,
   });
   assert.deepEqual(Buffer.from(part.data), c.bytes);
-  const listed = await modules.projectProposals.list._handler(s.ctx, {
-    projectId: 'project',
-    paginationOpts: { cursor: null, numItems: 10 },
-  });
-  assert.equal(listed.page[0]._id, stored._id);
   await modules.projectContributors.remove._handler(s.ctx, {
     projectId: 'project',
     contributor: 'contributor',
@@ -588,13 +583,6 @@ test('archive and proposal transfers recheck grant after byte read, and unrelate
   }
 
   s.caller('unrelated');
-  await assert.rejects(
-    modules.projectProposals.list._handler(s.ctx, {
-      projectId: 'project',
-      paginationOpts: { cursor: null, numItems: 10 },
-    }),
-    unavailable,
-  );
   s.caller(undefined);
   const shared = await modules.projectContributors.shared._handler(s.ctx, {
     paginationOpts: { cursor: null, numItems: 10 },

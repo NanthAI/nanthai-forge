@@ -129,7 +129,7 @@ export const projectPurgeTables = {
   projectInvites: 'by_project_and_email',
   projectContributors: 'by_project_and_contributor',
   projectTeams: 'by_projectId_and_teamId',
-  projectProposals: 'by_project',
+  projectProposals: 'by_project_and_operation',
   projectWorkHeads: 'by_project',
   projectWorkEvents: 'by_project_and_revision',
   projectRecoveryConnections: 'by_project_and_operation',

@@ -112,10 +112,15 @@ export const measure = internalMutation({
             .query('projectObjects')
             .withIndex('by_project_and_removed', q => q.eq('projectId', projectId).eq('removed', false))
             .paginate({ cursor, numItems: measurePageRows })
-        : await ctx.db
-            .query(table === 'projectBackups' ? 'projectBackups' : 'projectProposals')
-            .withIndex('by_project', q => q.eq('projectId', projectId))
-            .paginate({ cursor, numItems: measurePageRows });
+        : table === 'projectProposals'
+          ? await ctx.db
+              .query('projectProposals')
+              .withIndex('by_project_and_operation', q => q.eq('projectId', projectId))
+              .paginate({ cursor, numItems: measurePageRows })
+          : await ctx.db
+              .query('projectBackups')
+              .withIndex('by_project', q => q.eq('projectId', projectId))
+              .paginate({ cursor, numItems: measurePageRows });
     const next = page.isDone ? stage + 1 : stage,
       done = next >= measured.length;
     const task = done ? undefined : await ctx.scheduler.runAfter(0, fn('measure'), { projectId });

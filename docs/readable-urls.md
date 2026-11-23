@@ -75,7 +75,3 @@ Clerk account deletions to cover accounts shifted between offset pages; existing
 assignments are preserved. Accounts created during the sweep receive handles at
 sign-in. Run through the final project page before relying on readable links for
 existing projects.
-
-The local synthetic settings preview is `node scripts/qa-f-preview.mjs`, opening
-`http://127.0.0.1:5196/dino/nanthai-forge/settings/you`. It renders the actual handle
-control and settings shell with synthetic query answers, without a deployment.

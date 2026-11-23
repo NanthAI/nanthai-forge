@@ -157,7 +157,7 @@ This document is the design authority: the look, the tokens and the rules for ch
 
 The implementation lives in `web/src/ds/`. `tokens.css` is the one token source for the public page and the app; `base.css` and the component sheets build on it; screens import components from `web/src/ds` and never copy CSS or write a literal colour, font, radius, duration or curve.
 
-Everything is scoped to the `data-ds` attribute. The public page sets it on `<html>`. An app screen built on the system renders inside an element that has it (the shell frame sets it once). Screens not yet rebuilt keep the older styles (`web/src/legacy.css`, `web/src/ui/tokens.css` and the screen sheets) until their route is rebuilt; nothing new is added to those.
+Everything is scoped to the `data-ds` attribute. The public page sets it on `<html>`. An app screen built on the system renders inside an element that has it (the shell frame sets it once). The loader and a few shared pieces keep the older sheets (`web/src/ui/tokens.css` and `web/src/ui/components.css`); nothing new is added to those.
 
 Interactive components (menus, dialogs and sheets, the palette, reorderable lists, moving a region) are built on React Aria Components behind the system's own components. Screens never import the library ([decisions](docs/decisions.md#2026-11-16-rules-for-the-phase-7-shared-base)).
 
@@ -299,7 +299,7 @@ Flat: four surface steps and one-pixel seams. A shadow only on a menu, a sheet, 
 
 ## Brand mark states
 
-The F mark is alive. It is the only animated brand element, it is built from the letter's own pieces, and it never carries a message on its own: every state is also shown by a status pill, glyph and word beside it. Source of truth: `web/src/shell/mark.css` and `web/src/shell/brand.tsx` (64 geometry) plus the 16 px cut.
+The F mark is alive. It is the only animated brand element, it is built from the letter's own pieces, and it never carries a message on its own: every state is also shown by a status pill, glyph and word beside it. Source of truth: `web/src/ui/mark.css` and `web/src/ui/brand.tsx` (64 geometry) plus the 16 px cut.
 
 ### The pieces
 - **Stem** is main (ink, `currentColor`), split below the lower arm.

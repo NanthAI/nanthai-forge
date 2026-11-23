@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { getWorkRecord, setWorkRecord } from './hosted-fixture.mjs';
 import { dispatchCoordination } from '../dist/coordination-dispatch.js';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { state } from './hosted-fixture.mjs';
-import { moduleSource, moduleUrl } from './convex-module.mjs';
+import { moduleUrl } from './convex-module.mjs';
 import { indexedRecord, activityFields } from '../dist/work-hosted-index.js';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 const coordination = await import(moduleUrl('../convex/projectCoordination.ts'));
 const backfill = await import(moduleUrl('../convex/coordinationBackfill.ts'));
-const { sessionForest, flattenSessions } = await import(moduleUrl('../web/src/coordination-view.ts'));
 
 function fixture() {
   const f = state([], { keysetPaging: true });
@@ -53,6 +53,7 @@ async function drain(f, name, size, args = {}, afterFirst = () => {}) {
   } while (true);
   return rows;
 }
+
 test('1,000 retained descendants require independent bounded pages; credentials never escape', async () => {
   const f = fixture();
   seedSessions(f, true);
@@ -77,10 +78,6 @@ test('1,000 retained descendants require independent bounded pages; credentials 
   assert.equal(cliPage.page[0].parentSessionId, 's0');
   assert.equal(new Set(children.map(r => r.sessionId)).size, 999);
   assert.ok(!JSON.stringify([...roots.page, ...children]).includes('private-credential'));
-  const all = await drain(f, 'sessions', 50, { all: true });
-  const forest = sessionForest(all);
-  assert.equal(forest.length, 1);
-  assert.equal(flattenSessions(forest).length, 1000);
 });
 
 test('flat presence reaches a selected Lane beyond page one; heartbeats and inserts do not duplicate older rows', async () => {
@@ -206,78 +203,4 @@ test('indexed activity excludes 5,000 old runs; migration is bounded and safe to
     f.query('sessions', { all: true, paginationOpts: { cursor: null, numItems: 30 } }),
     /unavailable/,
   );
-});
-
-test('Activity exposes a provider continuation even when the loaded page contains no visible events', async () => {
-  const { createElement } = await import('react');
-  const { renderToStaticMarkup } = await import('react-dom/server');
-  const { Activity } = await import(moduleUrl('../web/src/cockpit/Activity.tsx'));
-  const props = {
-    items: [],
-    decisions: 0,
-    now: Date.now(),
-    nowHref: '#now',
-    laneHref: id => id,
-    viewHref: id => id,
-    loadMore: () => {},
-  };
-  const partial = renderToStaticMarkup(createElement(Activity, { ...props, complete: false }));
-  assert.match(partial, /Load older activity/);
-  assert.match(partial, /more history available/);
-  const complete = renderToStaticMarkup(createElement(Activity, { ...props, complete: true }));
-  assert.doesNotMatch(complete, /Load older activity/);
-});
-
-test('presence hook requests all flat pages and resolves a Lane on page two', async () => {
-  const f = fixture();
-  seedSessions(f);
-  const first = await f.query('sessions', { all: true, paginationOpts: { cursor: null, numItems: 30 } });
-  const second = await f.query('sessions', {
-    all: true,
-    paginationOpts: { cursor: first.continueCursor, numItems: 30 },
-  });
-  let loaded = false,
-    loads = 0;
-  globalThis.__f4React = {
-    useEffect: effect => effect(),
-    useMemo: fn => fn(),
-    useState: () => [0, () => {}],
-  };
-  const paged = (_ref, args) => {
-    assert.equal(args.all, true);
-    return {
-      results: loaded ? [...first.page, ...second.page] : first.page,
-      status: loaded ? 'Exhausted' : 'CanLoadMore',
-      loadMore: size => {
-        assert.equal(size, 50);
-        loads++;
-        loaded = true;
-      },
-    };
-  };
-  globalThis.__f4Convex = { useSafePaginatedQuery: paged, useSafeQuery: () => ({}) };
-  try {
-    const source = moduleSource('../web/src/cockpit/coordination.ts')
-      .replace(
-        /import \{ useEffect, useMemo, useState \} from [^;]+;/,
-        'const { useEffect, useMemo, useState } = globalThis.__f4React;',
-      )
-      .replace(/import \{ useMutation \} from [^;]+;/, 'const useMutation = () => {};')
-      .replace(
-        /import \{ useSafePaginatedQuery, useSafeQuery \} from [^;]+;/,
-        'const { useSafePaginatedQuery, useSafeQuery } = globalThis.__f4Convex;',
-      );
-    const { usePresenceSessions } = await import(
-      `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
-    );
-    usePresenceSessions('project');
-    const complete = usePresenceSessions('project');
-    assert.equal(loads, 1);
-    assert.equal(complete.status, 'Exhausted');
-    const target = second.page.at(-1);
-    assert.ok(flattenSessions(complete.results).some(row => row.context.laneId === target.context.laneId));
-  } finally {
-    delete globalThis.__f4React;
-    delete globalThis.__f4Convex;
-  }
 });

@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { PRESENCE, presenceState } from '../../../src/presence';
+import { presenceState } from '../../../src/presence';
 import { checkRunState, checkRunStatuses } from '../../../src/check-run-state';
 /** Visual status vocabulary shared by every cockpit surface. Colour is always paired with a glyph. */
 export type Tone = 'active' | 'waiting' | 'stale' | 'conflict' | 'passed' | 'failed' | 'running' | 'plain';
-
-/** Working activity window; quiet sessions remain listed until PRESENCE.foldMs. */
-export const STALE_AFTER_MS = PRESENCE.workingMs;
 
 export function freshness(lastSeen: number, now: number, status?: string): Tone {
   const state = presenceState({ lastSeen, status: status ?? 'working' }, now);
@@ -60,42 +57,6 @@ export function initials(name: string): string {
     return ((letters[0] ?? first![0]!) + (digits || letters[1] || '')).toUpperCase().slice(0, 2);
   }
   return (first![0]! + second[0]!).toUpperCase();
-}
-
-const HUES = [210, 265, 20, 160, 330, 95, 190, 45] as const;
-/** Stable, theme-independent avatar hue chosen from a fixed set by hashing an identity. */
-export function hue(identity: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < identity.length; i++) hash = Math.imul(hash ^ identity.charCodeAt(i), 16777619);
-  return HUES[Math.abs(hash) % HUES.length]!;
-}
-
-/** Status words: Conflict · Check failed · Ready · Working · Waiting · Not seen. Never a hash or a record name. */
-export const toneLabel: Record<Tone, string> = {
-  active: 'Working',
-  waiting: 'Waiting',
-  stale: 'Not seen',
-  conflict: 'Conflict',
-  passed: 'Ready',
-  failed: 'Check failed',
-  running: 'Checking',
-  plain: 'Done',
-};
-
-/** Attention order: what needs a decision sorts first. */
-export const attentionRank: Record<Tone, number> = {
-  conflict: 0,
-  failed: 1,
-  passed: 2,
-  waiting: 3,
-  running: 4,
-  active: 5,
-  stale: 6,
-  plain: 7,
-};
-
-export function shortHash(value: string | undefined, length = 7): string {
-  return value ? value.slice(0, length) : '';
 }
 
 /** Only live check states animate. Terminal and unknown states remain static. Run statuses read

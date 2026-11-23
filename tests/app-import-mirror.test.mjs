@@ -4,7 +4,6 @@
 // name one repository, every mirror state has its mark, and Getting started's import door opens the import page.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
@@ -121,11 +120,8 @@ test('every mirror state the shared sentence can return has a mark and a distanc
   );
 });
 
-test('Getting started opens the import page, and the old new-project form no longer imports itself', () => {
+test('Getting started opens the import page', () => {
   const html = renderToStaticMarkup(h(Start));
   assert.ok(html.includes(`href="${hrefFor({ frame: 'bare', page: 'import' })}"`), 'the import door');
   assert.equal(hrefFor({ frame: 'bare', page: 'import' }), '/new/import');
-  const old = readFileSync(new URL('../web/src/NewHostedProject.tsx', import.meta.url), 'utf8');
-  assert.match(old, /href="\/new\/import"/);
-  assert.doesNotMatch(old, /ImportGithubProject/);
 });

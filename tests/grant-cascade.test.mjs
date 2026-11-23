@@ -7,8 +7,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { state, providers } from './hosted-fixture.mjs';
 const secrets = await import(moduleUrl('../convex/secrets.ts'));
 const actions = await import(moduleUrl('../convex/secretActions.ts'));
-const lifecycle = await import(moduleUrl('../convex/secretLifecycle.ts'));
-const { secretAuditJson } = await import(moduleUrl('../web/src/Secrets.tsx'));
+
 const caps = ['discover', 'names', 'use', 'reveal', 'modify', 'delegate'];
 const paginationOpts = { cursor: null, numItems: 100 };
 const denied = e => (e.data?.code ?? e.code) === 'SECRET_UNAVAILABLE';
@@ -56,64 +55,6 @@ async function setup() {
   const preview = principal => secrets.revocationPreview._handler(s.ctx, { id, principal });
   return { s, id, grant, authorize, row, preview };
 }
-
-test('revoking B in owner → B → C → D previews, marks and audits every descendant without removing independent grants', async () => {
-  const { s, id, grant, authorize, row, preview } = await setup();
-  await grant('owner', 'B');
-  await grant('B', 'C');
-  await grant('C', 'D', ['discover', 'use']);
-  await grant('B', 'independent', ['use']);
-  await grant('owner', 'independent', ['use']);
-  await authorize('D');
-  s.caller('owner');
-  const before = await preview('B');
-  assert.deepEqual(
-    before.grants.map(row => row.principal),
-    ['C', 'D'],
-  );
-  const affected = await grant('owner', 'B', []);
-  assert.deepEqual(affected, before.grants);
-  assert.equal(row('B'), undefined);
-  assert.equal(typeof row('C').revokedAt, 'number');
-  assert.equal(row('C').discover, false);
-  assert.equal(row('D').activeUntil, 0);
-  await authorize('independent');
-  for (const actor of ['B', 'C', 'D']) {
-    for (const capability of caps) await assert.rejects(authorize(actor, capability), denied);
-    s.caller(actor);
-    assert.deepEqual((await secrets.list._handler(s.ctx, { paginationOpts })).page, []);
-    await assert.rejects(secrets.details._handler(s.ctx, { id }), denied);
-  }
-  s.caller('owner');
-  assert.deepEqual(
-    (await secrets.grants._handler(s.ctx, { id, paginationOpts })).page.map(row => row.principal),
-    ['independent', 'owner'],
-  );
-  const audit = (await secrets.audit._handler(s.ctx, { id, paginationOpts })).page;
-  assert.deepEqual(
-    audit
-      .filter(row => row.kind === 'cascade-revoke')
-      .map(row => row.principal)
-      .sort(),
-    ['C', 'D'],
-  );
-  assert.ok(
-    audit
-      .filter(row => row.kind === 'cascade-revoke')
-      .every(row => row.actor === 'owner' && row.cascadeFrom === 'B'),
-  );
-  assert.deepEqual(JSON.parse(secretAuditJson(id, audit)).events, audit);
-  const info = await lifecycle.exportInfo._handler(s.ctx, { id });
-  const exported = await lifecycle.exportPage._handler(s.ctx, {
-    id,
-    ...info.pins,
-    part: 'grants',
-    eventThrough: info.eventThrough,
-    eventThroughId: info.eventThroughId,
-    paginationOpts,
-  });
-  assert.equal(exported.page.find(row => row.principal === 'C').revokedAt, row('C').revokedAt);
-});
 
 test('read-time authority refuses descendants before any row cascade, including discovery and in-flight finish', async () => {
   for (const change of ['delete', 'revoke', 'delegate', 'capability']) {

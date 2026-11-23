@@ -20,7 +20,6 @@ const names = [
   'lifecycleActions',
   'projectBackupActions',
   'projectProposalActions',
-  'zoneActions',
   'projectWorkActions',
 ];
 const modules = Object.fromEntries(

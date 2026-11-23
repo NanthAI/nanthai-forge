@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// The backup calls of Settings > Project, moved from the old project screen (web/src/ProjectBackups.tsx) without a new
+// The backup calls of Settings > Project, moved from the old project screen without a new
 // server call: download a stored checkpoint, reconcile or resume an upload, and store a chosen archive as this
 // project's backup. Each press does its own work; nothing runs on open.
 import type { ConvexReactClient } from 'convex/react';

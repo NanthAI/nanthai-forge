@@ -503,10 +503,16 @@ export const purge = internalMutation({
     // Plain project rows (grants, Work, journals, settings) go in the inventory-guarded
     // row stage below, which also cancels their scheduled functions and frees their files.
     for (const table of ['projectProposals', 'projectBackups'] as const) {
-      const rows = await ctx.db
-        .query(table)
-        .withIndex('by_project', q => q.eq('projectId', projectId))
-        .take(1);
+      const rows =
+        table === 'projectProposals'
+          ? await ctx.db
+              .query(table)
+              .withIndex('by_project_and_operation', q => q.eq('projectId', projectId))
+              .take(1)
+          : await ctx.db
+              .query(table)
+              .withIndex('by_project', q => q.eq('projectId', projectId))
+              .take(1);
       if (!rows.length) continue;
       const row = rows[0]!,
         binding = await retainUploadCleanup(

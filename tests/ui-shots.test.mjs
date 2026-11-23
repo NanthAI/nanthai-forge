@@ -45,6 +45,7 @@ test('screenshot CLI validates pages and dimensions before using credentials or 
     ['--height', '0'],
     ['--themes', 'system'],
     ['--pages', 'fake'],
+    ['--pages', 'bootstrap'],
     ['--pages', 'review:'],
   ])
     assert.throws(() => options([...args, ...bad]));
@@ -257,10 +258,4 @@ test('Intents screenshot layout accepts only the real List and Board choices', (
   const base = ['--base', 'http://localhost:5173', '--out', '/tmp/forge-shots'];
   assert.equal(options([...base, '--intent-layout', 'board']).intentLayout, 'board');
   assert.throws(() => options([...base, '--intent-layout', 'timeline']), /must be list or board/);
-});
-
-test('synthetic bootstrap captures are isolated from signed-in routes', () => {
-  const args = ['--base', 'http://localhost:5179', '--out', '/tmp/ui'];
-  assert.deepEqual(options([...args, '--pages', 'bootstrap']).pages, ['bootstrap']);
-  assert.throws(() => options([...args, '--pages', 'bootstrap,home']), /separately/);
 });

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
-import { paginationOptsValidator } from 'convex/server';
-import { ForgeError } from '../src/errors';
+
 import { v } from 'convex/values';
 import { action, accountAction, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
@@ -14,7 +13,6 @@ import { hostedStatus, type HostedStatus } from '../src/hosted-status';
 import { indexedHostedQuery } from './hostedQueryIndex';
 import { invariant } from '../src/errors';
 import { report } from './errors';
-import { requireUnlinkedImportAccess } from './accessPolicy';
 
 export const start = accountAction('write')({
   args: { url: v.string(), ref: v.optional(v.string()) },
@@ -142,60 +140,4 @@ export const read = action({
   args: { id: v.id('imports'), endpoint: v.string() },
   returns: v.string(),
   handler: readSource,
-});
-
-export const discover = accountAction('same')({
-  args: { paginationOpts: paginationOptsValidator },
-  returns: v.string(),
-  handler: async (ctx, { paginationOpts }): Promise<string> => {
-    try {
-      requireUnlinkedImportAccess(ctx);
-      const candidates = await ctx.runQuery(internal.imports.publicPage, { paginationOpts });
-      const page = [];
-      let unavailable = 0;
-      for (const id of candidates.page) {
-        try {
-          // Always anonymous authority, including signed-in callers. Personal access cannot publish private metadata.
-          const { job, repository } = await currentAccess(ctx, id, undefined);
-          const current = await ctx.runQuery(internal.imports.get, { id });
-          invariant(
-            !repository.private &&
-              current?.visibility === 'public' &&
-              !current.removal &&
-              current.phase === 'ready' &&
-              current.head &&
-              current.artifactKey &&
-              current.generation === job.generation &&
-              current.head === job.head &&
-              current.artifactKey === job.artifactKey &&
-              current.repository === job.repository &&
-              current.ref === job.ref,
-            'GITHUB_UNAVAILABLE',
-            'This public import changed during discovery.',
-          );
-          page.push({
-            id,
-            repository: repository.full_name,
-            url: repository.html_url,
-            ref: job.ref,
-            head: job.head,
-            importedAt: job._creationTime,
-            checkedAt: Date.now(),
-            license: repository.license,
-          });
-        } catch (error) {
-          if (!(error instanceof ForgeError) || error.code !== 'GITHUB_UNAVAILABLE') throw error;
-          unavailable++;
-        }
-      }
-      return JSON.stringify({
-        page,
-        isDone: candidates.isDone,
-        continueCursor: candidates.continueCursor,
-        unavailable,
-      });
-    } catch (error) {
-      return report(error);
-    }
-  },
 });

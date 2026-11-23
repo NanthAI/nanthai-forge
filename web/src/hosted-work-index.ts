@@ -6,8 +6,6 @@ import { useArchivePaginatedQuery } from './archive-pagination';
 import { useSafePaginatedQuery } from './safe-query';
 import { makeFunctionReference, type PaginationOptions, type PaginationResult } from 'convex/server';
 import type { Id } from '../../convex/_generated/dataModel';
-import type { WorkData } from '../../src/work-types';
-import type { IntentPin } from './proposal-api';
 import { hostedError } from './snapshot';
 import { assembleIndexValue, type IndexHeader } from './hosted-index-value';
 
@@ -43,7 +41,6 @@ export const workIndex = {
   revision: makeFunctionReference<'query', Project, number | null>('projectWorkIndex:revision'),
 };
 export type WorkIndexWorkspace = {
-  needsFix?: readonly import('./cockpit/needs-fix').NeedsFixNotice[];
   githubMirror?: import('../../src/hosted-github-mirror-status').HostedMirrorStatus | null;
   decisionVersion?: string;
   landingWorker?: import('../../src/pending-status').PendingStatus['landingWorker'];
@@ -68,7 +65,6 @@ export type WorkIndexWorkspace = {
     planning?: boolean;
   };
 };
-export type IntentHeader = WorkData['intents'][number] & { noteCount?: number; lifecycleCount?: number };
 
 /** Source returns and ordinary revisions preserve mounted forms and query identities. */
 export function useWorkIndex(
@@ -261,45 +257,7 @@ export function useResolvedWorkValue<T>(
     [value, collection, parts.complete, parts.rows],
   );
 }
-export function useWorkRecordResult<T>(
-  projectId: Id<'hostedProjects'>,
-  workspace: WorkIndexWorkspace | null,
-  collection: string,
-  id: string,
-) {
-  const result = useQuery(
-    workIndex.detail,
-    id
-      ? { projectId, ...(workspace ? { generationId: workspace.generationId } : {}), collection, id }
-      : 'skip',
-  );
-  const header = useMemo(
-    () =>
-      result && (!workspace || result.generationId === workspace.generationId) && result.value
-        ? (JSON.parse(result.value) as T)
-        : null,
-    [result, workspace?.generationId],
-  );
-  const record = useResolvedWorkValue(projectId, workspace, collection, header);
-  return {
-    record,
-    header,
-    initialLoading: !!id && result === undefined,
-    editable: result?.generationId === workspace?.generationId && result?.editable === true,
-    intentPin:
-      result?.generationId === workspace?.generationId && result?.intentPin
-        ? (JSON.parse(result.intentPin) as IntentPin)
-        : undefined,
-  };
-}
-export function useWorkRecord<T>(
-  projectId: Id<'hostedProjects'>,
-  workspace: WorkIndexWorkspace | null,
-  collection: string,
-  id: string,
-) {
-  return useWorkRecordResult<T>(projectId, workspace, collection, id).record;
-}
+
 /** Fully resolve an explicitly selected editor value before allowing a replacement write. */
 export async function readWorkRecord<T>(
   client: Pick<ConvexReactClient, 'query'>,

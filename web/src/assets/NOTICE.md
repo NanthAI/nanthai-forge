@@ -26,4 +26,4 @@ Self-hosted variable typefaces for the public page (`web/index.html`, `web/src/l
 
 ## Forge mark
 
-The Forge Overlap mark, badge, lockups and browser/app icons in `brand/`, `web/public/`, the inline `shell/brand.tsx` component, its state styles in `shell/mark.css`, and the mark reference set in the repository's `design/hearth/` are the owner-supplied final Forge branding from Fable’s brand asset pack. Copyright 2026 Ferdinando Valsecchi. All brand and trademark rights reserved; these assets are excluded from the surrounding Apache-2.0 code license.
+The Forge Overlap mark, badge, lockups and browser/app icons in `brand/`, `web/public/`, the inline `ui/brand.tsx` component, its state styles in `ui/mark.css`, and the mark reference set in the repository's `design/hearth/` are the owner-supplied final Forge branding from Fable’s brand asset pack. Copyright 2026 Ferdinando Valsecchi. All brand and trademark rights reserved; these assets are excluded from the surrounding Apache-2.0 code license.

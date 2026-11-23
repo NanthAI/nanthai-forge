@@ -226,7 +226,7 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     );
     if (typeof result.deviceId !== 'string')
       process.stderr.write(
-        'This project uses the earlier device approval. The returned sign-in is a 30-day credential; stable device settings are not enabled here.\n',
+        'Stable device settings are not enabled for this project, so the returned sign-in is a 30-day credential.\n',
       );
     const credential: SavedCredential = {
       token: result.token,
