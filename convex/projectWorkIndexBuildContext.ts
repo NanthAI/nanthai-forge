@@ -80,7 +80,7 @@ export function buildContext(ctx: ActionCtx, selected: Selected, exchange: Excha
         for (const [i, pin] of page.entries()) {
           const value = ownerViewPageSchema.parse(JSON.parse(loaded[i]!.toString('utf8')));
           invariant(
-            value.work === exchange.records.work.sha256 && value.view[0] === pin.key,
+            value.work === exchange.originalWork && value.view[0] === pin.key,
             'INVALID_OWNER_DATA',
             'Owner View selects another Work or View.',
           );
@@ -100,7 +100,7 @@ export function buildContext(ctx: ActionCtx, selected: Selected, exchange: Excha
           bodies.get(pin.sha256) ?? (await reader.read(selected.projectId, selected.owner, [pin]))[0]!;
         const value = diffstatPageSchema.parse(JSON.parse(bytes.toString('utf8')));
         invariant(
-          value.work === exchange.records.work.sha256,
+          value.work === exchange.originalWork,
           'INVALID_OWNER_DATA',
           'Owner diffstats select another Work.',
         );

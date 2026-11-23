@@ -31,6 +31,7 @@ const routed = {
   projectCommentPurge: commentPurge,
   projectCommentPurgeArchive: await import(moduleUrl('../convex/projectCommentPurgeArchive.ts')),
   projectCommentPurgeArchiveStore: await import(moduleUrl('../convex/projectCommentPurgeArchiveStore.ts')),
+  projectCommentPurgeBaseStore: await import(moduleUrl('../convex/projectCommentPurgeBaseStore.ts')),
   projectPlanningPurgeSegmentRun: await import(moduleUrl('../convex/projectPlanningPurgeSegmentRun.ts')),
   projectPlanningPurgeSegments: await import(moduleUrl('../convex/projectPlanningPurgeSegments.ts')),
   projectJournalRead: await import(moduleUrl('../convex/projectJournalRead.ts')),

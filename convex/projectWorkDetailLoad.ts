@@ -12,6 +12,7 @@ import { batchedRecordReader } from '../src/native-exchange-stream';
 import { parseJsonStream } from '../src/json-stream';
 import { workDetailPins } from '../src/work-record-details';
 import type { WorkData } from '../src/work-types';
+import { backupRootPin } from '../src/work-backup-root';
 
 /** The original backup remains immutable. Its migration receipt selects the
  * compact catalog at an exact journal revision; future events replay after it. */
@@ -27,14 +28,7 @@ export async function migratedWork(
   const [bytes] = await reader.read(backup.projectId, owner, [migration.root]);
   const original =
     backup.transport === 'objects'
-      ? (
-          await reader.read(backup.projectId, owner, [
-            {
-              sha256: backup.objectManifest?.digest ?? backup.digest,
-              size: backup.objectManifest?.size ?? backup.size,
-            },
-          ])
-        )[0]!
+      ? (await reader.read(backup.projectId, owner, [backupRootPin(backup)]))[0]!
       : (
           await projectArchiveMetadata(
             _ctx,

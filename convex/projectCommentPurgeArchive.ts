@@ -21,6 +21,7 @@ import { invariant } from '../src/errors';
 import type { JournalIndex } from '../src/journal-segment';
 import { getJournalSegment } from './projectJournalObject';
 import { networkTimeout } from './networkFetch';
+import { scrubBase, scrubPlan } from './projectCommentPurgeBase';
 
 /** One run's time, under the action limit; a longer purge schedules the next run. */
 const RUN_MS = 8 * 60_000;
@@ -63,16 +64,30 @@ export const run = internalAction({
       const signal = networkTimeout(RUN_MS);
       const target = await ctx.runQuery(internal.projectCommentPurgeArchiveStore.target, identity);
       begun = target.state !== 'new';
+      const scrubInput = { ...identity, itemId: input.itemId };
       if (target.state === 'new') {
-        const archived = await archivedCommand(input, target.segment as JournalIndex, signal);
-        await ctx.runMutation(internal.projectCommentPurge.purge, {
+        const archived = target.segment
+          ? await archivedCommand(input, target.segment as JournalIndex, signal)
+          : undefined;
+        // A base the scrub cannot rewrite refuses before anything is written.
+        if (target.base) await scrubPlan(ctx, scrubInput);
+        const removed: number = await ctx.runMutation(internal.projectCommentPurge.purge, {
           ...identity,
           itemId: input.itemId,
-          archived,
+          ...(archived !== undefined ? { archived } : {}),
+          ...(target.base ? { base: true } : {}),
         });
         begun = true;
+        if (!removed) {
+          await ctx.runMutation(internal.projectCommentPurgeArchiveStore.finish, {
+            ...identity,
+            ...(input.auditId ? { auditId: input.auditId } : {}),
+            none: true,
+          });
+          return 'done';
+        }
       }
-      if (target.state !== 'swept') {
+      if (target.state !== 'swept' && target.sweep) {
         const swept: boolean = await ctx.runAction(internal.projectPlanningPurgeSegmentRun.run, {
           projectId: input.projectId,
           operationId: input.operationId,
@@ -80,6 +95,7 @@ export const run = internalAction({
         });
         if (!swept) return again(ctx, input, 0, input.attempt ?? 0);
       }
+      if (target.state !== 'swept' && target.base) await scrubBase(ctx, scrubInput);
       await ctx.runMutation(internal.projectCommentPurgeArchiveStore.finish, {
         ...identity,
         ...(input.auditId ? { auditId: input.auditId } : {}),

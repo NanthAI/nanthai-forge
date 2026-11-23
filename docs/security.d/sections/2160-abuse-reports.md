@@ -67,8 +67,10 @@ after the content expires). Look, then act:
   and reads as "Deleted comment"; the
   Item and the rest of its discussion stay ([removing one comment](../../planning.md#removing-one-comment)).
   A decision comment's line also leaves the current Item body, by an audited
-  edit. A comment whose Work row is in the journal archive is purged by a
-  scheduled action, and its audit row says `done: false` until that finishes. A
+  edit. A comment whose Work row is in the journal archive, or whose words are in
+  the stored base checkpoint, is purged by a scheduled action (the base one also
+  rewrites the stored base and deletes its old objects), and its audit row says
+  `done: false` until that finishes. A
   refusal before it wrote anything sets `failed` and returns the report to the
   open queue; a retry of the same review starts a failed run again.
   The report's excerpt is kept as the operator's evidence.

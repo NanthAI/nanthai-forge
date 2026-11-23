@@ -25,6 +25,7 @@ import { partialWork } from '../src/work-exchange-delta';
 import { materializeWork, indexBatches, type IndexEntry, type IndexMetadata } from '../src/work-hosted-index';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
+import { backupManifestDigest } from '../src/work-backup-root';
 /** Server-held record bodies are independently pinned and validated by seed.
  * Each durable step consumes a bounded record or source State page. No complete Work
  * object, projection, or historical State file map survives in the action. */
@@ -49,7 +50,7 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
   if (!exchange || exchange.records.work.size < 2 * 1024 * 1024) return;
   invariant(
     exchange.records.revision === project.work.initialRevision &&
-      digest(exchange.manifestBytes) === backup.preview.manifestDigest,
+      digest(exchange.manifestBytes) === backupManifestDigest(backup),
     'INVALID_WORK_JOURNAL',
     'Hosted Work base differs from its source record catalog.',
   );

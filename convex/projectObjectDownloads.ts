@@ -14,6 +14,7 @@ import { accessibleProject } from './projectAuthority';
 import { isR2Object } from './projectObjectFields';
 import { r2Config, presignGet, r2ObjectKey } from './r2';
 import { invariant } from '../src/errors';
+import { backupManifestDigest, backupRootPin } from '../src/work-backup-root';
 import { report } from './errors';
 import { hostedDownloadPageSize, type HostedDownloadDescriptor } from '../src/hosted-download-page';
 import {
@@ -212,7 +213,7 @@ export async function describeObjects(
       const backup = await selectedCheckpoint(ctx, projectId, checkpoint.backupId);
       invariant(
         backup.digest === checkpoint.backupDigest &&
-          backup.preview.manifestDigest === checkpoint.manifestDigest,
+          backupManifestDigest(backup) === checkpoint.manifestDigest,
         'SOURCE_CHANGED',
         'The selected checkpoint changed while reading.',
       );
@@ -344,14 +345,11 @@ export const source = mutation({
       return JSON.stringify({
         backupId,
         backupDigest: backup.digest,
-        manifestDigest: backup.preview.manifestDigest,
+        manifestDigest: backupManifestDigest(backup),
         format: backup.preview.format,
         operationId: backup.operationId,
         transport: backup.transport ?? 'archive',
-        root: {
-          sha256: backup.objectManifest?.digest ?? backup.digest,
-          size: backup.objectManifest?.size ?? backup.size,
-        },
+        root: backupRootPin(backup),
         pins,
         checkpointDescribe: true,
       });

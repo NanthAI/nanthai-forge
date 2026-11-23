@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Pure: the reducer half of permanent deletion (Item 4c9e961e, purge Lane 1). Also runs in the Convex runtime.
 import { invariant } from './errors.js';
-import { refusePurged } from './work-planning-put.js';
+import { decisionLine, refusePurged } from './work-planning-put.js';
 import {
   PURGED_ITEM_TITLE,
   itemChanged,
@@ -255,4 +255,57 @@ export function purgeableRowTarget(operationId: string, command: unknown) {
 /** An abandon plan still needs a reason to replay under its original lifecycle schema. */
 export function purgedLifecycleReason(action: HostedLifecycleRequest['action']) {
   return action === 'abandon' ? PURGED_ITEM_TITLE : '';
+}
+
+/** A purged decision comment's lines (Item b6588425 line 2c): its line in a body is found by its comment marker (the
+ * line's text may have been edited since) and becomes the line a replay of the purged row writes. `comment` is the
+ * command, or the purged row's facts: redaction is a fixed point, so both give the same line. */
+export function decisionLines(
+  comment: {
+    operationId: string;
+    text: string;
+    decidedBy?: string | undefined;
+    authorLabel?: string | undefined;
+  },
+  at: string,
+) {
+  const redacted = redactPlanningWrite(
+    comment as Parameters<typeof redactPlanningWrite>[0],
+  ) as typeof comment;
+  return {
+    marker: `(comment ${comment.operationId.slice(0, 8)})`,
+    redacted: decisionLine({
+      at,
+      label: redacted.decidedBy ?? redacted.authorLabel ?? '',
+      text: redacted.text,
+      commentId: comment.operationId,
+    }),
+  };
+}
+export type DecisionLines = ReturnType<typeof decisionLines>;
+
+/** The body with the decision's lines replaced (`last`: only the last, the derived version's own appended line), and
+ * how many lines carried the marker. */
+export function scrubDecision(body: string, lines: DecisionLines, which: 'all' | 'last') {
+  const rows = body.split('\n');
+  const at = rows.flatMap((row, index) =>
+    row.startsWith('- ') && row.trimEnd().endsWith(lines.marker) ? [index] : [],
+  );
+  for (const index of which === 'last' ? at.slice(-1) : at) rows[index] = lines.redacted;
+  return { body: rows.join('\n'), count: at.length };
+}
+
+/** The decision's derived body version (written with the comment, src/work-planning-state.ts) in the form a replay of
+ * the purged comment gives it: its own line replaced and its request derived from the comment's. The index record,
+ * the work-store body and the base checkpoint record (src/work-base-scrub.ts) all take this form. A fixed point. */
+export function decisionVersionValue(value: unknown, lines: DecisionLines, request: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const row = { ...(value as Record<string, unknown>) };
+  if (typeof row.body === 'string') {
+    const body = scrubDecision(row.body, lines, 'last').body;
+    row.body = body;
+    if (typeof row.bodyLength === 'number' && !row.bodyTruncated) row.bodyLength = body.length;
+  }
+  if ('request' in row) row.request = request;
+  return row;
 }

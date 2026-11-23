@@ -240,6 +240,8 @@ export function callsFixture(scale = 1, ownerStats = true) {
   const exchange = {
     root: { schema: 2, ownerViews, ...(ownerStats ? { ownerDiffstats: companion.pages } : {}) },
     records: built.root,
+    // The whole-Work digest the owner pages name (convex/projectWorkRecordExchange.ts): this root's, unscrubbed.
+    originalWork: built.root.work.sha256,
     manifest: {
       kind: 'forge-native-work-backup',
       head: base,

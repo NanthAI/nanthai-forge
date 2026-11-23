@@ -9,9 +9,10 @@ import { recordMap, recordMetadata, workRecordRootSchema } from '../src/work-exc
 
 import { sourceManifestSchema } from '../src/work-archive-metadata';
 import { invariant } from '../src/errors';
+import { backupOwnerWork, backupRootPin } from '../src/work-backup-root';
 
 export async function recordExchange(
-  backup: Pick<Doc<'projectBackups'>, 'projectId' | 'digest' | 'size' | 'objectManifest'>,
+  backup: Pick<Doc<'projectBackups'>, 'projectId' | 'digest' | 'size' | 'objectManifest' | 'scrubbed'>,
   owner: string,
   reader: ExchangeObjectReader,
   bodyBudget = 8 * 1024 * 1024,
@@ -60,10 +61,8 @@ export async function recordExchange(
     }
     return result;
   };
-  const bytes = await read({
-    sha256: backup.objectManifest?.digest ?? backup.digest,
-    size: backup.objectManifest?.size ?? backup.size,
-  });
+  // A scrubbed base (Item b6588425 line 2d) is read through its scrubbed root.
+  const bytes = await read(backupRootPin(backup));
   const value: unknown = JSON.parse(bytes.toString('utf8'));
   if (!isExchangeRoot(value)) return;
   const root = exchangeRootSchema.parse(value);
@@ -119,6 +118,8 @@ export async function recordExchange(
   return {
     root,
     records,
+    /** The whole-Work digest the base's derived owner pages and returned-source events name (the original one). */
+    originalWork: backupOwnerWork(backup, records),
     manifest,
     manifestBytes,
     read,

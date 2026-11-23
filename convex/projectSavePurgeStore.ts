@@ -27,6 +27,26 @@ const target = {
   head: v.string(),
   parent: v.string(),
 };
+/** Tombstone one stored object (Item 9d3c407d): from now on every read of it refuses PURGED. Returns its R2 work
+ * (a whole object to delete, or an upload-pack member to zero in place), or nothing when an earlier purge already
+ * tombstoned it. Objects stored in chunks (recipes) are the caller's to refuse. Also the base-checkpoint scrub's
+ * step (convex/projectCommentPurgeBaseStore.ts). */
+export async function tombstoneObject(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  row: Doc<'projectObjects'>,
+  purged: { at: number; operationId: string },
+) {
+  if (row.purged) return undefined;
+  if (row.storageId) await ctx.storage.delete(row.storageId);
+  await ctx.db.patch(row._id, { purged, storageId: undefined });
+  // A sweep-rotated pack keeps its own key on every member row.
+  if (row.pack)
+    return {
+      zero: { key: row.r2Key ?? r2Key(projectId, row.pack.digest), offset: row.pack.offset, size: row.size },
+    };
+  return row.r2Key ? { delete: row.r2Key } : {};
+}
 /** A purge that has not finished its R2 step within this long is taken as abandoned. */
 const busyMs = 15 * 60_000;
 type Row = Doc<'projectSavePurges'>;
@@ -43,7 +63,7 @@ async function owner(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
 }
 /** One purge at a time per project rewrites R2: two sharing an upload pack would each restore the
  * other's range. Checked in the same transaction that inserts or resumes a marked row. */
-async function notBusy(ctx: MutationCtx, projectId: Id<'hostedProjects'>, operationId: string) {
+export async function notBusy(ctx: MutationCtx, projectId: Id<'hostedProjects'>, operationId: string) {
   const since = Date.now() - busyMs;
   const marked = await ctx.db
     .query('projectSavePurges')
@@ -140,23 +160,14 @@ export const mark = internalMutation({
           `The saved bytes of ${JSON.stringify(file.path)} are not stored.`,
         );
         files.push({ ...file, size: row.size });
-        // Already purged (the same bytes in an earlier purge): nothing left to delete.
-        if (row.purged) continue;
         invariant(
-          !row.recipe,
+          row.purged || !row.recipe,
           'BAD_ARGUMENT',
           `${JSON.stringify(file.path)} is stored in chunks (a large file); purge covers files stored whole. Rotate the credential now.`,
         );
-        if (row.storageId) await ctx.storage.delete(row.storageId);
-        // A sweep-rotated pack keeps its own key on every member row.
-        if (row.pack)
-          zero.push({
-            key: row.r2Key ?? r2Key(input.projectId, row.pack.digest),
-            offset: row.pack.offset,
-            size: row.size,
-          });
-        else if (row.r2Key) deletes.add(row.r2Key);
-        await ctx.db.patch(row._id, { purged, storageId: undefined });
+        const work = await tombstoneObject(ctx, input.projectId, row, purged);
+        if (work?.zero) zero.push(work.zero);
+        if (work?.delete) deletes.add(work.delete);
       }
       // Copies that may hold the bytes: the Lane's built Git commit and its snapshots.
       for (const sha of await dropLaneCommit(ctx, input.projectId, input.laneId))

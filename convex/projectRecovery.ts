@@ -10,6 +10,7 @@ import { sourceAuthority } from '../src/hosted-source-authority';
 import { recoverySelectionSchema, recoveryConnectionSchema } from '../src/recovery-protocol';
 import { hostedStartMain } from './projectHostedChannels';
 import { invariant } from '../src/errors';
+import { backupManifestDigest } from '../src/work-backup-root';
 import { report } from './errors';
 import { capsuleRecoveryRevision } from './projectLandingCapsuleRecovery';
 
@@ -45,7 +46,7 @@ export async function recoverySelection(ctx: QueryCtx | MutationCtx, original: D
     backupId: backup._id,
     checkpointSha256: backup.digest,
     checkpointSize: backup.size,
-    manifestSha256: backup.preview.manifestDigest,
+    manifestSha256: backupManifestDigest(backup),
     revision: project.work!.revision,
     ...(capsuleRevision ? { capsuleRevision } : {}),
     ...(journalRevision ? { journalRevision } : {}),

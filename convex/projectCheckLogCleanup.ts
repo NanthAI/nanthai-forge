@@ -119,6 +119,7 @@ export async function planProjectCheckLogs(
       },
     });
     protectedPins.add(backup.objectManifest?.digest ?? backup.digest);
+    if (backup.scrubbed) protectedPins.add(backup.scrubbed.root.sha256);
     if (backup.ownerDerived) protectedPins.add(backup.ownerDerived.sha256);
     if (backup.transport !== 'objects' && checkLogStoragePlan([snapshots.at(-1)!]).logs.length)
       archives.push({ backupId: backup._id, digest: backup.digest, size: backup.size });

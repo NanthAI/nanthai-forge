@@ -94,7 +94,8 @@ export const sourceTransport = query({
         head: backup.preview.head,
         kind: backup.preview.format === 'native' ? ('native' as const) : ('git' as const),
         transport: backup.transport ?? ('archive' as const),
-        manifestDigest: backup.objectManifest?.digest ?? backup.preview.manifestDigest,
+        manifestDigest:
+          backup.scrubbed?.root.sha256 ?? backup.objectManifest?.digest ?? backup.preview.manifestDigest,
       };
     } catch (error) {
       return report(error);

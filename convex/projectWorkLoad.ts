@@ -12,6 +12,7 @@ import { invariant, ForgeError } from '../src/errors';
 import { migrateHostedIntents } from '../src/work-hosted-intents';
 import { checkPurgedJournal } from '../src/work-planning-purge';
 import { digest } from '../src/hash';
+import { backupManifestDigest, backupRootPin } from '../src/work-backup-root';
 import { hostedCommandSchema, type HostedEvent, type WorkData } from '../src/work-types';
 import { applyHostedEvent, parseWorkBytes, validateWorkSize, validateParsedWork } from '../src/work-metadata';
 import { resolveExchangeWork } from '../src/native-exchange-stream';
@@ -51,14 +52,7 @@ export async function source(
   const streamed =
     !migrated && original.backup.transport === 'objects'
       ? await resolveExchangeWork(
-          (
-            await objectReader.read(original.backup.projectId, owner, [
-              {
-                sha256: original.backup.objectManifest?.digest ?? original.backup.digest,
-                size: original.backup.objectManifest?.size ?? original.backup.size,
-              },
-            ])
-          )[0]!,
+          (await objectReader.read(original.backup.projectId, owner, [backupRootPin(original.backup)]))[0]!,
           pins => objectReader.read(original.backup.projectId, owner, pins),
         )
       : undefined;
@@ -80,7 +74,7 @@ export async function source(
     manifest = sourceManifestSchema.parse(JSON.parse(Buffer.from(manifestBytes).toString('utf8'))),
     file = manifest.files.find(item => item.path === 'work.json');
   invariant(
-    digest(manifestBytes) === original.backup.preview.manifestDigest &&
+    digest(manifestBytes) === backupManifestDigest(original.backup) &&
       file &&
       (migrated || streamed || (digest(bytes!.work) === file.sha256 && bytes!.work.byteLength === file.size)),
     'INVALID_WORK_BACKUP',

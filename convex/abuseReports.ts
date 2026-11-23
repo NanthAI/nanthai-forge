@@ -21,7 +21,7 @@ import { record, recordPartition, selectedGeneration } from './projectWorkIndexS
 import { retainedItem } from './discussionAttachmentRead';
 import { publicWorkPlan } from './publicWorkPlan';
 import { accountOf, applySwitch, purgeMessages } from './projectBoardOperator';
-import { archivedComment, purgeComment } from './projectCommentPurge';
+import { commentRoute, purgeComment } from './projectCommentPurge';
 import { report as reportError } from './errors';
 import { abuseReportInputSchema, type AbuseReportInput } from '../src/hosted-record-input';
 import { planningIssueArguments } from '../src/planning-issue-arguments';
@@ -463,9 +463,13 @@ export const review = internalMutation({
           reportId,
         })
       ).deleted;
-    } else if (row.kind === 'comment' && (await archivedComment(ctx, row.projectId!, row.targetId!))) {
-      // A comment row archived in an R2 journal segment: the purge reads it there, then rewrites that segment
-      // (convex/projectCommentPurgeArchive.ts), and marks this audit row done when it finishes.
+    } else if (
+      row.kind === 'comment' &&
+      (await commentRoute(ctx, row.projectId!, row.targetId!)) !== 'live'
+    ) {
+      // A comment row archived in an R2 journal segment, or a comment in the stored base checkpoint: the purge reads
+      // it there and rewrites that segment or scrubs that base (convex/projectCommentPurgeArchive.ts), and marks this
+      // audit row done when it finishes.
       removed = 0;
       auditId = await ctx.db.insert('boardAudit', {
         action: 'purge',

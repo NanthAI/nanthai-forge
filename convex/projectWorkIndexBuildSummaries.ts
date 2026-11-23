@@ -149,7 +149,7 @@ export async function projectSummaries(
         },
         {
           schema: 3,
-          work: e.records.work.sha256,
+          work: e.originalWork,
           parents: [],
           ancestry: [],
           stats: [],

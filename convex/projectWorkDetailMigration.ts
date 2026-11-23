@@ -42,6 +42,12 @@ export const begin = internalMutation({
       if (!previous.root) await current(ctx, input, previous);
       return JSON.stringify(previous);
     }
+    // A base-checkpoint scrub (convex/projectCommentPurgeBase.ts) rewrites the base this migration would copy whole.
+    invariant(
+      !project.itemPurges?.some(item => item.baseScrub && !item.baseScrub.done),
+      'WORK_STALE',
+      'A purge is scrubbing the base checkpoint. Start the detail migration after it finishes.',
+    );
     const id = await ctx.db.insert('projectWorkDetailMigrations', {
       projectId: input.projectId,
       operationId: input.operationId,

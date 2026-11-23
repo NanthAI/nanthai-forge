@@ -441,6 +441,21 @@ const projectFields = {
         created: v.optional(v.number()),
         startedAt: v.number(),
         purgedAt: v.optional(v.number()),
+        /** One comment's purge whose words are in the stored base checkpoint (convex/projectCommentPurgeBase.ts): the
+         * backup it scrubs, then, once the scrubbed root is published and the old objects tombstoned, the R2 work
+         * left; `done` once those bytes are gone. */
+        baseScrub: v.optional(
+          v.object({
+            backupId: v.id('projectBackups'),
+            done: v.boolean(),
+            pending: v.optional(
+              v.object({
+                deletes: v.array(v.string()),
+                zero: v.array(v.object({ key: v.string(), offset: v.number(), size: v.number() })),
+              }),
+            ),
+          }),
+        ),
         segmentSweep: v.optional(
           v.object({
             after: v.union(v.string(), v.null()),
@@ -557,6 +572,18 @@ const projectBackupFields = {
   validatedClosure: v.optional(v.literal(1)),
   historyBackfilling: v.optional(v.boolean()),
   objectManifest: v.optional(v.object({ digest: v.string(), size: v.number() })),
+  /** The scrubbed exchange root a purge wrote over this base (Item b6588425 line 2d, src/work-base-scrub.ts): every
+   * base reader reads it (backupRootPin) and checks its manifest digest; `originalWork` is the whole-Work digest the
+   * backup's derived owner pages and returned-source events name. */
+  scrubbed: v.optional(
+    v.object({
+      operationId: v.string(),
+      root: v.object({ sha256: v.string(), size: v.number() }),
+      manifestDigest: v.string(),
+      originalWork: v.string(),
+      at: v.number(),
+    }),
+  ),
   archiveReceipt: v.optional(
     v.object({
       digest: v.string(),

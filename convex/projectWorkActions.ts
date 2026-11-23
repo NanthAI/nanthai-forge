@@ -23,6 +23,7 @@ export { caller };
 export { source, load } from './projectWorkLoad';
 import { source, load } from './projectWorkLoad';
 import { exchangeObjectReader } from './projectExchangeReader';
+import { backupManifestDigest } from '../src/work-backup-root';
 export const initialize = action({
   args: { projectId: v.id('hostedProjects'), backupId: v.id('projectBackups'), operationId: v.string() },
   returns: projectDocument,
@@ -138,7 +139,7 @@ export const exportJournal = action({
             },
             base: {
               archiveSha256: snapshot.backup.digest,
-              manifestSha256: snapshot.backup.preview.manifestDigest,
+              manifestSha256: backupManifestDigest(snapshot.backup),
               workSha256: snapshot.originalWorkDigest,
             },
             events: snapshot.events,

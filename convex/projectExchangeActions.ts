@@ -8,6 +8,7 @@ import { internal } from './_generated/api';
 import type { Id, Doc } from './_generated/dataModel';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
+import { backupRootPin } from '../src/work-backup-root';
 
 import { projectArchivePart } from './projectArchivePart';
 import { isStored, isR2Object } from './projectObjectFields';
@@ -99,16 +100,7 @@ export async function exchangeMetadata(
   actor: string,
   reader: ExchangeObjectReader = exchangeObjectReader(ctx, true),
 ) {
-  const root = await objectBytes(
-    ctx,
-    backup.projectId,
-    actor,
-    {
-      sha256: backup.objectManifest?.digest ?? backup.digest,
-      size: backup.objectManifest?.size ?? backup.size,
-    },
-    reader,
-  );
+  const root = await objectBytes(ctx, backup.projectId, actor, backupRootPin(backup), reader);
   return resolveExchangeRoot(root, pins => reader.read(backup.projectId, actor, pins), { batchSize: 100 });
 }
 async function cacheLogicalMetadata(
@@ -164,10 +156,7 @@ async function checkpointBytes(ctx: ActionCtx, backupId: Id<'projectBackups'>) {
     'BAD_ARGUMENT',
     'This checkpoint uses a legacy archive; use its existing download command.',
   );
-  const bytes = await objectBytes(ctx, backup.projectId, actor, {
-    sha256: backup.objectManifest?.digest ?? backup.digest,
-    size: backup.objectManifest?.size ?? backup.size,
-  });
+  const bytes = await objectBytes(ctx, backup.projectId, actor, backupRootPin(backup));
   return { actor, backup, bytes };
 }
 export const checkpoint = action({

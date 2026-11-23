@@ -12,6 +12,7 @@ import { indexedReviewBytes, ReviewIndexUnavailable } from './projectSourceRevie
 import { nativeReviewBytes, readNativeSourceReviewBytes } from '../src/native-source-review';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
+import { backupManifestDigest, backupRootPin } from '../src/work-backup-root';
 import type { SourceAnchor } from '../src/work-intent-types';
 import { report } from './errors';
 import { takeVisitorRead } from './visitorBudget';
@@ -124,12 +125,7 @@ export async function renderCheckpointSource<T extends object>(
   }
   const reader = exchangeObjectReader(ctx, true),
     read = (pins: { sha256: string; size: number }[]) => reader.read(input.projectId, actor, pins);
-  const [root] = await read([
-    {
-      sha256: backup.objectManifest?.digest ?? backup.digest,
-      size: backup.objectManifest?.size ?? backup.size,
-    },
-  ]);
+  const [root] = await read([backupRootPin(backup)]);
   invariant(root, 'INVALID_WORK_BACKUP', 'Source manifest is unavailable.');
   const value: unknown = JSON.parse(root.toString('utf8'));
   // Review needs the source manifest only; it does not load or replay all retained Work.
@@ -137,7 +133,7 @@ export async function renderCheckpointSource<T extends object>(
     ? await readByteTree(exchangeRootSchema.parse(value).manifest, read)
     : root;
   invariant(
-    digest(manifestBytes) === backup.preview.manifestDigest,
+    digest(manifestBytes) === backupManifestDigest(backup),
     'INVALID_WORK_BACKUP',
     'Source manifest differs from this checkpoint.',
   );

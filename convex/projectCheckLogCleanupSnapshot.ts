@@ -13,6 +13,7 @@ import { isCheckMaintenancePath } from '../src/check-log-policy';
 import type { LogData, LogRun } from '../src/check-log-policy';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
+import { backupManifestDigest } from '../src/work-backup-root';
 import type { Identity } from './projectCheckLogCleanupTypes';
 type Backup = Doc<'projectBackups'> | Doc<'projectProposals'>;
 async function loadSnapshot(ctx: ActionCtx, input: Identity, backup: Backup) {
@@ -54,7 +55,7 @@ export function snapshotReader(ctx: ActionCtx, input: Identity) {
       };
     invariant(
       exchange.manifest.revision === backup.preview.revision &&
-        digest(exchange.manifestBytes) === backup.preview.manifestDigest,
+        digest(exchange.manifestBytes) === backupManifestDigest(backup),
       'INVALID_WORK_BACKUP',
       'Cleanup snapshot revision differs.',
     );

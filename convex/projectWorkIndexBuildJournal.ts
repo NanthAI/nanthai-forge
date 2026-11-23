@@ -96,7 +96,7 @@ export async function replayStep(
     let projected: IndexEntry[];
     if (event.command.action === 'source-return') {
       invariant(
-        event.command.workSha256 === e.records.work.sha256 && event.command.archiveSha256 === backup.digest,
+        event.command.workSha256 === e.originalWork && event.command.archiveSha256 === backup.digest,
         'INVALID_WORK_JOURNAL',
         'Returned source differs from its pinned record checkpoint.',
       );

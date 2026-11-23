@@ -231,6 +231,29 @@ export async function* workRecordChunks(
   root: WorkRecordRoot,
   read: (pin: { sha256: string; size: number }) => Promise<Buffer>,
 ) {
+  const actual = yield* recordChunks(root, read);
+  invariant(
+    actual.sha256 === root.work.sha256 && actual.size === root.work.size,
+    'INVALID_WORK_BACKUP',
+    'Record root differs from the whole Work digest.',
+  );
+  return actual;
+}
+/** The whole-Work pin a record catalog's bytes give (a catalog being written, whose `work` is not known yet). */
+export async function measureWorkRecords(
+  root: WorkRecordRoot,
+  read: (pin: { sha256: string; size: number }) => Promise<Buffer>,
+) {
+  const chunks = recordChunks(root, read);
+  for (;;) {
+    const next = await chunks.next();
+    if (next.done) return next.value;
+  }
+}
+async function* recordChunks(
+  root: WorkRecordRoot,
+  read: (pin: { sha256: string; size: number }) => Promise<Buffer>,
+) {
   recordMap(root);
   const hash = createHash('sha256');
   let size = 0;
@@ -260,13 +283,7 @@ export async function* workRecordChunks(
     } else yield append(JSON.stringify(field.value, null, 2).replaceAll('\n', '\n  '));
   }
   yield append(root.fields.length ? '\n}' : '}');
-  const actual = { sha256: hash.digest('hex'), size };
-  invariant(
-    actual.sha256 === root.work.sha256 && actual.size === root.work.size,
-    'INVALID_WORK_BACKUP',
-    'Record root differs from the whole Work digest.',
-  );
-  return actual;
+  return { sha256: hash.digest('hex'), size };
 }
 
 export async function hashWorkRecords(

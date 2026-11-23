@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// One comment's purge (Item b6588425 lines 2b, 2c): the operator's purge of a reported planning comment. It reuses the
+// One comment's purge (Item b6588425 lines 2b, 2c, 2d): the operator's purge of a reported planning comment. It reuses the
 // Item purge's redaction (convex/projectPlanningPurgeRedact.ts) on the stores that hold that one comment, in one
 // mutation: a `purge-planning-comment` journal row listing the comment's row with the digest of its redacted facts
 // (so every reader accepts the purged row by the one reader rule, convex/projectWorkPurgedRows.ts); the comment's
@@ -9,6 +9,8 @@
 // body version takes the form a rebuild gives it. The Item and every other row stay as they are. A comment row no
 // longer enters a journal segment (projectJournalSelect wordsRow, projectJournalWake wordsKinds); one archived before
 // that is read by convex/projectCommentPurgeArchive.ts, which passes its command here and rewrites its segment after.
+// A comment in the stored base checkpoint runs here with `base` from the same action, which then scrubs the base
+// (convex/projectCommentPurgeBase.ts).
 // Cost: one comment, a few point reads per record partition (usually one or two) and per display snapshot, one
 // journal append (two for a decision) and at most a few dozen small writes; nothing runs while idle and there is no
 // cron.
@@ -17,14 +19,24 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import { internalMutation } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
-import { planningCommentCommandSchema, type PlanningCommentPurge } from '../src/work-planning-types';
+import {
+  planningCommentCommandSchema,
+  planningCommentSchema,
+  type PlanningCommentPurge,
+} from '../src/work-planning-types';
 import { purgedFactsDigest, redactPlanningWrite } from '../src/work-intent-types';
-import { decisionLine, decisionOperationId } from '../src/work-planning-put';
+import { decisionOperationId } from '../src/work-planning-put';
 import { purgedDecisionRequest } from '../src/work-planning-state';
 import { metadataRequest } from '../src/work-metadata';
 import { digest } from '../src/state/hash';
 import { workReadDigest } from './projectWorkStoreDigests';
-import { purgedIndexValue } from '../src/work-planning-purge';
+import {
+  decisionLines,
+  decisionVersionValue,
+  purgedIndexValue,
+  scrubDecision,
+  type DecisionLines as Lines,
+} from '../src/work-planning-purge';
 import { executeCommand } from './projectWorkCommand';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { hostedRecordBody, recordHead } from './projectHostedRecords';
@@ -67,6 +79,9 @@ type Input = {
   /** The comment's command as its journal segment holds it (convex/projectCommentPurgeArchive.ts), for a row whose
    * command is in the journal archive; checked against the live row's request hash. */
   archived?: string;
+  /** The base route (convex/projectCommentPurgeArchive.ts): the comment is in the base checkpoint, which the route
+   * scrubs after this step (convex/projectCommentPurgeBase.ts). */
+  base?: boolean;
 };
 type Comment = ReturnType<typeof planningCommentCommandSchema.parse>;
 
@@ -85,17 +100,101 @@ export const purge = internalMutation({
     commentId: v.string(),
     operationId: v.string(),
     archived: v.optional(v.string()),
+    base: v.optional(v.boolean()),
   },
   returns: v.number(),
   handler: (ctx, input) => purgeComment(ctx, input),
 });
 
-/** Whether the comment's live journal row keeps its command in the journal archive (an R2 segment), so its purge
- * must read the command there first (convex/projectCommentPurgeArchive.ts). */
-export async function archivedComment(ctx: MutationCtx, projectId: Id<'hostedProjects'>, commentId: string) {
+/** How the comment's purge runs: `live` in one mutation (purgeComment), `archived` (its row's command is in the
+ * journal archive) or `base` (its words are in the stored base checkpoint) through
+ * convex/projectCommentPurgeArchive.ts. */
+export async function commentRoute(
+  ctx: MutationCtx | QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  commentId: string,
+) {
+  const project = await ctx.db.get(projectId);
+  const generation = project && (await selectedGeneration(ctx, project));
   const row = await commentRow(ctx, projectId, commentId);
-  return !!(row && 'journalSegment' in row && row.journalSegment && row.purged === undefined);
+  if (project && generation && inBase(project, generation, row) && row?.purged === undefined)
+    return 'base' as const;
+  return row && 'journalSegment' in row && row.journalSegment && row.purged === undefined
+    ? ('archived' as const)
+    : ('live' as const);
 }
+
+/** Whether the comment's words are in the stored base: no Work row of its own, or one at or before the base. */
+export function inBase(
+  project: Doc<'hostedProjects'>,
+  generation: { initialRevision: number },
+  row: Awaited<ReturnType<typeof commentRow>>,
+) {
+  return (
+    !row ||
+    row.revision === undefined ||
+    row.request === undefined ||
+    row.revision <= baseRevision(project, generation)
+  );
+}
+
+/** A base comment's event as the selected Work index holds it (the base has no Work row for it): its command, or the
+ * purge that already replaced it. A comment written before hosted Work (imported with the base) has no event: its
+ * command is the one its comment record replays from, and its purged form says an earlier purge removed it. */
+export async function baseEvent(
+  ctx: QueryCtx | MutationCtx,
+  partition: Id<'projectWorkGenerations'>,
+  commentId: string,
+) {
+  const root = await record(ctx, partition, 'events', commentId);
+  if (!root) return importedComment(ctx, partition, commentId);
+  const { full } = await indexValue(ctx, partition, 'events', root);
+  const command = full.command as
+    | { action?: string; purgeOperationId?: string; command?: unknown }
+    | undefined;
+  const purged = command?.action === 'purged-planning-row';
+  return {
+    command: purged ? undefined : JSON.stringify(command),
+    purgedBy: purged ? command!.purgeOperationId : undefined,
+    /** The purged form's facts (the comment's redacted command). */
+    facts: purged ? command!.command : undefined,
+    at: typeof full.at === 'string' ? full.at : '',
+    request: typeof full.request === 'string' ? full.request : '',
+  };
+}
+
+async function importedComment(
+  ctx: QueryCtx | MutationCtx,
+  partition: Id<'projectWorkGenerations'>,
+  commentId: string,
+) {
+  const root = await record(ctx, partition, 'planningComments', commentId);
+  if (!root) return undefined;
+  const { full } = await indexValue(ctx, partition, 'planningComments', root);
+  const comment = planningCommentSchema.safeParse(full);
+  if (!comment.success) return undefined;
+  const at = comment.data.at,
+    request = comment.data.request;
+  const command = {
+    action: 'comment-planning-item' as const,
+    operationId: comment.data.id,
+    itemId: comment.data.itemId,
+    authorLabel: comment.data.authorLabel,
+    text: comment.data.text,
+    ...(comment.data.replyTo ? { replyTo: comment.data.replyTo } : {}),
+    ...(comment.data.decision ? { decision: true } : {}),
+  };
+  // The purged form (src/work-planning-purge.ts purgedIndexValue): its words are already gone, by a purge the record
+  // does not name (IMPORTED_PURGE).
+  if (comment.data.text === 'Deleted comment' && comment.data.authorLabel === '')
+    return { command: undefined, purgedBy: IMPORTED_PURGE, facts: redactPlanningWrite(command), at, request };
+  return { command: JSON.stringify(command), purgedBy: undefined, facts: undefined, at, request };
+}
+/** baseEvent's `purgedBy` for a purged comment that has no event: its record does not name the purge. */
+export const IMPORTED_PURGE = '';
+/** The base comment's event was purged by this purge (or, with no event, by one the record cannot name). */
+export const purgedHere = (event: { purgedBy?: string | undefined } | undefined, operationId: string) =>
+  event?.purgedBy === operationId || event?.purgedBy === IMPORTED_PURGE;
 
 /** The comment's live journal row, in either journal table. */
 export async function commentRow(
@@ -131,8 +230,9 @@ async function commentParent(
  * when an earlier purge (its Item's, or another comment purge) already did. A decision comment's line in the Item
  * body is replaced by an audited put, and its derived body version takes the form a rebuild gives it. A row in the
  * journal archive needs its command from the segment (`archived`); the purge then registers the segment rewrite.
- * Refuses, with nothing written, a comment in the base checkpoint (its words are in the stored archive, which a
- * rebuild reads again: line 2d), and a Work index being built (it may copy the words again). */
+ * A comment in the base checkpoint runs only with `base` (its words are in the stored base, which the action scrubs
+ * next: line 2d), one base scrub per project at a time. Refuses, with nothing written, a Work index being built (it
+ * may copy the words again). */
 export async function purgeComment(ctx: MutationCtx, input: Input): Promise<0 | 1> {
   const project = await ctx.db.get(input.projectId);
   invariant(project && !project.removal, 'PROJECT_UNAVAILABLE', 'Select an existing Forge project.');
@@ -145,22 +245,42 @@ export async function purgeComment(ctx: MutationCtx, input: Input): Promise<0 | 
     missing,
   );
   const row = await commentRow(ctx, input.projectId, input.commentId);
+  const base = inBase(project, generation, row);
   invariant(
-    row && row.revision !== undefined && row.request !== undefined,
+    !base || input.base,
     'BAD_ARGUMENT',
-    'This comment is not in the live Work journal: it is in the base checkpoint, whose stored archive a rebuild reads again, so a base-checkpoint scrub must come first. Nothing was purged.',
+    'This comment is in the base checkpoint: its purge also scrubs the stored base (projectCommentPurgeArchive:run, which an abuse review starts). Nothing was purged.',
   );
-  if (row.purged !== undefined && row.purged !== input.operationId) return 0;
-  const archived = !!('journalSegment' in row && row.journalSegment);
+  if (row?.purged !== undefined && row.purged !== input.operationId) return 0;
+  const archived = !!(row && 'journalSegment' in row && row.journalSegment);
   // An archived row is purged in its segment later; its live steps all ran in the first call.
   const begun = project.itemPurges?.some(
     purge => purge.operationId === input.operationId && purge.commentId === input.commentId,
   );
-  if (row.purged === input.operationId || begun) {
+  if (row?.purged === input.operationId || begun) {
     await redactComment(ctx, input);
     return 1;
   }
-  const text = archived ? input.archived : row.command;
+  const event = base ? await baseEvent(ctx, recordPartition(generation), input.commentId) : undefined;
+  // An earlier purge (its Item's, or another of this comment) already replaced the base comment's event.
+  if (event?.purgedBy !== undefined) return 0;
+  if (base) {
+    invariant(project.work, 'PROJECT_WORK_MISSING', 'Start hosted Work from a stored source backup.');
+    // One base scrub at a time: a scrub built over a base another one is replacing would keep that one's words.
+    invariant(
+      !project.itemPurges?.some(
+        purge => purge.baseScrub && !purge.baseScrub.done && purge.operationId !== input.operationId,
+      ),
+      'WORK_STALE',
+      'Another purge is scrubbing the base checkpoint; this one runs after it. Nothing was purged.',
+    );
+    invariant(
+      project.work.recordDetails?.backupId !== project.work.backupId,
+      'BAD_ARGUMENT',
+      'This project reads its base through a migrated record-detail catalog, which the base scrub does not rewrite yet. Nothing was purged.',
+    );
+  }
+  const text = archived ? input.archived : (row?.command ?? event?.command);
   invariant(
     text !== undefined,
     'BAD_ARGUMENT',
@@ -169,14 +289,9 @@ export async function purgeComment(ctx: MutationCtx, input: Input): Promise<0 | 
   const parsed = planningCommentCommandSchema.safeParse(JSON.parse(text));
   invariant(parsed.success && parsed.data.operationId === input.commentId, 'NOT_FOUND', missing);
   invariant(
-    !archived || metadataRequest(parsed.data) === row.request,
+    !archived || metadataRequest(parsed.data) === row!.request,
     'INVALID_WORK_JOURNAL',
     'The archived comment differs from its Work row. Nothing was purged.',
-  );
-  invariant(
-    row.revision > baseRevision(project, generation),
-    'BAD_ARGUMENT',
-    'This comment is in the base checkpoint: its words are in the stored archive, which a rebuild reads again, so a base-checkpoint scrub must come first. Nothing was purged.',
   );
   const generations = await ctx.db
     .query('projectWorkGenerations')
@@ -223,7 +338,7 @@ export async function purgeComment(ctx: MutationCtx, input: Input): Promise<0 | 
     for (const page of pages) await ctx.db.delete(page._id);
   }
   // A decision's line goes from the current body first, by an audited put, so the purge is the Item's last row.
-  const decision = parsed.data.decision ? decisionLines(parsed.data, row.at ?? '') : undefined;
+  const decision = parsed.data.decision ? decisionLines(parsed.data, row?.at ?? event?.at ?? '') : undefined;
   if (decision) await decisionBodyEdit(ctx, project, input, recordPartition(generation), decision);
   const facts = purgedFactsDigest(redactPlanningWrite(parsed.data));
   const command: PlanningCommentPurge = {
@@ -239,14 +354,16 @@ export async function purgeComment(ctx: MutationCtx, input: Input): Promise<0 | 
     project.owner,
     { purge: true },
   );
-  await redactComment(ctx, input, facts);
-  if (decision) await decisionVersion(ctx, input, decision, purgedDecisionRequest(row.request));
+  // A base comment with no Work row of its own has no journal row to redact.
+  await redactComment(ctx, input, row && (row.command !== undefined || archived) ? facts : undefined);
+  const request = row?.request ?? event?.request ?? '';
+  if (decision) await decisionVersion(ctx, input, decision, purgedDecisionRequest(request));
   // A Work load or export that started before this purge refuses to finish over it (convex/projectWorkLoad.ts).
   const current = (await ctx.db.get(input.projectId))!;
   await ctx.db.patch(input.projectId, {
     planningPurgeRevision: (current.planningPurgeRevision ?? 0) + 1,
     // The archived row's segment rewrite runs as this purge's segment sweep (convex/projectCommentPurgeArchive.ts).
-    ...(archived
+    ...(archived || base
       ? {
           itemPurges: [
             {
@@ -260,11 +377,19 @@ export async function purgeComment(ctx: MutationCtx, input: Input): Promise<0 | 
               rows: 1,
               startedAt: Date.now(),
               // The sweep pages the Item's archived segments by the archive index when its coverage is complete.
-              segmentSweep: {
-                after: null,
-                done: false,
-                ...((await readArchiveCoverage(ctx, current)).state.ready ? { indexed: true as const } : {}),
-              },
+              ...(archived
+                ? {
+                    segmentSweep: {
+                      after: null,
+                      done: false,
+                      ...((await readArchiveCoverage(ctx, current)).state.ready
+                        ? { indexed: true as const }
+                        : {}),
+                    },
+                  }
+                : {}),
+              // The stored base is scrubbed next (convex/projectCommentPurgeBase.ts); the purge is open until then.
+              ...(base ? { baseScrub: { backupId: project.work!.backupId, done: false } } : {}),
             },
             // Finished entries are kept as the Item purge keeps them (the last few), so the project stays small.
             ...(current.itemPurges ?? []).filter(item => item.purgedAt === undefined),
@@ -293,44 +418,29 @@ export async function settleComment(ctx: MutationCtx, input: Input) {
   );
   await redactComment(ctx, input);
   const row = await commentRow(ctx, input.projectId, input.commentId);
-  invariant(
-    row?.purged === input.operationId && row.request,
-    'WORK_STALE',
-    'The comment’s row is not purged yet.',
-  );
-  const facts = JSON.parse(('journalCommand' in row && row.journalCommand) || row.command || '{}') as Comment;
-  if (facts.decision)
-    await decisionVersion(ctx, input, decisionLines(facts, row.at ?? ''), purgedDecisionRequest(row.request));
   const project = (await ctx.db.get(input.projectId))!;
+  let facts: Comment, at: string, request: string;
+  if (row?.purged === input.operationId && row.request) {
+    facts = JSON.parse(('journalCommand' in row && row.journalCommand) || row.command || '{}') as Comment;
+    at = row.at ?? '';
+    request = row.request;
+  } else {
+    // A base comment with no Work row of its own: its event in the Work index, which the first step purged.
+    const generation = await selectedGeneration(ctx, project);
+    invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before purging.');
+    const event = await baseEvent(ctx, recordPartition(generation), input.commentId);
+    invariant(
+      purgedHere(event, input.operationId) && event?.facts,
+      'WORK_STALE',
+      'The comment’s row is not purged yet.',
+    );
+    facts = event!.facts as Comment;
+    at = event!.at;
+    request = event!.request;
+  }
+  if (facts.decision)
+    await decisionVersion(ctx, input, decisionLines(facts, at), purgedDecisionRequest(request));
   await ctx.db.patch(input.projectId, { planningPurgeRevision: (project.planningPurgeRevision ?? 0) + 1 });
-}
-
-/** The decision's line in a body is found by its comment marker (the line's text may have been edited since), and
- * becomes the line a replay of the purged row writes. `comment` is the command, or the purged row's facts. */
-function decisionLines(comment: Comment, at: string) {
-  // Redaction is a fixed point, so the purged row's facts give the same line as the whole command.
-  const redacted = redactPlanningWrite(comment);
-  return {
-    marker: `(comment ${comment.operationId.slice(0, 8)})`,
-    redacted: decisionLine({
-      at,
-      label: redacted.decidedBy ?? redacted.authorLabel ?? '',
-      text: redacted.text,
-      commentId: comment.operationId,
-    }),
-  };
-}
-type Lines = ReturnType<typeof decisionLines>;
-
-/** The body with the decision's lines replaced (`last`: only the last, the derived version's own appended line), and
- * how many lines carried the marker. */
-function scrubDecision(body: string, lines: Lines, which: 'all' | 'last') {
-  const rows = body.split('\n');
-  const at = rows.flatMap((row, index) =>
-    row.startsWith('- ') && row.trimEnd().endsWith(lines.marker) ? [index] : [],
-  );
-  for (const index of which === 'last' ? at.slice(-1) : at) rows[index] = lines.redacted;
-  return { body: rows.join('\n'), count: at.length };
 }
 
 /** The audited edit: a put, as the owner, that replaces the decision's line in the Item's current body (its reason
@@ -378,17 +488,7 @@ async function decisionBodyEdit(
  * version record and the work-store version body. A fixed point. */
 async function decisionVersion(ctx: MutationCtx, input: Input, lines: Lines, request: string) {
   const key = decisionOperationId(input.commentId);
-  const rewrite = (value: unknown) => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-    const row = { ...(value as Record<string, unknown>) };
-    if (typeof row.body === 'string') {
-      const body = scrubDecision(row.body, lines, 'last').body;
-      row.body = body;
-      if (typeof row.bodyLength === 'number' && !row.bodyTruncated) row.bodyLength = body.length;
-    }
-    if ('request' in row) row.request = request;
-    return row;
-  };
+  const rewrite = (value: unknown) => decisionVersionValue(value, lines, request);
   let version: number | undefined;
   for (const partition of await partitionsOf(ctx, input.projectId)) {
     const root = await record(ctx, partition, 'planningVersions', key);

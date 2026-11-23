@@ -141,6 +141,9 @@ export async function planStep(
             : selected.digest,
           { protected: true },
         );
+        // A scrubbed base (Item b6588425 line 2d) is read through its scrubbed root.
+        if ('scrubbed' in selected && selected.scrubbed)
+          mark(selected.scrubbed.root.sha256, { protected: true });
         if ('ownerDerived' in selected && selected.ownerDerived)
           mark(selected.ownerDerived.sha256, { protected: true });
       } else if (page.isDone) advance();

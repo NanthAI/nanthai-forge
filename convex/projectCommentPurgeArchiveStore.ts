@@ -9,7 +9,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import { internalMutation, internalQuery } from './server';
 import { invariant } from '../src/errors';
-import { commentRow, settleComment } from './projectCommentPurge';
+import { commentRoute, commentRow, settleComment } from './projectCommentPurge';
 import { readArchiveCoverage } from './projectPlanningArchiveCoverage';
 import { journalIndexAt } from './projectJournalStore';
 
@@ -17,8 +17,12 @@ const identity = { projectId: v.id('hostedProjects'), commentId: v.string(), ope
 type ItemPurge = NonNullable<Doc<'hostedProjects'>['itemPurges']>[number];
 
 /** The segment sweep is over: it published the rewrite and deleted the old objects (none pending). */
+const sweepLeft = (entry: ItemPurge) =>
+  !!entry.segmentSweep && !(entry.segmentSweep.done && !entry.segmentSweep.pending);
+/** The base scrub (convex/projectCommentPurgeBase.ts) is not over. */
+const scrubLeft = (entry: ItemPurge) => !!entry.baseScrub && !entry.baseScrub.done;
 const swept = (entry: ItemPurge | undefined) =>
-  entry?.purgedAt !== undefined || (entry?.segmentSweep?.done === true && !entry.segmentSweep.pending);
+  !!entry && (entry.purgedAt !== undefined || (!sweepLeft(entry) && !scrubLeft(entry)));
 
 /** Where this purge stands: `new` (the archived row is whole; with the exact events segment that holds it), `begun`
  * (live copies purged, the segment rewrite or its old objects' deletion left), `swept` (both done), plus whether the
@@ -29,14 +33,17 @@ export const target = internalQuery({
     state: v.union(v.literal('new'), v.literal('begun'), v.literal('swept')),
     indexed: v.boolean(),
     segment: v.optional(v.any()),
+    /** The segment sweep is still to run. */
+    sweep: v.boolean(),
+    /** The base scrub is still to run (convex/projectCommentPurgeBase.ts). */
+    base: v.boolean(),
   }),
   handler: async (ctx, input) => {
     const project = await ctx.db.get(input.projectId);
     invariant(project && !project.removal, 'PROJECT_UNAVAILABLE', 'Select an existing Forge project.');
     const row = await commentRow(ctx, input.projectId, input.commentId);
-    invariant(row, 'NOT_FOUND', 'No comment with that id on that Item.');
     invariant(
-      row.purged === undefined || row.purged === input.operationId,
+      row?.purged === undefined || row.purged === input.operationId,
       'BAD_ARGUMENT',
       'An earlier purge already removed this comment.',
     );
@@ -46,9 +53,20 @@ export const target = internalQuery({
     const indexed = (await readArchiveCoverage(ctx, project)).state.ready === true;
     if (entry)
       return {
-        state: row.purged === input.operationId && swept(entry) ? ('swept' as const) : ('begun' as const),
+        state:
+          entry.purgedAt !== undefined ||
+          ((row?.purged === input.operationId || entry.baseScrub) && swept(entry))
+            ? ('swept' as const)
+            : ('begun' as const),
         indexed,
+        sweep: sweepLeft(entry),
+        base: scrubLeft(entry),
       };
+    const base = (await commentRoute(ctx, input.projectId, input.commentId)) === 'base';
+    // A base comment with no archived row of its own: only the base scrub runs after the first step.
+    if (base && !(row && 'journalSegment' in row && row.journalSegment))
+      return { state: 'new' as const, indexed, sweep: false, base: true };
+    invariant(row, 'NOT_FOUND', 'No comment with that id on that Item.');
     invariant(row.revision !== undefined, 'INVALID_WORK_JOURNAL', 'The comment’s Work row has no revision.');
     const segment = await journalIndexAt(ctx, input.projectId, 'events', row.revision);
     invariant(
@@ -56,7 +74,7 @@ export const target = internalQuery({
       'NOT_FOUND',
       'No journal segment holds the comment’s archived row. Nothing was purged.',
     );
-    return { state: 'new' as const, indexed, segment };
+    return { state: 'new' as const, indexed, segment, sweep: true, base };
   },
 });
 
@@ -80,7 +98,7 @@ async function auditRow(
 /** The last step, once the sweep is over: the live copies settled (projectCommentPurge settleComment), the entry
  * finished (no sweep state kept) and the review's audit row done. Refuses while the sweep is not over. */
 export const finish = internalMutation({
-  args: { ...identity, auditId: v.optional(v.id('boardAudit')) },
+  args: { ...identity, auditId: v.optional(v.id('boardAudit')), none: v.optional(v.literal(true)) },
   returns: v.null(),
   handler: async (ctx, input) => {
     const project = await ctx.db.get(input.projectId);
@@ -90,8 +108,19 @@ export const finish = internalMutation({
     const entry = entries.find(
       item => item.operationId === input.operationId && item.commentId === input.commentId,
     );
+    // An earlier purge had already removed the comment (the first step returned 0): only the audit row is left.
+    if (input.none && !entry) {
+      const audit = await auditRow(ctx, input.auditId, input.projectId, input.commentId);
+      if (audit && audit.detail.done !== true)
+        await ctx.db.patch(audit.audit._id, {
+          detail: JSON.stringify({ ...audit.detail, deleted: 0, done: true }),
+        });
+      return null;
+    }
     invariant(
-      entry && row?.purged === input.operationId && swept(entry),
+      entry &&
+        (entry.purgedAt !== undefined ||
+          ((row?.purged === input.operationId || entry.baseScrub) && swept(entry))),
       'WORK_STALE',
       'The comment’s journal segment is not rewritten, or its old objects are not deleted yet. Run the purge again.',
     );
@@ -104,6 +133,7 @@ export const finish = internalMutation({
           if (item.operationId !== operationId || item.commentId !== commentId) return item;
           const finished = { ...item, purgedAt: Date.now() };
           delete finished.segmentSweep;
+          delete finished.baseScrub;
           return finished;
         }),
       });

@@ -231,16 +231,39 @@ load or export that read it refuses to finish. It waits while an index build run
 finished (no sweep state kept; the last 20 finished entries stay) and the audit row done. A Work load that both
 starts and ends during the rewrite can still return the archived words, as during an Item purge's sweep; the audit
 row says the purge is done only after the rewrite. Each step is a fixed point, so a stopped run resumes. A refusal
-before anything was written (a base-checkpoint comment, say) sets `failed` on the audit row, returns the report to
+before anything was written (a base the scrub cannot rewrite, say) sets `failed` on the audit row, returns the report to
 the open queue and drops that review's receipt. Any other failure retries with backoff (from a minute, doubling, six
 runs), then is kept as `failed`. A retry of the same review starts a run that failed, or one that made no progress
 for two hours. The Item purge executor never takes a comment purge's entry as its own.
 
+A comment in the base checkpoint (written before the stored base was cut, or imported with it) has its words in the
+base backup's exchange root: its `planningComments` record, the `hostedEvents` record that wrote it and, for a
+decision, the derived body version, as content-addressed objects and the record packs over them. The abuse review
+schedules the same action for it. Its first step is the purge above, with the comment's command taken from its
+`events` index record (or, for a comment that has no event, rebuilt from its comment record). The action then scrubs
+the base (`src/work-base-scrub.ts`, `convex/projectCommentPurgeBase.ts`). It writes a new exchange root with those
+records in their purged form and the packs over them rebuilt. One pass over every record measures the whole-Work
+digest again, and the manifest's `work.json` pin moves to it. One mutation then publishes it: the backup selects
+the new root (`projectBackups.scrubbed`, as `work.recordDetails` selects a migrated catalog), and every replaced
+object still stored is tombstoned with the save purge's primitive, the seed's whole `work.json` among them (above
+1 MiB with its recipe, pages and chunks). Every base reader reads the backup's root through
+`backupRootPin` (index build, full and detail load, checkpoint and describe, source review, recovery, the journal
+export), so a read of an old object refuses `PURGED`. Their R2 bytes are deleted next (a pack member is zeroed), and
+only then is the purge finished. Owner pages and returned-source checks keep naming the original whole-Work digest
+(`scrubbed.originalWork`). The publication is refused when the backup's root changed since the build, and the retry
+builds again. One base scrub runs per project at a time; another base comment's purge waits, with nothing written,
+until it is done, and a record-detail migration does not start meanwhile. It refuses before anything is written: a legacy archive base, a project with another stored
+backup (checked again when the scrub is published), a base with no record catalog, and a project read through a migrated record-detail catalog. Cost per purge:
+one read of the base's root, catalog and manifest trees, every record once (one GET per record pack, one object
+resolve query per 100 pins, packs read up to 100 or 8 MiB at a time), a few new objects (the two records, the packs over them, the changed tree chunks, the
+root), one tombstone per replaced object, and three small mutations. In `tests/comment-purge-base.test.mjs` the
+whole purge is 151 document reads (about 102 KB) and 36 writes (about 20 KB). Nothing runs while idle. Whole-Item
+purge of an Item in the base checkpoint is still refused.
+
 Rebuilding a hosted display snapshot page skips a purged comment's versions. A page that pins the rewritten
 decision version still refuses to rebuild (its digest changed).
 
-It refuses, with nothing written: a comment in the base checkpoint (line 2d of Item b6588425 scrubs it), a project
-whose Work index is being built or whose record-table migration still keeps an old copy (retry after it finishes), and
+It refuses, with nothing written: a project whose Work index is being built or whose record-table migration still keeps an old copy (retry after it finishes), and
 a comment too large to rewrite on every partition in one step (about 8 MiB of reads; retire old partitions, or purge
 the Item). Cost per purge with one record partition, measured in `tests/comment-purge.test.mjs`: 28 document reads
 (about 22 KB) and 9 writes (about 6 KB), the same whatever other comments the Item has. A decision comment takes 52
