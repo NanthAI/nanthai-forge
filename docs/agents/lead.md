@@ -54,6 +54,8 @@ agent reads. Memory alone does not carry it to another harness or lead.
 
 For Phase 7 (owner, 2026-11-16), UI and web builders use Claude through Claude Code: Opus 5.5 or Sonnet 5.5. Fable 5.2 gives design direction and helps when a builder is stuck. Mythos 5.2 runs read-only security reviews. GPT through Codex (`gpt-6.1-sol`, reasoning effort `high`, service tier `default`) builds non-UI engineering slices and reviews every few landings; it gives no architecture or placement verdicts. This is the current project instruction, not a generic Forge product default; capacity does not authorize a silent provider switch.
 
+Builder model choice (owner, 2026-11-23): Sonnet by default. Opus only for core queue, landing and ledger work, security and access, deletion and purge safety, and root-cause hunts a Sonnet already failed. Review rounds run through [the review script](review-api.md) on the API credits, GPT-6.2 Sol first; Claude reviews only when GPT's daily cap is spent or the builder is not Claude, and a subscription reviewer only after both caps.
+
 The approval design on Issue 7f085ec9 treats AI and human approvals equally, binds approval to exact heads and classifies the change rather than its author. Mandatory human or multiple-human approval is not the selected design. Implementation/enablement remains tracked there; this instruction does not change an existing gate.
 
 Now has no user-facing money or ledger; operator Convex costs stay internal (Issue 50f2e809). Public mirroring follows [Sync identity](../workflows.md#sync-identity), preserving personal Git identity.
