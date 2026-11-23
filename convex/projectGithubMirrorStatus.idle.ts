@@ -7,7 +7,7 @@ import { mirrorRow } from './projectGithubMirrorQueue';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { githubSyncCommitSchema } from '../src/github-sync-types';
 import { hostedMirrorNextStep, type HostedMirrorStatus } from '../src/hosted-github-mirror-status';
-import { missingObjectDelays } from '../src/hosted-github-retry';
+import { missingObjectDelays, transientAttempts } from '../src/hosted-github-retry';
 import { inboundJobSchema } from '../src/github-inbound-job';
 import { strandedMirrorJobs } from './projectGithubMirrorRetarget';
 import { inboundLanding, inboundOutcomeSchema } from './projectGithubInboundQueue';
@@ -91,9 +91,13 @@ export async function githubMirrorStatus(
     pendingSince: job?._creationTime ?? null,
     mirroredAt: queue?.mirroredAt ?? null,
     failures: job?.failures ?? 0,
-    // Only lag 422s retry (others are terminal at once); 429/5xx and transient codes get 5 tries (projectGithubMirrorStore:failed).
+    // Only lag 422s retry (others are terminal at once); 429/5xx and transient codes get transientAttempts tries (projectGithubMirrorStore:failed).
     attemptLimit:
-      job?.status !== 'retrying' ? null : job.httpStatus === 422 ? missingObjectDelays.length + 1 : 5,
+      job?.status !== 'retrying'
+        ? null
+        : job.httpStatus === 422
+          ? missingObjectDelays.length + 1
+          : transientAttempts,
     nextAttemptAt: job?.nextAttemptAt ?? null,
     error:
       failedError ?? job?.error ?? (settled?.phase === 'terminal-failed' ? 'GITHUB_INBOUND_FAILED' : null),

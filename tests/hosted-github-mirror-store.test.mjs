@@ -792,7 +792,12 @@ for (const { files, gitlinks = false } of [
     const metrics = f.counts.filter(c => c.name.startsWith('mirrorMutation') || c.name === 'mirrorQuery');
     assert(metrics.every(c => c.documents <= 105 && c.writes <= 3));
     assert(!metrics.some(c => c.touched.includes('projectWorkRecords')));
-    assert.equal(github.calls.length, files ? (gitlinks ? 4 : files + 4 + Number(files === 2)) : 1);
+    // One extra POST git/trees per 500 changed entries (tree chunks chain base_tree).
+    const extraTrees = Math.max(0, Math.ceil(files / 500) - 1);
+    assert.equal(
+      github.calls.length,
+      files ? (gitlinks ? 4 : files + 4 + Number(files === 2)) + extraTrees : 1,
+    );
     if (files === 2) {
       const [status] = github.statuses.get(github.remote());
       assert.equal(status.context, 'forge/verify');

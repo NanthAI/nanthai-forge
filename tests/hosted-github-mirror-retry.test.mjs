@@ -11,7 +11,7 @@ import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
 
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { digest } from '../dist/hash.js';
-import { prepareMirror } from '../dist/hosted-github-mirror.js';
+import { prepareMirror, treeChunks, treeChunkBytes } from '../dist/hosted-github-mirror.js';
 import { githubRequest } from '../dist/hosted-github-api.js';
 import { gitHash } from '../dist/hosted-github-git.js';
 import { unexpectedMirrorFailure } from '../dist/hosted-github-retry.js';
@@ -207,11 +207,11 @@ test('real action: HTTP 500 retains the cursor, schedules one backoff, then succ
   assert.equal(f.job().status, 'retrying');
   assert.equal(f.job().cursor, f.cursor);
   assert.equal(f.job().failures, 1);
-  assert.equal(f.scheduled.at(-1).delay, 60_000);
+  assert(f.scheduled.at(-1).delay >= 48_000 && f.scheduled.at(-1).delay <= 72_000);
   assert.equal(f.job().httpStatus, 500);
   assert.equal(f.job().apiOperation, 'POST git/blobs');
   assert(f.job().requestBytes > 0);
-  assert.match(hostedMirrorStatusText(await f.status(), Date.now()), /retrying .* 1\/5 failed attempts/);
+  assert.match(hostedMirrorStatusText(await f.status(), Date.now()), /retrying .* 1\/\d failed attempts/);
   await f.step();
   assert.equal(f.job().status, 'done');
   assert.equal(f.job().failures, 0);
@@ -497,7 +497,7 @@ test('progressing large binary blobs do not exhaust the retry budget across diff
     assert.equal(f.job().status, 'retrying');
     assert.equal(f.job().failures, 1, 'verified durable progress starts the next request budget');
     assert.equal(f.job().requestBytes, 455302);
-    assert.equal(f.scheduled.at(-1).delay, 60_000);
+    assert(f.scheduled.at(-1).delay >= 48_000 && f.scheduled.at(-1).delay <= 72_000);
   }
   await f.step();
   assert.equal(f.job().status, 'done');
@@ -525,19 +525,18 @@ test('partial cursor storage failure still records the API failure and retries t
   assert.equal(f.job().status, 'done');
 });
 
-test('real action: five persistent 500s end terminal, visible in CLI and Now, with zero idle retries', async t => {
+test('real action: eight persistent 500s end terminal, visible in CLI and Now, with zero idle retries', async t => {
   const f = await fixture(t, () => true);
-  for (let i = 0; i < 5; i++) await f.step();
-  assert.deepEqual(
-    f.scheduled.map(s => s.delay),
-    [0, 60_000, 120_000, 240_000, 480_000],
-  );
-  assert.equal(
-    f.scheduled.reduce((n, s) => n + s.delay, 0),
-    15 * 60_000,
+  for (let i = 0; i < 8; i++) await f.step();
+  const delays = f.scheduled.map(s => s.delay);
+  assert.equal(delays.length, 8);
+  assert.equal(delays[0], 0);
+  [60_000, 120_000, 240_000, 480_000, 900_000, 900_000, 900_000].forEach((base, i) =>
+    assert(delays[i + 1] >= base * 0.8 && delays[i + 1] <= base * 1.2, `jittered ${base}`),
   );
   assert.equal(f.job().status, 'failed');
-  assert.equal(f.job().failures, 5);
+  assert.match(f.job().detail, /kept failing after every retry/);
+  assert.equal(f.job().failures, 8);
   assert.equal(f.job().nextAttemptAt, undefined);
   assert.equal(f.job().cursor, f.cursor);
   const status = await f.status();
@@ -555,14 +554,14 @@ test('real action: five persistent 500s end terminal, visible in CLI and Now, wi
   client.caps.githubMirror = capabilities.githubMirror;
   const cli = await readHostedCliStatus(client.root, client.transport());
   assert.equal(cli.value.githubMirror.status, 'failed');
-  assert.match(cli.text, /failed.* 5 failed attempts.*HTTP 500/);
+  assert.match(cli.text, /failed.* \d failed attempts.*HTTP 500/);
   assert.equal(
     client.calls.filter(c => c.name === 'projectHostedAgent:capabilities').length,
     1,
     'one finite status call',
   );
   await f.step();
-  assert.equal(f.scheduled.length, 5, 'terminal failure schedules nothing');
+  assert.equal(f.scheduled.length, 8, 'terminal failure schedules nothing');
 });
 
 test('dogfood-size retained mirror history costs only selected status rows and no writes', async t => {
@@ -664,10 +663,10 @@ test('real action: a transport fault keeps its named cause, retries on schedule 
   assert.equal(f.job().error, 'GITHUB_SYNC_NETWORK');
   assert.match(f.job().detail, /^Mirror step stopped on EXCHANGE_REQUEST_FAILED: Network request failed/);
   assert(!/synthetic-token/.test(f.job().detail));
-  assert.equal(f.scheduled.at(-1).delay, 60_000);
+  assert(f.scheduled.at(-1).delay >= 48_000 && f.scheduled.at(-1).delay <= 72_000);
   assert.match(
     hostedMirrorStatusText(await f.status(), Date.now()),
-    /retrying .*1\/5 failed attempts.*GITHUB_SYNC_NETWORK/,
+    /retrying .*1\/\d failed attempts.*GITHUB_SYNC_NETWORK/,
   );
   await f.step();
   assert.equal(f.job().status, 'done');
@@ -675,7 +674,7 @@ test('real action: a transport fault keeps its named cause, retries on schedule 
   assert.equal(f.scheduled.length, 2, 'no timer after recovery');
 });
 
-test('real action: an unexpected exception keeps a bounded redacted cause, retries 5 times, then names the resume command', async t => {
+test('real action: an unexpected exception keeps a bounded redacted cause, retries 8 times, then names the resume command', async t => {
   const f = await fixture(
     t,
     () => false,
@@ -686,11 +685,8 @@ test('real action: an unexpected exception keeps a bounded redacted cause, retri
         ? new Response('synthetic-token-0 https://example.invalid/x?sig=1', { status: 201 })
         : undefined,
   );
-  for (let i = 0; i < 5; i++) await f.step();
-  assert.deepEqual(
-    f.scheduled.map(s => s.delay),
-    [0, 60_000, 120_000, 240_000, 480_000],
-  );
+  for (let i = 0; i < 8; i++) await f.step();
+  assert.equal(f.scheduled.length, 8);
   const job = f.job();
   assert.equal(job.status, 'failed');
   assert.equal(job.error, 'GITHUB_SYNC_FAILED');
@@ -701,7 +697,7 @@ test('real action: an unexpected exception keeps a bounded redacted cause, retri
   assert(!job.detail.includes('npx convex'));
   assert.equal(job.cursor, f.cursor, 'the retained cursor is kept for resume');
   await f.step();
-  assert.equal(f.scheduled.length, 5, 'terminal failure schedules nothing');
+  assert.equal(f.scheduled.length, 8, 'terminal failure schedules nothing');
 });
 
 test('unexpected mirror failures: named codes, bounded and credential-free detail', () => {
@@ -880,4 +876,48 @@ test('friction 28e84c06: a retarget, a bring-in, a moved active job or client au
   });
   assert.equal(g.job().status, 'queued');
   assert.deepEqual(stops(g), [], 'a bring-in clears the stop');
+});
+
+test('replay 2026-11-23: a change touching every file lands in bounded tree pieces and survives two GitHub 502s', async t => {
+  const before = {},
+    after = {};
+  for (let i = 0; i < 1200; i++) {
+    before[`src/f${i}.txt`] = `// old\n${i}`;
+    after[`src/f${i}.txt`] = `// new header\n${i}`;
+  }
+  let bad = 2;
+  const f = await fixture(
+    t,
+    () => false,
+    { before, after },
+    (url, init) => {
+      if (url.endsWith('/git/trees') && init?.method === 'POST' && bad-- > 0)
+        return new Response('{"message":"Server Error"}', { status: 502 });
+    },
+  );
+  let guard = 0;
+  while (f.job().status !== 'done' && guard++ < 60) {
+    await f.step();
+    if (f.job().status === 'failed') assert.fail(`stopped: ${f.job().detail}`);
+  }
+  assert.equal(f.job().status, 'done');
+  const posts = f.github.calls.filter(c => c.path.endsWith('/git/trees') && c.method === 'POST');
+  assert.equal(bad, -3, 'both 502s were served');
+  assert.equal(posts.length, 3, '1200 entries land as 500 + 500 + 200');
+  assert(posts.every(c => (c.body?.tree?.length ?? 0) <= 500));
+  assert.equal(f.github.remote(), JSON.parse(f.job().mapping).commit);
+});
+
+test('tree chunks are bounded by UTF-8 request bytes as well as entries', () => {
+  const entries = Array.from({ length: 3000 }, (_, i) => ({
+    path: `${'目录'.repeat(60)}/${i}`,
+    sha: 'a'.repeat(40),
+  }));
+  const chunks = treeChunks(entries);
+  assert.deepEqual(chunks.flat(), entries);
+  for (const chunk of chunks) {
+    assert(chunk.length <= 500);
+    assert(Buffer.byteLength(JSON.stringify({ base_tree: 'a'.repeat(40), tree: chunk })) <= treeChunkBytes);
+  }
+  assert(chunks.length > 6, 'bytes, not entries, set the split');
 });

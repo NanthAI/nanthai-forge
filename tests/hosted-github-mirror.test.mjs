@@ -143,7 +143,7 @@ test('5,000 changed files use 50 bounded steps and metadata windows rather than 
   assert.equal(plan.entry.tree, f.expected());
   assert.equal(f.ticks.length, 50);
   assert(f.ticks.every(t => t.reads <= 100));
-  assert.equal(f.calls.length, 5004);
+  assert.equal(f.calls.length, 5004 + 9, '5,000 entries chain ten bounded tree POSTs');
   assert.equal(f.windows.filter(w => w.blobs).length, 50);
   assert(f.ticks.every(t => t.cursorBytes < 3 * 1024 * 1024));
   assert(
@@ -377,7 +377,7 @@ test('5,000 pointer bumps use 50 descriptor windows and four GitHub metadata cal
   assert.equal(plan.entry.tree, f.expected());
   assert.equal(f.ticks.length, 50);
   assert.equal(f.windows.filter(w => w.blobs).length, 50);
-  assert.equal(f.calls.length, 4);
+  assert.equal(f.calls.length, 4 + 9, 'ten bounded tree POSTs');
   assert(f.ticks.every(tick => tick.reads <= 100));
   assert(Math.max(...f.ticks.map(tick => tick.rss)) - rss < 128 * 1024 * 1024);
   t.diagnostic(

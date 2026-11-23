@@ -29,6 +29,30 @@ import {
 } from './github-lfs.js';
 export const mirrorWindow = 100;
 export const mirrorBytes = 8 * 1024 * 1024;
+/** One POST git/trees carries at most this many entries or request bytes; larger changes chain
+ * base_tree through intermediate trees (GitHub's tree limit is 100,000 entries / 7 MB; the
+ * 2026-11-23 licence change sent one 560 KB request and drew five 502s). */
+export const treeChunkEntries = 500;
+export const treeChunkBytes = 150 * 1024;
+
+/** Split tree entries into bounded pieces, in order (paths are independent, so order is free). */
+export function treeChunks<T>(changes: T[]): T[][] {
+  const chunks: T[][] = [];
+  let current: T[] = [],
+    bytes = 200; // body wrapper and base_tree
+  for (const change of changes) {
+    const size = Buffer.byteLength(JSON.stringify(change)) + 1;
+    if (current.length && (current.length >= treeChunkEntries || bytes + size > treeChunkBytes)) {
+      chunks.push(current);
+      current = [];
+      bytes = 200;
+    }
+    current.push(change);
+    bytes += size;
+  }
+  if (current.length) chunks.push(current);
+  return chunks;
+}
 type GitFile = NativeFile & { sha: string };
 export type MirrorSeed = {
   repository: string;
@@ -352,13 +376,24 @@ export function missingObjectError(error: unknown, plan: MirrorPlan | undefined)
  * Bounded by the tree's own entries; a second failure throws to the shared
  * scheduled policy (hosted-github-retry.ts), which ends terminal. */
 async function createTree(plan: MirrorPlan, io: MirrorIO, prefix: string): Promise<string> {
-  const body = { base_tree: plan.baseTree, tree: plan.changes };
+  let base = plan.baseTree;
+  for (const chunk of treeChunks(plan.changes)) base = await createTreeChunk(plan, chunk, base, io, prefix);
+  return base;
+}
+async function createTreeChunk(
+  plan: MirrorPlan,
+  chunk: MirrorPlan['changes'],
+  baseTree: string,
+  io: MirrorIO,
+  prefix: string,
+): Promise<string> {
+  const body = { base_tree: baseTree, tree: chunk };
   try {
     return (await io.api<{ sha: string }>(`${prefix}/trees`, 'POST', body)).sha;
   } catch (error) {
     const named = invalidTreeBlobs(error);
     const sources = named.map(sha => {
-      const change = plan.changes.find(entry => entry.type === 'blob' && entry.sha === sha);
+      const change = chunk.find(entry => entry.type === 'blob' && entry.sha === sha);
       return change && plan.pending.find(file => file.path === change.path && file.mode !== 'gitlink');
     });
     if (!named.length || sources.some(file => !file)) throw error;

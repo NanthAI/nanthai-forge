@@ -25,7 +25,7 @@ export function isMissingObject(status: number, operation: string, githubError: 
 /** Mirror failures that are not a GitHub HTTP answer but can clear on their own:
  * a transport fault or deadline (`networkFetch` raises NetworkTransportError,
  * not a ForgeError), unavailable source bytes, GitHub LFS 5xx, and any other
- * unexpected exception. They share the 429/5xx budget (5 tries, 1-8 min backoff)
+ * unexpected exception. They share the 429/5xx budget (`transientAttempts` below)
  * instead of stopping the queue terminally with no retry (incident 2026-11-09,
  * State c36418d6: a generic GITHUB_SYNC_FAILED held GitHub main for 17 min). */
 export const transientMirrorCodes: readonly string[] = [
@@ -78,4 +78,17 @@ export function unexpectedMirrorFailure(
     code: network ? 'GITHUB_SYNC_NETWORK' : 'GITHUB_SYNC_FAILED',
     detail: `Mirror step stopped on ${raw && network ? raw : name}${extra.length ? ` (${extra.join(', ')})` : ''}${message ? `: ${message}` : ''}.`,
   };
+}
+
+/** Tries for a GitHub 429/5xx or a transient fault before the mirror stops and asks a person.
+ * 1, 2, 4, 8, 15, 15, 15 minutes (about an hour) with +-20% jitter: a GitHub outage that
+ * outlasts it is a real stop (2026-11-23: five 502s in 15 minutes held 11 landings). */
+export const transientAttempts = 8;
+export const transientDelayCapMs = 15 * 60_000;
+
+/** Delay before the next try after `failures` consecutive transient failures, or null when spent. */
+export function transientDelay(failures: number, random: () => number = Math.random): number | null {
+  if (failures >= transientAttempts) return null;
+  const base = Math.min(60_000 * 2 ** (failures - 1), transientDelayCapMs);
+  return Math.round(base * (0.8 + 0.4 * random()));
 }

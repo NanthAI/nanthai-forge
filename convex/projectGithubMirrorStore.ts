@@ -19,7 +19,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { noteMessage } from '../src/landing-message';
 import { mirrorPublishMessage } from './projectGithubMirrorMessage';
-import { missingObjectDelays, transientMirrorCodes } from '../src/hosted-github-retry';
+import { missingObjectDelays, transientDelay, transientMirrorCodes } from '../src/hosted-github-retry';
 import { inboundBegin } from './projectGithubInbound';
 import { finish, inboundOutcomeSchema, yieldToInbound } from './projectGithubInboundQueue';
 import { openLane, projectLink, settlePull } from './projectGithubPullQueue';
@@ -355,8 +355,8 @@ export const failed = internalMutation({
           (input.httpStatus !== undefined && input.httpStatus >= 500 && input.httpStatus <= 599)));
     const delay = lag
       ? (missingObjectDelays[failures - 1] ?? null)
-      : transient && failures < 5
-        ? 60_000 * 2 ** (failures - 1)
+      : transient
+        ? transientDelay(failures)
         : null;
     // A pull request job never holds the queue on a terminal failure: forge/verify says why.
     if (delay === null && job.pullKey) {
@@ -381,7 +381,7 @@ export const failed = internalMutation({
       // A terminal job holds the queue: name the one recovery command.
       detail:
         delay === null
-          ? `${input.detail} Next: fix the cause, then the project owner runs nforge github resume PROJECT (or Resume in the mirror panel); the cursor and State are kept.`
+          ? `${input.detail}${input.code === 'GITHUB_SYNC_API' && transient ? ' GitHub kept failing after every retry over about an hour, so the mirror stopped.' : ''} Next: fix the cause, then the project owner runs nforge github resume PROJECT (or Resume in the mirror panel); the cursor and State are kept.`
           : input.detail,
       httpStatus: input.httpStatus,
       apiOperation: input.apiOperation,
