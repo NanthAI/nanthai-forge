@@ -7,7 +7,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { landingRow } from './projectHostedLandingStore';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { storedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
-import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
+import { hostedLandingProgressAt, stallPredecessor } from '../src/hosted-landing-stall';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { effectiveAgentDefaults, effectiveAgentDefaultsSchema } from '../src/agent-parallel-defaults';
@@ -92,6 +92,13 @@ export async function raiseStallAlert(
   if (!project) return null;
   const settings = alerts(project);
   if (!settings.enabled) return null;
+  // Queue invariants S12/L8: a follower stuck only because the predecessor it names is stalled sends
+  // nothing; the root alerts. Its tier-2 deadline looks once more and alerts if it is stuck alone by
+  // then. Past that, the stall supervisor ends a queued entry nothing drives with a tier-3 alert.
+  if (canonical && (await stalledPredecessor(ctx, input.projectId, state))) {
+    if (input.tier === 1) await scheduleTier(ctx, input, 2, settings.repeatAfterMinutes);
+    return null;
+  }
   const queuedBehind =
     input.tier === 2 && canonical
       ? (
@@ -107,7 +114,8 @@ export async function raiseStallAlert(
             .take(50)
         ).length
       : 0;
-  const value = stallAlert(state, input.tier, { project: project.name, queuedBehind, now });
+  const first = !sent.some(item => item.lastProgressAt === input.lastProgressAt);
+  const value = stallAlert(state, input.tier, { project: project.name, queuedBehind, now, first });
   await ctx.db.insert('projectHostedStallAlerts', {
     projectId: input.projectId,
     submissionId: input.submissionId,
@@ -122,6 +130,21 @@ export async function raiseStallAlert(
   });
   if (input.tier === 1) await scheduleTier(ctx, input, 2, settings.repeatAfterMinutes);
   return value;
+}
+
+/** True when this stall names a predecessor that is itself pending and stalled. One indexed read,
+ * made only when an alert is due for a queued follower. */
+async function stalledPredecessor(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  state: HostedLandingState,
+) {
+  const submissionId = stallPredecessor(state.observation.stall);
+  if (!submissionId) return false;
+  const row = await landingRow(ctx, { projectId, submissionId });
+  if (!row) return false;
+  const predecessor = storedLandingStateSchema.parse(JSON.parse(row.value));
+  return predecessor.observation.state === 'pending' && Boolean(predecessor.observation.stall);
 }
 
 /** The supervisor's cap (19328518) ended this landing: tell the owner once, at

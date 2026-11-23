@@ -170,6 +170,9 @@ export const hostedLandingTables = {
     mainReceiptId: v.optional(v.string()),
     /** Publication order for an approved exact replacement check, independent of the queue lease. */
     exactReview: v.optional(v.string()),
+    /** Submissions the recompose cap raised to urgent that have not ended (queue invariant S5), so a
+     * Ready claim reads them only when there are any. Written at the cap and at their end. */
+    raceCapped: v.optional(v.array(v.string())),
     train: v.optional(v.array(v.string())),
     status: v.optional(
       v.object({
@@ -351,6 +354,9 @@ export const hostedLandingTables = {
     /** Why this entry's pass cannot be carried across a moved main (scoped re-check, or a proof
      * refused for a reason no dependent change caused); set once, it stops graph-sealed overtakes. */
     unsealed: v.optional(v.string()),
+    /** Main-race re-checks so far (`countMainRace`: one per Candidate a finish installs after main
+     * moved). At MAIN_RACE_CAP the queue raises the entry to urgent once (queue invariant S5). */
+    mainRaces: v.optional(v.number()),
     /** When this submission first became ready (its check passed), in ms; set once and kept across
      * recompositions, so the landing's pass-to-land time starts at its first pass (42200ce4). */
     passedAt: v.optional(v.number()),

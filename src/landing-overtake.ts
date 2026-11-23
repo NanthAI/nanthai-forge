@@ -182,6 +182,50 @@ export function noCarryHold(
   );
 }
 
+/** Recompose cap (queue invariant S5, incident 5e3c3a3c). On 2026-11-21 to 11-23, the 13% of dogfood
+ * landings re-checked 3 or more times after main moved threw away 55% of discarded runner minutes and
+ * took a median 40 minutes to main (10 for the rest). After this many main-race re-checks an entry
+ * holds strict order: the queue raises it to urgent once (it leads the train, nothing newer takes
+ * main first) and an older pass whose landing would make its check stale waits for it. Only an entry
+ * already publishing, or an older urgent one (strict order puts it first), can still move main under
+ * it after that. */
+export const MAIN_RACE_CAP = 3;
+/** The count after the entry's current attempt changed: one more when that attempt is a main-race
+ * re-check (`recheckReason`, set only by the finish install of a fresh Candidate after main moved and
+ * no proof carried its pass). Forks for a check binding or platform retry drop `recheckReason`, so
+ * they count nothing. Pure. */
+export function countMainRace(prior: number | undefined, attempt: { recheckReason?: string | undefined }) {
+  return attempt.recheckReason === undefined ? prior : (prior ?? 0) + 1;
+}
+
+/** True once, on the re-check that reaches the cap: an owner who later sets the entry back to normal
+ * is not overruled by its next re-check. */
+export const reachesMainRaceCap = (prior: number | undefined, next: number | undefined) =>
+  (prior ?? 0) < MAIN_RACE_CAP && (next ?? 0) >= MAIN_RACE_CAP;
+
+export const MAIN_RACE_CAP_REASON =
+  `Raised to urgent by the queue after ${MAIN_RACE_CAP} re-checks caused by main moving (recompose cap, ` +
+  'queue invariant S5): it now holds strict order, and passes whose landing would make its check stale ' +
+  'wait for it. Use prioritize with priority normal to undo.';
+
+/** Whether a passed older change must wait for a capped entry while that entry checks: always, unless
+ * its landing cannot make that check stale, because the project's passes carry across heads, the two
+ * changes are unrelated (`unrelatedChanges`) and the capped entry's pass can carry (not `unsealed`, not
+ * in a combined group). Unknown paths wait. Pure. */
+export function waitsForCapped(
+  mine: readonly string[] | null,
+  theirs: readonly string[] | null,
+  checkEntries: readonly string[],
+  capped: { proofs: boolean; unsealed?: string | undefined; combined: boolean },
+) {
+  return !(
+    capped.proofs &&
+    !capped.combined &&
+    capped.unsealed === undefined &&
+    unrelatedChanges(mine, theirs, checkEntries)
+  );
+}
+
 /** The change itself touches a global-risk file: its pass never carries across a moved main and
  * every older live entry holds it (`waitFootprints` is `overlap` whatever the holder), so a wake that
  * drives it while it still waits only makes it park again (43b51a5e, 8 concurrent finishes on hot

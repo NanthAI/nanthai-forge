@@ -3,7 +3,7 @@
   "violations": {
     "L2": { "item": "5e3c3a3c", "reason": "Holder changes and parked handoffs do not always schedule a fresh claim." },
     "S6": { "item": "5e3c3a3c", "reason": "Handoffs can replace orderWait without recording the edge." },
-    "S5": { "item": "5e3c3a3c", "reason": "Main-race recompositions have no generation cap." },
+    "S5": { "item": "5e3c3a3c", "reason": "Capped at 3 since the recompose cap; no profile reaches a fourth race with or without it, so the waiver stays until one reproduces it." },
     "S10": { "item": "f5f250a5", "reason": "Baseline seed 1 retains a duplicate finish wake after acceptance; it drains as a terminal no-op. Reported for review before any runtime change." }
   }
 }

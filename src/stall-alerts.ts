@@ -27,12 +27,15 @@ export type StallAlert = {
 
 const minutes = (from: string, now: number) => Math.max(0, Math.round((now - Date.parse(from)) / 60_000));
 
-/** What, why, the repair command and what was already retried; tier 2 adds the diagnosis. */
+/** What, why, the repair command and what was already retried; tier 2 adds the diagnosis. `first`
+ * (default: tier 1) is false once this stall already sent its tier 1: a tier 2 that is the first page
+ * (its tier 1 waited on a stalled predecessor, queue invariant S12) still opens as a new stall. */
 export function stallAlert(
   state: HostedLandingState,
   tier: StallAlertTier,
-  input: { project: string; queuedBehind?: number; now?: number },
+  input: { project: string; queuedBehind?: number; now?: number; first?: boolean },
 ): StallAlert {
+  const heading = (input.first ?? tier === 1) ? 'Landing stalled' : 'Still stalled';
   const now = input.now ?? Date.now(),
     stall = state.observation.stall;
   const step = stall?.step ?? state.phase,
@@ -54,7 +57,7 @@ export function stallAlert(
     ...(state.supersedes ? [`resubmission of ${state.supersedes} (${state.retryReason ?? 'retry'})`] : []),
   ];
   const lines = [
-    `${tier === 1 ? 'Landing stalled' : 'Still stalled'}: ${input.project}, submission ${state.id}, ${minutes(since, now)} min without progress at ${step}.`,
+    `${heading}: ${input.project}, submission ${state.id}, ${minutes(since, now)} min without progress at ${step}.`,
     `Why: ${stall?.message ?? 'no landing progress'}`,
     `Already tried: ${retried.join('; ')}.`,
     `Repair: ${repair}`,
@@ -73,7 +76,7 @@ export function stallAlert(
     tier,
     submissionId: state.id,
     operationId: state.operationId,
-    subject: `[Forge] ${tier === 1 ? 'Landing stalled' : 'Still stalled'}: ${input.project} ${step}`,
+    subject: `[Forge] ${heading}: ${input.project} ${step}`,
     text: lines.join('\n'),
     repair,
     at: new Date(now).toISOString(),

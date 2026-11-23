@@ -207,6 +207,9 @@ nforge x ROOT prioritize '{"submissionId":"SUBMISSION_UUID","priority":"urgent",
 Use `priority:"normal"` with a new operation ID to undo a promotion. Replay the same
 operation ID and parameters after an unknown reply. The command retains the
 original priority version; an older retry cannot overwrite a later owner's change.
+The queue itself raises a submission to urgent once, on its third re-check caused by main moving
+(the recompose cap, [queue invariant S5](landing-queue-invariants.md)). The `priorityReason` says so,
+and the same `prioritize` undo applies.
 A running check is never cancelled for priority. Finish/status returns effective
 `priority`, `priorityReason` and `priorityVersion` on the submission, alongside a
 one-based `queuePosition` in the response for queued work. Position is a current observation, including active

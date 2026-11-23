@@ -282,8 +282,10 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // Item 411727ba: source resolve reuses the project row its step fence read, so each resolve call reads the
 // project document once instead of twice; the red keep runs fewer resolves than its retire: red moves by
 // +2,251 read bytes. No call or write changes.
+// Item 5e3c3a3c (recompose cap): the retire arm's re-checked request row carries `mainRaces: 1` (14 B)
+// on every read of it, so the carry delta moves by -609 read bytes. No call or write changes.
 export const WIRED = {
-  carry: { calls: -2, readBytes: 188_729, writeBytes: 14_836 },
+  carry: { calls: -2, readBytes: 188_120, writeBytes: 14_836 },
   'scoped-recheck': { calls: 8, readBytes: 326_875, writeBytes: 85_765 },
   red: { calls: -17, readBytes: -386_052, writeBytes: -145_358 },
 };

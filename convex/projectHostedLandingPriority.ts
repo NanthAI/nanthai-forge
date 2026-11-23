@@ -5,7 +5,8 @@ import { mutation } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
 import { ownedProject } from './projectAuthority';
 import { hostedWriteProject } from './projectHostedRecords';
-import { loadLanding } from './projectHostedLandingStore';
+import { listRaceCapped, loadLanding } from './projectHostedLandingStore';
+import { MAIN_RACE_CAP } from '../src/landing-overtake';
 import { landingPriorityState } from './projectHostedLandingOrder';
 import { releaseNoCarryWaiter } from './projectHostedLandingNoCarry';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -82,6 +83,9 @@ export const prioritize = mutation({
         priorityChange: change,
       };
       await ctx.db.patch(row._id, patch);
+      // Set back to normal, a recompose-capped entry no longer holds strict order (queue invariant S5).
+      if (input.priority === 'normal' && (row.mainRaces ?? 0) >= MAIN_RACE_CAP)
+        await listRaceCapped(ctx, row, false);
       await retainQueueStatus(ctx, landingPriorityState({ ...row, ...patch }, state));
       // An urgent change waits only for urgent ones: one held before its Lane check starts it now
       // (no-carry hold, Item 1018d0f8).

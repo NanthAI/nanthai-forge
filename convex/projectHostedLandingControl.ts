@@ -27,6 +27,7 @@ import {
 import { nextTrainLandingRow, scheduleLandingWake, releaseLandingQueue } from './projectHostedLandingWake';
 import { closeOrderWait, olderLandingAhead, recordOrderWait } from './projectHostedLandingOrder';
 import { reservationAhead } from './projectHostedLandingReservation';
+import { raceCapAhead } from './projectHostedLandingRaceCap';
 import { overtakeMark } from '../src/landing-overtake';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { retrySoloLandingCheck } from './projectHostedLandingCheckRetry';
@@ -500,7 +501,8 @@ export async function claimReadyLanding(
     (queue.exactReview === state.id
       ? null
       : ((await reservationAhead(ctx, row, state, now)) ??
-        (await olderLandingAhead(ctx, row, state, now, spent))));
+        (await olderLandingAhead(ctx, row, state, now, spent)) ??
+        (await raceCapAhead(ctx, queue, row, state, now))));
   if (ahead) {
     if (row.alarm) await cancelPendingTask(ctx, row.alarm.taskId);
     // A handed entry (`orderWaitHanded`) has no wait of its own yet: this claim decides it.

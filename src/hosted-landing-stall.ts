@@ -29,6 +29,10 @@ export function hostedLandingStall(
             : 'landing / finish controller';
   return landingStall(step, owner, progressAt, now);
 }
+/** The predecessor a queued stall names as its missing owner (above), or undefined. Queue invariant
+ * S12: such a follower is stuck because the predecessor is, so the predecessor alone alerts. */
+export const stallPredecessor = (stall: HostedLandingState['observation']['stall']) =>
+  /^predecessor (\S+) \(/.exec(stall?.missingOwner ?? '')?.[1];
 /** Incident 8c9b84fc: a cohort repair's owner outlives its stall, in later observations and the
  * terminal receipt. A solo owner (Item 9a04d916) describes only the current stall: it goes with
  * that stall once progress resumes, exactly like an owner-less stall. */

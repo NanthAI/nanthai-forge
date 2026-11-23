@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "claude-code-session:648af515-a796-4f0c-9e75-b38af89b894d",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "review-api:08bc1d7a-73ed-410c-924f-367402fe44b0",
+    "receipt": "29fafa7f-c6ab-46fa-bf55-9f1e8706ed6c"
+  },
+  "changes": {
+    "convex/projectHostedLandingPriority.ts": "36067bb5e9a2701f4552dcb73207953c0fda6a1946b3f4ccb5b7810fa9a0967d"
+  },
+  "replay": {
+    "incident": "5e3c3a3c",
+    "test": "the owner's prioritize normal takes a capped entry off the queue's list",
+    "receipt": "29fafa7f-c6ab-46fa-bf55-9f1e8706ed6c"
+  },
+  "exercised": {
+    "convex/projectHostedLandingPriority.ts": {
+      "executed": [
+        "prioritize"
+      ],
+      "digest": "8942b7321e5486feb6316d7e48a033b538bcddce88b1a5b9dd94ab880a0d069b",
+      "units": [
+        [
+          "MAIN_RACE_CAP",
+          "1c861178818ddf3646863db23a8dcc4e4829eddeb84c41bd17833dc64bc643ce"
+        ],
+        [
+          "acceptanceActor",
+          "0c9112e8326de402fdb77b8cece78b3ea8676c6d95760b6ea8075135b05abaf0"
+        ],
+        [
+          "callerActorKind",
+          "16b60ca51cd8b055310d477085a20a05e79fa21f4c8885db330ab732cc33bc41"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "effectiveAgentDefaults",
+          "b07c5c21291d41c264cb2b94862011d2c305524d09c04f5445bcecbf90443407"
+        ],
+        [
+          "effectivePolicy",
+          "3cdc0ff32407b7603d7a90387ef5e3b5e63f8a4336f55bfdf7f1dac19863e36e"
+        ],
+        [
+          "hostedWriteProject",
+          "3a2dcfd149cab0cc00290a015bc2bf96315135dd3f5c0643e4bb3178451cd869"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "landingMessageForReader",
+          "e507c1ccc4f956fe640a1c92e72478fcc673912a7d506918e4b8342b62b6354a"
+        ],
+        [
+          "landingPriorityState",
+          "1834598ec1c6c80df33da74a0ce97a217d66e3dafe1b77162656a7f8427a9e33"
+        ],
+        [
+          "listRaceCapped",
+          "f304a7a17b71f6f505e198558efc36d9c4c27a8476d1d0dd0017da2e237b53b8"
+        ],
+        [
+          "loadLanding",
+          "ebcbbc4824870ad74803810ad5144fbbc671303f4a51f289356b20578d07ace2"
+        ],
+        [
+          "mutation",
+          "4f17c7855059ce010489b8b943f417aba3333721a20f7872a46abe0eee887bc9"
+        ],
+        [
+          "ownedProject",
+          "074c52e90e6d215f47f4a3af501ff8b678592eba9f2d50c0388b111cfff5fcae"
+        ],
+        [
+          "prioritize",
+          "3ffe24d8604a54e459899ba7d50aa2b82983dec9dcac54af3c74a72ab492b820"
+        ],
+        [
+          "recordMutationReceipt",
+          "7094e3505424520d3f5d9497fd533fdd4f4ddc7df34bd134eca14c47f83bd982"
+        ],
+        [
+          "releaseNoCarryWaiter",
+          "5776f521a42bc76bfd9142e4a7a9025192a2a56487c7ce738b4b9a0081e2d0d4"
+        ],
+        [
+          "report",
+          "11f51c908ed7b15c3270a2410f7282cdb9c431b81d35e62cdff8695c9d306e0b"
+        ],
+        [
+          "retainQueueStatus",
+          "d7e6bdd567c501b458303d6729d6956eb4d33f1cf6b64b609ddf9dc7ba86e094"
+        ],
+        [
+          "urgentAllowed",
+          "13c66fb308f019fbc9e5df04df5ea409099eaf8e60a410566fe6acaaa5a14cc5"
+        ],
+        [
+          "urgentRefusal",
+          "0b8fcac2fbdec97ed84ca791424daa1595f58aeeabf5340237a9990745676b5c"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ]
+    }
+  }
+}

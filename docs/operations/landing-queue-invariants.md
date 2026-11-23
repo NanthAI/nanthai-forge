@@ -46,8 +46,26 @@ discarded runner share, median/p90 time to main, parked entries without alarms a
 landing. Morning references are 31%, 27.8 minutes and 65.8 minutes; measure missing count
 baselines rather than guessing. A regression disables that rule's switch, or for a rule without one is fixed forward as a bug, and goes to the lead.
 
-Cap 3, urgent-retry removal, early-refusal scope and per-generation `unsealed` wait for a real
-N=10 bench A/B of both arms, with owner go. The lifetime S4 bound remains.
+Cap 3 (S5) landed for Item `5e3c3a3c` without the A/B: the owner moved bench proof to one full
+bench at the end of the phase (2026-11-19). The third main-race re-check of an entry raises it to
+urgent once, with a `priorityReason` that names the cap (an owner who sets it back to normal is not
+overruled), and lists it on the queue row until it ends. While it checks, an older Ready pass whose
+landing would make that check stale waits for it (`held: "recompose-cap"`); one that is unrelated and
+whose proof carries does not, and none parks on a capped group whose check stacks on it or whose
+waits lead back to it (S6). After the cap, only an entry already publishing, or an older urgent one
+(strict order puts it first), can still move main under it. Ready claims read nothing extra while
+no entry is capped, and an owner's demotion takes the entry off the list. Proof:
+`tests/hosted-landing-recompose-cap.test.mjs` (source mutants fail it). On 2026-11-21 to 11-23 the 13%
+of landings re-checked 3 or more times threw away 55% of discarded runner minutes. The queue simulator
+reaches no fourth race with or without the cap, so its S5 waiver stays until a profile reproduces one.
+Urgent-retry removal, early-refusal scope and per-generation `unsealed` still wait for that bench.
+The lifetime S4 bound remains.
+
+S12/L8: a queued follower whose stall names a predecessor that is itself stalled sends no alert. Its
+tier-2 deadline looks once more and alerts if by then it is stuck on its own, opening as a new stall
+(`Landing stalled`). Past that, the stall supervisor ends a queued entry nothing drives with its
+tier-3 alert. The root's tier-2 diagnosis counts the runnable submissions after it; alert reads do
+not rise.
 
 ## Settlement after a main move
 

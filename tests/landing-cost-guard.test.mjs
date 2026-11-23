@@ -1542,6 +1542,8 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
   // index key bytes to the immediate and retained budgets in both scenarios.
   // 9064e885: the existing queue row retains one 55-byte main-receipt pin per project.
   // The acceptance timing evidence adds 50 B fresh and 21 B dogfood to each request.
+  // 5e3c3a3c recompose cap: the dogfood request's one main race stores `mainRaces: 1` (+14 B immediate
+  // and retained; the journal S2 scenario measures retained at 2,573 B). The capped list lives on the fixed queue row only while one is live.
   // Item 411727ba: the stored-key purge indexes hold one ~115 B entry per object, backup, proposal and upload
   // cleanup row: stored entries 225 -> 231 fresh and 24,789 -> 28,889 dogfood before landing, plus about 8
   // per landing scenario. Index writes stay within budget. The entry lives and dies with its row.

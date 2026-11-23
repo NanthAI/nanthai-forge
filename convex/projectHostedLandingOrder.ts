@@ -130,7 +130,9 @@ export type OrderHeld =
   // A later landing of reserved files waits for the holder (Issue 10d253c6).
   | 'reserved'
   // Before its Lane check: the spent order-sensitive head of the order lands first (Item 1018d0f8).
-  | 'no-carry';
+  | 'no-carry'
+  // A newer entry at the recompose cap is checking; landing now would make that check stale (S5).
+  | 'recompose-cap';
 const generationStartedAt = (state: HostedLandingState) =>
   Math.max(
     Date.parse(state.at),

@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "claude-code-session:648af515-a796-4f0c-9e75-b38af89b894d",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "review-api:08bc1d7a-73ed-410c-924f-367402fe44b0",
+    "receipt": "29fafa7f-c6ab-46fa-bf55-9f1e8706ed6c"
+  },
+  "changes": {
+    "convex/projectHostedLandingStallAlert.ts": "3a6dbc3c97b511738f75ff0ea5638f639baec131e64cabe47641b4eb4b443251",
+    "src/hosted-landing-stall.ts": "71c990786484ac95f647bc0356d97f080c53e83d357e9e23be7f423bb7a47a6c"
+  },
+  "replay": {
+    "incident": "5e3c3a3c",
+    "test": "incident 5e3c3a3c: a stalled head alerts once with its queue; the follower behind it stays quiet",
+    "receipt": "29fafa7f-c6ab-46fa-bf55-9f1e8706ed6c"
+  },
+  "exercised": {
+    "convex/projectHostedLandingStallAlert.ts": {
+      "executed": [
+        "alert",
+        "alerts",
+        "raiseStallAlert",
+        "scheduleTier",
+        "stalledPredecessor"
+      ],
+      "digest": "b48ab5d397ec1237f46c5d8f06546bfd5dd61b9202006f56ac5b5ae68de5998b",
+      "units": [
+        [
+          "alert",
+          "12b1892c17468f39e275c7356807d7b7bbb4ade1b06539807cafc822b253630c"
+        ],
+        [
+          "alerts",
+          "c66093ee48b4c99b0f2825d8290bd52d7ebb1c81c6e83298be0c6ce11e51b69f"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "deliver",
+          "f2288878f227d3e625b5ac48cbcf8513999b59ccb914d1175a42cb07f13cb31e"
+        ],
+        [
+          "deliverStallAlert",
+          "c93bee626236cc6d524a0952542c786d7fb92dcf6ee3106243b9e8b3de695551"
+        ],
+        [
+          "desiredLanding",
+          "a16cab9e2518219f1ae223b2363df2dbeaca3f54d7d23c324cf4335792d90483"
+        ],
+        [
+          "effectiveAgentDefaults",
+          "b07c5c21291d41c264cb2b94862011d2c305524d09c04f5445bcecbf90443407"
+        ],
+        [
+          "effectiveAgentDefaultsSchema",
+          "9d75e7a9ef4471517106fb783ab9c2c7ffaf4e81c4986f5a2bffb713b17b26f1"
+        ],
+        [
+          "effectivePolicy",
+          "3cdc0ff32407b7603d7a90387ef5e3b5e63f8a4336f55bfdf7f1dac19863e36e"
+        ],
+        [
+          "exhaustedStallAlert",
+          "746320904def5b367f15bf61d3e50722ebb81911c6e5a58988937cc80bfbe89f"
+        ],
+        [
+          "hostedLandingProgressAt",
+          "934f487989ee4215885647fb5284123fb12fd3c9469dffa80e0484b2244e414e"
+        ],
+        [
+          "internalAction",
+          "e8a3213694f58fe6f1b30f5e7262dce2d0b36c87d9a016867a8f5735a4c6b10d"
+        ],
+        [
+          "internalMutation",
+          "2d2e8c5fe8c87a66a55fab17b47bc1e8d757288506b6d2be6e2bbd8f4d58d9e4"
+        ],
+        [
+          "landingRow",
+          "9b2f0188e0b4cde94aab9a444ecb94a974871df87818b7d98abd5a37b26204aa"
+        ],
+        [
+          "latestStallAlert",
+          "da627ba493ebd4345ba491806be8a0dc07045e89f8d28480a7281d241987832c"
+        ],
+        [
+          "makeFunctionReference",
+          "90760cdb0f99f8303180da5ca3bbe536fdac31c89e78b170e62dbf914920e3e4"
+        ],
+        [
+          "raiseExhaustedAlert",
+          "8d1d0b1165d98032fa8a7272bd0f42384c0682c0b2a746583c272f231aa90048"
+        ],
+        [
+          "raiseStallAlert",
+          "b5063f110351a3f082de0149d836ea44b3845b58f1c870ca1aef015c9f4ded3e"
+        ],
+        [
+          "scheduleStallAlert",
+          "c7878b0e8bb7d3ccec70ec8107c7a0cd30fc8f49f0d033b292421c85a8076791"
+        ],
+        [
+          "scheduleTier",
+          "ac978beb5b52a91e64c263e6b436f2aa3658dff39ac0750aad22f309130b56c1"
+        ],
+        [
+          "stallAlert",
+          "b2fb90743280d3e8ee0577db71d7333db3d1e0689f6bced3b3f5f69baa9ffdd6"
+        ],
+        [
+          "stallPredecessor",
+          "faf1b2a92419dfbdf996ddac64fb9f5c47137bbdf778e4cfe9f3924e7d736147"
+        ],
+        [
+          "stalledPredecessor",
+          "98a39a79339e96a9e4fd63c2eee4c344f40c270e1b2a9824ca9a85d227f87611"
+        ],
+        [
+          "storedLandingStateSchema",
+          "84f2e6ac995c11ec270f1529329561cce7a49b20ebc8bf42dd09977cfa51b6a4"
+        ],
+        [
+          "tier",
+          "a6c9de1b644aad8eb16163ef87060fb3dc88577bad775226b08c343f684861a9"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ]
+    },
+    "src/hosted-landing-stall.ts": {
+      "executed": [
+        "hostedLandingProgressAt",
+        "stallPredecessor"
+      ],
+      "digest": "219df91a1372f9ed05cd4e614a56988f70b93bf9fee1a4af90ef592a4d15bda5",
+      "units": [
+        [
+          "COHORT_STALL_OWNER",
+          "9e7828c26c248d62e224c4b00a4608f6eef08248dba4fc44ea9f1c12e88078ad"
+        ],
+        [
+          "desiredWatchdogMs",
+          "628267f7fff58a49ef39989f7df61d01fa6a0a70bafa7a0ef6b446645c39a619"
+        ],
+        [
+          "hostedLandingProgressAt",
+          "f2ae9aecf53f0caeae8e5702ac1043d4b79a1f65d4aea7ec97328ca63480fc0e"
+        ],
+        [
+          "hostedLandingStall",
+          "d4ccee3a4d6e4e712ce7f0c97e91ede874b22719dc53c992ef49d3d8577b85a1"
+        ],
+        [
+          "landingStall",
+          "bc90c32e7d17a79155e237df154364e2e999a1ddf7b348d813739a142366ca35"
+        ],
+        [
+          "latestLandingProgress",
+          "b94136099e72b34ad4bc70f6738ae5eddf2536514c4876a9fa6ae8bc878c583f"
+        ],
+        [
+          "retainedStallOwner",
+          "ce492dfba3e4cff522a8523bb2dac687257d5f926bdcbfd594ec52400b08c404"
+        ],
+        [
+          "stallPredecessor",
+          "e0dfee024d497c64e72e52b6ea49a9191d4e099669bbe681559152571eaca68c"
+        ]
+      ]
+    }
+  }
+}

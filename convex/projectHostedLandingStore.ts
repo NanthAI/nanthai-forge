@@ -3,7 +3,13 @@ import { pendingRunnerState } from './cancelledRunUsage';
 import { recoverEarlyResolutions } from './projectHostedEarlyResolutionRecovery';
 import { wakeLandingCapsule, landingCapsuleGraceMs } from './projectLandingCapsuleWake';
 import { withLandingCapsule } from './projectLandingCapsuleStore';
-import { unsealedBy } from '../src/landing-overtake';
+import {
+  countMainRace,
+  MAIN_RACE_CAP,
+  MAIN_RACE_CAP_REASON,
+  reachesMainRaceCap,
+  unsealedBy,
+} from '../src/landing-overtake';
 export { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { checkReplay, type LandingReplay, type ReplayCause } from './projectHostedLandingReplay';
 import { recordLandingFeed } from './projectFeedTerminal';
@@ -72,6 +78,18 @@ export async function loadLanding(ctx: QueryCtx | MutationCtx, input: LandingIde
   const row = await landingRow(ctx, input);
   invariant(row, 'NOT_FOUND', 'Hosted landing request not found.');
   return { row, state: landingStateFromRow(row) };
+}
+/** Adds or removes a recompose-capped entry on its queue's list (queue invariant S5). One queue read,
+ * made only at the cap, when a capped entry ends and when its owner sets it back to normal. */
+export async function listRaceCapped(ctx: MutationCtx, row: LandingRow, add: boolean) {
+  const queue = await landingQueue(ctx, row);
+  if (!queue) return;
+  const listed = queue.raceCapped ?? [];
+  const next = add
+    ? [...new Set([...listed, row.submissionId])]
+    : listed.filter(id => id !== row.submissionId);
+  if (next.length !== listed.length)
+    await ctx.db.patch(queue._id, { raceCapped: next.length ? next : undefined });
 }
 export function landingStateFromRow(row: LandingRow) {
   const state = storedLandingStateSchema.parse(JSON.parse(row.value));
@@ -326,6 +344,21 @@ export async function writeLanding(
     if (queue?.exactReview === state.id) await ctx.db.patch(queue._id, { exactReview: undefined });
   }
   const changedAttempt = previous.attemptId !== state.attemptId;
+  // Recompose cap (queue invariant S5, incident 5e3c3a3c): this entry's main-race re-checks, one per
+  // Candidate, counted from the attempt already loaded. At the cap the entry is raised to urgent once
+  // and says why (the queue status and receipt read it from this same write), and the queue lists it
+  // until it ends, so Ready claims look for it only while there is one (raceCapAhead).
+  const mainRaces = changedAttempt ? countMainRace(row.mainRaces, attempt) : row.mainRaces;
+  const reachedCap = !ended && reachesMainRaceCap(row.mainRaces, mainRaces);
+  const raceCapped = reachedCap && (row.priority ?? 'normal') !== 'urgent';
+  if (reachedCap || (ended && (row.mainRaces ?? 0) >= MAIN_RACE_CAP))
+    await listRaceCapped(ctx, row, reachedCap);
+  if (raceCapped)
+    Object.assign(state, {
+      priority: 'urgent' as const,
+      priorityReason: MAIN_RACE_CAP_REASON,
+      priorityVersion: (row.priorityVersion ?? 0) + 1,
+    });
   if (changedAttempt)
     await retainLandingProgress(ctx, previous, true, attempt.main, {
       ...options?.replacementReplay,
@@ -454,6 +487,14 @@ export async function writeLanding(
     ...(ownerDecision !== row.reviewState ? { reviewState: ownerDecision } : {}),
     ...(alarm && alarm.id === row._id ? { alarm: alarm.alarm } : {}),
     ...(unsealed ? { unsealed } : {}),
+    ...(mainRaces !== row.mainRaces ? { mainRaces } : {}),
+    ...(raceCapped
+      ? {
+          priority: state.priority,
+          priorityReason: state.priorityReason,
+          priorityVersion: state.priorityVersion,
+        }
+      : {}),
     ...(passedAt !== row.passedAt ? { passedAt } : {}),
     ...(row.passToSettlementSeconds === undefined && passToSettlementSeconds >= 0
       ? { passToSettlementSeconds }
