@@ -3,7 +3,7 @@
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { mutation } from './cliServer';
-import { memberProject } from './projectAuthority';
+import { accessibleProject } from './projectAuthority';
 import { report } from './errors';
 import { utcDay } from './projectStatsClose';
 import { invariant } from '../src/errors';
@@ -20,7 +20,7 @@ export const refreshToday = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'AUTH_REQUIRED', 'Sign in to see Stats.');
-      await memberProject(ctx, projectId, user.subject);
+      await accessibleProject(ctx, projectId, user.subject);
       const now = Date.now(),
         day = utcDay(now);
       const row = await ctx.db

@@ -208,6 +208,33 @@ test('a Stats open needs a signed-in member and reads at most one day row and on
   assert.equal(call.writes, 1, 'the scheduled close only');
 });
 
+test('Read members see Stats: read, readAll and refreshToday accept a Read member and refuse a stranger (Item 3678767e)', async t => {
+  const { f, start } = await landedDay(t);
+  const project = f.tables.hostedProjects.get(f.projectId);
+  f.tables.hostedProjects.set(f.projectId, { ...project, visibility: 'private' });
+  f.tables.projectReaders.set('stats-reader', {
+    _id: 'stats-reader',
+    _creationTime: 1,
+    projectId: f.projectId,
+    reader: 'stats-reader-user',
+  });
+  const args = { projectId: f.projectId };
+  const day = utcDay(start);
+  await at(t, start + 12 * 3_600_000, async () => {
+    for (const [fn, a] of [
+      [statsApi.read, { ...args, from: day, to: day }],
+      [statsApi.readAll, args],
+      [todayApi.refreshToday, args],
+    ]) {
+      await f.transaction('readerStats', fn, a, 'stats-reader-user');
+      await assert.rejects(
+        f.transaction('strangerStats', fn, a, 'stats-stranger'),
+        error => error.data?.code === 'PROJECT_UNAVAILABLE',
+      );
+    }
+  });
+});
+
 // Calls and DB I/O per provisional close, at dogfood scale (200 landings a day, two check runs each) and doubled.
 async function scaleDay(t, n) {
   const { f, receipts, day, start } = await landedDay(t);

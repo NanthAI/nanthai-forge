@@ -5,7 +5,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import { internalMutation } from './server';
 import { query } from './cliServer';
-import { memberProject } from './projectAuthority';
+import { accessibleProject } from './projectAuthority';
 import { report } from './errors';
 import { invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -682,7 +682,7 @@ export const read = query({
       );
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'AUTH_REQUIRED', 'Sign in to see Stats.');
-      await memberProject(ctx, projectId, user.subject);
+      await accessibleProject(ctx, projectId, user.subject);
       const range = (a: string, b: string) =>
         ctx.db
           .query('projectStatsDays')
@@ -716,7 +716,7 @@ export const readAll = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'AUTH_REQUIRED', 'Sign in to see Stats.');
-      await memberProject(ctx, projectId, user.subject);
+      await accessibleProject(ctx, projectId, user.subject);
       const months = await ctx.db
         .query('projectStatsMonths')
         .withIndex('by_project_and_month', q => q.eq('projectId', projectId))
