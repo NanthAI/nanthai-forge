@@ -68,7 +68,11 @@ async function store(ctx: ActionCtx, input: Identity, owner: string, objects: Ui
     await commitObjects(
       ctx,
       owner,
-      prepared.filter(row => !row.stored).map(row => ({ id: row.id })),
+      prepared.flatMap(row => {
+        if (row.stored) return [];
+        invariant(row.id, 'SOURCE_UNAVAILABLE', 'Inbound upload reservation is unavailable.');
+        return [{ id: row.id }];
+      }),
     );
     pins.push(...ids);
   }

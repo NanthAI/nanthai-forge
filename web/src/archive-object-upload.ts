@@ -23,7 +23,7 @@ export async function uploadArchiveObjects(
     if (!uploaded.has(digest)) {
       const prepared = await client.mutation(api.projectObjects.prepare, { projectId, digest, size });
       if (!prepared.stored) {
-        if (!prepared.target) throw new Error('The original content upload is unavailable.');
+        if (!prepared.target || !prepared.id) throw new Error('The original content upload is unavailable.');
         // The browser supplies Content-Length from the Blob; JavaScript cannot set it.
         const headers = Object.fromEntries(
           Object.entries(prepared.target.headers).filter(([name]) => name.toLowerCase() !== 'content-length'),

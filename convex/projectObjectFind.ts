@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { isStored } from './projectObjectFields';
+import { isStored, type ObjectRowReason } from './projectObjectFields';
 import type { StateSize } from '../src/state/size';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { r2Key } from './r2';
 import { findPointObjects, clearPointObjectCache, pointMode } from './projectObjectPoints';
 import type { ObjectPack } from '../src/object-pack-range';
-import { ForgeError } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
 import { purgedMessage } from '../src/save-purge';
 
 /** Objects per catalog row (~19 KB): a lookup reads one small document. */
@@ -189,15 +189,35 @@ export async function findStoredObjects(
 export async function findStoredObject(ctx: QueryCtx, projectId: Id<'hostedProjects'>, digest: string) {
   return (await findStoredObjects(ctx, projectId, [digest]))[0] ?? null;
 }
-/** Writers that must return or patch a row id: a catalog entry is copied into an
- * equivalent stored row (rare: catalog objects are already stored). */
-export async function objectRow(ctx: MutationCtx, object: ObjectView): Promise<Doc<'projectObjects'>> {
+/** Writers that change what a stored object binds (trusted State metadata, its stored encoding, a
+ * purge tombstone) copy a catalog or point entry into an equivalent row, stamped with the reason.
+ * Writers that only set a flag or return an id must not copy: they use `ownRow` (pending rows are
+ * always their own rows) or skip the write when the entry already holds the value. */
+export async function objectRow(
+  ctx: MutationCtx,
+  object: ObjectView,
+  reason: ObjectRowReason,
+): Promise<Doc<'projectObjects'>> {
   if (object._id !== undefined) return object;
   const fields = { ...object };
   delete fields._id;
   delete fields._creationTime;
-  const id = await ctx.db.insert('projectObjects', { ...fields, nonce: object.nonce || crypto.randomUUID() });
+  const id = await ctx.db.insert('projectObjects', {
+    ...fields,
+    nonce: object.nonce || crypto.randomUUID(),
+    materializedBy: reason,
+  });
   return (await ctx.db.get(id))!;
+}
+/** The row of an object that is not stored yet. Catalog and point entries are always stored, so an
+ * unstored object is a row; patching it never copies a catalog entry. */
+export function ownRow(object: ObjectView): Doc<'projectObjects'> {
+  invariant(
+    object._id !== undefined,
+    'SOURCE_HASH_MISMATCH',
+    'Only an object row can hold pending upload state.',
+  );
+  return object;
 }
 // One indexed read per request and project, only where a physical binding is handed out.
 const purgedProjects = new WeakMap<QueryCtx, Map<string, Promise<boolean>>>();
@@ -229,7 +249,7 @@ export async function purgeTargetRow(ctx: MutationCtx, projectId: Id<'hostedProj
     .unique();
   if (row) return row;
   const source = (await findSourceObjects(ctx, projectId, [digest])).get(digest);
-  return source ? objectRow(ctx, source) : null;
+  return source ? objectRow(ctx, source, 'purge-tombstone') : null;
 }
 type CatalogPageEntry = {
   digest: string;

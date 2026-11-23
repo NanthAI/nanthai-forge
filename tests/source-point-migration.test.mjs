@@ -279,17 +279,21 @@ test('Done-when5: imported State dimensions and unknown generation repair surviv
   assert.deepEqual(row.stateSize, state.stateSize);
   assert(row._id, 'mutable State metadata has its own row');
   const promoted = await f.run(ctx =>
-    find.objectRow(ctx, {
-      ...row,
-      _id: undefined,
-      _creationTime: undefined,
-      digest: digest('promoted-state'),
-      r2Key: `v1/p/${f.projectId}/o/${digest('promoted-state')}`,
-      nonce,
-      stateParents: [digest('parent')],
-      statePhysical: { sha256: digest('root'), size: 123 },
-      recipeClosure: [{ sha256: digest('leaf'), size: 1 }],
-    }),
+    find.objectRow(
+      ctx,
+      {
+        ...row,
+        _id: undefined,
+        _creationTime: undefined,
+        digest: digest('promoted-state'),
+        r2Key: `v1/p/${f.projectId}/o/${digest('promoted-state')}`,
+        nonce,
+        stateParents: [digest('parent')],
+        statePhysical: { sha256: digest('root'), size: 123 },
+        recipeClosure: [{ sha256: digest('leaf'), size: 1 }],
+      },
+      'source-output-state',
+    ),
   );
   assert.deepEqual(promoted.stateParents, [digest('parent')]);
   assert.equal(promoted.statePhysical.sha256, digest('root'));

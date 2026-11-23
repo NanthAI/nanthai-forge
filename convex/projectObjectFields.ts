@@ -2,6 +2,18 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { backfillFields } from './r2BackfillFields';
+/** The only writers that may copy an immutable catalog or point entry into its own row, one label
+ * each: they change trusted State metadata, rebind the stored encoding, or mark a purge tombstone.
+ * Flag-only and id-only writers never copy (guarded by tests/object-row-reasons.test.mjs). */
+export const objectRowReasons = [
+  'source-output-encoding',
+  'source-output-state',
+  'source-state-size',
+  'state-generation',
+  'recovery-encoding',
+  'purge-tombstone',
+] as const;
+export type ObjectRowReason = (typeof objectRowReasons)[number];
 export const objectPack = v.object({ digest: v.string(), size: v.number(), offset: v.number() });
 // Trusted worker-only raw R2 leaves, including verified ranges in existing packs.
 export const recipeClosure = v.array(
@@ -46,6 +58,10 @@ export const objectFields = {
   /** Owner purge of a leaked save (Item 9d3c407d): bytes deleted, every lookup refuses PURGED. */
   purged: v.optional(v.object({ at: v.number(), operationId: v.string() })),
   sourceReferenced: v.optional(v.boolean()),
+  /** Which writer had `objectRow` copy a catalog or point entry into this row (Item d0297b9f), so
+   * dogfood counts materializations per writer from the rows themselves. Absent on
+   * rows a writer created directly and on copies made before the stamp. */
+  materializedBy: v.optional(v.union(...objectRowReasons.map(reason => v.literal(reason)))),
 };
 /** Readable bytes exist: Convex storage, a recipe, or an R2 object a HEAD check confirmed. */
 export const isStored = (row: {

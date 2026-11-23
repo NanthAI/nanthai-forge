@@ -4,7 +4,7 @@ import { internalMutation, internalQuery } from './server';
 import { activeProject } from './projectAuthority';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
-import { findObject, objectRow } from './projectObjectFind';
+import { findObject, ownRow } from './projectObjectFind';
 import { requireCatalogSeed } from './projectHostedSeedObjects';
 import { storeCatalogObjects } from './projectObjectCatalogStore';
 
@@ -60,7 +60,7 @@ export const bind = internalMutation({
       });
       row = (await ctx.db.get(id))!;
     }
-    await ctx.db.patch((await objectRow(ctx, row))._id, {
+    await ctx.db.patch(ownRow(row)._id, {
       recipe: binding,
     });
     return null;

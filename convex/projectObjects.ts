@@ -9,7 +9,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { r2Config, r2Key, presignPut, type R2Config } from './r2';
 import { pointObject } from './projectObjectPointBinding';
-import { findObject, findStoredObjects, findStoredObject, objectRow } from './projectObjectFind';
+import { findObject, findStoredObjects, findStoredObject } from './projectObjectFind';
 import { chargeStorage, checkObjectSize } from './abuseLimits';
 import { preparePack, uploadPackProposal } from './projectObjectPacks';
 import type { UploadPackProposal } from '../src/object-pack-upload';
@@ -48,7 +48,9 @@ export const missing = query({
   },
 });
 const preparedObject = v.object({
-  id: v.id('projectObjects'),
+  /** Absent when a catalog or point entry already stores the object (Item d0297b9f; the catalog
+   * seed shortcut has the same shape): no upload, no row. Clients read `stored` before any `id`. */
+  id: v.optional(v.id('projectObjects')),
   stored: v.boolean(),
   created: v.boolean(),
   target: v.optional(
@@ -81,12 +83,14 @@ async function prepareObject(
     const cached = known?.get(digest);
     known?.delete(digest);
     const found = cached !== undefined ? cached : await findObject(ctx, projectId, digest);
-    let row = found && (await objectRow(ctx, found));
     invariant(
-      !row || (row.size === size && !row.removed),
+      !found || (found.size === size && !found.removed),
       'INVALID_WORK_BACKUP',
       'Content differs from its original binding.',
     );
+    // Catalog and point entries are always stored: answer without copying one into a row.
+    if (found && found._id === undefined) return { stored: true, created: false, contentType: '' };
+    let row = found;
     const created = !row;
     if (!row) {
       checkObjectSize(size);
@@ -164,12 +168,7 @@ export const prepareBatch = mutation({
     pack: v.optional(uploadPackProposal),
     seedOperationId: v.optional(v.string()),
   },
-  returns: v.array(
-    v.union(
-      preparedObject,
-      v.object({ stored: v.literal(true), created: v.literal(false), contentType: v.literal('') }),
-    ),
-  ),
+  returns: v.array(preparedObject),
   handler: async (ctx, { projectId, objects, pack, seedOperationId }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
@@ -208,9 +207,7 @@ export const prepareBatch = mutation({
       );
       let next = 0;
       return rows.map(row =>
-        row && isStored(row)
-          ? { stored: true as const, created: false as const, contentType: '' as const }
-          : prepared[next++]!,
+        row && isStored(row) ? { stored: true, created: false, contentType: '' } : prepared[next++]!,
       );
     } catch (error) {
       return report(error);

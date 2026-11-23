@@ -37,7 +37,7 @@ import { isStored } from './projectObjectFields';
 import { hostedStartMain } from './projectHostedChannels';
 import { invariant } from '../src/errors';
 import { cohortRecheckBases } from '../src/scoped-recheck-policy';
-import { findObject, objectRow } from './projectObjectFind';
+import { findObject, ownRow } from './projectObjectFind';
 
 export async function batchFinishStep(
   ctx: MutationCtx,
@@ -356,7 +356,7 @@ export async function batchFinishStep(
         await wakeBatch(ctx, key);
         return { handled: true, command: null };
       }
-      await ctx.db.patch((await objectRow(ctx, object))._id, { location: 'r2', r2Key: objectKey });
+      await ctx.db.patch(ownRow(object)._id, { location: 'r2', r2Key: objectKey });
     } else
       await ctx.db.insert('projectObjects', {
         projectId: input.projectId,
@@ -408,7 +408,8 @@ export async function resumeBatchIO(
     'SOURCE_HASH_MISMATCH',
     'Batch metadata reservation differs.',
   );
-  await ctx.db.patch((await objectRow(ctx, object))._id, { r2Committed: true });
+  // A stored entry already holds the flag: never copy it into a row to set it again.
+  if (!object.r2Committed) await ctx.db.patch(ownRow(object)._id, { r2Committed: true });
   await writeBatch(ctx, key, { ...batch, uploadIndex: batch.uploadIndex + 1 });
   const { row } = await loadFinish(ctx, input);
   await cancelPendingTask(ctx, row.wake?.taskId);

@@ -138,6 +138,7 @@ export class ImportUpload {
             'Object storage could not verify source.',
           );
         }
+        invariant(target.id, 'INVALID_WORK_BACKUP', 'Original upload reservation is unavailable.');
         this.completions.push({ id: target.id, key: target.key });
       });
       if (start + importPageFiles < pending.length) await this.commit();

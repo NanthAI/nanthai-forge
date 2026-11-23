@@ -262,7 +262,7 @@ export async function storeSourceOutputs(
       old.removed ||
       (!old.storageId && !old.recipe && !old.r2Committed)
     )
-      await ctx.db.patch((await objectRow(ctx, old))._id, {
+      await ctx.db.patch((await objectRow(ctx, old, 'source-output-encoding'))._id, {
         ...encoding,
         ...patchGraph,
         ...(!pin.r2Key ? { location: undefined, r2Key: undefined, r2Committed: undefined } : {}),
@@ -277,7 +277,10 @@ export async function storeSourceOutputs(
       (old.stateSize === undefined && pin.stateSize !== undefined) ||
       (old.recipeClosure === undefined && pin.recipeClosure !== undefined)
     )
-      await ctx.db.patch((await objectRow(ctx, old))._id, { sourceReferenced: true, ...patchGraph });
+      await ctx.db.patch((await objectRow(ctx, old, 'source-output-state'))._id, {
+        sourceReferenced: true,
+        ...patchGraph,
+      });
     else if (old._id !== undefined && !old.sourceReferenced)
       await ctx.db.patch(old._id, { sourceReferenced: true, ...patchGraph });
     if (!old?.sourceReferenced) fence = pin.sha256;
@@ -314,6 +317,7 @@ export async function recordSourceStateSizes(
       'SOURCE_HASH_MISMATCH',
       'Immutable State dimensions changed.',
     );
-    if (!row.stateSize) await ctx.db.patch((await objectRow(ctx, row))._id, { stateSize });
+    if (!row.stateSize)
+      await ctx.db.patch((await objectRow(ctx, row, 'source-state-size'))._id, { stateSize });
   }
 }

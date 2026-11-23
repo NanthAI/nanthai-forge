@@ -6,7 +6,7 @@ import { activeOwnedProject } from './projectAuthority';
 import { storageDigest } from './projectStorage';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
-import { findObject, objectRow } from './projectObjectFind';
+import { findObject, ownRow } from './projectObjectFind';
 const pin = { projectId: v.id('hostedProjects'), actor: v.string(), digest: v.string(), size: v.number() };
 /** Internal only: the importer has verified these bytes against the Git object.
  * No cross-project digest-existence oracle is exposed to clients. */
@@ -53,7 +53,7 @@ export const bind = internalMutation({
       .take(20);
     const existing = shared.find(row => row.storageId && row.size === input.size);
     const storageId = existing?.storageId ?? input.storageId;
-    if (own) await ctx.db.patch((await objectRow(ctx, own))._id, { storageId });
+    if (own) await ctx.db.patch(ownRow(own)._id, { storageId });
     else
       await ctx.db.insert('projectObjects', {
         projectId: input.projectId,

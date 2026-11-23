@@ -36,7 +36,10 @@ move or download. Existing catalog ranges are merged without overlaps and the
 request-local lookup cache is invalidated after publication.
 
 `findObject` and `findObjects` continue to resolve object rows first, then catalog
-pages. Writers that need a row id retain `objectRow`. A compact
+pages. A stored catalog or point entry is never copied into a row to set a flag or return an
+id: upload preparation answers `stored` with no id. Only a writer that changes the binding (trusted
+State metadata, the stored encoding, a purge tombstone) calls `objectRow`, which stamps the row's
+`materializedBy` reason so dogfood counts copies per writer (`tests/object-row-reasons.test.mjs`). A compact
 `projectObjectReceipts` row keeps the original upload id, digest, size and nonce; `pendingRows`
 rechecks current project access and the committed object before reconciling an old
 upload id. Unknown ids still fail, and revoked access does not regain authority.

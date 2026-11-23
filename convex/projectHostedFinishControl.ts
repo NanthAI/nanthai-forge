@@ -38,7 +38,7 @@ import type { FinishCommand } from '../src/hosted-finish';
 import { culpritId } from '../src/culprit-bisect';
 import { ForgeError, invariant } from '../src/errors';
 import { reuseDecision } from './projectHostedReuseStore';
-import { findObject, objectRow } from './projectObjectFind';
+import { findObject, ownRow } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 import { ownerReviewFiles } from './projectHostedOwnerGrant';
 export type FinishIdentity = LandingIdentity & { wakeId: string; attempt?: number };
@@ -199,7 +199,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
           'SOURCE_HASH_MISMATCH',
           'Source plan binding differs.',
         );
-        await ctx.db.patch((await objectRow(ctx, object))._id, { location: 'r2', r2Key: key });
+        await ctx.db.patch(ownRow(object)._id, { location: 'r2', r2Key: key });
       }
       await retryFinish(ctx, row, input);
       // Item 9a04d916: a settle hands the action this compose, never the plan bytes.
@@ -422,7 +422,8 @@ async function resumeFinishIOOnce(
         'SOURCE_HASH_MISMATCH',
         'Resume the exact reserved R2 source plan.',
       );
-      await ctx.db.patch((await objectRow(ctx, old))._id, { r2Committed: true });
+      // A stored entry already holds the flag: never copy it into a row to set it again.
+      if (!old.r2Committed) await ctx.db.patch(ownRow(old)._id, { r2Committed: true });
     } else {
       // Read-only compatibility for an already-issued legacy IO callback.
       const metadata = await blobStore(ctx).getMetadata(input.storageId!);
@@ -441,7 +442,7 @@ async function resumeFinishIOOnce(
           nonce: crypto.randomUUID(),
           removed: false,
         });
-      else if (!isStored(old)) await ctx.db.patch((await objectRow(ctx, old))._id, { storageId });
+      else if (!isStored(old)) await ctx.db.patch(ownRow(old)._id, { storageId });
     }
     await submitHostedCompose(ctx, {
       projectId: input.projectId,

@@ -42,6 +42,7 @@ export async function storeProjectArtifact(
     'R2_OBJECT_CHECKSUM_MISMATCH',
     'Uploaded artifact checksum differs.',
   );
+  invariant(prepared.id, 'R2_REQUIRED', 'The artifact upload reservation is unavailable.');
   await ctx.runMutation(internal.projectExchangeCache.completeR2, {
     id: prepared.id,
     actor,

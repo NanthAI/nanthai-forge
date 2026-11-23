@@ -281,13 +281,17 @@ test('catalog-backed generations resolve sourceBlobs from the catalog, others do
 test('objectRow copies a catalog entry into one stored, source-referenced row only when a writer needs an id', async () => {
   const { s } = fixture(objects);
   const view = await find.findObject(s.ctx, 'project', objects[9].digest);
-  const row = await find.objectRow(s.ctx, view);
+  const row = await find.objectRow(s.ctx, view, 'state-generation');
   assert.ok(row._id);
   assert.deepEqual(
     { location: row.location, r2Committed: row.r2Committed, sourceReferenced: row.sourceReferenced },
     { location: 'r2', r2Committed: true, sourceReferenced: true },
   );
-  assert.equal((await find.objectRow(s.ctx, row))._id, row._id, 'rows are returned as they are');
+  assert.equal(
+    (await find.objectRow(s.ctx, row, 'state-generation'))._id,
+    row._id,
+    'rows are returned as they are',
+  );
   assert.equal(s.tables.projectObjects.size, 1);
 });
 
@@ -608,7 +612,7 @@ test('State logical dimensions survive catalog windows, page rewrites and row pr
   const page = find.catalogPages(entries)[0];
   const restored = catalog.windowEntries(JSON.stringify(page));
   assert.deepEqual(restored.find(row => row.digest === entries[0].digest).stateSize, dimensions);
-  assert.deepEqual((await find.objectRow(s.ctx, sized)).stateSize, dimensions);
+  assert.deepEqual((await find.objectRow(s.ctx, sized, 'state-generation')).stateSize, dimensions);
   const { CatalogTable } = await import('../dist/import-catalog-table.js');
   const compact = new CatalogTable();
   for (const entry of entries) compact.set(entry.digest, entry);

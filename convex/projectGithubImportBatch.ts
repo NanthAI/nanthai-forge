@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { v } from 'convex/values';
+import { v, type Infer } from 'convex/values';
 import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './server';
 import { validStateSize, type StateSize } from '../src/state/size';
 import type { Id } from './_generated/dataModel';
@@ -9,7 +9,7 @@ import { storageDigest, removeExclusive } from './projectStorage';
 import { r2Config, r2Key } from './r2';
 import { invariant } from '../src/errors';
 import { importPageFiles } from '../src/github-import-pages';
-import { findObject, findObjects, objectRow } from './projectObjectFind';
+import { findObject, findObjects, ownRow } from './projectObjectFind';
 export const objectPin = v.object({ digest: v.string(), size: v.number() });
 export const completion = v.object({
   id: v.id('projectObjects'),
@@ -24,16 +24,16 @@ export const recipePin = v.object({
   stateSize: v.optional(stateSize),
 });
 const identity = { projectId: v.id('hostedProjects'), actor: v.string() };
+const preparedPin = v.object({
+  /** Absent when a stored catalog or point entry already binds the object: nothing uploads. */
+  id: v.optional(v.id('projectObjects')),
+  stored: v.boolean(),
+  contentType: v.string(),
+  key: v.optional(v.string()),
+});
 export const prepare = internalMutation({
   args: { ...identity, objects: v.array(objectPin) },
-  returns: v.array(
-    v.object({
-      id: v.id('projectObjects'),
-      stored: v.boolean(),
-      contentType: v.string(),
-      key: v.optional(v.string()),
-    }),
-  ),
+  returns: v.array(preparedPin),
   handler: async (ctx, input) => {
     const project = await activeOwnedProject(ctx, input.projectId, input.actor);
     invariant(
@@ -43,7 +43,7 @@ export const prepare = internalMutation({
     );
     // Every object goes to R2; missing settings fail before any row is reserved.
     r2Config();
-    const result = [];
+    const result: Infer<typeof preparedPin>[] = [];
     for (const pin of input.objects) {
       invariant(
         /^[0-9a-f]{64}$/.test(pin.digest) && Number.isSafeInteger(pin.size) && pin.size >= 0,
@@ -51,12 +51,17 @@ export const prepare = internalMutation({
         'Use verified object pins.',
       );
       const found = await findObject(ctx, project._id, pin.digest);
-      let row = found && (await objectRow(ctx, found));
       invariant(
-        !row || (row.size === pin.size && !row.removed),
+        !found || (found.size === pin.size && !found.removed),
         'INVALID_WORK_BACKUP',
         'Original object binding changed.',
       );
+      // A stored catalog or point entry needs no upload and no row (Item d0297b9f).
+      if (found && found._id === undefined) {
+        result.push({ stored: true, contentType: '' });
+        continue;
+      }
+      let row = found;
       if (!row) {
         const id = await ctx.db.insert('projectObjects', {
           projectId: project._id,
@@ -154,7 +159,7 @@ export async function completeObjects(
       ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
       recipe: { digest: pin.recipeDigest, size: pin.recipeSize },
     };
-    if (row) await ctx.db.patch((await objectRow(ctx, row))._id, value);
+    if (row) await ctx.db.patch(ownRow(row)._id, value);
     else
       await ctx.db.insert('projectObjects', {
         projectId,

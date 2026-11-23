@@ -78,7 +78,7 @@ export function landingBrowserIO(client: ConvexReactClient, projectId: Id<'hoste
         size: pin.size,
       });
       if (prepared.stored) return;
-      invariant(prepared.target, 'SOURCE_UNAVAILABLE', 'Metadata upload is unavailable.');
+      invariant(prepared.target && prepared.id, 'SOURCE_UNAVAILABLE', 'Metadata upload is unavailable.');
       const headers = Object.fromEntries(
         Object.entries(prepared.target.headers).filter(([name]) => name.toLowerCase() !== 'content-length'),
       );

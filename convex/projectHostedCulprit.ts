@@ -1734,8 +1734,9 @@ export const transfer = internalMutation({
           'SOURCE_HASH_MISMATCH',
           'Recovery metadata binding differs.',
         );
-        if (input.committed)
-          await ctx.db.patch((await objectRow(ctx, object))._id, {
+        // Already committed at this key: nothing to set, so a stored entry is never copied.
+        if (input.committed && !(object.location === 'r2' && object.r2Key === key && object.r2Committed))
+          await ctx.db.patch((await objectRow(ctx, object, 'recovery-encoding'))._id, {
             location: 'r2',
             r2Key: key,
             r2Committed: true,

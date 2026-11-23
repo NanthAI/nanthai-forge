@@ -173,7 +173,7 @@ export const commit = internalMutation({
       );
       if (row.stateGeneration !== undefined) continue;
       assigned++;
-      const stored = await objectRow(ctx, row);
+      const stored = await objectRow(ctx, row, 'state-generation');
       await ctx.db.patch(stored._id, { stateGeneration: generation });
     }
     return JSON.stringify({ assigned });

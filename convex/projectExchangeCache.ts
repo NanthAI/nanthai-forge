@@ -1,23 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 // Only verified legacy-reader materialization and server-built artifacts call these.
 // It shares object bindings and explicit project cleanup with ordinary uploads.
-import { v } from 'convex/values';
+import { v, type Infer } from 'convex/values';
 import { internalMutation } from './server';
 import { accessibleProject } from './projectAuthority';
 import { isStored } from './projectObjectFields';
 import { r2Config, r2Key } from './r2';
 import { invariant } from '../src/errors';
-import { findObject, objectRow } from './projectObjectFind';
+import { findObject } from './projectObjectFind';
+const prepared = v.object({
+  /** Absent when a stored catalog or point entry already binds the object: nothing uploads. */
+  id: v.optional(v.id('projectObjects')),
+  stored: v.boolean(),
+  created: v.boolean(),
+  contentType: v.string(),
+  r2Key: v.optional(v.string()),
+});
 export const prepare = internalMutation({
   args: { projectId: v.id('hostedProjects'), actor: v.string(), digest: v.string(), size: v.number() },
-  returns: v.object({
-    id: v.id('projectObjects'),
-    stored: v.boolean(),
-    created: v.boolean(),
-    contentType: v.string(),
-    r2Key: v.optional(v.string()),
-  }),
-  handler: async (ctx, input) => {
+  returns: prepared,
+  handler: async (ctx, input): Promise<Infer<typeof prepared>> => {
     await accessibleProject(ctx, input.projectId, input.actor);
     r2Config();
     invariant(
@@ -26,12 +28,14 @@ export const prepare = internalMutation({
       'Use verified logical metadata pins.',
     );
     const found = await findObject(ctx, input.projectId, input.digest);
-    let row = found && (await objectRow(ctx, found));
     invariant(
-      !row || (row.size === input.size && !row.removed),
+      !found || (found.size === input.size && !found.removed),
       'INVALID_WORK_BACKUP',
       'Logical metadata differs from its original object binding.',
     );
+    // A stored catalog or point entry needs no upload and no row (Item d0297b9f).
+    if (found && found._id === undefined) return { created: false, stored: true, contentType: '' };
+    let row = found;
     const created = !row;
     if (!row) {
       const id = await ctx.db.insert('projectObjects', {
