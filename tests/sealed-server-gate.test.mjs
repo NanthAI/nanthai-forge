@@ -193,7 +193,8 @@ test('C18 a roster change without its step, a step that does not chain, a step a
   quiet.name('NEXT_TOKEN');
   assert.equal((await h2.publish(start.base, { history: ring }, quiet)).result.accepted, true);
   assert.deepEqual(h2.history().transitions, []);
-  assert.deepEqual(h2.history().rotateLists, []);
+  // A rotate list is derived from signed records on the client; the server stores none, whatever is sent.
+  assert.equal(h2.history().rotateLists, undefined);
 });
 
 test('C19 server-owned markers and join requests reach every read, survive head writes and are cleared only by their own step', async t => {
@@ -270,13 +271,17 @@ test('C18 a first head starts its own ring and never inherits steps from an olde
   assert.deepEqual(h.history().transitions, []);
 });
 
-test('C19 the owner CLI honours a server-owned marker and refuses to write until a re-key', async t => {
+test('C19 the owner CLI honours a server-owned marker: a marked reader is refused, a marker naming no entry blocks nothing', async t => {
   const h = harness(t);
   await h.client.write('API_TOKEN', Buffer.from('marker-synthetic-value'));
   h.set().revoked = [new Uint8Array(16).fill(4).buffer];
+  // Design 5.5: markers name entries to remove; this one names none, so the write goes ahead. Removal of a marked
+  // entry, the re-key and the agent refusal (SECRETS_REKEY_PENDING) are in tests/sealed-removal.test.mjs.
+  await h.client.write('NEXT_TOKEN', Buffer.from('unblocked-synthetic-value'));
+  h.set().revoked = [Uint8Array.from(h.client.keys.id).buffer];
   await assert.rejects(
-    h.client.write('NEXT_TOKEN', Buffer.from('blocked-synthetic-value')),
-    code('SECRETS_REKEY_PENDING'),
+    h.client.write('LAST_TOKEN', Buffer.from('blocked-synthetic-value')),
+    code('SECRETS_ROSTER_REFUSED'),
   );
 });
 

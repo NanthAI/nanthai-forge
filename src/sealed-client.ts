@@ -25,6 +25,7 @@ import { sealValue } from './sealed-value.js';
 import { checkSecretWriteName } from './secret-names.js';
 import { findEntry, ownerDevice } from './sealed-roster.js';
 import { networkFailure } from './network-fetch.js';
+import { removeMarkedFirst } from './sealed-unshare.js';
 
 export class SealedClient {
   constructor(
@@ -126,7 +127,8 @@ export class SealedClient {
     const journal = new SealedJournal(this.pins.directory, this.pins.lock);
     const identity = { project: this.project, name, removing: value === null, file: Boolean(options.file) };
     let pending = await journal.read(operationId, identity);
-    let replaying = Boolean(pending);
+    let replaying = Boolean(pending),
+      removedMarked = false;
     const unknown = () =>
       new ForgeError(
         'SECRETS_WRITE_UNKNOWN',
@@ -154,6 +156,11 @@ export class SealedClient {
       }
       if (!pending) {
         const state = await this.read();
+        // Design 5.5: a person's write first removes the entries Forge marked, with a re-key (once per write).
+        if (await removeMarkedFirst(this, state, removedMarked)) {
+          removedMarked = true;
+          continue;
+        }
         const previous = state ? framedHash(headBytes(state.reply.head)) : null;
         let reply: SealedReply, key: Buffer;
         if (!state) {
@@ -180,11 +187,6 @@ export class SealedClient {
             ownerDevice(findEntry(reply.roster, this.keys.id)),
             'SECRETS_NOT_ALLOWED',
             'This slice writes from an owner device.',
-          );
-          invariant(
-            reply.revoked.length === 0,
-            'SECRETS_REKEY_PENDING',
-            'A recipient removal needs a re-key before writing.',
           );
           const old = reply.head.names.find(n => n.name === name);
           invariant(

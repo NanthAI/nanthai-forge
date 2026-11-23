@@ -12,7 +12,7 @@ import { safeSecretName } from './sealed-display.js';
 import { checkSecretWriteName } from './secret-names.js';
 
 export const sealedUsage =
-  'nforge secret set NAME [--file] [--root ROOT] [--operation-id UUID]\nnforge secret list [--root ROOT]\nnforge secret rm NAME [--root ROOT] [--operation-id UUID]\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID [--root ROOT]';
+  'nforge secret set NAME [--file] [--root ROOT] [--operation-id UUID]\nnforge secret list [--root ROOT]\nnforge secret rm NAME [--root ROOT] [--operation-id UUID]\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID|--marked [--root ROOT]';
 export function sealedAgent() {
   const source = process.env;
   return (
@@ -128,7 +128,8 @@ export async function sealedCli(args: string[]) {
     sealedUsage,
   );
   const name = ['set', 'rm'].includes(command!) ? args.shift() : undefined;
-  const fingerprint = command === 'unshare' ? args.shift() : undefined;
+  const fingerprint = command === 'unshare' ? args.shift() : undefined,
+    marked = fingerprint === '--marked';
   let root = '.',
     file = false,
     operationId: string | undefined;
@@ -160,11 +161,18 @@ export async function sealedCli(args: string[]) {
         value?.fill(0);
       }
     } else if (command === 'unshare') {
-      const { unshareDevice } = await import('./sealed-unshare.js');
-      const result = await unshareDevice(client, fingerprint!);
-      process.stdout.write(
-        `${result.already ? `Device ${result.removed} was already removed from Development` : `Removed device ${result.removed} from Development and re-keyed it`}. Rotate at their provider what it could open: ${result.rotate.length ? result.rotate.map(safeSecretName).join(', ') : 'nothing'}.\n`,
-      );
+      const { removalLine, removeMarked, unshareDevice } = await import('./sealed-unshare.js');
+      if (marked) {
+        const result = await removeMarked(client);
+        process.stdout.write(
+          `${result.removed.length ? removalLine(result.removed, result.rotate) : 'Forge marks no Development entry for removal; nothing was removed.'}\n`,
+        );
+      } else {
+        const result = await unshareDevice(client, fingerprint!);
+        process.stdout.write(
+          `${result.already ? `Device ${result.removed} was already removed from Development. Rotate at their provider what it could open: ${result.rotate.length ? result.rotate.map(safeSecretName).join(', ') : 'nothing'}.` : removalLine([result.removed], result.rotate)}\n`,
+        );
+      }
     } else if (command === 'resolve') {
       invariant(operationId, 'BAD_ARGUMENT', 'Use nforge secret resolve --operation-id UUID.');
       const result = await client.resolve(operationId, agent ? undefined : confirmRepin);
@@ -183,6 +191,22 @@ export async function sealedCli(args: string[]) {
             process.stdout.write(
               `${safeSecretName(n.name)}\t${n.kind === 1 ? 'env' : 'file'}\tv${n.valueVersion}\n`,
             );
+        // Design 5.5: what removed devices could open and nobody has changed since, from signed records only.
+        const { rotateList } = await import('./sealed-unshare.js');
+        const rotate = rotateList(result.pin.roster, result.pin.head);
+        // On stderr, so the name table on stdout keeps its shape for scripts.
+        if (rotate.length)
+          process.stderr.write(
+            `Rotate at their provider, then set the new value (a removed device could open them):\n${rotate
+              .map(
+                r =>
+                  `${safeSecretName(r.name)}\tremoved ${r.devices
+                    .slice(0, 3)
+                    .map(fp => `fp ${fp}`)
+                    .join(', ')}${r.devices.length > 3 ? ` and ${r.devices.length - 3} more` : ''}\n`,
+              )
+              .join('')}`,
+          );
       } finally {
         result.key?.fill(0);
         for (const secret of result.secrets) secret.value.fill(0);

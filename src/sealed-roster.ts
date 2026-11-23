@@ -22,6 +22,14 @@ import {
 export const sameId = (a: Uint8Array, b: Uint8Array) => equalBytes(a, b);
 export const findEntry = (roster: Roster, id: Uint8Array) =>
   roster.entries.find(entry => sameId(entry.id, id));
+/** Design 5.5: the entries Forge marked that holder `self` removes. Forge marks a person who left, so a marker
+ * on self's own account (it still writes) or on a machine is server misbehaviour: `ignored`, never removed. */
+export function markedEntries(roster: Roster, revoked: readonly Uint8Array[], self: Uint8Array) {
+  const own = findEntry(roster, self)?.accountId,
+    marked = roster.entries.filter(e => revoked.some(id => sameId(id, e.id))),
+    honest = (e: Entry) => e.entryKind !== 2 && !(own && sameId(e.accountId, own));
+  return { remove: marked.filter(honest), ignored: marked.filter(e => !honest(e)) };
+}
 export const ownerDevice = (entry: Entry | undefined) => entry?.entryKind === 1 && entry.role === 1;
 export const writeDevice = (entry: Entry | undefined, kind: Roster['setKind']) =>
   entry?.entryKind === 1 && (entry.role === 1 || (kind === 1 && entry.role === 2));

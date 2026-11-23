@@ -24,6 +24,7 @@ export const teachingByCode: Record<string, Entry> = {
   SECRETS_WRITE_UNKNOWN: { learn: 'retry', next: 'nforge secret list' },
   SECRETS_JOURNAL_FULL: { learn: 'retry', next: 'nforge secret list' },
   SECRETS_WAITING: { learn: 'retry' },
+  SECRETS_REKEY_PENDING: { learn: 'auth', next: 'nforge secret unshare --marked' },
   LANDING_STALLED: { learn: 'queue', next: `nforge agent <root> queue '{}'` },
   HOSTED_ACTION_UNSUPPORTED: { learn: 'hosted', next: 'nforge agent <root> help' },
   WORK_STALE: { learn: 'retry', next: '<replay>' },

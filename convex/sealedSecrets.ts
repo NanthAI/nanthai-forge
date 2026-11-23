@@ -12,7 +12,6 @@ import { extendsStored, nextJoinRequests, nextSealedState, sealedWriteFacts } fr
 const history = v.object({
   genesis: v.bytes(),
   transitions: v.array(v.bytes()),
-  rotateLists: v.array(v.bytes()),
 });
 const same = (a: ArrayBuffer, b: ArrayBuffer) => equalBytes(new Uint8Array(a), new Uint8Array(b));
 export const read = query({
@@ -61,9 +60,7 @@ export const read = query({
               .unique();
       return {
         payload: set.payload,
-        history: row
-          ? { genesis: row.genesis, transitions: row.transitions, rotateLists: row.rotateLists }
-          : null,
+        history: row ? { genesis: row.genesis, transitions: row.transitions } : null,
         ...sides,
       };
     } catch (error) {
@@ -132,6 +129,7 @@ export const write = mutation({
         transition: args.transition,
         stored: previous ? { genesis: previous.genesis, transitions: previous.transitions } : null,
       });
+      if (!state) return { accepted: false, replay: false };
       const next = {
         projectId: args.projectId,
         kind: args.kind,
@@ -157,7 +155,6 @@ export const write = mutation({
         v: 1 as const,
         genesis: state.genesis,
         transitions: state.transitions.slice(-64),
-        rotateLists: previous?.rotateLists ?? [],
         events,
       };
       // The ring keeps the newest steps that fit its record; a reader past it needs a holder code.

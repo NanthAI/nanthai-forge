@@ -12,7 +12,7 @@ import {
   unshareCommand,
 } from './sealed-join.js';
 import { headBytes, rosterBytes, type Entry, type Roster } from './sealed-records.js';
-import { findEntry, sameId, writeDevice } from './sealed-roster.js';
+import { findEntry, markedEntries, sameId, writeDevice } from './sealed-roster.js';
 import { createTransition } from './sealed-transition.js';
 import { requireConfirmedBase } from './sealed-anchors.js';
 import type { SealedReply, SecretPin } from './sealed-verify.js';
@@ -45,13 +45,14 @@ export function planAutomaticShares(input: {
     entries: Entry[] = [],
     skipped: string[] = [];
   // Guard 1 (constant kind), the signed Automatic mode, and guard 5: only a device entry with write authority
-  // wraps; a machine or a person key never does. A pending removal re-keys first (5.5), never alongside.
+  // wraps; a machine or a person key never does. A pending removal re-keys first (5.5), never alongside; a
+  // marker that names no entry asks for nothing.
   if (
     roster.setKind !== AUTOMATIC_SET_KIND ||
     roster.sharingMode !== 1 ||
     signer?.entryKind !== 1 ||
     !writeDevice(signer, AUTOMATIC_SET_KIND) ||
-    input.revoked.length
+    markedEntries(roster, input.revoked, input.self).remove.length
   )
     return { entries, skipped };
   for (const bytes of input.requests) {

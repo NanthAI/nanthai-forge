@@ -60,7 +60,7 @@ export const extendsStored = (set: StoredSealedSet | null, facts: SealedWriteFac
 /** The history and side records after an accepted write. The server appends the one transition the
  * write introduces after checking that it chains from the stored roster to the signed head; a client
  * never supplies the ring. A removal clears its own markers; an addition answers its join request, and a step
- * drops requests it made stale. */
+ * drops requests it made stale. Null when an automatic addition's join request is no longer waiting. */
 export function nextSealedState(input: {
   set: StoredSealedSet | null;
   facts: SealedWriteFacts;
@@ -103,6 +103,10 @@ export function nextSealedState(input: {
     return { genesis: stored.genesis, transitions: stored.transitions, revoked, joinRequests };
   }
   const t = part<Transition>('transition', transition);
+  // An automatic addition answers a join request that is still waiting. Removing a person drops theirs, so a share
+  // signed from an earlier read stores nothing (null: not accepted; the holder retries on its next run).
+  if (t.delta.added.some(e => e.how === 3 && !joinRequests.some(j => equalBytes(u8(j.deviceId), e.id))))
+    return null;
   refuse(
     t.fromVersion === set.rosterVersion &&
       equalBytes(t.fromHash, current.rosterHash) &&
@@ -134,6 +138,27 @@ export function nextSealedState(input: {
     revoked,
     joinRequests,
   };
+}
+
+/** GB-10: when a person leaves the project, Forge asks holders to remove that account's entries (they see it).
+ * Marks each of the account's entries in this set once and drops its waiting join request; a marker lasts until
+ * the holder step that removes the entry. Null when nothing changes. Markers only ever name listed entries, so
+ * they stay within the roster bound. */
+export function markersForRemovedAccount(set: StoredSealedSet, accountId: Uint8Array) {
+  const roster = (decodeSealedWire(u8(set.payload)) as Payload).roster,
+    before = set.revoked ?? [],
+    revoked = [...before];
+  for (const entry of roster.entries)
+    if (equalBytes(entry.accountId, accountId) && !revoked.some(id => equalBytes(u8(id), entry.id)))
+      revoked.push(Uint8Array.from(entry.id).buffer);
+  const waiting = set.joinRequests ?? [],
+    joinRequests = waiting.filter(j => {
+      const id = (decodeSealedWire(u8(j.request)) as Partial<JoinRequest>).accountId;
+      return !id || !equalBytes(id, accountId);
+    });
+  return revoked.length === before.length && joinRequests.length === waiting.length
+    ? null
+    : { revoked, joinRequests };
 }
 
 /** Design 5.1 join request, stored for the next holder device's run (no timer, no polling). The request must

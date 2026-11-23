@@ -10,6 +10,7 @@ import { coordinationAccess } from './projectAudience';
 import { invariant } from '../src/errors';
 import { projectRole } from './projectRole';
 import { endInvitationEpoch } from './projectInvitationRevocation';
+import { markRemovedAccount } from './sealedSecretMarkers';
 async function known(
   ctx: QueryCtx | MutationCtx,
   project: Doc<'hostedProjects'>,
@@ -162,6 +163,13 @@ export async function retainMembership(
   };
   if (row) await ctx.db.patch(row._id, retained);
   else await ctx.db.insert('projectActorNames', { projectId, actor, ...retained });
+  // Every removal of a project grant comes through here, before the grant goes. A writer who leaves stops holding
+  // sealed secrets; a reader never held any, so their removal reads no sealed set.
+  const writer = await ctx.db
+    .query('projectContributors')
+    .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId).eq('contributor', actor))
+    .unique();
+  if (writer) await markRemovedAccount(ctx, projectId, actor);
 }
 
 async function membership(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, actor: string) {

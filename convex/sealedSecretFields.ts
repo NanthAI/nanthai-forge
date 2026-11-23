@@ -28,7 +28,9 @@ export const sealedHistoryFields = {
   setId: v.bytes(),
   genesis: v.bytes(),
   transitions: v.array(v.bytes()),
-  rotateLists: v.array(v.bytes()),
+  /** Unused and no longer written: a rotate list is derived from the signed roster's former signers and each
+   * name's value epoch. Delete the field once no stored row carries it (each head write replaces the row). */
+  rotateLists: v.optional(v.array(v.bytes())),
   events: v.array(v.object({ operationId: v.string(), headHash: v.bytes(), at: v.number() })),
 };
 export const sealedSecretTables = {

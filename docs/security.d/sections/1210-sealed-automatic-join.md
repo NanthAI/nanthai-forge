@@ -47,7 +47,7 @@ Undo is `nforge secret unshare FINGERPRINT` (an automatic device) or the full
 one write removes the device and re-keys the set (new set key, every value
 re-sealed, a wrap per remaining recipient), then prints the names to rotate at
 their provider, because the key was handed over. Repeating it after an unknown
-outcome reports the device as already removed and prints the same list.
+outcome reports the device as already removed and prints the same list. See Sealed removal and rotate list for the other routes.
 
 Residual, accepted with owner decision 2: the joining device trusts that first
 roster on first use. A compromised server can show it a fake Development set built

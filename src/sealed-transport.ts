@@ -16,7 +16,6 @@ const binary = (bytes: Uint8Array) => Uint8Array.from(bytes).buffer;
 export type SealedHistoryWire = {
   genesis: ArrayBuffer;
   transitions: ArrayBuffer[];
-  rotateLists: ArrayBuffer[];
 };
 /** The local journal record of one head write. `history` stays local for re-verification; the
  * server takes only `sealedWriteArgs`. */
@@ -124,7 +123,6 @@ export function sealedWrite(
     history: {
       genesis: encode(genesis),
       transitions: transitions.slice(-64).map(encode),
-      rotateLists: [],
     },
     transition: introduced[0] ? encode(introduced[0]) : null,
   };

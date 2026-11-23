@@ -28,6 +28,7 @@ import {
 } from './sealed-share-log.js';
 import { sealedRefusal, sealedWrite, sealedWriteArgs, type SealedReadWire } from './sealed-transport.js';
 import { verifySealedReply, type SealedReply, type SecretPin } from './sealed-verify.js';
+import { markerNotice } from './sealed-unshare.js';
 import type { SealedClient } from './sealed-client.js';
 
 type Verified = ReturnType<typeof verifySealedReply>;
@@ -101,6 +102,9 @@ export async function afterVerified(
   }
   const own = ownDevicesNotice(previous?.roster ?? null, result.pin.roster, client.keys.id);
   if (own) lines.push(own);
+  // GB-10: holders see every removal Forge asks for, until a person's write removes the entries (design 5.5).
+  const marked = markerNotice(result.pin.roster, reply.revoked, client.keys.id);
+  if (marked) lines.push(marked);
   let roster: SecretPin['roster'] | null = result.pin.roster;
   if (wire?.joinRequests?.length && result.key) {
     const shared = await shareWaiting(client, reply, result, wire);
