@@ -10,6 +10,14 @@
   .mr-rule { flex: 1 1 var(--s-5); min-width: var(--s-3); border-top: var(--rule) dashed var(--line-strong); }
   [data-st="passed"] .mr-rule { border-top-style: solid; }
   .mr-cadence { min-height: var(--ctl-h); padding: 0 var(--s-2); border: var(--rule) solid var(--key-edge); border-radius: var(--r); background: var(--surface-2); color: var(--text); }
+  /* A setting row: the words on the left within the measure, their control beside them, not at the far edge. */
+  .mr-set { grid-template-columns: minmax(0, 1fr) auto; }
+  .mr-set > :first-child { max-width: var(--m-wide); overflow-wrap: anywhere; }
+  .mr-set .sub { display: block; }
+  @container (min-width: 880px) {
+    .mr-set { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); column-gap: var(--s-8); }
+    .mr-set > :last-child { justify-self: start; }
+  }
   @media (max-width: 860px) {
     .mr-ends { grid-template-columns: minmax(0, 1fr); padding: var(--gut); }
     .mr-end:last-child { text-align: left; justify-items: start; }

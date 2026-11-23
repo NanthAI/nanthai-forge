@@ -95,7 +95,10 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
         mirror.state !== 'inbound-failed' &&
         !mirror.kept &&
         mirror.owner ? (
-          <div className="pad gs-stack">
+          <div className="pad beside">
+            <p className="t2">
+              Resume once GitHub’s main is the commit Forge pushed last, or the rule allows Forge.
+            </p>
             <div className="btns">
               {mirror.state === 'moved' ? (
                 <Key
@@ -115,9 +118,6 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
                 Resume the mirror
               </Key>
             </div>
-            <p className="t2">
-              Resume once GitHub’s main is the commit Forge pushed last, or the rule allows Forge.
-            </p>
           </div>
         ) : null}
         {command && mirror.direction !== 'off' ? <p className="quietline">Next: {command}</p> : null}
@@ -125,7 +125,7 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
       {mirror.state === 'off' && mirror.owner ? (
         <Region title="Turn the mirror on" weight="ref">
           <form
-            className="pad gs-stack"
+            className="pad beside"
             onSubmit={event => {
               event.preventDefault();
               const repository = (mirror.repository ?? repo).trim();
@@ -137,30 +137,32 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
                 ? 'Resume in Settings below keeps the existing link and its previous direction. If the link needs a new GitHub authorization, allow it here.'
                 : 'With the mirror on, each landing pushes one commit to GitHub’s main, so GitHub stays a full copy you can leave with. GitHub asks you once to allow Forge.'}
             </p>
-            {mirror.repository ? null : (
-              <label className="f">
-                GitHub repository
-                <input
-                  className="inp"
-                  value={repo}
-                  onChange={event => setRepo(event.target.value)}
-                  placeholder="OWNER/NAME"
-                  autoComplete="off"
-                  spellCheck={false}
-                  required
-                />
-              </label>
-            )}
-            <div className="btns">
-              <Key kind="primary" type="submit" disabled={busy}>
-                Allow on GitHub
-              </Key>
-              <Key
-                disabled={busy || !(mirror.repository ?? repo).trim()}
-                onClick={() => void allow((mirror.repository ?? repo).trim(), true)}
-              >
-                One-way only
-              </Key>
+            <div className="gs-stack">
+              {mirror.repository ? null : (
+                <label className="f">
+                  GitHub repository
+                  <input
+                    className="inp"
+                    value={repo}
+                    onChange={event => setRepo(event.target.value)}
+                    placeholder="OWNER/NAME"
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                  />
+                </label>
+              )}
+              <div className="btns">
+                <Key kind="primary" type="submit" disabled={busy}>
+                  Allow on GitHub
+                </Key>
+                <Key
+                  disabled={busy || !(mirror.repository ?? repo).trim()}
+                  onClick={() => void allow((mirror.repository ?? repo).trim(), true)}
+                >
+                  One-way only
+                </Key>
+              </div>
             </div>
           </form>
           <details className="gs-peek">

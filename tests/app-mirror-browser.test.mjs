@@ -171,6 +171,20 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
   await page.getByRole('heading', { name: 'Turn the mirror on', exact: true }).waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   if (shots) await page.screenshot({ path: join(shots, 'mirror-legacy-off.png'), fullPage: true });
+  // Item 0485fe7d: on a wide window the explanation and the buttons it explains share a row, not one narrow column.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await settleBrowserPage(page);
+  const why = await page.getByText(/Resume in Settings below keeps the existing link/).boundingBox();
+  const allow = await page.getByRole('button', { name: 'Allow on GitHub' }).boundingBox();
+  assert.ok(
+    why &&
+      allow &&
+      allow.x >= why.x + why.width &&
+      allow.y < why.y + why.height &&
+      allow.y + allow.height > why.y,
+  );
+  if (shots) await page.screenshot({ path: join(shots, 'mirror-legacy-off-1440.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 1000 });
   await page.getByRole('button', { name: 'Resume', exact: true }).click();
   await page.getByRole('button', { name: 'Pause', exact: true }).waitFor();
   assert.equal(

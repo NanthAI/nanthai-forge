@@ -7,23 +7,27 @@ import { secretPageCount, secretSetLabel, type SecretsMetadata } from './secrets
 export function SecretsGuidance() {
   return (
     <Region title="Secrets for checks">
-      <div className="pad secret-guidance">
-        <p>
-          Declare environment names in <code>env</code> and credential names in <code>credentials</code> on
-          the check definition. Their values must already be in the runner’s environment or CI secret store.
-        </p>
-        <p>
-          Secret Objects do not supply check credentials. They remain available on the current account screen
-          until their agreed export and retirement.
-        </p>
-        <p>
-          The planned shared store is the sealed <b>Development</b> and <b>Checks</b> sets. Machine-key setup
-          and declared-name delivery await the security-reviewed protocol.
-        </p>
-        <p>
-          Names and holders will appear here when it is connected. This page never asks for or shows a secret
-          value.
-        </p>
+      <div className="pad beside">
+        <div className="secret-guidance">
+          <p>
+            Declare environment names in <code>env</code> and credential names in <code>credentials</code> on
+            the check definition. Their values must already be in the runner’s environment or CI secret store.
+          </p>
+          <p>
+            Secret Objects do not supply check credentials. They remain available on the current account
+            screen until their agreed export and retirement.
+          </p>
+        </div>
+        <div className="secret-guidance">
+          <p>
+            The planned shared store is the sealed <b>Development</b> and <b>Checks</b> sets. Machine-key
+            setup and declared-name delivery await the security-reviewed protocol.
+          </p>
+          <p>
+            Names and holders will appear here when it is connected. This page never asks for or shows a
+            secret value.
+          </p>
+        </div>
       </div>
     </Region>
   );

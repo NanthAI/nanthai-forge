@@ -82,7 +82,7 @@ export function MirrorSettings({ mirror, projectId }: { mirror: Mirror; projectI
     });
   return (
     <Region title="Settings" hint={mirror.owner ? 'owner only' : 'only the owner changes these'}>
-      <Row cols="minmax(0, 1fr) auto">
+      <Row cols="" className="mr-set">
         <label htmlFor="mr-cadence" title={mirror.push?.reason}>
           Push cadence
         </label>
@@ -108,7 +108,7 @@ export function MirrorSettings({ mirror, projectId }: { mirror: Mirror; projectI
           </span>
         </Row>
       )}
-      <Row cols="minmax(0, 1fr) auto">
+      <Row cols="" className="mr-set">
         <label htmlFor="mr-inbound">
           Take GitHub pushes back in
           <span className="sub">
@@ -126,7 +126,7 @@ export function MirrorSettings({ mirror, projectId }: { mirror: Mirror; projectI
           onChange={event => void policy({ inbound: event.target.checked })}
         />
       </Row>
-      <Row cols="minmax(0, 1fr) auto">
+      <Row cols="" className="mr-set">
         <span>
           {paused ? 'Resume the mirror' : 'Pause the mirror'}
           <span className="sub">
@@ -144,7 +144,7 @@ export function MirrorSettings({ mirror, projectId }: { mirror: Mirror; projectI
         )}
       </Row>
       {mirror.repository ? (
-        <Row cols="minmax(0, 1fr) auto">
+        <Row cols="" className="mr-set">
           <span>
             Disconnect {mirror.repository}
             <span className="sub">

@@ -88,6 +88,11 @@ test('Secrets: value-free screen, honest states, accessible themes and zero prot
       );
       await page.getByRole('button', { name: 'nforge agent . secrets Proposed' }).press('Enter');
       assert.equal(await page.locator('#secrets-cli').count(), 0);
+      // Item 0485fe7d: on a wide window the two guidance columns sit side by side, not one narrow column.
+      const [today, planned] = await page
+        .locator('.secret-guidance')
+        .evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().toJSON()));
+      assert.ok(planned.left >= today.right && Math.abs(planned.top - today.top) < 2);
       await capture('unavailable');
     },
   );

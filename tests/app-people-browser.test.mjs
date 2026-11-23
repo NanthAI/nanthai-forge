@@ -220,6 +220,22 @@ root.render(owner?
         if (shots)
           await page.screenshot({ path: join(shots, `${mode}-${width}-${theme}.png`), fullPage: true });
         if (mode === 'owner') {
+          if (width === 1440) {
+            // Item 0485fe7d: the sentence and the link that changes it share a row, the link not at the far edge.
+            const row = await page.locator('.people-quiet').boundingBox();
+            const words = await page.locator('.people-quiet > .ttl').boundingBox();
+            const link = await page.getByRole('link', { name: /in Landing and checks/ }).boundingBox();
+            assert.ok(
+              row &&
+                words &&
+                link &&
+                link.x >= words.x + words.width &&
+                link.y < words.y + words.height &&
+                link.y + link.height > words.y &&
+                row.x + row.width - (link.x + link.width) > 100,
+              'link beside its sentence',
+            );
+          }
           // Linked teams: one read of the links on open, none of the owner's own teams until the form opens.
           const teams = page.getByRole('region', { name: 'Teams', exact: true });
           await teams.getByText('Documentation team', { exact: true }).waitFor();

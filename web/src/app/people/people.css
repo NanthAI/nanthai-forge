@@ -10,6 +10,8 @@
   .people-who { flex: 1 1 260px; min-width: 0; }
   .people-role { display: grid; gap: 5px; font-size: var(--t-meta); color: var(--text-2); font-weight: var(--w-strong); }
   .people-quiet { grid-template-columns: minmax(0, 1fr) auto; }
+  /* The sentence and the link that changes it sit side by side on a wide region, not at opposite edges. */
+  @container (min-width: 880px) { .people-quiet { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); column-gap: var(--s-8); } .people-quiet > :last-child { justify-self: start; } }
   .people-teams .row.acc .nm .who > span:last-child { min-width: 0; white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
   .people-quiet > .ttl { font-weight: var(--w-regular); color: var(--text-2); }
   /* Account > People and teams: a team is its name and one line, its members as handles, then the owner's add form. */
