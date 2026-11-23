@@ -26,7 +26,7 @@ import {
   type LaneMeta,
   type QueueEntry,
 } from '../../web/src/app/lanes/model';
-import { WaitRow } from '../../web/src/app/lanes/Touching';
+import { WaitChains, type ChainLane } from '../../web/src/app/lanes/WaitChains';
 import { HistoryView } from '../../web/src/app/lanes/History';
 import { Yard } from '../../web/src/app/lanes/Yard';
 import type { LineFeed } from '../../web/src/app/Line';
@@ -175,15 +175,51 @@ const yard = params.has('stall')
       NOW,
     )
   : buildYard(feed, lanes, { total: 2, held: 1, listed: 3, more: false, entries }, NOW);
+const base = [
+  ...entries,
+  { position: 3, laneId: ids.acct1, phase: 'queued', submittedAt: at(9), lastProgressAt: at(9) },
+] as QueueEntry[];
+// `?waits=12` / `?waits=50`: that many open Lanes in one queue, each behind the one ahead, plus one held for a person
+// and a loop of two Lanes that depend on each other (`?waits=loop` is the loop alone), with long and non-Latin titles.
+const crowd = Number(params.get('waits'));
+const lane = (n: number) => `b0000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const crowded: QueueEntry[] = Array.from({ length: Number.isFinite(crowd) ? crowd : 0 }, (_, i) => ({
+  position: i + 1,
+  laneId: lane(i),
+  landingState: { state: i === 0 ? 'checking' : 'waiting-for-order' },
+  phase: i === 0 ? 'checking' : 'queued',
+  submittedAt: at(90 - i),
+  lastProgressAt: at(1),
+}));
+const loop: QueueEntry[] = ['one', 'two'].map((name, i) => ({
+  position: null,
+  laneId: lane(900 + i),
+  submissionId: `loop-${name}`,
+  landingState: { state: 'held-dependency' },
+  phase: 'ready',
+  hold: { kind: 'dependency', reason: 'Waits for the Lane it depends on.', paths: null },
+  dependsOn: { submissionId: `loop-${i ? 'one' : 'two'}` },
+  submittedAt: at(120),
+  lastProgressAt: at(120),
+}));
+const waitEntries = params.get('waits') === 'loop' ? loop : crowd > 0 ? [...crowded, ...loop] : base;
 const titles = new Map(lanes.map(lane => [lane.laneId, lane.intent]));
-const titleOf = (laneId: string) => titles.get(laneId) ?? `Lane ${laneId.slice(0, 8)}`;
-const pairs = waits(
-  [
-    ...entries,
-    { position: 3, laneId: ids.acct1, phase: 'queued', submittedAt: at(9), lastProgressAt: at(9) },
-  ],
-  titleOf,
-);
+const crowdTitle = (laneId: string) => {
+  const n = Number(laneId.slice(-12));
+  return n >= 900
+    ? `A dependency loop, Lane ${n - 899}`
+    : n % 5 === 3
+      ? `長いタイトルのレーンです、番号 ${n}`
+      : `Lane ${n}: ${'a very long Item title that has to be cut '.repeat((n % 4) + 1)}`;
+};
+const titleOf = (laneId: string) =>
+  titles.get(laneId) ?? (laneId.startsWith('b0000000') ? crowdTitle(laneId) : `Lane ${laneId.slice(0, 8)}`);
+const pairs = waits(waitEntries, titleOf);
+const laneOf = (laneId: string): ChainLane => ({
+  title: titleOf(laneId),
+  state: yard.rows.find(row => row.laneId === laneId)?.state ?? (laneId.endsWith('0') ? 'active' : 'waiting'),
+  word: 'open',
+});
 
 const shares = sharesByLane([
   { path: 'web/src/app/account/Projects.tsx', laneIds: [ids.acct1, ids.acct2, ids.acct3] },
@@ -472,16 +508,7 @@ createRoot(document.getElementById('root')!).render(
         />
       ) : null}
       <Region title="Who waits on whom" weight="act" waiting={1} count={pairs.length}>
-        {pairs.map(pair => (
-          <WaitRow
-            key={pair.laneId}
-            pair={pair}
-            titleOf={titleOf}
-            laneHref={id => `#${id}`}
-            decideHref="#needs"
-            now={NOW}
-          />
-        ))}
+        <WaitChains waits={pairs} laneOf={laneOf} laneHref={id => `#${id}`} decideHref="#needs" now={NOW} />
       </Region>
     </main>
   ),

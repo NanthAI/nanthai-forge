@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Who is touching what (Item eb0bbb94): the pairs of Items whose Lanes saved the same files (Item df1f2d46,
-// Crossing.tsx), who waits on whom and why (traced to the front of the queue, Item 9e748e41), the landing
-// queue in order with held Lanes apart, and who has what. Built only from the existing queue, hold and overlap
+// Who is touching what (Item eb0bbb94): which Lanes collide or block each other. The pairs of Items whose Lanes saved
+// the same files (Item df1f2d46, Crossing.tsx), then who waits on whom drawn as chains (WaitChains.tsx, Item 8f94e5c3;
+// traced to the front of the queue, Item 9e748e41). The landing queue and who has what are Lanes > Open's and the top
+// flow strip's, so they are not repeated here (owner 2026-11-23). Built only from the existing queue, hold and overlap
 // records the Lanes place already reads; saved work only, so no row here ever proves two Lanes independent. A yard row's
 // "shares N files with M Lanes" opens this with `?lane=` (Item f787005c): Where Lanes cross then lists the pairs that
 // Lane is in, over its shared files only, with a link back to every pair; the address alone carries it.
 import { useMemo, type ReactNode } from 'react';
-import { Avatar, Dock, Key, Region, State, useDockLayout, type DockLayout } from '../../ds';
+import { Dock, Key, Region, useDockLayout, type DockLayout } from '../../ds';
 import { CrossList } from './Crossing';
 import { crossPairs, mostlyOne, type CrossSide } from './cross-pairs';
 import { A } from '../frames';
@@ -14,22 +15,12 @@ import { hrefFor } from '../paths';
 import { Head, crumbsFor } from '../Place';
 import { useSearch } from '../router';
 import type { LanesProps } from './common';
-import { currentEntries, queueEntryState, waitLine, type LaneMark } from '../lane-state';
-import {
-  LANE_FOCUS,
-  buildYard,
-  filesOfLane,
-  sharedFiles,
-  waits,
-  yardReady,
-  type QueueEntry,
-  type Wait,
-  type YardRow,
-} from './model';
+import { currentEntries } from '../lane-state';
+import { LANE_FOCUS, buildYard, filesOfLane, sharedFiles, waits, yardReady, type YardRow } from './model';
+import { WaitChains } from './WaitChains';
 import { useLaneMeta, useQueue, useSharedFiles } from './reads';
 
-const LAYOUT: DockLayout = { top: ['cross'], a: ['waits', 'queue'], b: ['has'] };
-const CAP = 8;
+const LAYOUT: DockLayout = { top: ['cross'], a: ['waits'], b: [] };
 
 /** Which Lanes Forge observed a conflict on: the yard's own state for a Lane (lane-state.ts `isConflict`: a held Lane
  * whose landing ended in conflict, by the cause the Lanes read carries). The line feed's overlap flag is only a shared
@@ -39,14 +30,15 @@ function conflictsOf(yard: { rows: readonly Pick<YardRow, 'laneId' | 'state'>[] 
   return (laneId: string) => found.has(laneId);
 }
 
-const age = (from: string, now: number) => {
-  const minutes = Math.max(0, Math.round((now - Date.parse(from)) / 60_000));
-  return minutes < 60
-    ? `${minutes} min`
-    : minutes < 2880
-      ? `${Math.round(minutes / 60)} h`
-      : `${Math.round(minutes / 1440)} d`;
-};
+/** Why the pair list may be short, said once: the overlap read holds every Lane's saved files only up to a limit (a
+ * very long list of changed files, or more Lanes than one read holds), and says only that it is partial. */
+function notCompared(compared: number, open: number | undefined) {
+  const of =
+    open !== undefined && compared < open
+      ? `${compared.toLocaleString()} of ${open.toLocaleString()} open Lanes were compared. `
+      : '';
+  return `${of}For some Lanes Forge holds only part of the saved files (a very long list of changed files, or more Lanes than one read holds), so a pair may be missing.`;
+}
 
 export function Touching({ route, projectId, projectName, feed }: LanesProps) {
   const { lanes, error: laneError } = useLaneMeta(projectId);
@@ -68,7 +60,7 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
   const focus = useSearch().get(LANE_FOCUS);
   const files = useMemo(() => ({ ...all, files: filesOfLane(all.files, focus) }), [all, focus]);
   const everyFile = hrefFor({ ...route, section: 'touching', rest: '' });
-  const markOf = new Map(feed?.lanes.map(mark => [mark.laneId, mark]));
+  const lanesHref = hrefFor({ ...route, section: '', rest: '' });
   const current = currentEntries(queue?.entries ?? []);
   const conflicted = useMemo(() => conflictsOf(yard), [yard]);
   // One side per Item, so an Item with three Lanes is named once; a Lane the Lane page did not list stands alone.
@@ -93,27 +85,16 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
       mostly: focus ? null : mostlyOne(all.files, sideOf),
     };
   }, [all, files, focus, lanes, conflicted, yard]);
-  const ordered = (queue?.entries ?? []).filter(entry => entry.position !== null);
-  // Out of the order: held for a person, a dependency or main, and ended checks; only each Lane's current submission
-  // (an earlier one is history).
-  const held = (queue?.entries ?? []).filter(
-    entry => entry.position === null && (!entry.laneId || current.get(entry.laneId) === entry),
-  );
+  // Only each Lane's current submission waits (an earlier one is history).
   const pairs = waits(
     (queue?.entries ?? []).filter(entry => !entry.laneId || current.get(entry.laneId) === entry),
     titleOf,
   );
   const onPerson = pairs.filter(pair => pair.person).length;
-  const row = (entry: QueueEntry) => (
-    <QueueRow
-      key={entry.submissionId ?? entry.laneId ?? entry.submittedAt}
-      entry={entry}
-      title={entry.laneId ? titleOf(entry.laneId) : (entry.intentTitle ?? 'A landing')}
-      href={entry.laneId ? laneHref(entry.laneId) : null}
-      mark={entry.laneId ? (markOf.get(entry.laneId) ?? null) : null}
-      wait={waitLine(entry, ordered, now)?.line ?? null}
-    />
-  );
+  const laneOf = (laneId: string) => {
+    const row = rowOf.get(laneId);
+    return { title: titleOf(laneId), state: row?.state ?? 'stale', word: row?.word ?? 'open' } as const;
+  };
   const lead = !shared.view
     ? 'Loading the Lanes…'
     : all.files.length
@@ -126,18 +107,6 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
   const rest = queue
     ? `${onPerson ? `${onPerson.toLocaleString()} ${onPerson === 1 ? 'Lane waits' : 'Lanes wait'} on a person, ` : ''}${(pairs.length - onPerson).toLocaleString()} on another Lane or on main.`
     : '';
-  const more = (n: number, words: string) =>
-    n > 0 ? (
-      <div className="pf">
-        {n.toLocaleString()} {words}.{' '}
-        <a
-          className="lk"
-          href={`/${encodeURIComponent(route.handle)}/${encodeURIComponent(route.project)}/lanes`}
-        >
-          Every open Lane
-        </a>
-      </div>
-    ) : null;
   const regions = [
     {
       id: 'cross',
@@ -201,43 +170,11 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
             </p>
           )}
           {shared.view && !files.complete ? (
-            <div className="pf">Some Lanes were not compared, so this list may be short.</div>
+            <div className="pf">
+              {notCompared(shared.view.lanes.length, lanes?.length)}{' '}
+              <code className="mono">nforge agent . peers</code> checks one Lane exactly.
+            </div>
           ) : null}
-        </Region>
-      ),
-    },
-    {
-      id: 'has',
-      title: 'Who has what',
-      render: (handle: ReactNode) => (
-        <Region
-          title="Who has what"
-          handle={handle}
-          weight="ref"
-          count={yard?.rows.length}
-          hint="open Lanes, latest change first"
-        >
-          {(yard?.rows ?? [])
-            .slice()
-            .sort((a, b) => b.changedAt - a.changedAt)
-            .slice(0, 12)
-            .map(row => (
-              <A key={row.laneId} className="row lanes-has" href={laneHref(row.laneId)}>
-                <Avatar handle={row.actor ?? '?'} />
-                <span className="any">
-                  <span className="ttl wrap2" dir="auto">
-                    {row.title}
-                  </span>
-                  <span className="meta mono cut" translate="no">
-                    {row.actor ?? 'not reported'}
-                  </span>
-                </span>
-                <State word={row.glyph} state={row.state}>
-                  {row.word}
-                </State>
-              </A>
-            ))}
-          {more((yard?.rows.length ?? 0) - 12 + (yard?.beyond ?? 0), 'more open Lanes')}
         </Region>
       ),
     },
@@ -251,47 +188,24 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
           weight={onPerson ? 'act' : 'watch'}
           waiting={onPerson}
           count={queue ? pairs.length : undefined}
-          hint="waits on a person first, longest first"
+          hint="longest wait first"
         >
           {queueError ? <p className="quietline">The landing queue could not be read.</p> : null}
           {queue && !pairs.length ? <p className="quietline">No Lane is waiting on another.</p> : null}
-          {pairs.slice(0, CAP).map(pair => (
-            <WaitRow
-              key={pair.laneId}
-              pair={pair}
-              titleOf={titleOf}
-              laneHref={laneHref}
-              decideHref={hrefFor({ ...route, place: 'needs', section: '', rest: '' })}
-              now={now}
-            />
-          ))}
-          {more(pairs.length - CAP, 'more waits, none on a person')}
-        </Region>
-      ),
-    },
-    {
-      id: 'queue',
-      title: 'Landing queue',
-      render: (handle: ReactNode) => (
-        <Region
-          title="Landing queue"
-          handle={handle}
-          weight="watch"
-          count={queue ? queue.total : undefined}
-          hint="in order, each checked on top of the one before"
-        >
-          {queue && !ordered.length ? <p className="quietline">Nothing is in the landing queue.</p> : null}
-          {ordered.map(row)}
-          {queue && queue.more ? <div className="pf">More are in the queue than are listed here.</div> : null}
-          {held.length ? (
-            <>
-              <div className="band">
-                <span>Held, out of the order</span>{' '}
-                <span className="cnt">{held.length.toLocaleString()}</span>
-              </div>
-              {held.map(row)}
-            </>
-          ) : null}
+          <WaitChains
+            waits={pairs}
+            laneOf={laneOf}
+            laneHref={laneHref}
+            decideHref={hrefFor({ ...route, place: 'needs', section: '', rest: '' })}
+            now={now}
+          />
+          <div className="pf">
+            The landing queue and every open Lane are on{' '}
+            <A className="lk lanes-inline" href={lanesHref}>
+              Lanes
+            </A>
+            .
+          </div>
         </Region>
       ),
     },
@@ -318,99 +232,5 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
         onReset={resetLayout}
       />
     </>
-  );
-}
-
-/** One wait: who waits on whom and why, and for a Lane further back, the front of the queue and why it has not
- * landed (the blocked path, Item 9e748e41). */
-export function WaitRow({
-  pair,
-  titleOf,
-  laneHref,
-  decideHref,
-  now,
-}: {
-  pair: Wait;
-  titleOf: (laneId: string) => string;
-  laneHref: (laneId: string) => string;
-  decideHref: string;
-  now: number;
-}) {
-  return (
-    <div className="row lanes-wait">
-      <span className="any">
-        <A className="ttl" href={laneHref(pair.laneId)} dir="auto">
-          {titleOf(pair.laneId)}
-        </A>{' '}
-        <span className="t3">waits on</span>{' '}
-        <span className="ttl" dir="auto">
-          {pair.on}
-        </span>
-        <span className="meta" style={{ display: 'block' }} dir="auto">
-          {pair.why || 'no reason was recorded'}
-          {pair.since ? ` · ${age(pair.since, now)}` : ''}
-        </span>
-        {pair.front ? (
-          <span className="meta t3" style={{ display: 'block' }} dir="auto">
-            {pair.front.ahead.toLocaleString()} Lanes ahead; the queue moves when{' '}
-            <A className="lk lanes-inline" href={laneHref(pair.front.laneId)} dir="auto">
-              {pair.front.title}
-            </A>{' '}
-            lands ({pair.front.why})
-          </span>
-        ) : null}
-      </span>
-      {pair.person ? (
-        <A className="btn sm rec" href={decideHref}>
-          Decide
-        </A>
-      ) : null}
-    </div>
-  );
-}
-
-function QueueRow({
-  entry,
-  title,
-  href,
-  mark,
-  wait,
-}: {
-  entry: QueueEntry;
-  title: string;
-  href: string | null;
-  mark: LaneMark | null;
-  wait: string | null;
-}) {
-  const name = href ? (
-    <A className="ttl cut" href={href} dir="auto">
-      {title}
-    </A>
-  ) : (
-    <span className="ttl cut" dir="auto">
-      {title}
-    </span>
-  );
-  const said = queueEntryState(entry, mark);
-  return (
-    <div className="row lanes-q">
-      <span className="qn" aria-label={entry.position ? `number ${entry.position}` : 'held'}>
-        {entry.position ?? '–'}
-      </span>
-      <span className="any">
-        {name}
-        <span className="meta cut" style={{ display: 'block' }}>
-          {entry.hold?.reason ??
-            (entry.position === null
-              ? said.why
-              : entry.position === 1
-                ? 'lands next'
-                : (wait ?? `behind ${entry.position - 1}`))}
-        </span>
-      </span>
-      <State word={said.glyph} state={said.kind}>
-        {said.word}
-      </State>
-    </div>
   );
 }

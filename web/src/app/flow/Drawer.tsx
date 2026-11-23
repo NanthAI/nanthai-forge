@@ -98,7 +98,7 @@ function River({
         : {})}
     >
       <span className="w">
-        <span className="ttl" dir="auto">
+        <span className="ttl" dir="auto" title={title}>
           {title}
         </span>
         <span className="meta">

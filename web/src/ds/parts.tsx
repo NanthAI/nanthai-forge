@@ -5,6 +5,7 @@
 import { useCallback, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
 import { useFirstStop } from './first-stop';
 import { Count, Glyph, type StateKind } from './marks';
+import { SoloRegionProvider, useSoloRegion } from './solo-region';
 import './review.css';
 import './public.css';
 import './figures.css';
@@ -102,6 +103,8 @@ export function Region({
   const own = useFold(foldState ? undefined : fold, !foldedByDefault);
   const [open, toggle] = foldState ?? own;
   const first = useFirstStop<HTMLElement>(weight === 'act' ? waiting : 'none');
+  // The only region in its Dock: no bar to carry a handle, only the name for assistive technology.
+  const bare = useSoloRegion() && !fold && !foldState && !tools;
   const H = level === 2 ? 'h2' : 'h3';
   const bodyId = fold ? `fold-${fold}` : undefined;
   return (
@@ -111,30 +114,35 @@ export function Region({
       data-weight={weight}
       aria-label={title}
     >
-      <div className={cx('ph', !handle && 'plain')}>
-        {handle}
-        <H>
-          {fold ? (
-            <button
-              type="button"
-              className="fold"
-              aria-expanded={open}
-              aria-controls={bodyId}
-              onClick={toggle}
-            >
-              {title}
-            </button>
-          ) : (
-            title
-          )}
-        </H>
-        {count === undefined ? null : <Count n={count} hot={weight === 'act'} atLeast={countAtLeast} />}
-        {sum ? <span className="sum">{sum}</span> : null}
-        {hint ? <span className="hint">{hint}</span> : null}
-        {tools ? <span className="tools">{tools}</span> : null}
-      </div>
+      {bare ? (
+        <H className="sr">{title}</H>
+      ) : (
+        <div className={cx('ph', !handle && 'plain')}>
+          {handle}
+          <H>
+            {fold ? (
+              <button
+                type="button"
+                className="fold"
+                aria-expanded={open}
+                aria-controls={bodyId}
+                onClick={toggle}
+              >
+                {title}
+              </button>
+            ) : (
+              title
+            )}
+          </H>
+          {count === undefined ? null : <Count n={count} hot={weight === 'act'} atLeast={countAtLeast} />}
+          {sum ? <span className="sum">{sum}</span> : null}
+          {hint ? <span className="hint">{hint}</span> : null}
+          {tools ? <span className="tools">{tools}</span> : null}
+        </div>
+      )}
       <div id={bodyId} hidden={fold ? !open : undefined} className="rbody">
-        {children}
+        {/* The rule is for the dock's own region, never one drawn inside it. */}
+        <SoloRegionProvider value={false}>{children}</SoloRegionProvider>
       </div>
     </section>
   );

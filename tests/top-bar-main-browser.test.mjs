@@ -395,6 +395,48 @@ test('the top bar main segment and side rails stay accessible at responsive widt
       }
     });
     await t.test(
+      'the brand spot always reads Forge beside the mark; a conflict is announced, never drawn in the name (Item 8f94e5c3)',
+      async () => {
+        const page = await browser.newPage({ viewport: { width: 1440, height: 800 } });
+        try {
+          await routeFixture(page, out, html);
+          await page.goto('https://forge.test/top.html');
+          const brand = page.locator('.brand').first();
+          await brand.waitFor();
+          assert.equal((await brand.innerText()).trim(), 'Forge');
+          await page.evaluate(() =>
+            window.dispatchEvent(
+              new CustomEvent('deliver-line', {
+                detail: previous => ({
+                  ...previous,
+                  lanes: [
+                    {
+                      laneId: 'c0000000-0000-4000-8000-000000000001',
+                      stage: 'saved',
+                      held: true,
+                      fix: true,
+                      overlap: true,
+                      changedAt: 1,
+                    },
+                  ],
+                }),
+              }),
+            ),
+          );
+          // The real incident: a held Lane with a conflict put "Conflict" in the name's place.
+          await page
+            .locator('[role="status"]', { hasText: 'Conflict' })
+            .first()
+            .waitFor({ state: 'attached' });
+          assert.equal((await brand.innerText()).trim(), 'Forge');
+          assert.equal(await brand.locator('.st').count(), 0, 'no state pill in the brand spot');
+        } finally {
+          await page.close();
+        }
+      },
+    );
+
+    await t.test(
       '29 updates travel in one delivery, and reduced motion draws the same final stops instantly',
       async t => {
         for (const reducedMotion of ['no-preference', 'reduce']) {

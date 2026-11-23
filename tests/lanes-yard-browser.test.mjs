@@ -193,18 +193,110 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
       async t => {
         const page = await open(t, DESK);
         const lines = await page
-          .locator('.lanes-wait')
+          .locator('.wc')
           .evaluateAll(nodes => nodes.map(node => node.textContent.replace(/\s+/g, ' ').trim()));
-        assert.equal(lines.length, 3);
-        assert.match(lines[0], /^Public pages.* waits on a person/);
-        const back = lines.find(line => line.startsWith('Account Projects'));
-        assert.match(back, /waits on Stamp every save and landing with who made it/);
+        assert.equal(lines.length, 2, 'two chains: the queue, and the Lane held for a person');
+        const queue = lines.find(line => line.startsWith('Account Projects'));
         assert.match(
-          back,
+          queue,
+          /Account Projects page in the redesign.*Stamp every save.*Hosted CLI and agent workflow/,
+        );
+        assert.match(
+          queue,
           /2 Lanes ahead; the queue moves when Hosted CLI and agent workflow papercuts lands \(its check restarted 3 times because main moved\)/,
         );
-        const next = lines.find(line => line.startsWith('Stamp every save'));
-        assert.doesNotMatch(next, /Lanes ahead/, 'directly behind the front, the one hop is the whole path');
+        const person = lines.find(line => line.startsWith('Public pages'));
+        assert.match(person, /a person.*Decide/);
+      },
+    );
+
+    await t.test(
+      'who waits on whom is a picture at 12 and 50 open Lanes: chips never overlap or cut the page, and a phone stacks the chain (Item 8f94e5c3)',
+      async t => {
+        for (const [viewport, query] of [
+          [DESK, '?waits=12'],
+          [DESK, '?waits=50'],
+          [PHONE, '?waits=12'],
+          [PHONE, '?waits=50'],
+          [DESK, '?waits=loop'],
+          [PHONE, '?waits=loop'],
+        ]) {
+          const page = await open(t, viewport, query, '/yard.html', '.wc');
+          const chips = await page.locator('.wc').evaluateAll(chains =>
+            chains.map(chain =>
+              [...chain.querySelectorAll('.wc-chip, .wc-end, .wc-skip')].map(node => {
+                const box = node.getBoundingClientRect();
+                const text = node.querySelector('.wc-t');
+                return {
+                  box: [box.left, box.top, box.right, box.bottom],
+                  cut: text ? text.scrollWidth > text.clientWidth + 1 : false,
+                  titled: text ? Boolean(node.getAttribute('title')) : true,
+                };
+              }),
+            ),
+          );
+          const where = `${viewport.width} ${query}`;
+          for (const chain of chips)
+            for (const [i, a] of chain.entries())
+              for (const b of chain.slice(i + 1))
+                assert.ok(
+                  a.box[2] <= b.box[0] + 0.5 ||
+                    b.box[2] <= a.box[0] + 0.5 ||
+                    a.box[3] <= b.box[1] + 0.5 ||
+                    b.box[3] <= a.box[1] + 0.5,
+                  `chips never overlap at ${where}`,
+                );
+          assert.ok(
+            chips.flat().every(chip => chip.titled),
+            `a cut title keeps its full text as a tooltip at ${where}`,
+          );
+          if (query === '?waits=loop')
+            assert.equal(await page.locator('.wc-loop').count(), 1, 'a loop is marked');
+          else {
+            const first = await page.locator('.wc').first().locator('.wc-age').allTextContents();
+            const lengths = await page.locator('.wc').evaluateAll(list => list.length);
+            assert.ok(lengths <= 8, `the list is capped at 8 chains, got ${lengths}`);
+            assert.ok(
+              first.length > 0 && first.every(age => /^\d+ (min|h|d)$/.test(age)),
+              `each arrow says how long: ${first}`,
+            );
+            if (query.endsWith('50'))
+              assert.match(
+                await page.locator('.wc-skip').first().textContent(),
+                /^\d+ more Lanes$/,
+                '50 Lanes skip the middle',
+              );
+          }
+          const path = chips[0].map(chip => chip.box);
+          if (viewport.width === 390)
+            assert.ok(
+              path.every((box, i) => i === 0 || box[1] >= path[i - 1][3] - 0.5),
+              `a phone stacks the chain downwards at ${where}`,
+            );
+          else
+            assert.ok(
+              path.slice(0, 3).every((box, i) => i === 0 || box[0] >= path[i - 1][2] - 0.5),
+              `a wide screen draws the chain left to right at ${where}`,
+            );
+          const [scroll, inner] = await page.evaluate(() => [
+            document.documentElement.scrollWidth,
+            innerWidth,
+          ]);
+          assert.ok(scroll <= inner, `no sideways scroll at ${where}: ${scroll} > ${inner}`);
+          await page.addScriptTag({ path: axePath });
+          const violations = await page.evaluate(async () => {
+            const result = await window.axe.run(document.querySelector('.wc-list'), {
+              runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
+            });
+            return result.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`);
+          });
+          assert.deepEqual(violations, [], `axe at ${where}`);
+          if (shots)
+            await page.screenshot({
+              path: join(shots, `waits-${query.slice(7)}-${viewport.width}.png`),
+              fullPage: true,
+            });
+        }
       },
     );
 
@@ -473,6 +565,37 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
           1,
           'Back keeps the address',
         );
+      },
+    );
+
+    await t.test(
+      'a Dock with one region draws no header bar or handle; with two it keeps both; Who is touching what is pairs and chains only (Item 8f94e5c3)',
+      async t => {
+        const only = await open(t, DESK, '', LANES, '.yard .ln');
+        const region = only.locator('section.region', {
+          has: only.getByRole('heading', { name: 'On the way to main' }),
+        });
+        assert.equal(await region.locator('> .ph').count(), 0, 'no region header bar on Lanes > Open');
+        assert.equal(await only.locator('.grip').count(), 0, 'no drag handle on a lone region');
+        await only.getByRole('heading', { name: 'On the way to main' }).waitFor({ state: 'attached' });
+        const touching = await open(t, DESK, '', `${LANES}/touching`, '.wc-list, .quietline');
+        for (const title of ['Where Lanes cross', 'Who waits on whom'])
+          assert.equal(
+            (await touching
+              .locator('section.region', { has: touching.getByRole('heading', { name: title }) })
+              .locator('> .ph .grip')
+              .count()) > 0,
+            true,
+            `${title} keeps its handle beside another region`,
+          );
+        for (const gone of ['Landing queue', 'Who has what'])
+          assert.equal(
+            await touching.getByRole('heading', { name: gone }).count(),
+            0,
+            `${gone} is on Lanes, not here`,
+          );
+        const link = touching.locator('a.lanes-inline', { hasText: /^Lanes$/ });
+        assert.match(await link.getAttribute('href'), /\/lanes$/);
       },
     );
 

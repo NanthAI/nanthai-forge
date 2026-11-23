@@ -210,6 +210,15 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
           said ? (
             <>
               <b>{said.lead}</b> {said.rest}
+              {said.next ? (
+                <>
+                  {' '}
+                  <A className="lk lanes-inline" href={laneHref(said.next.laneId)} title={said.next.title}>
+                    The next Lane
+                  </A>{' '}
+                  {said.next.words}.
+                </>
+              ) : null}
             </>
           ) : (
             'Loading the Lanes…'

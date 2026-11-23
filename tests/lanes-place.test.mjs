@@ -135,7 +135,8 @@ test('48049998: Needs you holds the held Lanes this reader decides, Held the res
   assert.equal(yard.next.laneId, 'c', 'next is the queue position 1, never a held Lane');
   assert.deepEqual(model.situation(yard), {
     lead: '1 Lane needs you.',
-    rest: '1 more is held. Check me lands next.',
+    rest: '1 more is held.',
+    next: { laneId: 'c', title: 'Check me', words: 'is next to land' },
   });
   // The yard's stop counts are the top bar's (Line.tsx lineStopCounts): Editing, Saved, In queue, Checking, where a
   // failed check is not counted and a passed one is said apart.
@@ -157,7 +158,8 @@ test('48049998: Needs you holds the held Lanes this reader decides, Held the res
   assert.deepEqual([viewer.counts.needs, viewer.counts.held], [0, 2]);
   assert.deepEqual(model.situation(viewer), {
     lead: 'No Lane needs you.',
-    rest: '2 Lanes are held. Check me lands next.',
+    rest: '2 Lanes are held.',
+    next: { laneId: 'c', title: 'Check me', words: 'is next to land' },
   });
   // Needs me's read is capped (more held than it lists): never "No Lane needs you", and the count is a floor.
   const capped = model.buildYard(
@@ -425,7 +427,7 @@ test("f787005c: a row's shares line opens Who is touching what on that Lane's sh
   assert.deepEqual(model.filesOfLane(files, 'gone'), [], 'a Lane that landed since shares nothing now');
 });
 
-test('who waits on whom puts waits on a person first and each queued Lane on the one ahead', () => {
+test('who waits on whom lists the longest wait first and names the Lane each queued Lane waits on', () => {
   const entries = [
     { position: 1, laneId: 'q1', phase: 'checking', submittedAt: '2026-11-17T10:00:00Z', lastProgressAt: '' },
     { position: 2, laneId: 'q2', phase: 'queued', submittedAt: '2026-11-17T10:01:00Z', lastProgressAt: '' },
@@ -434,17 +436,18 @@ test('who waits on whom puts waits on a person first and each queued Lane on the
       laneId: 'h',
       phase: 'ready',
       submittedAt: '',
-      lastProgressAt: '2026-11-17T09:00:00Z',
+      lastProgressAt: '2026-11-17T10:30:00Z',
       hold: { kind: 'review', reason: '', paths: null },
     },
   ];
   const pairs = model.waits(entries, id => `T-${id}`);
   assert.deepEqual(
-    pairs.map(pair => [pair.laneId, pair.on, pair.person]),
+    pairs.map(pair => [pair.laneId, pair.on, pair.onLane, pair.person]),
     [
-      ['h', 'a person', true],
-      ['q2', 'T-q1', false],
+      ['q2', 'T-q1', 'q1', false],
+      ['h', 'a person', null, true],
     ],
+    'owner 2026-11-23: longest wait first; only a Lane target is an arrow between Lanes',
   );
 });
 

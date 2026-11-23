@@ -301,7 +301,7 @@ Flat: four surface steps and one-pixel seams. A shadow only on a menu, a sheet, 
 
 ## Brand mark states
 
-The F mark is alive. It is the only animated brand element, it is built from the letter's own pieces, and it never carries a message on its own: every state is also shown by a status pill, glyph and word beside it. Source of truth: `web/src/ui/mark.css` and `web/src/ui/brand.tsx` (64 geometry) plus the 16 px cut.
+The F mark is alive. It is the only animated brand element, it is built from the letter's own pieces, and it never carries a message on its own: every state is also said in words (the line's stops and each Lane's own pill, glyph and word, and an announcement for assistive technology). Source of truth: `web/src/ui/mark.css` and `web/src/ui/brand.tsx` (64 geometry) plus the 16 px cut.
 
 ### The pieces
 - **Stem** is main (ink, `currentColor`), split below the lower arm.
@@ -344,7 +344,7 @@ Loops: idle, working, checks, overlap, waiting, queued (slowest 8 s, fastest 2.4
 - No bounce, no overshoot, no shake, no pop, no glow. Settles are strong ease-outs to 100 %.
 - Calming down: after 60 s in a looping state every period doubles (the `--calm` multiplier); after 5 min, or once an idle tab's live reads sleep, the still pose holds and the glyph beside the mark carries the state alone. A state change, a return to the tab or the input that wakes the reads resets the clock.
 - Paused when the tab is hidden and when the mark is off screen. No JavaScript per frame; the state is a `data-state` attribute.
-- In the app's top bar (`web/src/app/mark.ts`) the state comes from the live line feed the frame already reads. Failed is a Lane that leaves Checking held; landed and set aside are the feed's last exit; landing is a Lane ready to land. A first read or a repeated delivery never plays a one-shot. Paused and queued have no field in the feed yet and are not shown. While failed, landed, set aside or overlap is shown, its word takes the name's place beside the mark and is announced.
+- In the app's top bar (`web/src/app/mark.ts`) the state comes from the live line feed the frame already reads. Failed is a Lane that leaves Checking held; landed and set aside are the feed's last exit; landing is a Lane ready to land. A first read or a repeated delivery never plays a one-shot. Paused and queued have no field in the feed yet and are not shown. While failed, landed, set aside or overlap is shown, its word is announced; the name beside the mark is always Forge (owner 2026-11-23).
 - Reduced motion: every state is its end pose, still, and every change is instant. The base rule of each state is its still; animation only adds movement. Every still differs from idle in shape, not only colour (landed excepted, by rule 4). A user may opt in to full motion over the OS setting (`.mk-motion-full` on the root, Settings → You, kept in that browser); the product never opts in for them.
 
 ### Delight (plays once per event, never loops, never always-on)

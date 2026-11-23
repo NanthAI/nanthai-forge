@@ -489,8 +489,13 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString
 
 /** The head's sentence: what needs the reader, what else is held, what is not listed, and what lands next. Counts per
  * stop are the shell strip's alone: a second grouping of the same Lanes here read as a disagreement (owner dogfood
- * 2026-11-17), so the sentence never counts the queue or the work bands. */
-export function situation(yard: Yard): { lead: string; rest: string } {
+ * 2026-11-17), so the sentence never counts the queue or the work bands. What lands next is never named in the
+ * sentence (a full Item title spliced into it read as broken, owner 2026-11-23): `next` carries the Lane for a link and
+ * the words after it, "is next to land" or, while its check runs with a usual time, "lands in about N min". */
+export function situation(
+  yard: Yard,
+  now = Date.now(),
+): { lead: string; rest: string; next: { laneId: string; title: string; words: string } | null } {
   const needs = yard.counts.needs;
   const known = yard.needsKnown === 'all';
   const held = yard.counts.held;
@@ -511,8 +516,22 @@ export function situation(yard: Yard): { lead: string; rest: string } {
       `${yard.beyond.toLocaleString()}${yard.beyondIsLowerBound ? ' or more' : ''} more not shown`,
   ].filter(Boolean) as string[];
   const rest = parts.length ? `${parts.join(', ').replace(/^./, c => c.toUpperCase())}.` : '';
-  const next = yard.next ? ` ${yard.next.title} lands next.` : '';
-  return { lead, rest: (rest + next).trim() };
+  const check = yard.next?.check;
+  const left = check && check.usualMs !== null && !check.note ? check.startedAt + check.usualMs - now : null;
+  return {
+    lead,
+    rest,
+    next: yard.next
+      ? {
+          laneId: yard.next.laneId,
+          title: yard.next.title,
+          words:
+            left !== null && left >= 90_000
+              ? `lands in about ${Math.round(left / 60_000)} min`
+              : 'is next to land',
+        }
+      : null,
+  };
 }
 
 export type Filter = 'all' | 'needs' | 'mine';
@@ -588,6 +607,9 @@ export function sharesWords(shares: LaneShares): string {
 export type Wait = {
   laneId: string;
   on: string;
+  /** The Lane it waits on, when it waits on one (the chains draw an arrow to it); null for a person, main or its own
+   * update. */
+  onLane: string | null;
   why: string;
   since: string | null;
   person: boolean;
@@ -616,7 +638,7 @@ function frontWhy(head: QueueEntry) {
 
 /** Who waits on whom, from the queue alone: held entries wait on a person (or their dependency), an entry main has
  * moved under waits on its own update, and each queued entry waits on the one ahead of it, traced to the front of
- * the queue when Lanes stand between. People first, then the longest wait. */
+ * the queue when Lanes stand between. The longest wait first. */
 export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) => string): Wait[] {
   const queued = entries.filter(entry => entry.position !== null).sort((a, b) => a.position! - b.position!);
   const head = queued[0];
@@ -627,6 +649,7 @@ export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) 
       out.push({
         laneId: entry.laneId,
         on: 'its own update from main',
+        onLane: null,
         why: `main already changed ${taken(entry.needsSync)}`,
         since: entry.lastProgressAt,
         person: false,
@@ -635,6 +658,7 @@ export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) 
       out.push({
         laneId: entry.laneId,
         on: 'a person',
+        onLane: null,
         why: entry.hold.reason,
         since: entry.lastProgressAt,
         person: true,
@@ -658,6 +682,7 @@ export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) 
       out.push({
         laneId: entry.laneId,
         on: parent ? titleOf(parent.laneId!) : 'the Lane it depends on',
+        onLane: parent?.laneId ?? null,
         why: parent
           ? `it lands after it; ${
               parent.hold?.kind === 'review'
@@ -679,6 +704,7 @@ export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) 
       out.push({
         laneId: entry.laneId,
         on: 'main',
+        onLane: null,
         why: 'main’s full check is red',
         since: entry.lastProgressAt,
         person: false,
@@ -698,6 +724,7 @@ export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) 
       out.push({
         laneId: entry.laneId,
         on: wait?.aheadLaneId ? titleOf(wait.aheadLaneId) : `number ${entry.position - 1} in the queue`,
+        onLane: wait?.aheadLaneId ?? null,
         why: wait?.reason ?? 'next in the queue behind it',
         since: entry.submittedAt,
         person: false,
@@ -705,9 +732,7 @@ export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) 
       });
     }
   }
-  return out.sort(
-    (a, b) => Number(b.person) - Number(a.person) || (a.since ?? '').localeCompare(b.since ?? ''),
-  );
+  return out.sort((a, b) => (a.since ?? '~').localeCompare(b.since ?? '~'));
 }
 
 /** The bands: landed today, then each earlier day, newest first. Days are UTC project days, the boundary of the top

@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState, type PointerEventHandler } from 'react';
 import { createPortal } from 'react-dom';
 import type { DockRegion } from './behaviour';
+import { SoloRegionProvider } from './solo-region';
 
 type RegionHosts = { body: HTMLDivElement; grip: HTMLSpanElement };
 export type DockHosts = ReadonlyMap<string, RegionHosts>;
@@ -55,8 +56,16 @@ export function useDockRegions(regions: readonly DockRegion[]) {
   // Keep it mounted while the host moves between rows or from first paint to the behaviour layer.
   const content = regions.map(region => {
     const host = hosts.get(region.id)!;
+    // One region has nothing to be moved among: no handle, and its Region draws no header bar (solo-region.ts).
+    const solo = regions.length === 1;
     return connected.has(host.body)
-      ? createPortal(region.render(<DockMount host={host.grip} />), host.body, region.id)
+      ? createPortal(
+          <SoloRegionProvider value={solo}>
+            {region.render(solo ? undefined : <DockMount host={host.grip} />)}
+          </SoloRegionProvider>,
+          host.body,
+          region.id,
+        )
       : null;
   });
   return { hosts, content, onAttach };

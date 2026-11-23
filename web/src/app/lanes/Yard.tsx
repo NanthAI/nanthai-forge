@@ -297,6 +297,7 @@ function LaneLine({
           className={dense ? 'ttl ln-open' : 'ttl ln-open wrap2'}
           href={checkHref ?? href}
           dir="auto"
+          title={row.title}
           aria-label={name === row.title ? undefined : name}
         >
           {row.title}
@@ -339,7 +340,8 @@ function LaneLine({
           {row.word}
         </State>
         <span className="why">
-          <b>{why}</b>
+          {/* The word beside the dot already says it: never "Held" then "held" (owner 2026-11-23). */}
+          {why.toLowerCase() === row.word.toLowerCase() ? null : <b>{why}</b>}
           {detail ? <> {detail}</> : null}
         </span>
         <span className="sr">. {where}</span>

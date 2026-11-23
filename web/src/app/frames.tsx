@@ -5,7 +5,7 @@
 // behaviour layer (decisions.md, shared-base rule 3). Each frame has a skip link, one main landmark and the phone tabs.
 import { lazy, Suspense, useState, type FocusEvent, type ReactNode } from 'react';
 import type { Id } from '../../../convex/_generated/dataModel';
-import { Avatar, Count, DockPerson, Menu, State, initials, type MenuAction } from '../ds';
+import { Avatar, Count, DockPerson, Menu, initials, type MenuAction } from '../ds';
 import { Rail } from '../ds/Rail';
 import { RailControls, useRailState } from '../ds/rail-state';
 import { ForgeMark } from '../ui/brand';
@@ -73,7 +73,9 @@ function showPageFocus(event: FocusEvent<HTMLElement>) {
   });
 }
 
-/** The F follows the project (mark.ts). Its word takes the name's place while the state needs one, and is announced. */
+/** The F follows the project (mark.ts). The name beside it is always Forge: a state word (Conflict, Check failed…) is
+ * announced to assistive technology and drawn where the work is, never in place of the name (owner 2026-11-23: the
+ * brand spot read "Conflict" beside the logo). */
 function Brand({
   href,
   feed,
@@ -88,7 +90,7 @@ function Brand({
     <>
       <A className="brand" href={href} translate="no" aria-label="Forge">
         <ForgeMark state={state} motion={motion} size={20} />
-        {word ? <State word={word} /> : <span>Forge</span>}
+        <span>Forge</span>
       </A>
       <span className="sr" role="status">
         {word}
