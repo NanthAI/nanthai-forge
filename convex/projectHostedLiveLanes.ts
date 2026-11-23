@@ -203,7 +203,7 @@ export const list = query({
         const receipt =
           overlap !== undefined && !stamped ? await landedByReceipt(ctx, projectId, lane) : null;
         const evidence =
-          overlap !== undefined && !stamped && !receipt ? overlapEvidence(lane, overlap) : null;
+          overlap !== undefined && !stamped && !receipt ? await overlapEvidence(ctx, lane, overlap) : null;
         const stale = dormant
           ? {
               dormant: true,

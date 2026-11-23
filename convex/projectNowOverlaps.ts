@@ -5,6 +5,7 @@ import { channelRow } from './projectHostedChannels';
 import { dormantCutoff, rowActivity } from './projectHostedDormancy';
 import { dormantHostedPresence } from './projectHostedPresence';
 import { nowOverlapSignals } from '../src/now-overlap-signals';
+import { overlapLaneChanges } from './projectHostedOverlapChanges';
 import { viewSignals } from '../src/now-overlap-view';
 import { v } from 'convex/values';
 import { query } from './cliServer';
@@ -44,8 +45,11 @@ async function openLanePage(ctx: QueryCtx, projectId: Id<'hostedProjects'>, cuto
       ))
       if (rowActivity(row) > cutoff) yield row;
   };
-  for await (const row of rows()) {
-    const size = JSON.stringify(row).length;
+  for await (const slim of rows()) {
+    // The Now signal needs every saved path: a slim row's list counts against the page like an inline one.
+    const row = { ...slim, changes: await overlapLaneChanges(ctx, slim) };
+    // The page boundary is the inline row's size: the slim-row fields add nothing to it.
+    const size = JSON.stringify({ ...row, pathSummary: undefined, symbolFacts: undefined }).length;
     if (page.length >= OPEN_LANE_ROWS || (page.length && bytes + size > OPEN_LANE_BYTES)) {
       isDone = false;
       break;

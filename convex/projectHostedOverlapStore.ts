@@ -4,6 +4,15 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { z } from 'zod';
 import type { hostedLaneSchema } from '../src/hosted-lane';
 import { mergeOverlapChanges, advanceOverlapMain, type OverlapChange } from '../src/hosted-overlap';
+import { presencePaths } from '../src/hosted-presence';
+import {
+  hasSymbolFacts,
+  joinOverlapBuckets,
+  overlapBucketRows,
+  overlapBucketsOn,
+  overlapLaneChanges,
+  writeOverlapBuckets,
+} from './projectHostedOverlapChanges';
 import { trackLineLane } from './projectLiveLineStore';
 import {
   dropLanePark,
@@ -46,10 +55,10 @@ function looseEndDetails(
 }
 
 type OverlapRow = Doc<'projectHostedOverlapLanes'>;
-/** The saved head's evidence: pending entries swapped back for what the saved head held. */
-function settledEvidence(row: OverlapRow) {
+/** The saved head's evidence: pending entries swapped back for what the saved head held. `current` is the row's list. */
+function settledEvidence(row: OverlapRow, current: string) {
   const touched = new Set(row.settled!.paths);
-  const kept = (JSON.parse(row.changes) as OverlapChange[]).filter(change => !touched.has(change.path));
+  const kept = (JSON.parse(current) as OverlapChange[]).filter(change => !touched.has(change.path));
   return {
     changes: [...kept, ...(JSON.parse(row.settled!.changes) as OverlapChange[])].sort((a, b) =>
       a.path.localeCompare(b.path),
@@ -58,17 +67,17 @@ function settledEvidence(row: OverlapRow) {
   };
 }
 /** Records the saved evidence of the paths a pending delta touches, once per path. */
-function addSettled(row: OverlapRow, delta: OverlapChange[]) {
+function addSettled(row: OverlapRow, current: string, delta: OverlapChange[]) {
   const settled = row.settled ?? { paths: [], changes: '[]', complete: row.complete };
   const known = new Set(settled.paths);
   const added = delta.map(change => change.path).filter(path => !known.has(path));
   if (!added.length) return settled;
-  const current = new Map((JSON.parse(row.changes) as OverlapChange[]).map(change => [change.path, change]));
+  const saved = new Map((JSON.parse(current) as OverlapChange[]).map(change => [change.path, change]));
   return {
     paths: [...settled.paths, ...added],
     changes: JSON.stringify([
       ...(JSON.parse(settled.changes) as OverlapChange[]),
-      ...added.flatMap(path => (current.has(path) ? [current.get(path)!] : [])),
+      ...added.flatMap(path => (saved.has(path) ? [saved.get(path)!] : [])),
     ]),
     complete: settled.complete,
   };
@@ -113,24 +122,48 @@ export async function trackHostedOverlapLane(
   const keepChanges = sameBase || metadata?.rebased === true;
   const sameHead = old?.head === lane.head;
   const unchangedBase = lane.head === lane.base.head && !metadata?.pending;
+  const bucketsOn = overlapBucketsOn();
+  // The list this row held before the write: inline, or joined from its buckets. Read at most once, and only
+  // when the projection can change (a slim row's bucket rows are not read for a write that keeps its list).
+  let oldBuckets: ReturnType<typeof overlapBucketRows> | undefined;
+  const oldBucketRows = () => (oldBuckets ??= overlapBucketRows(ctx, projectId, lane.id));
+  let oldText: string | undefined;
+  const oldList = async () =>
+    (oldText ??= old!.changes ?? joinOverlapBuckets((await oldBucketRows()).map(bucket => bucket.changes)));
+  // A write of a slim row that keeps its saved list as it is (same head and base, nothing new, nothing failed):
+  // `boundOverlapChanges` on its own output returns it unchanged (tests/hosted-overlap-buckets.test.mjs), so no
+  // bucket is read or written, and the row keeps its list summary.
+  const keepsList =
+    bucketsOn &&
+    old !== null &&
+    old.changes === undefined &&
+    old.pathSummary !== undefined &&
+    sameHead &&
+    metadata?.changes === undefined &&
+    !metadata?.restorePending &&
+    (unchangedBase
+      ? old.pathSummary.pathCount === 0 && old.complete
+      : keepChanges && metadata?.complete !== false);
   // Pending deltas never outlive their head: a head move (that save's publish, or any other) and a
   // failed save start from the saved evidence (Item 3f70760d, review of receipt 4401958d).
   const saved =
-    keepChanges && old
-      ? old.settled && (!sameHead || metadata?.restorePending)
-        ? settledEvidence(old)
-        : { changes: JSON.parse(old.changes) as OverlapChange[], complete: old.complete }
-      : { changes: [], complete: false };
-  let projection = unchangedBase
-    ? { changes: '[]', complete: true }
-    : mergeOverlapChanges(
-        saved.changes,
-        metadata?.changes ?? [],
-        saved.complete && (sameHead || metadata?.changes !== undefined) && metadata?.complete !== false,
-      );
+    keepsList || unchangedBase || !(keepChanges && old)
+      ? { changes: [], complete: false }
+      : old.settled && (!sameHead || metadata?.restorePending)
+        ? settledEvidence(old, await oldList())
+        : { changes: JSON.parse(await oldList()) as OverlapChange[], complete: old.complete };
+  let projection: { changes: string | undefined; complete: boolean } = keepsList
+    ? { changes: undefined, complete: old.complete }
+    : unchangedBase
+      ? { changes: '[]', complete: true }
+      : mergeOverlapChanges(
+          saved.changes,
+          metadata?.changes ?? [],
+          saved.complete && (sameHead || metadata?.changes !== undefined) && metadata?.complete !== false,
+        );
   for (const other of unchangedBase ? [] : (metadata?.restorePending ?? []))
     projection = mergeOverlapChanges(
-      JSON.parse(projection.changes),
+      JSON.parse(projection.changes!),
       other.changes,
       projection.complete && other.complete,
     );
@@ -138,7 +171,7 @@ export async function trackHostedOverlapLane(
   const settled =
     ['active', 'paused', 'ready'].includes(lane.state) && keepChanges && sameHead && old && !unchangedBase
       ? metadata?.pending
-        ? addSettled(old, metadata.changes ?? [])
+        ? addSettled(old, await oldList(), metadata.changes ?? [])
         : metadata?.restorePending
           ? metadata.restorePending.length
             ? old.settled
@@ -158,8 +191,8 @@ export async function trackHostedOverlapLane(
       : null;
   if (origin && !unchangedBase)
     projection = mergeOverlapChanges(
-      JSON.parse(origin.changes),
-      JSON.parse(projection.changes),
+      JSON.parse(await overlapLaneChanges(ctx, origin)),
+      JSON.parse(projection.changes!),
       origin.complete && metadata?.complete !== false,
     );
   // Stack membership (Issue ee9d5738): the root is the parent's own root, read once per (re)stack. A
@@ -259,8 +292,22 @@ export async function trackHostedOverlapLane(
     ...(open && lane.park ? { park: lane.park } : {}),
     ...looseEndDetails(old, lane, sameHead, unchangedBase),
     ...(open && !superseded && old?.landed ? { landedMark: true as const } : {}),
-    ...projection,
+    complete: projection.complete,
   };
+  // The list itself: inline (switch off), or buckets and a slim row (switch on). Presence compares the paths summary.
+  const list = projection.changes;
+  const summary = list === undefined ? old!.pathSummary! : presencePaths(list);
+  const slim =
+    list === undefined
+      ? { pathSummary: summary, ...(old!.symbolFacts ? { symbolFacts: true as const } : {}) }
+      : bucketsOn
+        ? { pathSummary: summary, ...(hasSymbolFacts(list) ? { symbolFacts: true as const } : {}) }
+        : { changes: list };
+  if (list !== undefined) {
+    if (bucketsOn) await writeOverlapBuckets(ctx, projectId, lane.id, list, await oldBucketRows());
+    else if (old && old.changes === undefined)
+      for (const row of await oldBucketRows()) await ctx.db.delete(row._id);
+  }
   const at = Date.parse(lane.at);
   const presenceRow = await trackHostedPresence(
     ctx,
@@ -273,6 +320,7 @@ export async function trackHostedOverlapLane(
             ? (lane.holder?.change?.previous?.actor ?? old.actor)
             : (lane.holder?.actor ?? old.actor),
           pointer: old.presenceRow,
+          paths: old.pathSummary ?? presencePaths(old.changes!),
           goal: old.intent,
           ...(old.landedMark ? { landedBefore: true as const } : {}),
         }
@@ -284,7 +332,7 @@ export async function trackHostedOverlapLane(
           ...(value.session ? { session: value.session } : {}),
           ...(value.agent ? { agent: value.agent } : {}),
           goal: value.intent,
-          changes: value.changes,
+          paths: summary,
           at: Number.isFinite(at) ? at : Date.now(),
           ...(value.park ? { park: value.park } : {}),
           ...(value.saves === undefined ? {} : { saves: value.saves }),
@@ -304,7 +352,10 @@ export async function trackHostedOverlapLane(
   );
   // A stamp that did not carry over (a newer head, or a closed Lane) takes its marker row with it.
   if (old?.passedMark && value.passedMark !== old.passedMark) await ctx.db.delete(old.passedMark);
-  const stored = { ...value, ...(presenceRow ? { presenceRow } : {}) };
+  const stored = { ...value, ...slim, ...(presenceRow ? { presenceRow } : {}) };
+  // The in-memory row the trial merge reads carries the list even when the stored one is slim.
+  const withList = (row: Doc<'projectHostedOverlapLanes'>) =>
+    list === undefined ? row : { ...row, changes: list };
   const sourceId = old ? old._id : await ctx.db.insert('projectHostedOverlapLanes', stored);
   if (old) await ctx.db.replace(old._id, stored);
   await trackLineLane(ctx, sourceId, stored, old, false);
@@ -322,7 +373,7 @@ export async function trackHostedOverlapLane(
     await planTrialMerge(
       ctx,
       projectId,
-      { ...stored, _id: old._id, _creationTime: old._creationTime },
+      withList({ ...stored, _id: old._id, _creationTime: old._creationTime }),
       undefined,
     );
   else if (
@@ -339,13 +390,13 @@ export async function trackHostedOverlapLane(
       ctx,
       projectId,
       lane.id,
-      new Set((JSON.parse(stored.changes) as OverlapChange[]).map(change => change.path)),
+      new Set((JSON.parse(list!) as OverlapChange[]).map(change => change.path)),
     );
   else if (old && open && old.head !== lane.head)
     await planTrialMerge(
       ctx,
       projectId,
-      { ...stored, _id: old._id, _creationTime: old._creationTime },
+      withList({ ...stored, _id: old._id, _creationTime: old._creationTime }),
       old.head,
     );
   // Stacked Lanes (Issue dc62b120). A Lane nobody stacked on has no flag and a Lane without `stack`

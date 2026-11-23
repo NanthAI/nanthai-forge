@@ -20,7 +20,8 @@ type PresenceValue = {
   agent?: string;
   session?: import('zod').infer<typeof import('../src/hosted-lane').sessionMetadataSchema>;
   goal: string;
-  changes: string;
+  /** The saved paths' presence summary (presencePaths of the Lane's change list). */
+  paths: PathSummary;
   at: number;
   /** The Lane record's park (Item e1633718). */
   park?: LanePark;
@@ -33,6 +34,7 @@ type PresenceValue = {
   landedBefore?: true;
   passedAt?: number;
 };
+type PathSummary = ReturnType<typeof presencePaths>;
 type Pointer = { id: Id<'projectHostedPresence'>; at: number };
 /** A Lane whose presence data is unchanged rewrites its row at most this often (activity time only). */
 export const PRESENCE_REFRESH_MS = 10 * 60_000;
@@ -54,7 +56,7 @@ export async function trackHostedPresence(
     agent?: string;
     session?: import('zod').infer<typeof import('../src/hosted-lane').sessionMetadataSchema>;
     goal: string;
-    changes: string;
+    paths: PathSummary;
     park?: LanePark;
     saves?: number;
     landedBefore?: true;
@@ -78,7 +80,7 @@ export async function trackHostedPresence(
     ...(value.agent ? { agent: value.agent } : {}),
     ...(value.session ? { session: value.session } : {}),
     goal: value.goal.slice(0, PRESENCE_GOAL_CHARS),
-    ...presencePaths(value.changes),
+    ...value.paths,
     at: value.at,
     ...(value.park ? { park: value.park } : {}),
     ...(value.saves === undefined ? {} : { saves: value.saves }),
@@ -86,7 +88,7 @@ export async function trackHostedPresence(
     ...(value.passedAt === undefined ? {} : { passedAt: value.passedAt }),
   };
   if (pointer) {
-    const before = presencePaths(old.changes);
+    const before = old.paths;
     if (
       old.intentId === row.intentId &&
       old.actor === row.actor &&

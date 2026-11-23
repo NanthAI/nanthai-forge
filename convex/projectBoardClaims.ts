@@ -14,6 +14,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { safeRelative } from '../src/safe-relative';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { overlapLaneChanges } from './projectHostedOverlapChanges';
 
 type Ctx = QueryCtx | MutationCtx;
 /** Live automatic claims one Lane may hold. A claim is freed when the Lane saves the path (removed
@@ -52,7 +53,7 @@ async function laneState(ctx: Ctx, projectId: Id<'hostedProjects'>, laneId: stri
   if (!row?.open) return null;
   let changes: { path?: unknown }[] = [];
   try {
-    changes = JSON.parse(row.changes) as { path?: unknown }[];
+    changes = JSON.parse(await overlapLaneChanges(ctx, row)) as { path?: unknown }[];
   } catch {
     changes = [];
   }

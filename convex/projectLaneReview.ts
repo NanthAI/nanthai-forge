@@ -20,6 +20,7 @@ import { landedTiming } from './projectLaneTiming';
 import { saveFailureForViewer } from './projectHostedSaveStore';
 import { approvalRow, approvalView } from './projectHostedApprovalStore';
 import { deriveApproval } from '../src/approval-state';
+import { overlapLaneChanges, overlapLaneEntries } from './projectHostedOverlapChanges';
 
 /** The owner's open decision on a Lane's own request: asked, declined while it still holds the Lane (the owner may
  * approve instead), or granted and not yet landed (shown, nothing to decide). A settings key is never a Lane; a fork run is decided once. The Needs me request shape. */
@@ -82,7 +83,7 @@ export const read = query({
         offset === 0 && project.owner === user.subject ? approvalRow(ctx, projectId, laneId) : null;
       // The row describes this exact pinned pair only when it was written for the Lane's current head and base.
       const current = !!row && row.head === lane.head && row.baseHead === lane.base.head;
-      const changes: OverlapChange[] = current ? JSON.parse(row.changes) : [];
+      const changes: OverlapChange[] = current ? JSON.parse(await overlapLaneChanges(ctx, row)) : [];
       const page = changes.slice(offset, offset + REVIEW_PAGE);
       const policy = effectivePolicy(project);
       const guarded = new Set(
@@ -118,7 +119,7 @@ export const read = query({
           ]);
           // The peer's exact version of each path this page shows, so the browser can say which lines came from it.
           const files = peerRow
-            ? (JSON.parse(peerRow.changes) as OverlapChange[]).filter(change => shown.has(change.path))
+            ? (JSON.parse(await overlapLaneEntries(ctx, peerRow, shown)) as OverlapChange[])
             : [];
           return {
             laneId: peer,

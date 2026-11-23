@@ -96,7 +96,7 @@ export const forLane = query({
           })
         : null;
       const title = intent ? (intentTitle.safeParse(JSON.parse(intent.value)).data?.outcome ?? null) : null;
-      const { count, lane } = lanePaths(overlap);
+      const { count, lane } = await lanePaths(ctx, overlap);
       const { candidateId, request } = await laneLandingRequest(ctx, projectId, laneId);
       const main = await mainEvidence(ctx, projectId);
       if (!request)

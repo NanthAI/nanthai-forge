@@ -15,15 +15,16 @@ import { summarizeCheckRun } from '../src/hosted-check-summary';
 import { failureCause, failureCauseField } from '../src/check-failure-cause';
 import { landingStateOf } from '../src/landing-state';
 import type { HostedLandingState } from '../src/hosted-landing';
+import { overlapLaneChanges } from './projectHostedOverlapChanges';
 
 const composeCandidate = z.looseObject({ candidateId: z.uuid() });
 /** At most this many changed paths feed attribution; a larger Lane is marked incomplete. */
 const LANE_PATHS = 2_000;
 type Project = Id<'hostedProjects'>;
 
-/** A Lane's changed paths from its overlap row, bounded to LANE_PATHS. No reads. */
-export function lanePaths(overlap: Doc<'projectHostedOverlapLanes'> | null) {
-  const changes = overlap ? (JSON.parse(overlap.changes) as { path: string }[]) : null;
+/** A Lane's changed paths from its overlap row, bounded to LANE_PATHS. A slim row reads its bucket rows. */
+export async function lanePaths(ctx: QueryCtx, overlap: Doc<'projectHostedOverlapLanes'> | null) {
+  const changes = overlap ? (JSON.parse(await overlapLaneChanges(ctx, overlap)) as { path: string }[]) : null;
   const lane = changes
     ? {
         paths: changes.slice(0, LANE_PATHS).map(change => change.path),
@@ -181,7 +182,7 @@ export async function failureCauseReply(
   const lane = knownLane
     ? knownLane.lane
     : laneId
-      ? lanePaths(await laneOverlap(ctx, projectId, laneId)).lane
+      ? (await lanePaths(ctx, await laneOverlap(ctx, projectId, laneId))).lane
       : null;
   const { summary, step, reDefers } = await landingRun(ctx, projectId, row, state);
   const main = await mainEvidence(ctx, projectId);

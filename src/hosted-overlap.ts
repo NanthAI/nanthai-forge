@@ -159,6 +159,11 @@ export function boundOverlapChanges(changes: OverlapChange[], complete = true) {
 export const supersededSummary = (by: string, receiptId: string) =>
   `superseded by Lane ${by} (receipt ${receiptId}): its Intent landed there. Abandon this Lane, or save to make it live again.`;
 
+/** The list's order: by path, ties between distinct strings that collate equally broken by code unit, so the
+ * inline list and the bucketed list (read back in bucket order) never differ. */
+export const byPath = (a: { path: string }, b: { path: string }) =>
+  a.path.localeCompare(b.path) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+
 export function mergeOverlapChanges(previous: OverlapChange[], delta: OverlapChange[], complete = true) {
   const paths = new Map(previous.map(change => [change.path, change]));
   for (const change of delta) {
@@ -173,10 +178,7 @@ export function mergeOverlapChanges(previous: OverlapChange[], delta: OverlapCha
       paths.set(change.path, lines && lineCounts({ before: original, lines }) ? { ...kept, lines } : kept);
     }
   }
-  return boundOverlapChanges(
-    [...paths.values()].sort((a, b) => a.path.localeCompare(b.path)),
-    complete,
-  );
+  return boundOverlapChanges([...paths.values()].sort(byPath), complete);
 }
 
 /** Latest main touch per path replaces a walk through acceptance history. */

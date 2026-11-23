@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Overlap change buckets (Item 411727ba): table projectHostedOverlapChanges holds a Lane's saved entries by path hash so a hook read loads one bucket per peer, not every peer's whole list (~621 KB -> ~30-50 KB); nothing removed yet: the inline field goes in the contract landing after the budgeted backfill",
+  "date": "2026-11-23"
+}

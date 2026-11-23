@@ -5,6 +5,7 @@ import { acceptancePage, acceptancePlan } from './projectHostedAcceptanceStore';
 import { dormantAfterDays } from '../src/agent-parallel-defaults';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { effectivePolicy } from '../src/autonomy-policy';
+import { overlapLaneChanges } from './projectHostedOverlapChanges';
 
 const DAY_MS = 24 * 3_600_000;
 /** Peer window of every overlap read; one more row says the window is full. */
@@ -113,13 +114,19 @@ export async function landedByReceipt(
  * head and the list is small enough to compare: one entry per path with the bytes it ends with
  * (`after`, null = deleted). Null when the evidence is partial, stale or too large to send. */
 export const COMPARE_PATHS = 200;
-export function overlapEvidence(
+export async function overlapEvidence(
+  ctx: QueryCtx,
   lane: { head: string },
-  row: Pick<Doc<'projectHostedOverlapLanes'>, 'head' | 'complete' | 'changes'> | null,
-): { path: string; after: { blob: string; mode: string } | null }[] | null {
+  row: Pick<
+    Doc<'projectHostedOverlapLanes'>,
+    'head' | 'complete' | 'changes' | 'projectId' | 'laneId' | 'pathSummary'
+  > | null,
+): Promise<{ path: string; after: { blob: string; mode: string } | null }[] | null> {
   if (!row || row.head !== lane.head || !row.complete) return null;
+  // A slim row knows how many paths it holds: one too large to compare reads no bucket.
+  if (row.changes === undefined && (row.pathSummary?.pathCount ?? 0) > COMPARE_PATHS) return null;
   try {
-    const changes = JSON.parse(row.changes) as {
+    const changes = JSON.parse(await overlapLaneChanges(ctx, row)) as {
       path: string;
       after: { blob: string; mode: string } | null;
     }[];

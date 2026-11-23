@@ -20,6 +20,8 @@ import { stackingMode } from '../src/agent-parallel-defaults';
 import { laneConflicts } from './projectHostedConflicts';
 import { overlapMainFor } from './projectHostedOverlapMainLog';
 import { landingRequestOriginalDb } from './projectLandingRequestBody';
+import { logIoAttribution } from './ioAttribution';
+import { hasSymbolFacts, overlapLaneChanges, overlapLaneEntries } from './projectHostedOverlapChanges';
 
 /** Path notices were removed (flip 4, Issue 853fcde3); exact trial-merge conflicts replace them. */
 const RETIRED_OVERLAPS = { count: 0, items: [], coverage: 'unavailable' } as const;
@@ -124,22 +126,30 @@ export const read = query({
             }
           : {}),
       };
-      const focus =
-        mine && mine.head === lane.head && mine.baseHead === lane.base.head
-          ? { ...mine, baseSequence, ...links }
-          : {
-              laneId,
-              intentId: lane.intentId,
-              actor: lane.actor,
-              intent: lane.intentId,
-              head: lane.head,
-              baseHead: lane.base.head,
-              ...links,
-              baseSequence,
-              open: lane.state === 'active',
-              changes: '[]',
-              complete: lane.head === lane.base.head,
-            };
+      const current = mine && mine.head === lane.head && mine.baseHead === lane.base.head ? mine : null;
+      // A slim row says without a read whether it saved nothing (the idle skip below).
+      const savedNothing =
+        current?.changes === undefined ? current?.pathSummary?.pathCount === 0 : current.changes === '[]';
+      const focus = current
+        ? {
+            ...current,
+            changes: savedNothing ? '[]' : await overlapLaneChanges(ctx, current),
+            baseSequence,
+            ...links,
+          }
+        : {
+            laneId,
+            intentId: lane.intentId,
+            actor: lane.actor,
+            intent: lane.intentId,
+            head: lane.head,
+            baseHead: lane.base.head,
+            ...links,
+            baseSequence,
+            open: lane.state === 'active',
+            changes: '[]',
+            complete: lane.head === lane.base.head,
+          };
       // A Lane with no saved path changes cannot overlap anything: skip the peer and head
       // reads (the bulk of this query's I/O) instead of scanning every open Lane for nothing.
       const idle = !path && !scope?.length && focus.complete && focus.changes === '[]';
@@ -220,9 +230,25 @@ export const read = query({
         peers.length <= 50 &&
         headers.length <= 50 &&
         unmatched.every(header => dormantLanes?.has(header.key));
+      // A slim peer row's entries are read only as far as this read can use them (Item 411727ba): a path read needs
+      // the entry of that path, a default read the entries of the paths the caller saved (the whole list only when
+      // both sides carry cross-file symbol facts), scope and detail reads the whole list. An inline row already
+      // holds everything. The advice function sees the same entries it would have used from the whole list.
+      const mineSaved = new Set(savedPaths(focus.changes));
+      const mineFacts = !path && !detail && !scope?.length && hasSymbolFacts(focus.changes);
+      const peerChanges = async (peer: (typeof currentPeers)[number]) => {
+        if (peer.changes !== undefined) return peer.changes;
+        if (!peer.open || peer.laneId === laneId) return '[]';
+        if (path) return overlapLaneEntries(ctx, peer, new Set([path]));
+        if (detail || scope?.length || (mineFacts && peer.symbolFacts)) return overlapLaneChanges(ctx, peer);
+        return overlapLaneEntries(ctx, peer, mineSaved);
+      };
+      const peerViews = await Promise.all(
+        currentPeers.map(async peer => ({ ...peer, changes: await peerChanges(peer) })),
+      );
       const advice = hostedOverlapAdvice(
         focus,
-        currentPeers.slice(0, 50),
+        peerViews.slice(0, 50),
         latest,
         main,
         complete,
@@ -316,7 +342,7 @@ export const read = query({
                     saved: new Set(savedPaths(focus.changes)),
                     // Peers already in memory: their open state and saved paths cost no read.
                     peers: (peerLane: string) => {
-                      const peer = currentPeers.find(row => row.laneId === peerLane);
+                      const peer = peerViews.find(row => row.laneId === peerLane);
                       return peer ? { open: peer.open, saved: new Set(savedPaths(peer.changes)) } : undefined;
                     },
                   },
@@ -349,6 +375,11 @@ export const read = query({
           }
         : {};
       const offered = await coordinate();
+      // Bytes by read mode in the spend ledger (Item 411727ba): path (the hook), default, detail, scope.
+      await logIoAttribution(
+        ctx,
+        `overlaps/${path ? 'path' : detail ? 'detail' : scope?.length ? 'scope' : 'default'}`,
+      );
       return JSON.stringify({
         behindMain: advice.behindMain,
         // Installed CLIs before flip 4 part 2 require this field; empty, so they show no path notice.

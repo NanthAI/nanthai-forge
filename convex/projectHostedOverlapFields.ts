@@ -74,8 +74,17 @@ export const hostedOverlapTables = {
     superseded: v.optional(
       v.object({ by: v.string(), receiptId: v.string(), laneHead: v.string(), at: v.string() }),
     ),
-    changes: v.string(),
+    /** The saved change list as JSON. Absent on a slim row (FORGE_OVERLAP_CHANGE_BUCKETS): its entries are
+     * then the rows of projectHostedOverlapChanges, read through convex/projectHostedOverlapChanges.ts. */
+    changes: v.optional(v.string()),
     complete: v.boolean(),
+    /** Slim rows only: some entry carries usable cross-file symbol links, so a default read needs the whole list. */
+    symbolFacts: v.optional(v.literal(true)),
+    /** Slim rows only: the presence path summary (src/hosted-presence presencePaths) of the saved list, so a
+     * record write compares presence without reading a bucket. */
+    pathSummary: v.optional(
+      v.object({ paths: v.array(v.string()), pathCount: v.number(), pathBloom: v.optional(v.string()) }),
+    ),
     /** While background saves settle at this head (Item 3f70760d): the saved evidence of the paths their
      * pending deltas touched (`changes`, entries absent when the saved head did not change the path),
      * so a publish or a failure rebuilds `changes` from the saved head, never from unsaved work. */
@@ -112,6 +121,15 @@ export const hostedOverlapTables = {
     // index-order: caller: convex/projectHostedDormancy.ts#liveOpenOverlapLanes; order: dormancy-off peer window selects newest Lanes by creation time.
     .index('by_project_and_open', ['projectId', 'open'])
     .index('by_project_and_open_and_activity', ['projectId', 'open', 'lastActivityAt']),
+  /** A Lane's saved change entries by path hash (Item 411727ba): up to 64 rows per Lane, each the JSON list of
+   * the entries whose path hashes to `bucket`, exactly as `boundOverlapChanges` produced them. Written only by the Lane
+   * record write, in the same transaction as the slim overlap row; deleted with the Lane's data. */
+  projectHostedOverlapChanges: defineTable({
+    projectId: v.id('hostedProjects'),
+    laneId: v.string(),
+    bucket: v.number(),
+    changes: v.string(),
+  }).index('by_project_and_lane_and_bucket', ['projectId', 'laneId', 'bucket']),
   /** Stacked Lanes (Issue dc62b120): one row per open Lane stacked on a parent Lane, written only by
    * stacked Lane records. It holds the parent head the child is pinned to and one mark per parent
    * event already announced, so each event reaches each dependent once. Deleted when the child

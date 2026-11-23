@@ -18,6 +18,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import { sameResolution, sameStack, type OverlapChange } from '../src/hosted-overlap';
 import { overlapMainSince } from './projectHostedOverlapMainLog';
+import { overlapLaneChanges, overlapLaneEntries } from './projectHostedOverlapChanges';
 import { presenceMayShare } from '../src/hosted-presence';
 import { NOTICE_PATHS } from '../src/conflict-notice-paths';
 import type { TrialTask } from '../src/hosted-trial-merge';
@@ -148,9 +149,16 @@ const laneRow = (ctx: QueryCtx, projectId: Id<'hostedProjects'>, laneId: string)
  * landing of its Intent: no exact conflict names it (Item 3f70760d). */
 const finishedAtHead = (row: Pick<Row, 'head' | 'landed' | 'superseded'>) =>
   (row.landed?.laneHead === row.head && !row.landed.revertedBy) || row.superseded?.laneHead === row.head;
-const changesOf = (row: Pick<Row, 'changes'>): OverlapChange[] => {
+/** The Lane's saved entries, or with `only` just those of the given paths (a slim peer reads only their buckets). */
+const changesOf = async (
+  ctx: QueryCtx,
+  row: Pick<Row, 'changes' | 'projectId' | 'laneId'>,
+  only?: ReadonlySet<string>,
+): Promise<OverlapChange[]> => {
   try {
-    return JSON.parse(row.changes) as OverlapChange[];
+    return JSON.parse(
+      only ? await overlapLaneEntries(ctx, row, only) : await overlapLaneChanges(ctx, row),
+    ) as OverlapChange[];
   } catch {
     return [];
   }
@@ -211,7 +219,7 @@ export async function planTrialMerge(
   previousHead: string | undefined,
 ) {
   if (!row.open || row.head === previousHead) return;
-  const changes = changesOf(row);
+  const changes = await changesOf(ctx, row);
   const mine = new Map(changes.map(change => [change.path, change]));
   if (!mine.size) {
     if (row.conflicted) await closeConflictNotices(ctx, projectId, row.laneId, 'save');
@@ -246,7 +254,7 @@ export async function planTrialMerge(
   for (const peer of peerRows) {
     if (peers.size >= TRIAL_PEERS) break;
     let shared = false;
-    for (const change of changesOf(peer)) {
+    for (const change of await changesOf(ctx, peer, minePaths)) {
       const own = mine.get(change.path);
       if (!own || (tasks.size >= TRIAL_PATHS && !tasks.has(change.path))) continue;
       const task = tasks.get(change.path) ?? {
