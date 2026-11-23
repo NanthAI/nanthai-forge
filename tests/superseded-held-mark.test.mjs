@@ -401,3 +401,22 @@ test('the legacy repair marks a hold whose submission is gone, reads each submis
   assert.deepEqual(first.unread, []);
   assert.equal(marks(f)[0].fix, true);
 });
+
+test('incident replay 9b9057a9 (Lane 88671ba0): a composition-conflict hold whose landing is later gone still names its reason and asks no one', async t => {
+  const f = await finishFixture(t);
+  await heldAtSave(f);
+  // A sync conflict moved the Lane to a resolution Lane and its landing record left the read.
+  await run(f, 'landingGone', async ctx => {
+    const owner = [...f.tables.projectFinishReadRows.values()].find(
+      entry => entry.kind === 'projectLiveLineOwner' && entry.sourceId === f.lane.laneId,
+    );
+    await ctx.db.patch(owner._id, { submissionId: undefined });
+  });
+  const attention = await needsRead(f);
+  assert.equal(attention.held.length, 1);
+  assert.equal(attention.held[0].why, 'conflict', 'the exact conflict flag still names it');
+  assert.equal(needsCount(attention).n, 0, 'a conflict is its agent’s: nothing waits on the owner here');
+  const feed = await lineRead(f);
+  assert.equal(feed.lanes[0].held, true);
+  assert.equal(feed.lanes[0].fix, true, 'the line says it is held on the Lane’s own next step');
+});

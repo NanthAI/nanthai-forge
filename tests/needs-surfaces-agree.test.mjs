@@ -200,3 +200,62 @@ test('9b9057a9 review: a capped read says "at least" on the Held headline', () =
   const view = model.needsView(read([held('a', 'check-failed')], { more: 3, moreIsLowerBound: true }), NOW);
   assert.match(model.heldSentence(view).bold, /^At least 1 Lane is held now\.$/);
 });
+
+// Incident replay 9b9057a9 (Lane 88671ba0, Item ffb6cc49, 2026-11-23 08:51Z). The Licence work had three Lanes in one
+// chain: 88671ba0's landing ended in a composition conflict (held, its agent's to fix; its landing was then replaced by
+// the resolution Lane's), and the resolution's landing waited for the owner's protected-path approval. The board said
+// "Needs you · held, why not reported" on the conflicted Lane, which has no approve action, while the owner's real
+// approval is a different Lane's. Every surface must send the owner to the approval and say plainly that the conflicted
+// Lane waits on its agent.
+test('incident replay 9b9057a9: the owner approval and the conflicted Lane in one chain, on every surface', () => {
+  const approval = held('af85c71e', 'review', {
+    submissionId: '4a6e7ec2',
+    attemptId: 'attempt-1',
+    title: 'Licence: AGPL-3.0-only',
+  });
+  const conflicted = held('88671ba0', 'conflict', { submissionId: null, title: 'Licence: AGPL-3.0-only' });
+  const input = read([conflicted, approval]);
+  const view = model.needsView(input, NOW);
+  const said = surfaces(input, [
+    mark('88671ba0', { fix: true, overlap: true }),
+    mark('af85c71e', { stage: 'ready' }),
+  ]);
+
+  assert.equal(said.badge, 1, 'top bar and sidebar badge: the one approval');
+  assert.deepEqual(
+    view.now.map(row => [row.laneId, row.word, row.landing?.submissionId]),
+    [['af85c71e', 'Needs you', '4a6e7ec2']],
+    'Needs you lists the approval, with the exact attempt to approve',
+  );
+  assert.ok(view.now[0].landing?.attemptId, 'the row carries an approve action (decideTarget)');
+  assert.match(said.nowHeadline.bold, /^1 thing holds work until you decide\.$/);
+  const waiting = count.waitingLanes(count.needsYouLanes(input, NOW));
+  const feed = {
+    lanes: [mark('88671ba0', { fix: true, overlap: true }), mark('af85c71e', { stage: 'ready' })],
+    more: 0,
+    moreIsLowerBound: false,
+    main: null,
+  };
+  const heldAt = stage =>
+    lineStopCounts(
+      feed,
+      lineStops.find(stop => stop.stage === stage),
+      waiting,
+    ).held;
+  assert.deepEqual(
+    [heldAt('saved'), heldAt('checking')],
+    [0, 1],
+    'the line counts the approval, not the conflicted Lane',
+  );
+  assert.equal(said.mark, 'waiting', 'the F waits for the owner even with the approved Lane past its check');
+  assert.deepEqual(said.heldPageRows.sort(), ['held:4a6e7ec2', 'held:88671ba0'].sort());
+  // The conflicted Lane is held on its agent, in its own words, never "Needs you" and never "why not reported".
+  const fyiRow = view.fyi.find(row => row.laneId === '88671ba0');
+  assert.equal(fyiRow.word, 'Conflict');
+  assert.match(fyiRow.next, /updates it from main and lands again/);
+  assert.doesNotMatch(JSON.stringify([view.fyi, view.now]), /why not reported/);
+  // The same Lane read from its mark alone, with its landing gone: a hold, not a person's turn.
+  const alone = laneStateModule.laneState({ stage: 'saved', held: true, overlap: true }, null);
+  assert.equal(alone.kind, 'conflict');
+  assert.notEqual(alone.glyph, 'Needs you');
+});
