@@ -65,7 +65,9 @@ export type MacExecutionTransport = CheckoutObjectTransport & {
 /** Landing secret scan (src/secret-scan.ts) on the paths changed from the composition
  * base (main): one extra State read. An unreadable base scans every file instead and
  * applies no allow entry. Allow entries come from the base only (R-01). It runs before
- * the plan is saved so the plan can carry the allow entries this change adds. */
+ * the plan is saved so the plan can carry the allow entries this change adds. An unreadable
+ * base also leaves no queue proof to pin (nor any way to see deleted core paths), so a
+ * proof-pinning check reports `queueProofUnavailable` and the run refuses (fail closed, Item df8166f4). */
 export async function machineSecretScan(
   cache: HostedCheckoutCache,
   baseHead: string,
@@ -130,7 +132,35 @@ export async function machineSecretScan(
     signal.throwIfAborted();
     queueProof = queueProofPaths(paths, read);
   }
-  return { ...scan, queueProof };
+  // Without main's State the changed and deleted core paths are unknown: refuse instead of running unproven.
+  return { ...scan, queueProof, queueProofUnavailable: pinQueueProof && !before };
+}
+/** A Node command that prints the refusal and ends by signal, so the run reports `interrupted`: a
+ * platform cause the landing retries within its platform budget (convex/projectHostedLandingCheckRetry.ts),
+ * never a test failure that blames the change. The write callback keeps the line on an async pipe. */
+export function queueProofUnavailableCommand(executable: string) {
+  const line =
+    "QueueProofUnavailable: main's State could not be read, so this change's queue proof cannot be pinned. Next: retry the landing; main is read again.\n";
+  return [
+    executable,
+    '--eval',
+    `process.stderr.write(${JSON.stringify(line)}, () => process.kill(process.pid, 'SIGTERM'));`,
+  ];
+}
+/** The command a machine run executes: refusals first, before any project code runs. */
+export function machineRunCommand(
+  executable: string,
+  command: string[],
+  secretScan: Awaited<ReturnType<typeof machineSecretScan>>,
+  submoduleRefusal?: string | null,
+) {
+  return secretScan.findings.length
+    ? secretScanFailureCommand(executable, secretScan)
+    : secretScan.queueProofUnavailable
+      ? queueProofUnavailableCommand(executable)
+      : submoduleRefusal
+        ? submoduleFailureCommand(executable, submoduleRefusal)
+        : command;
 }
 /** Check commands receive a private HOME/temp and only declared inputs. Source
  * bytes go from hosted/R2 to a hash-verified checkout, without any Git export. */
@@ -277,12 +307,8 @@ export async function executeHostedMacCheck(
             cache: join(root, 'submodules'),
           });
     signal.throwIfAborted();
-    // A finding fails the run before project code runs, through the ordinary result path.
-    const execute = secretScan.findings.length
-      ? secretScanFailureCommand(process.execPath, secretScan)
-      : submodules?.refusal
-        ? submoduleFailureCommand(process.execPath, submodules.refusal)
-        : command;
+    // A finding or an unpinnable queue proof fails the run before project code runs, through the ordinary result path.
+    const execute = machineRunCommand(process.execPath, command, secretScan, submodules?.refusal);
     await save({ kind: 'reserve' });
     const executionId = `${run.configuration.provider}:${run.id}:${run.fence}:${owner}`;
     await save({ kind: 'observe', result: { status: 'accepted', executionId } });

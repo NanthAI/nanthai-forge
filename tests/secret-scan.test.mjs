@@ -430,3 +430,74 @@ test('Convex deployment, preview-project and project-key prefixes are scanned ou
     );
   }
 });
+
+test('machine runner: an unreadable base State fails closed for core paths, never runs without queue proof', async t => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join: joinPath } = await import('node:path');
+  const { createHash } = await import('node:crypto');
+  const { HostedCheckoutCache } = await import('../dist/hosted-checkout-cache.js');
+  const { machineSecretScan, machineRunCommand, queueProofUnavailableCommand } =
+    await import('../dist/hosted-mac-execute.js');
+  const objects = new Map();
+  const put = text => {
+    const bytes = Buffer.from(text),
+      sha256 = createHash('sha256').update(bytes).digest('hex');
+    objects.set(sha256, bytes);
+    return sha256;
+  };
+  const file = (path, text) => ({ path, blob: put(text), mode: 'file' });
+  const state = files =>
+    put(
+      JSON.stringify({
+        schema: 1,
+        kind: 'forge-source-state',
+        parents: [],
+        files,
+        at: '2026-01-01T00:00:00.000Z',
+        message: 'synthetic',
+      }),
+    );
+  // A missing base State object fails its read like a lost fetch.
+  const transport = {
+    objects: async ids =>
+      ids.map(sha256 => {
+        if (!objects.has(sha256)) throw new Error('object unavailable');
+        return { sha256, size: objects.get(sha256).length };
+      }),
+    downloadToFile: async (pin, path) =>
+      (await import('node:fs/promises')).writeFile(path, objects.get(pin.sha256)),
+  };
+  const scan = async (base, files, pin = true) => {
+    const root = mkdtempSync(joinPath(tmpdir(), 'forge-queue-proof-base-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const cache = new HostedCheckoutCache(root, transport, joinPath(root, 'objects'), null);
+    return machineSecretScan(cache, base, files, new AbortController().signal, pin);
+  };
+  const readme = file('README.md', 'synthetic');
+  const core = file('src/hosted-landing-synthetic.ts', 'export const value = 1;\n');
+  const lost = 'f'.repeat(64);
+  // Unreadable base: no proof can be pinned and deleted core paths are unknown, so the run must refuse,
+  // even when no core path is left in the State (the change may delete the last one).
+  const unread = await scan(lost, [readme, core]);
+  assert.equal(unread.queueProof, undefined);
+  assert.equal(unread.queueProofUnavailable, true);
+  assert.equal((await scan(lost, [readme])).queueProofUnavailable, true);
+  // A check that pins no proof (audit, probe, custom command) has nothing to refuse.
+  assert.equal((await scan(lost, [readme, core], false)).queueProofUnavailable, false);
+  // A readable base pins the proof as before.
+  const read = await scan(state([readme]), [readme, core]);
+  assert.equal(read.queueProofUnavailable, false);
+  assert.deepEqual(read.queueProof?.source, [core.path]);
+  // The runner executes the refusal instead of the project command; a readable base runs the command.
+  const project = ['node', 'scripts/forge-check.mjs'];
+  const refusal = queueProofUnavailableCommand(process.execPath);
+  assert.deepEqual(machineRunCommand(process.execPath, project, unread), refusal);
+  assert.deepEqual(machineRunCommand(process.execPath, project, read), project);
+  // The refusal ends by signal: the run reports `interrupted`, a platform cause the landing retries,
+  // not a test failure (exit code 1) that blames the change.
+  const run = spawnSync(refusal[0], refusal.slice(1), { encoding: 'utf8' });
+  assert.equal(run.status, null);
+  assert.equal(run.signal, 'SIGTERM');
+  assert.match(run.stderr, /QueueProofUnavailable: .*Next: retry/);
+});
