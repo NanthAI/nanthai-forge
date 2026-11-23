@@ -22,7 +22,7 @@ Use this portable template for one finite slice. The [standard builder block](br
 - Done when: `<behavior, failure cases, evidence per line, required repeats and noise allowance>`. Name the behaviour, contract or incident each line guards, so the builder tests that and nothing else ([test signal](lint-rules.md#test-signal)); do not write "add tests".
 - Must not regress: `<metric and comparison method>`.
 - Targeted verification: `<affected tests, docs, format/lint/type checks>` (the guarded behaviour decides which tests exist, never a count); full verification belongs to the landing runner.
-- Independent review: `<required review and scope, if applicable>`.
+- Independent review: `<required review and scope, if applicable>`; omit to use the default one round through [the review script](review-api.md), or name the model reviewer here.
 
 ## Standard safety and delivery block
 

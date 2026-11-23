@@ -6,7 +6,8 @@
 //
 //   node scripts/review-api.mjs --lane LANE_PATH --item ITEM_ID [--provider anthropic|openai]
 //     [--model M] [--effort low|medium|high] [--context-bytes N] [--max-call-usd N] [--max-day-usd N]
-//     [--price-in N --price-out N] [--dry-run] [--json]
+//     [--price-in N --price-out N] [--spend-log FILE] [--dry-run] [--json]
+//   Calibration on a landed Lane: add --lane-id LANE_ID --files-root DIR (files are read from DIR, e.g. main).
 //
 // Keys come from the macOS keychain (docs/agents/review-api.md); no key value is printed, logged or
 // sent anywhere but its provider. Forge cost: reads only (`diff`, `planning`), one page each.
@@ -51,6 +52,8 @@ const VALUE_FLAGS = new Set([
   'price-out',
   'spend-log',
   'diff-pages',
+  'lane-id',
+  'files-root',
 ]);
 
 export function parseArgs(argv) {
@@ -128,6 +131,7 @@ async function gatherInput(args, deps, contextBytes) {
     const reply = await deps.nforge(args.lane, 'diff', {
       format: 'unified',
       byteBudget: 200_000,
+      ...(args['lane-id'] ? { laneId: args['lane-id'] } : {}),
       ...(cursor ? { cursor } : {}),
     });
     laneId = reply.sourceContext?.laneId ?? laneId;
@@ -151,7 +155,10 @@ async function gatherInput(args, deps, contextBytes) {
     if (list.length >= 50) notes.push('The Item has 50 or more comments; older ones may be missing.');
     item = `${it?.title ?? ''}\n${(it?.body ?? '').slice(0, 16_000)}${comments ? `\n\nComments (can amend Done-when):\n${comments}` : ''}`;
   }
-  const files = changedPaths(diff).map(path => ({ path, text: deps.readText(args.lane, path) }));
+  const files = changedPaths(diff).map(path => ({
+    path,
+    text: deps.readText(args['files-root'] ?? args.lane, path),
+  }));
   const agents = deps.readText(args.lane, 'AGENTS.md') ?? '';
   const safety =
     agents
@@ -161,8 +168,9 @@ async function gatherInput(args, deps, contextBytes) {
   return { laneId, diff, item, files, notes, safety, contextBytes };
 }
 
-export async function review(argv, deps = realDeps) {
+export async function review(argv, defaults = realDeps) {
   const args = parseArgs(argv);
+  const deps = args['spend-log'] ? { ...defaults, spendLog: args['spend-log'] } : defaults;
   if (!args.lane)
     throw new ReviewError(
       'REVIEW_ARGS',

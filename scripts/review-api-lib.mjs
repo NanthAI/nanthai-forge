@@ -301,7 +301,10 @@ export function parseFindings(text) {
   try {
     value = JSON.parse(text);
   } catch {
-    throw new ReviewError('REVIEW_UNPARSEABLE', 'The reply was not valid JSON.');
+    throw new ReviewError(
+      'REVIEW_UNPARSEABLE',
+      `The reply was not valid JSON (${text.length} chars): ${text.slice(0, 300)} ... ${text.slice(-200)}`,
+    );
   }
   if (!value || typeof value.summary !== 'string' || !Array.isArray(value.findings))
     throw new ReviewError('REVIEW_UNPARSEABLE', 'The reply did not match the findings shape.');

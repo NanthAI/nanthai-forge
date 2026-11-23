@@ -255,8 +255,8 @@ test('a refused or truncated reply is an error but its billed tokens are still l
   assert.equal(callRows(h)[0].outputTokens, 16000);
 });
 
-test('a malformed reply is an error, never an empty review', () => {
-  assert.throws(() => parseFindings('not json'), { code: 'REVIEW_UNPARSEABLE' });
+test('a malformed reply is an error that shows its head and tail, never an empty review', () => {
+  assert.throws(() => parseFindings('not json'), { code: 'REVIEW_UNPARSEABLE', message: /not json/ });
   assert.throws(() => parseFindings('{"summary":"x"}'), { code: 'REVIEW_UNPARSEABLE' });
   assert.throws(() => readReply('openai', { status: 'incomplete', output: [] }), ReviewError);
 });
@@ -274,4 +274,18 @@ test('the guard accepts the one standalone POST of the review script and still r
   const source = readFileSync(new URL('../scripts/review-api.mjs', import.meta.url), 'utf8');
   assert.deepEqual(networkBoundaryFindings('scripts/review-api.mjs', source), []);
   assert(networkBoundaryFindings('scripts/review-api-lib.mjs', 'const r = fetch(u);').length);
+});
+
+test('--lane-id reviews a landed Lane and --files-root supplies its files; --spend-log redirects the log', async () => {
+  const h = harness({ reply: anthropicReply });
+  const seen = [];
+  const log = join(h.dir, 'other.jsonl');
+  await review(['--lane', h.dir, '--lane-id', 'lane-9', '--files-root', '/main', '--spend-log', log], {
+    ...h.deps,
+    nforge: async (lane, action, json) => (seen.push(json), h.deps.nforge(lane, action, json)),
+    readText: (root, rel) => (rel === 'src/a.ts' ? `from ${root}\n` : null),
+  });
+  assert.equal(seen[0].laneId, 'lane-9');
+  assert.match(JSON.parse(h.sent[0].init.body).messages[0].content, /from \/main/);
+  assert(existsSync(log) && !existsSync(h.deps.spendLog));
 });
