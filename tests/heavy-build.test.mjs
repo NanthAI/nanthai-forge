@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { coreBuildRoot, coreBuildState, ensureCoreBuild } from '../dist/heavy-build.js';
+import { needsCoreBuild } from '../dist/heavy-slots.js';
 
 // A synthetic checkout: package.json with a build:core script that writes dist/cli-entry.js.
 function checkout(
@@ -135,4 +136,79 @@ test('incident 2659b45c: --no-build runs a new failing-first test against the ex
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stderr, /running npm run build:core/);
   assert.equal(coreBuildState(root), 'stale', 'the accepted build stays pinned');
+});
+
+test('frictions aa71d3ed and bfb98e08: wrapped test commands (sh <script>, sh -c with node --test) build missing or stale dist/ unless --no-build is set', t => {
+  const root = checkout(
+    t,
+    "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/cli-entry.js','');fs.writeFileSync('dist/mod.cjs','exports.v=1;\\n')\"",
+  );
+  const slots = mkdtempSync(join(tmpdir(), 'forge-heavy-wrapped-'));
+  t.after(() => rmSync(slots, { recursive: true, force: true }));
+  writeFileSync(
+    join(root, 'sample.test.mjs'),
+    "import test from 'node:test';import assert from 'node:assert/strict';import m from './dist/mod.cjs';test('built',()=>assert.equal(m.v,1));\n",
+  );
+  writeFileSync(join(root, 'run.sh'), `${JSON.stringify(process.execPath)} --test sample.test.mjs\n`);
+  const cli = join(process.cwd(), 'dist', 'cli-entry.js');
+  const env = { ...process.env, FORGE_HEAVY_DIR: slots };
+  delete env.NODE_TEST_CONTEXT;
+  const heavy = (...args) =>
+    spawnSync(process.execPath, [cli, 'heavy', ...args], {
+      cwd: root,
+      encoding: 'utf8',
+      env,
+    });
+
+  for (const [args, expected] of [
+    [['node', '--test', 'sample.test.mjs'], true],
+    [['sh', 'run.sh'], true],
+    [['bash', '-e', 'run.sh'], true],
+    [['/bin/zsh', '-euo', 'pipefail', 'run.sh'], true],
+    [['sh', '--', 'run.sh'], true],
+    [['sh', '-c', 'node --import ./setup.mjs --test sample.test.mjs'], true],
+    [['bash', '-ec', `${process.execPath} --test sample.test.mjs`], true],
+    [['sh', '-c', 'echo ok'], false],
+    [['sh', '-c', 'echo "node --test sample.test.mjs"'], false],
+    [['sh', '-c', 'node -e "process.exit(0)"'], false],
+    [['sh', '-c', 'node -e "console.log(\\"--test\\")"'], false],
+    [['sh', '-c', 'node --test-concurrency=2 script.mjs'], false],
+    [['sh'], false],
+    [['npm', 'run', 'typecheck'], false],
+  ])
+    assert.equal(needsCoreBuild(args), expected, args.join(' '));
+
+  // aa71d3ed: fresh Lane (no dist/) running `nforge heavy sh <script>` builds dist/ first.
+  const fromScript = heavy('sh', 'run.sh');
+  assert.equal(fromScript.status, 0, fromScript.stderr);
+  assert.match(fromScript.stderr, /dist\/ is missing; running npm run build:core/);
+  assert.equal(coreBuildState(root), 'fresh');
+
+  // bfb98e08: stale dist/ running `nforge heavy sh -c "... node --test ..."` rebuilds dist/ first.
+  touch(join(root, 'dist', 'cli-entry.js'), 1000);
+  touch(join(root, 'src', 'nested', 'a.ts'), 2000);
+  assert.equal(coreBuildState(root), 'stale');
+  const fromInline = heavy('sh', '-c', `${JSON.stringify(process.execPath)} --test sample.test.mjs`);
+  assert.equal(fromInline.status, 0, fromInline.stderr);
+  assert.match(fromInline.stderr, /dist\/ is stale; running npm run build:core/);
+  assert.equal(coreBuildState(root), 'fresh');
+
+  // Shell flags before the script (`sh -e run.sh`) also check/build dist/, while a non-test
+  // `sh -c` or `--no-build` leaves a stale dist/ untouched.
+  touch(join(root, 'dist', 'cli-entry.js'), 1000);
+  touch(join(root, 'src', 'nested', 'a.ts'), 2000);
+  const nonTest = heavy('sh', '-c', 'echo ok');
+  assert.equal(nonTest.status, 0, nonTest.stderr);
+  assert.doesNotMatch(nonTest.stderr, /running npm run build:core/);
+  assert.equal(coreBuildState(root), 'stale');
+
+  const noBuild = heavy('--no-build', 'sh', 'run.sh');
+  assert.equal(noBuild.status, 0, noBuild.stderr);
+  assert.doesNotMatch(noBuild.stderr, /running npm run build:core/);
+  assert.equal(coreBuildState(root), 'stale');
+
+  const flagged = heavy('sh', '-e', 'run.sh');
+  assert.equal(flagged.status, 0, flagged.stderr);
+  assert.match(flagged.stderr, /dist\/ is stale; running npm run build:core/);
+  assert.equal(coreBuildState(root), 'fresh');
 });

@@ -284,3 +284,56 @@ test('the daily summary names who held a slot at the CPU and load peaks and igno
   });
   assert.deepEqual(summary.lanes[0], { lane: 'bbbbbbbb', minutes: 10 });
 });
+
+test('friction 24456142: heavy warns when --test-name-pattern matches no top-level test (including subtest-only patterns) and stays quiet when one matches', t => {
+  const { root, cwd, heavy } = project(t);
+  writeFileSync(
+    join(cwd, 't', 'nested.test.mjs'),
+    "import test from 'node:test'; test('outer top-level test', async t => { await t.test('inner subtest only', () => {}); }); test.skip('skipped top-level test', () => {});\n",
+  );
+  // Pattern matches only the inner subtest: node --test skips the outer top-level test and reports 1 pass.
+  const subtestOnly = heavy([
+    process.execPath,
+    '--test',
+    '--test-name-pattern=inner subtest only',
+    't/nested.test.mjs',
+  ]);
+  assert.match(
+    subtestOnly.stderr,
+    /heavy: warning: --test-name-pattern \(inner subtest only\) matched no top-level test/,
+  );
+
+  // Wrapped in sh -c with space-separated `--test-name-pattern <pattern>` and an explicit `--test-concurrency=1`.
+  const wrappedUnmatched = heavy([
+    'sh',
+    '-c',
+    `${JSON.stringify(process.execPath)} --test --test-concurrency=1 --test-name-pattern 'missing pattern' t/nested.test.mjs`,
+  ]);
+  assert.match(
+    wrappedUnmatched.stderr,
+    /heavy: warning: --test-name-pattern \(missing pattern\) matched no top-level test/,
+  );
+
+  // Matching top-level test (runnable or skipped) runs without the warning.
+  for (const pattern of ['outer top-level', 'skipped top-level']) {
+    const matched = heavy([
+      process.execPath,
+      '--test',
+      `--test-name-pattern=${pattern}`,
+      't/nested.test.mjs',
+    ]);
+    assert.doesNotMatch(matched.stderr, /matched no top-level test/, pattern);
+  }
+
+  // With localHeavySlots: 0 (slots disabled), heavy still warns when --test-name-pattern matches no top-level test.
+  const noSlotsSettings = join(root, 'no-slots.json');
+  writeFileSync(noSlotsSettings, JSON.stringify({ localHeavySlots: 0 }));
+  const noSlotsUnmatched = heavy(
+    [process.execPath, '--test', '--test-name-pattern=inner subtest only', 't/nested.test.mjs'],
+    { FORGE_CLIENT_SETTINGS: noSlotsSettings },
+  );
+  assert.match(
+    noSlotsUnmatched.stderr,
+    /heavy: warning: --test-name-pattern \(inner subtest only\) matched no top-level test/,
+  );
+});

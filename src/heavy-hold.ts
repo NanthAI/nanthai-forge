@@ -21,11 +21,13 @@ const PRELOAD_PREFIX = 'forge-heavy-cap-';
  * --test-concurrency wins; the runner's per-file children (NODE_TEST_CONTEXT) and Node before
  * 20.10 (no --test-concurrency) are left alone. Where process.execve is missing or refused
  * (Windows, Node before 22.15, a worker), the capped runner runs as a blocking child instead: a
- * signal sent to this process alone, not its group, then does not reach that runner. */
+ * signal sent to this process alone, not its group, then does not reach that runner. When
+ * `--test-name-pattern` is passed and matches no top-level test across the run, the runner warns
+ * on stderr before exiting (friction 24456142). */
 const PRELOAD = `'use strict';
-const n = process.env.FORGE_HEAVY_TEST_CONCURRENCY, a = process.execArgv;
+const n = process.env.FORGE_HEAVY_TEST_CONCURRENCY, a = process.execArgv, isTest = a.includes('--test');
 const [major, minor] = process.versions.node.split('.').map(Number);
-if (/^[1-9][0-9]*$/.test(n || '') && !process.env.NODE_TEST_CONTEXT && a.includes('--test') &&
+if (/^[1-9][0-9]*$/.test(n || '') && !process.env.NODE_TEST_CONTEXT && isTest &&
   (major > 20 || (major === 20 && minor >= 10)) &&
   !a.some(x => x === '--test-concurrency' || x.startsWith('--test-concurrency='))) {
   // Paths after --, so a file named like an option stays a path.
@@ -36,14 +38,63 @@ if (/^[1-9][0-9]*$/.test(n || '') && !process.env.NODE_TEST_CONTEXT && a.include
   if (run.signal) process.kill(process.pid, run.signal);
   process.exit(run.status === null ? 1 : run.status);
 }
+if (!process.env.NODE_TEST_CONTEXT && isTest) {
+  const patterns = [];
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] === '--test-name-pattern' && a[i + 1] !== undefined) patterns.push(a[++i]);
+    else if (a[i].startsWith('--test-name-pattern=')) patterns.push(a[i].slice(20));
+  }
+  if (patterns.length) {
+    const fs = require('node:fs'), marker = require('node:path').join(__dirname, 'pat-' + process.pid);
+    try { fs.rmSync(marker, { force: true }); } catch {}
+    process.env.FORGE_HEAVY_PATTERN_MATCH = marker;
+    let hit = false;
+    const mark = () => { hit = true; };
+    if (a.includes('--test-isolation=none') || a.some((x, i) => x === '--test-isolation' && a[i + 1] === 'none')) {
+      const nt = require('node:test');
+      nt.beforeEach(mark);
+      for (const fn of [nt, nt.describe, nt.it, nt.suite])
+        for (const k of ['skip', 'todo', 'only'])
+          if (typeof fn?.[k] === 'function') {
+            const orig = fn[k];
+            fn[k] = function(...args) { mark(); return orig.apply(this, args); };
+          }
+    }
+    process.once('exit', () => {
+      const matched = hit || fs.existsSync(marker);
+      try { fs.rmSync(marker, { force: true }); } catch {}
+      if (!matched)
+        process.stderr.write(
+          'heavy: warning: --test-name-pattern (' + patterns.join(', ') + ') matched no top-level test; node --test filters top-level test names first and still reports 1 pass per file when none match.\\n'
+        );
+    });
+  }
+} else if (process.env.NODE_TEST_CONTEXT && process.env.FORGE_HEAVY_PATTERN_MATCH) {
+  const marker = process.env.FORGE_HEAVY_PATTERN_MATCH;
+  delete process.env.FORGE_HEAVY_PATTERN_MATCH;
+  let ended = false, hit = false;
+  // Registered before the test file loads node:test, so it runs before node:test's own beforeExit
+  // flushes the final 0..0 test:plan frame. Any Uint8Array frame before then is a matched test
+  // (runnable, skipped or todo).
+  process.once('beforeExit', () => { ended = true; });
+  const write = process.stdout.write;
+  process.stdout.write = function(chunk, ...rest) {
+    if (!ended && !hit && chunk instanceof Uint8Array) {
+      hit = true;
+      try { require('node:fs').writeFileSync(marker, ''); } catch {}
+    }
+    return write.call(this, chunk, ...rest);
+  };
+}
 `;
+const PRELOAD_NAME = `preload-${createHash('sha256').update(PRELOAD).digest('hex').slice(0, 12)}.cjs`;
 
 /** The preload's file: in this user's own cache folder (created 0700 and checked to be a real,
  * private folder this user owns, so no other account can plant code every Node process would
  * load), written once by name hash and reused, so a killed heavy leaves nothing. A folder that
  * fails the check falls back to a fresh private one per command, removed afterwards. */
 function preloadFile(): { file: string; owned: string | null } | null {
-  const name = `preload-${createHash('sha256').update(PRELOAD).digest('hex').slice(0, 12)}.cjs`;
+  const name = PRELOAD_NAME;
   const uid = process.getuid?.();
   const shared = join(tmpdir(), `${PRELOAD_PREFIX}${uid ?? 'user'}`);
   try {
@@ -78,25 +129,34 @@ function preloadFile(): { file: string; owned: string | null } | null {
  * through a preload, Go tools such as the native TypeScript checker through GOMAXPROCS, Rust rayon
  * tools through RAYON_NUM_THREADS. A value already set (by the command or an outer slot) wins.
  */
-export function slotCapEnv(env: NodeJS.ProcessEnv, cores: number, slots: number) {
-  if (slots <= 0) return { env: {} as Record<string, string>, dispose() {} };
-  const share = /^[1-9][0-9]*$/.test(env.FORGE_HEAVY_TEST_CONCURRENCY ?? '')
-    ? env.FORGE_HEAVY_TEST_CONCURRENCY!
-    : String(testWorkersPerSlot(cores, slots));
-  const options = env.NODE_OPTIONS ?? '';
+export function slotCapEnv(env: NodeJS.ProcessEnv, cores: number, slots: number, alwaysPreload = false) {
+  if (slots <= 0 && !alwaysPreload) return { env: {} as Record<string, string>, dispose() {} };
+  const share =
+    slots <= 0
+      ? null
+      : /^[1-9][0-9]*$/.test(env.FORGE_HEAVY_TEST_CONCURRENCY ?? '')
+        ? env.FORGE_HEAVY_TEST_CONCURRENCY!
+        : String(testWorkersPerSlot(cores, slots));
+  const options = (env.NODE_OPTIONS ?? '')
+    .replace(/(?:^|\s+)--require="(?:[^"\\]|\\.)*forge-heavy-cap-(?:[^"\\]|\\.)*"/g, '')
+    .trim();
   let owned: string | null = null;
-  let nodeOptions = options;
-  const preload = options.includes(PRELOAD_PREFIX) ? null : preloadFile();
+  let nodeOptions = env.NODE_OPTIONS ?? '';
+  const preload = nodeOptions.includes(PRELOAD_NAME) ? null : preloadFile();
   if (preload) {
     owned = preload.owned;
     nodeOptions = `${options ? `${options} ` : ''}--require="${preload.file.replace(/["\\]/g, '\\$&')}"`;
   }
   return {
     env: {
-      FORGE_HEAVY_TEST_CONCURRENCY: share,
       NODE_OPTIONS: nodeOptions,
-      GOMAXPROCS: env.GOMAXPROCS || share,
-      RAYON_NUM_THREADS: env.RAYON_NUM_THREADS || share,
+      ...(share
+        ? {
+            FORGE_HEAVY_TEST_CONCURRENCY: share,
+            GOMAXPROCS: env.GOMAXPROCS || share,
+            RAYON_NUM_THREADS: env.RAYON_NUM_THREADS || share,
+          }
+        : {}),
     },
     dispose: () => owned && rmSync(owned, { recursive: true, force: true }),
   };

@@ -26,10 +26,12 @@ never folders or arguments; older holders can lack metadata. Slots are granted f
 first served, and a waiting `heavy` prints its queue position and an estimate. Run bounded
 batches under heavy, dev servers directly.
 
-`heavy node --test FILES` first runs `npm run build:core` when `dist/` is missing or older than `src/`
+`heavy node --test FILES` (and wrapped test commands: `sh <script>` or `sh -c` with `node --test`)
+first runs `npm run build:core` when `dist/` is missing or older than `src/`
 (one stat pass when fresh; a failed build stops the batch and prints the command).
 It also names any `--import`/`--require` preload that the project's own `test` script passes to
-`node --test` and the command leaves out, since tests that depend on that setup can fail only there.
+`node --test` and the command leaves out, since tests that depend on that setup can fail only there,
+and warns on stderr when `--test-name-pattern` matches no top-level test.
 
 Pull preserves ROOT and surviving directory inodes; see [recovery](../../../operations/source-exchange.md#hosted-main-client-checkout).
 `CWD_UNAVAILABLE` precedes hooks and gives `cd` advice: `cd /`, then

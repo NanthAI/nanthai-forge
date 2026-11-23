@@ -563,6 +563,46 @@ export function nodeTestPathCount(args: string[]): number | null {
   return testing ? paths : null;
 }
 
+const SHELL = /^(?:sh|bash|zsh)(?:\.exe)?$/i;
+const SHELL_KEYWORD = /^(?:do|then|else|elif|while|until|\{|[A-Za-z_]\w*=.*)$/;
+const NODE_BIN = /(?:^|[\/\\])node(?:\.exe)?$/i;
+
+function shellRunsNodeTest(command: string): boolean {
+  for (const segment of command.split(/&&|\|\||[;|\n()]/)) {
+    const tokens: string[] = segment.match(/'[^']*'|"(?:\\.|[^"])*"|\S+/g) ?? [];
+    while (tokens.length && SHELL_KEYWORD.test(tokens[0]!)) tokens.shift();
+    if (!tokens.length) continue;
+    const head = tokens[0]!.replace(/^(['"])(.*)\1$/, '$2');
+    if (head !== process.execPath && !NODE_BIN.test(head)) continue;
+    const end = tokens.indexOf('--');
+    const flags = end < 0 ? tokens.slice(1) : tokens.slice(1, end);
+    if (flags.some(token => /^(['"]?)--test\1$/.test(token))) return true;
+  }
+  return false;
+}
+
+/**
+ * True when a heavy command runs tests directly (`node ... --test FILES`) or through a shell
+ * (`sh <script>`, or `sh -c` with `node ... --test`), so a missing or stale `dist/` must be
+ * built or checked before it runs (frictions aa71d3ed, bfb98e08).
+ */
+export function needsCoreBuild(args: string[]): boolean {
+  if (nodeTestPathCount(args)) return true;
+  if (!SHELL.test(basename(args[0] ?? ''))) return false;
+  for (let index = 1; index < args.length; index++) {
+    const arg = args[index]!;
+    if (arg === '--') return Boolean(args[index + 1]?.trim());
+    if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg)) return shellRunsNodeTest(args[index + 1] ?? '');
+    if (/^[+-][a-zA-Z]*o$/.test(arg)) {
+      index++;
+      continue;
+    }
+    if (/^[+-]/.test(arg)) continue;
+    return Boolean(arg.trim());
+  }
+  return false;
+}
+
 /** An inherited holder is a scheduling lease, never source or user authority. */
 export function inheritedHeavySlot(directory: string): string | null {
   try {
@@ -722,6 +762,7 @@ export async function heavyCli(
         },
     availableParallelism(),
     slot || inherited || cores !== null ? Math.max(1, slots) : 0,
+    true,
   );
   const before = Object.keys(cap.env).map(name => [name, process.env[name]] as const);
   Object.assign(process.env, cap.env);
@@ -752,7 +793,7 @@ export async function heavyCli(
   try {
     writeHolder();
     // Inside the slot, so builds stay bounded; a fresh dist/ costs one stat pass (friction 6288d0c2).
-    if (nodeTestPathCount(args) && !noBuild) {
+    if (needsCoreBuild(args) && !noBuild) {
       const built = await ensureCoreBuild(process.cwd());
       if (built !== 0) return built;
       // The bound runs from the command's start: a waiter's overdue clock restarts with it.
