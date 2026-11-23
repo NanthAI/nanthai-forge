@@ -20,6 +20,11 @@ const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'
 const capabilities = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const exact = await import(moduleUrl('../convex/projectHostedConflicts.ts'));
 const boardApi = await import(moduleUrl('../convex/projectBoard.ts'));
+import { withSavedList } from './hosted-overlap-list.mjs';
+
+/** The fixture's overlap rows as the advice function reads them: a slim row's saved list is rebuilt from its buckets. */
+export const overlapRowsWithLists = s =>
+  [...s.tables.projectHostedOverlapLanes.values()].map(row => withSavedList(s, row));
 
 export async function setup(t, options = {}) {
   options = { base: 'original', ...options };

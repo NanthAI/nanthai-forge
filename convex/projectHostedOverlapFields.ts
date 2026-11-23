@@ -74,8 +74,8 @@ export const hostedOverlapTables = {
     superseded: v.optional(
       v.object({ by: v.string(), receiptId: v.string(), laneHead: v.string(), at: v.string() }),
     ),
-    /** The saved change list as JSON. Absent on a slim row (FORGE_OVERLAP_CHANGE_BUCKETS): its entries are
-     * then the rows of projectHostedOverlapChanges, read through convex/projectHostedOverlapChanges.ts. */
+    /** The saved change list as JSON, only on a row not yet converted by the one-off backfill. A slim row has no `changes`:
+     * its entries are the rows of projectHostedOverlapChanges, read through convex/projectHostedOverlapChanges.ts. */
     changes: v.optional(v.string()),
     complete: v.boolean(),
     /** Slim rows only: some entry carries usable cross-file symbol links, so a default read needs the whole list. */

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { saveFixture } from './hosted-saves-fixture.mjs';
+import { overlapRowsWithLists } from './hosted-overlaps-fixture.mjs';
 import { digest } from '../dist/hash.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 
@@ -576,7 +577,7 @@ const HOUR = 3_600_000;
 // The idle summary still shapes the default read's stack offer; the advice is read directly.
 const idleAdvice = async (s, mine) => {
   const { hostedOverlapAdvice, IDLE_NOTICE_MS } = await import('../dist/hosted-overlap.js');
-  const rows = [...s.tables.projectHostedOverlapLanes.values()];
+  const rows = overlapRowsWithLists(s);
   const own = rows.find(row => row.laneId === mine.id);
   const main = { head: own.baseHead, sourceRevision: 0 };
   const peers = rows.filter(row => row.laneId !== mine.id);

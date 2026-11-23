@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { composeFixture } from './hosted-compose-fixture.mjs';
+import { withSavedList } from './hosted-overlap-list.mjs';
 import { controls, environment, modules as sourceModules } from './hosted-source-efficiency-fixture.mjs';
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
@@ -115,7 +116,10 @@ async function setup(t, { fromBase = false, protectedPath = false } = {}) {
   );
   exchange.client = c.client;
   const overlap = () =>
-    [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === entry.laneId);
+    withSavedList(
+      s,
+      [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === entry.laneId),
+    );
   const settle = async jobId => {
     const args = { projectId: s.projectId, jobId };
     await c.call('projectConvexSource:dispatch', args);

@@ -14,6 +14,7 @@ const buckets = await import(moduleUrl('../convex/projectHostedOverlapChanges.ts
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
+const backfill = await import(moduleUrl('../convex/projectHostedOverlapBackfill.ts'));
 
 const hex = n => digest(`blob-${n}`);
 const prng = seed => () => {
@@ -210,7 +211,7 @@ const rowOf = (s, laneId) =>
   [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === laneId);
 const bucketRows = (s, laneId) =>
   [...s.tables.projectHostedOverlapChanges.values()].filter(row => row.laneId === laneId);
-/** Puts every slim row back to the inline form, as the rows written before the switch hold it. */
+/** Puts every slim row back to the inline form, as the rows written before the buckets hold it. */
 const toInline = s => {
   for (const [id, row] of s.tables.projectHostedOverlapLanes)
     if (row.changes === undefined) {
@@ -224,13 +225,7 @@ const toInline = s => {
 };
 const sweep = (count, tag = 'sweep') =>
   Array.from({ length: count }, (_, i) => delta(`${tag}/file-${i}.txt`, i));
-const switchOn = t => {
-  process.env.FORGE_OVERLAP_CHANGE_BUCKETS = '1';
-  t.after(() => delete process.env.FORGE_OVERLAP_CHANGE_BUCKETS);
-};
-
-test('hook read: a sweep-size peer costs one bucket, every read mode answers as the inline row did, the switch can go off again', async t => {
-  switchOn(t);
+test('hook read: a sweep-size peer costs one bucket, every read mode answers as the inline row did', async t => {
   const { s, lane: mine, peer } = await setup(t);
   await trackChange(s, peer, [...sweep(540), delta('a.txt', 900)], 'Peer sweep');
   await trackChange(s, mine, [delta('a.txt', 901), delta('sweep/file-3.txt', 902)], 'My change');
@@ -263,7 +258,6 @@ test('hook read: a sweep-size peer costs one bucket, every read mode answers as 
 });
 
 test('the hook read does not grow with the peer: 5 files and 540 files read about the same', async t => {
-  switchOn(t);
   const costs = [];
   for (const size of [5, 540]) {
     const { s, lane: mine, peer } = await setup(t);
@@ -276,7 +270,6 @@ test('the hook read does not grow with the peer: 5 files and 540 files read abou
 });
 
 test('a record write that keeps the saved list touches no bucket; a save of one path rewrites only its bucket', async t => {
-  switchOn(t);
   const { s, lane: mine, peer } = await setup(t);
   await trackChange(s, peer, sweep(300), 'Peer sweep');
   const start = bucketRows(s, peer.id)
@@ -317,32 +310,7 @@ test('a record write that keeps the saved list touches no bucket; a save of one 
   assert.equal(rowOf(s, peer.id).pathSummary.pathCount, 301);
 });
 
-test('switching off again: a same-head write of a slim Lane also restores the inline list', async t => {
-  switchOn(t);
-  const { s, peer } = await setup(t);
-  await trackChange(s, peer, sweep(40), 'Peer sweep');
-  delete process.env.FORGE_OVERLAP_CHANGE_BUCKETS;
-  await s.transaction(
-    'rewrite',
-    {
-      _handler: async ctx => {
-        const row = await records.readHostedRecord(ctx, {
-          projectId: s.projectId,
-          actor: 'owner',
-          kind: 'lane',
-          key: peer.id,
-        });
-        await tracking.trackHostedOverlapLane(ctx, s.projectId, JSON.parse(row.value), { intent: 'Parked' });
-      },
-    },
-    {},
-  );
-  assert.equal(bucketRows(s, peer.id).length, 0);
-  assert.equal(JSON.parse(rowOf(s, peer.id).changes).length, 40);
-});
-
 test('wide caller: the hook read of a Lane with a near-limit saved list costs no more than inline and is reported', async t => {
-  switchOn(t);
   const { s, lane: mine, peer } = await setup(t);
   await trackChange(s, peer, [delta('a.txt', 900)], 'Peer');
   await trackChange(s, mine, [...sweep(540, 'mine'), delta('a.txt', 901)], 'Mine');
@@ -353,19 +321,75 @@ test('wide caller: the hook read of a Lane with a near-limit saved list costs no
   assert(bucketed <= inline + 2_000, `${bucketed} B against ${inline} B`);
 });
 
-test('switching off again: the next write of a slim Lane stores the inline list and deletes its buckets', async t => {
-  switchOn(t);
-  const { s, peer } = await setup(t);
-  await trackChange(s, peer, sweep(120), 'Peer sweep');
-  const list = buckets.joinOverlapBuckets(bucketRows(s, peer.id).map(row => row.changes));
-  delete process.env.FORGE_OVERLAP_CHANGE_BUCKETS;
+test('a legacy inline Lane row converts on its next record write, and the readers answered the same before it', async t => {
+  const { s, lane: mine, peer } = await setup(t);
+  await trackChange(s, peer, [...sweep(120), delta('a.txt', 900)], 'Peer sweep');
+  await trackChange(s, mine, [delta('a.txt', 901)], 'Mine');
+  const expected = buckets.joinOverlapBuckets(bucketRows(s, peer.id).map(row => row.changes));
+  toInline(s);
+  assert.equal(rowOf(s, peer.id).changes, expected);
+  const before = (await read(s, mine.id, { path: 'a.txt' })).reply;
   await trackChange(s, peer, [delta('x.txt', 5)], 'Peer sweep');
   const row = rowOf(s, peer.id);
-  assert.equal(bucketRows(s, peer.id).length, 0);
-  assert.equal(row.pathSummary, undefined);
+  assert.equal(row.changes, undefined, 'the written row is slim');
+  assert.equal(row.pathSummary.pathCount, 122);
   assert.equal(
-    row.changes,
-    mergeOverlapChanges(JSON.parse(list), [delta('x.txt', 5)], true).changes,
-    'the inline list is what the merge of the saved list and the new path gives',
+    buckets.joinOverlapBuckets(bucketRows(s, peer.id).map(bucket => bucket.changes)),
+    mergeOverlapChanges(JSON.parse(expected), [delta('x.txt', 5)], true).changes,
   );
+  assert.equal(before.peerEvidence.count, 1);
+});
+
+test('the backfill moves inline rows to buckets with identical reads, then reads only the slim rows', async t => {
+  const { s, lane: mine, peer } = await setup(t);
+  await trackChange(s, peer, [...sweep(300), delta('a.txt', 900)], 'Peer sweep');
+  await trackChange(s, mine, [delta('a.txt', 901)], 'Mine');
+  const expected = buckets.joinOverlapBuckets(bucketRows(s, peer.id).map(row => row.changes));
+  toInline(s);
+  const modes = [{ path: 'a.txt' }, { detail: true }, { scope: ['sweep/'] }];
+  const inline = [];
+  for (const mode of modes) inline.push((await read(s, mine.id, mode)).reply);
+  const run = args =>
+    s.transaction(
+      'backfill',
+      { _handler: ctx => backfill.run._handler(ctx, { budgetBytes: 10_000_000, ...args }) },
+      {},
+    );
+  const first = await run({});
+  assert.equal(first.converted, 2);
+  assert.equal(first.next, null);
+  assert(first.readBytes > 20_000, 'it read the inline rows');
+  assert.equal(rowOf(s, peer.id).changes, undefined);
+  assert.equal(rowOf(s, peer.id).pathSummary.pathCount, 301);
+  assert.equal(buckets.joinOverlapBuckets(bucketRows(s, peer.id).map(bucket => bucket.changes)), expected);
+  for (const [i, mode] of modes.entries())
+    assert.deepEqual((await read(s, mine.id, mode)).reply, inline[i], `reply of ${JSON.stringify(mode)}`);
+  const again = await run({});
+  assert.equal(again.converted, 0, 'a second run converts nothing');
+  assert(
+    again.readBytes < first.readBytes / 10,
+    `slim rows read ${again.readBytes} B against ${first.readBytes} B`,
+  );
+});
+
+test('a backfill that reaches its budget stops with a cursor, and a run from that cursor converts the rest', async t => {
+  const { s, peer } = await setup(t);
+  await trackChange(s, peer, [...sweep(10), delta('a.txt', 900)], 'Peer sweep');
+  toInline(s);
+  const { _id, _creationTime, ...template } = rowOf(s, peer.id);
+  for (let i = 0; i < 40; i++)
+    s.insert('projectHostedOverlapLanes', { ...template, laneId: `legacy-${String(i).padStart(2, '0')}` });
+  const inlineRows = [...s.tables.projectHostedOverlapLanes.values()].filter(
+    row => row.changes !== undefined,
+  ).length;
+  const run = args => s.transaction('backfill', { _handler: ctx => backfill.run._handler(ctx, args) }, {});
+  const first = await run({ budgetBytes: 1_000 });
+  assert.equal(first.scanned, 25);
+  assert.equal(first.converted, 25, 'the page that was started is finished');
+  assert.equal(s.scheduled.length, 0, 'the budget leaves no continuation');
+  assert.equal(typeof first.next.cursor, 'string');
+  const rest = await run({ budgetBytes: 1_000, cursor: first.next.cursor });
+  assert.equal(first.converted + rest.converted, inlineRows, 'every inline row converted once');
+  assert.equal(rest.next, null);
+  assert([...s.tables.projectHostedOverlapLanes.values()].every(row => row.changes === undefined));
 });

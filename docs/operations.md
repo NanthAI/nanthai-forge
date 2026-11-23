@@ -1118,6 +1118,20 @@ The count uses the current Lane state, and replaying a page adds no duplicate ma
 npx convex run projectPlanLaneBackfill:run '{"projectId":"PROJECT_ID","phase":"items","cursor":null}'
 ```
 
+### Move overlap change lists into buckets
+
+After a deploy at or past the bucketed overlap writer, convert the Lane rows that still hold their saved change list inline
+(closed and idle Lanes; an open Lane converts on its next record write). One run covers the whole deployment and is
+idempotent: it pages 25 rows of `projectHostedOverlapLanes` per call, moves a row's list into `projectHostedOverlapChanges`
+rows and leaves the row slim, then continues itself until the table ends or no further page fits `budgetBytes` of row bytes
+read (a page reads at most 2 MB). State the budget first: row bytes read plus the same bytes written, at $0.20/GB. The run
+ends with one log line (`npx convex logs`): `done` with the totals, or `stopped` with the `cursor` to pass back as
+`{"budgetBytes":BYTES,"cursor":"…"}`. A second full run that logs `converted` 0 proves no inline row is left.
+
+```sh
+npx convex run projectHostedOverlapBackfill:run '{"budgetBytes":BYTES}'
+```
+
 ### Project retention and restore
 
 Moving a project to the trash from Settings, Project or the Projects list (or

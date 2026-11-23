@@ -13,6 +13,7 @@ import { bindTrialSides } from '../dist/hosted-trial-plan.js';
 import { exactConflictNotice } from '../dist/hosted-conflict-notice.js';
 import { moduleUrl } from './convex-module.mjs';
 import { setup } from './hosted-overlaps-fixture.mjs';
+import { withSavedList } from './hosted-overlap-list.mjs';
 
 const superseded = await import(moduleUrl('../convex/projectHostedSuperseded.ts'));
 const pendingOverlap = await import(moduleUrl('../convex/projectHostedSavePendingOverlap.ts'));
@@ -22,8 +23,10 @@ const exact = await import(moduleUrl('../convex/projectHostedConflicts.ts'));
 // A fixed fixture instant for the stamps these tests write; no code under test compares it to the clock.
 const AT = '2026-11-20T12:00:00.000Z';
 
+// The live stored row: tests mutate it in place. `savedList` is a copy that also carries the saved change list.
 const overlapRow = (s, laneId) =>
   [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === laneId);
+const savedList = (s, laneId) => JSON.parse(withSavedList(s, overlapRow(s, laneId)).changes);
 const openNotices = s => [...s.tables.projectHostedConflictNotices.values()].filter(row => row.open);
 /** Every surface a builder reads a conflict from: the save reply, status and peers. */
 async function surfaces(transport, laneId, saved) {
@@ -231,7 +234,7 @@ test('3f70760d review: a background save that restored the file and then failed 
     {},
   );
   assert.deepEqual(
-    JSON.parse(overlapRow(s, peer.id).changes).map(change => change.path),
+    savedList(s, peer.id).map(change => change.path),
     ['a.txt'],
     'the saved change is evidence again',
   );
@@ -265,7 +268,7 @@ test('3f70760d review: a failed pending save takes out only its own paths; a hea
       },
       {},
     );
-  const paths = () => JSON.parse(overlapRow(s, lane.id).changes).map(change => change.path);
+  const paths = () => savedList(s, lane.id).map(change => change.path);
   const saved = paths();
   const one = [change('one.txt', 'one')],
     two = [change('two.txt', 'two'), change('a.txt', 'two')];
@@ -275,7 +278,7 @@ test('3f70760d review: a failed pending save takes out only its own paths; a hea
   // The first fails while the second still settles: only one.txt leaves; a.txt keeps the second's bytes.
   await write({ restorePending: [{ changes: two, complete: true }] });
   assert.deepEqual(paths(), [...new Set([...saved, 'two.txt'])].sort());
-  const a = JSON.parse(overlapRow(s, lane.id).changes).find(change => change.path === 'a.txt');
+  const a = savedList(s, lane.id).find(change => change.path === 'a.txt');
   assert.equal(a.after.blob, two[1].after.blob);
   assert.deepEqual(overlapRow(s, lane.id).settled.paths.sort(), ['a.txt', 'one.txt', 'two.txt']);
   // Another pending save, then the second publishes a new head: the pending third never reaches it.

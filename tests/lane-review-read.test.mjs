@@ -12,6 +12,7 @@ import { digest } from '../dist/hash.js';
 const review = await import(moduleUrl('../convex/projectLaneReview.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const lanes = await import(moduleUrl('../convex/projectHostedLiveLanes.ts'));
+const overlapBuckets = await import(moduleUrl('../convex/projectHostedOverlapChanges.ts'));
 
 async function lane(changes, extra = {}, savedBy) {
   const s = await saveFixture('original', 'a.txt');
@@ -103,7 +104,9 @@ test('one read names the pinned head and every changed path with its exact blobs
   assert.deepEqual(reply.conflicts, []);
   const meter = s.counts.filter(c => c.name === 'projectLaneReview:read').at(-1);
   t.diagnostic(`per view: ${meter.documents} documents, ${meter.ranges} ranges, ${meter.readBytes} bytes`);
-  assert(meter.documents <= 10, `reads ${meter.documents} documents`);
+  // The saved list is read whole: one bucket document per distinct path hash, beside the handful of Lane documents.
+  const bucketDocuments = new Set(changes.map(change => overlapBuckets.overlapBucket(change.path))).size;
+  assert(meter.documents <= 10 + bucketDocuments, `reads ${meter.documents} documents`);
   assert(meter.readBytes < 64 * 1024, `reads ${meter.readBytes} bytes`);
   for (const table of ['projectBackups', 'projectWorkRecords', 'projectWorkEvents', 'projectHostedSaveJobs'])
     assert(!meter.touched.includes(table), `does not read ${table}`);

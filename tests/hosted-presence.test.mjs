@@ -291,10 +291,11 @@ test('cost: a start-shaped presence read stays far under 64 KB with 41 large ope
       {},
     );
   }
-  const big = [...s.tables.projectHostedOverlapLanes.values()].reduce(
-    (n, row) => n + JSON.stringify(row).length,
-    0,
-  );
+  // The saved lists live in bucket rows beside the slim overlap rows; the measured size counted both together.
+  const big = [
+    ...s.tables.projectHostedOverlapLanes.values(),
+    ...s.tables.projectHostedOverlapChanges.values(),
+  ].reduce((n, row) => n + JSON.stringify(row).length, 0);
   assert(big > 330_000, `fixture is at least the measured size (${big})`);
   await read({});
   const without = s.counts.at(-1);

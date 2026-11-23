@@ -9,7 +9,6 @@ import {
   hasSymbolFacts,
   joinOverlapBuckets,
   overlapBucketRows,
-  overlapBucketsOn,
   overlapLaneChanges,
   writeOverlapBuckets,
 } from './projectHostedOverlapChanges';
@@ -122,11 +121,15 @@ export async function trackHostedOverlapLane(
   const keepChanges = sameBase || metadata?.rebased === true;
   const sameHead = old?.head === lane.head;
   const unchangedBase = lane.head === lane.base.head && !metadata?.pending;
-  const bucketsOn = overlapBucketsOn();
-  // The list this row held before the write: inline, or joined from its buckets. Read at most once, and only
-  // when the projection can change (a slim row's bucket rows are not read for a write that keeps its list).
+  // The list this row held before the write: inline (a row not yet converted by the backfill), or joined from its
+  // buckets. Read at most once, and only when the projection can change (a slim row's bucket rows are not read for
+  // a write that keeps its list; a new, inline or empty-list row has none).
   let oldBuckets: ReturnType<typeof overlapBucketRows> | undefined;
-  const oldBucketRows = () => (oldBuckets ??= overlapBucketRows(ctx, projectId, lane.id));
+  const oldBucketRows = () =>
+    (oldBuckets ??=
+      old && old.changes === undefined && old.pathSummary?.pathCount !== 0
+        ? overlapBucketRows(ctx, projectId, lane.id)
+        : Promise.resolve([]));
   let oldText: string | undefined;
   const oldList = async () =>
     (oldText ??= old!.changes ?? joinOverlapBuckets((await oldBucketRows()).map(bucket => bucket.changes)));
@@ -134,7 +137,6 @@ export async function trackHostedOverlapLane(
   // `boundOverlapChanges` on its own output returns it unchanged (tests/hosted-overlap-buckets.test.mjs), so no
   // bucket is read or written, and the row keeps its list summary.
   const keepsList =
-    bucketsOn &&
     old !== null &&
     old.changes === undefined &&
     old.pathSummary !== undefined &&
@@ -294,20 +296,14 @@ export async function trackHostedOverlapLane(
     ...(open && !superseded && old?.landed ? { landedMark: true as const } : {}),
     complete: projection.complete,
   };
-  // The list itself: inline (switch off), or buckets and a slim row (switch on). Presence compares the paths summary.
+  // The list itself lives in buckets; the row stays slim. Presence compares the paths summary.
   const list = projection.changes;
   const summary = list === undefined ? old!.pathSummary! : presencePaths(list);
   const slim =
     list === undefined
       ? { pathSummary: summary, ...(old!.symbolFacts ? { symbolFacts: true as const } : {}) }
-      : bucketsOn
-        ? { pathSummary: summary, ...(hasSymbolFacts(list) ? { symbolFacts: true as const } : {}) }
-        : { changes: list };
-  if (list !== undefined) {
-    if (bucketsOn) await writeOverlapBuckets(ctx, projectId, lane.id, list, await oldBucketRows());
-    else if (old && old.changes === undefined)
-      for (const row of await oldBucketRows()) await ctx.db.delete(row._id);
-  }
+      : { pathSummary: summary, ...(hasSymbolFacts(list) ? { symbolFacts: true as const } : {}) };
+  if (list !== undefined) await writeOverlapBuckets(ctx, projectId, lane.id, list, await oldBucketRows());
   const at = Date.parse(lane.at);
   const presenceRow = await trackHostedPresence(
     ctx,

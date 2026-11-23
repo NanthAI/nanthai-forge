@@ -18,6 +18,7 @@ import { moduleUrl } from './convex-module.mjs';
 
 const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
 const conflicts = await import(moduleUrl('../convex/projectHostedConflicts.ts'));
+const buckets = await import(moduleUrl('../convex/projectHostedOverlapChanges.ts'));
 
 const text = lines => Buffer.from(lines.map(line => `${line}\n`).join(''));
 const BASE = text(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
@@ -570,8 +571,13 @@ test('83e6d0d3: a resolution inherits every saved origin path, including files w
     },
   );
   const row = [...f.s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === resolution);
+  const saved = buckets.joinOverlapBuckets(
+    [...f.s.tables.projectHostedOverlapChanges.values()]
+      .filter(bucket => bucket.laneId === resolution)
+      .map(bucket => bucket.changes),
+  );
   assert.deepEqual(
-    JSON.parse(row.changes).map(change => change.path),
+    JSON.parse(saved).map(change => change.path),
     ['src/inherited.ts', 'src/marked.ts'],
   );
   const present = [...f.s.tables.projectHostedPresence.values()].find(row => row.laneId === resolution);

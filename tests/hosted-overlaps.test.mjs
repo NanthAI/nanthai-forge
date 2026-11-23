@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { saveFixture, api } from './hosted-saves-fixture.mjs';
-import { setup } from './hosted-overlaps-fixture.mjs';
+import { setup, overlapRowsWithLists } from './hosted-overlaps-fixture.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 import { lifecycleFixture } from './hosted-lane-lifecycle-fixture.mjs';
@@ -524,7 +524,7 @@ test('20 open Lanes x 200 paths use one indexed peer read; history does not ente
     ),
   );
   assert.equal(response.peerEvidence.items.length, 5);
-  const peers = [...s.tables.projectHostedOverlapLanes.values()].filter(row => row.open);
+  const peers = overlapRowsWithLists(s).filter(row => row.open);
   const focus = peers.find(row => row.laneId === lane.id);
   // The 50 ms claim is checked on main-thread CPU time. Wall time also counts the time a loaded runner
   // deschedules this process: hosted Linux takes about 5.6 ms per comparison, yet one run read 52 ms

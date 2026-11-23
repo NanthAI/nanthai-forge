@@ -319,8 +319,15 @@ function assertSaveWriteBudget(run, ceiling) {
     .flatMap(row => row.written)
     .filter(table => table === 'deviceAttempts').length;
   assert.equal(limitWrites, 1, 'one account counter write per save');
+  // Item 411727ba: the saved list of the Lane's overlap row lives in path-hash bucket rows, one per distinct bucket
+  // of the changed paths (at most one per changed file), written by the same mutation as the slim overlap row.
+  const bucketWrites = run.s.counts
+    .flatMap(row => row.written)
+    .filter(table => table === 'projectHostedOverlapChanges').length;
+  assert(bucketWrites >= 1 && bucketWrites <= 10, `${bucketWrites} bucket rows for a ten-file save`);
   assert(
-    run.stats.writes - run.stats.overlapWrites - metricWrites - feedWrites - limitWrites <= ceiling,
+    run.stats.writes - run.stats.overlapWrites - bucketWrites - metricWrites - feedWrites - limitWrites <=
+      ceiling,
     JSON.stringify(run.stats),
   );
 }

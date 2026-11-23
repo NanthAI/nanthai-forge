@@ -24,6 +24,7 @@ import { saveContract } from '../dist/hosted-save-client.js';
 import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
 import { moduleUrl } from './convex-module.mjs';
 import { saveFixture } from './hosted-saves-fixture.mjs';
+const { overlapBucket } = await import(moduleUrl('../convex/projectHostedOverlapChanges.ts'));
 
 async function checkout(t, files) {
   const parent = mkdtempSync(join(tmpdir(), 'forge-line-counts-'));
@@ -376,5 +377,7 @@ test("the Lane page's one read carries the recorded counts with no extra documen
   );
   const meter = s.counts.filter(c => c.name === 'projectLaneReview:read').at(-1);
   t.diagnostic(`per view: ${meter.documents} documents, ${meter.readBytes} bytes`);
-  assert(meter.documents <= 10, `reads ${meter.documents} documents`);
+  // The saved list is read whole: one bucket document per distinct path hash, beside the handful of Lane documents.
+  const bucketDocuments = new Set(changes.map(change => overlapBucket(change.path))).size;
+  assert(meter.documents <= 10 + bucketDocuments, `reads ${meter.documents} documents`);
 });

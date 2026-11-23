@@ -12,11 +12,6 @@ export const OVERLAP_BUCKETS = 64;
 /** Few distinct buckets are read one by one; beyond this the whole range is one cheaper read. */
 const POINT_READ_BUCKETS = 16;
 
-/** Switch FORGE_OVERLAP_CHANGE_BUCKETS (off by default): the Lane record write stores slim rows and bucket rows.
- * Readers accept both forms at all times, so turning it off again stays safe: the next write of a Lane
- * stores the inline form and deletes its bucket rows. */
-export const overlapBucketsOn = () => process.env.FORGE_OVERLAP_CHANGE_BUCKETS === '1';
-
 /** FNV-1a over the path's UTF-16 units: stable on every runtime, no async digest. */
 export function overlapBucket(path: string) {
   let hash = 0x811c9dc5;

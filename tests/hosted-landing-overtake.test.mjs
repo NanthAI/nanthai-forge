@@ -391,10 +391,12 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // removed at close, inside those mutations: +1,339 read and +1,870 write bytes for the pair, with unchanged calls.
   // Item 411727ba: source resolve reuses the project row its step fence read (one project read fewer per
   // resolve call): 2,088 fewer read bytes for the pair, with unchanged calls and writes.
+  // Item 411727ba (bucketed overlap changes): each Lane's saved list is a bucket row beside a slim overlap row: +286 read
+  // and +182 write bytes for the pair, with unchanged calls.
   const measured = canonicalReplayCost(pair);
   assert.deepEqual(
     measured,
-    { calls: 107, readBytes: 1_822_233, writeBytes: 593_762 },
+    { calls: 107, readBytes: 1_822_519, writeBytes: 593_944 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -453,10 +455,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item ced8e98f (recheck none): the same 1,051 read and 346 write bytes at 4,000 files.
   // Item c6615b66: the pair's coordination session rows, as in the small replay: +1,159 read and +1,727 write bytes.
   // Item 411727ba: the same resolve project-row reuse at 4,000 files: 2,088 fewer read bytes.
+  // Item 411727ba (bucketed overlap changes): the same +286 read and +182 write bytes at 4,000 files.
   const measured = canonicalReplayCost(after);
   assert.deepEqual(
     measured,
-    { calls: 107, readBytes: 1_827_090, writeBytes: 596_039 },
+    { calls: 107, readBytes: 1_827_376, writeBytes: 596_221 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { transfers } from './hosted-compose-fixture.mjs';
 import { syncFixture, api, jobApi, code } from './hosted-sync-fixture.mjs';
+import { withSavedList } from './hosted-overlap-list.mjs';
 const target = s => ({ kind: 'main', head: s.main.head, receiptId: s.main.receipt.id });
 // A Lane whose base names the same head under an earlier receipt: its sync is still up to date, but
 // publication rebases the record, so prepare cannot settle it and the source job runs.
@@ -144,7 +145,7 @@ test('a merged sync moves the Lane base to the main it took in, so behindMain st
   assert.equal(overlap.baseHead, main.sha256, 'the overlap row measures behindMain from the merged main');
   assert.equal(overlap.baseReceiptId, 'new-main');
   assert(
-    JSON.parse(overlap.changes).some(change => change.path === 'lane'),
+    JSON.parse(withSavedList(s, overlap).changes).some(change => change.path === 'lane'),
     'its own saved paths stay as evidence',
   );
 });
