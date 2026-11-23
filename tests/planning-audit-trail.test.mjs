@@ -584,6 +584,112 @@ test('window read lists each Item once across scan pages, keeps its older close 
   }
 });
 
+test('window rows list the Decisions lines dated in the window across Items, without extra reads', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-10T10:00:00.000Z') });
+  const s = await setup(t);
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  addDeviceAndAccounts(s);
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
+  const p = makePort(s);
+  const first = (await runPut(p, { kind: 'issue', title: 'Decided twice' })).itemId;
+  const second = (await runPut(p, { kind: 'issue', title: 'Decided once' })).itemId;
+  const quiet = (await runPut(p, { kind: 'issue', title: 'Only edited' })).itemId;
+  const at = iso => t.mock.timers.setTime(Date.parse(iso));
+  at('2026-11-12T08:00:00.000Z');
+  await runComment(p, { planningItemId: first, text: 'Before the window.', decision: true });
+  at('2026-11-16T09:00:00.000Z');
+  await runComment(p, {
+    planningItemId: first,
+    text: 'Ship the filter first.\n\nLonger reasoning.',
+    decision: true,
+  });
+  at('2026-11-17T09:00:00.000Z');
+  await runComment(p, { planningItemId: second, text: 'Park the rest.', decision: true });
+  await runComment(p, { planningItemId: quiet, text: 'Plain discussion is not a decision.' });
+  await runPut(p, { planningItemId: quiet, expectedVersion: 1, title: 'Only edited!' });
+  at('2026-11-19T09:00:00.000Z');
+  await runComment(p, { planningItemId: first, text: 'After the window.', decision: true });
+
+  p.calls.length = 0;
+  const read = await runPlanning(p, { history: { from: '2026-11-15', to: '2026-11-18' } });
+  assert.deepEqual(p.calls, ['projectHostedPlanning:windowHistory'], 'one read, no per-Item calls');
+  const byId = new Map(read.items.map(row => [row.itemId, row]));
+  assert.deepEqual(
+    byId.get(first).decisions.map(({ date, text }) => [date, text]),
+    [['2026-11-16', 'Ship the filter first.']],
+    'only the in-window line, first paragraph, none from before or after',
+  );
+  assert.match(byId.get(first).decisions[0].comment, /^[0-9a-f]{8}$/);
+  assert.deepEqual(
+    byId.get(second).decisions.map(({ date, text }) => [date, text]),
+    [['2026-11-17', 'Park the rest.']],
+  );
+  assert.equal('decisions' in byId.get(quiet), false, 'an Item without Decisions lines has no field');
+});
+
+test('decisionsInWindow keeps UTC-day lines, the newest max and ignores other sections', async () => {
+  const { decisionsInWindow } = await import('../dist/work-planning-put.js');
+  const body = [
+    'Intro',
+    '- 2026-11-01: not a decision',
+    '## Decisions',
+    '- 2026-11-14 @owner: too early (comment aaaaaaaa)',
+    '- 2026-11-15 @lead/amber-fox: on the first day (comment bbbbbbbb)',
+    '- 2026-11-16: no actor (comment cccccccc)',
+    '- 2026-11-18: last day',
+    '- 2026-11-19: too late',
+    'prose line',
+    '## Notes',
+    '- 2026-11-16: not under Decisions',
+  ].join('\n');
+  const from = Date.parse('2026-11-15T13:00:00.000Z');
+  const until = Date.parse('2026-11-18T01:00:00.000Z');
+  const all = decisionsInWindow(body, from, until);
+  assert.deepEqual(
+    all.decisions.map(d => d.date),
+    ['2026-11-15', '2026-11-16', '2026-11-18'],
+    'a day counts when any part of it overlaps the window',
+  );
+  assert.equal(all.decisions[0].label, '@lead/amber-fox');
+  assert.equal(all.decisions[1].label, undefined);
+  assert.equal(all.decisions[2].comment, undefined);
+  const capped = decisionsInWindow(body, from, until, 2);
+  assert.deepEqual(
+    capped.decisions.map(d => d.date),
+    ['2026-11-16', '2026-11-18'],
+  );
+  assert.equal(capped.omitted, 1);
+  assert.deepEqual(decisionsInWindow('no section here', from, until), { decisions: [], omitted: 0 });
+  const odd = [
+    '## Decisions',
+    '```',
+    '- 2026-11-16: inside a fence',
+    '```',
+    '- 2026-11-31: not a calendar day',
+    '- 2026-11-16 @x:  (comment ABCDEF12)',
+    '- 2026-11-17 @x: upper id (comment ABCDEF12)',
+    '- 2026-11-18: newest listed first',
+    '- 2026-11-15: older',
+    '   ## Notes',
+    '- 2026-11-16: after an indented heading',
+  ].join('\n');
+  const parsed = decisionsInWindow(odd, from, until);
+  assert.deepEqual(
+    parsed.decisions.map(d => [d.date, d.text, d.comment]),
+    [
+      ['2026-11-15', 'older', undefined],
+      ['2026-11-16', '', 'abcdef12'],
+      ['2026-11-17', 'upper id', 'abcdef12'],
+      ['2026-11-18', 'newest listed first', undefined],
+    ],
+    'order and the cap follow dates, not body order; empty text keeps its comment id',
+  );
+  assert.deepEqual(
+    decisionsInWindow(odd, from, until, 1).decisions.map(d => d.date),
+    ['2026-11-18'],
+  );
+});
+
 test('window read names where imported records begin and flags Items recorded after they changed', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-01T10:00:00.000Z') });
   const s = await setup(t);

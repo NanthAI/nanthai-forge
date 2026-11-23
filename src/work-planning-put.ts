@@ -224,3 +224,43 @@ export function bodyWithDecision(
   lines.splice(end, 0, line);
   return `${lines.join('\n')}\n`;
 }
+
+export type BodyDecision = { date: string; label?: string; text: string; comment?: string };
+const DECISION_LINE =
+  /^-\s+(\d{4}-\d{2}-\d{2})(?:\s+(\S+))?:\s*(.*?)\s*(?:\(comment ([0-9a-fA-F]{8})\))?\s*$/;
+const DAY_MS = 86_400_000;
+/** The `## Decisions` lines of a body whose UTC day overlaps [fromMs, untilMs], oldest first, as `bodyWithDecision`
+ * wrote them (the date is the only time a line keeps). Fenced code and other sections are skipped, and a date that is
+ * not a real calendar day is ignored. At most `max` are returned (the newest by date); `omitted` counts the older
+ * ones. The author is `label` (not a person field), so reads add no account lookup. Pure: reads only the body. */
+export function decisionsInWindow(body: string, fromMs: number, untilMs: number, max = 10) {
+  const found: BodyDecision[] = [];
+  let fenced = false;
+  let inSection = false;
+  for (const line of body.split('\n')) {
+    if (/^ {0,3}(```|~~~)/.test(line)) fenced = !fenced;
+    if (fenced) continue;
+    if (/^ {0,3}#{1,2}\s/.test(line) || /^##\s+Decisions\s*$/i.test(line)) {
+      inSection = /^##\s+Decisions\s*$/i.test(line);
+      continue;
+    }
+    const match = inSection ? DECISION_LINE.exec(line) : null;
+    if (!match) continue;
+    const day = Date.parse(`${match[1]}T00:00:00.000Z`);
+    if (!Number.isFinite(day) || new Date(day).toISOString().slice(0, 10) !== match[1]) continue;
+    if (day + DAY_MS <= fromMs || day > untilMs) continue;
+    found.push({
+      date: match[1]!,
+      ...(match[2] ? { label: match[2] } : {}),
+      text: match[3]!,
+      ...(match[4] ? { comment: match[4].toLowerCase() } : {}),
+    });
+  }
+  const ordered = found
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) =>
+      a.entry.date === b.entry.date ? a.index - b.index : a.entry.date < b.entry.date ? -1 : 1,
+    )
+    .map(({ entry }) => entry);
+  return { decisions: ordered.slice(-max), omitted: Math.max(0, ordered.length - max) };
+}

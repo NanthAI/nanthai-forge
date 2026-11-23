@@ -224,6 +224,10 @@ neither).
   where its records begin, and a window starting earlier is `partial` (read those changes on each Item's timeline,
   which keeps their real dates). A listed Item whose newest version was imported carries `recordedAt` (the time the
   window placed it by), is counted in `recordedLater`, and also makes the page `partial`.
+  A row whose body has `## Decisions` lines dated inside the window (a `decision:true` comment writes one) carries them
+  as `decisions` (`date`, `label`, `text`, `comment` id prefix; oldest first by date, newest 10, `decisionsOmitted` counts older
+  ones) from the body already read for the row: no extra read. A line keeps only its UTC day, so rows stay ordered by
+  the Item's newest change and the line dates give the decision order.
 - **Access and identity**: Audit reads require project membership (`readProjectRole`). Writers and the owner see public
   handles; read-only members see agent slugs and models without person handles; signed-out viewers and non-members are
   refused. Both reads make zero idle calls and run no polling.

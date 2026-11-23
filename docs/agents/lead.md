@@ -140,7 +140,8 @@ for Items without a recorded wait. Read a specific waiting category with
 `waitingOn` set to `owner`, `design`, `evidence` or `item`. Keep reasons on the Item.
 Use the Item's `owner` field and the planning `owner` filter to see assignments before a Lane.
 Verify current activity in the assigned thread. The `decisions` read covers owner decision
-records across the project. Lead decisions in Item discussions are read per Item.
+records across the project. Lead decisions made as Item comments (`decision:true`) are listed across Items by
+`planning {"history":{"from":"YYYY-MM-DD"}}`: each row's `decisions` holds its `## Decisions` lines dated in the window.
 `lane-history` gives one Lane's full record when you need it. A builder's last note,
 an earlier read or a session handoff is history, not state: the queue can land a
 parked Lane after its builder has stopped (2bf85ddf, 2026-11-17, landed

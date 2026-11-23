@@ -8,6 +8,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { invariant } from '../src/errors';
 import { diffPlanningVersion, parseAuditInstant } from '../src/planning-audit';
+import { decisionsInWindow, type BodyDecision } from '../src/work-planning-put';
 import { isShelved, type PlanningItem } from '../src/work-planning-types';
 import { cursorJson } from './projectItemLandingHistory';
 import { loadVersionSnapshot, writerIdentity, type ResolvedWriter } from './projectPlanningAudit';
@@ -57,6 +58,10 @@ type WindowAuditItem = {
   /** Set when the newest version was written to the store later than it happened (imported): the window
    * placed it by this time, and the Item's own timeline has the real dates. */
   recordedAt?: string;
+  /** `## Decisions` lines dated inside the window (oldest first, newest 10 at most), read from the body already
+   * loaded for this row; `decisionsOmitted` counts older ones. Absent when the Item recorded none. */
+  decisions?: BodyDecision[];
+  decisionsOmitted?: number;
 } & ResolvedWriter;
 
 /** One Item's in-window versions, classified from record headers. */
@@ -202,6 +207,7 @@ async function describe(
   partition: Id<'projectWorkGenerations'> | null,
   entry: Classified,
   charge: Budget,
+  window: { fromMs: number; untilMs: number },
 ): Promise<WindowAuditItem | 'budget' | 'missing'> {
   const load = async (row: Row | null) =>
     row ? await loadVersionSnapshot(ctx, project._id, partition, row, charge) : null;
@@ -228,6 +234,7 @@ async function describe(
     latest.item.agentClient,
   );
   const reason = highlight?.item.reason ?? latest.item.reason;
+  const said = decisionsInWindow(latest.item.body, window.fromMs, window.untilMs);
   return {
     itemId: latest.item.id,
     kind: latest.item.kind,
@@ -242,6 +249,9 @@ async function describe(
     closedAt: at(entry.closed, closed),
     reopenedAt: at(entry.reopened, reopened),
     ...(reason ? { reason } : {}),
+    ...(said.decisions.length
+      ? { decisions: said.decisions, ...(said.omitted ? { decisionsOmitted: said.omitted } : {}) }
+      : {}),
     summary: entry.versions > 1 ? `${diff.summary} (+${entry.versions - 1} earlier in window)` : diff.summary,
     ...(recordedLater(latest.item.at, entry.newest)
       ? { recordedAt: new Date(entry.newest._creationTime).toISOString() }
@@ -424,7 +434,7 @@ export async function readBacklogWindowAudit(
   const items: WindowAuditItem[] = [];
   let shown = 0;
   for (const entry of remaining.slice(0, pageLimit)) {
-    const item = await describe(ctx, project, partition, entry, detail);
+    const item = await describe(ctx, project, partition, entry, detail, { fromMs, untilMs });
     if (item === 'budget') break;
     shown++;
     if (item === 'missing') unresolved++;
