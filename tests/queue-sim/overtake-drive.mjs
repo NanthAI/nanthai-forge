@@ -156,16 +156,37 @@ export async function drive(
     runs: ids.map(id => runsOf.get(id)?.size ?? 0),
     runTicks,
     orderWaits: ids.map(id => byId.get(id)?.orderWaits ?? []),
+    // What each landing's first-check proof carried its pass across (null: it landed on an exact check).
+    proofs: ids.map(id => {
+      const proof = byId.get(id)?.crossHeadProof;
+      return proof && proof.algorithm !== 'exact-tree-v1'
+        ? { algorithm: proof.algorithm, candidatePaths: proof.candidatePaths, mainPaths: proof.mainPaths }
+        : null;
+    }),
+    // Every first-check decision in order: `proof`, or the refusal reason.
+    firstCheck: [...f.reuseDecisions],
     calls: f.counts.length,
     readBytes: f.counts.reduce((n, c) => n + c.readBytes, 0),
     writeBytes: f.counts.reduce((n, c) => n + c.writeBytes, 0),
     aliasWriteBytes: f.counts.reduce((n, c) => n + metricAliasProjectionCounts(c).writeBytes, 0),
     idle: f.pending().filter(task => !/MainAudit:start|LandingStall/.test(task.name)).length,
   };
-  t.diagnostic(JSON.stringify({ ...result, ids: undefined, firstCheck: f.reuseDecisions }));
+  t.diagnostic(JSON.stringify({ ...result, ids: undefined }));
+  // A stranded entry says what it waits for (Item 273650ab: a circle of waits is readable at once).
+  const sequenceOf = id => rows().find(row => row.submissionId === id)?.sequence;
   assert(
     states(f).every(s => s.phase === (withdrawn.has(s.id) ? 'terminal-failed' : 'landed')),
-    JSON.stringify(states(f).map(s => [s.sequence, s.phase])),
+    JSON.stringify(
+      states(f).map(s => {
+        if (s.phase === 'landed') return [s.sequence, s.phase];
+        const row = rows().find(r => r.submissionId === s.id);
+        return [
+          s.sequence,
+          s.phase,
+          { waitsFor: sequenceOf(row?.orderWait), reason: s.observation?.pendingReason },
+        ];
+      }),
+    ),
   );
   return result;
 }

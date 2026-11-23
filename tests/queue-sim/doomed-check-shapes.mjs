@@ -10,6 +10,7 @@ import test from 'node:test';
 import { appendFileSync } from 'node:fs';
 import { synthetic } from '../hosted-landing-batches-fixture.mjs';
 import { drive } from './overtake-drive.mjs';
+import { stream as mixed } from './streams.mjs';
 Object.assign(process.env, {
   ...synthetic,
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
@@ -26,43 +27,7 @@ const spend = index => (f, ids) => {
 };
 const risky = i => `.github/actions/w${i}/action.yml`;
 const script = i => `scripts/test-s${i}.mjs`;
-// Deterministic pseudo-random stream (mulberry32), so a mixed stream is the same for every arm.
-const rng = seed => () => {
-  seed = (seed + 0x6d2b79f5) | 0;
-  let v = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-  v ^= v + Math.imul(v ^ (v >>> 7), 61 | v);
-  return ((v ^ (v >>> 14)) >>> 0) / 4294967296;
-};
-function stream(seed, count, gap, riskShare, mode = 'fast') {
-  const r = rng(seed);
-  const paths = [],
-    at = [],
-    dur = [];
-  let tick = 0;
-  for (let i = 0; i < count; i++) {
-    const kind = r();
-    paths.push(
-      kind < riskShare / 2
-        ? i % 2
-          ? 'convex/schema.ts'
-          : risky(i)
-        : kind < riskShare
-          ? risky(i)
-          : `src/m${i}.ts`,
-    );
-    at.push(tick);
-    tick += Math.floor(r() * gap * 2);
-    dur.push(Math.round(D * (0.8 + r() * 0.4)));
-  }
-  // At most one schema change in flight at a time is not required: the queue must cope.
-  const unique = paths.map((p, i) => (p === 'convex/schema.ts' && paths.indexOf(p) !== i ? risky(i) : p));
-  return {
-    memberPaths: unique,
-    fixture: { landingMode: mode },
-    arrives: i => at[i],
-    duration: i => dur[i],
-  };
-}
+const stream = (seed, count, gap, riskShare, mode) => mixed(seed, count, gap, riskShare, mode, D);
 const shapes = {
   // Incident 0e94a117 shape (builder's replay): schema re-checks 1000 ticks, step spent, late plain arrivals.
   'incident-k3': {
@@ -198,6 +163,12 @@ for (const [name, shape] of Object.entries(shapes)) {
         readMB: +(r.readBytes / 1e6).toFixed(2),
         writeMB: +(r.writeBytes / 1e6).toFixed(2),
         idle: r.idle,
+        // First-check decisions (proof or refusal reason) and the landings whose pass carried across
+        // a moved main, with the main paths it carried across.
+        firstCheck: Object.fromEntries(
+          [...new Set(r.firstCheck)].map(reason => [reason, r.firstCheck.filter(x => x === reason).length]),
+        ),
+        carried: r.proofs.flatMap((proof, i) => (proof ? [{ entry: i, across: proof.mainPaths }] : [])),
         lat,
         perEntryRuns: r.runs,
         waits: r.orderWaits.map(w => w.map(x => x.held).join('+')),

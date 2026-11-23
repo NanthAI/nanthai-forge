@@ -379,7 +379,13 @@ the same runner minutes as without the Lane check.
 - The Lane check never re-runs because main moved; the combined check is that
   re-check, once per cohort.
 - A group never waits for an older entry stacked behind it in the pipeline: that
-  entry can publish only after the group.
+  entry can publish only after the group. The same holds through any chain of waits:
+  an entry never parks on one whose order waits or stacked predecessors lead back to
+  it (it goes ahead instead), and when the predecessor it is stacked on is parked on
+  such a chain, that predecessor's claim runs again and goes ahead (if the entry
+  holds a live reservation, the reservation ends instead, as in a reservation
+  cycle). At most 8 indexed reads per claim, only for a parked or stacked entry it
+  would wait for; rows the claim already read cost none.
 
 A pending full admission can be the first predicted-head predecessor when a
 follower has known disjoint paths with unplaceable global risk in Strict mode.

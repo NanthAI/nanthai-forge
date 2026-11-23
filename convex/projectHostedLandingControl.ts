@@ -528,6 +528,9 @@ export async function claimReadyLanding(
       await ctx.db.patch(row._id, { reservedUntil: now });
       await wakeLandingOrderWaiters(ctx, row);
     }
+    // The predecessor this entry publishes after is parked on a chain that leads back here (Item
+    // 273650ab): drive its claim once, which goes ahead of the entry it waited for.
+    if ('redrive' in ahead && ahead.redrive) await driveParkedWaiter(ctx, ahead.row);
     // A park that lasts a check (the holder is not about to land) never holds the Ready followers
     // handed to this entry: they get their own claim (baton, incident 43b51a5e case 2).
     if (

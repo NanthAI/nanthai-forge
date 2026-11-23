@@ -9,7 +9,7 @@ import type { Doc } from './_generated/dataModel';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { hostedLandingProgressAt, retainedStallOwner } from '../src/hosted-landing-stall';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
-import { stackedBehind } from './projectHostedLandingSuffix';
+import { stackedBehind, waitsBackOn } from './projectHostedLandingSuffix';
 import { batchRow, batchSchema } from './projectHostedLandingBatchState';
 import {
   generationStartedAfterPass,
@@ -195,6 +195,23 @@ export async function olderLandingAhead(
       if (singleton && (await reuseOn()) && (await side())?.proofs) {
         if (reservationLive && ahead.orderWait && (await waitsOnReservation(ctx, row, ahead, chain)))
           return { ...wait, cycle: true };
+        // This entry publishes after its predecessor, so it waits for it whatever. If the predecessor
+        // is parked on a chain that leads back here (Item 273650ab), one wait must give: this entry's
+        // own live reservation (it ends, as above), else the predecessor's claim decides again and
+        // goes ahead of the entry it waits for (`waitsBackOn` below).
+        if (
+          ahead.phase === 'ready' &&
+          ahead.orderWait &&
+          (await waitsBackOn(
+            ctx,
+            row,
+            state,
+            ahead,
+            storedLandingStateSchema.parse(JSON.parse(ahead.value)),
+            chain,
+          ))
+        )
+          return reservationLive ? { ...wait, cycle: true } : { ...wait, redrive: true };
         return wait;
       }
     }
@@ -217,6 +234,7 @@ export async function olderLandingAhead(
     )
     .order('asc')
     .take(16);
+  const loaded = new Map(older.map(other => [other.submissionId, other]));
   for (const other of older) {
     if (row.priority === 'urgent' && other.priority !== 'urgent') continue;
     const value = storedLandingStateSchema.parse(JSON.parse(other.value));
@@ -359,6 +377,15 @@ export async function olderLandingAhead(
       if (me && waitFootprints(me.paths, await pathsOf(), me.checkEntries) === 'disjoint') continue;
       cycle = true;
     }
+    // Never park on an entry whose own waits lead back here any other way (Item 273650ab): it cannot
+    // take main first, so this entry goes ahead of it. After the reservation rule, which decides its
+    // own cycles. Only for a parked or cohort entry; rows of this claim's window cost no read.
+    if (
+      !cycle &&
+      (other.orderWait || value.batchId) &&
+      (await waitsBackOn(ctx, row, state, other, value, chain, loaded))
+    )
+      continue;
     // Its own global risk, from the paths this claim already read (none read for it).
     const ahead = {
       ...(await wait()),

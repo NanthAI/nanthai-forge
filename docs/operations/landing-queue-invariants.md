@@ -9,7 +9,7 @@ Targets; violations remain.
 | S3 | Pass older work only with unrelated known footprints and the sealed/bounded rule, or bounded only when the older side's own global risk is the sole link, a parked Ready entry included (`43b51a5e`). |
 | S4 | Lifetime: one generation lost solely to newer entries; two after a wrong sealed guess. |
 | S5 | Three main-race recompositions, then strict order. Exclude platform retries and batch fallback. |
-| S6 | Decide and record every wait in its writing transaction; no cycles: a reservation holder never parks on an entry whose wait chain leads back to a waiter on its reservation (`43b51a5e`). |
+| S6 | Decide and record every wait in its writing transaction; no cycles: a reservation holder never parks on an entry whose wait chain leads back to a waiter on its reservation (`43b51a5e`), and no entry parks on one whose order waits or stacked predecessors lead back to it (Item `273650ab`). |
 | S7 | Parking and reclaim preserve passed evidence. |
 | S8 | Shared acceptance includes every member; speculative failures settle no member. |
 | S9 | Invalidate pinned descendants, preserving unrelated groups. |
