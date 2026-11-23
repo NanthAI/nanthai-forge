@@ -95,7 +95,10 @@ the reported minutes. A later correction can use the last values the day counted
 adjustment failed. A day whose runs
 could not be read (closed before every run was recorded) leaves the CI figures and is counted: a
 window of such days shows "not recorded" and why, never "landings to go". A day the close read only in
-part (past a cap) is marked `partial`, and the page says so wherever its figures show. Check runs left unread make
+part (past a cap) is marked `partial`, and the page says so once, on hover over the headline's "Some days read in part" marker (never as
+repeated sentences). Which cap stops a day is not recorded on the row: candidates are the run, attempt and lookup caps
+and the transaction read meter shared with the landings and person days (`convex/projectStatsRuns.ts` `pages`,
+`statsDayRuns`; `convex/projectStats.ts` landings loop). Check runs left unread make
 runs and CI minutes a lower bound; landings left unread make landings a lower bound, CI minutes per landing an upper
 bound (every run, over fewer landings), and leave first-try rate and times covering only the landings read. The
 minutes saved are an upper bound when check runs went unread (Forge's minutes are short), a lower bound when landings
@@ -144,9 +147,12 @@ display-only: never an input to a verdict, a queue or a bill.
   reach main one by one, each taking the check time; the queue carries across days. When the check
   time asked of the queue exceeds the day (the method states the load), this is a growing backlog:
   shown only as the worst case.
-- **Merge queue, 5 at a time** (like GitHub's "Require merge queue" with "Build concurrency", the
-  maximum pull requests to build, 5 and "Maximum pull requests to merge" 1). Each change first runs
-  its pull-request check (one check time), then joins the queue: up to 5 entries build at once, each on
+- **Merge queue, N at a time** (like GitHub's "Require merge queue" with "Build concurrency", the
+  maximum pull requests to build, N: the project's own `checks.concurrency`, default 6, read at each day's close and
+  kept on the day row as `replay.width`; days closed before it was kept replayed 5. A period whose days used
+  different widths names the range) and "Maximum pull requests to merge" 1. The page labels it "Merge queue, N at a time
+  (your setting)". Each change first runs
+  its pull-request check (one check time), then joins the queue: up to N entries build at once, each on
   top of those ahead; an entry merges when its build passed and every entry ahead merged.
   - A change's own failed check fails its pull-request run and never joins the queue. A recheck that
     failed here because main moved after the change passed (the attempt records a main-race
@@ -306,3 +312,15 @@ before today's first close) beside them, and the line then reads "Landings are l
 to 10:00 UTC." Every "today" in the app is the UTC project day (`sameUtcDay`, `mainToday` in src/flow-day.ts).
 By agent shows agents in four first-try buckets (100%, 75–99%, 50–74%, under 50%), never a list per agent; each landing's own
 time to main and stops are on its Lane page.
+
+## The value story (Item 3678767e)
+
+Stats opens with what the replayed merge queue at the project's own width would have cost and taken, from this
+project's own history (never the public bench): "Since 28 Oct, Forge saved about $X of CI and N hours of waiting to reach
+main." Dollars are the minutes saved times GitHub's list price for a standard Linux 2-core runner
+(`src/stats-pricing.ts`: one dated constant with its source URL, read from GitHub's pricing page), shown for every plan
+and public repositories too; a hover says free or included minutes and discounts may mean the project pays less.
+The width costs two small reads per day close (the project row and its newest policy receipt), at most 50 a
+project-day (24 so-far closes and the final), the same at 100 and at 1,000 landings a day; views add no call. Hours are the median seconds saved to reach main times the landings, stated in hours with no money value: that time is
+productivity people and agents get back. Each card leads with its percent against the merge queue at the same width,
+then the one-at-a-time worst case.

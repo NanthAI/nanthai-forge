@@ -385,6 +385,28 @@ function fixture() {
   return { day0: { landings, runs: day0 }, day1: { landings: [landing('N', 1441, 1453)], runs: day1 } };
 }
 
+test('the replayed merge queue builds at the project’s own width and the window names it (Item 3678767e)', () => {
+  const { day0 } = fixture();
+  const at5 = statsDay('2026-11-10', day0.landings, day0.runs, statsCarry(null));
+  const at1 = statsDay('2026-11-10', day0.landings, day0.runs, statsCarry(null), 1);
+  assert.equal(
+    at5.replay.width,
+    undefined,
+    'width 5 is what days closed before it was kept replayed: nothing stored',
+  );
+  assert.equal(at1.replay.width, 1);
+  // Width 1 is still a merge queue: every change runs its pull-request check (600 s) before it joins, so none reaches
+  // main sooner than that check plus its own build (1,200 s).
+  assert.ok(Math.min(...at1.replay.mergeQueue) >= 1200, 'a width-one queue keeps the pull-request check');
+  assert.deepEqual(statsWindow([at1]).comparison.mergeQueue.widths, [1]);
+  assert.deepEqual(statsWindow([at5]).comparison.mergeQueue.widths, [5], 'days without a stored width say 5');
+  assert.deepEqual(
+    statsWindow([at5, at1]).comparison.mergeQueue.widths,
+    [1, 5],
+    'a setting changed inside the period lists every width it used',
+  );
+});
+
 test('fixture: every Stats figure recomputed by hand from raw rows, across midnight', () => {
   const { day0, day1 } = fixture();
   const d0 = statsDaySchema.parse(

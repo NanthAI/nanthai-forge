@@ -129,6 +129,7 @@ const totalsSchema = z
         soloWall: dists,
         soloRuns: int,
         asked: z.number().nonnegative(),
+        widths: z.array(z.number().int().min(1).max(16)).optional(),
         oneRuns: z.number().nonnegative(),
         queueRuns: z.number().nonnegative(),
         one: dists,

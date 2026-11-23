@@ -581,7 +581,8 @@ async function resubmissionJourney(t, mode, failedSeconds) {
   for (const close of closes) {
     const docs = close.readDocumentsByTable;
     assert(
-      close.documents <= 6 + 2 + people + 1 + 1 + 1 + 1 + 4 && close.readBytes < 16_000,
+      // + 2: the project row and its newest policy receipt, for the merge-queue replay's width (Item 3678767e).
+      close.documents <= 6 + 2 + people + 1 + 1 + 1 + 1 + 4 + 2 && close.readBytes < 16_000,
       `the close reads receipt and ticket/body pages, the Lanes (open and closed), the person row, the change range, the project and its writers, one earlier submission and the day's runs: ${JSON.stringify(docs)}`,
     );
     assert.equal(
@@ -590,6 +591,7 @@ async function resubmissionJourney(t, mode, failedSeconds) {
       'the ticket and one earlier same-Intent submission',
     );
     for (const [table, n] of Object.entries(statsRuns)) assert.equal(docs[table] ?? 0, n, table);
+    assert((docs.projectPolicyChanges ?? 0) <= 1, 'at most one policy receipt for the replay width');
     assert.equal(close.writes, 1 + people);
   }
   assert.equal(closed.landings, 1);

@@ -13,10 +13,20 @@
   /* Links sitting in a sentence carry an underline, not colour alone. */
   .stats a.lk { text-decoration: underline; text-underline-offset: 3px; }
   .stats-note { padding: var(--s-3) var(--gut); color: var(--text-2); max-width: var(--m-note); }
-  .stats-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .stats-pair > .fig + .fig { border-left: var(--rule) solid var(--line); }
-  /* Headroom for the printed value above the tallest bar. */
-  .stats-pair .vb i { height: calc(var(--h) * .8%); }
+  /* The two comparison figures, one under the other at full width, each a stack of horizontal bars: label on one line,
+     bar as long as its share of the longest, value at its end (Item 3678767e). */
+  .stats-figs > .fig + .fig { border-top: var(--rule) solid var(--line); }
+  .hb { display: grid; gap: var(--s-2); margin-top: var(--s-3); }
+  .hb .hrow { display: grid; grid-template-columns: minmax(14rem, 20rem) minmax(0, 1fr); align-items: center; gap: var(--s-3); }
+  .hb .hlab { white-space: nowrap; color: var(--text-2); font-size: var(--t-meta); overflow: hidden; text-overflow: ellipsis; cursor: help; }
+  .hb .hrail { display: flex; align-items: center; gap: var(--s-2); min-width: 0; height: 28px; border-left: var(--rule) solid var(--text-3); }
+  .hb .hrail i { display: block; flex: none; width: calc((100% - 8rem) * var(--w) / 100); height: 100%; min-width: 2px; border-radius: 0 var(--r-bar) var(--r-bar) 0; }
+  .hb .hrail i.forge { background: var(--series); }
+  .hb .hrail i.est { background: repeating-linear-gradient(135deg, var(--text-3) 0 1.5px, transparent 1.5px 6px); box-shadow: inset 0 0 0 1px var(--text-3); }
+  .hb .hval { font: var(--w-strong) 13px/1.25 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
+  /* A figure with a hover of its own: dotted underline, reachable by keyboard. */
+  .stats-hint { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+  .stats-hint:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   .stats-how { margin-left: auto; }
   .stats-how-body { padding: var(--s-3) var(--gut) var(--gut); border-top: var(--rule) solid var(--line); color: var(--text-2); max-width: var(--m-prose); }
   .stats-how-body > p { margin: 0 0 var(--s-3); }
@@ -59,22 +69,19 @@
   .stats-bx { margin-inline: var(--gut); }
   .stats-bx small { display: block; color: var(--text-3); font-size: var(--t-micro); }
   @container (max-width: 720px) {
-    .stats-pair { grid-template-columns: minmax(0, 1fr); }
-    .stats-pair > .fig + .fig { border-left: 0; border-top: var(--rule) solid var(--line); }
     /* The method reads as prose on a phone: each term above its explanation. */
     .stats-how-body .kv { grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding-inline: 0; }
     .stats-how-body .kv dd { margin-bottom: var(--s-2); }
+    /* A phone's bar rows stack: the label on its line above the bar. */
+    .hb .hrow { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   }
   @media (max-width: 720px) {
-    .stats-pair { grid-template-columns: minmax(0, 1fr); }
-    .stats-pair > .fig + .fig { border-left: 0; border-top: var(--rule) solid var(--line); }
-    /* The method reads as prose on a phone: each term above its explanation. */
     .stats-how-body .kv { grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding-inline: 0; }
     .stats-how-body .kv dd { margin-bottom: var(--s-2); }
+    .hb .hrow { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   }
   @media (prefers-reduced-motion: reduce) { .stats-days i, .stats[aria-busy='true'] { transition: none; } }
-  /* Baselines named by mechanism, with their GitHub hint under the name; discarded checks by cause. */
-  .stats-vx3 small { display: block; color: var(--text-3); font-size: 11px; }
+  /* Discarded checks by cause. */
   .stats-causes { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
   .stats-causes li > span:first-child { display: inline-block; min-width: 92px; color: var(--text-2); }
 }

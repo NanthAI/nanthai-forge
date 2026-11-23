@@ -155,6 +155,9 @@ const statsDayV2Schema = statsDayV1Schema
         mergeQueueFast: ints.nullable(),
         mergeQueueSlow: ints.nullable(),
         tails,
+        /** Merge-queue builds at once the replay used (the project's `checks.concurrency` when the day closed). Absent on
+         * days closed before it was kept: those replayed 5 at a time. */
+        width: z.number().int().min(1).max(16).optional(),
       })
       .strict(),
     /** The close did not finish (convex/projectStats.ts#closeDay): the day is not measured. It holds no figures,
@@ -256,6 +259,7 @@ export function statsDay(
   input: readonly StatsLanding[],
   runs: ReturnType<typeof classifyRuns> | null = null,
   carry: StatsCarry = NO_CARRY,
+  width: number = MERGE_QUEUE_CONCURRENCY,
 ): StatsDayV2 {
   const landings = [...input].sort((a, b) => a.landedAt - b.landedAt).slice(0, STATS_DAY_MAX_LANDINGS);
   const tally = new Map<string, [number, number, number]>();
@@ -283,14 +287,15 @@ export function statsDay(
     })),
     ...failures.map(f => ({ at: f.at, fails: true, seconds: f.seconds === null ? null : f.seconds * scale })),
   ];
-  const replay = (concurrency: number, scale: number, tail: number[]) =>
+  // A merge queue runs each change's pull-request check first, whatever its width (width 1 included).
+  const replay = (concurrency: number, scale: number, tail: number[], mergeQueue: boolean) =>
     wallSeconds === null
       ? null
-      : mergeQueueReplay(entries(scale, concurrency > 1), wallSeconds * scale, concurrency, tail);
-  const one = replay(1, 1, carry.tails.one),
-    queue = replay(MERGE_QUEUE_CONCURRENCY, 1, carry.tails.queue),
-    fast = replay(MERGE_QUEUE_CONCURRENCY, 0.9, carry.tails.fast),
-    slow = replay(MERGE_QUEUE_CONCURRENCY, 1.1, carry.tails.slow);
+      : mergeQueueReplay(entries(scale, mergeQueue), wallSeconds * scale, concurrency, tail);
+  const one = replay(1, 1, carry.tails.one, false),
+    queue = replay(width, 1, carry.tails.queue, true),
+    fast = replay(width, 0.9, carry.tails.fast, true),
+    slow = replay(width, 1.1, carry.tails.slow, true);
   const ci = runs
     ? {
         all: runs.all,
@@ -339,6 +344,7 @@ export function statsDay(
         fast: (fast?.tail ?? carry.tails.fast).map(Math.round),
         slow: (slow?.tail ?? carry.tails.slow).map(Math.round),
       },
+      ...(width === MERGE_QUEUE_CONCURRENCY ? {} : { width }),
     },
     who: ranked.slice(0, STATS_DAY_MAX_WHO).map(([who, [n, first, counted]]) => [who, n, first, counted]),
     others: ranked.slice(STATS_DAY_MAX_WHO).reduce((s, [, [n]]) => s + n, 0),
@@ -446,6 +452,8 @@ export type StatsTotals = {
     soloRuns: number;
     /** Sum of arrivals × check seconds, for the queue's load. */
     asked: number;
+    /** The merge-queue widths these days replayed (sorted, no repeats): the project's setting as each day closed. */
+    widths?: number[] | undefined;
     oneRuns: number;
     queueRuns: number;
     one: StatsDist[];
@@ -485,6 +493,7 @@ export const noTotals = (): StatsTotals => ({
     soloWall: [],
     soloRuns: 0,
     asked: 0,
+    widths: [],
     oneRuns: 0,
     queueRuns: 0,
     one: [],
@@ -544,6 +553,7 @@ export function dayTotals(d: StatsDay): StatsTotals {
     soloWall: exactDist(d.solo.wallSeconds),
     soloRuns: d.solo.runnerSeconds.length,
     asked: d.replay.arrivals * d.replay.wallSeconds,
+    widths: [d.replay.width ?? MERGE_QUEUE_CONCURRENCY],
     oneRuns: d.landings + d.replay.reruns,
     queueRuns: d.landings + d.replay.builds,
     one: exactDist(d.replay.oneAtATime),
@@ -553,6 +563,8 @@ export function dayTotals(d: StatsDay): StatsTotals {
   };
   return t;
 }
+/** The widths a window's compared days replayed: rollups written before widths were kept replayed 5. */
+const widthsOf = (t: StatsTotals) => t.cmp.widths ?? (t.cmp.days > 0 ? [MERGE_QUEUE_CONCURRENCY] : []);
 /** Two windows' totals as one (sums in order, so a window of days adds exactly as its days do). */
 export function addTotals(a: StatsTotals, b: StatsTotals): StatsTotals {
   const who = new Map<string, [number, number, number]>();
@@ -608,6 +620,7 @@ export function addTotals(a: StatsTotals, b: StatsTotals): StatsTotals {
       soloWall: [...a.cmp.soloWall, ...b.cmp.soloWall],
       soloRuns: a.cmp.soloRuns + b.cmp.soloRuns,
       asked: a.cmp.asked + b.cmp.asked,
+      widths: [...new Set([...widthsOf(a), ...widthsOf(b)])].sort((x, y) => x - y),
       oneRuns: a.cmp.oneRuns + b.cmp.oneRuns,
       queueRuns: a.cmp.queueRuns + b.cmp.queueRuns,
       one: [...a.cmp.one, ...b.cmp.one],
@@ -663,6 +676,7 @@ export function statsFigures(t: StatsTotals) {
       sooner: toMainSeconds === null || forgeToMain === null ? null : toMainSeconds - forgeToMain,
     };
   };
+  const widths = cmp.widths?.length ? cmp.widths : [MERGE_QUEUE_CONCURRENCY];
   const daysWithoutRuns = t.days - ci.days;
   const daysWithoutSolo = ci.days - cmp.days;
   const gap: CompareGap | null =
@@ -758,7 +772,10 @@ export function statsFigures(t: StatsTotals) {
               cmp.one,
             ),
             mergeQueue: {
-              concurrency: MERGE_QUEUE_CONCURRENCY,
+              /** The project's own build width (`checks.concurrency`) as the window's days closed; one number unless the
+               * setting changed inside the window, then `widths` lists them. Rollups from before it was kept say 5. */
+              concurrency: widths.at(-1)!,
+              widths,
               maxToMerge: 1,
               ...baseline(
                 cmp.queueRuns,

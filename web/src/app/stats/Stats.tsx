@@ -17,6 +17,7 @@ import { api } from '../../../../convex/_generated/api';
 import { Region, useFold } from '../../ds';
 import { flowToday, mainToday, utcDayStart } from '../../../../src/flow-day';
 import { STATS_TODAY_REFRESH_MS, rangeDays } from '../../../../src/stats-period';
+import { minutesToUsd } from '../../../../src/stats-pricing';
 import type {
   StatsAgents,
   StatsMonths,
@@ -31,24 +32,24 @@ import { navigate, useSearch } from '../router';
 import { errorCode } from '../session';
 import type { PlaceProps } from '../screens';
 import { ByMonth, ByWho, PerDay, Trend, Waited } from './Charts';
-import { Compare, Measured } from './Compare';
+import { Compare, Hint, Measured, dollarsHover } from './Compare';
 import { PeriodPicker } from './PeriodPicker';
 import {
-  duration,
   filledDays,
   gapWords,
   derivedAsOf,
   hintAsOf,
   holdsToday,
+  hoursWords,
   partialWords,
   int,
-  minutes,
   coverWords,
   periodOf,
   periodWords,
   plural,
-  spanWords,
   soFarOf,
+  usd,
+  valueWhen,
   withLiveToday,
   weekdayName,
   type Period,
@@ -339,7 +340,13 @@ function Sentence({ data, period, asOf }: { data: StatsRead; period: Period; asO
   const w = data.window,
     c = w.comparison,
     when = coverWords(period, data.cover),
-    part = partialWords(w);
+    part = partialWords(w),
+    mark = part ? (
+      <>
+        {' '}
+        <Hint text={part}>Some days read in part.</Hint>
+      </>
+    ) : null;
   if (!c)
     return (
       <>
@@ -349,29 +356,26 @@ function Sentence({ data, period, asOf }: { data: StatsRead; period: Period; asO
         {w.compare.gap === 'landings'
           ? `The comparison with your own history starts at ${int(data.compareFrom)} landings; ${part ? 'what Forge measured is shown as far as it was read.' : 'what Forge measured is exact from the first.'}`
           : `${gapWords(w).text} What Forge measured is shown as it was recorded.`}
-        {part ? ` ${part.measured}` : ''}
+        {mark}
       </>
     );
-  // Headline against the merge queue (the setup a busy GitHub project uses): its CI minutes and the median time to
-  // main. One at a time, the worst case, stays in the chart.
+  // The value story (Item 3678767e): what the replayed merge queue at this project's own width would have cost and
+  // taken, as dollars at GitHub's list price and hours of waiting. One at a time, the worst case, stays in the chart.
   const q = c.mergeQueue;
-  const ci =
-    q.savedMinutes >= 0
-      ? `${minutes(q.savedMinutes)} fewer CI minutes`
-      : `${minutes(-q.savedMinutes)} more CI minutes`;
-  const s = q.sooner;
-  const time =
-    s === null
-      ? ''
-      : s === 0
-        ? ' Changes reached main in the same time (median).'
-        : ` Changes reached main ${duration(Math.abs(s))} ${s > 0 ? 'sooner' : 'later'} (median).`;
+  const dollars = usd(Math.abs(minutesToUsd(q.savedMinutes)));
+  const waited = q.sooner === null ? null : q.sooner * c.landings;
   return (
     <>
-      <b>{ci} than a GitHub merge queue would have used</b> for these {plural(c.landings, 'landing')}
-      {spanWords(data.cover, period)}
-      {asOf ? `, ${asOf}` : ''}.{time}
-      {part ? ` ${part.saved}` : ''}
+      <b>
+        {valueWhen(period, data.cover)}, Forge {q.savedMinutes >= 0 ? 'saved about ' : 'used about '}
+        <Hint text={dollarsHover}>{dollars}</Hint> {q.savedMinutes >= 0 ? 'of CI' : 'more CI'}
+        {waited === null
+          ? ''
+          : ` and ${waited >= 0 ? (q.savedMinutes >= 0 ? '' : 'saved ') : 'added '}${hoursWords(waited)} of waiting to reach main`}
+        .
+      </b>{' '}
+      Against your own history replayed through a merge queue at your width, {plural(c.landings, 'landing')}
+      {asOf ? `, ${asOf}` : ''}.{mark}
     </>
   );
 }

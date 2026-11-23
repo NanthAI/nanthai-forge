@@ -3,6 +3,8 @@
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { hostedPipelineWidth } from '../src/hosted-landing-batch';
 
 export const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const HOUR_MS = 3_600_000;
@@ -35,4 +37,22 @@ export async function scheduleStatsClose(
       makeFunctionReference<'mutation'>('projectStats:closeDay'),
       { projectId, day: utcDay(at), provisional: true },
     );
+}
+
+/** The merge-queue width a day's replay uses: the project's own `checks.concurrency` now (the pipeline width the
+ * landing queue runs, default 6), so the replayed GitHub queue builds as many entries at once as Forge's does. One
+ * project row and at most one policy receipt, read once per close: 2 small reads, the same at 100 and at 1,000 landings
+ * a day. A project-day closes at most 25 times (24 hourly so-far closes and the final one): at most 50 reads a day,
+ * none per landing, none per view, none at idle. */
+export async function statsQueueWidth(ctx: Pick<MutationCtx, 'db'>, projectId: Id<'hostedProjects'>) {
+  const project = await ctx.db.get(projectId);
+  if (!project) return undefined;
+  const latest = await ctx.db
+    .query('projectPolicyChanges')
+    .withIndex('by_project', q => q.eq('projectId', projectId))
+    .order('desc')
+    .first();
+  // A plan-visibility row carries the default policy on a project that never stored one; it is not a receipt.
+  const receipt = latest?.planChange && !project.autonomyPolicy ? undefined : latest?.policy;
+  return hostedPipelineWidth(receipt ?? effectivePolicy(project));
 }

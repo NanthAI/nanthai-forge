@@ -20,7 +20,7 @@ import { landingAcceptedBySchema } from '../src/landing-accepted-by';
 import { recordPersonDays } from './personDays';
 import { DAY_MS, STATS_LANE_LOOKBACK_DAYS, isAccount, laneWindowStart, lanesByDay } from './statsLanes';
 import { PLANNING_HOT_MS, planningContributions, planningMembers, planningPartialDays } from './personWork';
-import { utcDay, utcHour } from './projectStatsClose';
+import { statsQueueWidth, utcDay, utcHour } from './projectStatsClose';
 import {
   STATS_CLOSE_TRIES,
   STATS_DAY_MAX_LANDINGS,
@@ -464,7 +464,7 @@ export const closeDay = internalMutation({
 
     const carry = statsCarry(prior);
     const runs = await statsDayRuns(ctx, projectId, from, from + DAY_MS, landedAttemptIds);
-    const closed = statsDay(day, landings, runs, carry);
+    const closed = statsDay(day, landings, runs, carry, await statsQueueWidth(ctx, projectId));
     // Today so far, or a re-close of a day still provisional: rebuilt figures, still provisional, so the day's real
     // close (person days, day budgets, late-correction lists) still runs.
     const soFar = provisional ? now : reclose ? keptSoFar : undefined;

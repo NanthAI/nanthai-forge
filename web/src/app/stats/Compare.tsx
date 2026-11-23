@@ -1,62 +1,85 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Stats: measured beside the project's own history replayed through two GitHub setups, named by how they merge
-// (Item a61d3c91; method in src/stats-estimate.ts#statsWindow), and the measured facts.
+// (Item a61d3c91; method in src/stats-estimate.ts#statsWindow), and the measured facts. Each figure leads with its
+// percent against a merge queue at the project's own width, then the one-at-a-time worst case (Item 3678767e).
 import { useState, type CSSProperties } from 'react';
 import { Key, Region } from '../../ds';
 import {
+  STATS_RATE_READ_ON,
+  STATS_RATE_RUNNER,
+  STATS_RATE_SOURCE,
+  STATS_USD_PER_RUNNER_MINUTE,
+  minutesToUsd,
+} from '../../../../src/stats-pricing';
+import {
   clock,
   duration,
+  hoursWords,
   int,
   minutes,
   gapWords,
   hintAsOf,
-  partialWords,
   percent,
   plural,
+  savedPercent,
   scale,
+  usd,
   type StatsRead,
   type StatsWindow,
 } from './model';
 
-/** The two replayed setups. `like` is the short hint under the name. `setting` gives GitHub's wording on hover. */
-export const BASELINES = {
-  oneAtATime: {
-    name: 'One at a time',
-    like: 'like GitHub with branches up to date',
-    setting:
-      'GitHub branch protection: “Require status checks to pass before merging” with “Require branches to be up to date before merging”',
-  },
-  mergeQueue: {
-    name: 'Merge queue, 5 at a time',
-    like: 'like GitHub merge queue',
-    setting:
-      'GitHub ruleset: “Require merge queue”, with “Build concurrency” (maximum pull requests to build) 5 and “Maximum pull requests to merge” 1',
-  },
+/** The two replayed setups, in plain words on hover. A merge queue is named for the project's own width. */
+export const ONE_AT_A_TIME = {
+  name: 'One at a time',
+  setting:
+    'Each change waits for the one ahead to reach main, then re-runs its check on the new main: GitHub branch protection with “Require status checks to pass before merging” and “Require branches to be up to date before merging”.',
 } as const;
+type Comparison = NonNullable<StatsWindow['comparison']>;
+/** "Merge queue, 6 at a time (your setting)"; when the setting changed inside the period, the widths it used. */
+export const queueName = (q: Pick<Comparison['mergeQueue'], 'widths'>) =>
+  q.widths.length > 1
+    ? `Merge queue, ${q.widths[0]}–${q.widths.at(-1)} at a time (your setting)`
+    : `Merge queue, ${q.widths[0]} at a time (your setting)`;
+const queueSetting = (q: Pick<Comparison['mergeQueue'], 'widths'>) =>
+  `GitHub ruleset: “Require merge queue”, with “Build concurrency” (maximum pull requests to build) ${q.widths.length > 1 ? `${q.widths.join(', ')} as your setting changed` : q.widths[0]} and “Maximum pull requests to merge” 1. The width is this project’s own check concurrency setting.`;
 
-const fewer = (saved: number) =>
-  saved > 0 ? `${minutes(saved)} fewer` : saved < 0 ? `${minutes(-saved)} more` : 'the same';
+/** The reader's dollar figure and its hover: GitHub's list price, whatever the plan. */
+export const dollarsHover = `Priced at GitHub’s list price for a ${STATS_RATE_RUNNER} runner, $${STATS_USD_PER_RUNNER_MINUTE} a minute (read from GitHub’s pricing page on ${STATS_RATE_READ_ON}), for every plan and public repositories too: what these minutes would cost a private repository. It assumes your checks run on that standard runner: a larger runner costs more per minute. Free or included minutes and discounts may mean your project pays less.`;
+
+const fewerWord = (n: number) => (n >= 0 ? 'fewer' : 'more');
+const soonerWord = (n: number) => (n >= 0 ? 'sooner' : 'later');
+/** A saving's lead: its whole percent of the baseline, else the amount. */
+const lead = (pct: number | null, amount: string) => (pct === null ? amount : `${Math.abs(pct)}%`);
 const sooner = (s: number | null) =>
-  s === null
-    ? 'not replayed'
-    : s > 0
-      ? `${duration(s)} sooner`
-      : s < 0
-        ? `${duration(-s)} later`
-        : 'the same';
+  s === null ? 'not replayed' : s === 0 ? 'the same' : `${duration(Math.abs(s))} ${soonerWord(s)}`;
 
-function Axis() {
+/** One row of a horizontal bar chart: a label on one line, a bar as wide as its share of the longest, its value. */
+type BarRow = { name: string; hover?: string; value: string; share: number; kind: 'forge' | 'est' };
+function Bars({ rows, label }: { rows: BarRow[]; label: string }) {
   return (
-    <div className="vx stats-vx3" aria-hidden="true">
-      <span>Forge</span>
-      {(['oneAtATime', 'mergeQueue'] as const).map(k => (
-        <span key={k} title={BASELINES[k].setting}>
-          {BASELINES[k].name}
-          <small>({BASELINES[k].like})</small>
-        </span>
+    <div className="hb" role="img" aria-label={label}>
+      {rows.map(row => (
+        <div className="hrow" key={row.name}>
+          <span className="hlab" title={row.hover}>
+            {row.name}
+          </span>
+          <span className="hrail">
+            <i className={row.kind} style={{ '--w': row.share } as CSSProperties} />
+            <b className="hval">{row.value}</b>
+          </span>
+        </div>
       ))}
     </div>
+  );
+}
+
+/** A figure's hover on its own: keyboard focusable, so a touch or keyboard reader can reach it too. */
+export function Hint({ text, children }: { text: string; children: React.ReactNode }) {
+  return (
+    <span className="stats-hint" tabIndex={0} title={text} aria-label={`${text}`}>
+      {children}
+    </span>
   );
 }
 
@@ -76,10 +99,16 @@ export function Compare({ w, asOf = null }: { data: StatsRead; w: StatsWindow; a
   }
   const one = c.oneAtATime,
     queue = c.mergeQueue;
+  const name = queueName(queue);
   const [fm, om, qm] = scale([c.forgeMinutes, one.ciMinutes, queue.ciMinutes]);
   // Forge's median over the same days the replays cover, so the bars and the headline agree.
   const forgeToMain = c.forgeToMainSeconds;
   const [ft, ot, qt] = scale([forgeToMain ?? 0, one.toMainSeconds ?? 0, queue.toMainSeconds ?? 0]);
+  const ciQueue = savedPercent(queue.savedMinutes, queue.ciMinutes),
+    ciOne = savedPercent(one.savedMinutes, one.ciMinutes),
+    timeQueue = savedPercent(queue.sooner, queue.toMainSeconds),
+    timeOne = savedPercent(one.sooner, one.toMainSeconds);
+  const waited = queue.sooner === null ? null : queue.sooner * c.landings;
   return (
     <Region
       title="Against your own history"
@@ -88,65 +117,81 @@ export function Compare({ w, asOf = null }: { data: StatsRead; w: StatsWindow; a
         asOf,
       )}
     >
-      <div className="stats-pair">
+      <div className="stats-figs">
         <div className="fig">
           <h3>CI minutes, every check run</h3>
           <div className="big">
-            {fewer(queue.savedMinutes)} than a merge queue
+            {lead(ciQueue, minutes(Math.abs(queue.savedMinutes)))} {fewerWord(queue.savedMinutes)} CI minutes
             <small>
-              {fewer(one.savedMinutes)} than one at a time, over {plural(c.landings, 'landing')}
+              than a merge queue at your width · {lead(ciOne, minutes(Math.abs(one.savedMinutes)))}{' '}
+              {fewerWord(one.savedMinutes)} than one at a time, the worst case
+            </small>
+            <small>
+              {minutes(Math.abs(queue.savedMinutes))} minutes {fewerWord(queue.savedMinutes)}, about{' '}
+              <Hint text={dollarsHover}>{usd(Math.abs(minutesToUsd(queue.savedMinutes)))}</Hint> at GitHub
+              list price, over {plural(c.landings, 'landing')}
             </small>
           </div>
-          {partialWords(w) ? (
-            <p className="stats-readout" role="note">
-              {partialWords(w)!.saved}
-            </p>
-          ) : null}
-          <div
-            className="vb"
-            role="img"
-            aria-label={`CI minutes: Forge ${minutes(c.forgeMinutes)} measured. Replayed estimates: one at a time ${minutes(one.ciMinutes)}, merge queue 5 at a time ${minutes(queue.ciMinutes)}.`}
-          >
-            <div className="col">
-              <span className="val">{minutes(c.forgeMinutes)}</span>
-              <i className="forge" style={{ '--h': fm } as CSSProperties} />
-            </div>
-            <div className="col">
-              <span className="val">{minutes(one.ciMinutes)}</span>
-              <i className="est" style={{ '--h': om } as CSSProperties} />
-            </div>
-            <div className="col">
-              <span className="val">{minutes(queue.ciMinutes)}</span>
-              <i className="est" style={{ '--h': qm } as CSSProperties} />
-            </div>
-          </div>
-          <Axis />
+          <Bars
+            label={`CI minutes: Forge ${minutes(c.forgeMinutes)} measured. Replayed estimates: ${name} ${minutes(queue.ciMinutes)}, one at a time ${minutes(one.ciMinutes)}.`}
+            rows={[
+              { name: 'Forge', value: minutes(c.forgeMinutes), share: fm!, kind: 'forge' },
+              { name, hover: queueSetting(queue), value: minutes(queue.ciMinutes), share: qm!, kind: 'est' },
+              {
+                name: ONE_AT_A_TIME.name,
+                hover: ONE_AT_A_TIME.setting,
+                value: minutes(one.ciMinutes),
+                share: om!,
+                kind: 'est',
+              },
+            ]}
+          />
         </div>
         <div className="fig">
           <h3>Median time to main, from “land” to on main</h3>
           <div className="big">
-            {sooner(queue.sooner)} than a merge queue
-            <small>{sooner(one.sooner)} than one at a time, the worst case</small>
+            {timeQueue === null
+              ? sooner(queue.sooner)
+              : `${Math.abs(timeQueue)}% ${soonerWord(queue.sooner!)} to main`}
+            <small>
+              than a merge queue at your width ·{' '}
+              {timeOne === null || one.sooner === null
+                ? `${sooner(one.sooner)} than one at a time, the worst case`
+                : `${Math.abs(timeOne)}% ${soonerWord(one.sooner)} than one at a time, the worst case`}
+            </small>
+            {waited === null ? null : (
+              <small>
+                {sooner(queue.sooner)} each, about {hoursWords(waited)} of waiting{' '}
+                {waited >= 0 ? 'saved' : 'added'} over {plural(c.landings, 'landing')} (median saving ×
+                landings)
+              </small>
+            )}
           </div>
-          <div
-            className="vb"
-            role="img"
-            aria-label={`Median time to main: Forge ${duration(forgeToMain)} measured. Replayed estimates: one at a time ${duration(one.toMainSeconds)}, merge queue 5 at a time ${duration(queue.toMainSeconds)}.`}
-          >
-            <div className="col">
-              <span className="val">{forgeToMain === null ? '–' : clock(forgeToMain)}</span>
-              <i className="forge" style={{ '--h': ft } as CSSProperties} />
-            </div>
-            <div className="col">
-              <span className="val">{one.toMainSeconds === null ? '–' : clock(one.toMainSeconds)}</span>
-              <i className="est" style={{ '--h': ot } as CSSProperties} />
-            </div>
-            <div className="col">
-              <span className="val">{queue.toMainSeconds === null ? '–' : clock(queue.toMainSeconds)}</span>
-              <i className="est" style={{ '--h': qt } as CSSProperties} />
-            </div>
-          </div>
-          <Axis />
+          <Bars
+            label={`Median time to main: Forge ${duration(forgeToMain)} measured. Replayed estimates: ${name} ${duration(queue.toMainSeconds)}, one at a time ${duration(one.toMainSeconds)}.`}
+            rows={[
+              {
+                name: 'Forge',
+                value: forgeToMain === null ? '–' : clock(forgeToMain),
+                share: ft!,
+                kind: 'forge',
+              },
+              {
+                name,
+                hover: queueSetting(queue),
+                value: queue.toMainSeconds === null ? '–' : clock(queue.toMainSeconds),
+                share: qt!,
+                kind: 'est',
+              },
+              {
+                name: ONE_AT_A_TIME.name,
+                hover: ONE_AT_A_TIME.setting,
+                value: one.toMainSeconds === null ? '–' : clock(one.toMainSeconds),
+                share: ot!,
+                kind: 'est',
+              },
+            ]}
+          />
         </div>
       </div>
       <div className="legend">
@@ -211,7 +256,7 @@ export function Compare({ w, asOf = null }: { data: StatsRead; w: StatsWindow; a
               {plural(c.failed.pullRequest, 'run')}) keeps its change out of the queue.
             </dd>
             <dt>
-              {BASELINES.oneAtATime.name}, {minutes(one.ciMinutes)}
+              {ONE_AT_A_TIME.name}, {minutes(one.ciMinutes)}
             </dt>
             <dd>
               We price one check per change and a rerun each time another change reached main while it waited
@@ -220,13 +265,14 @@ export function Compare({ w, asOf = null }: { data: StatsRead; w: StatsWindow; a
               available. The wait grows when checks need more time than the day has.
             </dd>
             <dt>
-              {BASELINES.mergeQueue.name}, {minutes(queue.ciMinutes)}
+              {name}, {minutes(queue.ciMinutes)}
             </dt>
             <dd>
-              We replay a pull-request check and a queue build for each change that lands. Up to 5 changes
-              build at once on top of those ahead, and 1 merges at a time. A failed recheck after main moves
-              removes the change from the queue ({plural(c.failed.inQueue, 'check')}) and restarts the builds
-              behind it. A cut-short build counts for the share it ran. That gives{' '}
+              We replay a pull-request check and a queue build for each change that lands. Up to{' '}
+              {queue.concurrency} changes build at once on top of those ahead (your project’s check
+              concurrency setting), and 1 merges at a time. A failed recheck after main moves removes the
+              change from the queue ({plural(c.failed.inQueue, 'check')}) and restarts the builds behind it. A
+              cut-short build counts for the share it ran. That gives{' '}
               {plural(Math.round(queue.runs), 'full-check equivalent')} plus{' '}
               {plural(queue.recordedRuns, 'run')} at their recorded minutes. Waiting changes carry into the
               next day. With checks 10% faster or slower, the median time to main is{' '}
@@ -252,6 +298,15 @@ export function Compare({ w, asOf = null }: { data: StatsRead; w: StatsWindow; a
             </dd>
           </dl>
           <p>
+            Dollars price the minutes saved at GitHub’s list price for a {STATS_RATE_RUNNER} runner, $
+            {STATS_USD_PER_RUNNER_MINUTE} a minute, read from{' '}
+            <a className="lk" href={STATS_RATE_SOURCE}>
+              GitHub’s pricing page
+            </a>{' '}
+            on {STATS_RATE_READ_ON}. Hours of waiting are the median time saved to reach main times the
+            landings; they carry no money value, because that time is productivity people and agents get back.
+          </p>
+          <p>
             We calculate these figures from this project’s own records and use them only on Stats. Only
             signed-in project members with write access can see them.
           </p>
@@ -273,11 +328,6 @@ export function Measured({ w, asOf = null }: { w: StatsWindow; asOf?: string | n
   const d = m.discarded;
   return (
     <Region title="Measured" hint={hintAsOf('facts from this project’s check runs and landings', asOf)}>
-      {partialWords(w) ? (
-        <p className="stats-readout" role="note">
-          {partialWords(w)!.measured}
-        </p>
-      ) : null}
       <dl className="kv">
         <dt>CI minutes per landing</dt>
         <dd>

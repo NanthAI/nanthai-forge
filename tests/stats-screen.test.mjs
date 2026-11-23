@@ -111,7 +111,7 @@ async function fixture(out) {
       const name = new Date(start).toISOString().slice(0, 10);
       if (sample === 'notMeasured' && i === 1) return statsFailedDay(name, carry, 3);
       const landings = day(start, n);
-      const d = statsDay(name, landings, runsOf(landings), carry);
+      const d = statsDay(name, landings, runsOf(landings), carry, 6);
       carry = statsCarry(d);
       if (sample === 'today' && i === plan.length - 1) return {...d, provisional: Date.UTC(2026, 10, 19, 10)};
       return sample === 'landingsCut' ? {...d, partial: true} : d;
@@ -201,11 +201,17 @@ test('stats: short headline, one freshness line, today so far, comparison, table
   };
   const page = await open();
   const sentence = await page.locator('.sit').textContent();
-  // Item 580b1a1a: the merge queue's CI minutes and the median time to main, for the landings and days counted.
+  // Item 3678767e: the value story. Dollars of CI at GitHub list price and hours of waiting to reach main, the merge
+  // queue at the project's own width; the period it covers in the opening words.
   assert.match(
     sentence,
-    /^[\d,.]+ (fewer|more) CI minutes than a GitHub merge queue would have used for these [\d,]+ landings, 1–15 Nov\. Changes reached main [\w ]+ (sooner|later) \(median\)\.(Through|$)/,
-    'the headline is short and exact',
+    /^Since 1 Nov, Forge saved about \$[\d,.]+ of CI and [\d,.]+ hours? of waiting to reach main\. Against your own history replayed through a merge queue at your width, [\d,]+ landings\.(Through|$)/,
+    'the headline tells the value in dollars and hours',
+  );
+  assert.match(
+    (await page.locator('.sit .stats-hint').first().getAttribute('title')) ?? '',
+    /GitHub’s list price for a standard Linux 2-core runner, \$0\.006 a minute \(read from GitHub’s pricing page on 2026-11-23\).*public repositories too.*may mean your project pays less/,
+    'the dollar figure says what it is priced at, and that a project may pay less',
   );
   assert.doesNotMatch(sentence, /one at a time/i, 'one at a time stays in the chart');
   assert.deepEqual(
@@ -217,14 +223,18 @@ test('stats: short headline, one freshness line, today so far, comparison, table
   assert.deepEqual(await today.locator('.stats-freshness').allTextContents(), [
     'Includes today up to 10:00 UTC.',
   ]);
-  assert.match(await today.locator('.sit').textContent(), /landings, 1–19 Nov\./, 'today is in the totals');
+  assert.match(
+    await today.locator('.sit').textContent(),
+    /Since 1 Nov, .* 298 landings\./,
+    'today is in the totals',
+  );
   // Item 6bd1cf57: today's landings are the live figure (20, the top bar's), not the close's 12 at 10:00 UTC; the
   // derived figures keep the close and say so beside them.
   const live = await open(1440, 'today', 'dark', 'live=20');
   assert.match(await live.locator('main').textContent(), /306 landings · plan usage in Billing/);
   assert.match(
     await live.locator('.sit').textContent(),
-    /for these 298 landings, 1–19 Nov, as of 10:00 UTC\./,
+    /Since 1 Nov, .* merge queue at your width, 298 landings, as of 10:00 UTC\./,
   );
   assert.deepEqual(await live.locator('.stats-freshness').allTextContents(), [
     'Landings are live; the other figures count today up to 10:00 UTC.',
@@ -237,12 +247,28 @@ test('stats: short headline, one freshness line, today so far, comparison, table
     'no freshness for a retained busy reply',
   );
   const main = await page.locator('main').textContent();
-  // Baselines are named by how they merge, each with its GitHub hint, and the exact setting names on hover.
-  assert.match(main, /One at a time\(like GitHub with branches up to date\)/);
-  assert.match(main, /Merge queue, 5 at a time\(like GitHub merge queue\)/);
+  // Baselines are named by how they merge on one line, the merge queue at the project's own width, the exact setting
+  // names on hover; each card leads with its percent.
+  assert.match(main, /Forge.*Merge queue, 6 at a time \(your setting\).*One at a time/);
   assert.match(
-    (await page.locator('.stats-vx3 span[title]').first().getAttribute('title')) ?? '',
+    main,
+    /\d+% fewer CI minutes.*than a merge queue at your width · \d+% fewer than one at a time, the worst case/,
+  );
+  assert.match(
+    main,
+    /\d+% sooner to main.*than a merge queue at your width · \d+% sooner than one at a time, the worst case.*of waiting saved.*\(median saving × landings\)/,
+  );
+  assert.match(
+    (await page.locator('.hb .hlab[title]').last().getAttribute('title')) ?? '',
     /Require branches to be up to date before merging/,
+  );
+  assert.equal(
+    await page
+      .locator('.hb .hlab')
+      .first()
+      .evaluate(node => node.scrollWidth <= node.clientWidth),
+    true,
+    'a bar label sits on one line',
   );
   // Discarded checks, every run, by cause; runs without minutes are named, never zero.
   assert.match(main, /Discarded checks[\d,.]+ min [\d,]+ runs that did not land/);
@@ -291,15 +317,13 @@ test('stats: short headline, one freshness line, today so far, comparison, table
     how,
     /price a replayed full run at 10 runner minutes\. That is the median of 319 solo full checks/,
   );
-  const settings = await page
-    .locator('.stats-vx3 [title]')
-    .evaluateAll(nodes => nodes.map(node => node.title));
+  const settings = await page.locator('.hb .hlab[title]').evaluateAll(nodes => nodes.map(node => node.title));
   // GitHub's exact names stay available on the chart. The fold describes the behavior.
-  assert.match(settings[0], /“Require branches to be up to date before merging”/);
   assert.match(
-    settings[1],
-    /“Build concurrency” \(maximum pull requests to build\) 5 and “Maximum pull requests to merge” 1/,
+    settings[0],
+    /“Build concurrency” \(maximum pull requests to build\) 6 and “Maximum pull requests to merge” 1/,
   );
+  assert.match(settings[1], /“Require branches to be up to date before merging”/);
   assert.match(how, /add up the recorded minutes for checks that started on these days/);
   assert.match(how, /one check per change and a rerun each time another change reached main while it waited/);
   assert.match(how, /a pull-request check and a queue build for each change that lands/);
@@ -373,18 +397,22 @@ test('stats: short headline, one freshness line, today so far, comparison, table
   await page.getByLabel('From', { exact: true }).fill('2026-10-01');
   await page.getByLabel('To', { exact: true }).fill('2026-11-19');
   await page.getByRole('button', { name: 'Show' }).click();
-  assert.match(await page.locator('.sit').textContent(), /landings, 20 Oct – 15 Nov\./);
+  assert.match(await page.locator('.sit').textContent(), /^From 20 Oct to 15 Nov, Forge saved about/);
   await page.getByRole('button', { name: 'By month' }).click();
   assert.equal(await page.getByRole('table', { name: 'Stats by month' }).locator('tbody tr').count(), 2);
   // October 20 to November 1 had no closed day: the gap draws as zero-landing days, not as nothing.
   assert.equal(await page.locator('.stats-days button').count(), 27);
   await page.getByLabel('Period').selectOption('this');
-  assert.match(await page.locator('.sit').textContent(), /landings, 1–15 Nov\./);
+  assert.match(await page.locator('.sit').textContent(), /^Since 1 Nov, Forge saved about/);
   // Last 7 days ends today (19 Nov): its label names only the closed days in it.
   await page.getByLabel('Period').selectOption('7');
-  assert.match(await page.locator('.sit').textContent(), /landings, 13–15 Nov\./);
+  assert.match(await page.locator('.sit').textContent(), /^Since 13 Nov, Forge saved about/);
   await page.getByLabel('Period').selectOption('30');
-  assert.match(await page.locator('.sit').textContent(), /landings, 1–15 Nov\./, '21 Oct to 19 Nov');
+  assert.match(
+    await page.locator('.sit').textContent(),
+    /^Since 1 Nov, Forge saved about/,
+    '21 Oct to 19 Nov',
+  );
 
   // Fixed-width bars fill from the left: two days stay two narrow bars, 31 days fit a phone.
   const bars = async p =>
@@ -409,7 +437,7 @@ test('stats: short headline, one freshness line, today so far, comparison, table
     assert.equal(list.length, 31);
     assert.match(
       await month.locator('.sit').textContent(),
-      /in October 2026\./,
+      /^In October 2026, Forge saved about/,
       'a fully closed month is named',
     );
     assert(list.at(-1).left + list.at(-1).width <= width, `${width}: 31 days fit`);
@@ -443,17 +471,20 @@ test('stats: short headline, one freshness line, today so far, comparison, table
   const nosoloMain = await nosolo.locator('main').textContent();
   assert.match(nosoloMain, /No change here has run the whole check on its own yet/);
   assert.doesNotMatch(nosoloMain, /landings? to go|Not recorded/);
-  // A day the close read only in part says its counts are a lower bound, and, its check runs read in part, that the
-  // minutes saved are an upper bound: in the headline and beside the comparison (review b4dd69b4 finding 3).
+  // A day the close read only in part says so once, on hover over the headline's marker (Item 3678767e, review b4dd69b4
+  // finding 3): its check runs read in part, runs and CI minutes are at least what is shown and the minutes saved at
+  // most. No caveat sentence repeats down the page.
   const partial = await open(390, 'partial');
   const partialMain = await partial.locator('main').textContent();
-  assert.match(partialMain, /runs and CI minutes are a lower bound/);
-  assert.doesNotMatch(partialMain, /CI minutes per landing an upper bound/, 'every landing was read');
-  assert.match(await partial.locator('.sit').textContent(), /the minutes saved are an upper bound/);
+  assert.equal(await partial.locator('.stats-hint[title*="read in part"]').count(), 1, 'said once');
+  const partialHover =
+    (await partial.locator('.stats-hint[title*="read in part"]').getAttribute('title')) ?? '';
   assert.match(
-    await partial.getByRole('region', { name: 'Against your own history' }).textContent(),
-    /the minutes saved are an upper bound/,
+    partialHover,
+    /runs and CI minutes are at least what is shown, so the minutes saved are at most these/,
   );
+  assert.doesNotMatch(partialHover, /CI minutes per landing are at most/, 'every landing was read');
+  assert.doesNotMatch(partialMain, /lower bound|upper bound/, 'no caveat sentence on the page itself');
   // Under 50 landings, read in part: never "exact from the first".
   const partialFew = await open(390, 'partialFew');
   const fewSentence = await partialFew.locator('.sit').textContent();
@@ -472,11 +503,17 @@ test('stats: short headline, one freshness line, today so far, comparison, table
   // bound, never a lower one; rates and times cover the landings read; saved minutes a lower bound (review d6b0f1aa
   // finding 1).
   const landingsCut = await open(390, 'landingsCut');
-  const cutMain = await landingsCut.locator('main').textContent();
-  assert.match(cutMain, /landings are a lower bound, CI minutes per landing an upper bound/);
-  assert.match(cutMain, /first-try rate and times cover only the landings read/);
-  assert.doesNotMatch(cutMain, /runs and CI minutes are a lower bound|counts and minutes are a lower bound/);
-  assert.match(await landingsCut.locator('.sit').textContent(), /the minutes saved are a lower bound/);
+  const cutHover =
+    (await landingsCut.locator('.stats-hint[title*="read in part"]').getAttribute('title')) ?? '';
+  assert.match(
+    cutHover,
+    /landings are at least what is shown, CI minutes per landing are at most what is shown/,
+  );
+  assert.match(
+    cutHover,
+    /rates and times cover only the landings read, and the minutes saved are at least these/,
+  );
+  assert.doesNotMatch(cutHover, /runs and CI minutes are at least/);
   // A day whose close did not finish is missing, never zero: its bar says so, its table row says so, and it is in no
   // figure (review d6b0f1aa finding 5).
   const notMeasured = await open(1440, 'notMeasured', 'dark', 'from=2026-10-31&to=2026-11-02');

@@ -5,6 +5,7 @@
 // today so far; nothing here estimates.
 import type { StatsCover, StatsHead } from '../../../../src/stats-period';
 import { STATS_RANGE_MAX_DAYS, rangeDays, validRange } from '../../../../src/stats-period';
+import { STATS_DAY_MAX_LANDINGS } from '../../../../src/stats-estimate';
 
 export type StatsRead = StatsHead;
 export type StatsWindow = StatsRead['window'];
@@ -148,16 +149,17 @@ export function derivedAsOf(data: StatsRead, period: Period, now: number, live: 
 /** A region's hint with where its figures stop appended, when they stop short of the live landings. */
 export const hintAsOf = (hint: string, asOf: string | null) => (asOf ? `${hint} · ${asOf}` : hint);
 
-/** The days the headline covers, after its landings: " in October 2026" when the whole period is counted, else short:
- * ", 22 Nov", ", 1–22 Nov", ", 28 Oct – 22 Nov", with years only across a new year. */
-export function spanWords(cover: StatsCover, period: Period) {
+/** The value headline's opening words: "In November 2026" when the whole period is counted, "Since 28 Oct" while it is
+ * still filling (this month, the last days, All time), "From 3 Nov to 18 Nov" for a custom range cut short. */
+export function valueWhen(period: Period, cover: StatsCover) {
   const { first, last } = cover;
-  const whole = period.kind !== 'all' && first === period.from && last === period.to && !cover.notMeasured;
-  if (first === null || last === null || whole) return ` ${periodWords(period)}`;
+  if (first === null || last === null) return `In ${period.label}`;
   const years = first.slice(0, 4) !== last.slice(0, 4);
-  if (first === last) return `, ${shortDay(first)}`;
-  if (first.slice(0, 7) === last.slice(0, 7)) return `, ${Number(first.slice(8))}–${shortDay(last)}`;
-  return `, ${shortDay(first, years)} – ${shortDay(last, years)}`;
+  const whole = period.kind !== 'all' && first === period.from && last === period.to && !cover.notMeasured;
+  if (whole) return `In ${period.label}`;
+  if (period.kind === 'custom' || period.kind === 'last')
+    return `From ${shortDay(first, years)} to ${shortDay(last, years)}`;
+  return `Since ${shortDay(first, years)}`;
 }
 /** How far a provisional newest row counts: its UTC day and "10:00"; null for none (or a reply without the field). */
 export function soFarOf(upTo: number | null | undefined) {
@@ -231,36 +233,25 @@ export function gapWords(w: Pick<StatsWindow, 'compare' | 'daysWithoutRuns'>) {
   };
 }
 
-/** What a window with days read only in part may say (reviews b4dd69b4 finding 3, d6b0f1aa finding 1); null when every
- * day was read in full. Runs not read leave counts and minutes short: a lower bound. Landings not read leave the landing
- * count short and every run spread over fewer landings, so minutes per landing are an upper bound; rates and medians
- * cover only the landings read, no bound either way. Saved minutes: runs not read leave Forge's minutes short (fewer
- * saved than shown), landings not read leave the replays short (more saved than shown). */
+/** What a window with days read only in part says, once, on hover over the figure it affects (reviews b4dd69b4 finding
+ * 3, d6b0f1aa finding 1, Item 3678767e); null when every day was read in full. A day's close reads a bounded number of
+ * check runs, attempts and landings and stops while the transaction still has read room (convex/projectStatsRuns.ts,
+ * convex/projectStats.ts): it samples, never guesses. Runs not read leave counts and minutes short (a lower bound;
+ * Forge's minutes short, so minutes saved are at most those shown). Landings not read leave the landing count short, every
+ * run spread over fewer landings (minutes per landing an upper bound), rates and medians covering only the landings read,
+ * and the replays pricing only those (minutes saved at least those shown). */
 export function partialWords(w: Pick<StatsWindow, 'partial' | 'partialLandings' | 'partialRuns'>) {
   if (!w.partial) return null;
-  const measured = [
+  const effects = [
     w.partialRuns
-      ? 'Some days had more check runs than one day’s close reads, and the rest were not counted: runs and CI minutes are a lower bound.'
+      ? 'check runs read in part: runs and CI minutes are at least what is shown, so the minutes saved are at most these'
       : '',
     w.partialLandings
-      ? `Some days had more landings than one day’s close reads: landings are a lower bound, ${
-          w.partialRuns
-            ? 'CI minutes per landing may be more or fewer than shown'
-            : 'CI minutes per landing an upper bound (every run, over fewer landings)'
-        }, and first-try rate and times cover only the landings read.`
+      ? `landings read in part: landings are at least what is shown, ${w.partialRuns ? 'CI minutes per landing may be more or fewer' : 'CI minutes per landing are at most what is shown'}, rates and times cover only the landings read, and the minutes saved are at least these`
       : '',
-  ];
-  return {
-    measured: measured.filter(Boolean).join(' '),
-    saved: savedWords(w),
-  };
+  ].filter(Boolean);
+  return `A day’s close reads at most ${int(STATS_DAY_MAX_LANDINGS)} landings and a bounded number of check runs, oldest first, and stops early when its read room runs out, so a very busy day is counted from its start as far as it was read, never guessed. Some days here were: ${effects.join('; ')}. Where both apply, the minutes saved may be more or fewer.`;
 }
-const savedWords = (w: Pick<StatsWindow, 'partialLandings' | 'partialRuns'>) =>
-  w.partialRuns && w.partialLandings
-    ? 'Some days were read only in part, both their landings and their check runs, so the minutes saved may be more or fewer than shown.'
-    : w.partialRuns
-      ? 'Some days’ check runs were read only in part, so Forge used at least these minutes: the minutes saved are an upper bound.'
-      : 'Some days’ landings were read only in part, and the replays price only those read: the minutes saved are a lower bound.';
 /** A month read in part, by which way its replayed saving may be off (src/stats-period.ts month rows). */
 export const monthPartWords = (w: Pick<StatsWindow, 'partialLandings' | 'partialRuns'>) =>
   w.partialRuns && w.partialLandings
@@ -274,3 +265,18 @@ export function scale(values: number[]) {
   const top = Math.max(0, ...values);
   return values.map(v => (top > 0 ? Math.max(1, (v / top) * 100) : 0));
 }
+
+/** Dollars at GitHub's list price (src/stats-pricing.ts): whole dollars from $10, cents below. */
+export const usd = (n: number) =>
+  Math.abs(n) >= 10
+    ? `$${Math.round(n).toLocaleString('en')}`
+    : `$${(Math.round(n * 100) / 100).toLocaleString('en', { minimumFractionDigits: 2 })}`;
+/** Hours of waiting, always in hours (no money value for people's time): one decimal below ten. */
+export function hoursWords(seconds: number) {
+  const h = Math.abs(seconds) / 3600;
+  if (h < 10) return `${(Math.round(h * 10) / 10).toLocaleString('en')} ${h === 1 ? 'hour' : 'hours'}`;
+  return plural(Math.round(h), 'hour');
+}
+/** A saving as a whole percent of what the baseline took; null without a baseline. */
+export const savedPercent = (saved: number | null, baseline: number | null) =>
+  saved === null || baseline === null || !(baseline > 0) ? null : Math.round((saved / baseline) * 100);
