@@ -102,8 +102,8 @@ export const resolve = sourceMutation({
       );
       return canonicalPayload(args.paged ? { rows: bindings, next: rows.length } : bindings);
     }
-    const project = await ctx.db.get(args.projectId),
-      generation = project ? await selectedGeneration(ctx, project) : null;
+    // The step fence above already read this project row and nothing since wrote it (Item 411727ba).
+    const generation = await selectedGeneration(ctx, active.project);
     // Graph descriptor hints warm a bounded breadth-first page. Byte ordering
     // still comes only from authenticated parent edges in the caller.
     const pending = args.probe ? [...args.digests] : [...args.digests].reverse(),

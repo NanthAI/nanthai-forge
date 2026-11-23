@@ -2539,6 +2539,72 @@ test('filtered planning and one-read Initiative counts charge only matching rows
   );
 });
 
+test('incident 411727ba: whole-plan counts read the exact Plan counter and the shelves, and answer as the root scan does', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const body = 'Synthetic retained detail. '.repeat(40);
+  const initiativeId = (await put(p, { kind: 'initiative', title: 'Group' })).result.itemId;
+  await put(p, { kind: 'initiative', title: 'Shipped group', status: 'closed' });
+  for (const [i, status] of [
+    'proposed',
+    'open',
+    'open',
+    'in-progress',
+    'closed',
+    'closed',
+    'abandoned',
+  ].entries())
+    await put(p, { kind: 'issue', title: `Item ${i}`, status, body, ...(i % 2 ? { initiativeId } : {}) });
+  const shelve = async (status, n) => {
+    const id = (await put(p, { kind: 'issue', title: `Shelved ${n}`, status: 'open', body })).result.itemId;
+    const { item } = await list(p, { id, reconcile: false });
+    await put(p, { itemId: id, expectedVersion: item.version, status });
+  };
+  await shelve('archived', 1);
+  await shelve('deleted', 2);
+  await shelve('deleted', 3);
+  const selections = [
+    {},
+    { kind: 'issue' },
+    { kind: 'initiative' },
+    { status: 'open' },
+    { status: 'deleted' },
+    { kind: 'issue', status: 'archived' },
+    { kind: 'initiative', status: 'closed' },
+  ];
+  const meter = meterReads(s.ctx);
+  const read = async () => {
+    const replies = [];
+    let bytes = 0;
+    for (const selection of selections) {
+      p.calls.length = 0;
+      const cost = await meter.cost(async () => replies.push(await list(p, { counts: true, ...selection })));
+      assert.deepEqual(p.calls, ['projectWorkIndex:records'], 'one read, no reconcile writes');
+      bytes += cost.bytes;
+    }
+    return { replies, bytes };
+  };
+  const counter = await read();
+  assert.deepEqual(counter.replies[0], {
+    counts: { proposed: 1, open: 3, 'in-progress': 1, closed: 3, abandoned: 1, archived: 1, deleted: 2 },
+    coverage: 'complete',
+    nextCursor: null,
+    notice: counter.replies[0].notice,
+  });
+  // Growth in Plan-status Items adds no count read: only the counter row's digits change.
+  for (let i = 0; i < 30; i++) await put(p, { kind: 'issue', title: `Grown ${i}`, status: 'closed', body });
+  const grown = await read();
+  assert.equal(grown.replies[0].counts.closed, 33);
+  assert(grown.bytes - counter.bytes < 64, JSON.stringify({ before: counter.bytes, after: grown.bytes }));
+  // The root scan the counter replaces answers the same once the counter row is gone, and reads every root.
+  const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  await s.ctx.db.delete(planCounterRow(s, generationId)._id);
+  const scan = await read();
+  assert.deepEqual(grown.replies, scan.replies);
+  assert(grown.bytes * 3 < scan.bytes, JSON.stringify({ counter: grown.bytes, scan: scan.bytes }));
+  t.diagnostic(JSON.stringify({ counterBytes: grown.bytes, scanBytes: scan.bytes }));
+});
+
 test('indexed planning preserves all filter combinations, record-store bodies, paging and reconciliation (5a85cb5f)', async t => {
   const s = await setup(t),
     p = port(s);

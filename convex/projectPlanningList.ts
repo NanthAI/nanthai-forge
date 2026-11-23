@@ -8,7 +8,13 @@ import { record, recordPartition } from './projectWorkIndexStore';
 import { hostedRecordValue } from './hostedRecordValue';
 import { readsStore, storeItem } from './projectWorkStoreReads';
 import { planningWaitingKinds } from '../src/work-planning-types';
-import { coveredInitiativeTallies, zeroTally } from './projectPlanCountsStore';
+import {
+  coveredInitiativeTallies,
+  planCounter,
+  PLAN_STATUSES,
+  zeroTally,
+  type PlanCounts,
+} from './projectPlanCountsStore';
 
 export const planningFilter = v.object({
   kind: v.optional(v.union(v.literal('issue'), v.literal('initiative'))),
@@ -140,6 +146,44 @@ export async function countedInitiative(
   return { counts, page: [], isDone: true, continueCursor: '' };
 }
 
+/** A first count page answered from the exact Plan counter (Item 3fa3187d) instead of every root: Item 411727ba
+ * measured an unfiltered `planning {counts:true}` at four ~1 MB root pages on the dogfood board. The counter tallies
+ * the five Plan statuses per kind in the transaction of each status move; Archived and Deleted, which it leaves out,
+ * are counted from their own indexed roots. A viewer without a role, an Initiative or waiting filter, a continued
+ * cursor, an unprepared search index, a counter still backfilling or a shelf past one page keeps the root scan. */
+async function counterCounts(
+  ctx: QueryCtx,
+  generation: Doc<'projectWorkGenerations'>,
+  filter: Filter,
+  counts: Record<(typeof PLAN_STATUSES)[number] | 'archived' | 'deleted', number>,
+) {
+  if (
+    filter.initiativeId !== undefined ||
+    filter.waitingOn !== undefined ||
+    generation.planningSearchVersion !== 2
+  )
+    return false;
+  const partition = recordPartition(generation);
+  const row = await planCounter(ctx.db, partition);
+  const stored = row ? (JSON.parse(row.value) as PlanCounts) : null;
+  if (!stored?.done) return false;
+  const kinds: ('issue' | 'initiative')[] = filter.kind ? [filter.kind] : ['issue', 'initiative'];
+  const found: Partial<typeof counts> = {};
+  for (const status of PLAN_STATUSES)
+    if (!filter.status || filter.status === status)
+      found[status] = kinds.reduce((sum, kind) => sum + stored[kind][status], 0);
+  for (const status of ['archived', 'deleted'] as const) {
+    if (filter.status && filter.status !== status) continue;
+    const shelf = await (
+      await matchingSelectors(ctx, partition, { ...filter, status })
+    ).paginate({ cursor: null, numItems: 1000, maximumRowsRead: 1000, maximumBytesRead: 1000000 });
+    if (!shelf.isDone) return false;
+    found[status] = shelf.page.length;
+  }
+  Object.assign(counts, found);
+  return true;
+}
+
 /** One bounded DB page. Counts inspect root metadata only; lists hydrate only their matching items.
  * Current record-store readers keep exact item bytes and reconciliation inputs, including long bodies. */
 export async function planningPage(
@@ -151,22 +195,32 @@ export async function planningPage(
     counts?: boolean;
     /** With `counts`: also return the roots counted (their stored values), for a per-row visibility count. */
     roots?: boolean;
+    /** With `counts`: the viewer has a project role, so the member-only Plan counter may answer. */
+    members?: boolean;
     newestFirst?: boolean;
     paginationOpts: PaginationOptions;
   },
 ) {
   const partition = recordPartition(generation);
-  const page = await (
-    await matching(ctx, partition, input.planningFilter)
-  )
-    .order(input.newestFirst ? 'desc' : 'asc')
-    .paginate({
-      ...input.paginationOpts,
-      numItems: input.counts ? 1000 : Math.min(input.paginationOpts.numItems, 100),
-      maximumRowsRead: input.counts ? 1000 : 100,
-      maximumBytesRead: 1000000,
-    });
   const counts = { proposed: 0, open: 0, 'in-progress': 0, closed: 0, abandoned: 0, archived: 0, deleted: 0 };
+  const counted =
+    input.counts &&
+    input.members &&
+    !input.roots &&
+    !input.paginationOpts.cursor &&
+    (await counterCounts(ctx, generation, input.planningFilter, counts));
+  const page = counted
+    ? { page: [], isDone: true, continueCursor: '' }
+    : await (
+        await matching(ctx, partition, input.planningFilter)
+      )
+        .order(input.newestFirst ? 'desc' : 'asc')
+        .paginate({
+          ...input.paginationOpts,
+          numItems: input.counts ? 1000 : Math.min(input.paginationOpts.numItems, 100),
+          maximumRowsRead: input.counts ? 1000 : 100,
+          maximumBytesRead: 1000000,
+        });
   const rows: { id: string; position: number; value: unknown }[] = [];
   const roots: string[] = [];
   for (const root of page.page) {

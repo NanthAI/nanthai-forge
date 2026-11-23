@@ -358,7 +358,14 @@ export async function journalWorkRecordsRead(
       const actors = new Map<string, Promise<boolean>>();
       const page =
         input.planningFilter && input.collection === 'planningItems'
-          ? await planningPage(ctx, project, generation, { ...input, planningFilter: input.planningFilter })
+          ? await planningPage(ctx, project, generation, {
+              ...input,
+              planningFilter: input.planningFilter,
+              // Visitors count only the Items the public rule shows: the member-only counter never answers them.
+              ...(input.counts && (await readProjectRole(ctx, project, user.subject))
+                ? { members: true }
+                : {}),
+            })
           : await storePage(ctx, project._id, {
               ...input,
               paginationOpts,

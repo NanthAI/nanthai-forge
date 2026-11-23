@@ -278,10 +278,13 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // Item 5b4b5918 moved main: a kept proof bound on a moved main with nothing ahead starts its retry in the
 // binding write, so its ready write, acceptance preparation and refused publish go: carry and scoped
 // recheck each 7 fewer calls, about 184 KB fewer reads and 42 KB fewer writes.
+// Item 411727ba: source resolve reuses the project row its step fence read, so each resolve call reads the
+// project document once instead of twice; the red keep runs fewer resolves than its retire: red moves by
+// +2,251 read bytes. No call or write changes.
 export const WIRED = {
   carry: { calls: -2, readBytes: 188_729, writeBytes: 14_836 },
   'scoped-recheck': { calls: 8, readBytes: 326_875, writeBytes: 85_765 },
-  red: { calls: -17, readBytes: -388_303, writeBytes: -145_358 },
+  red: { calls: -17, readBytes: -386_052, writeBytes: -145_358 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */
