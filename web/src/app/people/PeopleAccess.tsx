@@ -2,7 +2,7 @@
 // Settings / People and access (Items b987e608, c6629fda; docs/access.md). One bounded read, projectAccess.people,
 // which re-runs only when a grant or an invitation changes; no timer and no poll. The screen shows the server's
 // answers and never decides access: every change below is refused by the server unless the owner person makes it.
-// Devices inside each person arrive with the device record (df06081d); teams with team grants (1e474c35).
+// Devices inside each person arrive with the device record (df06081d); teams with team grants (1e474c35, b6588425).
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useAction, useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
@@ -12,6 +12,8 @@ import { crumbsFor, Head } from '../Place';
 import type { PlaceProps } from '../screens';
 import { hrefFor } from '../paths';
 import { A } from '../frames';
+import { Cell, No, Yes } from './access-cells';
+import ProjectTeams, { linksOf, useTeamLinks } from './ProjectTeams';
 import './people.css';
 
 type Data = NonNullable<ReturnType<typeof useQuery<typeof api.projectAccess.people>>>;
@@ -21,31 +23,13 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString
 const opId = () => crypto.randomUUID();
 const handleOf = (person: string) => (person ? `@${person}` : '');
 
-const Yes = ({ what }: { what: string }) => (
-  <span className="yes" role="img" aria-label={`may ${what}`}>
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-      <path d="m3 8.5 3.2 3.2L13 4.8" />
-    </svg>
-  </span>
-);
-const No = ({ what }: { what: string }) => (
-  <span className="t3" role="img" aria-label={`may not ${what}`}>
-    –
-  </span>
-);
-const Cell = ({ k, on }: { k: string; on: boolean }) => (
-  <span className="c">
-    <span className="k">{k}</span>
-    {on ? <Yes what={k.toLowerCase()} /> : <No what={k.toLowerCase()} />}
-  </span>
-);
-
 export default function PeopleAccess({ route, projectId, projectName: name }: PlaceProps) {
   const trail = crumbsFor(route, name);
   const [limit, setLimit] = useState(PAGE);
   const [invitationCursor, setInvitationCursor] = useState<string | null>(null);
   const data = useQuery(api.projectAccess.people, { projectId, limit, invitationCursor });
   const owner = data?.role === 'owner';
+  const teams = useTeamLinks(projectId, owner);
   const [inviting, setInviting] = useState(false);
   const [sent, setSent] = useState<{ who: string; role: Role; email: boolean } | null>(null);
   const [removing, setRemoving] = useState<{ person: string; role: Role } | null>(null);
@@ -61,7 +45,10 @@ export default function PeopleAccess({ route, projectId, projectName: name }: Pl
   const checksHref = hrefFor({ ...route, place: 'settings', section: 'checks', rest: '' });
   return (
     <>
-      <Head trail={trail} sentence={data ? <Situation data={data} name={name} /> : ''}>
+      <Head
+        trail={trail}
+        sentence={data ? <Situation data={data} name={name} linked={linksOf(teams)?.teams ?? []} /> : ''}
+      >
         {owner ? (
           <button type="button" className="btn" onClick={() => (setInviting(true), setSent(null))}>
             Invite
@@ -195,6 +182,7 @@ export default function PeopleAccess({ route, projectId, projectName: name }: Pl
           </>
         )}
       </section>
+      {owner && data ? <ProjectTeams projectId={projectId} teams={teams} /> : null}
       {data ? (
         <section className="region quiet" aria-label="Landing without a check">
           <div className="ph plain">
@@ -227,7 +215,8 @@ export default function PeopleAccess({ route, projectId, projectName: name }: Pl
 }
 
 /** The head's sentence: who can change the project, then what waits on the owner (open invitations). */
-function Situation({ data, name }: { data: Data; name: string }) {
+function Situation({ data, name, linked }: { data: Data; name: string; linked: { role: Role }[] }) {
+  const writeTeams = linked.filter(team => team.role === 'write').length;
   const writers = 1 + data.write.rows.length;
   const more = data.write.more ? ' at least' : '';
   let text: ReactNode;
@@ -241,7 +230,7 @@ function Situation({ data, name }: { data: Data; name: string }) {
     );
   else if (data.role === 'owner')
     text =
-      writers === 1 && !data.read.rows.length ? (
+      writers === 1 && !data.read.rows.length && !linked.length ? (
         <>
           <b>Only you can change {name}.</b>
           {data.visibility === 'public' ? ' Anyone can read it, because it is public.' : ''} Agents act
@@ -251,10 +240,14 @@ function Situation({ data, name }: { data: Data; name: string }) {
         <>
           <b>
             {more ? 'At least ' : ''}
-            {plural(writers, 'person', 'people')} can change {name}.
+            {plural(writers, 'person', 'people')}
+            {writeTeams ? ` and ${plural(writeTeams, 'linked team')}` : ''} can change {name}.
           </b>{' '}
           {data.read.rows.length
             ? `${plural(data.read.rows.length, 'more person reads', 'more people read')} it. `
+            : ''}
+          {linked.length > writeTeams
+            ? `${plural(linked.length - writeTeams, 'linked team reads', 'linked teams read')} it. `
             : ''}
           Agents act through their person’s devices.
           {data.invited.filter(row => row.state === 'pending').length

@@ -10,6 +10,7 @@
   .people-who { flex: 1 1 260px; min-width: 0; }
   .people-role { display: grid; gap: 5px; font-size: var(--t-meta); color: var(--text-2); font-weight: var(--w-strong); }
   .people-quiet { grid-template-columns: minmax(0, 1fr) auto; }
+  .people-teams .row.acc .nm .who > span:last-child { min-width: 0; white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
   .people-quiet > .ttl { font-weight: var(--w-regular); color: var(--text-2); }
   /* Account > People and teams: a team is its name and one line, its members as handles, then the owner's add form. */
   .account-people .row.team { align-items: start; padding-block: 10px; }
