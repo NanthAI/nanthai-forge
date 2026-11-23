@@ -61,6 +61,7 @@ function harness(overrides = {}) {
     },
     localConfig: () => ({}),
     readKey: () => SECRET,
+    backoff: async () => {},
     async request(url, init) {
       sent.push({ url, init });
       return { ok: true, status: 200, text: async () => JSON.stringify(overrides.reply) };
@@ -473,13 +474,15 @@ test('invalid JSON from GPT is retried once at the same worst case; a second fai
 
   const twice = harness({});
   replies(twice, [bad, bad, openaiReply]);
-  await assert.rejects(review(['--lane', twice.dir], twice.deps), { code: 'REVIEW_UNPARSEABLE' });
+  await assert.rejects(review(['--lane', twice.dir, '--provider', 'openai'], twice.deps), {
+    code: 'REVIEW_UNPARSEABLE',
+  });
   assert.equal(twice.sent.length, 2, 'one retry only');
 
   const full = harness({});
   replies(full, [bad, openaiReply]);
   full.deps.localConfig = () => ({ providers: { openai: { monthlyCreditUsd: 0.165 } }, daysPerMonth: 1 });
-  await assert.rejects(review(['--lane', full.dir], full.deps), {
+  await assert.rejects(review(['--lane', full.dir, '--provider', 'openai'], full.deps), {
     code: 'REVIEW_UNPARSEABLE',
     message: /No room/,
   });
@@ -491,6 +494,140 @@ test('invalid JSON from GPT is retried once at the same worst case; a second fai
     code: 'REVIEW_UNPARSEABLE',
   });
   assert.equal(claude.sent.length, 1);
+});
+
+// Lead 2026-11-23 12:50Z: a provider error spills to the other provider, not only a spent cap.
+const answers = (h, byProvider) => {
+  h.deps.request = async (url, init) => {
+    h.sent.push({ url, init });
+    const step = byProvider[url.includes('openai') ? 'openai' : 'anthropic'];
+    const next = typeof step === 'function' ? step() : step;
+    if (next instanceof Error) throw next;
+    return next.failed ?? { ok: true, status: 200, text: async () => JSON.stringify(next) };
+  };
+};
+const http = status => ({ failed: { ok: false, status, text: async () => 'busy' } });
+const urls = h => h.sent.map(s => (s.url.includes('openai') ? 'openai' : 'anthropic'));
+
+test('a 429 or 5xx is retried once, then the review goes to the other provider and says why', async () => {
+  const h = harness({});
+  answers(h, { openai: http(529), anthropic: anthropicReply });
+  await review(['--lane', h.dir], h.deps);
+  assert.deepEqual(urls(h), ['openai', 'openai', 'anthropic'], 'one retry, then the other provider');
+  assert.match(
+    h.out.join('\n'),
+    /Routed to anthropic\/claude-sonnet-5-5 because openai failed \(HTTP 529 after one retry\)/,
+  );
+  assert.equal(callRows(h).at(-1).provider, 'anthropic');
+  assert(callRows(h)[0].estimated, 'the unbilled-unknown 5xx stays logged at its worst case');
+
+  const flaky = harness({});
+  let calls = 0;
+  answers(flaky, { openai: () => (calls++ ? openaiReply : http(429)), anthropic: anthropicReply });
+  await review(['--lane', flaky.dir], flaky.deps);
+  assert.deepEqual(urls(flaky), ['openai', 'openai'], 'a retry that works stays on the first provider');
+});
+
+test('a timeout, a missing key or unusable GPT text sends the review to the other provider; both failing falls back to a subscription reviewer', async () => {
+  const timeout = harness({});
+  answers(timeout, {
+    openai: () => Object.assign(new Error('x'), { name: 'TimeoutError' }),
+    anthropic: anthropicReply,
+  });
+  await review(['--lane', timeout.dir], timeout.deps);
+  assert.deepEqual(urls(timeout), ['openai', 'openai', 'anthropic'], 'a timeout is retried once');
+  assert.match(timeout.out.join('\n'), /openai failed \(timeout or network error after one retry\)/);
+  assert.equal(
+    callRows(timeout).filter(r => r.estimated).length,
+    2,
+    'both timeouts stay logged at worst case',
+  );
+
+  const noKey = harness({});
+  noKey.deps.readKey = service => (service.endsWith('openai') ? '' : SECRET);
+  answers(noKey, { anthropic: anthropicReply });
+  await review(['--lane', noKey.dir], noKey.deps);
+  assert.deepEqual(urls(noKey), ['anthropic']);
+  assert.match(noKey.out.join('\n'), /openai failed \(no key\)/);
+
+  const bad = {
+    ...openaiReply,
+    output: [{ type: 'message', content: [{ type: 'output_text', text: 'oops' }] }],
+  };
+  const garbled = harness({});
+  answers(garbled, { openai: bad, anthropic: anthropicReply });
+  await review(['--lane', garbled.dir], garbled.deps);
+  assert.deepEqual(urls(garbled), ['openai', 'openai', 'anthropic']);
+  assert.match(garbled.out.join('\n'), /openai failed \(unusable reply after one retry\)/);
+
+  const both = harness({});
+  both.deps.readKey = service => (service.endsWith('openai') ? '' : SECRET);
+  answers(both, { anthropic: http(401) });
+  await assert.rejects(review(['--lane', both.dir], both.deps), error => {
+    assert.equal(error.code, 'REVIEW_NO_REVIEWER');
+    assert.match(error.message, /forge-review-openai/);
+    assert.match(error.message, /anthropic returned 401/);
+    assert.match(error.message, /subscription reviewer/);
+    assert(!error.message.includes(SECRET));
+    return true;
+  });
+  assert.deepEqual(urls(both), ['anthropic'], 'a 401 is not retried');
+});
+
+test('a cut-off, refused or non-JSON reply spills; a rejected key says it was not retried; the key never leaks through reply text', async () => {
+  const cut = harness({});
+  answers(cut, { openai: { status: 'incomplete', output: [], usage: {} }, anthropic: anthropicReply });
+  await review(['--lane', cut.dir], cut.deps);
+  assert.deepEqual(urls(cut), ['openai', 'anthropic']);
+  assert.match(cut.out.join('\n'), /openai failed \(reply cut off\)/);
+
+  const html = harness({});
+  html.deps.request = async (url, init) => {
+    html.sent.push({ url, init });
+    return url.includes('openai')
+      ? { ok: true, status: 200, text: async () => '<html>gateway</html>' }
+      : { ok: true, status: 200, text: async () => JSON.stringify(anthropicReply) };
+  };
+  await review(['--lane', html.dir], html.deps);
+  assert.deepEqual(urls(html), ['openai', 'openai', 'anthropic']);
+
+  const rejected = harness({});
+  answers(rejected, { openai: http(401), anthropic: anthropicReply });
+  await review(['--lane', rejected.dir], rejected.deps);
+  assert.match(rejected.out.join('\n'), /openai failed \(HTTP 401\)\./);
+
+  const echo = harness({});
+  const echoed = { ...anthropicReply, content: [{ type: 'text', text: `oops ${SECRET} oops` }] };
+  answers(echo, { openai: () => Object.assign(new Error('x'), { name: 'TimeoutError' }), anthropic: echoed });
+  await assert.rejects(review(['--lane', echo.dir], echo.deps), error => {
+    assert.equal(error.code, 'REVIEW_NO_REVIEWER');
+    assert(!error.message.includes(SECRET), 'the parse diagnostic is redacted');
+    return true;
+  });
+});
+
+test('the retry waits first and then checks the caps: a reservation made during the pause blocks it', async () => {
+  const h = harness({});
+  answers(h, { openai: http(429), anthropic: anthropicReply });
+  h.deps.backoff = async () => seed(h, [['2026-11-23T02:00:00Z', 7.3, 'openai']]); // another builder took the credit
+  await review(['--lane', h.dir], h.deps);
+  assert.deepEqual(urls(h), ['openai', 'anthropic'], 'no second openai request');
+  assert.match(h.out.join('\n'), /openai failed \(HTTP 429, no room under the caps to retry\)/);
+});
+
+test('the other provider stays inside its caps when the first one errors, and a pinned provider never spills', async () => {
+  const capped = harness({});
+  answers(capped, { openai: http(500), anthropic: anthropicReply });
+  seed(capped, [['2026-11-23T02:00:00Z', 5.9, 'anthropic']]);
+  await assert.rejects(review(['--lane', capped.dir], capped.deps), { code: 'REVIEW_NO_REVIEWER' });
+  assert(!urls(capped).includes('anthropic'), 'no request goes to a provider without room');
+
+  const pinned = harness({});
+  answers(pinned, { openai: http(529), anthropic: anthropicReply });
+  await assert.rejects(review(['--lane', pinned.dir, '--provider', 'openai'], pinned.deps), {
+    code: 'REVIEW_HTTP',
+  });
+  assert.deepEqual(urls(pinned), ['openai', 'openai']);
 });
 
 test('--spend prints today and this month per provider against the credit, summed from the log, with no lane or key', async () => {

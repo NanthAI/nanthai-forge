@@ -47,9 +47,15 @@ or `FORGE_REVIEW_CONFIG`):
 
 A review that would break either cap for its first provider goes to the other one (the output says
 `Routed to … because … is at its daily cap`); `--provider` or `--model` pins one provider and never
-spills. GPT sometimes returns text that is not the JSON object; that call is billed and logged, then the
-script retries once with the same request, so the retry's worst case is the first reservation, and only when
-both caps still have room for it.
+spills. An error on the first provider spills too, not only a spent cap. An HTTP 429 or 5xx, a timeout or
+network error, or GPT text that is not the JSON object, is retried once with the same request (after a 2
+second pause, except for the GPT text), so the retry's worst case is the first reservation, and only when
+both caps still have room for it, checked after the pause. After that retry, or at once for a missing key,
+another 4xx such as a rejected key, a refused or cut-off reply, the review goes to the other provider within
+its caps, and the output says which ran and why (`Routed to … because openai failed (HTTP 529 after one
+retry)`). The key is redacted from reply text and diagnostics. Only when both fail does the script
+refuse with `REVIEW_NO_REVIEWER`, naming each provider's reason, and the builder uses a subscription
+reviewer. Every attempt, failed or not, is in the spend log (an unknown-billing failure at its worst case).
 
 `--spend` sums the log per provider: today against the daily cap, the month against the credit, and each day
 of the month with its spend.
