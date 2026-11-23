@@ -1007,18 +1007,25 @@ export class HostedAgentTransport {
       // Client-only start placement: where to open the Lane, or open:false for pins only.
       const placement =
         action === 'start'
-          ? { path: parameters.path, open: parameters.open, installScripts: parameters.installScripts }
+          ? {
+              path: parameters.path,
+              open: parameters.open,
+              installScripts: parameters.installScripts,
+              carryEdits: parameters.carryEdits,
+            }
           : {};
       if (action === 'start') {
         delete parameters.path;
         delete parameters.open;
         delete parameters.installScripts;
+        delete parameters.carryEdits;
         invariant(
           (placement.path === undefined || (typeof placement.path === 'string' && placement.path !== '')) &&
             (placement.open === undefined || typeof placement.open === 'boolean') &&
-            (placement.installScripts === undefined || typeof placement.installScripts === 'boolean'),
+            (placement.installScripts === undefined || typeof placement.installScripts === 'boolean') &&
+            (placement.carryEdits === undefined || typeof placement.carryEdits === 'boolean'),
           'BAD_ARGUMENT',
-          'start path is a directory, open is true or false, and installScripts is true or false.',
+          'start path is a directory, open is true or false, and installScripts and carryEdits are true or false.',
         );
       }
       const command = hostedAgentCommandSchemas[action].safeParse(observation ? input : parameters);
@@ -1853,12 +1860,26 @@ export class HostedAgentTransport {
             )
           : undefined;
         if (action === 'finish') result = await recoverHostedFinish(session, result);
+        // Edits made in the shared clone since this Lane started: said once per set (Item e802a0f9).
+        if ((action === 'save' || action === 'finish') && result && typeof result === 'object') {
+          const laneId = (command.data as { laneId?: string }).laneId ?? markerIdentity(root)?.laneId;
+          // Only a Lane started from a shared clone has one to look at; the module loads just then.
+          const headsUp =
+            laneId && readLaneEntry(laneId)?.cloneRoot
+              ? (await import('./clone-local-edits.js')).cloneEditsHeadsUp(laneId, {
+                  read: readLaneEntry,
+                  record: recordLane,
+                })
+              : null;
+          if (headsUp) result = { ...(result as object), localEditsNotice: headsUp };
+        }
         if (action === 'start') {
           // The replay command keeps the client-only choice to run dependency install scripts.
-          const startData =
+          let startData: unknown =
             typeof placement.installScripts === 'boolean'
               ? { ...(command.data as object), installScripts: placement.installScripts }
               : command.data;
+          if (placement.carryEdits === true) startData = { ...(startData as object), carryEdits: true };
           const { laneTitle, ...started } = parseHostedResponse(hostedStartResultSchema, result);
           const explicit = typeof placement.path === 'string' ? resolve(placement.path) : null;
           const local = Boolean(
@@ -1904,6 +1925,13 @@ export class HostedAgentTransport {
           if (into) {
             invariant(started.lane, 'SOURCE_UNAVAILABLE', 'Hosted start has no Lane source.');
             result = await this.completeStart(root, started, into, startData, journal);
+            result = (await import('./clone-local-edits.js')).noteCloneEdits(
+              root,
+              started.lane.laneId,
+              result,
+              placement.carryEdits === true,
+              { record: recordLane },
+            );
           } else if (started.lane && placement.open !== false)
             // Pins only because ROOT has no default placement: say how to materialize this same Lane.
             result = {

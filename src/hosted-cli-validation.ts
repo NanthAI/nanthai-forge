@@ -46,13 +46,14 @@ export function validateHostedCliCommand(
       parameters = rest;
     }
     if (action === 'start') {
-      const { path, open, installScripts, ...rest } = parameters;
+      const { path, open, installScripts, carryEdits, ...rest } = parameters;
       invariant(
         (path === undefined || (typeof path === 'string' && path !== '')) &&
           (open === undefined || typeof open === 'boolean') &&
-          (installScripts === undefined || typeof installScripts === 'boolean'),
+          (installScripts === undefined || typeof installScripts === 'boolean') &&
+          (carryEdits === undefined || typeof carryEdits === 'boolean'),
         'BAD_ARGUMENT',
-        'start path is a directory, open is true or false, and installScripts is true or false. Run nforge agent ROOT start --help.',
+        'start path is a directory, open is true or false, and installScripts and carryEdits are true or false. Run nforge agent ROOT start --help.',
       );
       parameters = rest;
     }

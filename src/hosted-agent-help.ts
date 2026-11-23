@@ -25,6 +25,7 @@ export const hostedAgentHelpEntries = [
     json.properties.path = { type: 'string', minLength: 1 };
     json.properties.open = { type: 'boolean' };
     json.properties.installScripts = { type: 'boolean' };
+    json.properties.carryEdits = { type: 'boolean' };
   }
   if (
     !['history', 'status', 'observe', 'friction-list', ...Object.keys(hostedClientReadSchemas)].includes(

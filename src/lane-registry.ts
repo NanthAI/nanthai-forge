@@ -30,6 +30,10 @@ export const laneRegistryEntrySchema = z.object({
   /** The last landing this machine submitted for the Lane and has not seen settle (7da396ed): a new land
    * reads it once and points at it while it is still live instead of submitting a second one. */
   landing: z.object({ operationId: z.uuid(), at: z.number() }).nullable().optional(),
+  /** The shared main clone this Lane was started from on this machine (Item e802a0f9): where stray edits are looked for. */
+  cloneRoot: z.string().optional(),
+  /** The clone edits a save or land last mentioned for this Lane, so the same set is said once. */
+  editsNoticed: z.object({ at: z.number(), signature: z.string() }).optional(),
   /** The Forge command this machine is running in the Lane now; a dead pid means it is stale. */
   running: z.object({ action: z.string(), pid: z.number(), since: z.number() }).nullable().optional(),
   /** The landing hold (review, dependency or main-red) a wait or land on this machine last observed (5c59940b);

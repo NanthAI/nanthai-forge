@@ -10,7 +10,7 @@
 | `report-abuse` | `target, messageId?, planningItemId?, id?, itemId?, commentId?, handle?, reason, operationId?` |
 | `tests` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
 | `save --contract` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
-| `start` | `model?, outcome?, constraints?, intentId?, initialHead?, stackOn?, stackEntry?, planningItemId?, id?, itemId?, scope?, path?, open?, installScripts?, operationId?` |
+| `start` | `model?, outcome?, constraints?, intentId?, initialHead?, stackOn?, stackEntry?, planningItemId?, id?, itemId?, scope?, path?, open?, installScripts?, carryEdits?, operationId?` |
 | `start --open` | `laneId, takeover?, acceptHandoff?, reason?, handoff?, expected?, paths?, operationId?` |
 | `save` | `laneId?, message?, model?, supersedeFinish?, park?, notVerified?, operationId?` |
 | `save --candidate` | `laneId?, message?, intentId?, inputs?, dependencies?, operationId?` |

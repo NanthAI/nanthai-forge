@@ -166,7 +166,7 @@ export async function pullHostedProject(
     if (error instanceof ForgeError && error.code === 'WORK_CONFLICT')
       throw new ForgeError(
         error.code,
-        `${error.message} Move your local edits into a Lane created with nforge agent ${shellQuote(root)} start '{"outcome":"Keep local edits"}', then re-run nforge pull ${shellQuote(root)}.`,
+        `${error.message} Move your local edits into a Lane created with nforge agent ${shellQuote(root)} start '{"outcome":"Keep local edits","carryEdits":true}', then re-run nforge pull ${shellQuote(root)}.`,
         undefined,
         error.recovery,
       );
@@ -186,6 +186,9 @@ export async function cloneFreshness(
   const main = parseHostedResponse(hostedMainSchema, read ? read.main : await transport.current());
   invariant(main.projectId === marker.projectId, 'PROJECT_UNAVAILABLE', 'Select this clone’s project.');
   const current = marker.head === main.head && marker.receipt.id === main.receipt.id;
+  // Local file reads only: the clone's own manifest compare. Listed so nobody finds them at the next pull.
+  const { cloneLocalEdits, WHY_EDITS_BELONG_IN_A_LANE } = await import('./clone-local-edits.js');
+  const local = cloneLocalEdits(root);
   return {
     clone: {
       head: marker.head,
@@ -200,6 +203,16 @@ export async function cloneFreshness(
           : null,
       next: current ? null : `nforge pull ${shellQuote(canonicalRoot(root))}`,
     },
+    ...(local?.count
+      ? {
+          edits: {
+            count: local.count,
+            files: local.files,
+            ...(local.truncated ? { truncated: true } : {}),
+            note: WHY_EDITS_BELONG_IN_A_LANE,
+          },
+        }
+      : {}),
     ...(read?.today ? { mainToday: await mainTodayFrom(read.today) } : {}),
   };
 }

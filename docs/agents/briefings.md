@@ -54,7 +54,9 @@ Read first, then pass a literal argument to the write command.
 If a command waits for approval and nobody can answer, cancel it and use the routes above.
 
 1. Read Lane AGENTS.md, DESIGN.md, the Issue body and **every comment** (`planning {"planningItemId":"ISSUE_ID"}`);
-   comments can amend Done-when. Own one finite task: `start {planningItemId}`, then follow what the start
+   comments can amend Done-when. Own one finite task: `start {planningItemId}` **before the first edit**
+   (an edit in the shared clone is seen by no one, blocks the next pull and is never saved; `start` and
+   `status` list any found there, and `start` with `carryEdits:true` moves them into the Lane), then follow what the start
    reply and Forge's own output say (the Lane path, `openLanes`, `previousLane`, hook warnings). Continue or
    abandon earlier open work it names; never redo work already on main.
 2. Follow AGENTS.md secret handling and owner decision rights. Never print secrets

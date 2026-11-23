@@ -18,6 +18,12 @@ export async function readHostedCliStatus(root: string, supplied?: Pick<HostedAg
   const response = await transport.dispatch('status', {});
   const result = response.result as {
     clone?: { status: string; sourceRevisionsBehind: number | null; next: string | null };
+    edits?: {
+      count: number;
+      files: { path: string; kind: 'edited' | 'extra' | 'deleted'; changedAt: string | null }[];
+      truncated?: boolean;
+      note?: string;
+    };
     githubMirror?: HostedMirrorStatus | null;
     needsFix?: unknown[];
     mainToday?: { words: string; state?: string };
@@ -38,6 +44,11 @@ export async function readHostedCliStatus(root: string, supplied?: Pick<HostedAg
   const main = result.mainToday
     ? `\nmain: ${result.mainToday.words} (UTC day)${result.mainToday.state ? ` · ${result.mainToday.state}` : ''}`
     : '';
+  const editLines = result.edits ? (await import('./clone-local-edits.js')).editLines : null;
+  const localEdits =
+    result.edits && editLines
+      ? `\n${result.edits.count} local edit${result.edits.count === 1 ? '' : 's'} in this clone, not in any Lane (${result.edits.note ?? ''}):\n${editLines({ count: result.edits.count, files: result.edits.files, truncated: Boolean(result.edits.truncated) }).join('\n')}\nCarry them: nforge agent ${shellQuote(root)} start '{"outcome":"Keep local edits","carryEdits":true}'`
+      : '';
   const hold = result.landingHold;
   const approval = hold?.kind === 'review' ? `\n${reviewHoldLine(hold.review)}` : '';
   const scratch = result.scratchPath ? `\nLane scratch: ${JSON.stringify(result.scratchPath)}` : '';
@@ -75,6 +86,6 @@ export async function readHostedCliStatus(root: string, supplied?: Pick<HostedAg
   const kept = budget ? `\n${budget.note}${budget.clearCommand ? `\n${budget.clearCommand}` : ''}` : '';
   return {
     value: { transport: 'hosted', ...result, hooks, ...(budget ? { keptApplyBudget: budget } : {}) },
-    text: `${text}${main}${fixes}${moreFixes}${approval}${scratch}${usage}${kept}${hookText ? `\n${hookText}` : ''}`,
+    text: `${text}${localEdits}${main}${fixes}${moreFixes}${approval}${scratch}${usage}${kept}${hookText ? `\n${hookText}` : ''}`,
   };
 }

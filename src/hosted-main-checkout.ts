@@ -13,6 +13,7 @@ import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
+import type { CheckoutChange } from './hosted-checkout-clean.js';
 import { parseNativeState, parseNativeStateValue } from './state/format.js';
 import { hostedMainSchema, type HostedMain, type MainExpectation } from './hosted-main.js';
 import { durableReplace, syncDirectory } from './state/durability.js';
@@ -186,10 +187,38 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
         'PROJECT_UNAVAILABLE',
         'Select this clone’s project.',
       );
+      const changes: CheckoutChange[] = [];
       cleanHostedCheckout(root, marker.state.files, 'hosted-main.json', true, {
         deferExtras: true,
         index: readCheckoutStatIndex(root),
+        collect: changes,
       });
+      // Name every obstructing path at once, not only the first (Item e802a0f9).
+      if (changes.length) {
+        const first = changes[0]!;
+        throw new ForgeError(
+          'WORK_CONFLICT',
+          `Local checkout changes at ${changes
+            .slice(0, 200)
+            .map(change => JSON.stringify(change.path))
+            .join(', ')}${changes.length > 20 ? ` and ${changes.length - 20} more` : ''} are preserved.`,
+          undefined,
+          {
+            obstruction: {
+              path: first.path,
+              kind: first.path.startsWith('.forge/')
+                ? 'unknown-metadata'
+                : first.kind === 'edited'
+                  ? 'source-edit'
+                  : first.kind === 'extra'
+                    ? 'extra-source'
+                    : 'deletion',
+              paths: changes.slice(0, 200).map(change => change.path),
+              count: changes.length,
+            },
+          },
+        );
+      }
     }
     const next = {
       request,
