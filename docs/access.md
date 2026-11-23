@@ -172,7 +172,7 @@ settles shows "send interrupted" after ten minutes. Email content uses the invit
 current address and the role, with no tracking pixel or rewritten link. The
 production sender domain remains part of the Phase 8 production move.
 The switch must remain off until the email-enablement requirements on
-[invitation email Issue c6629fda](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=c6629fda-c29f-48e9-b677-5094e5cf0d9b)
+[invitation email Issue c6629fda](https://dev.forge.nanthai.tech/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=c6629fda-c29f-48e9-b677-5094e5cf0d9b)
 are complete, including on dev.
 
 Invitation limits are checked together before any write, including explicit resends:

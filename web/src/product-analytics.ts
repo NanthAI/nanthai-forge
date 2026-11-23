@@ -51,7 +51,7 @@ export function captureBrowserAnalytics(
   projectId?: string,
 ) {
   if (
-    location.hostname !== 'nanthai-forge-dev.nanthai-forge.workers.dev' ||
+    location.hostname !== 'dev.forge.nanthai.tech' ||
     navigator.doNotTrack === '1' ||
     !import.meta.env.VITE_FORGE_POSTHOG_PROJECT_TOKEN
   )

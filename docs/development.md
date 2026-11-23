@@ -759,7 +759,7 @@ design-system behaviour layer out of the first paint.
 - Invitations: Home and `/account/people` load the recipient inbox lazily. The link carries no grant; the signed-in recipient accepts or declines. `FORGE_INVITATION_EMAIL=1` enables the separate sender on dev; its default is off. See [access](access.md#invitations).
 - Sign-in: one handle field (passkey sign-in or sign-up, browser autofill) and
   GitHub. After a first GitHub sign-in with no passkey, `/signin/passkey`
-  offers one (`authFirstPasskey`), skippable. The return address is kept in
+  offers one (`authPasskeys`), skippable. The return address is kept in
   session storage and only same-origin app paths are followed. The client is
   wrapped by `withRefreshHold` (rule 1) and the passkey hook is mounted only
   inside `WhileAwake` (rule 2).
@@ -973,9 +973,21 @@ use, retain at most 120/20 charged handle counters and schedule nothing. An
 exhausted budget returns `RATE_LIMITED` before a challenge or account is created.
 These interim defaults do not implement the phase 8 admission policy.
 
-`authFirstPasskey:start/finish` adds the first passkey from a
-live session minted within ten minutes, composing the pinned component functions
-without a library patch. Subsequent passkeys use the library flow. Sign-in
+`authPasskeys:start/finish` adds a passkey, the first or a later one, and
+`authPasskeys:remove` removes one. Each needs a recent sign-in of this browser: a
+session minted within ten minutes, or the ten-minute proof that a passkey or GitHub
+check records for it (`authSessions:confirmDeviceApproval`, a GitHub device check).
+They compose the pinned component functions without a library patch. The library's
+own add and remove flows are not used: they first ask for a sign-in with an existing
+passkey, and a passkey made on an earlier site address belongs to another relying
+party, so no authenticator can answer (Safari shows only the phone QR code, and the
+phone treats it as a sign-in). Removing keeps a way in: another passkey or the
+linked GitHub identity; otherwise it is refused with `BAD_ARGUMENT`. The component stores no relying-party id per
+passkey, so a passkey from an earlier address still counts as a way in, as in the library; and an account whose only
+way in is such a passkey has to be recovered by hand. The ten-minute window is the same recent-sign-in rule as
+GitHub's sudo mode: a copied browser token inside it can change passkeys, and every other browser of the account then
+shows the new-passkey notice. `finish` checks the 20-passkey cap again and answers a repeat for an already stored
+credential with that passkey. Sign-in
 ceremonies request no extensions; the secret-envelope PRF ceremony uses its own
 relying party/origin. Review first-passkey freshness and the pinned internal API
 before removing Clerk.
@@ -1275,7 +1287,7 @@ From a built checkout with Chromium installed and a current owner `nforge login`
 
 ```sh
 node scripts/ui-bot-setup.mjs --passkey \
-  --base https://nanthai-forge-dev.nanthai-forge.workers.dev \
+  --base https://dev.forge.nanthai.tech \
   --deployment https://benevolent-wildebeest-974.convex.cloud \
   --project mh7aafndrxmj8c2q0931zbjk2n8h4ffs --grant-reader
 ```
@@ -1301,10 +1313,16 @@ Reader administration is currently API-based: owner action `projectReaderActions
 
 ### Web site
 
-The dev site is the Cloudflare Worker `nanthai-forge-dev`
-(https://nanthai-forge-dev.nanthai-forge.workers.dev) on the Workers Free plan. Static files from
-`hosted-web-dist` are served by the platform before the Worker runs, so they cost no Worker request, and carry the
-headers of `site/headers.ts` as `_headers`. A path with no file runs the Worker (`site/worker.ts`): device
+The dev site is the Cloudflare Worker `nanthai-forge-dev` on the Workers Free plan, at its custom domain
+https://dev.forge.nanthai.tech (a Worker custom domain on the `nanthai.tech` zone; Cloudflare keeps its DNS record
+and certificate). It is the relying party for passkeys, so its passkeys never sign in to the future production site.
+The Worker's own address, https://nanthai-forge-dev.nanthai-forge.workers.dev, answers the front door, every app
+page and the CLI sign-in calls with a permanent redirect to `FORGE_WEB_URL`; other static files there (docs pages,
+scripts, text files) still serve, free, and none of them signs in. The CLI refuses a redirect on device sign-in, so it
+follows the origin the Convex deployment advertises: set `FORGE_WEB_URL` there before the redirect deploys. Static files from `hosted-web-dist` are served by the platform before the Worker runs,
+so they cost no Worker request, and carry the headers of `site/headers.ts` as `_headers`; the front door `/` is the
+one exception, run through the Worker first (one request per visit) so its redirect works too. A path with no file
+runs the Worker (`site/worker.ts`): device
 sign-in (`site/device-auth.ts`), the cached public read and the 301 for every earlier `/-` address
 (`site/public-read.ts`), and the app shell for any other path. Every Worker response gets the same security headers.
 The Worker reads the visitor's address from `CF-Connecting-IP` and forwards only its keyed hash.
@@ -1350,8 +1368,15 @@ A deploy by hand uses the same steps: `npm run build:web` with the `VITE_` varia
 `cf deploy` from the output. To roll back, redeploy an earlier version from the Cloudflare dashboard
 (Workers → nanthai-forge-dev → Deployments) or dispatch the workflow on an earlier commit.
 
-Passkeys belong to their origin: a passkey made on an earlier site address does not sign in here. Register a new
-one on this site, including the UI bot's passkey for [captures](#signed-in-hosted-ui-review-gate).
+Passkeys belong to their origin: a passkey made on an earlier site address does not sign in here. Sign in with
+GitHub, add a new one in Sign-in and devices and remove the old one there; do the same for the UI bot's passkey for
+[captures](#signed-in-hosted-ui-review-gate).
+
+To attach the custom domain to another Worker, put `"domains": ["HOST"]` in a scratch Build Output's
+`worker.config.json` and run `cf workers triggers deploy --prebuilt` there once; the site's own build declares no
+domain, so a deploy with the Workers-only token leaves it in place. The move also sets `FORGE_WEB_URL` on the
+Convex deployment and the Worker, and the R2 browser CORS origin ([R2 storage](r2-storage-plan.md)). GitHub
+sign-in's callback is on the Convex site address and does not change.
 
 Public-repository analysis runs in a Convex Node action (`convex/indexer.ts`). An import makes more than 2,000
 GitHub reads, past the Workers Free plan's 50 subrequests and 10 ms CPU per request, while a Convex action may run

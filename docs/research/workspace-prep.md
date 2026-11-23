@@ -425,5 +425,5 @@ was not available during these observations; no speed-up is claimed.
   recorded GitHub gap remains **9.306 s** (19.3715 − 10.0655), owned by
   [a245bcf0][gap]; the remaining absolute gap is not reassigned here.
 
-[prep]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=c83c4451-a30a-4f0e-8b45-1ff35300a001
-[gap]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=a245bcf0-b1ff-4ea5-ba8d-a2c9c9e14dff
+[prep]: https://dev.forge.nanthai.tech/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=c83c4451-a30a-4f0e-8b45-1ff35300a001
+[gap]: https://dev.forge.nanthai.tech/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=a245bcf0-b1ff-4ea5-ba8d-a2c9c9e14dff

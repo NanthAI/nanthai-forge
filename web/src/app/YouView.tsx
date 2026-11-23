@@ -44,6 +44,8 @@ type Actions = {
   removeDevice?: (id: string) => void;
   projectChoice?: (select: (projectId: string, name: string) => void) => ReactNode;
   configureDevice?: (id: string, name: string, settings: Settings) => void;
+  /** Set while a passkey change waits for a fresh check of this browser. */
+  proof?: { github: () => void; passkey: () => void; cancel: () => void };
 };
 export function YouView({
   data,
@@ -106,6 +108,25 @@ export function YouView({
         <div className="notice" data-st="failed" role="alert">
           <State state="failed" word="Check failed" />
           <p>{problem}</p>
+        </div>
+      ) : null}
+      {actions.proof ? (
+        <div className="notice" data-st="waiting" role="status">
+          <State state="waiting" word="Needs you" />
+          <p>Confirm it is you to change your passkeys. After a GitHub check, choose the change again.</p>
+          {data?.github ? (
+            <Key size="sm" onClick={actions.proof.github} disabled={busy}>
+              Check with GitHub
+            </Key>
+          ) : null}
+          {data?.passkeys.length ? (
+            <Key size="sm" onClick={actions.proof.passkey} disabled={busy}>
+              Use a passkey
+            </Key>
+          ) : null}
+          <Key size="sm" kind="ghost" onClick={actions.proof.cancel}>
+            Not now
+          </Key>
         </div>
       ) : null}
       {data?.notice ? (
@@ -459,14 +480,9 @@ export function YouView({
               </Row>
             ) : null}
             <div className="pad">
-              <Key onClick={actions.add} disabled={busy || !data?.passkeys.length}>
+              <Key onClick={actions.add} disabled={busy || !data}>
                 Add a passkey
               </Key>
-              {data && !data.passkeys.length ? (
-                <a className="btn" href="/signin/passkey">
-                  Add your first passkey
-                </a>
-              ) : null}
             </div>
           </Region>
           {handle ? (

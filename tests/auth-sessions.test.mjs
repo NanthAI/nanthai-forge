@@ -10,7 +10,7 @@ const sealedMarkSteps = s =>
 const SEALED_LINK = [{ projectId: 'fixture-project', deviceId: Uint8Array.of(1, 2, 3).buffer }];
 const sessionsApi = await import(moduleUrl('../convex/authSessions.ts'));
 const passkeyPages = await import(moduleUrl('../convex/components/authPasskey/accountPasskeys.ts'));
-const first = await import(moduleUrl('../convex/authFirstPasskey.ts'));
+const passkeyFlows = await import(moduleUrl('../convex/authPasskeys.ts'));
 const policy = await import(moduleUrl('../convex/accessPolicy.ts'));
 
 function passkeyStore(keys) {
@@ -68,8 +68,16 @@ function fixture(t) {
   s.tables.cliCredentials = new Map();
   const passkeys = passkeyStore(s.keys);
   const base = s.ctx.runQuery;
+  s.signInCeremonies = 0;
   const dispatch = async (ref, args) => {
     const name = getFunctionAddress(ref).reference ?? '';
+    if (name.endsWith('/startAuthentication')) s.signInCeremonies++;
+    if (name.endsWith('/deletePasskey')) {
+      const index = s.keys.findIndex(key => key.passkeyId === args.passkeyId && key.userId === args.userId);
+      if (index < 0) return { success: false, userError: { error: 'PASSKEY_NOT_FOUND' } };
+      s.keys.splice(index, 1);
+      return { success: true };
+    }
     if (name.endsWith('/listSessions'))
       return [...s.sessions]
         .filter(([, row]) => row.userId === args.userId)
@@ -220,8 +228,8 @@ test('B-05: revoking the current browser during confirmation prevents any furthe
 });
 test('B-05: adding a first passkey records a notice; another browser independently sees the notice', async t => {
   const s = fixture(t);
-  await s.call(first.start, {});
-  await s.call(first.finish, {
+  await s.call(passkeyFlows.start, {});
+  await s.call(passkeyFlows.finish, {
     response: {
       id: 'credential',
       rawId: 'credential',
@@ -579,4 +587,109 @@ test('SI-01 review: the GitHub end-all-devices route revokes only this accountâ€
   // Sole-owner follow-up: the issuer is the returning browser's fresh session, the only one this route keeps.
   assert.equal(user.sealedSweep.sessionId, 'new-session');
   assert.equal(user.sealedSweep.epoch, user.deviceSignOutEpoch);
+});
+
+const registered = {
+  id: 'credential',
+  rawId: 'credential',
+  type: 'public-key',
+  response: { clientDataJSON: '', attestationObject: '' },
+  clientExtensionResults: {},
+};
+const ISSUER = 'https://auth-fixture.convex.cloud/components/auth';
+const staleBrowsers = s => {
+  for (const id of ['session', 'other']) s.sessions.get(id).creationTime -= 11 * 60 * 1000;
+};
+test('Item 702af738: after a GitHub sign-in, an account whose only passkey is from an earlier site address adds one with no passkey sign-in ceremony', async t => {
+  const s = fixture(t);
+  s.keys.push({ userId: 'user', passkeyId: 'earlier-address', createdAt: 1 });
+  const options = await s.call(passkeyFlows.start, {});
+  assert.equal(options.rp.id, 'forge.example');
+  assert.equal(s.signInCeremonies, 0, 'no navigator.credentials.get() with the unreachable passkey');
+  assert.deepEqual(await s.call(passkeyFlows.finish, { response: registered }), {
+    success: true,
+    passkeyId: 'passkey-1',
+  });
+  assert.deepEqual(
+    s.keys.map(key => key.passkeyId),
+    ['earlier-address', 'passkey-1'],
+  );
+});
+test('Item 702af738: a passkey from an earlier address is removable with GitHub as the other way in; the last way in stays', async t => {
+  const s = fixture(t);
+  s.keys.push({ userId: 'user', passkeyId: 'earlier-address', createdAt: 1 });
+  s.keys.push({ userId: 'someone-else', passkeyId: 'theirs', createdAt: 1 });
+  assert.equal(await s.call(passkeyFlows.remove, { passkeyId: 'earlier-address' }), null);
+  assert.equal(
+    await s.call(passkeyFlows.remove, { passkeyId: 'earlier-address' }),
+    null,
+    'a retry reconciles',
+  );
+  assert.equal(await s.call(passkeyFlows.remove, { passkeyId: 'theirs' }), null);
+  assert.deepEqual(
+    s.keys.map(key => key.passkeyId),
+    ['theirs'],
+    'another account keeps its passkey',
+  );
+  delete s.tables.users.get('user').githubId;
+  s.keys.push({ userId: 'user', passkeyId: 'only', createdAt: 2 });
+  await assert.rejects(s.call(passkeyFlows.remove, { passkeyId: 'only' }), refused('BAD_ARGUMENT'));
+  s.keys.push({ userId: 'user', passkeyId: 'second', createdAt: 3 });
+  assert.equal(await s.call(passkeyFlows.remove, { passkeyId: 'only' }), null);
+  assert.deepEqual(
+    s.keys.filter(key => key.userId === 'user').map(key => key.passkeyId),
+    ['second'],
+  );
+  s.tables.users.get('user').githubId = '123';
+  s.tables.users.get('user').githubConflict = true;
+  await assert.rejects(
+    s.call(passkeyFlows.remove, { passkeyId: 'second' }),
+    refused('BAD_ARGUMENT'),
+    'a conflicted GitHub identity is no way in',
+  );
+});
+test('Item 702af738: an older browser proves itself again; a passkey or GitHub check renews the proof for that browser only', async t => {
+  const s = githubFixture(t);
+  s.keys.push(
+    { userId: 'user', passkeyId: 'kept', createdAt: 1 },
+    { userId: 'user', passkeyId: 'gone', createdAt: 2 },
+  );
+  staleBrowsers(s);
+  await assert.rejects(s.call(passkeyFlows.start, {}), refused('AUTH_EXPIRED'));
+  await assert.rejects(s.call(passkeyFlows.finish, { response: registered }), refused('AUTH_EXPIRED'));
+  await assert.rejects(s.call(passkeyFlows.remove, { passkeyId: 'gone' }), refused('AUTH_EXPIRED'));
+  await s.call(sessionsApi.startDeviceConfirmation, {});
+  await s.call(sessionsApi.confirmDeviceApproval, { response: assertion });
+  assert.equal(await s.call(passkeyFlows.remove, { passkeyId: 'gone' }), null);
+  s.identity({ subject: 'other', issuer: ISSUER });
+  await assert.rejects(
+    s.call(passkeyFlows.start, {}),
+    refused('AUTH_EXPIRED'),
+    'the proof belongs to one browser',
+  );
+  const started = await s.call(githubSessions.startDeviceSignInWithGithub, {
+    redirectTo: 'https://forge.example/account/devices',
+  });
+  assert.equal(
+    (await s.call(githubSessions.completeSignInWithGithub, await s.ticket(started.state))).status,
+    'complete',
+  );
+  s.identity({ subject: 'new-session', issuer: ISSUER });
+  assert.equal((await s.call(passkeyFlows.start, {})).user.name, 'existing-person');
+});
+test('Item 702af738 review: a repeated finish answers with the stored passkey, and the 20-passkey cap holds at finish', async t => {
+  const s = fixture(t);
+  s.keys.push({ userId: 'user', passkeyId: 'stored', credentialId: 'credential', createdAt: 1 });
+  assert.deepEqual(await s.call(passkeyFlows.finish, { response: registered }), {
+    success: true,
+    passkeyId: 'stored',
+  });
+  assert.equal(s.keys.length, 1, 'a lost reply never stores the credential twice');
+  for (let index = 1; index < 20; index++)
+    s.keys.push({ userId: 'user', passkeyId: `key-${index}`, createdAt: 1 });
+  await assert.rejects(s.call(passkeyFlows.start, {}), refused('QUOTA_EXCEEDED'));
+  await assert.rejects(
+    s.call(passkeyFlows.finish, { response: { ...registered, id: 'another' } }),
+    refused('QUOTA_EXCEEDED'),
+  );
 });

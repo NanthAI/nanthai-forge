@@ -67,14 +67,9 @@ const passkeys = setupUsernamePasskey(core, {
   usernameComponent: components.authUsername,
   ...passkeyConfig,
 }).attachUserCallbacks({ createUser: internal.authUsers.createPasskey });
-export const {
-  listPasskeys,
-  renamePasskey,
-  startAddPasskey,
-  verifyAddPasskey,
-  startRemovePasskey,
-  finishRemovePasskey,
-} = passkeys;
+// Adding and removing passkeys are Forge's own (convex/authPasskeys.ts): the library's flows require a sign-in with
+// an existing passkey, which a passkey from an earlier site address cannot give.
+export const { listPasskeys, renamePasskey } = passkeys;
 
 /** Preserve the pinned library's argument/return validators and ceremony handler while
  * running Forge policy in the same transaction through the standard public builder. */
@@ -195,23 +190,3 @@ export const startAutofillSignInWithUsernamePasskey = protect(
     return run(ctx, args);
   },
 );
-
-/** Keep passkey additions visible on the account's next visit, in the ceremony transaction. */
-export const finishAddPasskey = protect(passkeys.finishAddPasskey, async (ctx, args, run) => {
-  const identity = await ctx.auth.getUserIdentity();
-  const sessionId = identity?.forgeAuthSession;
-  invariant(typeof sessionId === 'string', 'AUTH_REQUIRED', 'Sign in to add a passkey.');
-  const result = await run(
-    { ...ctx, auth: { ...ctx.auth, getUserIdentity: async () => ({ ...identity!, subject: sessionId }) } },
-    args,
-  );
-  if (result.success) {
-    const id =
-      typeof identity?.forgeAuthUser === 'string'
-        ? ctx.db.normalizeId('users', identity.forgeAuthUser)
-        : null;
-    invariant(id, 'AUTH_REQUIRED', 'Sign in to add a passkey.');
-    await ctx.db.patch(id, { passkeyNotice: { at: Date.now(), passkeyId: result.passkeyId } });
-  }
-  return result;
-});

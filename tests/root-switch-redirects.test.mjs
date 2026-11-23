@@ -187,11 +187,15 @@ test('b0704959: an earlier /- address never redirects to another site', async t 
 });
 
 test('b0704959: the Worker answers its paths itself and leaves the static files alone', () => {
-  // Static files are served before the Worker; a missing file runs it (no Worker-first route, no 404 page), and a
-  // file name without .html serves that page (scripts/build-site.mjs).
+  // Static files are served before the Worker; a missing file runs it (no 404 page), and a file name without .html
+  // serves that page (scripts/build-site.mjs). The one Worker-first route is "/", so the workers.dev address can
+  // redirect its front door too (Item 702af738); every other static file stays free.
   const build = readFileSync(new URL('../scripts/build-site.mjs', import.meta.url), 'utf8');
-  assert.match(build, /assets: \{ htmlHandling: 'auto-trailing-slash', notFoundHandling: 'none' \}/);
-  assert.doesNotMatch(build, /runWorkerFirst|run_worker_first/);
+  assert.match(
+    build,
+    /assets: \{ htmlHandling: 'auto-trailing-slash', notFoundHandling: 'none', runWorkerFirst: \['\/'\] \}/,
+  );
+  assert.equal(build.match(/runWorkerFirst|run_worker_first/g).length, 1);
   for (const path of [
     '/-/public/v1/explore/active.json',
     '/sitemap.xml',

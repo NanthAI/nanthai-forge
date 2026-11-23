@@ -12,7 +12,7 @@ const authIdentity = await import(moduleUrl('../convex/authIdentity.ts'));
 const users = await import(moduleUrl('../convex/authUsers.ts'));
 const auth = await import(moduleUrl('../convex/auth.ts'));
 const handles = await import(moduleUrl('../convex/urlAccounts.ts'));
-const firstPasskey = await import(moduleUrl('../convex/authFirstPasskey.ts'));
+const passkeyFlows = await import(moduleUrl('../convex/authPasskeys.ts'));
 const device = await import(moduleUrl('../convex/deviceActions.ts'));
 // Every sign-in is the stable device flow (ac85b100); `stable` is the proven device the HTTP action passes in.
 const begin = (ctx, input) =>
@@ -327,7 +327,7 @@ test('a Convex Auth browser approval issues the normal Forge CLI credential; a C
   assert.equal(token.aud, 'forge-cli');
   assert.equal(token.exp - token.iat, 30 * 24 * 3600);
   s.identity({ subject: token.sub, issuer: token.iss, forgeCredential: issued.credentialId });
-  await assert.rejects(firstPasskey.start._handler(s.ctx, {}), refused('AUTH_REQUIRED'));
+  await assert.rejects(passkeyFlows.start._handler(s.ctx, {}), refused('AUTH_REQUIRED'));
   await assert.rejects(
     device.decide._handler(s.ctx, { code: flow.user_code, approve: true, operationId: randomUUID() }),
     refused('AUTH_REQUIRED'),
@@ -368,9 +368,9 @@ test('GitHub callbacks keep numeric identity and account key, store verified ema
   );
 });
 
-test('a GitHub-only account can add its first passkey; stale, revoked, wrong and repeat ceremonies fail', async t => {
+test('a GitHub-only account can add its first and a later passkey; stale, revoked, wrong and repeat ceremonies fail', async t => {
   const s = fixture(t);
-  const options = await firstPasskey.start._handler(s.ctx, {});
+  const options = await passkeyFlows.start._handler(s.ctx, {});
   assert.equal(options.user.name, 'synthetic');
   assert.deepEqual(options.extensions, {});
   const response = {
@@ -381,19 +381,19 @@ test('a GitHub-only account can add its first passkey; stale, revoked, wrong and
     clientExtensionResults: {},
   };
   assert.equal(
-    (await firstPasskey.finish._handler(s.ctx, { response: { ...response, id: 'wrong' } })).success,
+    (await passkeyFlows.finish._handler(s.ctx, { response: { ...response, id: 'wrong' } })).success,
     false,
   );
-  assert.deepEqual(await firstPasskey.finish._handler(s.ctx, { response }), {
+  assert.deepEqual(await passkeyFlows.finish._handler(s.ctx, { response }), {
     success: true,
     passkeyId: 'first',
   });
-  await assert.rejects(firstPasskey.start._handler(s.ctx, {}), refused('BAD_ARGUMENT'));
-  s.passkeys.length = 0;
+  // Item 702af738: a later passkey takes the same fresh-sign-in proof, never a sign-in with an existing passkey.
+  assert.equal((await passkeyFlows.start._handler(s.ctx, {})).user.name, 'synthetic');
   s.sessions.get('session').creationTime = Date.now() - 11 * 60 * 1000;
-  await assert.rejects(firstPasskey.finish._handler(s.ctx, { response }), refused('AUTH_EXPIRED'));
+  await assert.rejects(passkeyFlows.finish._handler(s.ctx, { response }), refused('AUTH_EXPIRED'));
   s.sessions.delete('session');
-  await assert.rejects(firstPasskey.finish._handler(s.ctx, { response }), refused('AUTH_REQUIRED'));
+  await assert.rejects(passkeyFlows.finish._handler(s.ctx, { response }), refused('AUTH_REQUIRED'));
 });
 
 test('GitHub App credentials are encrypted, owner-bound, and unavailable to a changed callback', async t => {
@@ -511,7 +511,7 @@ test('passkey entry uses only the current Forge handle and never registers an ex
   );
   assert.equal(s.tables.users.size, 1);
   s.identity({ issuer: `${process.env.CONVEX_CLOUD_URL}/components/auth`, subject: 'session' });
-  assert.equal((await firstPasskey.start._handler(s.ctx, {})).user.name, 'synthetic');
+  assert.equal((await passkeyFlows.start._handler(s.ctx, {})).user.name, 'synthetic');
   assert.equal(s.usernames.get(s.user._id), 'synthetic');
   await handles.set._handler(s.ctx, { handle: 'new-handle', operationId: 'rename' });
   assert.equal(s.usernames.get(s.user._id), 'new-handle');

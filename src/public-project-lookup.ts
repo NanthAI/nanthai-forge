@@ -6,7 +6,7 @@ import { ForgeError, invariant } from './errors.js';
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import { publicProjectClone, publicProjectLogin } from './public-project-commands.js';
 
-const defaultSite = 'https://nanthai-forge-dev.nanthai-forge.workers.dev';
+const defaultSite = 'https://dev.forge.nanthai.tech';
 const segment = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,99}$/i);
 const projectEntry = z.object({ handle: segment, slug: segment, name: z.string() });
 type Match = z.infer<typeof projectEntry> & { url: string; cloneCommand: string };

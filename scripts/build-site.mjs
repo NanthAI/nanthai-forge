@@ -73,8 +73,9 @@ await writeFile(
     workersDev: true,
     previewUrls: false,
     // A static file is served first and free; a file name without its .html serves that page; anything else runs
-    // the Worker.
-    assets: { htmlHandling: 'auto-trailing-slash', notFoundHandling: 'none' },
+    // the Worker. "/" runs the Worker first too, one request per front-page visit, so the workers.dev address can
+    // redirect to the canonical one (site/worker.ts); the Worker serves the static page from ASSETS otherwise.
+    assets: { htmlHandling: 'auto-trailing-slash', notFoundHandling: 'none', runWorkerFirst: ['/'] },
     env: {
       ASSETS: { type: 'assets' },
       // Per-address backstops before any backend call: 60 public reads and 10 sign-in starts a minute.

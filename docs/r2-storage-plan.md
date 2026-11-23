@@ -85,7 +85,7 @@ The exact Cloudflare API rule array is:
 [
   {
     "allowed": {
-      "origins": ["https://nanthai-forge-dev.nanthai-forge.workers.dev", "http://localhost:5173"],
+      "origins": ["https://dev.forge.nanthai.tech", "http://localhost:5173"],
       "methods": ["GET", "HEAD", "PUT"],
       "headers": ["Range", "Content-Type", "If-None-Match", "x-amz-checksum-sha256"]
     },
@@ -95,7 +95,7 @@ The exact Cloudflare API rule array is:
 ]
 ```
 
-The dev site origin comes from the `nanthai-forge-dev` site in
+The dev site origin is the `nanthai-forge-dev` Worker's custom domain in
 [development](development.md); localhost is Vite's default port, 5173. Use that
 exact localhost origin for qualification. Standalone leaves use full GET; packed
 GitHub-import objects use byte ranges bound into the GET signature, with logical
@@ -107,7 +107,7 @@ can validate a 206 response. No wildcard origin or public bucket is required.
 With the lead's existing cf CLI profile and bucket selection, apply the rule array:
 
 ```sh
-cf r2 buckets cors update "$R2_BUCKET" --rules '[{"allowed":{"origins":["https://nanthai-forge-dev.nanthai-forge.workers.dev","http://localhost:5173"],"methods":["GET","HEAD","PUT"],"headers":["Range","Content-Type","If-None-Match","x-amz-checksum-sha256"]},"exposeHeaders":["Content-Range","Content-Length","ETag","x-amz-checksum-sha256"],"maxAgeSeconds":3600}]'
+cf r2 buckets cors update "$R2_BUCKET" --rules '[{"allowed":{"origins":["https://dev.forge.nanthai.tech","http://localhost:5173"],"methods":["GET","HEAD","PUT"],"headers":["Range","Content-Type","If-None-Match","x-amz-checksum-sha256"]},"exposeHeaders":["Content-Range","Content-Length","ETag","x-amz-checksum-sha256"],"maxAgeSeconds":3600}]'
 cf r2 buckets cors get "$R2_BUCKET"
 ```
 

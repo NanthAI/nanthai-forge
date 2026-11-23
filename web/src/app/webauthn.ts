@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// The browser leg of "add your first passkey" (convex/authFirstPasskey.ts): the server's creation options in, the
+// The browser leg of adding a passkey (convex/authPasskeys.ts): the server's creation options in, the
 // registration response out, in exactly the wire shape that function accepts (no extensions, no extra fields).
-// Sign-in itself and later passkeys use the auth library's own ceremonies.
+// Sign-in itself uses the auth library's own ceremony.
 
 export type CreationOptions = {
   rp: { id: string; name: string };

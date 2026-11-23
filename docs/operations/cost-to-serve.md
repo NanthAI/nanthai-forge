@@ -670,9 +670,9 @@ alert landing waited on protected-workflow owner review. The later rolling
 proof. Cost A2 subsequently reported another 3,299 discarded runner-seconds;
 the post-safety-fix smoke/dogfood comparison remains open; the pre-fix smoke context is above.
 
-Evidence: cost Issue [298f9675](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd) (A2 completion `99be677c`, B/B2 and catalog
-comments), storage Issue [8c4f126b](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981) (inventory and B/C/D receipts), and
-main-race Issue [1018d0f8](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=1018d0f8-7745-447b-8e83-b2b502bc25fc). Accepted runtime commits include
+Evidence: cost Issue [298f9675](https://dev.forge.nanthai.tech/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd) (A2 completion `99be677c`, B/B2 and catalog
+comments), storage Issue [8c4f126b](https://dev.forge.nanthai.tech/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981) (inventory and B/C/D receipts), and
+main-race Issue [1018d0f8](https://dev.forge.nanthai.tech/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=1018d0f8-7745-447b-8e83-b2b502bc25fc). Accepted runtime commits include
 [State writer `acdd3980`](https://github.com/NanthAI/nanthai-forge/commit/acdd3980b25007a3de4accd98a4b5d4ce53075b4),
 [CI windows `5afc36a6`](https://github.com/NanthAI/nanthai-forge/commit/5afc36a6f41093e072c425238ec585a986c83b17),
 [Actions closure `840097f2`](https://github.com/NanthAI/nanthai-forge/commit/840097f27b0f77647297f69b8061b0198aa99e4e),
@@ -724,7 +724,7 @@ overhead. The post-overnight-fixes dry above measures captured write I/O and
 check-wall/time-to-main, without a causal or scored exit claim. The latter is **measured but unexplained** at 7.601 s versus 2.384 s
 normal (about +5.217 s), in three samples per path. Overall client means were
 246.567 versus 249.066 s, but blocked cohorts, moving CLI pins and different
-provider matrices prevent a causal speedup claim (Flip 3 Issue [4e4204b6](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e4204b6-9373-49b3-a8fd-3eb06208a310)).
+provider matrices prevent a causal speedup claim (Flip 3 Issue [4e4204b6](https://dev.forge.nanthai.tech/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e4204b6-9373-49b3-a8fd-3eb06208a310)).
 The quoted-provider-log marker bug caused missing project/landing attribution;
 the split builder added balanced-quote parsing, but a new paired coverage-checked
 window is still required. No missing metric is treated as zero.
@@ -2281,8 +2281,8 @@ deletion counters. No missing field is zero and no new run is authorized by this
 follow-up list.
 
 Evidence and open lines are tracked on
-[S0](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=886a4694-b2eb-4e58-881f-787376038698)
-and the existing [cost Issue](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd).
+[S0](https://dev.forge.nanthai.tech/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=886a4694-b2eb-4e58-881f-787376038698)
+and the existing [cost Issue](https://dev.forge.nanthai.tech/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd).
 This documentation replaces unlabelled placement estimates with scoped
 observations and explicit gaps. The temporary patch writer and three schema
 definitions are removed after row cleanup. The retained numeric evidence and
