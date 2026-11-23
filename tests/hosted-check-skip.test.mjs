@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Checks that do not apply to a change skip cleanly and never hang the landing (Issue 9e71abcc).
 import test from 'node:test';
 import assert from 'node:assert/strict';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Split from projectWorkIndex-phases.test.mjs so check shards can run both long workers in parallel.
 import test from 'node:test';
 import assert from 'node:assert/strict';

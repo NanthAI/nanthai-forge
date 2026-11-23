@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // L1 source-mutant scenarios (Item 687d1eda, review e7137e30 finding 4). Each one drives a reviewed
 // chain hand-off through the real production code and returns the follower that is stranded when
 // that code regresses. The parent test asserts L1 stays silent on current code; the mutant child

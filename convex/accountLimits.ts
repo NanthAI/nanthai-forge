@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One suspend switch and one shared per-account daily limiter for every channel that can carry a
 // message (Issue b6588425 line 3). Callers run it inside their existing write mutation, after their
 // operation-id replay check (a replay is free) and never from server-scheduled jobs (exempt).

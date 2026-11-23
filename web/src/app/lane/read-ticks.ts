@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Which files this reader has read in a Lane (Item 52235fbf). A tick belongs to the exact content read, so a file the
 // agent changes again after you read it comes back unread on its own. Kept in this browser only: no Convex call,
 // no write per tick, nothing for an idle tab. A blocked or cleared store simply starts with nothing read.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 273650ab (found in the queue sim 2026-11-23): with checks about four times longer, passed
 // entries waited on each other in a circle with nothing scheduled, freed only by the stall alarm.
 // Entry 4's re-check was composed on younger entry 9's predicted head (it publishes after 9), 9 waited

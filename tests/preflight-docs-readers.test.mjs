@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Docs-only preflight (Issue c14f4065, receipt 0f3d44e1): a Markdown change runs only the tests that
 // read it; a file the save ignores never widens the plan; the plan is printed before anything runs.
 import assert from 'node:assert/strict';

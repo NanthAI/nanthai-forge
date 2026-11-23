@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Bulk permanent delete in one owner approval (Item 7456856f). An unrestricted sign-in to the account prepares a request:
 // the exact list of projects (ids, slugs, revisions, last landing, size), frozen when it is made. Only the owner person
 // approves it, once, in the browser; approval re-checks every project and runs the existing permanent purge

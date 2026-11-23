@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // GitHub Actions as the project's CI (Item 0c9207b8): the workflows on main with what each runs on, the one trigger
 // line the chosen file needs shown as the exact change, and one press that chooses it (choose-ci.ts: two reads and one
 // write). The list comes from the CI question's read (use-workflows.ts); this file reads nothing itself.

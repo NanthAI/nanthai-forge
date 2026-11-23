@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // `nforge import`: start or resume a pinned GitHub source import into a new hosted
 // project and report the project and its readiness. The local journal keeps the
 // original operation UUID and request, so a lost reply or a stopped worker is

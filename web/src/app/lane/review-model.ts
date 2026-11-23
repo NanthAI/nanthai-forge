@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Lane review reply (convex/projectLaneReview.ts) and what the screen derives from it, with no reads: each file's
 // group and observed reason (src/review-order.ts, shared with the agent's diff summary), the crossing lines from the
 // Lane's open conflict notices, and the stop the Lane is at.

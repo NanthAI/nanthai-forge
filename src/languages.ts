@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The analysed languages and their file extensions, from the ecosystem registry (src/ecosystems.ts).
 import { codeMapLanguages, type SourceLanguage } from './ecosystems.js';
 export type { SourceLanguage } from './ecosystems.js';

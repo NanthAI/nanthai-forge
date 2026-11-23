@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Cache key for the trusted control dependencies (`npm ci` output plus the npm download cache).
 // Any CI can call it: `node scripts/control-deps-key.mjs [ROOT]` prints one key. Plain Node.
 //

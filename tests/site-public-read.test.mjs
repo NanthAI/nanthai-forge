@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The site Worker's cached public read (site/public-read.ts, Items 6a60e89a, 875a4b60 and ef6aa22a): it forwards no
 // cookie or credential, keeps only public cache headers, keeps 200s in the edge cache by canonical path, briefly caches
 // failure envelopes, adds share tags only from the public read, and gives a private or missing project the same plain

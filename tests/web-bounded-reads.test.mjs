@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Bounded web reads (Item 686ecdde, comment ac886ed1): old web hooks read every 100-row page of planning Items,
 // Lanes, Intents, views and runs on a page open, 80 to 800 calls and 26 to 41 MB per open, and the cost of one open
 // grew with the project. Every place of the rebuilt app reads one bounded page or a server summary instead

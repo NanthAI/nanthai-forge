@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // B1.5d Metric 4 ground truth: did two tasks really change the same code? Each task's
 // changed files are copied when its agent exits; after the cell, every pair of tasks that
 // changed one file is merged three-way against the base (`git merge-file`). A conflict means

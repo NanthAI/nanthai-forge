@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue fe5bea80: the owner accepts or declines a landing held for review in one step; agents never can.
 import test from 'node:test';
 import assert from 'node:assert/strict';

@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* Design system: The frames (top bar, the line, rail, phone tabs, public bar), page head, regions, bands, rows, tables, trees,
    boards, decisions, forms, the list toolbar and bulk bar, choices, timelines, Items, overlays, the fold and the standing line.
    Scoped to [data-ds]; every value is a token from tokens.css. Rules for choosing each part: DESIGN.md. */

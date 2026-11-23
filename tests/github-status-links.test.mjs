@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item d357d772: a GitHub status carries no private project's handle, slug or title. Every status Forge posts for a
 // private project (pending and started on a fork run, settled, reposted) links the opaque /approve form, which a
 // member's session resolves to the Lane and anyone else gets not-found; a public project keeps the readable Lane page.

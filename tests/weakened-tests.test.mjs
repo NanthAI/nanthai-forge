@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 11901a0c: preflight flags a weakened test (removed or loosened assertions, added skips or
 // name filters, a changed input under unchanged assertions) by file and test name, and never a
 // plain refactor. Real past diffs of this repository's own tests are in fixtures/weakened-tests.json.

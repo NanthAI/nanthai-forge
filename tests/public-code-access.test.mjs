@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Public read-only code and history (Item 4c164732): the access matrix. Signed out, a stranger, a reader, a writer and
 // the owner read history and source on a public and on a private project through the path each one uses: visitors the
 // cached public route (convex/publicHttp.ts), people the Code place's reads. Every answer must match the access

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Synthetic records shared by the focused state-table tests and local visual preview.
 export const now = Date.parse('2026-10-23T19:50:00Z');
 export function s16Work() {

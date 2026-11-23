@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item ad80e037 fix 5: preflight's clean environment hid the browser cache, so all 18 UI browser tests
 // skipped in 0.0 s and the skip counted as a pass; a broken screen reached the landing check.
 import assert from 'node:assert/strict';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Peak live memory of this process: V8 heap plus external Buffers/ArrayBuffers. Unlike RSS it does
 // not depend on allocator slack, thread arenas or young-generation sizing. A raw sample still counts
 // old-space garbage until the next major GC, and concurrent marking falls behind on a loaded runner,

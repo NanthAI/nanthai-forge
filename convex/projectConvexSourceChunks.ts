@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { stateByteChunks } from '../src/state/format';
 import { mapSourceOrdered } from '../src/hosted-source-parallel';
 import type { WorkerPin } from '../src/hosted-source-worker-format';

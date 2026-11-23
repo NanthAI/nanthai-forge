@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A start shows its Item as in progress for every member (Item d3357f40, lead 2026-11-19). Planning writes are the
 // project owner's, so a member's own status write after a start is refused. The start schedules this action instead
 // when the starter is not the owner, and the server moves the Issue, as the owner, from open to in progress. A proposed

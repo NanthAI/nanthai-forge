@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { checkNeverRan } from './check-run-state.js';
 import type { FrictionCapture } from './friction-types.js';
 import { appendFriction, frictionId } from './friction.js';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Per-visitor limits (Item b6588425, owner numbers 2026-11-22). The site's edge forwards a keyed hash of the client
  * address (src/client-hash.ts), never the address; a visitor is one hash. Each charge runs inside the mutation that
  * already serves the request: one point read and one write, and a refusal writes nothing. A new hash's first row also

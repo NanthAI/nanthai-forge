@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Fixtures that model a busy, long-standing owner mark it Established in the account limiter
 // (convex/accountLimits.ts, Item b6588425) without an account row, which many tests add themselves.
 // An Established tier kept on a counter row carries over days, so the rows need no clock.

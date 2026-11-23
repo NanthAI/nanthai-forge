@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A Markdown file read as a document (Item 8e847a17): the text drawn by the same safe renderer comments use (raw HTML
 // is dropped, links open only to http(s), mailto, or another file of this State), fenced code coloured by the
 // highlight worker, and images that name a file of the same State loaded from storage when they scroll into view:

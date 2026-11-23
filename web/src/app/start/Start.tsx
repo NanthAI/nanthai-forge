@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Before a first project (`/new`, the bare frame): give a prompt to the agent app the person already uses, or import
 // a repository yourself (Items 6beca32b, c3e4a838). The agent explains first and installs nothing until its person says
 // so; Forge never starts an agent. The connection step reads this account’s confirmation once. The import

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // How close each test is to a changed module, read from the parsed import graph only: no file
 // reads, no process, no server call. Preflight ranks local tests with it; landing coverage never
 // depends on it (a missing edge proves nothing).

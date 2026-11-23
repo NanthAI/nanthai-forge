@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The CI files on main (Item 0c9207b8), through the Code place's bounded source read (projectCodeBrowse.read: same
 // access check, no signed URL, 200-entry folder pages, 16,000-character file pages). Every answer is for an exact
 // State and kept for the visit (code-data.ts), so reopening asks nothing.

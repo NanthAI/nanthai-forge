@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { z } from 'zod';
 
 /** Policy shape for B2.6 trust per path per actor. Absent means off; `enabled:false` records history

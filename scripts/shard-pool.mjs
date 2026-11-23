@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Node-free: bundled into the Convex check backend and read by the fixed executor.
 // The shard pool (work stealing, Issue 0ea17a29). Runner speed differs between jobs of one
 // check (the same file ran 98 s on one runner and 183 s on another), so a perfect static plan

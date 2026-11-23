@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** When the dev site deploys (Item ef6aa22a): only when what it serves changed, and at most once per window when
  * landings arrive close together. A run inside the window ends without waiting; the next landing after it, or the
  * three-hourly catch-up run, deploys what accumulated, so no runner sits idle. The deployed site carries its own record (`/_forge/build.json`, written by

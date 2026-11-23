@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Forge's own standard check: `node scripts/forge-check.mjs`.
  *
  * The one place that decides whether a check is Forge's own recipe. Forge's

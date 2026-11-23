@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Source-free signatures from the existing presign counters, grouped by provider caller.
  * A signed capability may be unused/reused/retried: this never claims executed bucket counts. */
 export function r2SignatureMeter(projectId) {

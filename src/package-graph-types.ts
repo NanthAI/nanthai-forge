@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Shared shapes of the manifest-level package graph (src/package-graph.ts). */
 /** Every package-graph ecosystem; the placement pin (src/package-placement.ts) validates against it. */
 export const PACKAGE_ECOSYSTEMS = [

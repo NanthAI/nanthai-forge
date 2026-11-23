@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // P8: the real import and mirror components preserve choices, confirm only disconnect, and work by keyboard in both themes.
 import test from 'node:test';
 import { settleBrowserPage } from './browser-runtime.mjs';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Operation-local traversal of verified State parents. Never retained across operations. */
 export class NativeAncestry {
   private readonly verified = new Map<string, string[]>();

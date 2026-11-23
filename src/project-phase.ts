@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /**
  * Where a hosted project is in its removal lifecycle (SM-D, machine M1). One pure derive that the
  * web, the CLI and the server read models share, in the shape of `hostedMirrorStatusText`'s source

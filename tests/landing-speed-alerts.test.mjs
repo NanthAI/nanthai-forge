@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Speed budgets (b7851c44, regression ladder rung 1): a landing's own time to main and check minutes
 // are judged against src/speed-budgets.json over the last window of landings, on data the landing
 // already wrote. A break alerts once and opens one P0 Issue; a recovery closes the alert.

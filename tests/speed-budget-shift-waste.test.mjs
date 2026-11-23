@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item a217b83e follow-ups. (1) Name the landing behind a whole-check shift, judged on full checks reserved
 // after it landed: the check runner runs from main, so the landing whose own check first saw the shift is
 // never blamed (lead 7c9e5a86). Replayed on the live 2026-11-19 checks around d5de1c98 (hosted coverage

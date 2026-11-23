@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Clones, pulls and Lane checkouts hold a submodule as a real checkout of its pinned commit;
 // every scanner treats it as one opaque leaf whose pointer is its HEAD.
 import test from 'node:test';

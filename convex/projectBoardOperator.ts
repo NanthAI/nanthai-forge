@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Operator stop switches for the agent board. Internal only: run with the deployment key, e.g.
 //   npx convex run projectBoardOperator:setSwitch '{"scope":"global","off":true,"reason":"..."}'
 // Every call writes a boardAudit row. Switches take effect on the next post or read. The account

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The terminal-chosen device name, as both approval pages show it: cleaned and capped (shownDeviceName), quoted and
 // marked as not verified. Callers place it last, after the facts the server knows, and never in a heading.
 import { shownDeviceName } from './code';

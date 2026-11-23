@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item ad80e037 fix 6: the landing check typechecks every TypeScript project (root, web, convex,
 // site); preflight typechecked none of them, so a TS2339 in convex/ reached the landing check.
 import assert from 'node:assert/strict';

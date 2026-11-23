@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Portable fetch instrumentation. The Node CLI supplies its async-local reader;
  * Convex/browser consumers have no observer and no Node runtime dependency. */
 export type ExchangeMeasurements = {

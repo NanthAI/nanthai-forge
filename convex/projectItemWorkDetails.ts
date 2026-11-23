@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Optional Item-page facts. These reads share the Item Work transaction and its page; the CLI keeps its compact reply.
 import { getDocumentSize } from 'convex/values';
 import { inverseRelationLabel, isLive } from '../src/planning-model';

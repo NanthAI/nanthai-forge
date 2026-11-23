@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What a non-owner receives of a project row (Item 5ba7c7f9, docs/access.md#what-leaves-convex). The owner reads the
 // whole row; every other viewer (a member, or a signed-in reader of a public project) gets an allowlist. The check
 // compares the row the read already loaded with the caller, so it costs no Convex read. Emails and check credential

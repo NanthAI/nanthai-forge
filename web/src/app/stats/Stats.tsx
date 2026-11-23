@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Stats (Items 2cf30e0a, a61d3c91): what Forge measured in this project, beside the project's own history replayed
 // through a GitHub-style flow. Measured figures are facts with their source words; the replay is hatched, its lower
 // bound first. The page opens with one read (the headline figures and landings per day) of the chosen period's closed

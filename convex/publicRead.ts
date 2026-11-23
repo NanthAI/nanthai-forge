@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** What a visitor reads of public projects (Items 8947a779, 6a60e89a, 875a4b60, 0650b8cb). Each page is one bounded
  * internal query, called only by the cached public HTTP route (publicHttp.ts) on a cache miss; a cache hit never
  * reaches Convex. Every result passes the one visibility rule (publicVisibility.ts) and names no actor, session,

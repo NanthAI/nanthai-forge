@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Lanes (Item e317b6ea): what needs the reader, then every open Lane on the shell's stops. What landed is History
 // (c613e6bc). The yard's stops and held marks are the line feed's, so the counts here are the top bar's. Each row that
 // shares saved files with other open Lanes says so and links to Who is touching what (Item f787005c), which replaced

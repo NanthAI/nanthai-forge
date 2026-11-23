@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The base-checkpoint scrub (Item b6588425 lines 2d, 2e): a stored base backup keeps a purged comment's or Item's words in
 // content-addressed record objects (and the record packs that cover them), pinned by the backup's exchange root, whose
 // record catalog every base reader verifies against the whole-Work digest. A scrub writes a new exchange root: the

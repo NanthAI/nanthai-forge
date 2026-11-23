@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure previews over a supplied pool: plan changes, pace, the extra-landings limit, held work and payment recovery.
 // No IO, no clock (the pool's `asOf` stands in for now), no timers. Prices come from the contract only.
 import {

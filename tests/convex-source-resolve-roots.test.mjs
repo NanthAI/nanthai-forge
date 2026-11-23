@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 1eef1b43 line 3 (friction 09c0b7cd): a live resolve spent 3 of its 4 steps reading about 40
 // history manifests. The resolve walked ancestry from five roots; the draft is always an ancestor
 // of the saved head, so the generation walk saw a subset-common State and fell back to a

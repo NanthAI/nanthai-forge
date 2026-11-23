@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Every read of a file's executable or group/other permission bits goes through here (lint rule
 // forge/no-raw-mode-bits).
 // Windows filesystems store no executable bit (as Git's core.fileMode=false): there a regular

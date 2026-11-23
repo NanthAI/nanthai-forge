@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Loose ends details (Item fc1831eb): "passed its check, never landed" is a Lane-level stamp. An unrequested check that
 // passed (the Lanes recordCheckFeed already names) stamps each Lane that is still open on the exact head that was
 // checked: `passedAt` on its overlap and presence rows, and one marker row (projectFinishReadRows, kind

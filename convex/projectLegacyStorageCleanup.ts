@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The only pause-exempt mutations. Every write below requires the exact active
 // dev pause, pinned bodies, complete frozen reference coverage and retry identity.
 import { maintenanceInternalMutation as internalMutation, internalQuery } from './server';

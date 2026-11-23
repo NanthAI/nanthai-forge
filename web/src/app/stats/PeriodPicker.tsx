@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Stats period picker (Item a61d3c91): the page's one picker. Last 7 or 30 days, this month, last month or a custom
 // range of at most STATS_RANGE_MAX_DAYS days; the choice lives in the address and every figure follows it.
 import { useState, type FormEvent } from 'react';

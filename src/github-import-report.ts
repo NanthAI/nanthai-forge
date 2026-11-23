@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The pre-import report (Item a488af2a): what a GitHub import will bring across and which of the existing
 // limits already apply, said before any work begins. It states today's envelope and adds no quota: the numbers
 // come from the source-step envelope (src/source-state-size.ts) and the import's Git LFS rule

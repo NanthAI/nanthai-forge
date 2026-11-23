@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Seed historical archive registrations to exercise retained read/resume support.
 // New production writes use object exchange; these constructors model old data.
 import { getFunctionName } from 'convex/server';

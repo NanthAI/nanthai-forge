@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Per-reason fast-path fallback counts of one Forge cell (Issue 7c2e69e1), taken from the
  * `metrics` reply the cell already reads for forge-metrics.json: no extra read. */
 export function cellFallbacks(reply) {

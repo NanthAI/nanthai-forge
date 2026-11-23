@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Package-graph-scoped first check (Issue 234b5abc): an Intent without a contract, under every
 // other contract-gate guard, may run its first check scoped to the packages its change affects,
 // but only for a configured command that declares `selection: changed-paths` and only when the

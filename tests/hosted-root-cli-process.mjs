@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Run the actual CLI in its own process, separate from the in-memory Convex/R2
 // server and its retained fixture bytes. Only synthetic bucket GETs are proxied.
 import { readFileSync } from 'node:fs';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Detached sender for automatic file claims (Issue 9c8490a4, board Lane 4). Started by the
 // first-write hook while it holds the per-Lane lock; never on the hook's critical path. It waits a
 // short window so first writes that arrive together go up in one mutation, sends, and exits once

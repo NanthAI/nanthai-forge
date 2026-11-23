@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Where the Flow picture's parts stand for a given width (Item 85f456c1, the approved home mock): an isometric
 // platform per stop on a zigzag, a block per open Lane, Lanes checked together in one tower, main as the day's
 // landings, and two rails back to Editing. Three sizes by the width the region gives it: under 640, 640 to 999, and

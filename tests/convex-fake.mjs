@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A hook-only React host and a fake Convex client that counts server subscriptions.
 // Components under test render null-equivalent trees; no layout or DOM behaviour is modelled.
 import { ConvexError, convexToJson } from 'convex/values';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Connect CI from the CI a project has (Item 0c9207b8): the workflows on main are read for what they run on, a file
 // that can never check a landing is not offered, the one trigger line is shown as the exact change to that file, and
 // a file Forge cannot read plainly is never called passing or failing.

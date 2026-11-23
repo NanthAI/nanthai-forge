@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The folders one tab has listed at one exact State (Item a3b55a6e). A folder read brings its subfolders' first pages
 // (src/code-tree.ts withChildren), so a listed folder opens from here. A background read looks one level ahead
 // when there are visible subfolders the tab has not listed yet. States never change during the visit.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Interrupted in-place apply: every later command, not only the same sync, must find a checkout
 // whose marker describes its bytes. Interruptions throw a code-less error inside the apply's own
 // process, at one rename boundary of a multi-path journal.

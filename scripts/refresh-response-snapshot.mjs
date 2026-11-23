@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs dist/ (npm run build:core first). Ordinary checks never update a baseline.
 // `npm run response:snapshot`: release preparation; refuses while a change would break released CLIs
 // and is not declared. `npm run response:main`: after any reply-contract change, brings

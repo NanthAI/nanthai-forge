@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /**
  * The Flow view as text (Item 85f456c1): `nforge agent ROOT flow` draws the same picture as Needs me from the same
  * one line feed (convex/projectLiveLine.ts `read`), so a stop's count here is the top bar's count for that stop.

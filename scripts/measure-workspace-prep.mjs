@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Explicit dev-only synthetic qualification. Run through nforge heavy.
 // BASELINE_BUILD CURRENT_BUILD FIXTURE ADDRESS.json OUTPUT [PAIRS=11] [COHORT=3] [PAIR_OFFSET=0]
 // Builds remain pinned; --import adds the same transport observer to both.

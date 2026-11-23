@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One row's tick box on the Plan screen (Item 65b0e706): one press, one row; nothing else is selected for you.
 import type { PlanRow } from '../../../../src/planning-model';
 

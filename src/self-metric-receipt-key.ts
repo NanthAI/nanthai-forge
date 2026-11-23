@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { CallerReceipt } from './self-metric-receipts.js';
 
 /** Idempotency identity: replays of the same visible outcome collapse to one row. */

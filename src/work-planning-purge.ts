@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure: the reducer half of permanent deletion (Item 4c9e961e, purge Lane 1). Also runs in the Convex runtime.
 import { invariant } from './errors.js';
 import { decisionLine, refusePurged } from './work-planning-put.js';

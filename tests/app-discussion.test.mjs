@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // An Item's discussion (Item 9a3d6f5f): member Markdown is drawn without running raw HTML or unsafe links, threads keep
 // replies under their root, the count reconciles with what is shown, and writers show by public identity only.
 import test from 'node:test';

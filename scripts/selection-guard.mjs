@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Fail-closed guard for test selection. Selecting nothing for a change that touches code is
 // a selector failure, never a pass: the check runs a safe default set or fails with
 // ZERO_SELECTION. Pure and CI-neutral; every planner (local, owner, hosted) applies it.

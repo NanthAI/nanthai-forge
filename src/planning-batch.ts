@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { isLive, type PlanRow } from './planning-model.js';
 import type { PlanningItem } from './work-planning-types.js';
 // Pure: also runs in the Convex non-Node runtime and in the web app. No I/O.

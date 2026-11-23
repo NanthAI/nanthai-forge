@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Shared documents split into one file per entry (Item 491ddd77).
  *
  * Nearly every Lane added a paragraph to a few shared documents, so their paths overlapped on

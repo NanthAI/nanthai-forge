@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The forge/verify commit status on a pull request head (two-way sync, Issue 0b481f5f). Default
 // runtime: the status write needs only fetch and the App token module.
 import { v } from 'convex/values';

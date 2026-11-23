@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Global risk for every ecosystem (Issue c2f6a26a): a passed check is reused after main moved, and a
 // newer landing overtakes an older one, only when neither side touched a file that can change every
 // test or build. Harness and build files are matched by shape at any depth, plus declared globs.
@@ -87,7 +88,7 @@ test('a root build input named *.txt is risk from v4; prose names stay reusable'
   }
   for (const path of [
     'README.txt',
-    'LICENSE-Apache-2.0.txt',
+    'LICENSE-AGPL-3.0-only.txt',
     'THIRD_PARTY_NOTICES.txt',
     'llms.txt',
     'CHANGELOG.txt',

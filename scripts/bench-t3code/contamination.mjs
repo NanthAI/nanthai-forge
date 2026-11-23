@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // B1.5d contamination audit (B1): a task is void when its agent reached for the answer —
 // upstream PRs, the reference/oracle material, earlier cells' landings — or was shown it.
 // Rules are pre-registered in PLAN.md; every hit is kept with an excerpt for the report.

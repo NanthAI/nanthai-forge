@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The bulk bar (Item 65b0e706, DESIGN.md rules 6, 7 and 18): only the ticked rows change, each action is one batch
 // call with per-Item results, and the reply's one Undo waits in a toast for 10 seconds. A row someone else changed
 // meanwhile is refused by its version and named; their change stays.

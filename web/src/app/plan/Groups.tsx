@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The backlog's Initiative groups (Item 4df3ee17; decision afcb5bc3; f49e3a5c). Each group folds to its header and
 // stays as this viewer left it (fold.ts, this browser only). With every group folded the list is the Initiatives
 // overview: one row each, dragged or moved by keyboard into hand order. An open group's header keeps a Move key for

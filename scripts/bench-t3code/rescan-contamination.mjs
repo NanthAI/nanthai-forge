@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Re-run the contamination audit over finished cells with the current rules (e7e7428c): the
 // same inputs run-cell gave scanTask, rebuilt from a cell's result.json, kept transcripts and
 // relay call log. Read-only on BENCH_ROOT: nothing there is written; the comparison goes to

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // At the limit and billing elsewhere (Item 176db9fb): the plan-held moments, drawn once from one source (heldStory),
 // so the rail foot, Needs-you row and decision, held Lane and agent tell agree. P7 renders them; P8 holds work.
 import { useState } from 'react';

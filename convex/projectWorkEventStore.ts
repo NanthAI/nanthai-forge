@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Provenance belongs to the retained primary version's body, never to another audit row.
 import { journalIndexAt, requireJournal } from './projectJournalStore';
 import type { Doc, Id } from './_generated/dataModel';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 
 /** Items with the first of each key kept, in order. Source rows can repeat (an event read on two pages, a save
  * recorded twice with one head); a list that React keys by that id must drop the repeat here rather than key by

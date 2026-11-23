@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Code place's words for times, people, States and addresses. Pure, so the screens and their tests share them.
 import type { CodeHistoryRow } from '../../../../src/code-history';
 export { landedBy } from '../../../../src/code-history';

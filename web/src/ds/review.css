@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* Design system: Reviewing: code and diff, a changed file and its reason, a note on a line, whose line it is, two sides,
    a failed check's suspects and output, where a fact came from, and the four mono blocks.
    Scoped to [data-ds]; every value is a token from tokens.css. Rules for choosing each part: DESIGN.md. */

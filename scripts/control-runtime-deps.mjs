@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The control supervisor's runtime packages: what scripts/hosted-actions-job.mjs and the executor
 // it spawns import from node_modules once dist/ is built. A check job that restores the cached
 // build needs only these, not the full install (compilers, bundlers, browsers, ~150 MB). Any CI

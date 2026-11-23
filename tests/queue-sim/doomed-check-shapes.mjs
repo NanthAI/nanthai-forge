@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 1018d0f8: checks an older order-sensitive entry makes unusable (lost runner time). Every shape
 // runs through the real queue code, one JSON line each (MEASURE_OUT appends them to a file; LABEL tags
 // the lines of one run, SHAPES=a,b picks shapes). Run explicitly, like replay-runner.mjs:

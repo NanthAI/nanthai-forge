@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Item a841a76d: each `teamMembers` row carries its member's handle, so the account's team page reads handles with
  * the rows it already reads (convex/accountTeams.ts) instead of one account lookup per person.
  *

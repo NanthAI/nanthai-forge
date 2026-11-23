@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Purge test helpers (Item 4c9e961e): find an Item's journal rows, list them on a purge (planning-purge-v2) and turn
 // them into the purged form the purge executor writes.
 import {

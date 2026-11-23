@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Any configured check command, not only Forge's own recipe, gets the changed-paths file; a
 // check that declares scope or shards gets scoped evidence and shard jobs (Issue efa03bee).
 import test from 'node:test';

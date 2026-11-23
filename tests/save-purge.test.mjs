@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 9d3c407d (owner decision Q83, journey J29-1 dead end): the project owner purges the stored
 // bytes of a leaked save. Negative paths first: a non-owner is refused, and after the purge every
 // read route (checkout, diff, the Git and GitHub mirror resolver) refuses PURGED.

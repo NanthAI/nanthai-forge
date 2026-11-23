@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The one menu: a key that opens a list of actions. Arrow keys move, Enter runs, Escape closes and focus returns to
 // the key. Loaded with the behaviour layer; screens use ds/menu.tsx, which draws the same key at first paint.
 import { useLayoutEffect, useRef, useState, type AriaAttributes, type ReactNode } from 'react';

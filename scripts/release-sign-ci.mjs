@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Automated CLI release signer (docs/operations/cli-update.md, "Automated signer"). Run by
 // .github/workflows/release-sign.yml in the `release-sign` environment with plain Node: no install,
 // no build. It signs only the State named by the commit's Forge-State trailer, and only while that

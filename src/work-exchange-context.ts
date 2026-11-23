@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { WORK_DELTA_BYTES, partialWork, batchContextIds, type WorkDelta } from './work-exchange-delta.js';
 import { recordIdentity, recordMap, readRecord, type WorkRecordRoot } from './work-exchange-records.js';
 /** Include inbound dependants, referenced records and sibling View families. */

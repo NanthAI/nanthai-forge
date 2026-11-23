@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
 export const resourceKind = v.union(
   ...(['project', 'import', 'secret', 'agent', 'team', 'view', 'interest'] as const).map(v.literal),

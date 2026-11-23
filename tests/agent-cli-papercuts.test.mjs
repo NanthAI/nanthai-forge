@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue ad80e037 (CLI papercuts): the retry reason has one name across the failure reply and land,
 // and a preflight refused for edits made during its `nforge heavy` wait says so. Issue 593fc2d7: refusals
 // name the field and what to send first, a withdrawn landing says its id is spent, agent verbs typed at

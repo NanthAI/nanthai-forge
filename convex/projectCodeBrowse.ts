@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 'use node';
 // The Code place's source reads (Item 90e5bc9c): one folder, one file page, or what one landing changed, at an exact
 // State; a folder read adds the first page of each subfolder (Item a3b55a6e). Registered States use current source

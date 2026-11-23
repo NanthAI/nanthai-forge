@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Bench harness cleanup: oracle branches that survive a network blip (02ee5788) and cleanup
 // diagnostics from the CLI's stderr (108a4883). No network, no bench data.
 import test from 'node:test';

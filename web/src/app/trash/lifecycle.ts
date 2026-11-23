@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The three lifecycle calls of a project the person owns (convex/projectLifecycle.ts), each one retry-safe mutation: the
 // operation id is kept per action, project and revision until the call succeeds, so a retry after an unknown outcome
 // reconciles on the server instead of repeating. No reads here.

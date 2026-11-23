@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What a screen folder's `route.ts` registers (Run C2): the places and account pages that folder's lazy screen serves.
 // screens.tsx collects every `web/src/app/<folder>/route.ts`, so a new screen adds files and edits no shared one.
 // A route file is data: addresses and `load: () => import(...)`, with no value imports (tests/app-screen-routes), so

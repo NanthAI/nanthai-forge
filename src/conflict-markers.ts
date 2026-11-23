@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { TEXT_SNIFF_BYTES } from './text-bytes.js';
 /** Serializable, bounded line-prefix scanner shared by local and hosted recovery.
  * A separator alone is ordinary source; only an ordered three-marker hunk counts.

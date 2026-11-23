@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Small pieces the behaviour parts share: the handle's dots, English ordinals ("2nd") for the drop line, the locale.
 import type { ReactNode } from 'react';
 import { I18nProvider } from 'react-aria-components';

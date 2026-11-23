@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me (Items 9e748e41, 12fde646): what holds work until a person decides, in one bounded subscription.
 // Review decisions come from the queue's submissions. Other holds start from the live line's held marks.
 // The screen and top bar share this read. For each held Lane it adds the Lane's title and holder

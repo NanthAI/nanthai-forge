@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item fc1831eb: one compact read of loose ends. Dormant Lanes and Lanes quiet for over 90 minutes are listed oldest
 // first from presence rows (no per-Lane reads); groups with no data yet say "not reported" with the reason; only the
 // owner gets the authority to set Lanes aside; another account cannot read it. The page words each set-aside result,

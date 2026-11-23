@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Design 5.1 journeys on a device: the joining device posts its own request and waits, then pins on first use
 // (Gate B1 M2); a holder device wraps for waiting devices on its next run, in one signed write. No polling: a
 // joiner and a holder each act only when their own command runs.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { randomBytes } from 'node:crypto';
 
 /** Names shown to the owner, collaborators and agents never come from the machine's hostname or OS

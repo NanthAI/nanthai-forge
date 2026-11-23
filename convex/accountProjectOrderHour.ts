@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Hour buckets for the person-order rows (convex/accountProjectOrder.ts), kept apart so the live-line store can use
  * them without importing the order writers. */
 export const HOUR_MS = 3_600_000;

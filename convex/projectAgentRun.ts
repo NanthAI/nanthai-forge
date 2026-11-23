@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One agent run's page in a project (Item 6a251b23): its Lanes, which of them landed, its app, device code and the
 // model it declared, read from the Lane records that already exist (no table of agents). Members only, like the
 // project's sessions. One read per page view, plus one per "look further back":

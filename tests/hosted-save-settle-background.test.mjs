@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { testDeploymentOrigin } from './trusted-origin.mjs';
 // Split save (fea47345 C): a save returns once its upload is in and it is submitted; the server
 // settles it on a scheduled step, peers see its paths at once, and the checkout's next command

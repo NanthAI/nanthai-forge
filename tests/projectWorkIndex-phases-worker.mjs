@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { makeFunctionReference, getFunctionName } from 'convex/server';

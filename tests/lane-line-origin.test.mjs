@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item a1e3d771: each line of a combined result is attributed from the three exact retained inputs (main, the Lane
 // ahead's save, this Lane's result). Lines the Lane ahead added that the result drops are listed as left out, and
 // nothing claims which of this Lane's saves wrote a line, because that is not retained.

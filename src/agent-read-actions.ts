@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Agent actions that only read. They never write Work records, States, receipts
  * or presence. */
 export const SNAPSHOT_READ_ACTIONS: ReadonlySet<string> = new Set([

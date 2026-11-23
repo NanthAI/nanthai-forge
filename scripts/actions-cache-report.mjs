@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Dependency-cache hit rate and check wall time from completed Forge check runs.
 //   node scripts/actions-cache-report.mjs OWNER/REPO [runs=40]
 // Reads the GitHub API through the owner's gh login (one list call plus one call per run).

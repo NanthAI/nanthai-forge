@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 593fc2d7: a heavy slot is freed when its command hangs past the hold bound or ignores the stop
 // signal its agent's end sends, and a holder that never stops itself is freed (unsignalled) by the
 // next waiter. A live command inside its bound is never touched.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item f9309eec: the Lane review screen on source data that repeats rows: one path on two pages and one path twice in
 // a conflict. The test builds this module with a development React, which logs "two children with the same key" and
 // fails on it.

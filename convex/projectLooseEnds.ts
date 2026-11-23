@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Loose ends (Item fc1831eb): what was started and left, in one compact read for the Needs me screen and for agents
 // (`nforge agent ROOT lanes '{"view":"loose-ends"}'`). Each of the five groups either lists its rows or says it is not
 // reported yet and why, so a reader never takes a missing group for an empty one. Nothing here changes or deletes

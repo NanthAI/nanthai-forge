@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item ff33e9a6: heavy admits by measured CPU, load and memory. A long one-core holder no longer
 // blocks test runs while load is low; none extra start at the ceiling; the memory freeze guard holds
 // every slot, while load alone never holds a base slot (a busy shared CI runner keeps its slots).

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Failed check screen's one read (Items b030c3c5 and 2c420916): a Lane's newest landing, its check run summary
 // and the failure cause from src/check-failure-cause.ts. A subscription; it re-runs only when one of the rows it read
 // is written, so an idle or settled page costs nothing.

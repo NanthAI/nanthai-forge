@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Getting started's rows from where the project's setup stands (convex/projectSetup.ts) and the line feed the project
 // frame already reads. Pure: the screen renders these and tests read them. Each step says who did it and when when
 // Forge recorded that, and says nothing it was not told.

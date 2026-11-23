@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** A source step's worker lease as its begin read it: the lease length, and how long it had left,
  * measured on the server's clock inside begin. The step never compares the server's deadline with
  * its own clock: it times renewals from when it received this. */

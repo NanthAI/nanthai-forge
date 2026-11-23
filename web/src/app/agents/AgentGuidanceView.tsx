@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Agents as one view over what the page read (Item f2ee8381). Two texts, each saved on its own: the project's
 // (the owner or a guidance maintainer writes it; everyone else reads it) and the viewer's own. Layout follows the other
 // Settings places: a head, then regions.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What the last Loose ends action did (Item fc1831eb), as the approved forge-design-p7/flow/loose-ends.html says it.
 // When some rows were left alone, the waiting notice names each with why, offers Retry for the calls that failed
 // only, See what is left, and Undo for the rows the action did change. When every row changed, a toast says so with

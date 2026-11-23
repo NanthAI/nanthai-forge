@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Security headers for every response of the site (review S-13): frame protection, MIME sniffing, referrer rules and
  * the full Content-Security-Policy are enforced. A signed-in smoke test of the dev site with this policy enforced
  * showed no violations once Zod runs jitless (web/src/zod-jitless.ts). The inline script hashes must match the one

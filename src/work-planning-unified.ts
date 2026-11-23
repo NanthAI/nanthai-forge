@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { planningIntentStatus } from './work-planning-lifecycle.js';
 import { invariant } from './errors.js';
 import {

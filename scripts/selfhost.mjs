@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { childEnv } from './child-env.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';

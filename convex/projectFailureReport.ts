@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // On-demand health report over the failure log and accepted receipts (Item 2c420916).
 // Bounded indexed reads only; the lead check-in runs it (docs/agents/lead.md).
 import { v } from 'convex/values';

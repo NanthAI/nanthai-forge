@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Build-time HTML only. Source comes from the same explicit public inventory as the LLM and offline docs.
 import { readFileSync } from 'node:fs';
 import { posix, join } from 'node:path';

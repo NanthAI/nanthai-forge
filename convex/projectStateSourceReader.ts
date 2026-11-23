@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { Id } from './_generated/dataModel';
 import { r2Config, r2Key, presignGet } from './r2';
 import { convexFetch, networkTimeout } from './networkFetch';

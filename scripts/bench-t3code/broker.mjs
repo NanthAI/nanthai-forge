@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // B1.5d nforge relay, in its own process so nothing the harness does (observe, abandon,
 // deleting a 29k-file Lane folder) can delay an agent's call. Agents' `nforge` posts here.
 // It has two jobs: (1) a trusted call log for scoring (operations, coordination notices and

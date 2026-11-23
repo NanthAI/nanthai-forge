@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Projects (Item 3d5d8839): every project the person owns or is a member of, newest activity first. One
 // bounded read per visit (convex/accountProjects.ts, 50 rows a page; "Show more" reads the next page by its cursor),
 // read again when the tab comes back into view. It is a one-off read, not a subscription: nothing re-runs on landings,

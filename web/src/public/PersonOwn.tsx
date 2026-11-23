@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What only the person sees on their own page (Item 6a251b23): their devices and browser sign-ins, and the projects
 // they starred. Both reads are the signed-in person's own (convex/authSessions.ts list, convex/publicDiscovery.ts
 // myStarred), so neither can show anyone else's, whatever page asks. Each is asked once when the page opens, never

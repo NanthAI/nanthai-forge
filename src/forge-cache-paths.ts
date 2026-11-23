@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Transient filesystem-event probe folders start with this name (scripts/filesystem-event-health.mjs);
  * one a killed older client left in `.forge` is Forge-owned: clean ignores it, disposal removes it. */
 export const EVENT_PROBE_PREFIX = '.forge-event-probe-';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A quiet Report key (Item b6588425 line 2). The sheet and its input schema load only when it opens, so public pages
 // that show the key carry no report code until someone reports.
 import { lazy, Suspense, useState } from 'react';

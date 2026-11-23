@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { readFile } from 'node:fs/promises';
 import { privateJson } from './legacy-storage-journal.mjs';
 export const FLAG_NAMES = Object.freeze(['FORGE_LEGACY_STORAGE_PAUSE', 'FORGE_R2_MAINTENANCE']);

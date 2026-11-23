@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { UNITTEST_UNIT } from './module-graph-types.js';
 import { globRegExp } from './path-glob.js';
 import { parseToml, tomlGet, tomlStrings, tomlTable, type TomlTable } from './toml-lite.js';

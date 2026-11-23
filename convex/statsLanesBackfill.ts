@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One-time backfill (Item a9ad21c9): before the fix, a day close counted only the Lanes started on its own day, so a
 // Lane started on a day with no landing in that project (a weekend, a Lane crossing midnight UTC) was never counted.
 // This files those Lanes under their own days. It reads only the gaps between a project's closed days (a closed day's

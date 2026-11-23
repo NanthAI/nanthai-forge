@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { authComponents as components } from './authComponents';
 import { v } from 'convex/values';
 import { query, accountMutation } from './cliServer';

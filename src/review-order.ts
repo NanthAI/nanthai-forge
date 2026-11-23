@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The order a person reads a change in (Item 52235fbf): files grouped by what needs eyes, each with the observed fact
 // that put it there. "Needs your eyes" holds only what the Lane page's Facts name: a conflict with another Lane or main
 // and a protected-path match; every other code file is "Code" (Item c2388099). Never a risk score: every reason is a fact Forge saw (a status, a mode, a path, a protected-path

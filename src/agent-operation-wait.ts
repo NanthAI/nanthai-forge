@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { shellQuote } from './shell-quote.js';
 
 /** Agent-mode wait budget: under the 10-minute ceiling of common agent shells

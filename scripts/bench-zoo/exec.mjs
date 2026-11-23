@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Child-process helper of the zoo run (Issue 85d26a8b): timed, bounded, last JSON line parsed.
 import { spawn } from 'node:child_process';
 import { statfsSync } from 'node:fs';

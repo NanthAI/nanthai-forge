@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // `land --withdraw` through the real hosted agent transport (Issue 78a97771): one mutation, a lost
 // reply replays the same withdraw, and a later identical withdraw targets the Lane's next landing.
 import test from 'node:test';

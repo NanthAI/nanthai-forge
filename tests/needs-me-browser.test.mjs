@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me in a real browser (Item 48049998), on synthetic data through the real shell frame, screen and model
 // (tests/browser/needs-me.tsx): the shell's Needs you count equals the page's; an agent's conflict and a refusal are
 // FYI rows, never Needs you; a protected-path approval and a question stay in Needs you; Dismiss and Clear all write

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Per-visitor limits (Item b6588425, "Per-client limits"): device sign-in start and renewal go through the site's edge
 // (site/device-auth.ts, in the site Worker), which forwards only a keyed hash of the platform-reported address; the backend
 // charges that visitor (convex/visitorBudget.ts) before the deployment budget. Two synthetic visitors keep separate

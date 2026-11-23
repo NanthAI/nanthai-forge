@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The GitHub mirror in one sentence (Item c63c2171): the same words on the web Mirror screen and in
 // `nforge github status`, from the recorded facts only (no clock), including an honest "no mirror".
 import type { HostedMirrorStatus } from './hosted-github-mirror-status.js';

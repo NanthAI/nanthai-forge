@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { uploadCheckReports, type ReportUploadTarget } from './check-report-upload.js';
 import { networkFetch } from './network-fetch.js';
 import { isMachineRunner } from './hosted-machine-runner.js';

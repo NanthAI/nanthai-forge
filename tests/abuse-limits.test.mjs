@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Signed-out read budget per public project and storage quotas per project and account (a91b9b69).
 import test from 'node:test';
 import assert from 'node:assert/strict';

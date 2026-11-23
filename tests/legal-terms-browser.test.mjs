@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The terms page (Item b6588425, lines 1 and 7): the acceptable-use section renders, names in-app reporting and the
 // support@nanthai.tech abuse-report contact without keeping the placeholder, stays a draft, and passes axe with no
 // sideways scroll at phone and desk width in both themes.

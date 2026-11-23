@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The folders and the file the reader has opened at one exact State. A deep link asks once for the path with its
 // folders; after that a click in a known folder asks only for that file's first page. Every folder read also lists its
 // subfolders (listing.ts), so a listed folder opens from the tab cache and fetches missing subfolder pages in

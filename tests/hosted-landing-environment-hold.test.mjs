@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 0d14c456 (from bf111983 line 4): under isolation=user every scoped check exited 126 with the same
 // environment error (the packages runner was not runnable for the Candidate user), and the queue kept
 // dispatching new runs of it. The CI-down hold (switch FORGE_QUEUE_HOLD_ON_CI_DOWN) now counts identical

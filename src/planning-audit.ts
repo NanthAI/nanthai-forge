@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure: also runs in the Convex non-Node runtime. No I/O.
 // Diffs and summaries for Item audit trails (Item 1d51c91f).
 import { AGENT_CLIENT } from './agent-slug.js';

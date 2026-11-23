@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Frozen-count allowlist for the test-hygiene lint rules (guard 7, Item 611a1795). The rules in
 // scripts/lint/forge-plugin.mjs (test-no-fixed-sleep, test-no-retries, test-no-raised-timeout,
 // test-no-unsignaled-polling, test-no-implicit-date) let each tests/ file keep the count it has in

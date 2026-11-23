@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { constants, copyFileSync, mkdirSync, chmodSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { digest } from './hash.js';

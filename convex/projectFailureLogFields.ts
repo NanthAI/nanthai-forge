@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 /** Failure log (Item 2c420916): one small row per failed operation or failed landing, written only in the

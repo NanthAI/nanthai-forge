@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Lane review screen's one read (Items 52235fbf, 4bc460aa): everything the page needs before any file body, in
 // one bounded query, so the screen makes one round trip before its first diff instead of 13 serial calls. No State
 // object or file body is read here: the changed paths and their exact blob ids come from the Lane's overlap row, which

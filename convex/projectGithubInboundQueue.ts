@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Two-way sync queue: the push webhook, the publish yield and the settle path. Light enough for
 // convex/http.ts, every acceptance (enqueueGithubMirror) and the mirror status to load, with no
 // compose or landing machinery behind it (that lives in projectGithubInbound.ts).

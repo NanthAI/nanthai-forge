@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Serialized into the read-only Convex sandbox; hashes leave it, row values do not. */
 export async function benchPage(ctx, table, projectId, index, cursor) {
   let page;

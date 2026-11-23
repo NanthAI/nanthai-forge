@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Projects as words (Item 3d5d8839): what needs the person comes first, then every project by its newest
 // activity; each row says, with its own nouns, what is held, what is moving and how far its Items are. No clock in
 // the read: ages are worked out when the rows arrive, in whole hours like the server's order.

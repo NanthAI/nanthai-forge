@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 0a99ab23: approval links open the page that decides them. A Lane's request and a held landing link to
 // /<handle>/<slug>/lanes/<id> under the app root; a settings request links to Needs me; a project without an address
 // keeps the /approve form, and /approve itself is one lookup (urlProjects:approvalTarget) that names the Lane page.

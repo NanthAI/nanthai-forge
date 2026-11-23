@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Plan screen's one read (Items d3357f40, b7a0dff1): bounded display rows and Initiative counts. It uses
 // compact planning pages once covered and indexed search roots otherwise. Members can use the same complete
 // Initiative tallies as CLI/MCP. It never hydrates bodies or writes. Members see hidden Items with their mark.

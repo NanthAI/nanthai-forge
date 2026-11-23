@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 export function githubWorkflow({ ghRunsOn = 'ubuntu-latest', ghShards = 1 } = {}) {
   const job = (name, index) => `  ${name}:
     runs-on: ${JSON.stringify(ghRunsOn)}

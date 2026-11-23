@@ -1,3 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Ferdinando Valsecchi
 # Bench environment setup; see setup.mjs. Patched Node only.
 exec /usr/local/bin/node "$(dirname "$0")/setup.mjs" "$@"

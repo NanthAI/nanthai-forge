@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure: also runs in the Convex non-Node runtime.
 import { saveExpectedSchema, saveResultSchema, type SaveThen } from './hosted-save.js';
 import { syncRequestSchema } from './hosted-sync.js';

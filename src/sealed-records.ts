@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { compareBytes, empty, fixed, frame, list, octet, textBytes, uint } from './sealed-portable.js';
 
 export type SetKind = 1 | 2 | 3;

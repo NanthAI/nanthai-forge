@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Plan (Items d3357f40, b7a0dff1, e0a23825, 65b0e706): one hand-ordered list grouped by Initiative. The page sentence
 // and the standing line answer what is done, in progress and left; "next" is derived from state
 // (src/planning-model.ts nextItem), never stored. The view (scope, filters, order, list / tree / board, find) lives

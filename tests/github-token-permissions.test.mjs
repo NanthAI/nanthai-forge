@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Every installation-token request names an explicit permissions object, so a
 // token never silently carries all of an installation's permissions.
 import test from 'node:test';

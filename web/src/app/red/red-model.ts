@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One main red's words (Item ae068e0c), from convex/projectMainRed.ts read. Pure: the screen renders what this returns;
 // tests/app-main-red-browser.test.mjs drives it. A culprit the bisect proved is named as the landing that broke main; a
 // landing that made never-passed tests run is named as that, never as the culprit; without either, the landings since

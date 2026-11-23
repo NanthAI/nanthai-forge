@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { invariant } from './errors.js';
 /** Lossless URL compression only. Every signature still binds the original exact key and Range. */
 export type SourceGrantWire = { sourceGrants: 1; templates: string[][]; value: unknown };

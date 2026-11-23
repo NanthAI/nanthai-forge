@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The state of one hosted save and what to do about it (Issue 68361cd5, SM-E). A refusal for a
 // moved Lane (WORK_STALE) and one for a live finish (LANE_FINISH_ACTIVE) used to share `stale`;
 // each has its own state, label and next step. The server writes `status` and renders `progress`

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The state of tidying open Intents on the Loose ends page (Item fc1831eb): what the last batch changed (for Undo),
 // the exact batches whose call failed (replayed as they were), and the words for the notice. The row results live in
 // the page's shared `outcome` map, keyed by Intent id. Calls: one mutation per batch of 25, one transition per Undo row.

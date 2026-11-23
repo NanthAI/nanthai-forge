@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Imported Git history (Issue e103bacf): GitHub's pack bytes go to R2 unchanged, one
 // row per pack, and Lane reads (log, blame, file at a commit) equal plain git on the
 // source repository. Synthetic repository, fake GitHub and the in-memory R2 bucket.

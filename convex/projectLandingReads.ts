@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // History (Item c613e6bc, replacing To read 9e748e41 and Landed today): what landed, newest first, with this
 // account's read marks, and the one write that marks landings read. Read state is per account, so a browser, a phone
 // and the CLI agree. Nothing here holds a landing or counts toward Needs you.

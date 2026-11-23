@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 3a733ee8: a landing posts its receipt to its Item, including landings the queue makes after
 // the agent stopped. The landing writes one small row per Item-started Intent (it never reads an Item: the
 // Item→Intent link is a one-way chain), and the Item's comment read walks that chain and returns the

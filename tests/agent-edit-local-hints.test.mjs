@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 6b7d5a79: the first-write hook teaches three working rules at the moment they matter, from local state
 // only (no server call): edits in the project's copy of main, edits during a live landing, and long unsaved work.
 import test from 'node:test';

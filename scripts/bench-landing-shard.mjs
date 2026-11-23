@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Same scoped selection, static contracts and explicit shard membership as Forge Actions.
 import { pinnedComparison, standardSelection, sourceFiles } from './test-impact.mjs';
 import { browserSelection, browserGroups } from './browser-test-policy.mjs';

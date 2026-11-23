@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Explicit Lane holds (Item e1633718; owner decision ead78765): a builder parks its Lane on a named holder with a
 // reason, or with no one named, and clears it. A named holder's Needs me lists the Lane at once and nobody else's
 // does; a Lane parked with no one named is listed for the account that started it, with its last activity time, for

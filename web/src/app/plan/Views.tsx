@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Plan toolbar and the browser-local Save this view sheet.
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Chip, CodeBox, Key, Menu, Sheet } from '../../ds';

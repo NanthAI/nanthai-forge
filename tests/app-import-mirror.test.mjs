@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The import page and the Mirror screen (Items a488af2a, 2abda01f, c63c2171): each recorded import progress reads as one
 // stage, a rate limit offers resuming at the reset (or says Forge already will), the address forms the import accepts
 // name one repository, every mirror state has its mark, and Getting started's import door opens the import page.

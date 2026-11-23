@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // An old /approve?project=…&submission=…|lane=… link (Item 0a99ab23), from agent output, mail or board text. One read
 // (urlProjects:approvalTarget) names the project's address and the Lane whose page decides it; the address is then
 // replaced, so the back button never returns here. A settings request, or a landing whose one Lane is not known, opens

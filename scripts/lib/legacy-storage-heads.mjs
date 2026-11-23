@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Page-scoped, bounded R2 HEAD rechecks. A transient provider failure (no HTTP
  * response, timeout, 408/429/5xx) is retried for the failing files only; an
  * integrity failure (missing object, size or checksum) is never retried. The

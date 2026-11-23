@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** The words of one invitation email. Plain text first; the HTML is the same words, styled inline from the design
  * tokens' light values (email clients ignore external CSS), with no images. */
 export function inviteEmail(input: {

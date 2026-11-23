@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 9e7a17df: "Take it out of main", the person's undo of a landing on the landing check, proof and Lane review
 // screens, starts the existing exact-change revert and never a second one. A press retried after a lost reply, and a
 // second press, reuse the first operation id, so the server reconciles one reverse landing; the reply names the

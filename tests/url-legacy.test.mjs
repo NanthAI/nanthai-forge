@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Old id-only addresses (Item d61f36fe): one access-checked read answers where a project, decision or review view
 // lives now, and an id never reveals the handle of a project the caller cannot read.
 import test from 'node:test';

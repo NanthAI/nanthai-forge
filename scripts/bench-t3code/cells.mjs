@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Coordination cells of the P6 exit bench (Issue bf130503, plan: docs/research/p6-exit-bench-plan.md):
 //   convoy   N agents, each a task in a different workspace package (new files only), one
 //            start signal: measures the landing convoy (pass: rework.mjs convoyVerdict);

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Synthetic legacy closures for read compatibility fixtures.
 /** Complete immutable closures avoid a quadratic table of individual pairs.
  * Each chunk is below 70 KiB, independently of retained history size. */

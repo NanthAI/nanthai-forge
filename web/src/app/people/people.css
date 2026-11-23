@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* People and access: the invite form's fields and the quiet landing line; the table, bands and notices are the design
    system's (ds/figures.css access table). Scoped to [data-ds] like the system; every value is a token. */
 [data-ds] {

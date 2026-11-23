@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { blank, fromFile, lineEnd, quoted, type DeclarationScan } from './structural-scan-types.js';
 
 /** Ruby without comments, `=begin` blocks, string literals and heredoc bodies (offsets kept).

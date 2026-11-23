@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Comment-, literal- and bracket-aware text scanning for the export scanner. */
 const REGEX_BEFORE = /[(,=:[!&|?{};+\-*%<>~^]/;
 const REGEX_WORDS = /(?:^|[^\w$])(?:return|typeof|case|void|delete|in|of|yield|await|throw|new)$/;

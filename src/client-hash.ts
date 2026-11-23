@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Per-visitor limits (Item b6588425): the site's edge keys a visitor by a keyed hash of the client address the
  * platform reports, and forwards only that hash. The address itself is never stored, logged or forwarded.
  * IPv6 visitors are keyed by their /64 (one subscriber's usual allocation), so rotating within it buys nothing.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Symbol-level reach (5dcfce75). An edge reaches a module at a site; where the site sits decides what
 // the change can alter there. Inside a function body (or a value only bound to a name) it alters the
 // top-level declarations that refer to it, transitively, and an importer that uses none of the

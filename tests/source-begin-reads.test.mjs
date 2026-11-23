@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Review 3aa618e2 F3: begin hints only the shape the small save runs, so a save the V8 step hands
 // to Node does not first download its baseline and page for nothing.
 import test from 'node:test';

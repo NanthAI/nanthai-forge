@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* Plan only (loaded with its route): the views column, the ordered Item rows, the Initiative group header with its
    roll-up and fold, the Initiatives overview, the Initiative page, the bulk bar, the board, the next line and the
    capture form. Every value is a token; rows, bands, roll, shards, nextmark, flags and the turn mark are the design

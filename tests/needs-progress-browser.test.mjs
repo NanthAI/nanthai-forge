@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me in a real browser (Items 3fa3187d, 0cb9b064), on synthetic data through its real view
 // (tests/browser/needs-progress.tsx): Done is the all-time total with today beside it, a capped read shows "N+" on every
 // figure, a withdrawn landing sits under FYI and out of the Needs you count; axe is clean with no sideways scroll

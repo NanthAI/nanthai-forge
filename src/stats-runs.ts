@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Stats method, every check run (Item a61d3c91, analyst comment 438310e0, review 1240fe03; docs/run-evidence.md#stats).
  * Forge's side counts every check run started on a day, not only the minutes attached to landings, and names why each
  * run that did not land was discarded. The GitHub side is priced from this project's own solo full checks. Pure: no

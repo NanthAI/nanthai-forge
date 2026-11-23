@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // SigV4 query-string presigner for R2 (S3 API). Web Crypto only (no Node APIs),
 // so it runs in Convex's V8 runtime. Ported from the design spike's presign.mjs.
 const enc = (s: string) =>

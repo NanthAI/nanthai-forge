@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { removeCachePreservingKept } from './hosted-apply-kept.js';
 import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
 import { lstatSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

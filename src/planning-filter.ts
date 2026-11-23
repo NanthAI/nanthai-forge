@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure: imports nothing; used by the web Plan screen and, loaded only when a read names one of these fields, by the
 // agent `planning` read (Item e0a23825). One rule for both, so a saved web view is a shortcut to the same call.
 

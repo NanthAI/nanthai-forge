@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Run as a child of a synchronous preflight: waits FIFO for a machine-wide `nforge heavy`
 // slot held for the parent pid, prints it as JSON and exits. A preflight inside `nforge heavy`
 // reuses the inherited slot instead. Keep the queue in this child so preflight can wait synchronously.

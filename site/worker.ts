@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** The web site's Worker (Item ef6aa22a). Cloudflare serves the built static files (hosted-web-dist) first, for free,
  * with the `_headers` rules; this runs only for an address that is no static file:
  * - device sign-in start and renewal (site/device-auth.ts);

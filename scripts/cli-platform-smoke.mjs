@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Cross-platform CLI smoke (Windows, macOS, Linux). Forge has one client mode (hosted), so the
 // built CLI (dist/cli-entry.js) must refuse a folder without a hosted marker with one next step.
 // The shared source kernel that hosted clones and Lanes use (dist/native-source.js) then captures

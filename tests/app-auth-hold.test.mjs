@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Browser lifecycle rule 1 for Convex Auth (docs/development.md, "Convex Auth core beside Clerk"; decisions.md
 // shared-base rule 4): a token refresh due while the tab is hidden or dormant waits, and the tab's return answers
 // every waiting request with exactly one refresh, also when the idle sleep had already begun.

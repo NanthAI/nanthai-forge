@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Landing and checks (Items 871e9b73, 0c9207b8): which check decides a landing, who approves landings and
 // the landing mode in effect, with the one press that changes each. A fixed frame. It reads once when it opens (the
 // setup read, the policy and the main audit's landing view: three calls) and again only after its own write; an open

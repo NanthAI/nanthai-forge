@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One synthetic fixture repository per registry ecosystem (tests/fixtures/ecosystems/ID), read the
 // way Forge reads a real one. Each case also shows that dropping the entry from the registry
 // (src/ecosystems.ts) loses what the fixture needs.

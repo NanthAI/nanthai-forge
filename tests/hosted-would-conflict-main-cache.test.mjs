@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 36fd3295, cost: the would-conflict config action compares Candidate listings against main's path entries. Main's State (up to 16 MiB) is fetched
 // at most once per main head per warm process, shared with the forge.json lists cache.
 import test from 'node:test';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The 2,048 words a code or reply is spoken in (design 4.13). Each word carries 11 bits; no two share their
 // first four letters. The list is the BIP-39 English word list (bitcoin/bips, bip-0039/english.txt, SHA-256
 // 2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda), used under its MIT License:

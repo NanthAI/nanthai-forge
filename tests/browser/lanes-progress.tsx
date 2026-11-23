@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The yard's running checks (Item ecd6e610) on synthetic data, through its real model and row: a check running for
 // `?elapsed=` minutes (default 3), one past the usual slowest check (overdue), one that passed and waits its turn, and one
 // that failed, against a project whose checks usually take 10 min and at slowest 18 min. Starts count back from the

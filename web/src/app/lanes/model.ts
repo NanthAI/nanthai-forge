@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Lanes place's one model (Item e317b6ea): the line feed decides each Lane's stop and whether it is held, so the
 // yard's words and counts are the shell's; the existing Lane page, queue view and overlap view add the title, the
 // person, the reason it is held and the queue order. Pure and read-free: every count here comes from rows in hand and

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { sourceAuthority, type SourceAuthority } from './hosted-source-authority.js';
 
 /** Binding alone is not a cutover. Native-owner, shadow and rollback retain

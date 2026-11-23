@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 168e4ed8 (friction Lane fe781875; lead 2026-11-22: orphaned typechecks ran 18 min outside
 // heavy). A test file past its per-file limit is killed and named, and nothing a preflight command
 // started outlives it: not when the command ends, and not when the preflight process itself dies.

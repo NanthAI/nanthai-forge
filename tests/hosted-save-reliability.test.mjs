@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Wave 3b save reliability. Incident replays from builder friction on 2026-11-05:
 // fcd197f1 (save returned "submitted" and needed 2-3 manual replays), a4c2e8f0 (the local Lane
 // binding stayed one version behind until replayed), 381b348c (save --sync after a fire-and-forget

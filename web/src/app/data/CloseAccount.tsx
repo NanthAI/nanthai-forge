@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Your data > Close your account (Item 17cdc774). Offered only once the account holds nothing. A press reads
 // the exact before-list (accountClose.preview, one query); the close is one retry-safe mutation (accountClose.close)
 // behind the typed handle, the same confirm as deleting a project forever. A retry keeps the operation id, so an

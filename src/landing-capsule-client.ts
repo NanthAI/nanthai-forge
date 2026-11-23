@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** The client sees only a history marker. Raw capsule bytes and object grants stay on the server. */
 export const capsuleHistoryQueries = new Set([
   'projectHostedFinishObserve:page',

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One comment's purge (Item b6588425 lines 2b, 2c, 2d): the operator's purge of a reported planning comment. It reuses the
 // Item purge's redaction (convex/projectPlanningPurgeRedact.ts) on the stores that hold that one comment, in one
 // mutation: a `purge-planning-comment` journal row listing the comment's row with the digest of its redacted facts

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Syntax colours for the code reader and the diffs (Item 8e847a17). The tokenizer is Pierre's @pierre/highlights, the
 // engine @pierre/diffs (the highlighter T3 Code's diffs use) draws with: one WebAssembly module with every major
 // language, loaded only when a file is first coloured. It runs in the highlight worker, never on the page. The file

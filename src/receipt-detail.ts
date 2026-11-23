@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Reply shaping only: callers keep the complete object for --detail and machine continuations.
 type Json = Record<string, unknown>;
 const obj = (value: unknown): Json | undefined =>

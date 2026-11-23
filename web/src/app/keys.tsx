@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Keyboard navigation of the frames: ⌘K or Ctrl+K opens go to or run, ? lists every key, 1–6 go to the project's
 // places. Keys never fire while the reader types in a field or holds a modifier other than the palette's. The palette
 // and the keys sheet are the design system's (they arrive with the behaviour layer; a key pressed first waits for it).

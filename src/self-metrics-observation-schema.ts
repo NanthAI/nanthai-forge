@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure observation schema: Convex V8 modules import this, so it must not reach the node-only journal.
 import { z } from 'zod';
 const text = z.string().min(1);

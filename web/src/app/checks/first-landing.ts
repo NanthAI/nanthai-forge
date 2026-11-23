@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Connecting CI ends in a checked landing, not in a saved setting (Item 0c9207b8). Pure words for the chosen check's
 // row: the first landing since the choice that carries a check run is the evidence that the check ran; until then,
 // what stands between the choice and that run. Nothing here is inferred: a landing with no check run proves nothing,

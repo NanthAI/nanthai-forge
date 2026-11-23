@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Team grants on a project (Item b6588425; docs/access.md#teams): `projectTeams` rows link the owner's teams to a
 // project, each with its own role. The person's effective role is the highest of their direct grant and every team.
 import type { QueryCtx, MutationCtx } from './_generated/server';

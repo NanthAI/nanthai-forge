@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { parseForgeJson } from './project-config.js';
 import { ciFlags, FLAG_ECOSYSTEMS, type CiFlags, type FlagEcosystem } from './package-ci-flags.js';
 import type { Ecosystem, PackageCommand } from './package-graph-types.js';

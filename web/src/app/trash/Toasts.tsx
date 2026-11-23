@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One toast at a time for the account's project pages (SPEC-01-trash): the words, at most one Undo, gone after 10
 // seconds. A timer runs only while a toast is showing; an idle page has none.
 import { useEffect, useState } from 'react';

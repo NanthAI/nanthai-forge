@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { useId, useState, type FormEvent } from 'react';
 import { useAction } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';

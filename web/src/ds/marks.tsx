@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The drawn vocabulary of the design system: six state glyphs with their fixed words, two Item glyphs, the five kind
 // marks and the person/agent square. Static markup only: no behaviour layer, no effects, safe for first paint.
 import type { MouseEventHandler, ReactNode } from 'react';

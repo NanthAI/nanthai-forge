@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Recover-apply keeps only the changed files, in the client cache, lists them, and expires them.
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';

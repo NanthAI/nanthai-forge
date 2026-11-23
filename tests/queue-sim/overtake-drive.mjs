@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Shared queue-replay driver for the overtake and handoff replays (incidents 7d98c7da, c6b81429,
 // 70a9bd2f, 43b51a5e).
 import assert from 'node:assert/strict';

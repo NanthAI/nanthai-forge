@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item b6588425 parts (4) and (5): the board and agent coordination belong to the project's team (the owner and write
 // members, direct or through a linked team). Under the `team-and-contributors` audience a reader may also message the
 // team and read only their own notes. No audience opens them to everyone, and leaving a team ends access on the next

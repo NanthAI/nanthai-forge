@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Item purge executor (Item 4c9e961e, purge Lane 2). `run` is internal: the 30-day timer and the owner's early
 // removal (purge Lane 4) call it. Order: read-only preflight; selection of every journal row of the Item (all its
 // ids, notes included; refused above PURGE_ROW_LIMIT), and for an Item in the stored base checkpoint every base row

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { slowestSourcePhase, sourceTimingMax, type SourcePhaseTiming } from './hosted-source-retry.js';
 /** Wall time one source step spends with at least one R2 read, R2 write or Convex call in
  * flight (friction 84c1497f). Concurrent operations of one kind count once, so each value is

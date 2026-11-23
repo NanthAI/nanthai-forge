@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Choosing the check that decides a landing, starting from the CI the project has (Item 0c9207b8). The first question
 // is the CI itself: four answers drawn alike. The recorded check sets the initial answer, with main's files as
 // a fallback for first-time setup. Every answer leads to a route that works today: GitHub Actions to its workflows

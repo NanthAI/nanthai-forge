@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { networkFetch } from '../src/network-fetch';
 
 /** The site Worker's bindings (scripts/build-site.mjs declares them). Settings are Worker secrets, so an unset one is

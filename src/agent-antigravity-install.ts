@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Antigravity keeps user hooks and MCP servers in ~/.gemini/config/. It treats an agent editing them as
 // guardrail tampering, so only the person-run `nforge connect antigravity` writes them, never the
 // automatic hook install that every CLI run makes for Claude Code and Codex.

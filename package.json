@@ -4,7 +4,7 @@
   "private": true,
   "description": "Local native source, Intent/Lane workflows and source context for NanthAi:Forge",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=24.22.1 <25"
   },
@@ -482,7 +482,6 @@
     "dist",
     "README.md",
     "LICENSE.md",
-    "LICENSE-Apache-2.0.txt",
     "LICENSE-AGPL-3.0-only.txt",
     "web/src/assets/NOTICE.md",
     "THIRD_PARTY_NOTICES.txt",

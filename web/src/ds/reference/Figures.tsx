@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The reference surface's figures (dev only, Item 6ebb58ab): one of each yardstick, chart, money block, access row,
 // device and holder line and the yard from ds/figures.css, so the browser test checks them in both themes and at phone
 // width. All figures are invented sample data.

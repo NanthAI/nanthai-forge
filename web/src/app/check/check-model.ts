@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Failed check screen's words (Item b030c3c5), from the failure-cause contract (src/check-failure-cause.ts) and the
 // landing state (src/landing-state.ts). Pure: the screen renders what this returns and adds nothing of its own.
 import type {

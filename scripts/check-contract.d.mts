@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 export const CHECK_CONTRACT_ENV: 'FORGE_CHECK_CONTRACT';
 export const CHECK_CONTRACT_PROVIDED: number;
 export const CHECK_CONTRACT_REQUIRED: number;

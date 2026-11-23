@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { v, getDocumentSize } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator, type GenericDocument } from 'convex/server';
 import { internalMutation, internalQuery, query, type QueryCtx, type MutationCtx } from './cliServer';

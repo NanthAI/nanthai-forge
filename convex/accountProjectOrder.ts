@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Each person's projects in activity order (Item 3d5d8839): one row per (person, project) the person owns or is a
  * member of, so Account > Projects pages by activity with a real cursor and never reads a project the person has no
  * role on. Activity is main landings plus creation, in whole hours, so a landing writes nothing here unless its hour

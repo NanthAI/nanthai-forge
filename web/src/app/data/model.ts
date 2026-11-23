@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Your data as words (Item 17cdc774): what Forge holds for the account, kind by kind, what deleting each
 // kind does, the metadata archive the person can take with them, the exact before-list a deletion removes and
 // leaves, and where a deletion stands. Pure; the reads are convex/accountData.ts (overview, owned, shared, watch), the

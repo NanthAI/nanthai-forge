@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Ferdinando Valsecchi
 """Discrete-event CI pool and the parallel singleton arm from the queue refit."""
 
 import heapq

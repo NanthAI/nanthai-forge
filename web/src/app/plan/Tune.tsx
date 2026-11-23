@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The phone's Tune sheet: every filter, the order, the layout and
 // the Initiative folds, each a native select or key so the phone shows its own picker (DESIGN.md rule 8). Every choice
 // applies at once through the address, as on the desk toolbar; Done only closes the sheet. Mounted only while open.

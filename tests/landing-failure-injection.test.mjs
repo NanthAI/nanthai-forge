@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue d910db6b: every landing step, with a transient fault (fails once) and a
 // permanent one (fails every time). A transient fault lands, once. A permanent
 // one lands through another driver or ends every entry with a typed code whose

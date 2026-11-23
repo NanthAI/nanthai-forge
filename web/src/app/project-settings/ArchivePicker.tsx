@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The archive file picker (Item 966cb821): a design-system button and the chosen file's name. The browser's own file
 // input renders its words in the OS language ("Scegli file"), so it stays hidden and this button opens it.
 import { useEffect, useId, useRef, useState } from 'react';

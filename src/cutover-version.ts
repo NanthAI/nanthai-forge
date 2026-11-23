@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { invariant } from './errors.js';
 export const CUTOVER_CLI_VERSION = '0.3.1';
 export const CUTOVER_UPGRADE = `Upgrade nforge to ${CUTOVER_CLI_VERSION} or later: install the matching @nanthai/forge release package with npm install -g /path/to/nanthai-forge-${CUTOVER_CLI_VERSION}.tgz. Rediscover authority and resume the original operation through hosted CAS; preserve local edits and pending operation IDs.`;

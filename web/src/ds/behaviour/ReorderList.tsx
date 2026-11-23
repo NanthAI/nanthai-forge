@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The one reorder model (DESIGN.md rule 4). Pointer: drag the handle; a line with the place it lands is drawn. Keyboard:
 // Enter on the handle picks the row up, arrow keys choose the place, Enter drops, Escape cancels. Phone: the handle is
 // a menu (to the top, up, down, to the bottom). Every move is announced with the position the row now has on screen.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import assert from 'node:assert/strict';
 import { deadlineConvexClient } from '../dist/network-convex-client.js';
 import { api } from '../convex/_generated/api.js';

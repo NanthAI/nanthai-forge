@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Keep the run (Item fa2c1383) wired into the main-move sweep, switch FORGE_QUEUE_KEEP_THE_RUN on.
  * Guards from plan 82bf7c75 (A2-A5, B1, C1), review 563c595b (F2, F3a-c) and review 0c7f9440
  * (finding 4). The switch-off rows prove today's retire is unchanged. A1 is the starvation and C1

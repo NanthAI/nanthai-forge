@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue d730121f: agent runs on one account tell each other apart in idle hints, presence and
 // overlap notices, and on receipts. A run is the agent session slug (c29d0780); no new auth.
 import test from 'node:test';

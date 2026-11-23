@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Standard code verification: installs and exercises the actual local npm archive.
 import assert from 'node:assert/strict';
 import { checkAgentWeight, measureAgentWeight } from './check-agent-weight.mjs';
@@ -100,7 +101,6 @@ try {
     'skills/forge-agent/SKILL.md',
     'README.md',
     'LICENSE.md',
-    'LICENSE-Apache-2.0.txt',
     'LICENSE-AGPL-3.0-only.txt',
     'THIRD_PARTY_NOTICES.txt',
     'web/src/assets/NOTICE.md',
@@ -226,7 +226,7 @@ try {
     );
   }
   assert.equal(manifest.private, true);
-  assert.equal(manifest.license, 'Apache-2.0');
+  assert.equal(manifest.license, 'AGPL-3.0-only');
   assert.equal(manifest.engines.node, '>=24.22.1 <25');
   const bin = join(directory, 'no-git');
   mkdirSync(bin);

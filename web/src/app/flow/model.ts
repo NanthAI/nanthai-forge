@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Flow picture's model (Item 85f456c1, direction B): every figure comes from the top bar's one line feed (convex/
 // projectLiveLine.ts `read`, already subscribed by the shell) and the Needs me read the page already holds, so a stop's
 // count here is the line's count for that stop (Line.tsx `lineStops`) and a held block's words are its Needs you row's.

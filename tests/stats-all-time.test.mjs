@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Stats All time, the self-trend and covered days (Item a61d3c91, Done-when 22:05Z): All time adds up stored month
 // rollups (one row a month) and gives the figures its days give; a rollup keeps each distribution as at most 400
 // quantiles, so its medians stay within a sample's share; the self-trend sets a range beside the same number of days

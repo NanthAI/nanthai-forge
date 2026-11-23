@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item fc1831eb: the Loose ends page lists open Intents with no Item (web side). The group is read on request, one
 // bounded page at a time; the owner tidies picked rows in batches of 25 through one retry-safe mutation each, and a
 // batch that failed outright is replayed exactly as it was. Each test names the behaviour it guards.

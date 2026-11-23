@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Mechanical proof that each scripted scenario role really happened (Item 5e3c3a3c). A cell
 // whose role did not fire is not a test of its switch path: run-cell voids it, so no reading
 // of the cell depends on judgment. Evidence comes only from what the cell recorded: the

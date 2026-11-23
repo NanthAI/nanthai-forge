@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Your data (Item 17cdc774): what Forge holds for the account, the way to take it out, and deleting it.
 // Reads (review 8e86eb09): one `accountData.overview` query on open (the first rows of each kind and the latest
 // receipts; no provider call), a one-off read, not a subscription, so nothing runs while the tab is idle. Everything

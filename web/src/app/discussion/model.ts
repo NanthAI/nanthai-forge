@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // An Item's discussion as the screen draws it (Item 9a3d6f5f): threads in the order they started, each reply under its
 // root, who wrote each comment by public identity only, and the reaction counts beside it.
 import type { ThreadEntry } from './conversation';

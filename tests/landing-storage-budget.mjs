@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Landing storage budgets (Item 491ddd77). Every new table used to add four lines to one shared
 // fixture, so most table-adding Lanes overlapped on it and paid a re-check. Each table's
 // per-landing bytes now live in tests/landing-storage-budget.d/<table>.json; scenario-wide budgets

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The hosted fake must keep the provider rules that hosted code relies on, or a
 // handler bug passes here and fails against the real backend.
 import test from 'node:test';

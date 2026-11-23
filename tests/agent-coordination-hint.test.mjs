@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue c6615b66: Forge teaches coordination itself. Each agent client's first write to a file another
 // Lane is changing shows the claim and one coordination line; nothing else ever carries that line.
 import { testDeploymentOrigin } from './trusted-origin.mjs';

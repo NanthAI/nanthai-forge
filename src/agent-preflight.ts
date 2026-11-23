@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { durableReplace } from './state/durability.js';
 import { clientCacheRoot, retainedRootSibling } from './root-paths.js';
 import { pinImportFacts } from '../scripts/test-import-cache.mjs';

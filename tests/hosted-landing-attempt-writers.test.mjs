@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue ced8e98f follow-ups (receipt a58539d0, lead live check 8866a6ed): the attempt-ledger writers.
 // Each test fails when its writer is removed.
 // 1. A protected-review park records the holder it waits for (`orderWaits`), typed `approved-check`.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** What a visitor may see of a project (Items 76be0714, 8947a779). Every public read (the cached public page, explore,
  * profiles, share cards, the sitemap and the agent lookup) passes through these functions.
  *

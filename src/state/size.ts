@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Logical State dimensions, authenticated by the fixed writer or a successful exact load.
  * Independent of raw, packed and recipe storage; never part of State identity. */
 export type StateSize = { fileCount: number; manifestBytes: number };

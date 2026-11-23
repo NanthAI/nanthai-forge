@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Definition trial (Item 687d1eda, docs/operations/github-actions-checks.md#definition-trial).
  *
  * A hosted check always runs main's check definition: the pinned control checkout's workflow,

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me › Loose ends (Item fc1831eb) on synthetic data, through the real shell frame and the real route screen, with
 // a Convex client that records every call (window.calls) behind the app's sleeping live reads (window.reads).
 // `?data=demo` has all five groups, with more pages in Lanes nobody holds, leftover projects

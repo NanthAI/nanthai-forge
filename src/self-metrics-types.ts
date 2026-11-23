@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { CheckCause } from './hosted-check.js';
 import type { DiskSample } from './self-metrics-disk.js';
 import type { MetricObservation } from './self-metrics-observation-schema.js';

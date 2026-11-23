@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Package-graph-scoped first checks for outside repositories (Issue 234b5abc): an Intent without a
 // contract under the contract gate's other guards runs a declared command scoped when the manifest
 // package graph selects a minority of testable packages; Forge ships the per-ecosystem runner.

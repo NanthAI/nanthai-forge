@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Lane review screen in a real browser (Items 52235fbf, 4bc460aa, a1e3d771, c2388099), on synthetic data through
 // its real components (tests/browser/lane-review.tsx). Only overlaps and protected paths need eyes, as the Facts say;
 // every row shows the +/- counts its save recorded with no read; file order is one press away, a folded file reads

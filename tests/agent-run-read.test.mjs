@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One agent run's page (Item 6a251b23): its saves (save records on its Lanes), its comments (the count the day close
 // made, the list from the person's Work change rows, only this run's) and who may read them: the project's owner and
 // write members; a reader, a stranger and a signed-out caller are refused, as for the rest of the page.

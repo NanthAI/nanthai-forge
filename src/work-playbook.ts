@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { checkNeverRan } from './check-run-state.js';
 import { localActor } from './work-actor.js';
 import { processAlive, processIdentity } from './local-process.js';

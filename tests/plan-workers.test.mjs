@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Who works on an unowned Item now (Item d3357f40, owner 2026-11-19: rows said "no one yet" while agents worked on
 // them). The server read asks by Intent (the page's in-progress Items and two follow-ups), one indexed range
 // each on the slim presence rows active in the last 48 hours, for writers only, with public identities only; a busy

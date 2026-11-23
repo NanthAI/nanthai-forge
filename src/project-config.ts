@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** A project's Forge settings for preflight, for any language. A root `forge.json` holds them:
  * `{"preflight": {"tests": {…}, "static": […], "guards": […], "guardSet": {…}}}`. The same `preflight` object under
  * `forge` in package.json is the fallback, so Node projects keep working unchanged. Each key is read

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { Component, createRef, type CSSProperties, type SVGProps } from 'react';
 import { followLink } from '../router';
 import { cubeArt, solid, solidHeight, type Config } from './geometry';

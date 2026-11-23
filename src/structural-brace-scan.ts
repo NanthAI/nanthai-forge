@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Declaration scanner for Swift, Kotlin and Dart (no Lezer grammar exists for them). Comments and
  * string literals (with their interpolations) are masked, keeping offsets; only top-level and
  * type-body headers are read, never function bodies, and no project code runs. */

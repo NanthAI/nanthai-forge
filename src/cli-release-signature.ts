@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Wire format of signed CLI releases, shared by the CLI and the Convex store (no Node built-ins).
 import { z } from 'zod';
 export {

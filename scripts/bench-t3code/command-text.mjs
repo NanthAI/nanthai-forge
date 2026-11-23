@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What an agent action actually runs, for any client (d8cf81b4). Tool inputs arrive as
 //   - raw shell text (scripted agents),
 //   - JSON (Claude Bash/Write, Codex function calls, local_shell_call), or

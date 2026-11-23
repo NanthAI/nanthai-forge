@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Where a new project's setup stands (Items 6beca32b, 0c9207b8, 871e9b73): the facts Getting started on Needs me and
 // Settings > Landing and checks show, from rows that already exist. One bounded read: the project, its first GitHub
 // repository connection, its mirror, the check runner setting, the first accepted landing and the handles of the

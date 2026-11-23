@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // How the behaviour layer arrives: on the first press or focus of a part that needs it, or once when the browser is
 // idle after a screen that uses it has painted. One fetch, cached by the browser; no timer, no polling, no request to
 // the backend. The first-paint chunks never contain it (scripts/ds-build-guard.mjs fails the build if they do).

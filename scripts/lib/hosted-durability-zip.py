@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Ferdinando Valsecchi
 """Read a snapshot ZIP front to back without extracting files. SOURCE is a path or "-" for stdin,
 so a backup can stream straight from storage and is never written whole to disk. stdout is
 private input to Node: one JSON event per table, record and file.

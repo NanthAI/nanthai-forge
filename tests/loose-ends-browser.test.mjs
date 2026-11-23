@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me › Loose ends (Item fc1831eb) in a real browser, on synthetic data through the real shell frame and route
 // screen (tests/browser/loose-ends.tsx): route entry subscribes once to the details read and nothing runs while idle;
 // a hidden tab drops it and catches up with one subscription; each Show 25 more is one call with the group's cursor,

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One file's changed hunks, drawn unified or side by side, with syntax colours from the highlight worker (Item
 // 8e847a17). The Lane page and a landing's changes (app/code/Changes.tsx) share it, so a diff reads the same
 // wherever it opens. Each side is coloured once as one text; a line that cannot be coloured stays plain.

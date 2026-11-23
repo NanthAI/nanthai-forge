@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The side-by-side diff (Item 8e847a17): a replaced line sits across from its replacement, a pure addition or removal
 // across from an empty cell, and every line keeps its own number on each side.
 import test from 'node:test';

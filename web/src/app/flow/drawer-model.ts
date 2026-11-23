@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A station's drawer (Item 85f456c1, the approved home mock): the Lanes at one stop, when each arrived there, what waits
 // on the reader first; Checking grouped by check; main as the newest landings. The stop's Lanes and their times come
 // from the line feed the page already holds; titles and people come from the one read the drawer makes while open (the

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me › Loose ends (Items 48049998, fc1831eb, 77d2e8bc): what was started and left, read from projectLooseEnds:read
 // while the region is open, which it is by default (a reader who folds it is remembered, and a folded region reads
 // nothing). Only groups with rows are listed; with none it says "No loose ends." on one line, and the groups not

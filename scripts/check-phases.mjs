@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One log line per job: wall seconds and machine CPU busy share for each phase, so
 // worker count and shard count are tuned from measurements on any CI, not guesses.
 // The line also names the CPU model: runner speed varies between jobs of one check

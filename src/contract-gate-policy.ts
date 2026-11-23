@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { type AcceptanceActor, type AutonomyPolicy } from './autonomy-policy.js';
 import { protectedPathMatches, type DefinedChecks } from './public-governance.js';
 import type { CheckGate, MainGate } from './bet2-gate.js';

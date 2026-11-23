@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The baseline arm for keep-the-run (Item fa2c1383): today's main-move sweep
 // (convex/projectHostedLandingStaleChecks.ts with the O4 switch off, the only state main has run in)
 // as a pure decision on the same inputs as src/stale-check-keep.ts. A run is kept only when the

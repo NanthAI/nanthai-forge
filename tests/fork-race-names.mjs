@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item c3c69c57 re-check gap (lead read 2026-11-20): 39 main-race waste rows, 2,343 of 8,804
 // runner-min, had no reason. `metrics` counts a main race whenever a child attempt pins another
 // main than its parent, so every writer that forks a checked parent onto a moved main names why.

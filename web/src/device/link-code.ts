@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A device code that arrives in a link (`?code=`) leaves the address as soon as an approval page loads, so it is not
 // readable in the address bar, kept in browser history or carried into a sign-in return address. The page keeps it in
 // this tab's session storage for the 10 minutes a code lives, so it survives a sign-in round trip. Shared by /device

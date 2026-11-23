@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Any CI reports a check result (flip 3, Issue 4e4204b6): one contract, run against every adapter
 // (BYOCI rule: checks work with any CI, contract test on a second adapter). The pass rule must stay
 // unforgeable (2026-11-09 design review, security note N4): the job that ran the Candidate cannot pass

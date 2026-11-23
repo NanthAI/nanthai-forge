@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident replay, Issue 55bcad06: a three-member batch reported every member LANDED while the
 // shared State carried none of member 3's paths. The stepped compose moved its cursor past
 // member 3 before an on-main probe that needed a fresh text merge, so the member was neither

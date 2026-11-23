@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue d0f8472a: per-call Convex cost of Actions shard results must not grow with the
 // reports earlier shards already stored. Drives the real HTTP handler with inline logs
 // (the runner's common path) over a realistic report set and meters every mutation.

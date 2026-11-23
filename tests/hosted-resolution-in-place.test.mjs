@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Frictions 5b1c7e0e, d184519f, f32613f2: a mid-work sync conflict moved the builder's work to
 // another (sometimes nested) folder. The resolution now happens in the builder's own folder,
 // keeps unsaved edits, and any other Lane folder is a sibling, never nested. Synthetic fixtures.

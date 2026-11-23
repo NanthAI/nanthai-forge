@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Why main failed, on the server (Item ae068e0c): projectMainRed:read answers one red by its audit event's sequence
 // with the landings since the last pass, the culprit only when the bisect named one (else every landing is a
 // candidate), and how it ended: still red with the live reason, recovered by the revert of the culprit, or counted as

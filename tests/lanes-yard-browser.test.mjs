@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Lanes yard in a real browser (Items 29671737, d9e1ac62, d4b68402), on synthetic data through its real model and
 // row (tests/browser/lanes-yard.tsx): a Lane held for approval reads Needs you, never Check failed; two rows of one
 // Item never look the same and a left-behind one says what replaced it, below the live one; a Ready Lane behind

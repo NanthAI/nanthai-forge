@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Guard 2 of Item 368ac54f (bug class: Item b574ed11, receipt b42fa8cc).
 //
 // A test that only passes when no agent is the parent process fails on a builder's machine (the

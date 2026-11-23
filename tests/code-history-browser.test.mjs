@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What landed narrowed to one file (Item 3968a655), the real Code place signed in on synthetic reads: a deep link to
 // ?path= reads that file's landings with one bounded projectCode:fileHistory read per step and never the live page of
 // every landing; a step with no match still offers the next; a failed step keeps the rows already read; an older match

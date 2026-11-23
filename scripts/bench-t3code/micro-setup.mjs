@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Shared read-only qualification for rung 2 and the future E3 rematch.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Serialized into Convex's sandboxed read-only inline-query runtime. No imports,
  * network, writes, per-reference gets, or repository code evaluation. */
 export async function auditPage(ctx, table, cursor, numItems = 512, idLengths = null) {

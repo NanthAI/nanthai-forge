@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Convex function names in repository source, parsed as data (never executed):
 // api.module.fn chains, "module:fn" strings and templates, and by-name loaders.
 import { posix } from 'node:path';

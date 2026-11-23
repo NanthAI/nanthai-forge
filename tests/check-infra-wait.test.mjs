@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 0d8a85a3: on 2026-11-20 05:27-06:37Z Forge's own job API hung. Every check failed after
 // ~3.5 min without a failing test, settled as "Actions completed (failure) without complete job
 // evidence" (runner-unavailable), and its platform retries showed CHECKING, as if the code ran.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 7456856f: many projects deleted for good in one owner approval. Anyone signed in to the account prepares the exact
 // frozen list; only the owner person approves it, once. A device or agent sign-in cannot approve, another account reads
 // the request as missing, a project the approver no longer owns is refused, an expired request deletes nothing, a project

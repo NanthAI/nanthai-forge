@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Exact planning progress (Item 3fa3187d): one small row per Work record partition counts Items and Initiatives by
 // status. The planning writer (projectWorkRecordWriter.ts, projectPlanCountsStore.ts) moves it in the transaction of each status change, so
 // Needs me, Plan and the CLI's paged `planning {counts:true}` agree at any size. A partition made after this row

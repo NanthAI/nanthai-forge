@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { generatedDocumentationPaths } from './docs-output-paths.mjs';
 import { landingAttemptForkFindings } from './check-landing-attempt-forks.mjs';
 import { workStoreAccessFindings } from './check-work-store-access.mjs';
@@ -14,7 +15,7 @@ import { pathConventionFindings } from './check-path-conventions.mjs';
 import { recoveryAdviceFindings } from './check-recovery-advice.mjs';
 import { actionPinFindings, isWorkflowPath } from './check-action-pins.mjs';
 import { candidateStepFindings } from './check-candidate-steps.mjs';
-import { spdxFindings } from './check-spdx.mjs';
+import { spdxFindings, spdxScanned } from './check-spdx.mjs';
 import { envPrintFindings } from './check-env-print.mjs';
 import { readBaseline, scanSet, testSignalFindings } from './check-test-signal.mjs';
 import { statusListFindings } from './check-status-lists.mjs';
@@ -74,6 +75,8 @@ for (const file of files) {
     errors.push(...actionPinFindings(relative(root, file), readFileSync(file, 'utf8')));
     errors.push(...candidateStepFindings(relative(root, file), readFileSync(file, 'utf8')));
   }
+  if (spdxScanned(relative(root, file).split(sep).join('/')))
+    errors.push(...spdxFindings(relative(root, file).split(sep).join('/'), readFileSync(file, 'utf8')));
   if (['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'].includes(extname(file))) {
     const path = relative(root, file),
       source = readFileSync(file, 'utf8');
@@ -85,7 +88,6 @@ for (const file of files) {
       errors.push(...pathConventionFindings(path, source));
     }
     errors.push(...recoveryAdviceFindings(path, source));
-    errors.push(...spdxFindings(path.split(sep).join('/'), source));
     errors.push(...statusListFindings(path.split(sep).join('/'), source));
   }
   if (
@@ -150,7 +152,6 @@ for (const path of [
   'SECURITY.md',
   'CONTRIBUTING.md',
   'LICENSE.md',
-  'LICENSE-Apache-2.0.txt',
   'LICENSE-AGPL-3.0-only.txt',
 ]) {
   check(

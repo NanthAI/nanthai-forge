@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 .thread-handoff {
   display: grid;
   grid-template-columns: minmax(0, 132px) minmax(0, 1fr);

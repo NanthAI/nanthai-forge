@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** JUnit XML reports from any check command (vitest, jest-junit, pytest, Go, Maven,
  * Gradle, ...). The fixed runner gives the check a fresh, private directory in
  * `FORGE_JUNIT_DIR`; after the command exits it reads every `*.xml` file there into the

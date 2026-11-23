@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue df06081d (review 80132c2d, blockers 1-3): a folder-grant device's landing is held to its grant. Its own files
 // (the Candidate's trusted net change) are checked at admission before any check, and at publication together with
 // the credential it was submitted with. Whole-project devices are unchanged (lead decision).

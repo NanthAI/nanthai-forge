@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Plan views (Item e0a23825): the view lives in the address and round-trips; filters keep the same rows the agent
 // read keeps; any order other than by hand sorts without touching the shared order; the Closed and Everything scopes
 // read done and dropped Items one bounded page at a time from the root rows, and an inaccessible project reveals

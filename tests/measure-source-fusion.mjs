@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Local qualification, no hosted workload. A/B interleave synthetic pipelines (three pairs per 29k shape for qualification).
 // A uses three existing provider jobs; B uses one job with the same pinned stage inputs.
 // This is source-only wall, never a measurement of time to accepted main or billed savings.

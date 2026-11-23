@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The yard (DESIGN.md figures): every open Lane on the shell's four stops (Editing, Saved, In queue, Checking) and main, in bands, stuck work first. The
 // Checking and passed-waiting use the shell strip's counts. Each
 // row opens its Lane; a Lane whose check failed opens that check instead (the approved flow's lanes.html), whose trail

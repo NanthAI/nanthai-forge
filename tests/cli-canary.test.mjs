@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // CLI canary (ac9c4ed4): the updater smoke-tests the NEW build before switching to it. Every
 // installation root, HOME and XDG directory here is a temp directory; nothing touches the real
 // forge-cli installation, the real hook files or any hosted state.

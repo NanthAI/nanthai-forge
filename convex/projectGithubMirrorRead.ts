@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The GitHub mirror for members (Item c63c2171): direction, the two ends and the one sentence that the web
 // Mirror screen and `nforge github status` both show. One project read plus the mirror status rows
 // (githubMirrorStatus: three selected rows on the healthy path); it re-runs only on mirror or policy

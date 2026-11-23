@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { z } from 'zod';
 const gitId = z.string().regex(/^[0-9a-f]{40}$/);
 /** Empty means a root commit / a branch that did not exist yet. */

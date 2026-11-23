@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import { storedBytes } from './default-r2.mjs';

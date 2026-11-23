@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One project in the Trash (SPEC-01-trash, "Screens" 3): name and address, time left, size, and the keys its phase
 // allows. Layout is the screen's own grid (`row.tr`); everything else is the design system's.
 import { Key, Row, State, type StateWord } from '../../ds';

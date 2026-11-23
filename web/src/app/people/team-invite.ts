@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // An address has an `@` after its first character; `@name` and a bare `name` are Forge handles.
 const isEmailTarget = (who: string) => who.indexOf('@', 1) > 0;
 const recipientKey = (who: string) =>

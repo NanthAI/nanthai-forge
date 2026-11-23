@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* Design system: Public pages: the wide frame, the public head, an organisation's mark, week bars, the star, the project
    table, public signals, rendered Markdown, the sign-in prompt, the share card and the glance.
    Scoped to [data-ds]; every value is a token from tokens.css. Rules for choosing each part: DESIGN.md. */

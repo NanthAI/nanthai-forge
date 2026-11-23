@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 17cce1b3: a wait on a check-only landing must never report "no check run" while compose is
 // done but the run is not reserved yet; that gap is in progress, the same as every landing step.
 import test from 'node:test';

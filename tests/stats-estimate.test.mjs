@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Stats method (Item a61d3c91, analyst comment 438310e0, review 1240fe03; docs/run-evidence.md#stats). Guards, with
 // every expected number worked out by hand from the timeline in the comments, never by calling the replay:
 // - Forge's side is every check run started that day (audits apart), and runs that did not land are split by why;

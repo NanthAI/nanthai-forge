@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { hasLandingCapsule } from './landing-capsule-client.js';
 import { isNetworkPending } from './network-continuation.js';
 import { observedConflictRecovery } from './hosted-observed-conflict.js';

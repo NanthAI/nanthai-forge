@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 0a99ab23: an old /approve link in a real browser (tests/browser/approve-redirect.tsx). The submission and lane
 // forms make one read and replace the address with the Lane page (or Needs me for a settings request), so Back never
 // returns to the link; a link the reader cannot open says so, with no read when it names nothing, and that screen is

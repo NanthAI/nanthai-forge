@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { readLandingAttempts } from './land-attempts.js';
 import { landingPositions, landingMatch } from './landing-records-index.js';
 import { finishChild } from './agent-finish-journal.js';

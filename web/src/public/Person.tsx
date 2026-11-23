@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A person's page (Item 6a251b23): first and last activity, what they and their agent runs did per day, the runs they
 // started, and where. Everything comes from the per-person day rows (convex/personDays.ts), filtered on the server for
 // this viewer: a visitor reads the cached public JSON (no Convex connection); a signed-in viewer asks Convex once when

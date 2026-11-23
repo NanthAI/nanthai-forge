@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Read-only history projection. Prefix filtering bounds the inline-query input;
  * the operator joins full digests afterwards, so prefix collisions prove nothing. */
 export async function attributionPage(ctx, table, cursor, prefixes, hours) {

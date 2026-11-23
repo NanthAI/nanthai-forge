@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Your data as real components with synthetic rows (Item 17cdc774): what Forge holds kind by kind, the
 // take-out rows, the deletion's exact before-list behind a typed handle, and every state passing axe with no sideways
 // scroll at desk and phone width in both themes. Set FORGE_DATA_SHOTS to a folder to also save the screenshots.

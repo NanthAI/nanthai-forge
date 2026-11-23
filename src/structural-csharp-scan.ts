@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** C# header scanner: comments, strings and preprocessor lines are masked, bodies are skipped. */
 const MODIFIERS = new Set(
   'public private protected internal static abstract sealed virtual override readonly const new partial unsafe async extern volatile required file ref implicit explicit fixed global'.split(

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 16093ed1: a held settings change reads as a summary line, a before/after row per changed field and a line diff
 // per script; internal request fields (operation id, authority epoch, digests, ids) never show outside Details, and a
 // request the server could not compare still shows the request as sent instead of an empty card.

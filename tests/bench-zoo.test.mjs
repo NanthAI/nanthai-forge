@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The zoo run's generic choices (Issue 85d26a8b): probe files come from the tree shape alone,
 // edits stay comments in every ecosystem, keep-both resolution and receipt reading. Synthetic trees.
 import test from 'node:test';

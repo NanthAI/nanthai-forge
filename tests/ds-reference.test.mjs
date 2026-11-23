@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The design system's reference surface in a real browser (Item 6ebb58ab, lines moved from f97fb89d): the one reorder
 // model (Enter picks up, arrows choose, Enter drops, Escape cancels; the handle's menu on a phone) with the drawn drop
 // line, the screen and the announcement agreeing after every move; the dock moving a region between the full-width row

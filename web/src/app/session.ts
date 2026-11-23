@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What the rebuilt app keeps between a sign-in redirect and the page it returns to. Session storage only: it never
 // leaves this tab, holds no token (the auth library keeps those) and is cleared once used.
 import { ConvexError } from 'convex/values';

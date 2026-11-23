@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Behaviour for the public page (web/index.html). No network requests, no storage, no app code. Everything here
 // waits for its section to be on screen and the tab to be visible; at rest the page schedules nothing.
 // The page reads completely without this script: the race and the charts are written in their end state.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Owner steps for signed CLI releases (docs/operations/cli-update.md, "Signed releases"). Only
 // public material is ever printed: the key id, the public key and the signature.
 import { generateKeyPairSync } from 'node:crypto';

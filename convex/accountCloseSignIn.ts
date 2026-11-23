@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** The native (Convex Auth) sign-in of a closing account (convex/accountClose.ts). Sessions end at the `signout` step;
  * passkeys, the username and the account key go in the close's final transaction, so a close that stops keeps them.
  * A person has a handful of sessions and passkeys (each made by a sign-in or a ceremony), so each call is small. */

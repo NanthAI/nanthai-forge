@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -87,7 +88,7 @@ test('guard rejects the replayed bare fetches under convex/ and site/', () => {
   }
   const convex = networkBoundaryFindings('convex/r2Operations.ts', fixture('convex-r2-list-bare.mjs'));
   assert(
-    convex.some(line => /:10: /.test(line)),
+    convex.some(line => /:11: /.test(line)),
     `default request = fetch passes: ${convex}`,
   );
 });

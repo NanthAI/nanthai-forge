@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Side-by-side rows of one hunk (Item 8e847a17), pure so the layout rule has its own test.
 import type { Hunk } from './app/lane/file-diff';
 

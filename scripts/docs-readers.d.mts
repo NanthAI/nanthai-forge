@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Test files that read one of `docs` (scripts/docs-readers.mjs): test -> the document and the file that names it. */
 export function docsReaders(
   files:

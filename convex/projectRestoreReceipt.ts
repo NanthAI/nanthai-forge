@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Undo after a restore (Item 966cb821). A restore answers with a receipt: the revision it wrote and its own operation
 // id. The Undo trash call presents the receipt, so a stale tab or a person who joined after the restore can never
 // trash a restored or shared project. No reads: the receipt rides the row the transition already holds.

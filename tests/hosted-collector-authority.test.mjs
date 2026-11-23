@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Collector signing authority is scoped to one project and one registered machine,
 // and the public collector endpoints bind the signed-in caller to that machine's owner.
 import test from 'node:test';

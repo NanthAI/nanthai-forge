@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { ZodError } from 'zod';
 import { ForgeError } from './errors.js';
 /** Decode only already-acquired, hash-verified metadata here. Never put an

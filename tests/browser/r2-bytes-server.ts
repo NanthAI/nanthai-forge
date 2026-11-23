@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Local synthetic browser fixture only. Run after build:core, alongside Vite on localhost:5173.
 import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';

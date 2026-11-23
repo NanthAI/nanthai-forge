@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Two-way GitHub sync, pull request side (Issue 0b481f5f, owner decision B1). A PR head into main
 // becomes a mirror queue job (sequence 0.5: after an inbound push, before publishes) that reads
 // GitHub like an inbound push and stages a Lane and composition. It then releases the queue and

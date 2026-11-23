@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Syntax facts for the weakened-test detector (Issue 11901a0c): what is a test call, what is an
 // assertion and how much each assertion pins down. Parsing only; nothing runs.
 import type ts from 'typescript';

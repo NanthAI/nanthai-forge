@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What one `nforge heavy` hold may use and what it leaves behind (Item 7008ff18): the slot's core
 // share for every runner started inside it, and a dated, attributed, bounded record of the hold.
 // Local files only; no server calls.

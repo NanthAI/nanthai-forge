@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What landed: landings on main, newest first (a timeline, DESIGN.md rule 13), beside the selected landing's receipt.
 // The list is one live page; earlier pages load on "Show earlier". The receipt (Receipt.tsx) adds two reads only for
 // the landing the reader opens.

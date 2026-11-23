@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Report locations only: diagnostics must never echo potentially private source.
 const localHome = /\/(?:Users|home)\/[^/\s]+\//;
 const fixtureMarker = /^\s*(?:\/\/|#|<!--)\s*forge-path-fixture: synthetic(?:\s*-->)?\s*$/;

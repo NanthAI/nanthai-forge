@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Archive scheduling, lookup hints and replay markers are derived metadata. Logical
  * recovery rows retain their original identities and source fields without those hints. */
 const transient = new Set([

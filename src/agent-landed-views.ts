@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { allRecords } from './agent-lifecycle.js';
 import type { LandingEntry } from './landing-batch-types.js';
 import type { WorkStore } from './work-store.js';

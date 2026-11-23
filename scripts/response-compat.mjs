@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Old CLI vs new server (Issue 3205f7e6). A CLI parses hosted replies with parseHostedResponse
 // (src/hosted-response.ts): unknown keys are dropped, everything else must match. So a server
 // change is safe for released CLIs when every reply the new contract allows is still accepted by

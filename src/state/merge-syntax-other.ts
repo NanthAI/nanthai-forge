@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { Parser, SyntaxNode, Tree } from '@lezer/common';
 import { mergeGates, type MergeGrammar } from '../ecosystems.js';
 

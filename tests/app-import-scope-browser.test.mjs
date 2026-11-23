@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item bd24f0a6: the real import screen says what comes across and what stays on GitHub, suggests the agent route for
 // issues, and is accessible at 390 and 1440 in both themes.
 import test from 'node:test';

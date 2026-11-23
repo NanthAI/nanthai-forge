@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // An Item's versions (Item 4c9e961e): compare any two by line and word, and restore one, which writes a new version
 // with that title and body through the batch call (retry-safe, with the 10-second Undo); no version is ever removed.
 // The server allows it to the project owner only, and refuses it when the Item changed meanwhile. Mounted only while

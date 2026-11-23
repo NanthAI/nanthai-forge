@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { createHash } from 'node:crypto';
 /** Real Convex `ctx.storage.store` in the Node runtime sends `blob.type` as the
  * upload content-type and rejects an empty one (live dev, 2026-10-28). It also

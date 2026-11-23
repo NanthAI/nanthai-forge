@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Core-claim incident 43b51a5e, 2026-11-19 17:54-18:24Z: a reservation cycle. Shared by the replay
 // (tests/hosted-landing-reservation-cycle.test.mjs) and the queue simulation (Guard 2).
 import { drive } from './overtake-drive.mjs';

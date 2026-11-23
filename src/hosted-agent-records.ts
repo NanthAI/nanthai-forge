@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { planningIssueArguments } from './planning-issue-arguments.js';
 import { describeIssues } from './argument-errors.js';
 import { actionRoot } from './agent-verbs.js';

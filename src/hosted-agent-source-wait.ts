@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { retryHostedObservation } from './hosted-observation-retry.js';
 import { makeFunctionReference } from 'convex/server';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';

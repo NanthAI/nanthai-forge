@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Sign-in and devices (web/src/app/You.tsx).
 import type { ScreenRoutes } from '../screen-route';
 

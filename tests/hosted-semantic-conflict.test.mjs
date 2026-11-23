@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { execFileSync } from 'node:child_process';
 import { fixture } from './semantic-conflict-fixture.mjs';
 import { hostedLandingProgressSchema } from '../dist/hosted-landing.js';

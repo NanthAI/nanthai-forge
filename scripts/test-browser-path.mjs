@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Resolve the installed browser cache before tests replace HOME/XDG with private fixture homes.
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';

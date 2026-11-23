@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Navigation for the rebuilt app: the address is the state. A link is a real <a href> (new tab, copy link and middle
 // click work); a plain click moves in place with pushState, so browser Back and Forward walk the same entries.
 // No timers and no reads: a change of place re-renders from the address alone.

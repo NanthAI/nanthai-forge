@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Restore drill: weekly backup ZIP -> fresh local self-hosted deployment -> byte-for-byte checks.
 // Reads the backup and one project's R2 prefix (GET/LIST only), streamed: neither is written
 // whole to disk. Writes only to the new scratch instance and its in-memory bucket, never to the

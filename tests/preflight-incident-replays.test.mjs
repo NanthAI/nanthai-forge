@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident replays on the real Forge inventory (Issue c14f4065): each case is a preflight that let a
 // landing check fail or ran far more than the change needed. Selection only (a local graph read), plus
 // the pure run verdict where a case needs it.

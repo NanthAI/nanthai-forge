@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident 67771ca6 (2026-11-22 15:27Z): the GitHub mirror stopped with GITHUB_SYNC_HASH. Receipt
 // 893d4653 was a no-op landing (landed base = landed head = State 541ed345, already mirrored as
 // GitHub 95fe4ed). It waited in the batch hold and ran as a staged burst member

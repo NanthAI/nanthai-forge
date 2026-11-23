@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Connecting the agent app a person already uses (Items c3e4a838, 6beca32b): the prompt that makes an agent explain
 // before it sets anything up, and the commands that connect each app today. Forge works with any agent app and any
 // CI and never starts an agent itself: these are words to paste and commands to run, nothing more. Every command here

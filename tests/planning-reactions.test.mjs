@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Reactions on planning comments (Item 9a3d6f5f): only the project's planning writers react, a retried toggle never
 // flips twice, a read returns counts and the viewer's own marks, never who else reacted, a reaction names a comment
 // that exists on that Item, and agents never react (security review C1-11).

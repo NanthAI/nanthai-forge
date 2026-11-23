@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Contract: both R2 fakes share storage cases with the real test bucket. Upload validation
 // and signature checks exercise the HTTP fake and the real bucket. The real cases run when
 // CONTRACT_R2_* settings are present (the nightly contract workflow). Production signing and

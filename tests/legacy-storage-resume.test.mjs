@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Deterministic fake R2/Convex fixtures for 1323a44c: page-scoped HEAD retry and
 // skip, reliable resume with retained evidence, and approved class 4 scope.
 import { test } from 'node:test';

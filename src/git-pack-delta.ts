@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { invariant } from './errors.js';
 /** Git pack delta instructions: https://git-scm.com/docs/gitformat-pack */
 export function applyGitDelta(base: Buffer, delta: Buffer, maximum = Number.MAX_SAFE_INTEGER): Buffer {

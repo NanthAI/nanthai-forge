@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Errors that teach (Issue 0a7d6f56): every public error code maps to a help topic (`learn`) and, where one
 // command is the right thing to run now, a `next` template filled with the caller's own values. Added at the
 // boundary where an error leaves the process; `code` and `message` stay exactly as they were, so older

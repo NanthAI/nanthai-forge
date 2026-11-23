@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me as data (Items 9e748e41, 12fde646, 48049998): Needs you holds only what a person can act on and its count is
 // the shell's (needs/count.ts); an agent's conflict and a refusal are FYI rows naming who acts next; a protected-path
 // approval stays in Needs you; requests asked ahead are listed and never counted; a Lane's approval is drawn on its

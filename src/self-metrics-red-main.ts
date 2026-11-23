@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { MetricRecords, MetricPeriod } from './self-metrics-types.js';
 import { observations, time } from './self-metrics-joins.js';
 /** Sweep exact-State results against accepted main. Only a passing current head ends red. */

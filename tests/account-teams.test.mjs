@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > People and teams (Item a841a76d): the person's teams, members by handle. Person-only: every device, agent
 // and legacy CLI credential is refused through the real auth wrapper, whatever its project or source scope. Owners get
 // the member keys their remove path needs; members never do. Handles come from the membership rows (kept current on

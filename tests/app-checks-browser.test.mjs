@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Connect CI and connect your agent (Items 0c9207b8, c3e4a838) in a browser: the real Landing and checks and start
 // screens with synthetic reads. The first question is the CI, four answers alike with the one main's files point to
 // chosen ahead, and every answer has a route. The owner picks from the workflows on main, a tags-only file cannot be

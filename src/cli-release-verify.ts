@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // `nforge cli release-verify`: re-check stored release signatures with this build's own keys and
 // verification code (docs/operations/cli-update.md, "Signed releases"). Unlike the updater's
 // verdict file, which is written when a build installs (usually before CI has signed it), this

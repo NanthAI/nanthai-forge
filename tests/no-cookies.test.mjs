@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Forge's own code sets no cookies, so no cookie banner is needed (a9f4654f). Sign-in keeps its state in browser
 // storage, and usage stats stay cookie-free. A new cookie must be classified as essential and listed here first.
 import test from 'node:test';

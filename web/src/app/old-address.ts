@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Old addresses (Item d61f36fe): every address the old site served and a person or an agent may still hold, mapped to
 // its place in the app. Pure, and built from paths.ts (the app is at the root since Item b0704959; "/-/…" is the
 // 301 in site/public-read.ts). A plain path maps with no read. An address that names only ids (`?project=<id>`, `/decisions/<id>`,

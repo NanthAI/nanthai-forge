@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // `nforge host ROOT --delete-projects …` (Item 7456856f): prepare one bulk permanent-delete request, print the exact
 // list and the owner's approval link, and exit. Nothing is deleted here: only the owner person approves, signed in on
 // the web. `--wait ID` holds one subscription to the request until it is decided and every purge has ended (no polling);

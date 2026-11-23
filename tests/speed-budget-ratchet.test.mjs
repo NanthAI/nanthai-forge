@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue a217b83e: speed budgets must not let check time bloat again after d5de1c98 (check p50 886 s to
 // 663 s, shard runner-minutes per full check 121 to 82, receipt 378ab39b). Runner minutes per full check
 // get their own budget (parallel shards hid coverage from wall time), and a line that holds for seven

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { packageDocuments, packageDocumentData, readDocument } from './package-documents.mjs';
@@ -156,6 +157,7 @@ export function llmDocuments(root) {
     `## For agents\n\n${agentRules.map(rule => `- ${rule}`).join('\n')}\n\n` +
     `${links(documents.filter(doc => agentDocs.has(doc.path)))}\n` +
     `- [forge-agent skill](${repository}/skills/forge-agent/SKILL.md): ${describe('skills/forge-agent/SKILL.md', skill).note}\n\n` +
+    `## Licence\n\nForge is licensed AGPL-3.0-only, copyright 2026 Ferdinando Valsecchi: [LICENSE.md](${repository}/LICENSE.md). Outside contributions need a contributor agreement and are closed for now.\n\n` +
     `## Measured results\n\n${measured}\n\nMethod, sources and caveats: [Why Forge](/docs/why-forge.md).\n\n` +
     `## Reference\n\n${links(reference)}\n\n` +
     `## Optional\n\n${links(rest)}\n\n` +

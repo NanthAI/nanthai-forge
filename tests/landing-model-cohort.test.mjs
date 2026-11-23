@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Regression for Issue 6e587f06: an unaccepted prefix cannot terminalize its peer.
 import test from 'node:test';
 import { ticketState } from './landing-ticket-fixture.mjs';

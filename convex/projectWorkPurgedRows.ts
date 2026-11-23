@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Purged Work journal rows (Item 4c9e961e, purge Lanes 1 and 2). A purged row keeps its envelope (operation id,
 // revision, actor, time, request hash) and, as its facts, its own command with every word replaced
 // (redactPlanningWrite); it has no segment. Every reader accepts a row under one rule: it hashes to its request, or it

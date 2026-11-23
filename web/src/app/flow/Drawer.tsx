@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The station drawer (Item 85f456c1, the approved home mock): opened from a stop's name in the picture, a phone row or
 // `?open=` (the top-bar line's stops). On a desk it stands in the column beside the picture, straight under Needs you;
 // on a phone it is a sheet. Its rows sit on a log time axis from three hours ago to now. The stop's Lanes and times are

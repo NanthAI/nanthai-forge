@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 9d3c407d (owner decision Q83, journey J29-1): the landing secret scan also runs at save, after
 // capture and before any upload, so a credential never reaches stored bytes. Synthetic credentials are
 // generated per run, never committed.

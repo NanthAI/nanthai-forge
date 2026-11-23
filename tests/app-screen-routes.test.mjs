@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Screen registration (Item 84125787, run C2): each screen folder registers its own addresses in `<folder>/route.ts`,
 // so a new screen adds files and edits no shared one. A route file must never import its screen eagerly (that would
 // put the screen in the first paint), every address keeps the screen it had in the shared registry, and the top-bar

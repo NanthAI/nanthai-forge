@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The landing check of one Lane (Items b030c3c5, 2c420916, 9e7a17df), the approved Failed check screen: the verdict and
 // the next action in the head, the four suspects on the right, what failed and the facts on the left, the log one press
 // away (while the check runs, the output so far, read again only on a press: Item 42b8bf0e). One subscription

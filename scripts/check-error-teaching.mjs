@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Errors that teach (Issue 0a7d6f56): every public error code (the growth guard's count) must resolve to a
 // help topic, and every `next` template and help topic may name only commands, actions and topics that
 // exist. Static: reads source text and the two pure data modules; runs no project code, no Convex call.

@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* Forge design system tokens: the one source for the public page and the app (DESIGN.md).
    Scoped to [data-ds]: the public page sets it on <html>; app screens built on the system set it on their frame,
    so legacy screens keep their own tokens until they are rebuilt. Nothing outside this file writes a literal

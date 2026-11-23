@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Item eb631a53: a project keeps its PROJECT_ALIASES most recent addresses (`projectSlugs` rows, newest by creation
  * time: the time this project took the address). Its current address is always the newest; the older ones redirect to
  * it. Anything past the newest 10 is released: it answers "not found" and is free again.

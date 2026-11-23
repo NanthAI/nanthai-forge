@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Browser work shares one existing test job; the other jobs need no browser cache.
 import { createRequire } from 'node:module';
 import { testDuration } from './test-shards.mjs';

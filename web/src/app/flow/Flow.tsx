@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // "On the way to main" on Needs me (Item 85f456c1, the approved home mock): the Flow picture, the day's five figures and
 // one line for checks, in one region. It replaces "Moving without you". Everything comes from the line feed the shell
 // already subscribes to and the Needs you rows the page already reads: no read of its own, no timer. Below desk width the

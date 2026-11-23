@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Initiative page (Items 4df3ee17, b7a0dff1; decision afcb5bc3): opened from a group's name on the backlog. Its
 // open Items in hand order (reorderable, the same one-write move as the backlog), its counted progress, its About
 // text, an edit of title, About and status, and its done and dropped Items on request.

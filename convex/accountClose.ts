@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Account > Your data > Close account (Item 17cdc774). Once an account holds nothing, its person closes it: Forge
  * removes the account row, every handle it held, its handle operations, its earlier deletion receipts, its project
  * ordering hints, its device sign-ins and, for the native sign-in, its sessions, passkeys and username. Deleted-project

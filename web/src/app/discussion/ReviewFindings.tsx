@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Review batches share the existing Item comment record and permissions. JSON text survives older readers and
 // exports without a journal/schema migration. Pins and outcomes are reviewer reports, never acceptance evidence.
 import { MAX_COMMENT_CHARACTERS } from './model';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Runner repository visibility: one GitHub read per repository per short expiry,
 // kept in one small row. Only private projects read or write it.
 import { v } from 'convex/values';

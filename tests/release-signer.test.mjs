@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Automated release signer: signed-out signatures verified by the store, the key-proof read, and a
 // mirror backlog replay through the workflow's own tip step (docs/operations/cli-update.md).
 import test from 'node:test';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident replay (Item ee9899ca, 2026-11-20): signed in on the live site, the owner pasted the Item id 1d69905b
 // into ⌘K and got "Nothing matches.". Every address under /- is the rebuilt app, and its palette (app/keys.tsx)
 // had no id search. This drives that real palette: a typed id sends one debounced lookup (three existing reads,

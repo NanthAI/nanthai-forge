@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue f5c4d136 (dev, 2026-11-22): a Lane's landing ended in a composition conflict, so its live-line mark was held.
 // A resolution Lane then landed its work and superseded it. The supersede deleted its presence row but kept the hold,
 // so the project list said a Lane needed the owner and the top bar's F waited, with nothing to decide.

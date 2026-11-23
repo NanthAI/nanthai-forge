@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { parseWork } from '../src/work-unified-types';
 import { commandPayloadRows, commandPlanningRows, commandValues } from './projectWorkCommandRows';
 // Runtime-neutral action helper (no "use node"): the existing reducer stays the semantic owner and only its

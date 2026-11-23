@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Offline import cost projection for a real GitHub tree shape (B1.5c preflight).
 // Usage: node scripts/benchmark-import-projection.mjs TREE.json
 // TREE.json is a saved `GET /repos/O/R/git/trees/SHA?recursive=1` response (truncated:false).

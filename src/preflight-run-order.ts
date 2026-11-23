@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Run order of the protected tiers (mandatory, learned, direct) under preflight's wall-time budget
  * (Item 5dcfce75, preflight-miss fixes 3 and 4). The plan never trims those tiers, but the wall clock
  * stops whatever has not started when the budget is spent, so the order decides what a long plan

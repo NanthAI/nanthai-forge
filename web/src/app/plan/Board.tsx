@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The plan as a board (Items e0a23825, d3357f40; design cecab403, decision f4e28113): the system board, lists side
 // by side that meet at seams, each Item a row (DESIGN.md rule 5). Bands of the chosen group run across the columns and
 // fold (fold.ts, this browser only). The same rows as the list, from the same read: order inside a cell is the plan

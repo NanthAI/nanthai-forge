@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Approve and land / Decline for one held landing (Item 48049998): the same two keys on Needs me and the Lane page,
 // through decide.ts. The announcement says what happened, or the server's own words when it refused.
 import { useId, useState } from 'react';

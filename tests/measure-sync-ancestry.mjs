@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Local real-handler/R2-fake measurement of a hosted Lane sync and its resolve when main is
 // `distance` States ahead of the Lane's base (issue 1eef1b43). No network, no repository code.
 // Usage: node tests/measure-sync-ancestry.mjs [files] [changed] [distance]

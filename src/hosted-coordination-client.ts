@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Client side of coordination before the queue (Issue 1eb42254, D2): per-machine memory of the last
 // stack offer. No server call: it reads the advice the receipt already carries.
 import { randomUUID } from 'node:crypto';

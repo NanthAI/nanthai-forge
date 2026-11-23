@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Server-phase split of a hosted sync (friction 84c1497f): what each step reports, what the step row
 // keeps, what the receipt derives, and when the step's own result skips the complete action.
 import test from 'node:test';

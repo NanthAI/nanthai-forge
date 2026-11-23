@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Client-side package-level facts for cross-file advisory overlap notes on code without import-level
 // facts (Issue a6566fbe). Parsing and manifests only: repository code never runs. The server matches
 // the facts (hosted-overlap-symbol-notes) inside the existing overlap read.

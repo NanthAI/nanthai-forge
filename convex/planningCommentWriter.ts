@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Who a hosted planning comment names, set by the server only (Item 9a3d6f5f). The writer is the signed-in account
 // (stamped as `author` by the replay); a label the client typed never becomes the writer, because a reader who may not
 // see people would otherwise be shown whatever handle the client chose. The agent marker comes from the credential

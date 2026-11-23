@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { z } from 'zod';
 /** One operator setting; optional device-start override; the approved default is 120/minute. */
 export function publicAbuseBudgets() {

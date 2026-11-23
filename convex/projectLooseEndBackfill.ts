@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Loose ends details (Item fc1831eb): the one-time backfill of what new writes now keep current. Two bounded passes,
 // each self-continuing, upserts only (a rerun writes nothing new):
 //   projects: per project, the stored size on its live-line summary row (the open-Lane count is read, not stored);

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // "Which CI do you have?" (Item 0c9207b8): the four answers, drawn alike, and which one main's own files point to.
 // Pure: it reads the names in one page of main's root folder (use-workflows.ts) and never opens or runs a CI file. A
 // file it did not see is never reported as absent: with more root entries than one page, nothing is preselected.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { isMainModule } from '../scripts/main-module.mjs';
 import { spawn } from 'node:child_process';
 import { statSync, utimesSync, writeFileSync } from 'node:fs';

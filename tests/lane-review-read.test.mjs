@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Items 4bc460aa and 52235fbf: the Lane review screen's one read declares the page's data up front from rows that every
 // save already writes. It names the pinned saved head and every changed path with its exact blobs, and reads no State
 // object, file body or history, so the reads per view stay a handful of documents whatever the repository's size.

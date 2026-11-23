@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Win32 filesystem aliases must stay unsafe when source first passes through a POSIX host.
 const windowsAlias =
   /(?:^|\/)(?:[^/]*[ .]|[^/]*:[^/]*|\.?(?:git|forge)~\d+(?:\.[^/]*)?|(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\.[^/]*)?)(?=\/|$)/i;

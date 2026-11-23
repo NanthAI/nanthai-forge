@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Builds the web site for Cloudflare (Item ef6aa22a): the static files from hosted-web-dist (run `npm run build:web`
  * first) plus the site Worker (site/worker.ts), as Build Output that `cf deploy --prebuilt --no-provision` uploads.
  *

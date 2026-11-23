@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Usage: node scripts/measure-agent-context.mjs   (after npm run build:core)
 // Prints the hosted agent MCP tool list per tool: description, input schema and total characters, with
 // tokens approximated as characters / 4. Receipts: compare `nforge agent ROOT ACTION` with `--detail`;

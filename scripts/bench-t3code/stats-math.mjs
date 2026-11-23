@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Descriptive statistics only: extrema are observed bounds, not confidence intervals.
 export function quantile(values, p) {
   const xs = values.filter(Number.isFinite).sort((a, b) => a - b);

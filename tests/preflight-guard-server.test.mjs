@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 13ea93bf, server half: the land gate's `ran` rides on the landing row; only a failed check reads
 // it and writes the project's guard document; a Lane start's reply computes the candidates.
 import test from 'node:test';

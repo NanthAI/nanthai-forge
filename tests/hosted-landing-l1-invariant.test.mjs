@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // L1 (Item 687d1eda, option B; reviews e7137e30 and a66aa1ce): the inspector's own branches, each
 // with a case that must pass and one that must fail, on stored rows of a real parked queue. A
 // branch that silently excuses a dead chain would let a stranded follower through every sim seed.

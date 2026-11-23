@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /**
  * The Flow view's running day (Item 85f456c1): a few small counts in the line feed's per-project summary row
  * (convex/projectLiveLineStore.ts), stepped only by writes that already rewrite that row or a line mark. No

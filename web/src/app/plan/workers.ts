@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Who works on each Item now (Item d3357f40): the Plan's Owner column shows them when an Item has no owner. One
 // bounded read (convex/projectPlanWorkers.ts) asks, by Intent, about the in-progress Items: each Item's own Intent
 // and its first two follow-ups (a reopened Item, src/hosted-intent-chain.ts), at most PLAN_WORK_INTENTS Intents, in

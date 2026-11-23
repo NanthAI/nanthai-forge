@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Signed CLI releases (docs/operations/cli-update.md, "Signed releases"). The updater checks a new
 // release with the keys compiled into the build that is already installed, before it downloads,
 // installs dependencies for or builds the new State.

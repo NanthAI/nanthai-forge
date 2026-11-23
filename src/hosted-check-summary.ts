@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure: runs in the CLI and in the Convex non-Node runtime.
 import type { HostedCheckRun } from './hosted-check.js';
 import { evidenceSources } from './receipt-detail.js';

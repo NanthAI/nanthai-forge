@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Old addresses that name a thing only by id: `?project=<id>` links, `/decisions/<id>` and `/review/<id>` (Item
 // d61f36fe). One read answers where it lives now. A project the caller cannot read answers null, the same as a missing
 // one, so an id never reveals a handle.

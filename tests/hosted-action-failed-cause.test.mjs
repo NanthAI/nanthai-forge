@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 3f76a3df: every HOSTED_ACTION_FAILED names its cause and one next command that works, and a
 // save that completed never reports failed. One test per phase: save, wait, preflight, tests read.
 import test from 'node:test';

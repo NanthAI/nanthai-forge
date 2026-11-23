@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Removal markers: when a person loses write access to a project, every active sealed set of the project marks
 // that account's entries. Holders see the marker on their next read, and a person's next write on an owner device
 // removes the entries and re-keys (design 5.5). The server opens nothing and changes no signed record. A direct

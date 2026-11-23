@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Synthetic repositories for the zoo shapes no small real repository has (Issue 70a9bd2f): CRLF text,
 // file modes, symlinks, case-only renames, case-colliding, Unicode-folding and non-UTF-8 paths, large binaries.
 // Each recipe is plain data: commits of { path (string or Buffer), mode, data }. They are written

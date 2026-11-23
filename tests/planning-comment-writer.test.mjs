@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Who a hosted planning comment names (Item 9a3d6f5f, security review C1-10 and C1-11): the writer is the signed-in
 // account, never a label the client typed, so a forged label cannot change the author an outside reader of a public
 // project sees; the agent marker comes from the credential kind; comments have a server size cap.

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // B1.5d pinned harness (B3): a clean checkout of one landed commit of nanthai-forge, outside
 // every Lane root, that the driver and cells run from. The Convex meter needs the convex
 // package, so node_modules links to the installed CLI build's dependencies (read-only), found

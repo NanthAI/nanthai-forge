@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // projectNeedsMe:read (Items 9e748e41, 12fde646): the held Lanes it lists are exactly the live line's held marks, each
 // with the reason the bound landing recorded (a hold Forge cannot explain is "unknown", never guessed), its open
 // approval requests come from the same bounded reads as projectHostedApprovals:list, and an idle view re-runs nothing.

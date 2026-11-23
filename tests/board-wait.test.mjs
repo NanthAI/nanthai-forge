@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Board Lane 3 (Issue 9c8490a4): wait delivery, peer wait and first-write claims.
 import test from 'node:test';
 import assert from 'node:assert/strict';

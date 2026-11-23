@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Explicit Work runs write the check queue: a focused `node --test` run without the preload must still
 // use a private HOME, or the real-user-state guard fails the run (friction c804f164).
 import './check-runtime.mjs';

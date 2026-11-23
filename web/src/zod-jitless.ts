@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 
 // The enforced Content-Security-Policy has no 'unsafe-eval' (site/headers.ts, review S-13). On its first
 // parse Zod probes `Function('')` to decide whether to compile fast parsers, and the browser reports that

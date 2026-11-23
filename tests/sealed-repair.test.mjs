@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // GB-08 d5 (Gate B1 C9-C12): a Checks roster that breaks the cross-set rule is repaired by one owner write.
 import './check-runtime.mjs';
 import test from 'node:test';

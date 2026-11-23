@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me › FYI on the server (Item 48049998, decision b15fff49): projectNeedsFyi:read lists landings, settings
 // changes (owner only) and messages to the reader that ask nothing; a message clears when it is acknowledged or its
 // Lane closes (lands or is abandoned), and one with choices goes to Needs you through projectNeedsMe:read instead.

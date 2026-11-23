@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Metadata only. The gated device protocol will supply this view; neither values, ciphertext nor key material
 // belong in it. Totals describe the complete set; arrays are one bounded page, never a whole collection read.
 export type SecretName = {

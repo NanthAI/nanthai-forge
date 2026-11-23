@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { TrialFile, TrialTask } from './hosted-trial-merge.js';
 
 /** Bounds of one save's trial merge (flip 4, Issue 853fcde3): peers merged against, shared files,

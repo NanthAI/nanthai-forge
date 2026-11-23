@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Contamination audit across agent clients (d8cf81b4): the same command must scan the same
 // whether the agent sent it as raw shell text, Claude Bash JSON, a Codex function call, or
 // Codex code-mode `exec` JavaScript (text(await tools.exec_command({cmd:"…"}))), which is the

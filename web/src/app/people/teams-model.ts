@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > People and teams as words (Item a841a76d): the head sentence and each team's one line, from the rows of
 // convex/accountTeams.ts. Plain functions so the words are tested without a browser.
 import type { FunctionReturnType } from 'convex/server';

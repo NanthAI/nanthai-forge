@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Guard for the docs promise "a normal user never needs a Forge background process"
 // (docs/quickstart.md#no-background-process). Every place the client detaches a child is named here with
 // its job. Entries marked owner-store belong to the local Git/native owner workflow, not to a hosted

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Real People and invitation components with a synthetic transport: pending,
 // expired and accepted states, explicit recipient acceptance and keyboard controls, and the owner's linked teams
 // (Item b6588425, 4d): read once per open, link / change / unlink with the revision, no read per change beyond one.

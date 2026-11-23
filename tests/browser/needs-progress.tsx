@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me on synthetic data (Items 3fa3187d, 0cb9b064), through its real view: exact progress counts with today's
 // closures beside Done (or, with ?capped, a capped read whose every figure reads "N+"), one Lane waiting for
 // approval in Needs you and one landing its agent withdrew, listed under FYI (Item 48049998).

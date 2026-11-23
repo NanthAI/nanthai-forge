@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One file's landings (Item 3968a655): projectCode:fileHistory, one bounded read per step back and no subscription.
 // A signed-out visitor of a public project reads the same pages from the site's cached public read.
 import { useContext, useEffect, useReducer, useRef } from 'react';

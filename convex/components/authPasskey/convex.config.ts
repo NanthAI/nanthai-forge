@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import batchWorker from '@convex-dev/batch-worker/convex.config.js';
 import { defineComponent } from 'convex/server';
 

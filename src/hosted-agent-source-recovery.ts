@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { normalizeObservedFinish, withFinishLandingState } from './hosted-agent-finish-result.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';

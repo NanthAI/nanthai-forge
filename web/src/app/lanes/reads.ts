@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Lanes place's reads (Item e317b6ea). All are existing bounded queries, sent together once the project id is
 // known; none takes a clock-derived argument, so they re-run on server writes only and sleep with the tab
 // (live-reads.ts). The line feed is not read here: the project frame already holds it and passes it down.

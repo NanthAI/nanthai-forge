@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Candidate sandbox's mount plan (scripts/candidate-sandbox.mjs), as plain data so it is testable
 // without root. Plain Node only.
 import { createHash } from 'node:crypto';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Purge Lane 2 readers (Item 4c9e961e, lead decision 2bce94e5, follow-ups a-f of reviews e0720f64 and 327b1600):
 // planning-purge-v2. A purge lists every row of its Item with the digest of its redacted facts; purged rows include an
 // Intent-born Item's intent and note rows and writes through another id; a redacted command keeps only listed fields.

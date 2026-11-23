@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Recorded State parents (Git commit-graph parity, issue 1eef1b43): the ancestry walk of a sync or
 // resolve reads object rows, not manifests, so its source bytes do not grow with main's distance.
 import test from 'node:test';

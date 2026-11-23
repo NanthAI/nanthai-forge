@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Child of hosted-landing-queue-sim.test.mjs: the 5e3c3a3c parked incident on the historical
 // no-new-run-wake mutant (pre-N1 code, applied by FORGE_TEST_SOURCE_PATCHES). The read-only
 // detector must expose the stale chain without repairing it.

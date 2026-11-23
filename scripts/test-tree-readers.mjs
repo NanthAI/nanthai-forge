@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Recognize repository paths consumed by a directory listing, glob, recursive reader or callback.
 // Paths can be relative to the test process's working directory or to the source via import.meta.
 // Package file lists come from the source inventory. The analysis does no I/O and runs no test code.

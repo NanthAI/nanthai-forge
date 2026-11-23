@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 9fac9a0e: a tracked file is published whatever its name; a new file's
 // credential-looking name only prompts a content check. Synthetic fixtures only:
 // keys and tokens are generated per run, never committed.

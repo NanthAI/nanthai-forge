@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The server's checks on a sealed head write. Every stored fact is derived from the signed payload
 // with the shared portable format code; mutation arguments are never trusted. The server opens no
 // value and holds no key. Clients verify everything themselves and rely on none of this.

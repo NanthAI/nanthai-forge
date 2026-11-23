@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Lanes place (Items e317b6ea, c613e6bc History, eb0bbb94): its own chunk, loaded with the route. Sessions, one
 // Lane, its holder, its check and its landing evidence each register their own screen (sessions/, lane/, check/,
 // proof/ route.ts), so this place only serves the overview, History and Touching. An address under Lanes that no

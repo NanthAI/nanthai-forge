@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A Forge check job runs the Candidate's own code in one step: the check step (`forge-check.mjs`,
 // or the hosted supervisor's `hosted-actions-job.mjs run`). Everything the job attests or caches
 // must come from steps that ran no Candidate code (Issue 432164bf), so in such a job:

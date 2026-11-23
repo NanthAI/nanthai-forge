@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Plan Item page with its discussion (Item 9a3d6f5f) on synthetic data, through the real Plan screen, the lazy
 // ItemDiscussion chunk and its hosted hooks. The Convex client is a stand-in that answers the reads the
 // discussion makes (the Work index workspace, comments, reactions and the scoped thread) and records every write.

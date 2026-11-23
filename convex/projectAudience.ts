@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The one audience rule for the board, agent coordination and Lane holders (Item b6588425; docs/access.md#audience).
 // Every input is the caller's current role from `projectRole` (direct grants and linked teams) and the project row the
 // caller already loaded, so the rule adds no read of its own.

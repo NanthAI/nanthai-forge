@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 76be0714: the public plan access matrix. Every viewer (signed out, signed-in stranger, reader, writer, owner)
 // against every plan policy (a hidden Item, a hidden Initiative with its Items, a members-only plan) on every read
 // surface: the public project page (web, signed out), the Plan screen read, CLI planning reads (list, one Item with

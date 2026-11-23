@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Why main failed, for agents (Item ae068e0c): `status {"main":true}` and `status {"main":N}` read the
 // same answer as the web's Main broke view (projectMainRed:read) in one query, and main mixed with another selector
 // is refused before any server call. Before this, a lead could not look up a red without Convex access.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One main red (Item ae068e0c): the view a Main broke or Drill row's Why opens. The head says where main failed, which
 // landing broke it (or that the landings since the last pass are candidates) and how it ended; the left column is
 // what failed and the log, one press away; the right is the landings since the last pass, each linking to its receipt

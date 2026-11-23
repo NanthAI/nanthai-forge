@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Tree fidelity of the zoo run (Issue 70a9bd2f): does a Forge clone hold the same files as a plain
 // `git clone` of the same repository on the same machine? Compares path, kind (file, executable,
 // symlink), size and symlink target, so CRLF, file modes, LFS pointers, large binaries, case-only

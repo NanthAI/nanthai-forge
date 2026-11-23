@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The places of each frame (DESIGN.md "Frames"; pattern rule 8): the rail's six project places, the account's five,
 // the pages of each place, and the quiet line icon each place shows in the rail and the phone tabs.
 import type { AccountPlace, ProjectPlace } from './paths';

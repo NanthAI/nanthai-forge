@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { SettingCompare } from './setting-change';
 
 /** One Lane's approval request as projectHostedApprovals:observe {detail:1} returns it. */

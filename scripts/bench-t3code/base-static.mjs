@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Setup hygiene (Item 5e3c3a3c, 2026-11-17): every arm starts from a base that passes the
 // repository's own conventional format check, the static check `land --save` runs inline.
 // Only bench-owned files (the bench's check script and workflow) may be rewritten, and only by

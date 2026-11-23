@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 
 /** One purge page per transaction (project removal and the import-inventory purge). Rows are read in chunks of 8 and the page stops
  * once it has read 4 MiB, so the worst case (8 maximum-size documents after the

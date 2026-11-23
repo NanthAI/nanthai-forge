@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** A suggested schedule for open Issues (Issue aa9fb5b1, part 3): which can run in parallel and which
  * should stack, from the repository files each Issue names. Advice only: nothing here starts, orders
  * or blocks work, and an Issue that names no file is reported as unknown, never as independent (a

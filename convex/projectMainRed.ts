@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One main red, explained (Item ae068e0c): the failed audit run (what failed, a link to the full log), main's head,
 // the landings since the last green, the landing that broke it when the bisect proved one (else those landings are
 // candidates), and how it ended (passed again by a revert or a fix, counted as flaky, or still red). The web's

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Product lint rules in scripts/lint/forge-plugin.mjs (Issue 8b7b97ce): each rule fails on its
 // incident fixture and accepts the bounded forms used on main.
 import assert from 'node:assert/strict';

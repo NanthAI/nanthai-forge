@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One definition of the project's progress (Item 3fa3187d), for Needs me and Plan: Issues in this project, from the
 // stored counter (convex/projectPlanCounts.ts). Done is every closed Issue, In progress is in-progress, and Left is
 // planned plus proposed (the mock's "7 Items left" includes the Ideas). A figure from a capped read is a lower bound:

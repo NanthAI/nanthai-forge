@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* Design system base: element defaults, state, keys, who and counts, the three weights, the first stop and kind marks.
    Everything is nested under [data-ds], so a frame built on the system is styled and a legacy screen is not; the
    extra attribute also outranks the legacy element rules (button, p, h1) that are still loaded globally. */

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // On-demand help (Issue 0a7d6f56): `nforge agent ROOT help TOPIC` prints one topic, never the whole
 // manual, so how-to prose stays out of the text an agent reads up front. Every error's `learn` names one
 // of these ids. Pure data with no imports: scripts/check-error-teaching.mjs reads it directly. Each topic is

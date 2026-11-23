@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Loose ends actions (Item fc1831eb) over the existing mutations, with a result per row. Setting Lanes aside and
 // bringing them back (Undo) go through the dormant sweep, projectHostedDormant:abandon, 25 Lanes per call; a Lane that
 // gained a save or changed meanwhile comes back with its own skip word. Moving a project to the trash and restoring it

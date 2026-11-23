@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { WorkData, WorkView, ChannelMove } from './work-types.js';
 /** Optional C1 selection metadata remains additive for existing Work writers. */
 export function scopedPostAccept(data: WorkData, view: WorkView): ChannelMove['postAccept'] {

@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* Design system: the parts core.css leaves to the components: a fold's key, the table and its own sideways scroll, the
    wrapper that swaps a first-paint shape for the behaviour layer's. Scoped to [data-ds]; every value is a token. */
 

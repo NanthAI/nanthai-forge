@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Step timing of one `land --save` submission, recorded in the submitting process: local clock
  * reads only, no I/O and no network. The first mark of a step wins, so replays inside the same
  * submitter keep the original times. A resumed submission (new process) times only its own part. */

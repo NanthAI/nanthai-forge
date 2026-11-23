@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Forge's own check is one predicate; its settings and extra inputs never reach other projects.
 // The literal guard for the whole product is tests/forge-only-rules.test.mjs.
 import test from 'node:test';

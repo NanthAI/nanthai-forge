@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Where Lanes cross, by pair (Item df1f2d46): the shared files the overlap read already sends, turned into the pairs of
 // Items that touch the same files, most at risk first. An Item's open Lanes count as one side, so its title shows
 // once; its Lanes that cross each other are a pair of their own. Built in the browser from reads the page already

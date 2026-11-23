@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 687d1eda, review e7137e30 finding 4: parked chains that end at an entry nothing drives.
 // A parked waiter holds no timer (idle costs nothing, L1 option B), so the entry its chain ends at
 // must own progress. Each replay shapes the stored rows of the reviewed case on a real queue and

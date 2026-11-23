@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { ForgeError } from './errors.js';
 import { hostedContractFeatures } from './hosted-contract-features.js';
 import type { ReplySkew } from './hosted-response.js';

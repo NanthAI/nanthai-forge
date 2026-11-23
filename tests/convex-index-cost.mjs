@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Custom database indexes only; system/search indexes are unchanged. Key bytes
 // are a reproducible JSON payload model, not provider storage/B-tree overhead.
 export const indexEntriesPerWrite = (schema, table) => schema.tables[table]?.export().indexes.length ?? 0;

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Archive and Deleted (Item 4c9e961e): an Item sent to either shelf remembers the status it left, leaves every plan
 // page, count and public read, is listed only by its own shelf, and comes back by one ordinary put that adds a
 // version and keeps the history. Each move is owner-only, applies once under replay and has an Undo. Version compare

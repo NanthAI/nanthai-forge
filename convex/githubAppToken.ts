@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One GitHub App access module for the hosted mirror and Actions checks. It
 // runs in the default Convex runtime (WebCrypto, no Node), so mutation-bearing
 // modules may import it. Tokens are never persisted or logged.

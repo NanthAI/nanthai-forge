@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The interactive parts as screens use them. Each draws its resting shape at first paint without the behaviour layer,
 // asks for the layer on the first press or focus (or once when idle), and swaps to the layer's part when it arrives,
 // keeping focus on the same control. A press made before the layer arrived is carried out when it does.

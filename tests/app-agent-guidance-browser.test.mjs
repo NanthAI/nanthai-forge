@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Agents as real components with synthetic data (Item f2ee8381): the project text and the person's own text,
 // each saved on its own with one operation id kept across a failed save; a reader who may not edit sees the project text
 // read-only and no Save for it. Every state passes axe with no sideways scroll at 1440 and 390 in both themes. Set

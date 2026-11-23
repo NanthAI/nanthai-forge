@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // B1.5d prompt: identical template in both arms except the SOURCE WORKFLOW paragraph.
 export const WORKFLOW_SLOT = '\u0000WORKFLOW\u0000';
 

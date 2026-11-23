@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Markdown files a test, build or check script may read ("tested docs").
  *
  * Owner decision 2026-11-06 (Issue 7fe54c7c): a change still lands on its first

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Move to trash: always a sheet (SPEC-01-trash, "Screens" 2). Restore does not bring back other people's access, so an
 // Undo would not undo; the sheet names what is lost. It reads nothing: the Lane count comes from the row on screen.
 import { useState } from 'react';

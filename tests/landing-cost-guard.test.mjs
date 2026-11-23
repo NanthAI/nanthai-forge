@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Cost guard on change (Issue 3e3f9fe6): the landing check runs a scripted landing mix on the
 // in-process Convex fixture and judges each per-landing count against the ledger in
 // src/speed-budgets.json (`costs`). Deterministic counts, not live billing: a change that adds work

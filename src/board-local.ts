@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Board state kept on this machine. Light on purpose: the first-write hook loads it on every first
 // write (CPU budget), so it imports Node builtins, root paths and the pure notice renderer only:
 // no schema library, no Convex client.

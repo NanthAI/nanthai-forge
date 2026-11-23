@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Agent-reported tokens at landing (Item a61d3c91, measured side): an agent may send `tokens` with land, on the call it
 // already makes. The CLI sends it only to a server that records it (feature landing-tokens); the server refuses anything
 // but a whole number in range before it writes; the landing row keeps it as one column; the Stats day close sums it

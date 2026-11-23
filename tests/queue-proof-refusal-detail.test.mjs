@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 168e4ed8: QUEUE_PROOF_REQUIRED names every missing core path with its next step, and the
 // changed files no registered replay can reach (a pure schema module) with what to do instead.
 import test from 'node:test';

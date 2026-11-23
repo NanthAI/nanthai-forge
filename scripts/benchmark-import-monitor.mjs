@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Provider log adapter. Retain numeric execution metadata only, never raw logs.
 export const benchmarkLimits = Object.freeze({
   perMinute: 300,

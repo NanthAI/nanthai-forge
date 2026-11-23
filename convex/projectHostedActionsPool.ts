@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { r2Config } from './r2';
 import { deleteR2Object, listR2Prefix } from './r2Operations';
 import { poolClaimPrefix, poolClaimExpirySeconds } from '../src/hosted-actions-pool';

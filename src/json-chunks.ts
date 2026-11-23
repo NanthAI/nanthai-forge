@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** JSON data only (parsed source metadata): preserve JSON.stringify's property
  * order and pretty whitespace without constructing a whole-history string. */
 export function* jsonChunks(value: unknown, space = 0): Generator<string> {

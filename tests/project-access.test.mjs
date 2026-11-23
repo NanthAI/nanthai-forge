@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The project access contract (Item b987e608, docs/access.md): every role is asked every verb against the real
 // server handlers, and the answer must match the contract table the People and access screen shows. A removed
 // member's next call is refused, and the role resolver reads at most two indexed rows.

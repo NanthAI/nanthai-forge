@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The shared planning contract (Item d3357f40, docs/planning.md): hand order, derived next, progress and the one
 // public-plan visibility rule.
 import test from 'node:test';

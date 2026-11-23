@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The code reader's and the diffs' syntax colours (Item 8e847a17): Pierre's highlighter in the worker. Every language the
 // Item names is coloured by its file name, the colours use only the design system's roles, and the text is never changed.
 import test from 'node:test';

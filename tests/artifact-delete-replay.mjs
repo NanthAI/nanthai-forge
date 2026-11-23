@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 2766ef9e: the replays every purge that removes attachments runs (Item purge, comment purge). A removed
 // binding's R2 delete is tracked on its row and retried until it succeeds, and an upload that started before the purge
 // cannot leave its bytes behind: its commit deletes them, and the binding's tracking stays open until a delete that

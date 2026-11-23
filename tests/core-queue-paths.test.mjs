@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Guard 4 (Item 6abdde40, incident 5e3c3a3c): the 2026-11-17 wake cut claimed only to save cost and
 // cost hours of landing time. The landing check classifies queue, admission, acceptance, check and
 // wake paths as core by path alone, and every check of such a change runs the queue simulation and

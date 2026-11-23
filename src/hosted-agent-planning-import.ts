@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Loaded only for a requested transfer. Ordinary CLI/MCP planning startup is unchanged.
 import { z } from 'zod';
 import { HostedAgentJournal } from './hosted-agent-journal.js';

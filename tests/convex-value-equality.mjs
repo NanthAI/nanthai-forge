@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { compareValues } from 'convex/values';
 
 /** Match Convex byte/object value equality without sorting primitive index keys on every row. */

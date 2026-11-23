@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 3f70760d: overlap and conflict notices stay true. Builders act on every EXACT CONFLICT,
 // protected-path and "Sync now" line; a stale one sends them to sync, wait or ask for nothing
 // (frictions 9ad0df2e, e58dee09, c0584a78, 5c2b5e1b, 72c4e921, 8366f56e, 700035fd, d26e7f62).

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Separate diagnostic registration; the frozen scored design remains in plan.mjs.
 import { replayPlan, replayDigest } from './replay-schedule.mjs';
 export const REPLAY = Object.freeze({

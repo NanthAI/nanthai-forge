@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { ed25519, x25519 } from '@noble/curves/ed25519.js';
 import { ForgeError, invariant } from './errors.js';

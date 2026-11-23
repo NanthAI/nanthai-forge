@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Lanes on days with no landing (Item a9ad21c9): the day close used to count only the Lanes started on the closed day
 // itself, so a Lane started on a Saturday and landed on Monday, or one that crossed midnight UTC, was never counted
 // (a project's day closes only when it had a landing). The close now counts every Lane since the previous closed day,

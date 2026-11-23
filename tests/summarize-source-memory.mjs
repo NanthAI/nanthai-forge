@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Recompute the research tables from raw paired observations; no workload or network calls.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

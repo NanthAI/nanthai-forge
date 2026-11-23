@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Parse one file into unresolved facts. No inventory, package, or target resolution belongs here.
 import ts from 'typescript';
 import { directoryDependency, repositoryWorkspaceUser, shadowsRequire } from './test-directory-path.mjs';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Bench agent runner: one agent CLI, model and flag set for both arms (config.agent), in a
 // macOS sandbox. Claude Code (the exit bench's agent) and Codex (B1.5d's) are isolated the same
 // way: a fresh home per task holding no owner config, memory, skills, plugins or sessions, and

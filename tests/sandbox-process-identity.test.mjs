@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 5909318b: agent harnesses (Codex, Claude Code sandbox mode, ...) run tools under macOS
 // sandbox-exec, which refuses to exec setuid /bin/ps. Process identity must still be recorded,
 // and must equal what an unsandboxed observer records for the same process.

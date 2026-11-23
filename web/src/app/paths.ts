@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The rebuilt app's addresses (Item 84125787). One codec: every frame, link, key and palette entry builds its href here,
 // and the parser is its exact inverse, so a deep link opened in a new tab lands on the same place.
 //

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 7008ff18: load 65 on 10 cores. Heavy capped only the command it started, so an npm script or
 // `sh -c` ran its node --test with up to cores - 1 workers per slot, typechecks were unbounded and
 // the 32 undated, unattributed holds could not say what loaded the machine.

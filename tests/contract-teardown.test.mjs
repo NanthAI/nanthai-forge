@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // scripts/contract-teardown.mjs removes the nightly contract resources. `cf` exits 0 when a
 // non-interactive delete aborts, so the teardown must re-read each resource after deleting it.
 import test from 'node:test';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The account's projects place (requests/route.ts). With ?request=ID it is the bulk delete request page (Item
 // 7456856f); without one it is the projects list (projects/Projects.tsx, Item 3d5d8839). Each loads its own chunk.
 import { lazy, Suspense } from 'react';

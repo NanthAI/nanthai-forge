@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Stats All time and the self-trend in the browser (Item a61d3c91, Done-when 22:05Z): the real StatsView in the project
 // frame over the real replies (src/stats-period.ts). All time names the closed days it covers and draws one bar a month
 // from the month rollups; a range has "Against the days before", a fold that reads nothing until opened, with its

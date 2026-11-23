@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { useConvex, useMutation, useQuery } from 'convex/react';
 import { Component, useMemo, useState, type ReactNode } from 'react';
 import { api } from '../../../../convex/_generated/api';

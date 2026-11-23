@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 export type ActionsJobLogEvidence = {
   status: 'passed' | 'failed' | 'incomplete';
   source: 'forge-test-markers' | 'node-test-summary' | 'job-log';

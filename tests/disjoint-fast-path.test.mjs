@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { postAcceptMoves } from '../dist/post-accept-coverage.js';
 import test from 'node:test';
 import { latestWorkFormat } from '../dist/work-format.js';

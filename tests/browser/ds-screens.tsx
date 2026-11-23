@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { lazy, Suspense } from 'react';
 import { ConvexProvider } from 'convex/react';
 import { createRoot } from 'react-dom/client';

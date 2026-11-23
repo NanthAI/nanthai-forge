@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The FYI region (Needs me) and the Held page ("Held, redone or refused"): what the reader may want to know but need
 // not act on, newest first, from projectNeedsFyi:read plus the held Lanes that ask nobody. On Needs me it shows the
 // first rows and links to the Held page; there (`all`) it shows every row, with the same filter and Clear all.

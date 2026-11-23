@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The access table's yes / no cells, shared by the people rows and the linked-team rows of People and access.
 export const Yes = ({ what }: { what: string }) => (
   <span className="yes" role="img" aria-label={`may ${what}`}>

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Builds a one-page fixture app around real screen components with synthetic props and serves it from a fake origin, so
 // a browser test can open it at any width and theme and run axe on it. Shared by the Trash and Settings > Project tests.
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';

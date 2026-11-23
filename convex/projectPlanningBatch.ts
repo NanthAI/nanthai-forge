@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Backlog batches (Item 65b0e706, src/planning-batch.ts): one person or agent action on many Items is one call. Each
 // write in the batch runs through the same revision-free Work command as a single put or comment
 // (projectWorkCommand executeCommand: owner gate, item version check, journal append), so the journal, replay and

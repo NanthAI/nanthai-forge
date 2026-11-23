@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Approve or deny an `nforge login` from the browser, signed in with Convex Auth. The backend is convex/deviceActions.ts: one inspect when the code is complete, one decide per answer. A decision keeps its
 // operation id until it succeeds, so a retry after a lost reply never records two decisions. The full device and
 // session screens are stage C (Item df06081d); this page is the approval step the CLI links to.

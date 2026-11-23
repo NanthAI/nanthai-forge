@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // B1.5d driver: runs the PLAN.md batches end to end and resumes by itself.
 //   node scripts/bench-t3code/drive.mjs [--dry] [--reps 1|2] [--only n3-r1] [--tasks K] [--unpinned]
 //   node scripts/bench-t3code/drive.mjs --coordination [--dry] [--reps 1|2] [--only convoy-n16-r1]

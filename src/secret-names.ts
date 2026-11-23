@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { ForgeError } from './errors.js';
 /** Release-owned lists. These are depth behind the tree's .env.example, not a complete
  * inventory of variables that affect programs. Projects cannot override the lists. */

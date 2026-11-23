@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 0f76b07e line 7, friction b5e8e2d5: a sync conflict of the caller's own live resolution Lane
 // takes the new draft in that Lane (same id, chain's first origin) instead of drafting a sibling
 // resolution Lane per hop. Synthetic fixtures.

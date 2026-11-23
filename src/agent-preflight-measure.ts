@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { spawnSync, type SpawnSyncOptions } from 'node:child_process';
 import { tmpdir } from 'node:os';

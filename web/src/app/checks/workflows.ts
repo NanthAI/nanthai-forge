@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Which GitHub Actions workflows a project already has, and whether each can decide a landing (Item 0c9207b8). Pure:
 // it reads the first page of each workflow file's text, which the Code place's bounded source read returns, and never
 // runs or evaluates anything in it. It looks only at the `on:` key; a file it cannot read plainly is shown as "could

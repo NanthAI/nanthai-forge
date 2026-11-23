@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Topological level, independent of timestamps. Unknown parents never acquire
  * a guessed level: old or incomplete history keeps ordinary ancestry traversal. */
 export function validStateGeneration(value: unknown): value is number {

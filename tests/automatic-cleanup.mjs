@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Import in each cleanup test file: Node isolates hooks between test files.
 // Direct focused runs also avoid the user's real check queue and saved login.
 import './check-runtime.mjs';

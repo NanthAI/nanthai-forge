@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 76be0714: a visitor's Plan counts on a public plan come from the stored counter's visibility groups (one row
 // plus the Initiatives and parents the groups name), not from a live read of up to 1,000 Items, and they count
 // exactly what the one visibility rule shows, while members keep the stored totals.

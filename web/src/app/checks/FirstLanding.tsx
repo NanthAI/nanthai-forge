@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The end of connecting CI (Item 0c9207b8): whether the chosen check has decided a landing yet. One read when the page
 // opens with a check chosen (projectHostedLandings.read: the first FIRST_LANDINGS_READ landings since the choice, a
 // few indexed rows each), no subscription. While none is checked and the check is a CI file, the first page of that

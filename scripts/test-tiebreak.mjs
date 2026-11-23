@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Tie-breaking for preflight tests that rank equally close to a change (Issue 964e2d2b). A hub
 // module is loaded by well over a hundred tests that all share one import-graph rank; the time budget
 // then keeps a prefix of that tie. Ordering the tie by file name made coverage depend on names, so

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { NativeFile } from './state/format.js';
 type File = NativeFile | undefined;
 const same = (a: File, b: File) => a === b || (!!a && !!b && a.blob === b.blob && a.mode === b.mode);

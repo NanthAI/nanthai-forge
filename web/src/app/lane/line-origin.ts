@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Where each line of a combined result came from (Item a1e3d771), from three exact retained inputs: main's version
 // (this Lane's base), the Lane ahead's saved version, and this Lane's saved result. A line kept from main is main's; a
 // new line that the Lane ahead also added is the Lane ahead's; any other new line is this Lane's. Which of this

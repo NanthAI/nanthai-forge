@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Small pieces the getting-started screens share: the copy key whose label reads "Copied" for two seconds (DESIGN.md
 // rule 22), a command block a person copies, the one-line first-run help that goes away once read (rule 29: no standing
 // explainers), and the connection steps with the app choice in their last step.

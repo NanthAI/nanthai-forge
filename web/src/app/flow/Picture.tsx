@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Flow picture (Item 85f456c1, direction B · Works, the approved home mock): Editing, Saved, In queue, Checking and
 // main as isometric platforms, one block per open Lane, Lanes checked together as one tower, main as today's landings
 // hour by hour, and the two ways back to Editing. Its size steps with the width its region gives it (ResizeObserver:

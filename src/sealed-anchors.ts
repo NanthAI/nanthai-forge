@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { ForgeError, invariant } from './errors.js';
 import { decodePersonCheckpoint } from './sealed-decode.js';
 import { checkpointBytes, type PersonCheckpoint } from './sealed-future-records.js';

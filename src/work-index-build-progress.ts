@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { z } from 'zod';
 /** Consecutive pending resumes at one cursor before the build fails (B-N15). One budget for
  * the server cap and the progress line. */

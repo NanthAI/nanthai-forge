@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Items 52235fbf, c2388099: a change is read in the order of what needs eyes, and every file's reason is a fact Forge observed
 // (a conflict, a protected-path rule, a mode, a status, a path), never a risk score. The web review screen and the
 // agent's diff summary share this order, so the same facts give the same group and words on both.

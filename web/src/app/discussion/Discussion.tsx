@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // An Item's comments (Item 9a3d6f5f; the approved Item screen's Comments section): threads with their replies, member
 // Markdown drawn safely, reactions on comments, and one composer that can also record a decision in the Item body.
 // Data comes in as props, so the Item screen (Item d3357f40) decides how it reads; useDiscussion.ts wires the hosted

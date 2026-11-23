@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Where Lanes cross, drawn by pair (Item df1f2d46; design signed off on the Item): the pairs of Items that saved the
 // same files, a conflict Forge observed first (never a shared file alone), then most shared files, each with its
 // count over an amount stick. A pair opens in place to its Lanes and its files by folder. An Item's own Lanes crossing

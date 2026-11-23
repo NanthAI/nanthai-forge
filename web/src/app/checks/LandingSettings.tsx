@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Landing and checks: how a landing is checked (Item 871e9b73). One folded line per setting with its value
 // in effect and where that value comes from; opening a line says what the setting does, what it costs and the owner's
 // command that changes it. Nothing is explained while the lines are shut (DESIGN.md rule 29). It draws from the policy

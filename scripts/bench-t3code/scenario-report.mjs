@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Queue A/B report for retained Forge cells: joins each cell's result.json with the bench
 // project's receipts (one `landings` read per 30 landings of the cell window). Read-only.
 //   BENCH_ROOT=... node scripts/bench-t3code/scenario-report.mjs CELL_ID... > report.json

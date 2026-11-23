@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A person's contributions (Item 6a251b23; docs/people.md). The project's day close writes its entry into each
 // active person's day row (one read and one write per person active that day, nothing per landing). The profile reads
 // at most PERSON_DAYS_READ rows of one person once per page view and keeps only the projects the viewer may open:

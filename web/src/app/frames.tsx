@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The four frames (DESIGN.md "Frames"): project (mark, project picker, line, Needs you, six places), account (the owner
 // in the project's place, no line, the account's places), bare (no rail, no line; before a first project) and the
 // public bar and column. Every control at first paint is a plain link or button; menus and sheets attach with the

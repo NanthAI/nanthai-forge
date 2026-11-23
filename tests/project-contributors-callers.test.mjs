@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A person can write through a linked team (Item b6588425, docs/access.md#teams), so a direct read of the
 // projectContributors table sees only direct writers. Authorization and listings of who may work resolve the role
 // through projectRole/hasWriteRole (convex/projectRole.ts), which adds the team lookup only after the direct grants

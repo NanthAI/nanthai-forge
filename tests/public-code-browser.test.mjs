@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Public read-only code and history (Item 4c164732), the real screens signed out on synthetic cached public reads: from
 // the public project page's "Browse the code", a visitor opens folders, a file and the history with its receipts; every
 // read is one GET of the cached public route and nothing reaches Convex; no write control or Lane/Item link appears; a

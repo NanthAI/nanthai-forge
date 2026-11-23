@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Projects as real components with synthetic rows (Item 3d5d8839): the held project is the one first stop,
 // every row links to its project, the empty state offers Start and Import, and the list, the worst case and the empty
 // page pass axe with no sideways scroll at desk and phone width in both themes. Set FORGE_PROJECTS_SHOTS to a folder to

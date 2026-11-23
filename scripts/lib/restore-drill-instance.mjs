@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The restore drill's fresh local self-hosted instance (scripts/selfhost.mjs): CLI, admin client,
 // import completion and backend start. Every target is checked to be the local scratch instance.
 import { spawn } from 'node:child_process';

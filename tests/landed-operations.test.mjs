@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // edcb0fc8: the machine-local record of landed operations the CLI canary's wait step uses.
 import test from 'node:test';
 import assert from 'node:assert/strict';

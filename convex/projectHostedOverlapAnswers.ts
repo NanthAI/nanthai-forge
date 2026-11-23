@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { ConvexError, v } from 'convex/values';
 import { query } from './cliServer';
 import { OVERLAP_ANSWERS_RETIRED } from '../src/overlap-answers-retired';

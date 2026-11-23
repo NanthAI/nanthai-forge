@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A person's opt-in to full motion of the Forge mark over the device's reduced-motion setting (DESIGN.md "Motion
 // rules"; set in Settings → You). Kept in this browser only; the product never opts in for them. mark.css follows the
 // device setting by itself and reads `.mk-motion-full` on the root.

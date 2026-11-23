@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { createContext, Fragment, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Key, Menu, Sheet } from '../ds';
 import { hrefFor, placeSections, projectPlaces, type AppRoute, type ProjectPlace } from './paths';

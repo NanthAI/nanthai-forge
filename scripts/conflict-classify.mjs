@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Classifies a conflicted file (base, left, right bytes) by what a declaration-level or
 // import-block-aware merge could have done with it. Measurement only: nothing here merges,
 // and it never proves independence. Ambiguous shapes (unnamed statements, reordering,

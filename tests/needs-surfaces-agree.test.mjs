@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 9b9057a9 (owner, dev site, 2026-11-23): one held Lane was "Needs you · held, why not reported" on the flow and the
 // Lanes page, "Nothing is held" in the Now headline, 0 in the top bar and nothing on the Held page. Every surface that
 // says a Lane is held or waits on the reader now takes one rule: needs/count.ts (`needsCount`, `needsYouLanes`) decides

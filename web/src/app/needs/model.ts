@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me, as data (Items 9e748e41, 12fde646, 48049998): what waits on the reader comes first, longest held first,
 // one row per held Lane that waits on a person (count.ts `waitsOnPerson`) plus questions for the reader, so the count
 // is the top bar's "Needs you" number; held Lanes that ask nobody become FYI rows naming who acts next; requests asked

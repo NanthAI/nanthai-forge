@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 export type LineEdit = { start: number; end: number; lines: string[] };
 
 /** Myers shortest edit path within a distance cap and a step budget (shared across calls). */

@@ -33,7 +33,7 @@ Answers come from PRODUCT.md, DESIGN.md, README.md, docs/why-forge.md, docs/stat
   - Forge builds itself: about 2,200 tests in 315 files; the hosted dogfooding project held 11,186 objects and 478 Views at last live push; recovery drill restored in 9 s on 2026-10-24.
 - **Not available, must not be invented.** Customers, logos, testimonials, pricing, benchmarks beyond the above.
 - **Screenshots or video.** None in the repository I can read; the hosted app renders them on demand. The mockup uses a typed HTML facsimile of a Now panel, labelled as an example, with Lane titles modelled on landings on Forge's own main.
-- **Guarantees.** No commercial guarantee exists. Honest risk reversals that are true today: Apache-2.0 open source, no account for the preview, Git in and out so the repository stays portable, execution stays on your machines.
+- **Guarantees.** No commercial guarantee exists. Honest risk reversals that are true today: AGPL-3.0 open source, no account for the preview, Git in and out so the repository stays portable, execution stays on your machines.
 
 ## Constraints
 

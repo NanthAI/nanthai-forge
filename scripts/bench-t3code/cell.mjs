@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One cell, with the automatic infrastructure rerun (Item 368ac54f, guard 5). Same arguments as
 // run-cell.mjs (any --attempt is replaced):
 //   BENCH_ROOT=... node scripts/bench-t3code/cell.mjs forge 10 1 --dry --scenario withdraw-join

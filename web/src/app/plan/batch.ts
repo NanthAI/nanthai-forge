@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Plan screen's batch call (Item 65b0e706): one projectPlanningBatch:apply per action, retry-safe by its operation
 // id, with the one Undo built from the reply (src/planning-batch.ts). Full Items and comments for a merge or split are
 // read once at the moment of the action, never subscribed.

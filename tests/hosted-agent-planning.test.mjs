@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { meterReads } from './hosted-read-set.mjs';
 import { indexedRecord } from '../dist/work-hosted-index.js';
 import { installPlanningSearch } from './planning-search-fixture.mjs';

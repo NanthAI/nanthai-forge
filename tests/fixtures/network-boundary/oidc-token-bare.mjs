@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident replay (Issue 06cfc7b7, 2026-11-02): an OIDC token read with a bare
 // fetch and its own AbortSignal.timeout ran outside the shared helper, so the
 // helper's typed transient errors and bounded retry never applied to it.

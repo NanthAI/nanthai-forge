@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The backup calls of Settings > Project, moved from the old project screen without a new
 // server call: download a stored checkpoint, reconcile or resume an upload, and store a chosen archive as this
 // project's backup. Each press does its own work; nothing runs on open.

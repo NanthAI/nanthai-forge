@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One finite, read-only snapshot. Never imports the live driver, config, credentials or IO.
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

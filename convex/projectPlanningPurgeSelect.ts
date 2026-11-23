@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Purge executor, read-only half (Item 4c9e961e, purge Lane 2): the preflight and the first-step selection. Both
 // read; neither writes. Selection pages the project's Work journal in revision order and keeps only the rows that
 // write to the Item (any of its ids), with the digest of the facts each will hold once purged.

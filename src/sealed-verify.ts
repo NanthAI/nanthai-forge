@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { ForgeError, invariant } from './errors.js';
 import { equalBytes, forgeSecretId, framedHash } from './sealed-format.js';
 import { inboxKeys, unwrapSetKey, verifyBytes, type KeyWrap } from './sealed-keys.js';

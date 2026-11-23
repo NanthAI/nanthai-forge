@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Failed check screen's presses. Each reads or writes only when pressed: retry and undo reuse the existing
 // retry-safe landing client (one operation id per press, kept across a lost reply), and the log is read once per press:
 // while the check runs, again on "Read newer lines", never on a timer and never while nobody presses.

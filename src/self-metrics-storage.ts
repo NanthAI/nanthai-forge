@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { MetricRecords, MetricPeriod } from './self-metrics-types.js';
 import { observations, time, ratio, during } from './self-metrics-joins.js';
 /** Growth compares retained physical-byte observations, never forecasts missing scans as zero. */

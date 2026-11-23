@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Design 5.5 re-key, as one all-or-nothing build: a new random set key, every live value re-sealed under it
 // with its version, epoch, author, signature and `r` kept, a wrap for every remaining recipient and the next
 // head. Pure: the caller publishes the transition, head, ciphertexts and wraps in one mutation.

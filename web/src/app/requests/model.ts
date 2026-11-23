@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A bulk permanent-delete request as the owner reads it (Item 7456856f), as data: the page sentence, the rows with their
 // state, what goes for good and whether the typed count confirms. Pure; the page supplies the live read
 // (projectDeleteRequests:read) and the owner's choices (projects kept out, the number typed).

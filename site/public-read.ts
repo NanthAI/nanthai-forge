@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** The cached public read (Items 6a60e89a, 875a4b60, 8947a779). Signed-out visitors and crawlers of public pages are
  * served from the site's edge cache: a hit makes no Convex call. On a miss this asks the backend's public route once
  * (convex/publicHttp.ts) and the edge keeps the answer for the period the backend allows (s-maxage), so the backend is

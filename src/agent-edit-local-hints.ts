@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Forge teaches its working rules at the moment they matter (Item 6b7d5a79): the first-write hook says when an
 // edit lands in the project's main copy, during a live landing, or after a long unsaved stretch. Local reads only
 // (a marker stat, the machine's Lane registry file and one small cache entry): no server call, nothing at idle.

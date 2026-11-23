@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { sourceSeedPageSize } from '../src/source-object-window';
 import { assertSourceStateSize } from '../src/source-state-size';
 import { v } from 'convex/values';

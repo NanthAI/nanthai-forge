@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Core-claim incident 10d253c6 (2026-11-10, one-client slice 1): a 130-path deletion Lane took 10
 // land operations and about 2.5 h stranded. Its pre-queue check held no queue order, small Lanes
 // kept landing into the three hot files it rewrote, and each passed check then failed

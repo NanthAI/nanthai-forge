@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The zoo conformance suite (Issue 70a9bd2f): one command per step over scripts/bench-zoo/catalog.json.
 //   node scripts/bench-zoo/suite.mjs provision ZOO_ROOT [--repos a,b]   forks/creates the public NanthAI repos, writes zoo.json
 //   node scripts/bench-zoo/suite.mjs verify    ZOO_ROOT [--repos a,b]   plain GitHub full run of every check (no Forge)

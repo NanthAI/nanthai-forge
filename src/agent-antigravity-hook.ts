@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Antigravity's first-write hook (Issue c6615b66). Its hook contract differs from Claude Code's
 // (bundled docs `agy-customizations/docs/hooks.md`, confirmed with a test hook under `agy -p` and
 // `agy acp`, CLI 1.5.13):

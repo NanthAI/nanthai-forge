@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What a cell's result.json counts as (Item 368ac54f, guard 5). A cell stopped from outside (a
 // runner limit: the background command's timeout, a signal, or a process gone without a result)
 // is void-infrastructure: the bench failed to run it, the product did not crash it. It is rerun

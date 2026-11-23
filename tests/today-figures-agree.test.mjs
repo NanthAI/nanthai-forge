@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Today's figures agree (Item 8d21cc9e): on one fixture day, Needs me (the Flow figures), Stats (today so far), the top
 // bar and `nforge status` report the same landings today and the same main state. The owner saw Stats at 95 beside
 // Needs me's 129 because today's Stats row was rewritten only by a Stats open (it dated from 13:00 UTC), and "main red"

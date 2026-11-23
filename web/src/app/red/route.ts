@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One main red's address (Item ae068e0c): /<handle>/<project>/code/red/<sequence>, the audit event's sequence. Kept
 // apart from the screen so the shell can match it without loading the screen's chunk.
 import type { ProjectRoute, ScreenRoutes } from '../screen-route';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure helpers of the zoo conformance suite (Issue 70a9bd2f): the catalog, the files a fork needs,
 // per-path verdicts, timings against git, the result-to-commit gap, workspace prep and the baseline
 // comparison. No repository-specific branches: every rule reads the catalog or the RESULT shape.

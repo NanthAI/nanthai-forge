@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Common credential syntax. Shared by the output redactor (masks them) and the board post
  * scanner (src/board-text.ts, rejects them). No Node globals: Convex V8 imports it. */
 export const CREDENTIAL_PREFIXES: readonly string[] = [

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Shared Intent metadata is also validated in the Convex non-Node runtime.
 import { z } from 'zod';
 import { digest } from './state/hash.js';

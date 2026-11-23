@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Synthetic names and public handles only. This entry is never a production Vite input or an app route.
 import { createRoot } from 'react-dom/client';
 import { useState } from 'react';

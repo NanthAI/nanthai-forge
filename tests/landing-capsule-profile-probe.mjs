@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Isolated packer qualification (the V8 action's handler, run here under Node for RSS): V8 transaction replies come from a production-handler
 // fixture transcript, so its DB fake/import heap does not get counted as action memory.
 import assert from 'node:assert/strict';

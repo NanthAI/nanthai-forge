@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Device sign-in start and renewal through the site (Item b6588425). Cloudflare reports the client address in
  * CF-Connecting-IP; this forwards only its keyed hash (src/client-hash.ts) with the site's device key, and the backend
  * charges that visitor before its deployment budget (convex/visitorBudget.ts). The address is never stored, logged or

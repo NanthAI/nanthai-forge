@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Who approves landings: the one acceptance setting Getting started asks about once and Landing and checks shows. A
 // write changes only `acceptance.mode` (the rest of the policy stays as it is), compare-and-swaps on the policy the
 // reader saw, and keeps its operation id until the server answers, so a retry after a lost reply records one change.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Lexical helpers for the module graph (src/module-graph.ts): blank comments and string literals
  * while keeping every offset and newline, so line-anchored patterns stay exact. Syntactic and
  * approximate by design: a construct it misreads adds edges (over-selects); it never removes one,

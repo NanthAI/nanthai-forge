@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Archive and Deleted (Item 4c9e961e, DESIGN.md rule 18): two places an Item can be sent and come back from. Archive
 // hides it from every view and count and keeps its links with no time limit; Deleted hides it the same way. Each
 // action, and each way back, is one ordinary put through the batch call, so it is retry-safe by operation id, adds

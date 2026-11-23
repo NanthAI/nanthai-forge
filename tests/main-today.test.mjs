@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The top bar's main figure (Item 32e8de50): landings on main today and the share that landed first try, judged on
 // the landing's own write (docs/concepts.md#first-try). A Lane whose submission ended without landing is marked on the
 // patch that end already makes, the next submission's binding carries the mark, and its landing counts as not a

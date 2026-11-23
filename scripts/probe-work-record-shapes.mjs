@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Read-only: no exchange preparation, owner lock, publication or network calls.
 // Build first. --legacy reproduces the old exchange validator on current records.
 import { WorkStore } from '../dist/work-store.js';

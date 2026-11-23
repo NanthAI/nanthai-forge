@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // `tick-planning-item` (Item 66667155): tick one Done-when checkbox and post its evidence as a decision comment, in one
 // call. Composed from the existing put and comment writes, so no server change: the tick is a versioned put of the body,
 // and a version race (ITEM_CHANGED) re-reads the Item and re-applies only this line. Loaded only by that command.

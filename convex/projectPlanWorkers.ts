@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Who is working on the plan now (Item d3357f40): the open Lanes with activity in the last 48 hours on the Intents the
 // Plan asks about (its in-progress Items and their first two follow-up Intents), for the Owner column when an Item has
 // no owner. One call: per asked Intent one indexed range on the slim presence rows (projectHostedPresence

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Fork pull request heads (Issue f7793473, GitHub's approve-and-run norm). A fork head is read and
 // composed like any PR head, so the owner can review its Lane; its check-only run starts only after
 // a project owner grants it through the Lane approval request (fe5bea80 request/decide path, the

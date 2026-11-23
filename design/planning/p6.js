@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Mockup-only: theme toggle. ?theme=dark|light, remembered in localStorage.
 (function () {
   var q = new URLSearchParams(location.search).get('theme');

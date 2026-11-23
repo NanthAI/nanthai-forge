@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { planningRecordTable } from './projectWorkRecordTables';
 import { v, type Infer } from 'convex/values';
 import type { QueryCtx } from './_generated/server';

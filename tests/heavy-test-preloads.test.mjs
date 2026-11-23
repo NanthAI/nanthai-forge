@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Friction c804f164: a focused `node --test` run left out the project's test preload and failed only
 // on that machine. Friction dfb2a8d6: `nforge heavy sh -c "npm run build:core && node --test …"` ran
 // the whole build and only then failed inside the test. Heavy refuses both before any work, naming

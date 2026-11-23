@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Project (Item 966cb821): the project's facts, rename, and Move to trash. One read of the project per page
 // open (a one-off query, read again after a rename); each action is one retry-safe mutation; nothing runs while idle.
 // Trash and restore live in Account > Projects (SPEC-01-trash): a trashed project is closed to everyone.

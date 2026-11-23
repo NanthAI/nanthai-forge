@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Where "who did it" leads (Item 41514fee): a handle opens the person's page, a run name opens that run's page in the
 // project the row belongs to. Pure: the ds Who takes these as props, so the design system never imports app addresses.
 import { AGENT_CLIENT, isAgentSlug } from '../../../src/agent-slug';

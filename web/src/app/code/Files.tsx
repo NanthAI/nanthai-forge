@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Files: the tree, the file and what touched it, at main or at one exact State (`?at=`). One fixed frame (DESIGN.md
 // rule 3): the tree drives the file, the file drives the context. Each region loads and fails on its own.
 import { useState } from 'react';

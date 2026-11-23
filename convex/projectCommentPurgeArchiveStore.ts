@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Convex half of one archived comment's purge (Item b6588425 line 2c; the action is
 // convex/projectCommentPurgeArchive.ts): where the purge stands, its last step (the segment rewrite published and its
 // old objects deleted, the live copies settled, the purge entry and audit row marked done), and a failure's record.

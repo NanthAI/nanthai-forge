@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 export const backfillKinds = ['objects', 'backups', 'proposals', 'archives'] as const;
 export type BackfillPin = {
   kind: (typeof backfillKinds)[number];

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The backups regions of Settings > Project as one view over what the page read (Item 966cb821). Rows, keys, notices and
 // states are the design system's; the words are the old project screen's, tightened.
 import { Key, Region, Row, State } from '../../ds';

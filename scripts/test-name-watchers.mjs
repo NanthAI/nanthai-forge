@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Tests that watch names a change introduces. An import graph cannot see a test that hooks
 // `fs.open` on paths matching /(checkout|delta)-/ while the changed module only builds those
 // names with mkdtemp: the two share a literal, not an import. Parse repository bytes only.

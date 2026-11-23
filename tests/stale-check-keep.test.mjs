@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Keep the run (Item fa2c1383): the pure main-move rule. Every cancel cause and every keep cause, in
 // strict and fast, plus the guards the rule must hold: it keeps every run today keeps (except under a
 // coverage mover, an intended tightening), it never claims a carry that the strict or fast proof path

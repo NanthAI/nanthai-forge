@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Queue this command as a recorded Forge check on the historical View being measured.
 // Its explicit argument is the immutable comparison, not paths from a mutable checkout.
 import { execFileSync } from 'node:child_process';

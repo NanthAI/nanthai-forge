@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Cloudflare Worker for Git packs over the Convex response limit (Issue 09367fb2;
  * docs/git-serving.md). Deployed as the compiled dist/git-byte-worker.js, so it imports
  * nothing. It forwards each Git request on a signed session path to the configured Forge

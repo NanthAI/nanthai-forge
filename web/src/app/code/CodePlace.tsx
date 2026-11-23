@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Code place (Items 90e5bc9c, 3968a655): what landed on main, each with its receipt, and the files at main or at
 // any exact State. Loaded with its route. The views take the project, its main and the address, and nothing about
 // who is reading, so the signed-out public pages (4c164732) mount them under their own route.

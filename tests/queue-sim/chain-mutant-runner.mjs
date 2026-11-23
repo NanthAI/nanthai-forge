@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Child of hosted-landing-queue-sim.test.mjs: one review e7137e30 finding-4 scenario
 // (FORGE_CHAIN_SCENARIO) on its pre-fix code (its CHAIN_MUTANTS entry, applied by
 // FORGE_TEST_SOURCE_PATCHES). L1 must name every stranded follower; the parent asserts the

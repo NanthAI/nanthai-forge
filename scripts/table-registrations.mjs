@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Collect every onboarding omission before failing; keep the existing registries authoritative. */
 export function tableRegistrationFindings({ tables, placement, purge, budgets, owners = [], helpCurrent }) {
   const findings = [];

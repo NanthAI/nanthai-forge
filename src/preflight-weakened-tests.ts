@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Preflight and land side of the weakened-test detector (Issue 11901a0c). Local and static: the base
 // State and blobs come from this machine's object stores, the head bytes from the Lane folder; no
 // server call, no test run. A flag never fails the Lane; a reason line in the landing message clears it.

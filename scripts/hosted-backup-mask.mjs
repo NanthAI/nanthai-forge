@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Actions already masks exact secrets. Also mask the fragments/endpoints derived
 // from them before either credential-bearing command runs. Never emit these elsewhere.
 export function backupMasks(env) {

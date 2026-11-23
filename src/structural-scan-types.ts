@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** What a declaration scanner (Ruby, PHP, Elixir; src/structural-scanned.ts) reads from one file. */
 export type ScanDeclaration = { name: string; kind: string; exported: boolean; from: number; to: number };
 /** A use of another file or name: `paths` are repository-relative file candidates (first captured

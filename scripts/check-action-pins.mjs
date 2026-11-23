@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Workflow steps run third-party code with the job's token and permissions. A tag can move, a commit
 // cannot: every `uses:` names a full commit SHA and keeps the tag it was taken from in a comment, so
 // an upgrade is a reviewed edit of both. Local actions (`./path`) are part of the checkout itself;

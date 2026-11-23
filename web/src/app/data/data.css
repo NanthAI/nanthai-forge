@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* Account > Your data (loaded with its route): one row per kind of thing Forge holds, the take-out rows, and the
    deletion's exact before-list with its typed confirmation. Long names wrap, never the page. */
 [data-ds] {

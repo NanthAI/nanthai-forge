@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 16093ed1, in a real browser on synthetic worst-case data (tests/browser/setting-change.tsx): a held settings
 // change never scrolls the page sideways at desk or phone width, no direction override or zero-width character reaches
 // the page as an acting character (each shows as a marker), and axe is clean in both themes, on the approve page's

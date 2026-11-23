@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The switch to the root (Item b0704959): every row of the route coverage audit (comment 91a32d6c on Item 84125787),
 // and the earlier /- form of every app address, reaches its address at the root. Each request goes the way the site
 // serves it (Item ef6aa22a): a static file first ("/" is web/index.html), else the site Worker (site/worker.ts: the

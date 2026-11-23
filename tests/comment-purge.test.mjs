@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item b6588425 line 2b: the operator's purge of one reported planning comment removes its words from every Work
 // store and copy (journal row, index records on every partition, work-store versions and head, attachments), keeps
 // the Item and its other comments, leaves a tombstone, is idempotent by operation id, is audited, and is what the

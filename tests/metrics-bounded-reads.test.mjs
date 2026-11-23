@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Bounded metrics reads (Item 686ecdde, comment on the metrics line): on 2026-11-22 the agent `metrics` action made
 // 1,496 `projectSelfMetrics:page` calls and read 624 MB of database in one hour. One builder command with a 2 h window
 // read 27 calls and 10.2 MB, because the default horizon was a 7-day window plus 2 days of context, and every

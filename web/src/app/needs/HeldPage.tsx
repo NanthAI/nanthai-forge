@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Held, redone or refused (Needs me): everything Forge held, redid or refused, newest first, with the Lanes held now
 // at the top of it, whether they wait on the reader (those are decided on Needs me) or on their agent. It reads what
 // Needs me reads (projectNeedsMe:read, projectNeedsFyi:read), so the two pages, the top bar and the count say one

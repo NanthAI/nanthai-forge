@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Friction 28e84c06 (Item 67771ca6): while the GitHub mirror was stopped a builder polled GitHub for
 // 25 minutes for a landing that could not arrive. A landed reply now names the stopped mirror; a
 // pending reply reads no mirror row.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Who did it (Item 41514fee): a row shows a person by handle, or an agent run with its declared model ("model not
 // declared" when it declared none) and its person; each name leads to the person page or the run's page; a viewer
 // who may not follow links (a public page, a row that is itself a link) gets the same words as text.

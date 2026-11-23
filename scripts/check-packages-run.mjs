@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Per-ecosystem package runner (docs/workflows.md#check-command-scope). On a scoped hosted check,
 // Forge writes FORGE_CHECK_PACKAGES (the affected packages and each ecosystem's own test command:
 // go test, cargo test -p, gradle :mod:test, pytest paths, workspace npm/pnpm/yarn tests, dotnet test)

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { printedReceipt } from './receipt-slim.js';
 import type { ExactConflictNotice } from './hosted-conflict-notice.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';

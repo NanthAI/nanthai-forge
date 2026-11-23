@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Report abuse (Item b6588425 line 2): one sheet for a project, a message, a comment or an account. The report goes to
 // the Forge operator, not to the project; it is one write (convex/abuseReports.ts). One operation id per open sheet, so
 // a retry from it is the same report.

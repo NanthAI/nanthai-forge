@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Report abuse (Item b6588425 line 2). A signed-in account reports a project, a message, a comment or an account; the
 // report is one row in the operator review queue, charged to the shared account limiter (10 / 30 a day), and alerts
 // the operator. The operator opens the queue and reviews each report: suspend the account, purge the content or

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A declared split survives raw edits (Item 491ddd77). The docs/agents/workflow.md split took 6
 // rounds on 2026-11-19: every raw edit of the old file that landed while the split waited sent it
 // back for a manual fold. Composition now moves each raw hunk into the fragment that holds those

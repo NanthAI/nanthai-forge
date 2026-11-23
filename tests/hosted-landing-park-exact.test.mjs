@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 687d1eda: main red is not the Lane's failure, past the admission check (switch
 // FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED, off by default). A cohort's shared run or one entry's own
 // exact check that fails only on main's red tests parks its entries, then re-lands them on green.

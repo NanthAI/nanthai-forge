@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue df06081d (owner 2026-11-22): a device's folder grant writes only inside its folders of one project, ends
 // 7 days after its last write or 30 days after it was given, renews on use at most hourly, and is refused once ended.
 import test from 'node:test';

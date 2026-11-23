@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The state word of an Item's Lane on the Plan board (Item d3357f40, mock 02-plan-board: "Checking", "Waiting its
 // turn", "Needs you" with its reason), from reads the page already holds, never a read of its own: the shell's Needs
 // me read (held and parked Lanes by Intent, needs/model.ts), the shell's line feed (each Lane's stop by Lane id) and

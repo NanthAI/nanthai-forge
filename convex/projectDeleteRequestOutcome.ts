@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Where a project's permanent purge ends or stops, record that outcome on the bulk-delete request that started it
 // (Item 7456856f), so the owner's page and `--wait` see per-project progress from one row. Kept apart from
 // projectDeleteRequests so the purge path does not import the request module.

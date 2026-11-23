@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Stats periods (Item a61d3c91): a read covers 1 to 92 real days, agents fold into four fixed first-try buckets
 // (boundaries 100%, 75%, 50%), and a range reply re-aggregates only its own days into the part asked for: the head
 // (headline and days) or one fold (stops, agent buckets, months).

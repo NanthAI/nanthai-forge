@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Product-specific lint rules (Issue 8b7b97ce). oxlint loads this file through `jsPlugins` in
 // .oxlintrc.json and `npm run lint` runs it with the built-in rules, so it costs no extra walk.
 // Each rule names the incident it guards; docs/agents/lint-rules.md says how to add the next one.

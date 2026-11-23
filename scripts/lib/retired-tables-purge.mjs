@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { failure } from './hosted-durability-compare.mjs';

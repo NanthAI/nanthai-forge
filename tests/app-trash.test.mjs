@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Trash and Settings > Project as words (Items 8fba39a4, 966cb821, SPEC-01-trash): one row form per project phase from
 // src/project-phase.ts, "1 day left" never "1 days", soonest to go first, finished tombstones not listed unless this
 // visit deleted them, "by WHO" left out because the record does not store it, and the rename guard.

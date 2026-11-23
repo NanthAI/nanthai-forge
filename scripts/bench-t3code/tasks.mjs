@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // B1.5d task set: freeze tasks.json from saved PR metadata (offline, no network).
 // Usage: node scripts/bench-t3code/tasks.mjs RAW_DIR OUT.json
 // RAW_DIR holds pr-<n>.json (gh pr view: number,title,body,url,mergedAt,merge,author),

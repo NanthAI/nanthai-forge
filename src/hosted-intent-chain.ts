@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { digest } from './state/hash.js';
 
 /** Follow-ups after an Issue's first Intent landed (e4a71127). A planned Issue's first Intent shares

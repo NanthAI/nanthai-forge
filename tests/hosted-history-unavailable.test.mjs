@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Friction bae7e553: `history` on a project without stored history printed INTERNAL_ERROR; the server's
 // HISTORY_UNAVAILABLE code and message must reach the caller. Kept apart from the busy history file.
 import test from 'node:test';

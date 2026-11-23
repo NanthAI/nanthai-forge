@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item ff33e9a6: heavy admits by measured CPU, load and memory, not only a fixed count of slots. The
 // base slots (localHeavySlots) admit as before; extra "burst" slots open one at a time while the
 // machine has room, so a long one-core holder (a model check) no longer blocks test runs at low load.

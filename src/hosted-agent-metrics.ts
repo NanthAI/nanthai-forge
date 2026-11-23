@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { hostedAgentCommandSchemas, type HostedAgentAddress } from './hosted-agent-contract.js';
 import type { MetricQuery } from './self-metrics-hosted-pages.js';
 import { metricPeriod, metricsSurface } from './self-metrics-surface.js';

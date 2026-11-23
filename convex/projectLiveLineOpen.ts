@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Loose ends details (Item fc1831eb): the stored size a leftover-projects row shows, kept on the project's existing
 // live-line summary row (`size`). It is the sum of the project's projectStorageUsage shards, measured when the summary
 // row is already being written by a Lane's set-aside (at most once per SIZE_REFRESH_MS) and by the one-time backfill.

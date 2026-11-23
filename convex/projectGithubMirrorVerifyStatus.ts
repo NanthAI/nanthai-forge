@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { GithubMirrorApiError, type GithubRequest } from '../src/hosted-github-api';
 import { pullStatusContext } from '../src/github-pull-check';
 import { postPullStatus } from './projectGithubPullStatus';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Choosing the project's own CI file as the check that decides a landing (Item 0c9207b8), from the web. It writes the
 // same runner setting `configure-runner` does (provider "ci-status"), through the owner's existing setting mutation:
 // no placeholder values for a person to copy (the server derives the runtime and environment pins from the CI file),

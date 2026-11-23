@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A Markdown file in the Code reader (Item 8e847a17) is drawn by the safe renderer: no raw HTML or script runs, only
 // http(s), mailto and files of the same State can be linked, only files of the same State are asked for as images, and
 // a fenced block is handed to the colourer with its language.

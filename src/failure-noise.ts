@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure: runs in the Convex non-Node runtime and the CLI.
 /**
  * What a failed check names, and whether it was noise (Item 44f2b109). `nforge metrics ROOT --failures

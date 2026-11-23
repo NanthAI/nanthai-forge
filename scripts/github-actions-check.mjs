@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { childEnv, runnerEnvAllow, toolchainEnvAllow } from './child-env.mjs';
 // Shared executor for exported Forge snapshots and benchmark Git checkouts.
 import { existsSync, readFileSync } from 'node:fs';

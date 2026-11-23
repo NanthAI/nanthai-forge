@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Stable stored codes for dispatch, available to metrics without importing check requests or Work. */
 export const checkCause = {
   first: 0,

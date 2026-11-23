@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The registered sequence for an already set-up and qualified bench. Scheduling and resume
 // belong to drive.mjs; this entry point never sets up, qualifies or tears down resources.
 import { spawn } from 'node:child_process';

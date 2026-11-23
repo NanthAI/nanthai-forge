@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { ForgeError } from './errors.js';
 
 /** Git allows any path bytes except NUL and `/`; Forge stores UTF-8 paths only (Issue 6a0dd2e8).

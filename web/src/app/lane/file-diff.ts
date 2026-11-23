@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One changed file's body, read only when the reader opens it (Item 4bc460aa): one describe call names the exact
 // blobs' sizes and signs them, then the bytes come straight from object storage and are checked against their digest.
 // Nothing is read for a file that stays folded; a file over the drawing limit is named, never downloaded.

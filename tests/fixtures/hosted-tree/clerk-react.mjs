@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Test double for @clerk/react: a signed-in viewer named in globalThis.__forgeTree.
 import { createElement, Fragment } from 'react';
 const viewer = () => globalThis.__forgeTree?.viewer ?? { id: 'viewer', fullName: 'Test Viewer' };

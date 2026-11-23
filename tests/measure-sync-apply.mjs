@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Full local checkout, one changed path: compare ordinary State transfer with the live reply delta.
 // Setup is excluded. This helper uses synthetic bytes and never contacts a deployment.
 import assert from 'node:assert/strict';

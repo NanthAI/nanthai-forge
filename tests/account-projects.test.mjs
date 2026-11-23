@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident 2026-11-17 (Item 3d5d8839): the owner of a project with 276 newer removed (test) projects saw "No projects
 // yet": the owner list paged removed rows first and the screen filtered them out. Active projects must never sit
 // behind removed ones, and member projects belong in the person's list with their role. Review 5dccf92e: the list

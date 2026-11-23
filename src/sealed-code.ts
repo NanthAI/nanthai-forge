@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Design 4.13: the four-word code and two-word reply, for all four purposes. No IO or network call runs here (the
 // fresh-read check is an in-memory mark); transport and `nforge secret share` come later. One scrypt per side.
 import { randomBytes } from 'node:crypto';

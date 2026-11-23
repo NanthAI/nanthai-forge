@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Full public-mirror checks reuse Forge's selection, partition and Actions executor.
 import { benchmarkPlan } from './bench-landing-shard.mjs';
 import { runActionsCheck } from './github-actions-check.mjs';

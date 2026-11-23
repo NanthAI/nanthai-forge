@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 0f76b07e: after a sync conflict turns a Lane folder into its resolution Lane in place,
 // commands that still name the original Lane follow the resolution Lane instead of refusing
 // (HOSTED_CHECKOUT_REQUIRED, RESOLUTION_REQUIRED, LANDING_NOT_LIVE) or burning an operation id.

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Remove what `setup` created, and only that (the manifest BENCH_ROOT/setup-manifest.json).
 //   scripts/bench-t3code/teardown --dry            list what would go
 //   scripts/bench-t3code/teardown --live [--keep deps,meta]

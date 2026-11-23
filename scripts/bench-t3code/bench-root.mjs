@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The one bench folder rule: every bench script takes BENCH_ROOT from the environment, as an
 // absolute path, and refuses to run without it. There is no machine default, so a script can
 // never select a historical folder by accident (Issue 8c9b84fc). The folder holds the owner's

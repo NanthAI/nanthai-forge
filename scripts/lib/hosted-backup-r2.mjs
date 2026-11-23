@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { createHash } from 'node:crypto';
 import { presign } from '../../dist/r2-presign.js';
 import { networkFetch, networkTimeout } from '../../dist/network-fetch.js';

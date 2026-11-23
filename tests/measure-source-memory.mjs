@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // nforge heavy node tests/measure-source-memory.mjs OUTPUT [PAIRS=3] [SIZES=4000,29000,60000,100000,190000]
 // Offline only. Every provider action is a fresh process; never imports live credentials.
 import assert from 'node:assert/strict';

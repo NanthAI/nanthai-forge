@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me (Item 48049998) on synthetic data, through the real shell frame, screen, model and the folded Loose ends
 // body: `?data=busy` holds a protected-path approval and a question, with an agent's conflict, a refusal and a
 // person's own failed check under FYI beside landings and a settings change, plus Lanes parked for the reader (Item

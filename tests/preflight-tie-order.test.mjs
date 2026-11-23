@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 964e2d2b: tests that rank equally close to a change order by relevance and a stable hash,
 // never by file name, so adding a test file cannot move a relevant test out of the time budget.
 import assert from 'node:assert/strict';

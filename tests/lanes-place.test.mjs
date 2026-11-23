@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The rebuilt Lanes place (Items e317b6ea, 9e748e41 To read, eb0bbb94): the yard's counts are the shell line's
 // counts, "next" comes from the queue order, a count that lists fewer rows says so, and To read keeps read state per
 // account with a bounded page and an idempotent mark that Undo can take back. History (c613e6bc) replaced To read and

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 5dcfce75, preflight-miss fixes 3 and 4: when the protected tiers outlast the wall-time
 // budget, the files the clock stops must be the least likely to fail. The landing-check failures
 // preflight had selected but never started (9 between 2026-11-18 and 11-19) sat behind smoke and

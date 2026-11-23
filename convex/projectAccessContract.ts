@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The project access contract (Item b987e608; docs/access.md): three roles, and what each may do. Pure data, shared by
 // the server (convex/projectRole.ts resolves the role; each verb's enforcement point is listed in docs/access.md) and
 // the People and access screen, which shows the same answers. The screen never decides access: every verb is

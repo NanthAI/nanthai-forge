@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Shared shapes of the module graph (src/module-graph.ts). */
 export type ModuleLanguage = 'python' | 'go' | 'rust' | 'java' | 'kotlin';
 

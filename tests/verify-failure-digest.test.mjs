@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 58236de6: a failed static step names itself, its reproduction and its first error
 // in the 4 KiB tail the hosted job keeps, so CHECK_FAILED never says only `FAIL 4.8s check`.
 import test from 'node:test';

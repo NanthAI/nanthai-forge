@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Keep the run (Item fa2c1383): the recorded 11-17 window, extracted read-only (see `source.note`).
 // `paths` is the newline-joined path table in base64 (tests/keep-the-run-replay.mjs decodes it): the
 // test selector reads a file that names repository paths as their reader (scripts/check-path-scopes.mjs),

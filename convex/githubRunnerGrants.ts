@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Runner grants (Issue 77fa4412): one owner-proven permission for that owner's projects
 // to run hosted checks on a GitHub repository. configure-runner writes it with no
 // browser step and no operator setting: the GitHub App reads the repository's numeric id

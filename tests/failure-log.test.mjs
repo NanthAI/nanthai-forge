@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 2c420916: the failure log and on-demand health report. A failed landing appends exactly one bounded,
 // scrubbed row in the mutation that settles it (a replayed settle adds none); a landing that passes writes
 // nothing; the report counts by code in one bounded read; rows expire after 30 days.

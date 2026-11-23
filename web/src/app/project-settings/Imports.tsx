@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Project > Imported repositories (Item 966cb821): the analyses the person imported, each with Remove. Ported
 // from the old screen's ImportRemoveAction with the same call (importRemoval.remove). One page of 20 per open (a
 // one-off read); a removal is one retry-safe mutation, so its operation id is kept until it succeeds.

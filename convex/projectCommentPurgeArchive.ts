@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 'use node';
 // One comment's purge when its Work row is in the journal archive (Item b6588425 line 2c). Comment rows no longer
 // enter journal segments, but rows archived before that keep their command in an R2 segment. The abuse review

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Keep the run (Item fa2c1383): when main moves under a running whole check, decide whether the
  * run keeps going or is retired. A kept run's pass is never acceptance by itself: it either carries
  * through today's cross-head proof or becomes the basis of today's scoped recheck. So this rule

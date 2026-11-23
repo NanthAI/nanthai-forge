@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One landed Lane's own timing for its Lane page (Item a61d3c91): its time to main and stops, read from the
 // receipt and the landing row the daily Stats close reads, measured the same way (src/stats-estimate.ts). Two point
 // reads, only for a Lane that landed.

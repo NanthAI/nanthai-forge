@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Design 5.1 Automatic sharing, the client side. Pure: the joining device's request, the holder's choice of
 // which requests to wrap under the nine guards, and the one signed write that adds them. No IO.
 import { deserialize, serialize } from 'node:v8';

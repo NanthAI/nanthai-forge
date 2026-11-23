@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Did a cell reach the queue path a switch changes (Item 5e3c3a3c)? The role guard
 // (scenario-evidence.mjs) proves that each scripted move happened. This proves, from the
 // cell's own landing receipts only, that the queue then reached the path the switch changes.

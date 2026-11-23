@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { recordRoots } from './work-record-reachability.js';
 import { recordCollectionFence } from './work-record-staging.js';
 import { existsSync, lstatSync, readdirSync, unlinkSync } from 'node:fs';

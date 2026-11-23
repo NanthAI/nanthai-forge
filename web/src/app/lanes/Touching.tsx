@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Who is touching what (Item eb0bbb94): which Lanes collide or block each other. The pairs of Items whose Lanes saved
 // the same files (Item df1f2d46, Crossing.tsx), then who waits on whom drawn as chains (WaitChains.tsx, Item 8f94e5c3;
 // traced to the front of the queue, Item 9e748e41). The landing queue and who has what are Lanes > Open's and the top

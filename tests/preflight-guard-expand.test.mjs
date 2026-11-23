@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 13ea93bf, expand step: the guard-set wire fields and stored fields are accepted and kept by
 // today's readers and writers, before anything writes them (rollback safety; writers land next).
 import test from 'node:test';

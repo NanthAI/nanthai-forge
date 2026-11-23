@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Payment and details (Item 7f9a23e8): card summary, invoice details, the owner-set limit on extra landings and who
 // has billing. Card entry hands off to a hosted payment page: Forge holds no card fields or card secrets.
 import { useMemo, useState } from 'react';

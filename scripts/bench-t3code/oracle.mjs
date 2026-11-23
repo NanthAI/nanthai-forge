@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // B1.5d oracle: each task's own PR tests (original versions) plus the existing suites of
 // the check's scope (oracle.sh SUITES: five packages and apps/server/src/preview), run on the
 // exact final main of a cell, on GitHub Actions in the fork

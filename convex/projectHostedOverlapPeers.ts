@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Peer landing phase and ETA for overlap advice (Issue 1eb42254, D2). Read only for the few peers an
 // overlap read already names in its items: a Lane with no notices reads nothing here.
 import type { QueryCtx } from './_generated/server';

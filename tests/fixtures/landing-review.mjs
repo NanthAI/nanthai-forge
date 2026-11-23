@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 export const at = '2026-10-26T10:32:00.000Z';
 export const recipients = [{ id: 'r2', name: 'R2 browser bytes', agent: 'Codex' }, { id: 'retry', name: 'Upload retry', agent: 'Claude' }];
 export function landingRead(reason = 'checking', overrides = {}) {

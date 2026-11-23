@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Keep UTF-8 characters intact between byte-paged log reads. Offsets remain byte identities. */
 export function checkLogPage(bytes: Uint8Array, offset: number, total: number) {
   const text = new TextDecoder('utf-8').decode(bytes, { stream: offset + bytes.length < total });

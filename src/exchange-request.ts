@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { networkFetch, networkFailure, networkDeadline, networkCancellation } from './network-fetch.js';
 import { currentExchangeProgress } from './exchange-progress-hooks.js';
 import { ForgeError } from './errors.js';

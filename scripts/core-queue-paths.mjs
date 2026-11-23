@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Guard 4 (Item 6abdde40, incident 5e3c3a3c): a change to queue, admission, acceptance, check,
 // wake or scheduler code is core, whatever it claims to do. The 2026-11-17 wake cut was a small
 // cost saving that cost hours of landing time. The landing check classifies these paths by path

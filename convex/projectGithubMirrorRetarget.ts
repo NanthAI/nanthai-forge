@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The mirror repository changed (Issue 68361cd5, SM-E): re-point the queue row, off the landing
 // hot path. `projectGithubMirrors.repository` was written only at insert, so every later publish
 // became a failed job that never became active and no surface showed it.

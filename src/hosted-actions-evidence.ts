@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { checkPin, type HostedCheckRun } from './hosted-check.js';
 import { hostedCheckCallbackSchema, type HostedCheckCallback } from './hosted-check-evidence.js';
 import type { HostedActionsMapping } from './hosted-actions.js';

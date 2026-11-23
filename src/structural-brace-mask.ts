@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Comment and string masking for the Swift, Kotlin and Dart declaration scanner
  * (src/structural-brace-scan.ts). Block comments nest in all three; Swift strings interpolate
  * `\\(…)` (raw `#"…"#` ones `\\#(…)`), Kotlin and Dart `${…}`, Dart `r'…'` strings are raw. */

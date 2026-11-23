@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Two-way sync PR checks, light side (the heavy side is convex/projectGithubPull.ts): the
 // pull_request webhook, the composition and check-run completion hooks and the one settle path.
 // convex/http.ts and the compose, check and mirror stores reach only this module, never the

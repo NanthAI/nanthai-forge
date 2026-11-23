@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure helpers of the cross-ecosystem zoo run (Issue 85d26a8b). No repository-specific branches:
 // every choice is made from the file list, the ecosystem extension table or the receipt shape.
 

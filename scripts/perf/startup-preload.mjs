@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Counts the actual diagnostic entry graph, with no application imports in the probe.
 import { writeSync, writeFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';

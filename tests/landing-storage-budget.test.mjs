@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Per-table landing storage budgets (Item 491ddd77): one file per table so table-adding Lanes no
 // longer overlap on one shared fixture; readers keep budgets[scenario][phase][table].
 import test from 'node:test';

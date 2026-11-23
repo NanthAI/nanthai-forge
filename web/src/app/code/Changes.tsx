@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A landing read as its own diff (Item 8e847a17): the files it changed, each folded open to its hunks, unified or side
 // by side, with syntax colours. The receipt's "Read the code here" opens this first; "Browse the repo at this landing"
 // is the next step. It reads the receipt's changes (already read for the receipt: the answer is kept, so this view

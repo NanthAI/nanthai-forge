@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { presenceState } from '../../../src/presence';
 import { checkRunState, checkRunStatuses } from '../../../src/check-run-state';
 /** Visual status vocabulary shared by every cockpit surface. Colour is always paired with a glyph. */

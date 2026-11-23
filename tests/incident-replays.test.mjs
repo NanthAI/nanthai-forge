@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Regression ladder rung 3 guard: every registered incident replay stays a live test in the
 // normal suite, and the ladder doc lists every incident. Static reads only, well under 1 s.
 import test from 'node:test';

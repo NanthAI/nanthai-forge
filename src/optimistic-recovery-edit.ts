@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { editRecordProjection } from './work-record-edit.js';
 import { postAcceptRecords, preparePostAcceptRecords } from './post-accept-records.js';
 import type { WorkStore } from './work-store.js';

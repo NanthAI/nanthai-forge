@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 1eef1b43 line 3: a conflict sync, its resolve and a compose read the merge inputs they
 // need in overlapped waves (the merge base manifest with the tips, the draft and conflict page
 // with the saved head), and no object twice, on the real Convex handlers. Synthetic fixtures.

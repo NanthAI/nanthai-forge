@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One explicit manifest per public document; private output is never globbed into a package.
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';

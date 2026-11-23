@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { LandingIO, Pin } from './hosted-landing-client';
 import { verifyDownloadedOutput } from '../../../src/hosted-output-reader';
 import { invariant } from '../../../src/errors';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Code place's reads. History is one live page (it re-runs only when a landing is accepted) plus earlier pages
 // read once on request. Source reads are actions on exact States, which never change, so each answer is kept for the
 // visit and asking again costs nothing. No read waits on a timer, and an idle or hidden tab sends nothing.

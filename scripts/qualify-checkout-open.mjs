@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Synthetic, local-only real checkout qualification. Run under `nforge heavy`.
 // node scripts/qualify-checkout-open.mjs DIST[,CONTROL_DIST] OUTPUT [REPEATS=2] [COUNTS=1,6,12,10]
 // Environment (all optional):

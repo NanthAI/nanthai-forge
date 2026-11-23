@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Rebuilt screens (stage C), one lazy chunk per screen, so each loads with its route and never on first paint. Each
 // screen folder registers its own addresses in `<folder>/route.ts` (screen-route.ts); this file only collects them.
 // A place with no entry keeps its placeholder (Place.tsx).

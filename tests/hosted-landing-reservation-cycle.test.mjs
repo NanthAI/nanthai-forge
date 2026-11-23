@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Core-claim incident 43b51a5e, case 3 (dogfood 2026-11-19 17:54-18:24Z): a reservation holder
 // parked on an older entry whose wait chain led back to a waiter on its own reservation.
 import test from 'node:test';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The top bar on synthetic data through the real project frame. `?land=` sets today's landings on main,
 // and `?name=` can stress the space that the project picker leaves to the line.
 import { useEffect, useState } from 'react';

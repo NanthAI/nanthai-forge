@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Keep the run (Item fa2c1383): the recorded 11-17 window, where main moves threw running checks
 // away, replayed through today's sweep and the keep rule (tests/keep-the-run-replay.mjs). Recorded
 // queue waits are kept, so time to main moves only by the run wall the keep changes.

@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* Account > Projects strip and Trash (SPEC-01-trash, Item 8fba39a4). Layout only: keys, rows, regions, sheets, states
  * and type come from the design system. Time left is 232 px and Size 104 px so "deleted for good 5 Feb 2027" and
  * "not reported" stay on one line. */

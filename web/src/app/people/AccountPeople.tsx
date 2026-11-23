@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > People and teams (Item a841a76d): invitations waiting for the person, then the teams they own or are in,
 // each with its owner and members by handle. One bounded read per visit (convex/accountTeams.ts, 20 teams a page;
 // "Show more" reads the next page by its cursor), read again when the tab is shown and after the person changes a

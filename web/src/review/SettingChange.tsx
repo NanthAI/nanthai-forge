@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A held settings change, readable (Item 16093ed1): the summary line, a before/after row per changed field, each script
 // as a wrapped line diff, and the request as sent only behind Details. Used by the approve page and by Needs me. The text
 // is the agent's: drawn as text only (never as Markdown or HTML) and marked untrusted, with every hidden or

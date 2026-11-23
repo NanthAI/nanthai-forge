@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The line draws the stops and marks from one feed. The first delivery settles in place. Each stop opens its
 // station on Needs me.
 // The stops are the Flow picture's (Item 85f456c1): Editing, Saved, In queue, Checking; a Lane whose check passed

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Real billing components in the account frame, built once per test file with synthetic stub data and no session.
 import assert from 'node:assert/strict';
 import { chromiumLaunchOptions, settleBrowserPage } from './browser-runtime.mjs';

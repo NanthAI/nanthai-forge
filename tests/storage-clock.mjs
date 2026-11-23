@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 const clocks = new WeakMap();
 
 /** Start on a fixed UTC day with ISO stamps and scheduler time on the same clock.

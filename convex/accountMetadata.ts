@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Stable metadata bytes only; never accepts a credential or source export. */
 export function metadataBytes(value: unknown): string {
   function order(v: unknown): unknown {

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The public page's signature, Threads: main is one vertical line on the left, Lanes flow into it from the right as
 // thin threads, and the trunk gains a layer below every landing. Hot orange is work in progress, a hollow amber head
 // a held Lane, a dotted tie an overlap, green the moment of landing, ink is main.

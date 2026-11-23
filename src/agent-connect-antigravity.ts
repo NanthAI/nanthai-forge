@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // `nforge connect antigravity` (Issue c6615b66). Antigravity keeps MCP servers and hooks only in the
 // user config, so connect writes Forge's own keys there and nothing else: the `forge` and
 // `forge-coordination` MCP servers and the `forge-first-write` hook. One backup and one undo cover

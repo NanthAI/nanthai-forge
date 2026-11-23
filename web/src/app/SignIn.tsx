@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Sign in on Convex Auth (Item de67c77d; docs/development.md "Convex Auth core beside Clerk"): one handle field that
 // signs in with a passkey (or creates the account and its passkey for a new handle), and GitHub. After a GitHub
 // sign-in with no passkey yet, the next page offers one (FirstPasskey). The old Clerk screens stay until removal.

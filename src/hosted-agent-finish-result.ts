@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { checkTerminal, checkUnsuccessful } from './check-run-state.js';
 import { landingStateField, type LandingRecord } from './landing-state.js';
 import { orderWaitOf } from './hosted-wait-line.js';

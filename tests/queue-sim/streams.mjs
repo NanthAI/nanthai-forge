@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Mixed landing streams for the queue sim (Items 1018d0f8, 273650ab): the same stream for every arm,
 // a measurement run (doomed-check-shapes.mjs) and a regression replay (hosted-landing-wait-circle).
 const risky = i => `.github/actions/w${i}/action.yml`;

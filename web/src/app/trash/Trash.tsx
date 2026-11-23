@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Projects > Trash (Item 8fba39a4, SPEC-01-trash): the projects the person moved to the trash, soonest to go
 // first, with Restore, Delete forever and Empty trash. One bounded read per visit (projectBackups.list, removed only, 50
 // rows a page), read again when the tab comes back into view: no subscription, no polling, idle 0. Each action is one

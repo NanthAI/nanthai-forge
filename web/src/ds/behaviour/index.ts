@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The behaviour layer: the only folder that imports the headless library (scripts/ds-build-guard.mjs). It is loaded by
 // ds/layer.ts on a route or a first press, plus one idle fetch, and never in the first-paint chunks.
 import './layer.css';

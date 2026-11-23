@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The setup read behind Getting started and Landing and checks (convex/projectSetup.ts): facts from rows that already
 // exist, with who and when, and nothing for a reader who cannot open the project.
 import test from 'node:test';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Invitation email enablement gates (Item c6629fda): P1-02 and F-04, a suppressed send (recipient block or removal)
 // shows the inviter the same outcome and settles at the same time as a real send; P1-03, inviter and resend limits
 // refuse, while the recipient and deployment caps keep the invitation pending with its mail not sent and a blocked

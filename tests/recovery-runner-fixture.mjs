@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { hostedRecoveryFixture } from './recovery-hosted-fixture.mjs';

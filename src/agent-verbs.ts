@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { lifecycleVerbs, landSaveForm, promotedVerbs } from '../scripts/agent-verb-forms.mjs';
 export { lifecycleVerbs };
 import { invariant } from './errors.js';

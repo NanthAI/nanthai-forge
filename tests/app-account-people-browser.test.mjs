@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > People and teams as real components with synthetic rows (Item a841a76d): teams list members by handle,
 // only the owner's teams offer Add and Remove, the empty state offers Start a team, and the list, the worst case and the
 // empty page pass axe with no sideways scroll at desk and phone width in both themes. Set FORGE_PEOPLE_SHOTS to a folder

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 41a0df87 "Team removal": a team change that takes write access away marks the writer's sealed entries the
 // same way a direct removal does (design 5.5, docs/security.d/sections/1220-sealed-removal.md), and never marks a
 // writer who still writes through a direct grant or another write team. Real team, team-access, account-cleanup and

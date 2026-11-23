@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Design-system class-name clash check (Issue e2347b1c). A page or mock stylesheet that names its own thing
 // with a class the design system (web/src/ds/**) already defines gets the system's rules too: a two-sided diff
 // collapsed into the split bar's flex row, rows took a 64 px column, messages became 8 px marks. Static and

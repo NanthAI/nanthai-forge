@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Explicit recovery only: retain the active cursor, then one current-main catch-up. Never on landing.
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';

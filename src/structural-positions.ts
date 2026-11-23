@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { Position } from './types.js';
 
 /** Offset to 1-based line/column (UTF-16 code units) for one text, by binary search. */

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Phase split of one hosted `sync` in the calling process (friction 710f9028): local clock
  * reads only, no I/O and no extra calls. Each step is "from the previous mark to this one":
  * `settle` finishes this client's unfinished save (`save`: resolve's own save and its wait),

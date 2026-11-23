@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Guard (Issue 63d241db, audits 1bb0d8e6 and 875a57cc): no new Forge-only or JS-only fast path in product code. Every hit of a
 // literal that hid one before must be listed in docs/forge-only-rules.md with why and what other
 // repositories get; a new hit, a changed count or a stale row fails the build.

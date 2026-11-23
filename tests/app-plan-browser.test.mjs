@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Plan screen's views and bulk bar (Items e0a23825, 65b0e706) as real components with synthetic rows: the view
 // lives in the address, list / tree / board show the same rows, only ticked rows change, a batch reply names a row
 // changed meanwhile and offers one Undo, and every state passes axe with no sideways scroll at desk and phone width in

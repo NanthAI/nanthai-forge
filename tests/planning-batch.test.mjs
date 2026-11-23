@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Backlog batches (Item 65b0e706, docs/planning.md "Batches"): one action on many Items is one retry-safe call with
 // per-Item results and one Undo; split and merge are batches too.
 import test from 'node:test';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Read-only code and history of a public project for signed-out visitors (Item 4c164732), served by the cached public
  * route (publicHttp.ts): a cache hit never reaches Convex. Addresses carry everything in the path, in lower case, so the
  * site function's canonical form keeps them (file paths travel as UTF-8 hex):

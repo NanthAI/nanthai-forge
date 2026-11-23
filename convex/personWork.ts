@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A person's planning work and newest actions (Item 6a251b23; docs/people.md), read from records that already exist:
 // every planning command (put-planning-item, comment-planning-item) writes one Work `change` row in
 // projectCoordinationEvents (actor, time, action), and its command is kept in projectWorkEvents or its retained body.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Gate B2 (Item 14314add) M3: ending one device's sign-in from elsewhere, or removing it, marks that sealed device
 // alone, so a lost laptop is removed and re-keyed on the next owner write and its rotate list is printed. M1: only an
 // owner device removes another account's entry, marker or not. Real sealed, marker and device-credential Convex

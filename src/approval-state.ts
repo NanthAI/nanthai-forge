@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /**
  * What an owner approval request is and where it stands (SM-D, machine M3). One table holds three
  * kinds of request: a Lane approval (holds that Lane's landings), a fork pull request run request

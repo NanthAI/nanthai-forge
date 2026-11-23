@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item c63c2171: an agent's `nforge github connect` appears as a Forge-owned decision in the agent's words, with
 // an approve link the CLI prints. The owner person allows it (then authorizes on GitHub) or declines it (the
 // connect ends). A person's own connect asks nothing extra.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings / People and access > Teams (Item b6588425, line 4d; docs/access.md#teams). The owner sees the teams linked
 // to the project with their role, and links, changes or unlinks one. One-off reads, no subscription: the links
 // (projectTeamAccess.list, at most 50) once when the owner opens the screen and once after each change, the owner's

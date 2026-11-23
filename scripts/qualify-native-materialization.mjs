@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // node scripts/qualify-native-materialization.mjs /absolute/baseline/dist
 // Build the candidate first. Baseline must be an independently retained runtime.
 import assert from 'node:assert/strict';

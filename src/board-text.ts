@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Board message text: validation at post (server and client) and notice rendering (client).
 // No Node globals: the Convex V8 runtime imports this module.
 import { BOUNDARY_CREDENTIAL_PREFIXES, CREDENTIAL_PREFIXES } from './credential-prefixes.js';

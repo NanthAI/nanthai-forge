@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A held settings change at its worst (Item 16093ed1): a long unbroken script line, a direction override and a
 // zero-width character in agent text, a look-alike letter in the executable, a list that adds and reorders, and the request open under Details. `?none` is a
 // request the server could not compare; `data-ds` on the page selects the design-system tokens, otherwise the

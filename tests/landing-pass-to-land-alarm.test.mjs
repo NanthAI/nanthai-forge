@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Queue health alarm (Item 42200ce4, Guard 6 863c85ab): the time from a landing's first passed check
 // to its commit, judged by regression ladder rung 1 inside the accept mutation. Replays incident
 // 5e3c3a3c (passed landings waited p50 79 / p90 101 min on 2026-11-17) and the accepted bench

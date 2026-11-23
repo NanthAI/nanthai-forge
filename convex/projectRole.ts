@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The one place a project role is resolved (Item b987e608; docs/access.md). Every access check reads membership here:
 // the owner costs no read, write one indexed read, read at most two. A project with team grants (Item b6588425) adds
 // one indexed read of the actor's team rows, and one point read of a matching team, only after the direct grants miss.

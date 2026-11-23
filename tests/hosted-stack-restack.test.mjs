@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue f61e9339: a stacked Lane restacks onto its parent's newer saved work automatically when that
 // applies cleanly; a conflict changes nothing and is not retried for the same parent head.
 import test from 'node:test';

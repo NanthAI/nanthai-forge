@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Account > People and teams (Item a841a76d): the teams the person owns or is in, each with its owner and members by
  * handle, read page by page. Person-only: any device, agent or legacy CLI credential is refused before a membership is
  * read (the page is for the person in their browser; teams are managed on the owner paths in teams.ts/teamActions.ts).

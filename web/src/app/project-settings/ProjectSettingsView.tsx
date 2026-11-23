@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Project, as one view over what the page read (Item 966cb821). The owner renames the project and moves it to
 // the trash; everyone else reads the facts. Layout follows the other Settings places: a head, then regions of rows.
 import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';

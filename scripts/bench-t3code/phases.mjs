@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Rework tokens per landing (Issue bf130503, P6 exit bar 8c9b84fc): a deterministic phase
 // classifier over one agent session. Every model response (turn) gets one phase from the
 // source commands it runs and the last source-command results before it:

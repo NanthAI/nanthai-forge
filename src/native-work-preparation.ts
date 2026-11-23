@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { NativeSource } from './native-source.js';
 import { prepareNativeObjects, preparedCheckpointCurrent } from './native-checkpoint-publication.js';
 import { PreparationChanged } from './work-edit.js';

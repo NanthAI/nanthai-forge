@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Old CLI vs new server (Issue 3205f7e6): hosted replies drop unknown keys and keep every other check.
 import test from 'node:test';
 import assert from 'node:assert/strict';

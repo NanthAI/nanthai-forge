@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What a failed verify step says at the tail of the log. The hosted job keeps only the
 // last 4 KiB of output as its failure summary, so a step that failed early (check-foundation,
 // lint, format, documents) was reduced to the timings row `FAIL 4.8s check`. The digest repeats,

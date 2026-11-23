@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Each contract case runs once per target: the fake always, the real system when its settings
 // are present. FORGE_CONTRACT_REQUIRE (comma-separated system names, set by the nightly
 // workflow) turns a missing setting into a failure, so a lost secret can never pass as a skip.

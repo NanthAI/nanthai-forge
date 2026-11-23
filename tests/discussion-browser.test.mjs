@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Plan Item page with its discussion in a real browser (Item 9a3d6f5f), on synthetic data through its real
 // components (tests/browser/discussion.tsx): the comments load on their own chunk with four reads and nothing on a
 // clock, member HTML never runs, a reader of a public project sees no people and no composer, a typed label is marked

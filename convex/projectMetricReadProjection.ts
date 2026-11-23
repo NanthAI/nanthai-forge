@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { metricRunRow } from '../src/self-metrics-run';
 import { FAST_WINDOW, auditDonorSignal } from '../src/landing-mode';

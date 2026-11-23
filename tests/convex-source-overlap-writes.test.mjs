@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A merge step publishes its outputs one by one (merged blob, tree pages, State, result), and each
 // R2 write is a signed PUT plus a HEAD check. With overlapWrites those writes run behind the merge
 // work after them; outputs keep upload order and a failed write surfaces at settle.

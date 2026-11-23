@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Go to or run (⌘K) finds what an id names (Item ee9899ca): paste an 8-character prefix or a full UUID of an Item,
 // a Lane or a landing receipt and the palette offers it. The palette holds no records, so an id costs one debounced
 // lookup through three existing bounded reads (the planning search's id match, the Lane id resolver, the receipt

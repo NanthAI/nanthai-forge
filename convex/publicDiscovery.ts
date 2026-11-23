@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Stars and public settings (Items 8947a779, 76be0714). Each write is one retry-safe mutation: a star sets the
  * person's state for one project (repeating it changes nothing) and updates the project's count in the same
  * transaction. Agents cannot star, and only the owner, as a person in a browser, changes what visitors see. */

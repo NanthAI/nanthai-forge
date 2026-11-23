@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Preload (node --import) for measuring a CLI command up to its first network call: the process stops at
 // the first Convex client call or fetch (or, for land, the hand-off to its detached submitter) and prints one JSON line with the CPU time (user+sys) and, when
 // FORGE_PROBE_MODULES is set, the modules loaded by then. Nothing leaves the machine.

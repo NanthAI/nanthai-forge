@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { DecisionContext } from './decision-types.js';
 const plain = (text: string) => text.replace(/[\r\n\x00-\x1f\x7f]/g, ' ');
 export function formatDecisionContext(decisions: DecisionContext): string {

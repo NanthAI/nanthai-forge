@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me › FYI as data (Item 48049998, decision b15fff49): what the reader may want to know but need not act on,
 // newest first, from projectNeedsFyi:read plus the held Lanes that ask nobody (model.ts `fyi`). Two kinds of row:
 // events (landings, main breaking, settings and access changes) are listed from the clear line, or from the start of

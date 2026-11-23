@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Flow picture on Needs me (Item 85f456c1, Lane 2) in a real browser, on the Needs me fixture
 // (tests/browser/needs-me.tsx) through the real shell frame: every stop's count is the top bar's count and its blocks
 // (one source, the line feed); the approved home layout (picture left, Needs you right, FYI and Loose ends below, the

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Extract reported failures, never infer that every file assigned to a shard failed. */
 export function failedTestFiles(text: string): string[] {
   const files = new Set<string>();

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Contamination audit replay (d8cf81b4): the false-positive classes of the B1.5d real run must
 // scan clean, and the true reaches the audit exists for must still void the task. Fixtures are
 // synthetic, written from the report's description of the hits (no private excerpts).

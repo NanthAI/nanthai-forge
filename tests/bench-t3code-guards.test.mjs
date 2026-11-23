@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Bench regression guards from bench night 2026-11-18 (Item 368ac54f): each test replays the bug
 // that reached the bench, against synthetic data. No bench, service or GitHub call.
 import test from 'node:test';

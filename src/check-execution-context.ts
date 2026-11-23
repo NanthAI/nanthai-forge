@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { AsyncLocalStorage } from 'node:async_hooks';
 const detached = new AsyncLocalStorage<boolean>();
 export const withDetachedChecks = <T>(task: () => T) => detached.run(true, task);

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me › FYI (Item 48049998, decision b15fff49): what the reader may want to know but need not act on, newest
 // first, from one bounded subscription, plus the one write that dismisses rows or clears the list. The held Lanes
 // that wait on no person (an agent's conflict, a refusal, a withdrawn landing) come from projectNeedsMe:read, which

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** A short derived label never silently cuts the last word. The full outcome stays on the Intent. */
 export function derivedLaneName(outcome: string): string {
   const text = outcome.trim();

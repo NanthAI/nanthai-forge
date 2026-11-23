@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Mechanical pass/fail checks of a scripted cell from its own call log (nforge-calls.jsonl) and the
 // files each landing writes (path-evidence.mjs cellLandings). Pure. Item 368ac54f:
 //   guard 1: no landing may be refused locally for a file it did not change (incident 060fb653);

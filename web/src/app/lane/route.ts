@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One Lane (/lanes/<laneId>): its own screen beside whatever serves the Lanes list.
 import type { ScreenRoutes } from '../screen-route';
 

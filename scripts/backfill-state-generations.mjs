@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Explicit dev-operator command, never scheduled or invoked by ordinary source work.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';

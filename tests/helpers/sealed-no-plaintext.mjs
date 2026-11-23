@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // T18: no secret value and no device or set key in any stored row, call or local file of a sealed journey.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';

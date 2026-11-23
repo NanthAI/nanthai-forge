@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Stats today so far (Item 580b1a1a): opening Stats schedules one provisional close of the open UTC day, at most once an
 // hour and only after a landing since the last; the totals then count today, the day's real close replaces the row,
 // no month rollup reads it, and a later close treats a day still provisional as not closed.

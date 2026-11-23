@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Convex refuses a value that breaks its fixed shape limits (more than 1024 object fields,
  * 8192 array elements, a value or document too large, nesting too deep). The same request
  * fails the same way on every retry, so it is a deterministic refusal, never an outage

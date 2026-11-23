@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Plan screen as data (Items d3357f40, b7a0dff1): groups in plan order with their counts, the next free Item
 // derived from state, the page sentence and the hand-order move. Every rule comes from src/planning-model.ts; this
 // file only shapes it for the screen, so the CLI, the public plan and this screen never disagree.

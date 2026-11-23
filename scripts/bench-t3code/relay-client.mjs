@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Copied beside the agent's nforge shim; no harness imports or credentials in this file.
 // node:http, not fetch: undici's headers timeout would cut a long land --save.
 import { request } from 'node:http';

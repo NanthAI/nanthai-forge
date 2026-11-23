@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Your data: driving a deletion (review 8e86eb09), apart from React so every outcome is tested in Node. A
 // begin that Forge refused is `failed` with its words; one that went unanswered is `unknown`, and asking again sends
 // the SAME stored request (same operation id), which the server reconciles. A pass that Forge refused is `failed`

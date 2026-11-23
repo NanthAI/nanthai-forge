@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue a217b83e: name the landing that adds check time. A slow new test file adds seconds to every later
 // check. A whole run's per-file timings are judged against the planner's timing history after removing the
 // run's own hardware speed; only the change's new test files are named, net of test files it deletes or

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 80540753 guard: every accepted landing, solo or batch, carries runner seconds and discarded
 // runner seconds, so CI waste per landing is exact (Stats, a61d3c91, excludes unknowns and counts
 // them). Found in the release qualification smoke: nine accepted batch members recorded R2 counts but

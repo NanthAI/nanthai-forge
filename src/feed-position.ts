@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { z } from 'zod';
 
 const position = z.tuple([z.string().regex(/^\d{1,19}$/), z.string().min(1).max(200).nullable()]);

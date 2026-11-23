@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The account-wide P7 billing home and its screens. Every value is explicitly a stub; the adapter performs no IO.
 import { lazy, Suspense, useState, type ReactNode } from 'react';
 import { Dock, Key, Region, State, useDockLayout, type DockLayout, type DockRegion } from '../ds';

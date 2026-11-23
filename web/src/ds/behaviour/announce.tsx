@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One polite live region per moving part: what moved and where it now is, in the words the screen shows.
 import { useCallback, useState } from 'react';
 

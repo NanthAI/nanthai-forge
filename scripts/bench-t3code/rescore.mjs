@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Re-score a finished Forge cell from its relay call log, through the same arm.landing ->
 // score.mjs path run-cell uses live (no waiting: the cell is over).
 // Usage: node scripts/bench-t3code/rescore.mjs CELL_ID "why"

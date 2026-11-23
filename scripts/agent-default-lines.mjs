@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Parallel-work defaults and the agent-facing text generated from them. Shared by the CLI/MCP
  * (src/agent-parallel-defaults.ts), the packaged skill and llms.txt, so the wording cannot drift. */
 export const AGENT_DEFAULTS = Object.freeze({

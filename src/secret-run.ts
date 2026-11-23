@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { spawn, type ChildProcess } from 'node:child_process';
 import { constants } from 'node:os';
 import { pipeline } from 'node:stream/promises';

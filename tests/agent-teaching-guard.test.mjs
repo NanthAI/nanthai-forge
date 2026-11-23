@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 6b7d5a79: Forge teaches its own workflow from its output and defaults. Rules it now teaches or defaults
 // were removed from our docs, and printed commands use the current verb forms. This guard fails when a removed
 // rule's verb or wording comes back in agent docs, or a printed command teaches a deprecated alias again.

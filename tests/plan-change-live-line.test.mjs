@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 65b6d701 (review): a plan-visibility history row holds the default policy on a project that never stored a
 // policy. The live line must not read it as a policy receipt: it would add a free-slot count and a queue read.
 import test from 'node:test';

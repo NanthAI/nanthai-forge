@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What each place shows until its rebuilt screen lands (stage C): the breadcrumb, the place's head and one link to the
 // screen that serves it today, so every supported destination stays reachable through the new frames.
 import { lazy, Suspense, type ReactNode } from 'react';

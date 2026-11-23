@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // T18 over the slice-2 sharing journeys (Gate B2 M2): automatic share, Undo by fingerprint, removal with re-key on
 // the next write, unshare --marked and the key-store share log. Real sealed and contributor Convex modules on a
 // synthetic hosted project; synthetic keys and values only. Code approvals and repair are covered where they run

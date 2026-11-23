@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Build guard for the Phase 7 shared base (DESIGN.md, "Using the system"): only the design system's behaviour
 // folder imports the headless layer, no second behaviour, drag or motion library is imported anywhere, the layer never
 // reaches the first-paint chunks, and its own chunks stay inside web-ds-layer-gzip in src/speed-budgets.json.

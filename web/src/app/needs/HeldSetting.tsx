@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The held settings change under an open "Asked ahead" row (Item 16093ed1). One subscription (projectHostedApprovals:observe
 // with detail, the approve page's read), mounted only while the row is open, so a closed or idle Needs me reads nothing
 // more. It re-runs only on a write to that request or to the setting it changes.

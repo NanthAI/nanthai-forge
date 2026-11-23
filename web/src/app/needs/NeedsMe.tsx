@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me (Items 9e748e41, 12fde646, 48049998, 85f456c1), the project's front page, in four sections and nothing else:
 // - On the way to main (watch weight, flow/Flow.tsx): the Flow picture of every open Lane, the day's figures and one
 //   line for checks, from the shell's line feed and the Needs you rows below (no read of its own). It replaced

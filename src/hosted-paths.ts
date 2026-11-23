@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Hosted metadata is a presentation/transport copy. Never mutate local Work or source bytes. */
 export function hostedText(text: string): string {
   // Receipts and cleanup results often contain a second JSON document in a string.

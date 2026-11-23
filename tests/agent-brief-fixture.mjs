@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { briefInputSchema } from '../dist/agent-brief-types.js';
 import { briefingContext } from '../dist/agent-brief-context.js';
 import { renderBriefing } from '../dist/agent-brief-render.js';

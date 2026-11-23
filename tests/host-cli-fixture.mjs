@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { testDeploymentOrigin } from './trusted-origin.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';

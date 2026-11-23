@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Automatic file claims (Issue 9c8490a4, board Lane 4). The first-write hook records "touching
 // <path>" for its Lane the first time a session writes a file the Lane has not saved, so other
 // agents see unsaved edits. Claims are not notes: they never wake a wait, and they do not count

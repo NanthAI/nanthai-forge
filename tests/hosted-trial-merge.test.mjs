@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Flip 4 (Issue 853fcde3): exact conflicts at save. A save trial-merges the files it shares with main and
 // with other open Lanes using composition's own rules, and notifies both Lanes only on a real conflict.
 import test from 'node:test';

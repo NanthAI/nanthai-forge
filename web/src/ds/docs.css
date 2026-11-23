@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* Docs use the shared frame and prose, with a tree instead of the app rail (DESIGN.md rule 47). */
 body:has(.docs-shell) { margin: 0; }
 [data-ds] .docs-shell {

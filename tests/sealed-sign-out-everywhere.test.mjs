@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Gate B2 (Item 14314add) M3 follow-up, owner 2026-11-23: "Sign out everywhere" marks every sealed device of the
 // account in its linked projects (the issuer is a browser session, which holds no sealed device), owner devices
 // included, so a lost laptop is re-keyed on the next owner write. Sole-owner follow-up (owner 2026-11-23 07:50Z): when

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Your data as words and outcomes (Item 17cdc774, review 8e86eb09): the sentence names what Forge holds,
 // kind by kind, and says "at least" past the read bound; the deletion selects exactly the owned rows with their pins
 // and carries the reviewed token; the typed confirmation is the handle; the archive keeps its documented format. A

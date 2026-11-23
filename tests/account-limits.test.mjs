@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item b6588425 line 3: one suspend switch and one shared per-account daily limiter on every channel that can
 // carry a message (docs/security.d/sections/2150-account-limits-and-suspension.md).
 import test from 'node:test';

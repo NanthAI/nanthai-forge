@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { registerHostedWorkTools } from './mcp-hosted-work.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpStdioTransport } from './mcp-stdio.js';

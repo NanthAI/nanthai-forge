@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The two largest source-scale cases, split from convex-source-scale.test.mjs so
 // check shards can run them in parallel.
 import test from 'node:test';

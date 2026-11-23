@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One file at an exact State, read in 16,000-character pages: line numbers that are links (#L42), syntax colours from
 // the highlight worker (nothing is tokenized on the page), binary and submodule files said in words, and the next part
 // on request. A Markdown file opens as a document with a Source toggle (Item 8e847a17). Long lines scroll inside the

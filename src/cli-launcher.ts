@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Standalone bootstrap: copied to INSTALLATION/launcher.mjs. Only Node imports;
 // its code and lock/lease protocol must not depend on the selected CLI build.
 import {

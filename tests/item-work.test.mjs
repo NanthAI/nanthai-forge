@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What happened on one Item (Issue 1c2ab97a): the Item's Lanes in every state through the Intent→Lane link, landed
 // ones with their receipt (landing note first, overlap stamp for older landings), paged past 20 with a total; the
 // people rule per viewer; and the agent's `planning {id}` `work` section and `lanes {state:"all"}` over it.

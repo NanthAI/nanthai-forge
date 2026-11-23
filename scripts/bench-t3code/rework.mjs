@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Rework tokens per landing, per cell and Forge against GitHub (Issue bf130503), from the phase
 // classifier (phases.mjs) over each task's session, plus the convoy cell's pass rule and order
 // waits. Intervals follow docs/agents/perf-claims.md (bootstrap of the median, fixed seed).

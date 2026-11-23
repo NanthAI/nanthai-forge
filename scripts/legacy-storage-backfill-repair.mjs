@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Bounded owner-scoped repair of r2BackfilledAt for R2-native class 1 objects the
 // cleanup dry run reported as OWNER_BACKFILL_UNSET. `plan` writes nothing. `apply`
 // re-hashes every R2 copy first, then patches only rows whose full digest matched.

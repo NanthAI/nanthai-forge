@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Page titles, descriptions and share-card tags for public pages (Item 875a4b60). Pure: the site's public read
  * (site/public-read.ts) fills them from the cached public read, so a crawler or link preview gets them
  * without running the app and without a Convex call on a cache hit. Only what the public read already shows is used;

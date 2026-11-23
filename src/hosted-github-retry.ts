@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** One bounded policy for GitHub read-after-write lag on objects the mirror job
  * itself just created or uploaded (incident 8568bc76; adff6f58). Pure data and
  * patterns, so Convex mutations and the mirror runner share it. */

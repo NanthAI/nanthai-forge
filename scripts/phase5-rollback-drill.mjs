@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Offline qualification only. Existing owners are read only by APFS clone.
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';

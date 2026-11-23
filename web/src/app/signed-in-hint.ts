@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Key read by the inline script in web/index.html: a browser that last had a session opens the app, not the public page. */
 export const signedInHintKey = 'forge-signed-in';
 

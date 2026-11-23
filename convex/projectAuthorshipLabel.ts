@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { AGENT_CLIENT } from '../src/agent-slug';
 import { readAuthorship } from '../src/work-actor-types';
 

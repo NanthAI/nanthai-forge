@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Signed releases for updater tests. Release signatures are required, and the compiled
 // CLI_RELEASE_KEYS belong to a key no test holds. In-process tests hand the updater a key made
 // for this test process (`releaseCheck.trust`); processes a test spawns through the real launcher

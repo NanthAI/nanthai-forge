@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Inputs for a configured check command that is not Forge's own recipe
 // (docs/workflows.md#check-command-scope). One small file, outside the Candidate.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Rework tokens per landing (Issue bf130503): the phase classifier, its join with the relay's
 // call log, per-landing aggregation, the convoy rule and the coordination cells. Fixtures are
 // synthetic, in the exact shapes of recorded sessions: Claude session jsonl, `claude -p

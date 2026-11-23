@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident 2026-11-18 (Item 4bc460aa): the browser's Lane changes and Code views read a State stored as a recipe
 // without a signed closure by walking its byte tree one node at a time, two serial describe calls per leaf (hundreds
 // of round trips, minutes for one view). A tree read must batch each level: calls grow with height and width / 100,

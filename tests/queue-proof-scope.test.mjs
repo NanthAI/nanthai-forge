@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item ec229a55 (incident 9cd6c0ec): a queue proof survives composition onto a moved main when main
 // changed only units its replay never ran, and still refuses when the exercised code changed.
 import assert from 'node:assert/strict';

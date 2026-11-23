@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Account > Your data reads (reviews 8e86eb09, ae15c5ca). Person-only: accountActor refuses every device, agent and
  * legacy CLI credential before an account row is read.
  *

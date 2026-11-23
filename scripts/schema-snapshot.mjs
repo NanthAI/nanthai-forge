@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Interpret only Zod declarations. Never import project modules or execute their code.
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue ec7bd1b5: only a reply that disagrees with this CLI reads as version skew. A request this
 // CLI cannot build is its own terminal error, and an older CLI reads a reply with one extra field.
 import test from 'node:test';

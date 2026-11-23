@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Optional enhancements only: every document and link is present in the HTML without JavaScript.
 import '../ds/base.css';
 import '../ds/core.css';

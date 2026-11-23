@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Keep the run (Item fa2c1383): replay of the recorded 11-17 window (incident 5e3c3a3c) through two
 // arms of the main-move decision. Baseline: today's sweep (tests/keep-the-run-baseline.mjs). Keep:
 // src/stale-check-keep.ts. The trace is the read-only extraction in

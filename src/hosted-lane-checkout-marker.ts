@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { lstatSync, realpathSync } from 'node:fs';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { z } from 'zod';

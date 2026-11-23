@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The strip above the Projects place: Projects | Trash (DESIGN.md rule 8, SPEC-01-trash). Sections of one place are a
 // strip, never tabs inside a region. Trash has its own address so it can be linked and reloaded.
 import { A } from '../frames';

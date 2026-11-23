@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item b6588425 line 4e: a project someone reaches only through a linked team is listed in Account > Projects and in
 // the device project picker (known gap recorded after the Team landing, receipt 36e6c449). The read is bounded and
 // costs a person in no team nothing; the list re-derives access on every read, so leaving a team, unlinking it or

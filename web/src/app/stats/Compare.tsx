@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Stats: measured beside the project's own history replayed through two GitHub setups, named by how they merge
 // (Item a61d3c91; method in src/stats-estimate.ts#statsWindow), and the measured facts.
 import { useState, type CSSProperties } from 'react';

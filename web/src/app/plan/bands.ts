@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Group by a field (Item d3357f40, design cecab403): the Plan's rows in bands by Initiative (the default), owner, type
 // or none, the same for the list and the board. Pure: it reshapes rows already read (projectPlanView:read and the
 // settled pages), so switching the group costs no call. The board's column totals come from these same rows.

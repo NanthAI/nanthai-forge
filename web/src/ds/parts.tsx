@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The shared parts that need no behaviour library: keys, rows, bands, regions with folds that remember, the first
 // stop's edge, chips, the phone tabs, tables, the Markdown and diff containers and the standing line. Rules for
 // choosing each: DESIGN.md. They render at first paint; the interactive parts are in ds/interactive.tsx.

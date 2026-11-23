@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The planning counter's row and its in-transaction writer (Item 3fa3187d; read and backfill: projectPlanCounts.ts).
 // Imported by projectWorkRecordWriter.ts, so it depends on nothing but types.
 import type { Id } from './_generated/dataModel';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Owner rule: a person or machine shown to agents or users is a Forge handle or public GitHub login,
 // never a name, email or machine name. No default label may derive from the hostname, and no code
 // stores a provider display name.

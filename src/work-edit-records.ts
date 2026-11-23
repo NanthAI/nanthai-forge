@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { jsonValue, recordManifest, recordIO, putCollection, stageRecords } from './work-records.js';
 import { WorkRecordTransaction, type WorkCollection, type WorkRecord } from './work-record-transaction.js';
 import { safeParseWork } from './work-unified-types.js';

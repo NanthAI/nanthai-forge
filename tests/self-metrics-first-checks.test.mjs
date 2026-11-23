@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // First-submission check red rate (Item 9ce2ee79): the definition's edge cases, and proof the
 // request pages carry it with no extra read, write or landing-path call.
 import test from 'node:test';

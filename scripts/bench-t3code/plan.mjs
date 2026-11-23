@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Phase 6 exit bench pre-registered design (PLAN.md; B1.5d's design plus the outlier rule and
 // the Claude agent, docs/research/p6-exit-bench-plan.md). Everything a cell's order depends on is derived
 // here from fixed inputs, so the schedule is known before the first cell runs:

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 5dcfce75, preflight-miss fix 4: a repo-wide guard test (it lists a folder through a plain
 // relative path, or reads every file an import walk reaches) is a consumer of every file in that
 // folder, found from what the test does, for any repository. Incident shapes: a rules test walking

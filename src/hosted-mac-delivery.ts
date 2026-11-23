@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { setTimeout as delay } from 'node:timers/promises';
 
 /** Codes that mean the reply is unknown or the server asked for the same payload again (a network

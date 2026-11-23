@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { ContentPin } from './native-exchange.js';
 
 /** Yields each item with its result, keeping up to `depth` later calls in flight. A failed

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // contract: tests/contracts/github.contract.test.mjs
 // Shared GitHub HTTP fixture. The installation and Git data cases also run against the
 // scratch repo when configured. Actions, check runs and LFS use synthetic data.

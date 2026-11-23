@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Which test files are browser fixtures, with no imports, so code that only asks this (preflight)
 // does not load the shard planner. scripts/browser-test-policy.mjs re-exports it.
 // A test file named `tests/<name>-browser.test.mjs` is a browser fixture by name, in

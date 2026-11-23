@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The owner's decision on the Lane page (Item 48049998): when this Lane is held for the reader's approval, the same
 // Approve and land / Decline as Needs me, from the same read (projectNeedsMe:read, shared with the top bar's count
 // and Needs me when open) and the same calls (decide.ts). An approval link names its landing (`?submission=`), so the

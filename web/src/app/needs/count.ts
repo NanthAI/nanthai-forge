@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The one rule for what waits on a person (Items 12fde646, 48049998), shared by the shell's "Needs you" count and the
 // Needs me page so the two never disagree. A held Lane waits on a person only when that person has an action: an
 // approval Forge enforces, or a person's own Lane that is stuck (choose an order, retry, update, set aside). An agent's

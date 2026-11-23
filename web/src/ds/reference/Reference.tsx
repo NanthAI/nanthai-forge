@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The design system's reference surface (dev only: web/ds.html, not a build input). One screen built from the shared
 // parts only, so a change to a part shows here first and tests/ds-reference.test.mjs can check it in a real browser.
 // All figures are invented and marked as sample data.

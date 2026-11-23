@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The one implementation of sealed format framing, protocol hashing and public-key checks.
 // Uint8Array only, no node: builtins and no Buffer, so the same functions run in the CLI and
 // inside a Convex V8 mutation. Node-only work (AES, HKDF, scrypt, randomness) stays in sealed-format

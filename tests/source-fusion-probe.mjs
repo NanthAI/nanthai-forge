@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Qualification only: run pinned source stages in one provider execution before changing
 // publication or the CLI. The actual Convex transport, source kernel, storage and commit run.
 // Each completed phase clears its tree cursor and byte cache before the next phase.

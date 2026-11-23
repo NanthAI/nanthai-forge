@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure source-kernel comparison. No network, hosted writes, CLI substitution or repository code.
 // Usage: nforge heavy node tests/measure-conflict-reentry.mjs BASELINE_DIST OUTPUT.json [pairs]
 import assert from 'node:assert/strict';

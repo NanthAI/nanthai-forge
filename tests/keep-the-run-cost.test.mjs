@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Keep the run (Item fa2c1383) cost guard: a mover lands under a running full admission check, in
 // strict and fast, and every landing settles. Ceilings use the deterministic fixture measurements:
 // calls and documents exact, read and write bytes inside the band of tests/keep-the-run-scenarios.mjs. Rows that retire are the

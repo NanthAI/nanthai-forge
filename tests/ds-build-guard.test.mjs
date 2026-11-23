@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The build guard for the design system's behaviour layer (scripts/ds-build-guard.mjs, Item 6ebb58ab): only
 // web/src/ds/behaviour imports the headless library, no second behaviour or drag library appears, the release-candidate
 // Autocomplete stays in one file, and the layer never reaches the first-paint chunks.

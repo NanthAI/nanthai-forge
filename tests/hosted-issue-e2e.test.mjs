@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // End to end, planned Issue -> `start {planningItemId}` -> saved Lane -> accepted landing -> the Intent
 // and planning state a builder sees (CORE 0b12fcfe lines 1-2). Every hop is the real handler: the Work
 // index and planning writes (hosted-planning fixture), the planned start, the acceptance completion tick

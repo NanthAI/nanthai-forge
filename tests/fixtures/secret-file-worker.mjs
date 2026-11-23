@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { Writable } from 'node:stream';
 import { secretFileFolder } from '../../dist/secret-run-files.js';
 import { runWithSecrets } from '../../dist/secret-run.js';

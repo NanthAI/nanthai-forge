@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { orderWaitOf, waitEventLine } from './hosted-wait-line.js';
 import { ForgeError } from './errors.js';
 import type { Failure } from './system-errors.js';

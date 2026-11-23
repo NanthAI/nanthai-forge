@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { hostedActionError } from './hosted-action-error.js';
 /** A caller deadline says nothing about server completion. The operation was
  * prepared before submit: subscribe to that exact receipt, never submit new work.

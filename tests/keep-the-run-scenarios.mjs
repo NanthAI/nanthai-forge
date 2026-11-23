@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Keep the run (Item fa2c1383): the owner's end-user case (comment 00a694d5). Per kept run, the
 // Convex cost against the runner-minutes and time to main it saves, for a quiet project (1-2 agents),
 // a 3-5 agent project and a 10-agent project, and the cost per 1,000 landings that follows.

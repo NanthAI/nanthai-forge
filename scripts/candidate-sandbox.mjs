@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Started by the hosted check supervisor as `sudo -n unshare --mount --propagation private --
 // node candidate-sandbox.mjs SPEC` (src/candidate-user.ts). Runs as root inside a private mount
 // namespace, so nothing here is visible to the runner. Replaces the runner's home with an empty

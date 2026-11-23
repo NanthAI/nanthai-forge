@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me › FYI as data (Item 48049998, decision b15fff49): an agent's conflict and a refusal are FYI rows, newest
 // first, beside landings, settings changes and messages; a dismissal is keyed to the row version so a newer version
 // shows again; Clear all hides what came before it; events count from the clear line or from today; the figures say

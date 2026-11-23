@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Getting started on Needs me (Items 6beca32b, c3e4a838): the first things a new project needs, not a wizard. Each
 // step says who did it and when, from the setup read (convex/projectSetup.ts); the line feed the frame already holds
 // says whether a Lane is moving. It shows until the first landing, then once more to ask who approves the next

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The owner's decision on a held landing, wherever it is drawn (Needs me and the Lane page; Item 48049998).
 // A standalone Lane request goes through projectHostedApprovals:decide. A held landing is decided
 // on its exact attempt with the calls the /approve page makes: projectHostedAcceptance:approve

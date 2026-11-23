@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { digestChunks } from './state/hash.js';
 import { moduleGraphLanguages, nonSourceDirPattern } from './ecosystems.js';
 import { goFacts, resolveGo } from './module-graph-go.js';

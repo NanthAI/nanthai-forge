@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* The landing check page (Item b030c3c5): evidence on the left, the four suspects on the right; one column on a phone.
    Every value is a design-system token; the parts (.sus, .kv, pre.out, .panes) come from web/src/ds. */
 [data-ds] {

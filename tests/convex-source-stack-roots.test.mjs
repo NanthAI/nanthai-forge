@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 1eef1b43 (follow-up to the resolve fix): a stacked sync passed [left, right, stackBase] as
 // its ancestry roots. The stack base is an ancestor of both tips and its merge base is explicit, so
 // the generation walk saw a subset-common State and gave up for a breadth-first search that reads

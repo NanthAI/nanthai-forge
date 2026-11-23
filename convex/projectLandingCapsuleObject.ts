@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Runtime-portable: the V8 packer and cold reader and the Node journal share this transport.
 import { r2Config, presignGet, presignPut } from './r2';
 import { exchangeRequest } from '../src/exchange-request';

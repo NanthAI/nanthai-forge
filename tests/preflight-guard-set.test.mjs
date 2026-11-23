@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 13ea93bf: repo-wide guard tests that import selection never picks fail most landing checks.
 // The server learns them from the project's check failures (p x C / r - t) and Lane starts deliver
 // the candidates; every preflight runs the picked set first, inside its budget.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Archive local protocol evidence before any checkout removal. No source hydration/RPCs.
 import { lstat, readdir, mkdir, copyFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';

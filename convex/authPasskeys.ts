@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Adding and removing passkeys (Item 702af738). The auth library's own add and remove flows first ask for a sign-in
 // (`navigator.credentials.get()`) with an existing passkey of the account. A passkey made on an earlier site address
 // belongs to another relying party, so no authenticator on this address can answer that request: Safari falls back

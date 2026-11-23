@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** The one ecosystem registry (Issue 9c0ece48). Every list of ecosystem knowledge (lockfile and
  * manifest names, regenerable and dependency folders, code-file extensions, Actions cache presets,
  * check caches, the merge parse gate, the duplicate-import fix-up, the module graph) is read from

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 2766ef9e: a comment purge's attachment bytes leave R2 for good. A refused delete is retried until it succeeds,
 // and an upload in flight across the purge leaves no bytes (convex/artifactStorage.ts, tests/artifact-delete-replay.mjs).
 import test from 'node:test';

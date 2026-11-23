@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* The Lane review screen's layout only (Item 52235fbf): the change beside what is known about it, and the read box
    beside each file's summary (outside it, so the tick is not a control inside the fold's own button). Every part is
    the design system's (review.css, figures.css, core.css); every value is a token. */

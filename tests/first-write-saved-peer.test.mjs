@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 0487bccb (friction 133b5a79): once a claiming Lane saves, its automatic claim hides, so a first
 // write to that saved-but-unlanded file showed nothing in the hook. The same one read already returns
 // the saved-path evidence; the hook now names that Lane. Incident replay: the real overlap query, then

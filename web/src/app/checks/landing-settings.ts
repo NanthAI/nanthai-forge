@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // How a landing is checked, one row per setting (Item 871e9b73): the value in effect in words, where it comes from
 // (the owner set it, the default, or Automatic: Forge picks it from the project's own data), and, behind the row, what
 // the setting does, what it costs, how a change applies and the owner's command that changes it. Pure, from the policy

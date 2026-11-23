@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident 48835eea (Lane abcc3257, 2026-11-20): under load, `save --sync` twice reported success with
 // the builder's edits left out of the head (once on an up-to-date sync that saved nothing, once after a
 // killed sync replayed), and a killed event probe left a file that blocked the next apply. A reply that

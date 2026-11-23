@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Overlap answers were removed with path notices (flip 4, Issue 853fcde3). Installed CLIs that still
  * call the old ack, peer-ack, overlap-acks or overlap-answers endpoints get this upgrade step. */
 export const OVERLAP_ANSWERS_RETIRED =

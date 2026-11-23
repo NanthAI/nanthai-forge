@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Projects as words (Item 3d5d8839): projects with a held Lane come first (the page's one first stop), the
 // rest by newest activity; the sentence's totals match the rows; every count has its own noun; a plan Forge has not
 // counted is "not reported", never zero.

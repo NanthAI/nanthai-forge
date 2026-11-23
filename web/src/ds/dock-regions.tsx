@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A Dock region's content has one React owner. Each zone places that content's host in its own
 // GridList row, and renders its own drag grip into the region header under the GridList's context.
 import { useCallback, useEffect, useState, type PointerEventHandler } from 'react';

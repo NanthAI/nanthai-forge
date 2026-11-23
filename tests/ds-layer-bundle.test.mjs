@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The design system's behaviour layer in a real build (Item 6ebb58ab): the app plus the reference surface, which uses
 // every interactive part. The build's own guard (web/vite.config.ts, forge-ds-layer) fails if a first-paint chunk
 // carries the layer or the layer is over budget; this test also checks the layer only has English messages and that

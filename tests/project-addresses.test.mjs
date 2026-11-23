@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item eb631a53: a request for one project address never resolves to a different project. A removed project does not
 // keep blocking its address: a new or renamed live project takes it, and a later restore of the removed one gets a
 // free suffix and says so. The owner person renames directly; an agent's rename is held for them; the old address

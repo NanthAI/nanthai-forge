@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Zero-dependency SigV4 query presigner for R2 (S3 API). Same code shape would run
 // in a Convex V8 action/mutation (swap node:crypto for crypto.subtle).
 import { createHash, createHmac } from 'node:crypto';

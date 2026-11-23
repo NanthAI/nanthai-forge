@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Device codes are ten letters and digits shown as XXXXX-XXXXX; the server ignores case, spaces and dashes. */
 export const CODE_LENGTH = 10;
 const ALLOWED = /[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]/g;

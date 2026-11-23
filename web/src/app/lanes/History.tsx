@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // History (Item c613e6bc): what landed, newest first, with this reader's read marks. It replaces To read and the Lanes
 // overview's Landed today. The first page is read when the page opens (35f62c2c: never behind a fold), and the empty
 // state shows only when that read came back with no rows. Read state is per account (convex/projectLandingReads.ts),

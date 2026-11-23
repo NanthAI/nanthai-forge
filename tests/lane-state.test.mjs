@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One Lane state on every screen (Items 29671737, 31328be4, d9e1ac62, d4b68402): the yard, the Lane page, Needs you,
 // the queue rows and the public page all read a Lane's state from web/src/app/lane-state.ts over its CURRENT
 // submission; the yard draws only once its reads are in; Lanes of one Item are grouped and a left-behind one says what

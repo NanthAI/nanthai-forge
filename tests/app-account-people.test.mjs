@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > People and teams as words (Item a841a76d): the head sentence counts what is listed, says "at least" while
 // more pages are unread, and each team's line says the viewer's role and how many members it shows.
 import test from 'node:test';

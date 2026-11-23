@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One landing's failure cause (Items b030c3c5, 2c420916), read the same way for the Failed check screen
 // (projectFailureCause.forLane) and for agent replies (status by Lane or submission, land and wait), so a
 // person and an agent see the same cause and the same next step. Failure-only: a landing that is queued,

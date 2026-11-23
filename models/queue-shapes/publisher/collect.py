@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Ferdinando Valsecchi
 """Project a retained provider job ledger into the offline refit input."""
 
 import argparse

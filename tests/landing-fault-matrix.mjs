@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue d910db6b: the landing step x fault matrix. A step is the scheduled task
 // that runs plus the landing step its entry is at, observed on healthy hosted
 // landings (never a hand-kept list of task names). Faults are in-process: a

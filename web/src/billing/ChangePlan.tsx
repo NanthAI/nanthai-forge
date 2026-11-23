@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Change plan (Item 1fbf61b9): compare the plans in one table and preview what changes, when and the next invoice.
 // The pay step hands off to a hosted payment page; P7 has none, so its outcomes are sample moments.
 import { Fragment, useMemo, useState } from 'react';

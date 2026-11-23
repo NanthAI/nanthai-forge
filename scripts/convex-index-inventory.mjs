@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Static source analysis only: never import a schema, function, hook or script.
 import { readdirSync, readFileSync } from 'node:fs';
 import { dynamicIndexUses, inlineIndexUses } from './convex-index-dynamic.mjs';

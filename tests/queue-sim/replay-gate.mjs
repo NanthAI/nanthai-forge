@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Missing and non-finite values block qualification. No tolerance applies to
  * old/new rules; the 10% band is exclusively observed/old calibration. */
 export function regressions(before, after) {

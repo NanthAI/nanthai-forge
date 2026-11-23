@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The real public discovery screens (web/src/public/Discover.tsx) signed out, on synthetic cached public reads:
 // counts reconcile with lists, a members-only plan and Lane titles without the opt-in never appear, star and clone
 // ask for sign-in, a missing project and a private one look the same, and every page is axe-clean at 1440 and 390 in

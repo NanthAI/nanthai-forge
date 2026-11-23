@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Reviewed, owner-scoped operator path for NAMED stale source jobs (Issue 11fd39de).
 // A job is stale only when its worker lease expired more than a day ago, its step
 // has nothing scheduled or running and no fan-out batch is open: nothing can

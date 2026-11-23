@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Drives the 4.13 code journey between a requester and a holder over the synthetic sealed fixture.
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

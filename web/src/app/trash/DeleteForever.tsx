@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Delete forever: a sheet with the typed name (SPEC-01-trash, "Screens" 5). The name is the slug the server already
 // checks as `confirm`. A person approves it in the browser; the server refuses a device or agent sign-in.
 import { useId, useState, type FormEvent } from 'react';

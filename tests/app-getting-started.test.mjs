@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Getting started (Items 6beca32b, c3e4a838, 0c9207b8, 871e9b73): the agent app steps use only commands the CLI ships,
 // the copied prompt explains before it installs, the setup rows say who did what, the one question is asked once, and
 // the web's two setting writes have the shapes the server parses.

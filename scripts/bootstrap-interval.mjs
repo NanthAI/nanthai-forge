@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Median difference of interleaved A/B pairs with a 95% bootstrap interval.
 // Method and rules: docs/agents/perf-claims.md.
 // Usage: node scripts/bootstrap-interval.mjs [FILE] [--seed N] [--resamples N]

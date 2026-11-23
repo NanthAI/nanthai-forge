@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Rebuild the B1.5d bench environment from scratch (Issue e082f30a).
 //   scripts/bench-t3code/setup --dry                 print every step, its state and its cost; reads only
 //   scripts/bench-t3code/setup --live [flags]        run the missing steps (idempotent; resumes)

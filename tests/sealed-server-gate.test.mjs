@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Gate B1 server conditions C17 (arguments bound to the payload), C18 (server-appended history ring),
 // C19 (server-owned markers and join requests) and C22 (one portable format module, fixed X25519 probe).
 import './check-runtime.mjs';

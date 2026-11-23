@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import '../access.css';
 import { useState } from 'react';
 import { SESSION_QUIET_MS } from '../../../../src/session-presence';

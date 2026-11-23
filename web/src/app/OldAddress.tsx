@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // An old address that names only ids (Item d61f36fe): `?project=<id>&lane=…`, `/decisions/<id>`, `/review/<id>`.
 // One access-checked read (convex/urlLegacy.ts) says where it lives now; the page then replaces itself with that
 // address. A project the reader cannot see answers like a missing one, so an id never reveals its handle.

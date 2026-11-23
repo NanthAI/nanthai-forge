@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Repository-chosen commands Forge runs on the agent's machine outside a check (start-time dependency
 // installs, local preflight) run in the clean check environment, and a repository's declaration of
 // install scripts is a request the machine or the agent accepts, never a permission (eac76001).

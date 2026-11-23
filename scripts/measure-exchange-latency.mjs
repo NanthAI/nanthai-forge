@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Explicit qualification harness; it never creates a project, changes a Channel or
 // returns hosted source. A push publishes only the request's checkpoint. Recovery
 // uses a fresh target and the real supplied journal, never a manufactured journal.

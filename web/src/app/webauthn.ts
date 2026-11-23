@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The browser leg of adding a passkey (convex/authPasskeys.ts): the server's creation options in, the
 // registration response out, in exactly the wire shape that function accepts (no extensions, no extra fields).
 // Sign-in itself uses the auth library's own ceremony.

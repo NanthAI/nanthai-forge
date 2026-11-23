@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Coordination before the queue (Issue 1eb42254, D2). Pure: Convex (V8) and the CLI both import it.
 // Everything here rides on the overlap read that start, save, sync and the first-write hook already
 // make: no added call, and no read at all for a Lane whose items name no peer.

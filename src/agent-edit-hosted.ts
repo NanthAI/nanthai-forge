@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { PeersCache } from './agent-peers-cache.js';
 import type { EditTarget } from './agent-edit-target.js';
 import { networkFetch, networkTimeout } from './network-fetch.js';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // OS keychain device key store (Item a9f9b608). The keychain tools are mocked: no test reaches the
 // real login keychain or a real Secret Service. All keys are synthetic.
 import './check-runtime.mjs';

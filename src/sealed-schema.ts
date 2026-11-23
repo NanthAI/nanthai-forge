@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Exact sealed record schemas, checked in place. No Buffer or node: imports: the server runs these too.
 import { invariant } from './errors.js';
 

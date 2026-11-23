@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Idle tabs must cost nothing: a live query argument that changes with the clock re-subscribes (and re-runs)
 // the query on a timer for every open tab. Queries re-run on server writes only.
 const queryCall = /\b(?:useQuery|usePaginatedQuery|useQueries|watchQuery)\s*\(/g;

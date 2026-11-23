@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { Id } from './_generated/dataModel';
 import type { QueryCtx } from './server';
 import { FLOW_HOURS, HOUR_MS, rebuildFlowLandings, utcDayStart, type FlowDay } from '../src/flow-day';

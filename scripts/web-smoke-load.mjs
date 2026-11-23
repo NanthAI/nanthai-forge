@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Headless smoke for the built web app: evaluate the app chunk (src/app/App.tsx, served at the root since Item b0704959) and every other chunk under a stub DOM and fail on
 // any module-evaluation error. This is what the browser does before it renders anything, and what failed on
 // 2026-10-28 ("Could not load Forge." from createRequire). Usage: node scripts/web-smoke-load.mjs <build dir> [ENV_NAME...]

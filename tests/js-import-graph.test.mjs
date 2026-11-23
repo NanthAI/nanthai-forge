@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 63d241db: any JS/TS repository gets import-graph test selection in preflight, not only Forge.
 import assert from 'node:assert/strict';
 import test from 'node:test';

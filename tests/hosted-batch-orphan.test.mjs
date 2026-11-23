@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Replays Issue 108a24e3 (2026-10-30): batch members waiting for their
 // individual fallback turn were orphaned when the member holding the turn was
 // cancelled. The one-shot stall alarm had already fired, so nothing ever

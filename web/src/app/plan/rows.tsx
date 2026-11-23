@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The cells of one plan row and the Initiative roll-up (Items d3357f40, b7a0dff1, f49e3a5c), shared by the backlog
 // and the Initiative page. Pure drawing: no reads, no state.
 import { Fragment } from 'react';

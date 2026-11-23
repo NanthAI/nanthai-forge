@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The rebuilt app (Item 84125787): the four frames at the site root, signed in with Convex Auth. The Convex client sleeps
 // with the tab (live-reads.ts) and holds token refresh while asleep (auth-hold.ts), so an idle or hidden tab makes no
 // calls. Each page sends one bounded read for its frame: the project frame resolves its address and then reads the

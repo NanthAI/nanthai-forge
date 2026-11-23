@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* The Lanes place's few rules on top of the design system: row columns for its lists and the first-run line. Every
    value is a design-system token; loaded with the place's own chunk. */
 [data-ds] {

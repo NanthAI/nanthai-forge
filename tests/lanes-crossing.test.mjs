@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Who is touching what by pair (Item df1f2d46): the owner saw 543 shared files listed one by one, each followed by a
 // paragraph of Item titles with the same Item repeated per Lane, and a "−" that looked like a fold and did nothing.
 // Pairs of Items replace it: an Item is named once with its Lane count, a reported conflict ranks first, an Item's

@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* A held settings change (Item 16093ed1). Shared by the approve page (fx tokens) and Needs me (design-system tokens):
    each value names the design-system token first and the older page token as its fallback. Nothing scrolls the page
    sideways: rows wrap and scripts wrap inside their block. */

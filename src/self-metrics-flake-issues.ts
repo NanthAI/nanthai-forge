@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Opt-in (`metrics --flake-issues`): name the existing Issue for each listed flaky file, or say none.
 // One planning search per listed file, at most `flakeIssueLookups`; the default metrics read makes none.
 import { z } from 'zod';

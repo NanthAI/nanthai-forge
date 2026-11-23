@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Purge executor (Item 4c9e961e, purge Lanes 2 and 3): selection, the atomic first step, redaction of every store
 // (the work store's Intent versions, lifecycle versions and handoff summaries included), the completeness check before
 // purgedAt, resume after a crash and after an index rebuild, and the row limit.

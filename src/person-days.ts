@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure and import-free apart from zod: Convex (V8) and tests load it; the CLI never does.
 //
 // A person's contributions (Item 6a251b23; docs/people.md): one summary row per person per active UTC day, holding

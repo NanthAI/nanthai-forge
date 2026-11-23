@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { invariant } from '../src/errors';
 import { convexFetch, networkTimeout } from './networkFetch';
 import { readR2Exact } from '../src/hosted-r2-retry';

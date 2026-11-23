@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { executeCommand } from './projectWorkCommand';

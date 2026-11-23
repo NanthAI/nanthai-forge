@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import ts from 'typescript';
 
 /** Incident 8c9b84fc: a second attempt writer consumed an ordinal reserved before source IO.

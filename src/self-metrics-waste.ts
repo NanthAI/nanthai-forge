@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { minutesBetween, type MetricPeriod, type MetricRecords } from './self-metrics-types.js';
 const causes = ['main-race', 'flake', 'conflict', 'cancel', 'supersede', 'stall', 'check-failed'] as const;
 /** Elapsed lost time is submission/attempt time; runner time is execution time.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // New Item (Item d3357f40): a title, an Initiative, a type and Done-when lines, written as one put-planning-item whose
 // operation id is kept for a retry, so a lost reply never files the Item twice.
 import { useEffect, useRef, useState, type FormEvent } from 'react';

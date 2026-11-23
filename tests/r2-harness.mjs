@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { testDeploymentOrigin } from './trusted-origin.mjs';
 // Shared setup for the R2 write and read path tests: a Convex fixture with R2 enabled, a fake R2
 // bucket on the fetch path, and a CLI exchange client wired straight to the fixture's functions.

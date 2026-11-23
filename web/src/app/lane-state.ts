@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One Lane's state, as every screen says it (Items 29671737, 31328be4, d4b68402): the yard row, the Lane page, Needs
 // you, the queue rows and the public project page all call `laneState` with what their read holds. The line feed's
 // mark decides the stop and whether a person holds it; the CURRENT submission (src/landing-state.ts, already named

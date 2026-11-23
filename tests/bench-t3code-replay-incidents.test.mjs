@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Retained protocol shapes only; no live repository, deployment or benchmark inputs.
 import test from 'node:test';
 import assert from 'node:assert/strict';

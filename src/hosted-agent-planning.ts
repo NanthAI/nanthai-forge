@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { memberDataNotice, systemCommentNotice } from './member-data-notice.js';
 import { planningSummary, planningSearchTerms } from './planning-search.js';
 import { createHash } from 'node:crypto';

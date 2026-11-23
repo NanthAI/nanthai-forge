@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Local synthetic checks of the scripted queue scenarios; no bench, service or Git call.
 import test from 'node:test';
 import assert from 'node:assert/strict';

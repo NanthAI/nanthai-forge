@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Public discovery (Items 8947a779, 76be0714, 875a4b60): explore, a person's or organisation's profile, and a public
 // project's front page for visitors. Anyone can browse signed out; star and clone ask for sign-in (owner decision
 // 2026-11-16). Every page is one read of the cached public JSON (read.ts): no Convex connection for a visitor, no

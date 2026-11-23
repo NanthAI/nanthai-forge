@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Grading branches (oracle/<cellId>) are created by the harness while no agent runs and must
 // not outlive their cell. A network blip can leave one behind; the next batch reset then
 // removes it, but only when it is provably this harness's own finished cell.

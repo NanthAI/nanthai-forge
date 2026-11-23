@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // contract: tests/contracts/r2.contract.test.mjs
 // A local stand-in for R2's S3 endpoint. It verifies the SigV4 query signature with the Node
 // reference presigner, then enforces what R2 enforces on presigned PUTs: signed content-length,

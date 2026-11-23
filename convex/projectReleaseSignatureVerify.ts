@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Server-side check of release-key signatures (docs/operations/cli-update.md, "Automated signer").
 // Pure computation before any database read, so a wrong signature costs one refused call and
 // writes nothing. Runs in the default Convex runtime: @noble/curves is plain JavaScript.

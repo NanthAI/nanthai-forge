@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 
 /** A path -> text map that holds only paths and blob ids; text is read (and dropped) per `get`.
  * Selection readers touch a few files, so memory stays flat on a 100k-file tree and binaries

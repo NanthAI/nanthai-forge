@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** The signed-in person's projects for Account > Projects and the older Projects screen (Item 3d5d8839): every active
  * project they own or are a member of, with their role and compact counts, newest activity first. One query per page.
  *

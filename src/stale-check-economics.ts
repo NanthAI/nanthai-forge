@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Keep the run (Item fa2c1383): the project's own measured check costs, for the scoped-recheck keep
  * (`StaleCheckEconomics`). Pure: it reads the landing-speed samples the sweep loads once, and the
  * run's first shard start.

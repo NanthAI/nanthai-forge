@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Purge Lane 1 (Item 4c9e961e, verdict 719bacba): the journal and record purge primitive. No executor exists yet,
 // so these tests append the purge through the server's purge step, hand-make the purged rows Lane 2 will write and
 // check every reader and replay against them.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Stats charts (Item a61d3c91): landings per day, where work waited, agents by first-try rate and the months of a
 // period. Every chart prints its values on the chart and offers the same figures as a table; all but landings per day
 // are fold bodies, read only once their fold is opened.

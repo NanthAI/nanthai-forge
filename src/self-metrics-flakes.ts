@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Weekly flaky-file list (G4). Derived from the check run rows the runs projection already
 // reads: no extra call, and a recovered flake is listed, never counted as a clean pass.
 import type { MetricPeriod, MetricRun } from './self-metrics-types.js';

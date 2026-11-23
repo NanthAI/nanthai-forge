@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Code place's file tree, one folder at a time (convex/projectCodeBrowse.ts): the server reads the State's path
 // list it already verifies for every source read and returns only the folders the reader opened, each with its
 // subfolders' first pages, so the browser never downloads a whole State and the next folder opens without a read.

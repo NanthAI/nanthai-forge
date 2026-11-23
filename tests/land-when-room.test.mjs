@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue ad80e037 line "land when the queue has room": `land {maxChecks:N}` is judged by the
 // server inside the submitting mutation (switch FORGE_QUEUE_LAND_WHEN_ROOM, off by default), and a
 // land without room waits on a live query instead of a builder's 240 s polling loop.

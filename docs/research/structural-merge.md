@@ -72,7 +72,7 @@ The brief assumed declaration indexes with stable identities already existed. At
 
 ## Dependency and licence cost (summary)
 
-The structural tool declares **GPL-3.0-only**; Forge's portable code is Apache-2.0 with server code AGPL-3.0-only, so linking it into the Apache portable package would change that combination's obligations. A separately installed executable talking over files or a CLI can be an aggregate if source and notice obligations are met, but that is a legal reading to confirm before any bundling, not a settled conclusion. The measured macOS ARM64 cost was about 7.6 MiB download and 79 MiB extracted; other platforms' binaries were untested, and the upstream library API is documented as unstable. The licence investigation itself stays private. **Importing the tool is not authorized by this page.**
+The structural tool declares **GPL-3.0-only**; Forge's code is AGPL-3.0-only, and GPL-3.0 and AGPL-3.0 code may be combined under AGPL section 13, so the combination would carry both sets of obligations. A separately installed executable talking over files or a CLI can be an aggregate if source and notice obligations are met, but that is a legal reading to confirm before any bundling, not a settled conclusion. The measured macOS ARM64 cost was about 7.6 MiB download and 79 MiB extracted; other platforms' binaries were untested, and the upstream library API is documented as unstable. The licence investigation itself stays private. **Importing the tool is not authorized by this page.**
 
 ## Decision rule applied
 

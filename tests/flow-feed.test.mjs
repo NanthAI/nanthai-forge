@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Flow view's feed fields (Item 85f456c1) ride writes the line feed already makes: a landing's step goes in
 // the summary write its exit already makes, a check key and a main-red hold ride the mark's stage/held patch.
 import test from 'node:test';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The owner's way to resume a stopped GitHub mirror (Issue 68361cd5, SM-E): `nforge github resume`
 // and Resume in the web mirror panel. The operator mutation (projectGithubMirrorStore:resume) stays.
 import { v } from 'convex/values';

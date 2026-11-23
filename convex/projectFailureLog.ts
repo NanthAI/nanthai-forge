@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Failure log (Item 2c420916). A failed operation (save, compose, sync,
 // check, cancel, ...) or a failed landing appends one bounded row in the mutation that settles it, so
 // the cause outlives Convex's short function logs. The healthy path reads and writes nothing here, an

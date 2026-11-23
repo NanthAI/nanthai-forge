@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { formatDecisionContext } from './decision-brief.js';
 import { legacyPolicy } from './autonomy-policy.js';
 import type { BriefInput, BriefContext, Briefing } from './agent-brief-types.js';

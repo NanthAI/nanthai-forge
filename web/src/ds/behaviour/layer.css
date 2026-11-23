@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* The behaviour layer's own rules: the states the headless parts report (focused, dragging, drop target), on top of the
    shapes in core.css. Loaded with the layer, never at first paint. Every value is a token from tokens.css. */
 

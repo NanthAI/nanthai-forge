@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import assert from 'node:assert/strict';
 /** Keep the original controller budgets, and account for the added read model
  * explicitly. Totals in diagnostics remain actual DB I/O, including projections. */

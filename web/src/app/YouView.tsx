@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { DeviceSettings } from './DeviceSettings';
 import type { DeviceSettings as Settings } from './access-contract';
 import { useState, type ReactNode } from 'react';

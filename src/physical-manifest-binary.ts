@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { invariant } from './errors.js';
 const valid = (ok: unknown) =>
   invariant(ok, 'SOURCE_HASH_MISMATCH', 'Physical manifest encoding is invalid.');

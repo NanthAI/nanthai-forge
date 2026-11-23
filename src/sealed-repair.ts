@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // GB-08 d5 (Gate B1 C9-C12): when a Checks or Production roster breaks the cross-set rule, values stay
 // refused and one write is allowed. A full owner device of that set whose own account passes the rule removes
 // the offending entries, and every entry they added (transitively) unless the person keeps it by name, and

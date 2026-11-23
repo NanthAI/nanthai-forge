@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { storageClass, verificationIo } from './legacy-storage-verify.mjs';
 import { privateJson } from './legacy-storage-journal.mjs';
 export async function migrateVerifiedCursors(audit, verification, dry, command, io) {

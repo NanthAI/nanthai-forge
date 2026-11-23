@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // When the dev site deploys (Item ef6aa22a, scripts/site-deploy-plan.mjs): only when what it serves changed, at most
 // once per window, and a missing record or an unlistable change always builds.
 import test from 'node:test';

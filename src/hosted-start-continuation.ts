@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { shellQuote } from './shell-quote.js';
 
 /** Seconds start waits for checkout and dependency sharing once the Lane is durable (Issue d41bb6e5). */

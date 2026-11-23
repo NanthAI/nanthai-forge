@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The rebuilt app's addresses and navigation (Item 84125787): stable deep links, browser Back, keys that never fire
 // in a field, sign-in that only returns into the app, every supported destination still reachable, and the first
 // passkey's wire shape matching what the server accepts.

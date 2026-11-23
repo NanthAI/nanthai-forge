@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Design 5.1: the join request a new device of an account with no Development entry posts, and the device
 // fingerprint people compare. Uint8Array only and no node: builtins, so the Convex mutation that stores a
 // request runs the same checks as the holder device that later wraps for it. Neither side trusts the other:

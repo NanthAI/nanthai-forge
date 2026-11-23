@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Agents (Item f2ee8381): the project's agent guidance and the viewer's own. One read of
 // `agentGuidance.read` per page open (a one-off query, never a subscription); each save is one retry-safe mutation; nothing
 // runs while idle. The server decides who may edit the project text (owner or guidance maintainer) and says so in

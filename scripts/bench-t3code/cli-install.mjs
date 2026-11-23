@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Where the installed Forge CLI lives, found the way the product installs it (Issue 7af26482,
 // docs/operations/cli-update.md): an installation DIR whose `current` selects one build
 // (DIR/builds/HEAD), entered by the PATH launcher `nforge` (`exec NODE 'DIR/launcher.mjs'`).

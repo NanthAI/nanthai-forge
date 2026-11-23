@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Dry-agent protocol driver. Only public replies select recovery commands and roots.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';

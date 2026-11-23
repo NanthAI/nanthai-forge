@@ -53,6 +53,10 @@ logical manifest bytes per State across all phases; save and compose have larger
 individual bounds. See the [repository envelope](docs/operations/source-exchange.md#supported-repository-envelope)
 and [P8 streaming work](docs/roadmap.md#streaming-source-steps-p8).
 
+## Licence
+
+Forge is licensed [AGPL-3.0-only](LICENSE-AGPL-3.0-only.txt), copyright 2026 Ferdinando Valsecchi. Every original file is covered; third-party code keeps its own licence and the Forge marks stay all-rights-reserved. See [LICENSE.md](LICENSE.md). Outside contributions need a contributor agreement and are closed for now ([CONTRIBUTING.md](CONTRIBUTING.md)).
+
 ## More
 
 [Documentation](docs/README.md) · [Why Forge](docs/why-forge.md) · [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md) · [Development](docs/development.md) · [Security](docs/security.md) · [Operations](docs/operations.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE.md)

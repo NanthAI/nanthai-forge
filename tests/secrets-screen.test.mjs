@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The actual screen and frame, with synthetic metadata only: values have no entry or display surface; access-loss,
 // failure and partial-page states are honest; commands are inert, quoted proposals; both widths and themes pass axe.
 import test from 'node:test';

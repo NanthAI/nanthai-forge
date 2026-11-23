@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item f9309eec: the Lane page logged React "two children with the same key" for ids that repeat in its source rows.
 // This mounts the Lane review screen in a real browser on a fixture whose source data repeats a file path, through a
 // development React build (the production build never logs key warnings), and fails on any console error. 1440 px and

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** A small TOML reader for manifests (Cargo.toml, pyproject.toml): tables, arrays of tables, dotted
  * and quoted keys, strings (basic, literal, multi-line), arrays, inline tables, booleans and numbers.
  * Dates and numbers stay as their text. Malformed input throws; callers treat that as an unknown

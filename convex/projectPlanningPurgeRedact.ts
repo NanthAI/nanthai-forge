@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Purge executor, redaction half (Item 4c9e961e, purge Lane 2). Paged and idempotent: each step rewrites one bounded
 // page of one store into its purged form, and the same code with `apply` false is the completeness check (it counts
 // what a step would still change). Stores, in order (the Item purge inventory, `planningPurgeStores`):

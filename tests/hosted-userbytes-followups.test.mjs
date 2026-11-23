@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // e0ae9db0 (F1-F5): recover-apply and old-checkout disposal move or remove only what they must.
 import test from 'node:test';
 import assert from 'node:assert/strict';

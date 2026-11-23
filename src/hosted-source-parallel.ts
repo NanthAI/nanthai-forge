@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { mapExchange } from './exchange-parallel.js';
 
 /** Independent source reads/uploads in flight per action. Each call is a network

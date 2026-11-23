@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Which paths are documentation (prose no build or test reads) for every selector that skips them:
  * the package graph, package and runner test selection, and manifest placement. One rule, so a
  * dependency, build or fixture file is never skipped by one selector and run by another. When a path

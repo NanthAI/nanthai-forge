@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 36fd3295 (incident 5e3c3a3c, section B), land --save half: a land that rejoins its own
 // SYNC_REQUIRED entry syncs main in once instead of looping, and every outcome of that one sync is a
 // reply land already handles (review 73d4db6d).

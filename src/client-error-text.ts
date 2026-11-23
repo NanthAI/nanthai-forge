@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Shared by the browser reporter and the Convex insert so neither side alone decides what is safe to keep.
 
 export const clientErrorLimits = {

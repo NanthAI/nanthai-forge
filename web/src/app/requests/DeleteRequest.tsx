@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A request to delete many projects for good (Item 7456856f), at /account?request=ID: the whole frozen list first,
 // then what goes and the typed count. Only the owner person approves, once; the server re-checks every project and
 // skips any that changed. One subscription (projectDeleteRequests:read), which the server writes on the decision and

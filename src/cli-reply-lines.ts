@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Terminal-only facts from the reply already in hand. Never traverse arbitrary receipt fields:
  * credentials, device labels and exact machine evidence belong to their existing contracts. */
 import { reviewHoldLine } from './receipt-slim.js';

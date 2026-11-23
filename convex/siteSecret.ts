@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Whether a request carries one of the site's service credentials. Fixed-length digest comparison; the credential
  * never enters a reply or a DB row. */
 export async function sameSecret(expected: string | undefined, supplied: string | null) {

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** `lanes {"view":"tree"}` (Issue 57c6f3ec): which open Lanes stack on which, which overlap, and each
  * one's state and next step, from the one bounded `lanes` page. The Convex query pairs overlaps from
  * the slim presence rows it already reads (convex/projectHostedLiveLanes.ts); this module only renders

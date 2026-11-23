@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Two hosted Lanes on one real save path (tests/hosted-saves-fixture.mjs), each with its own checkout
 // root and transport: the overlap, exact-conflict and notice tests share it.
 import assert from 'node:assert/strict';

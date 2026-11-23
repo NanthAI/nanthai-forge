@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item b030c3c5, line 2: one next recovery name across web and agent replies. A failed landing check names the same
 // cause, suspects and next step in `status {submissionId}` and the land/wait page as the Failed check screen's read;
 // a landing still checking carries no cause.

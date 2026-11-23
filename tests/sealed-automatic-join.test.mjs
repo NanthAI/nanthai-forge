@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Design 5.1 Automatic sharing: the Gate B1 M2 `automatic-join` anchor, the nine guards, the join request
 // mutation and the holder wrap, against the real sealed Convex module on a synthetic hosted project.
 import './check-runtime.mjs';

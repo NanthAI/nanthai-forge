@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // contract: tests/contracts/r2.contract.test.mjs
 // Forge has no Convex byte mode, so every test process gets R2 settings and an in-memory
 // bucket behind them. It stores what is PUT and answers HEAD/GET/DELETE like R2, without

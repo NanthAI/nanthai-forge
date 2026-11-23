@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Reactions on planning comments (Item 9a3d6f5f). One bounded read per open Item returns counts and the viewer's own
 // marks, never who else reacted; a toggle is one mutation. Who may react follows who may comment (the project's
 // planning writers), so reactions widen with comments, never ahead of them. A reaction is a person's: agent (device)

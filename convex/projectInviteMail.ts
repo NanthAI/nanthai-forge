@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Invitation emails (Item c6629fda): one email per invitation, sent through the alert email sender's account, token
 // and from address (src/stall-alerts.ts STALL_ALERT_ENV, Cloudflare Email Service); no second provider. The invitation's operation row
 // holds the send state; a resend is explicit and idempotent per resend operation id. The email names the inviter's

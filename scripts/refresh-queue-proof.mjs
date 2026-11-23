@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Refresh named replay proofs offline (Item ec229a55): run only their registered replays, once
 // each, on this checkout, then rewrite each covered digest and record the units the replay ran.
 // A composition that later changes only other units keeps the proof. The review fields stay:

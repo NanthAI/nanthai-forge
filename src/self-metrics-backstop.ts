@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { MetricPeriod, MetricRecords } from './self-metrics-types.js';
 const time = (at: string) => Date.parse(at);
 /** Proved-reuse back-stop (Issue 71767c9b): every acceptance on a cross-head proof

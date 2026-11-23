@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One finite page of an Item's Lanes, and optional web details. The CLI keeps its compact Lane-only reply.
 import { z } from 'zod';
 import { v } from 'convex/values';

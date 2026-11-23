@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Side effects of the zoo run (Issue 85d26a8b): the Forge CLI, git, GitHub reads, the import
 // actions and the Convex meter. run.mjs takes these as one injectable object.
 import { appendFileSync, writeFileSync, renameSync, existsSync, readFileSync } from 'node:fs';

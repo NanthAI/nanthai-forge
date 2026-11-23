@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Public discovery (Items 8947a779, 76be0714, 6a60e89a, 875a4b60): what a visitor may read, and who may star.
 import test from 'node:test';
 import assert from 'node:assert/strict';

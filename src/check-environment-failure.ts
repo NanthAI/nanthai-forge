@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 0d14c456 (from bf111983 line 4): under isolation=user every scoped check exited 126 with the same
 // environment error, and the queue kept dispatching new runs of it. An environment end is a failed check
 // that named no failing test and whose sealed failure summary carries the runner's own attribution to

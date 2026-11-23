@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Browser-safe check that downloaded bytes match their sha256 digest (hex). Browser readers of
  * object storage (code view, diff) call this before using any byte; a mismatch is a typed error. */
 export class BlobDigestMismatch extends Error {

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { testDeploymentOrigin } from './trusted-origin.mjs';
 // A measurement hold that names the measured project lets that project's own landings run on the
 // held build; every other project's landings still wait, and CLI updates stay refused (8c9b84fc:

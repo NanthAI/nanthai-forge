@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Scripted (no-model) queue scenarios for queue-change A/B arms (Items 854a069e, 0cba0afa).
 // `smoke` is the unchanged dry run, so arm A stays comparable with earlier smoke cells. Each
 // other scenario gives fixed roles to fixed positions of the cell's task order: no task, file

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Test-signal ratchet (ffbec6ef): a test guards a behaviour, a contract or an incident. Real sleeps,
 // elapsed-time asserts and reads of docs/ text guard none of those: they flake on a loaded runner,
 // and they fail on prose edits. Per test file this counts the three patterns and fails only when a

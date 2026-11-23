@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure pieces of scripts/bench-landing.mjs: progress parsing, phase timing,
 // statistics, scenario files, the GitHub workflow and report rendering.
 
@@ -164,9 +165,9 @@ export function scenarioEdits(scenario, token, member) {
 
 function scenarioFiles(scenario, token) {
   const probe = name =>
-    `// SPDX-License-Identifier: Apache-2.0\n// Benchmark probe; safe to delete.\nexport const ${name} = '${token}';\n`;
+    `// SPDX-License-Identifier: AGPL-3.0-only\n// Copyright 2026 Ferdinando Valsecchi\n// Benchmark probe; safe to delete.\nexport const ${name} = '${token}';\n`;
   const test = (names, file) =>
-    `// SPDX-License-Identifier: Apache-2.0\nimport test from 'node:test';\nimport assert from 'node:assert/strict';\n${names
+    `// SPDX-License-Identifier: AGPL-3.0-only\n// Copyright 2026 Ferdinando Valsecchi\nimport test from 'node:test';\nimport assert from 'node:assert/strict';\n${names
       .map(([n, f]) => `import { ${n} } from '../dist/${f}.js';\n`)
       .join('')}\ntest('${file} carries the run token', () => {\n${names
       .map(([n]) => `  assert.equal(${n}, '${token}');\n`)

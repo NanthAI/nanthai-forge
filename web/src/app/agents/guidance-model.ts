@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Agents as words (Item f2ee8381). Pure: the page supplies the one read of `agentGuidance.read`.
 export type Guidance = { project: string; personal: string; projectEditable: boolean };
 export type Scope = 'project' | 'personal';

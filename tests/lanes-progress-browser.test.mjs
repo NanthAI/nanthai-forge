@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The yard's running checks in a real browser (Item ecd6e610), on synthetic data through its real model and row
 // (tests/browser/lanes-progress.tsx; usual check 10 min, usual slowest 18 min): the row says how long the check has run
 // against the usual time and turns overdue in the warning tone past the slowest; the mark sits along the Checking stop

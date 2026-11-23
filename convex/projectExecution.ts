@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { QueryCtx } from './_generated/server';
 const traced = new WeakMap<object, Set<string>>();
 /** Request-tree attribution only: no source, arguments, writes or extra reads.

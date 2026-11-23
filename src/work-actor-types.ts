@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { z } from 'zod';
 import { AGENT_CLIENT, AGENT_STAMP_VALUE } from './agent-slug.js';
 export const workActorSchema = z.object({

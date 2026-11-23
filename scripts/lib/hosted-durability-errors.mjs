@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 const actions = {
   ARGUMENT_INVALID: 'Run hosted-durability.mjs --help and correct the selected command inputs.',
   R2_NOT_CONFIGURED: 'Have the owner check the four R2 secrets in the hosted-backup environment.',

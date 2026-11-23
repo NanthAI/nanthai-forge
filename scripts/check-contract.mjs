@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The check contract between a check executor and the check scripts it runs.
 //
 // A hosted check runs the control plane's (main's) executor against the Candidate's own

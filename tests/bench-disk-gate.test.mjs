@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Bench disk gate: macOS purgeable space counts as free (2026-11-18, the C' smoke cell was
 // refused at 20.8 GB by df while 82.7 GB was available).
 import test from 'node:test';

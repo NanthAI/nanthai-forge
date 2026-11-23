@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Split shared documents (Item 491ddd77): nearly every Lane added a paragraph to docs/status.md, so
 // its path overlapped on most landings and each overlap paid a full re-check. Entries now live one
 // per file; readers see the assembled document and the shared file cannot grow entries again.

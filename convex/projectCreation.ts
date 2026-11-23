@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { ensureAccount, ensureProjectSlug } from './urlIdentity';
 import { policyPreset } from '../src/autonomy-policy';
 import type { MutationCtx } from './_generated/server';

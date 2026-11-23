@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** B3.3 A-C: four open Lanes, two gone agents, files shared by several Lanes (no answers since Issue 853fcde3). */
 export function overlapNowFixture(state = 'C') {
   const now = Date.parse('2026-10-14T10:20:00Z');

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The import screen's words and stages (Items a488af2a, 2abda01f): what one progress read means for the person, said
 // from the recorded facts. `now` is the render's clock, never a query argument.
 import type { ImportVisibility } from '../../../../src/github-import-report';

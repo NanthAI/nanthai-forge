@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Plan view in the address (Item e0a23825): scope, filters, sort, layout and find are query parameters, so a
 // view survives a refresh, a link and the browser's Back. Saved views are a name for one of these addresses, kept on
 // this browser only (a personal shortcut; the agent `planning` read takes the same filter fields). Pure.

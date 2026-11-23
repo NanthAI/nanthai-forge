@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Convex half of a base-checkpoint scrub (Item b6588425 lines 2d, 2e; the action is
 // convex/projectCommentPurgeBase.ts), for one purged comment (`commentId`) or a whole purged Item (no `commentId`):
 // what the scrub replaces (`plan`), its publication (`publish`: the scrubbed root selected on the backup and every

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Replay (Issue aabe52a7, 2026-11-07): convex/r2Operations.ts listed R2 with a
 // bare fetch and no deadline, and GitHub App calls defaulted their injected
 // request to the bare global, so a stalled socket held the action until the

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pure: also runs in the Convex non-Node runtime and in the web app. No I/O.
 //
 // The shared planning contract (Item d3357f40, docs/planning.md). The web Plan place, discussions, public

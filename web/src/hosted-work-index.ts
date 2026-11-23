@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { useReadRetry } from './ui/read-retry';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { type ConvexReactClient, useConvex, useQuery } from 'convex/react';

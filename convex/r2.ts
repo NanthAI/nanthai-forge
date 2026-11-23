@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // R2 object access for Convex functions (V8 runtime): config from the Convex
 // environment, presigned PUT targets, and signed HEAD checks. Secrets never leave Convex.
 import { physicalKey } from '../src/physical-manifest-binary';

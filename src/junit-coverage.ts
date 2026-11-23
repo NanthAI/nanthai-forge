@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Which JUnit report entries cover a test file when the reporter names no `file` (Issue b94681af,
  * M2-03). Go reporters (gotestsum, go-junit-report) name the import path of the package, Maven
  * Surefire and Gradle name the class (`com.acme.LedgerTest`), cargo-nextest names `crate::binary`.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 1018d0f8 (decision c2be3da5), incident 0e94a117: a plain change does not start its Lane check
 // while a spent order-sensitive holder at the head of the order is checking; the holder's exit (land,
 // fail, withdraw) starts it through the real wake path. Bars from Fable's measured plan (comment

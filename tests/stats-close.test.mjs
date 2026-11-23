@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Stats day close (Items 2cf30e0a, a61d3c91): a project's day closes once, when a landing on a later UTC
 // day is recorded; the close reads each receipt and its landing row (own columns, no body pages) once and writes one row; the read
 // returns that day as measured figures only, with no clock argument.

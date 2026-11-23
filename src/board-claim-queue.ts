@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Automatic file claims, client side (Issue 9c8490a4, board Lane 4). Light on purpose: the
 // first-write hook loads it, so only Node builtins and root paths. The hook appends the path to a
 // per-Lane spool and starts one detached sender when none holds the lock; the sender waits a short

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A landing's receipt beside What landed: its title and message, who landed it, its check, how long it took to reach
 // main and the files it changed. Two reads, only for the landing the reader opens: its evidence (the existing landings
 // read: its Lane and Item) and what it changed (one source comparison).

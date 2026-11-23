@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The clone root (nforge pull) applies through the same in-place delta journal as Lane checkouts.
 // A crash is simulated by failing every later write to the checkout and its delta folders, as if
 // the process had died at that boundary (its work lock is released, as a dead holder's would be

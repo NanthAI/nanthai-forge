@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The public read a visitor's page asks for (Items 8947a779, 6a60e89a): one GET of a cached JSON file per page, the
 // same file crawlers and the agent lookup get. A visitor never opens a Convex connection: the site's shared cache
 // answers, and the backend sees at most one call per page per cache period (convex/publicHttp.ts). Read once when the

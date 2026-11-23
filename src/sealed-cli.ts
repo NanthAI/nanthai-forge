@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { resolve } from 'node:path';
 import { AGENT_CLIENTS, nearestAgentProcess } from './agent-session.js';
 import { hostedAgentAddress } from './hosted-agent-address.js';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Failed check screen's words (Item b030c3c5): the head's state and sentence come from the failure-cause contract,
 // the agent chip shows the same cause and recovery an agent reads, and the copied prompt carries no log or path.
 import test from 'node:test';

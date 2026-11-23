@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The public page's one requestAnimationFrame loop. A job returns false to leave the loop; with no jobs left the
 // loop stops, so a page at rest schedules nothing.
 export type FrameJob = (now: number) => boolean;

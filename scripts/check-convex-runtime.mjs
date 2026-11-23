@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Convex bundles every module without "use node" for its V8 runtime, where node: builtins do not resolve.
 // A deploy fails when such a module reaches one through src/, so reproduce the bundle step here: the same
 // esbuild resolution and TypeScript import elision, with builtins left external so they show up in the metafile.

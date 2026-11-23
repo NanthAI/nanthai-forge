@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The hosted and machine check selects, for a docs-only change, the tests local preflight selects
 // (Issue d90e0a2d): the readers of the changed documents (scripts/docs-readers.mjs), nothing more.
 import assert from 'node:assert/strict';

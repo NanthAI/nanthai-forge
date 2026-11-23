@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A person's contributions (Item 6a251b23): the day close counts landings (and those by agent runs, with the model
 // the run declared), Lanes and reviews per person; a repeated close writes the same row; the profile reads at most 366
 // rows and sends only the projects the viewer may open: owner (everything), teammate (public plus shared private),

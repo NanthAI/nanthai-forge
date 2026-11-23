@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { checkoutHostedLane } from './hosted-lane-checkout.js';
 import { hostedLaneCheckoutSchema } from './hosted-lane-checkout-marker.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';

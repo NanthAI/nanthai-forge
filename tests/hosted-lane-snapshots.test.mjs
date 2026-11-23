@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Unsaved-work snapshots of a hosted Lane checkout with undo (Issue 7ac4e32f).
 import test from 'node:test';
 import assert from 'node:assert/strict';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Global risk by placement (Issue 5cfcca4b): a manifest or lockfile inside a package is risk for that
 // package and its dependents only; root manifests, workspace files and unknown layouts stay global.
 import test from 'node:test';

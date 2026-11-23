@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item b6588425 line 2: report abuse of a project, a message, a comment or an account; the report reaches the operator
 // review queue with an alert; review by suspend, purge or dismiss writes an audit row each
 // (docs/security.d/sections/2160-abuse-reports.md).

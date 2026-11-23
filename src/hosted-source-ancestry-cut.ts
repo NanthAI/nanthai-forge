@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Prove a cut relative to the selected roots, regardless of prefetch order.
  * Reduce their frontier in descendant-first order. A singleton frontier is on
  * every verified parent path; nothing below it can be a maximal merge base.

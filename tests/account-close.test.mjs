@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Your data > Close account (Item 17cdc774, owner 2026-11-22: self-serve close ships in the beta). Once an
 // account holds nothing, its own person closes it through Forge's path: the account row, every handle it held, its
 // handle operations, deletion receipts, ordering hints, device sign-ins and native sign-in (sessions, passkeys,

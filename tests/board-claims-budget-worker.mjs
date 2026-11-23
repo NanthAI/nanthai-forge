@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Real first-write hook processes with automatic claims on (board Lane 4): the hook still makes one
 // query and the claim goes up from the detached sender, batched. Call counts only: the CPU p95 budget was
 // a wall-clock measurement that varied with machine load, so it is not asserted here.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Loose ends (Item fc1831eb) as data. `looseEndsView` is the folded Needs me region's Lane groups. `looseEndsScreen`
 // is the Loose ends page from the details read (projectLooseEnds:read with details: true): the five groups in the
 // approved order, each with its rows, its next page cursor, or why it is not reported, plus pages the reader asked for

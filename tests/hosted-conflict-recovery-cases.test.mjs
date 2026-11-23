@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident replays for the 2026-11-05 conflict-recovery cases (Issue 36a087ea, lead comment):
 // four builders needed manual steps after a composition conflict. Synthetic fixtures only.
 import test from 'node:test';

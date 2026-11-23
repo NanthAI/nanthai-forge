@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The exact bytes release keys sign. No imports and no Node built-ins: the CLI, the Convex store
 // and the automated signer (scripts/release-sign-ci.mjs, run by Node without a build) share them.
 

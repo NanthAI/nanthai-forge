@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Preserve upstream notice bytes for the locked production npm dependency closure.
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -77,9 +78,44 @@ while (pending.length) {
     }
   }
 }
+// Item ffb6cc49: Forge is AGPL-3.0-only, so every locked production dependency must carry a licence that may be
+// distributed with it. Permissive licences only; a new licence fails here until someone reviews it and adds it.
+const AGPL_COMPATIBLE = new Set([
+  '0BSD',
+  'Apache-2.0',
+  'BSD-2-Clause',
+  'BSD-3-Clause',
+  'BlueOak-1.0.0',
+  'CC0-1.0',
+  'ISC',
+  'MIT',
+]);
+// An SPDX expression passes when every AND operand passes and each OR group has one compatible choice.
+const compatibleLicense = expression =>
+  typeof expression === 'string' &&
+  expression
+    .replace(/[()]/g, ' ')
+    .split(/\s+AND\s+/)
+    .every(group => group.split(/\s+OR\s+/).some(licence => AGPL_COMPATIBLE.has(licence.trim())));
+const licenceCounts = new Map(),
+  incompatible = new Set();
+for (const [path, entry] of Object.entries(lock.packages))
+  if (path && !entry.dev && !entry.link) {
+    const licence = entry.license ?? 'Undeclared';
+    licenceCounts.set(licence, (licenceCounts.get(licence) ?? 0) + 1);
+    if (!compatibleLicense(entry.license)) incompatible.add(licence);
+  }
+if (incompatible.size)
+  throw new Error(
+    `Production dependency licence not reviewed for AGPL-3.0-only distribution: ${[...incompatible].join(', ')}`,
+  );
+const compatibility = [...licenceCounts]
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([licence, count]) => `${licence} (${count})`)
+  .join(', ');
 const chunks = [
   Buffer.from(
-    `NanthAi:Forge third-party npm notices\n\nExact upstream license/notice files for installed locked production dependencies.\nLockfile SHA-256: ${hash(lockBytes)}\nDependencies retain their own licenses; this document does not relicense them.\nThe separately launched native Convex backend is not included in this package.\nNanthAi brand rights and the self-hosted web fonts (SIL Open Font License 1.1) are described separately in web/src/assets/NOTICE.md.\n\n`,
+    `NanthAi:Forge third-party npm notices\n\nExact upstream license/notice files for installed locked production dependencies.\nLockfile SHA-256: ${hash(lockBytes)}\nDependencies retain their own licenses; this document does not relicense them.\nDistribution under AGPL-3.0-only: the locked production dependencies declare ${compatibility}. All are permissive licenses compatible with distributing Forge under AGPL-3.0-only (the Apache-2.0 licensed ones are compatible with version 3 of the GPL family). Development-only dependencies (including LGPL and MPL tooling) are not distributed with the package.\nThe separately launched native Convex backend is not included in this package.\nNanthAi brand rights and the self-hosted web fonts (SIL Open Font License 1.1) are described separately in web/src/assets/NOTICE.md.\n\n`,
   ),
 ];
 const missing = [],
@@ -106,6 +142,15 @@ for (const [path, entry] of Object.entries(lock.packages).sort(([a], [b]) => a.l
   const manifest = JSON.parse(readFileSync(manifestPath));
   if (manifest.version !== entry.version)
     throw new Error(`Notice version mismatch at ${path}: ${manifest.version} versus locked ${entry.version}`);
+  // The installed manifest is what gets bundled: a licence the lock does not show still fails.
+  if (
+    typeof manifest.license === 'string' &&
+    !/^SEE LICENSE IN /i.test(manifest.license) &&
+    !compatibleLicense(manifest.license)
+  )
+    throw new Error(
+      `Installed ${manifest.name}@${manifest.version} declares ${manifest.license}, not reviewed for AGPL-3.0-only distribution.`,
+    );
   const files = readdirSync(packageRoot).filter(name =>
     /^(?:licen[cs]e|notice|copying)(?:[._-].*)?$/i.test(name),
   );

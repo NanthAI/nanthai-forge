@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The owner-set limit on extra landings (Item 7f9a23e8): choices with where landings wait and the monthly maximum.
 import { useState } from 'react';
 import { Key, Region } from '../ds';

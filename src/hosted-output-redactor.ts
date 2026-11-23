@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { BOUNDARY_CREDENTIAL_PREFIXES, CREDENTIAL_PREFIXES } from './credential-prefixes.js';
 // Byte-preserving: artifacts need not be UTF-8. Only matched bytes are replaced.
 type Rule = { from: Buffer; to: Buffer; mask?: boolean; boundary?: boolean };

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // 5dcfce75 item 3: symbol-level selection. Importing one export of a module selects only the tests
 // that reach a changed export; every shape that could hide a real dependency stays selected.
 import assert from 'node:assert/strict';

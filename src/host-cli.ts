@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { hostProgress, type ProgressSink } from './host-progress.js';
 import { basename, join } from 'node:path';

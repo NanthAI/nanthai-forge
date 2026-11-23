@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident a7de3a93 (2026-11-05): a check dispatch whose outcome stayed unknown,
 // with no execution bound, left the queue head `checking` for the 12 h watchdog.
 // The checking stall alarm only flagged it; replaying the land only re-sent a wake.

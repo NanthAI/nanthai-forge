@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Test double for convex/react: answers queries from globalThis.__forgeTree by function name.
 import { createElement, Fragment } from 'react';
 import { getFunctionName } from 'convex/server';

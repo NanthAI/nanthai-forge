@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Public identity rule: reads and receipts name people by Forge handle, never by auth
 // subject (account id), provider display name or email. Every public function passes
 // its result through convex/publicPeople.ts, which removes a person a reader may not

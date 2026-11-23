@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Glob with `**`, `*`, `?` and `{a,b}`; `/` separates segments. Enough for path scoping. */
 export function globRegExp(glob: string): RegExp {
   let source = '';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { batchesFixture, states } from './hosted-landing-batches-fixture.mjs';

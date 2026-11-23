@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** The public read route, GET /public/v1/… (Items 6a60e89a, 875a4b60). It is the origin behind the site's shared
  * cache (site/public-read.ts): a cache hit is served from the edge's storage and never reaches Convex,
  * so a page costs about one call here per cache period and edge location (parallel misses may each call), whatever the number of visitors or crawlers. Reads only:

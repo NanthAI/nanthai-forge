@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A focused `node --test FILES` run skips whatever the project's own test script preloads
 // (`--import ./tests/setup.mjs`, `--require …`). Setup such as a private HOME or a fake service is
 // then missing, and a test can fail only on that machine (friction c804f164: a check-run test hit

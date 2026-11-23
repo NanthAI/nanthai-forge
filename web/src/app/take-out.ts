@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // "Take it out of main" (Item 9e7a17df), the one person-facing undo of a landing, shared by the landing check, the
 // proof page and Lane review. It starts the existing exact-change revert (BrowserLanding.revert): a new landing that
 // removes exactly that change, checked and landed through the queue like any other; later landings stay and main is

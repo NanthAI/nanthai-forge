@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Project as real components with synthetic data (Item 966cb821): the facts, the owner's rename (one operation
 // kept across a failed save), Move to trash, backups with Download and the recovery request, storing an archive, and
 // removing an import. A member who is not the owner sees the facts and none of the controls. Every state passes axe with

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Mirror screen's marks (Item c63c2171): each recorded mirror state as one state word and the distance between
 // the two ends, and the ends themselves said from the recorded heads.
 import type { StateKind, StateWord } from '../../ds';

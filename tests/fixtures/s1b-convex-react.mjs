@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Real Convex action hooks are stable; preserve that contract in this synthetic preview.
 export * from './hosted-tree/convex-react.mjs';
 import { useCallback } from 'react';

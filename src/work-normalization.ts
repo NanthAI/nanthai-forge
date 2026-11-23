@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Keep schema-normalized property order relied on by legacy receipts while retaining
 // uninterpreted extension fields through a local migration.
 export function preserveFields(parsed: unknown, raw: unknown): unknown {

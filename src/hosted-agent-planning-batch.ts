@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // `put-planning-item {"batch":[…]}` (Item 65b0e706): the agent side of one backlog batch. Loaded only by that command.
 // Each entry is a put (the same fields as a single put, model fields in `fields`) or, with "action":
 // "comment-planning-item", a comment. Entries name full Item UUIDs, so a replay writes to the same Items; a creation

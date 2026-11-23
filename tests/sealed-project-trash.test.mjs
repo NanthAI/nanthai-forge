@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 41a0df87 "Project trash or delete": trashing a project removes every grant but its owner's and a restore
 // brings none back, so the trash marks every other account its sealed sets list (design 5.5,
 // docs/security.d/sections/1220-sealed-removal.md). A restored project never gives a removed person back a value.

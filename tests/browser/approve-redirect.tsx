@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The /approve lookup page (Item 0a99ab23) through its real component. The Convex client is a stand-in: the one read
 // it makes, urlProjects:approvalTarget, answers per `?answer=` (`lane`, `needs` or `none`), and every read's name and
 // arguments are kept on window.__reads.

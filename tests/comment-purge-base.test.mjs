@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item b6588425 line 2d: a reported comment whose words are in the stored base checkpoint (its event and comment
 // records in the base's record catalog, and the packs over them) is purged there too. The abuse review starts the
 // purge; the base scrub (src/work-base-scrub.ts, convex/projectCommentPurgeBase*.ts) writes a new exchange root that

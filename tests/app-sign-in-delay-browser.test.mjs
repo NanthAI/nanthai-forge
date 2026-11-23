@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A reload with a delayed sign-in (Item 31328be4, owner dogfood 2026-11-17): the real App is mounted with sign-in held
 // loading. While it is unresolved nothing renders and no read is sent; the first paint is the view the resolved
 // access gets (a signed-in project page, a redirect to sign-in, a signed-out front page), never a different-access

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // `land --save` in a folder that became a resolution Lane (friction 41fc0c29, Issue 30845e65).
 // The agent edits the conflict files and lands again, as it would fix and push in Git. Saving that
 // edit is the resolution's `resolve`, so land runs it and lands the resolution Lane, instead of

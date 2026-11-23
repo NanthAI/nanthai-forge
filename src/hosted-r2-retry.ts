@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { ForgeError } from './errors.js';
 /** One bounded policy for R2 read-after-write lag on an object a source job
  * itself just stored or already committed (eb0491bb). Pure data plus one helper,

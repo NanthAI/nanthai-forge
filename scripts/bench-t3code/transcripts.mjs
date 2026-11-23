@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // B1.5d agent transcripts: Claude Code keeps each headless session as
 // ~/.claude/projects/<mangled cwd>/<sessionId>.jsonl; Codex writes a rollout under its
 // per-task CODEX_HOME (agent.mjs copies it). Either lands in the cell directory as

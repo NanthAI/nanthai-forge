@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Backend conflict evidence cannot know the caller's local checkout. The
  * transport supplies its one executable continuation with that exact root. */
 export function recoveryAdviceFindings(path, source) {

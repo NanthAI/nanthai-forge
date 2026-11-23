@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident 5c59940b: a passed protected-path landing was held for a person (REVIEW_REQUIRED,
 // phase "ready", pending waiting-for-review) while the queue dropped it and every read said
 // "queued to land"; the builder cancelled it as stranded. Every read now names the hold.

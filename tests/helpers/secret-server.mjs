@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { serialize, deserialize } from 'node:v8';
 const clone = value => deserialize(serialize(value));
 /** Scriptable transport for the future sealed provider. It runs no repository code,

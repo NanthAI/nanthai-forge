@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The one overlay: a sheet over a scrim. Centred on a wide screen, from the bottom edge on a phone (core.css). Focus is
 // held inside while open and returns to what opened it; Escape and a press on the scrim close it unless `required`.
 import type { ReactNode } from 'react';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Header-only and comment-only edits (Issue c14f4065): the same program runs, so preflight adds only
 // the tests that read the file's text. Detection is local: base bytes from this machine's stores.
 import assert from 'node:assert/strict';

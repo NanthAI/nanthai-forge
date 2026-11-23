@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Compare landing the same small change through Forge and through Git+GitHub.
 // Usage: node scripts/bench-landing.mjs --source OWNER [--dry-run] [options]; see docs/development.md.
 import { spawn } from 'node:child_process';

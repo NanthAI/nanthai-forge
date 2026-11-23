@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Cross-ecosystem zoo run (Issue 85d26a8b): for every repository in ZOO_ROOT/zoo.json, the same
 // generic scenario on Forge and on plain git + GitHub, with timings side by side.
 //   node scripts/bench-zoo/run.mjs ZOO_ROOT [--repos go,rust] [--concurrency N] [--reimport] [--no-github-run] [--prepare-only]

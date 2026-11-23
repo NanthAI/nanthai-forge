@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 'use node';
 // The base-checkpoint scrub of one purged comment (Item b6588425 line 2d), a step of
 // convex/projectCommentPurgeArchive.ts, and of a whole purged Item (line 2e: every version, listed row, comment,

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Invitations with a role and one email (Item c6629fda), and the People and access read (b987e608, docs/access.md):
 // the role reaches the grant, the email names only the inviter, the project and the role, a resend is explicit and
 // idempotent, and the people read answers each role with only what the contract lets it see.

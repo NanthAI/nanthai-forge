@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Code place (Items 90e5bc9c, 3968a655): the tree is read one folder at a time and never as a whole State; a
 // folder page is bounded and resumes exactly; a deep link names its folders; history rows come from the receipt alone
 // and show public handles; pinned States and line links are exact.

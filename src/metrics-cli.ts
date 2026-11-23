@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { writeFileSync } from 'node:fs';
 import { invariant } from './errors.js';
 import { hasNextPage, metricsReadToken, openMetricsRead, readMetricRecords } from './self-metrics-source.js';

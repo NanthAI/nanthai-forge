@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Queue proof scope (Item ec229a55, incident 9cd6c0ec). A replay proof binds a core file's exact
 // bytes, so main's own edit to a shared file voided a green Lane's proof on composition. A refreshed
 // proof also records the top-level units its replay executed. The proof then holds on a composed

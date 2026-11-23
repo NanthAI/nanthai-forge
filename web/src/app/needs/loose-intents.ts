@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Loose ends: open Intents with no linked Item (Item fc1831eb). The group is read on request, one bounded page at a
 // time (projectLooseEnds:read with the Intent cursor); the owner tidies picked rows in batches of 25 through
 // projectLooseEndIntents:setAside, one retry-safe mutation per batch that skips any Intent that gained a save, an Item

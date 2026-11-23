@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** `.gitattributes` patterns and the `text`/`eol` line-ending rules Git applies with its default
  * configuration (core.autocrlf false, core.eol native) (Issue 44ef42b9). Stored bytes stay exactly
  * what Git stores; only working-tree copies are converted: LF to CRLF where Git's checkout would

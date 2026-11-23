@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { isDeepStrictEqual } from 'node:util';
 import { parse as toml, stringify } from 'smol-toml';
 import ts from 'typescript';

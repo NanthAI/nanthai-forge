@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { analyticsTarget, sendAnalytics, type AnalyticsEvent } from '../../src/product-analytics';
 import { isAppPath, parseAppPath, type AppRoute } from './app/paths';
 

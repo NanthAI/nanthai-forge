@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The single-Lane page (Items 52235fbf, 4bc460aa, a1e3d771): what changed, file by file, in the order of what needs
 // eyes; where each line of a combined result came from; and the overlap with other Lanes. One bounded read names the
 // pinned saved head and every changed path with its exact blobs and the +/- counts its save recorded; a file's body is

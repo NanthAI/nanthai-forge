@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Only scratch runner repositories get these groups. Keep the pinned App/OIDC
 // planner, check, pack and proof steps in place.
 const ending = digits => digits.map(digit => `endsWith(github.run_number, '${digit}')`).join(' || ');

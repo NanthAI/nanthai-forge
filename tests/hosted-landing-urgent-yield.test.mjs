@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 43b51a5e, review 01a38b28 finding 1: a normal Ready entry's claim gave way to any urgent Ready
 // entry, even one parked on it. The urgent one waited for the normal one to move, the normal one
 // re-polled every 250 ms, and neither landed (stuck queue, ~4 mutations/s).

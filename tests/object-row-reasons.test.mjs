@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item d0297b9f: catalog and point entries stay O(pages). Only a writer that changes what an
 // object binds may copy an entry into a row, and the row names why; a writer that only sets a
 // flag or returns an id never copies one.

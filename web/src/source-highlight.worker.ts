@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { highlightSource, plainLines, type SourceToken } from './source-highlight';
 const cache = new Map<string, SourceToken[][]>();
 self.onmessage = async (

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Env-print guard (df2ba360): scripts, workflows and docs must not run or instruct commands that
 // print environment values or full process listings. A dev key leaked 2026-10-22 through a
 // process listing. Findings name file, line and rule only; never the matched text.

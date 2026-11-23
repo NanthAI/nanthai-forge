@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import type { LandingHold } from './hosted-landing-hold.js';
 import { reviewHoldLine } from './receipt-slim.js';

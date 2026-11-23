@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item b6588425 (4c): the places that ask "may this person work here?" count a writer through a linked team as
 // they count a direct writer (docs/access.md#teams), and a team reader as no writer. Direct grants stay the first
 // and only read for owners and direct members.

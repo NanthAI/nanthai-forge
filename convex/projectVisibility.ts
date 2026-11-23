@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Project, Visibility (Item 966cb821). Who may see the project is the owner's call, by a signed-in person in a
 // browser: an agent or any forge-cli credential is refused (docs/access.md `ownerPersonOnly`). Making a project public
 // needs its name typed, like permanent delete. One mutation, retry-safe per operation id; it reads and writes the one

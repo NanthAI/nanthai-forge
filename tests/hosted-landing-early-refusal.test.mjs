@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Early refusal (Issue 7fe54c7c; model `prequeue-early`): admitted changes whose
 // Lane proofs a moved main has made stale recompose together, not one after the
 // other at each turn (wave 3b, 2026-11-05: 558 -> 559 -> 560 -> 563 took 4.3

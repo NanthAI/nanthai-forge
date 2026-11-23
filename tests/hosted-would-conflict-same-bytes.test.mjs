@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 36fd3295 (incident 5e3c3a3c, section B): an early-resolution Lane carries its predecessor's
 // files; when that predecessor lands, the same bytes on main are not SYNC_REQUIRED. The land --save
 // half: hosted-land-sync-once.test.mjs.

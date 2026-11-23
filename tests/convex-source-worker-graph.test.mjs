@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The hosted source worker's Node actions load their static import graph on every cold start
 // (Convex splits dynamic imports into lazy chunks). Through agent-sync.ts that graph once held the
 // whole CLI (local workspace, records, checks, GitHub, the Convex client, parsers): about 1.3 s of

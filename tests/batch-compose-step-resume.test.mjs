@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident replay, Issue 3439ae76 (batch 2d82c075, 2026-11-08): a shared check passed late, after
 // main moved six times, so the 4-member cohort recomposed on the new main. That compose merged its
 // first member, yielded at the 2 MiB compute budget, and saved `batchMerged` in its cursor. The

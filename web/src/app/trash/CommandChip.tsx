@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The command chip of the Trash (SPEC-01-trash): what an agent runs for the same request, and what it may do alone.
 // It opens with `c` and closes with `c` or Esc. The output is the documented commands (docs/operations.md); no new flag.
 import { useEffect, useId, useState } from 'react';

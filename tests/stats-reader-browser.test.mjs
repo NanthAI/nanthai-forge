@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Stats for a reader (Item 157b3506): Stats is for project members with write access, so the read a reader or a
 // signed-out visitor makes is refused (PROJECT_UNAVAILABLE / AUTH_REQUIRED). The real Stats place then shows the normal
 // no-access notice inside the frame, and the rest of the app keeps working: the project nav is still there and another

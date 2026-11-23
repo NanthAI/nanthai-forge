@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Verification with independent static steps running concurrently. Direct runs test
 // every file; the standard check can supply a pinned impact selection. Tests start
 // after their builds, streaming counts while static-step diagnostics stay buffered.

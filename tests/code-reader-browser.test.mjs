@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 8e847a17 in a real browser: the Pierre highlighter runs in the worker (WebAssembly, under the site's script
 // policy) and colours a diff unified and side by side and the code in a rendered Markdown file; Markdown draws as a
 // document with its raw HTML dropped, a relative link into the repository, and an image it cannot load said in words.

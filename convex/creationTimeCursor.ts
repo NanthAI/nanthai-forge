@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { invariant } from '../src/errors';
 
 /** Paging rule for time-window reads over `_creationTime` (Issue 9c0ba6e1): rows can share one

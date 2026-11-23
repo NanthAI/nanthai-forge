@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Planted sources for the test-hygiene lint rules (tests/lint-rules.test.mjs, guard 7, Item 611a1795).
 // Each is the text of a would-be test file. They sit here, not in the test file, because the
 // test-signal ratchet counts sleeps by line even inside strings. Line 1 is the import, line 2 the plant.

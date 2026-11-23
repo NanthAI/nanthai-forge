@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // P8: owner-person pause/resume retains the link/direction; disconnect uses the binding transaction and cannot repeat removal.
 import test from 'node:test';
 import assert from 'node:assert/strict';

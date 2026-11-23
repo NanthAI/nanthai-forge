@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Remove the checkouts a benchmark run leaves behind; keep logs, JSON and summaries.
 // Usage: node scripts/bench-teardown.mjs WORK_DIR [--dry-run]; also imported by bench harnesses.
 import { existsSync, lstatSync, readdirSync, rmSync } from 'node:fs';

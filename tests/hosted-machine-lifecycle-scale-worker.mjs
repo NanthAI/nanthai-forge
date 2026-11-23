@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { mock } from 'node:test';
 import { hostedMachineLifecycleDrill, machineInterruptions } from './hosted-machine-lifecycle-drill.mjs';
 

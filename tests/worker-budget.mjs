@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { availableParallelism } from 'node:os';
 
 // Concurrent standard checks share the machine; mirror the check queue's default slot count.

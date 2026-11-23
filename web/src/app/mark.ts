@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // What the top-bar F shows (Item 641d887b; DESIGN.md "Brand mark states"), worked out from the live line feed the
 // project frame already reads: no other read, no listener but one visibilitychange, and at most one timer, armed only
 // for the next moment the picture changes by itself. One-shots fire once per event, never on a re-render, a repeated

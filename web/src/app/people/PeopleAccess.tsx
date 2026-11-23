@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings / People and access (Items b987e608, c6629fda; docs/access.md). One bounded read, projectAccess.people,
 // which re-runs only when a grant or an invitation changes; no timer and no poll. The screen shows the server's
 // answers and never decides access: every change below is refused by the server unless the owner person makes it.

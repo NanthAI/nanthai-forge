@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > GitHub mirror (Item c63c2171): the mirror in one sentence, the two ends (Forge main, GitHub main) with the
 // distance between them, and one next action when a person must act. The words come from the same read as
 // `nforge github status` (projectGithubMirrorRead.read: the project row and about three mirror rows), one subscription

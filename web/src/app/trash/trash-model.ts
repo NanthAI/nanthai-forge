@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Trash as words (Item 8fba39a4, SPEC-01-trash): one row form per project phase, the page sentence and the dates.
 // Pure: the page supplies the rows it read and the clock. Phases come from src/project-phase.ts, the one derive the CLI
 // and the old screen share; this file adds no state words of its own.

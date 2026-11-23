@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The agent side of the shared Item work read (convex/projectItemWork.ts, Issue 1c2ab97a): `planning {id}`
 // shows its first page as `work`, and `lanes {planningItemId, state:"all"}` pages it.
 import type { HostedAgentTransport } from './hosted-agent-transport.js';

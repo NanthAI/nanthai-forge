@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One main red in a browser (Item ae068e0c): the real red view with synthetic reads. With a proven culprit the head
 // names it and links its receipt, and only it is marked; with candidates only, no landing is
 // called the cause; a landing that made never-passed tests run is named as that; still red, it says so with the live

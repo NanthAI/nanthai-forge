@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 /** A preparing landing's source step (incident e62d834b): its compose, then that job's step row, two

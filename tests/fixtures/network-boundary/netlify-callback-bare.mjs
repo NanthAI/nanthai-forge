@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Replay (Issue aabe52a7, 2026-11-07): the Netlify analysis worker posted its
 // Convex callback with a bare fetch and its own AbortSignal.timeout, outside the
 // shared helper's header/total deadlines and typed transport errors. The guard

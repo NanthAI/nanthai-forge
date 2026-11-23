@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // An Item's Discussion with its hosted reads and writes, loaded on its own chunk when an Item page opens (Item 9a3d6f5f),
 // so the Plan list never loads the Markdown renderer.
 import type { Id } from '../../../../convex/_generated/dataModel';

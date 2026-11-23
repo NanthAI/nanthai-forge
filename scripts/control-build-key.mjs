@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Cache key for the trusted control build (`npm run build:core` output in dist/): a content hash of
 // exactly the files that build reads, so unrelated commits reuse one cached build. Any CI can call
 // it: `node scripts/control-build-key.mjs [ROOT]` prints one hex digest. Plain Node, no dependencies.

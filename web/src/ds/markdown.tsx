@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Member-written Markdown (a comment, an Item's text) drawn safely: raw HTML is dropped, never parsed or run; links open
 // only for http(s) and mailto, name their destination host on hover, and in-page anchors stay in place; images from
 // outside are not loaded. Footnote ids carry the text's own prefix, so a footnote link never jumps to another comment.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { symlinkSync, writeFileSync, type Stats } from 'node:fs';
 import { executableBitMatches, regularFileMode } from './file-mode.js';
 

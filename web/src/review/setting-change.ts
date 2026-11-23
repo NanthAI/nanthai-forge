@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A held settings change as a person reads it (Item 16093ed1): one summary line, then a before/after row per changed
 // field, a line diff for every script, and nothing internal unless asked. Pure: the server sends the setting as it is
 // now and as the grant would leave it (convex/projectSettingCompare.ts); this only compares and words them. What the

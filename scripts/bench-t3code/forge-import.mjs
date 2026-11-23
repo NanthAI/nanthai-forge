@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // GitHub import of the bench fork at the base commit into a NEW Forge project (setup step
 // forge-project). The import builds a born-hosted, server-authority main that agents can land
 // on; `nforge host` of a Git checkout does not (it seeds in Git format, so `mainReady` stays

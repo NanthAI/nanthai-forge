@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
 /** The living Forge F (64 geometry). Poses and motion: ./mark.css and DESIGN.md "Brand mark states". Brand rights: assets/NOTICE.md. */
 export type MarkState =
   | 'idle'

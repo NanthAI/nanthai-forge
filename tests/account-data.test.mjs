@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Account > Your data, server side (reviews 8e86eb09, ae15c5ca). Person-only: every read and cleanup entry refuses
 // device, agent and legacy CLI credentials through the real wrappers, before an account row is read. The cleanup is
 // bound to the exact reviewed before-list of what the person can see: anything shared, removed or renamed after the

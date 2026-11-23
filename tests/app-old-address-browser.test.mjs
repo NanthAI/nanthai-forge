@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Old addresses in the served app (Item d61f36fe): a plain old path replaces itself with its new address before any
 // screen starts, and an old id-only link is taken by the rebuilt app (which resolves it with one read once signed in),
 // never by the old screens. Built without a backend, so no read can be made.

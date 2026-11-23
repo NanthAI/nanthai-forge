@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A comparison of two Item versions (Item 4c9e961e): the longest common run of lines, then what each side adds, and
 // inside a replaced line the words that changed, since prose changes by word. Pure and bounded: past `limit` lines
 // (or words) on either side the middle is compared as one changed block, so a huge body can never stall the page.

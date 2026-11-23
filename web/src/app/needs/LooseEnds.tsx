@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Needs me › Loose ends (Item fc1831eb), as the approved forge-design-p7/flow/loose-ends.html: what was started and
 // left, in five groups from one details read (projectLooseEnds:read, details: true) at route entry. Each group lists
 // its rows with their evidence, or says why it is not reported; a group with more asks for its next page with the

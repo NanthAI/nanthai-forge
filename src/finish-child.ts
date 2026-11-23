@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { sha256 } from '@noble/hashes/sha2.js';
 /** Stable child operation identity, shared by native receipts and read-only projections. */
 export function finishChild(operationId: string, phase: string, attempt = 0) {

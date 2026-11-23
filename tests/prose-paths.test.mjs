@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One documentation rule for every selector (Issue c2f6a26a): `.txt` is prose only by name or under a
 // docs folder; fixture and test-data files are never documentation.
 import assert from 'node:assert/strict';

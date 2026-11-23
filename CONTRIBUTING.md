@@ -17,6 +17,10 @@ The handoff describes the problem, resulting behavior, saved/accepted State, wha
 
 Plain Git clone/fetch is a read/export path ([Git serving](docs/git-serving.md)); current contributions use hosted clones and Lanes. Existing proposal archives can still be downloaded or their original uploads reconciled; the browser does not create a new archive proposal.
 
-Follow [LICENSE.md](LICENSE.md). Keep permissive protocol and tooling code independent from server code, and do not copy code from another repository without checking its license.
+Follow [LICENSE.md](LICENSE.md): everything original here is AGPL-3.0-only, and new source files start with `SPDX-License-Identifier: AGPL-3.0-only` and `Copyright 2026 Ferdinando Valsecchi` (`node scripts/check-spdx.mjs --fix` adds them). Do not copy code from another repository without checking its licence is compatible with AGPL-3.0-only.
+
+## Outside contributions: contributor agreement required
+
+Outside contributions are closed. Before any is accepted, the contributor must sign a contributor licence agreement (CLA). It licenses the contribution to the project owner with the right to relicense it, including under dual and commercial licences, and to assign the project to a future company. The draft is [docs/contributor-agreement.md](docs/contributor-agreement.md). The owner has not yet approved the CLA text or the signing mechanism; no contribution is accepted until they have.
 
 Never put credentials or private data in issues or pull requests. Report vulnerabilities as described in [SECURITY.md](SECURITY.md).

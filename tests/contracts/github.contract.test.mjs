@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The installation and Git data cases also run against the public scratch repository when
 // CONTRACT_GITHUB_* is set. That run creates and deletes one branch. The Actions, check-run
 // and LFS cases use synthetic data while scratch permissions and seed data await approval.

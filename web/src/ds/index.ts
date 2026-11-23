@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The design system (Item 6ebb58ab): one token source, the shared parts and their rules (DESIGN.md). A screen opts in
 // with data-ds on its root; legacy screens keep their own styles until stage C retires them route by route.
 import './base.css';

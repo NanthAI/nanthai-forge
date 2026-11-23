@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Reuses package-smoke's packed, offline installation; never installs a second dependency tree in CI.
 import { spawnSync } from 'node:child_process';
 import {

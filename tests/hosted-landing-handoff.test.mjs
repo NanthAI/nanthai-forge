@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Core-claim incident 43b51a5e, case 2 (dogfood 2026-11-19 16:53-17:16Z): passed landings handed
 // from one waited-on entry to the next waited out every head's re-check, whatever their paths.
 import test from 'node:test';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Pure dry-run planner. No delete, migrate, deploy, or execute path. */
 export function classifyStorage(storage, references, r2) {
   const byId = new Map();

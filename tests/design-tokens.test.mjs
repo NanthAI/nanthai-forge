@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The design system's token source (web/src/ds/tokens.css, Item 6ebb58ab): both themes carry every colour, and the
 // contrast floors of DESIGN.md hold in each theme, read from the file itself so a token change cannot drift past them.
 import test from 'node:test';

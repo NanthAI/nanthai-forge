@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 5ba7c7f9 (docs/access.md#what-leaves-convex): a signed-in stranger on a public project reads the project, but
 // no owner-only or personal field of it. The row carries one marker value per such field; no project read may return
 // any of them to the stranger, and the owner still reads them all. Policy copies inside other reads (workspace, pinned

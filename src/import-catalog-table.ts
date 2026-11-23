@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { invariant } from './errors.js';
 import type { StateSize } from './state/size.js';
 import type { ObjectPack } from './object-pack-range.js';

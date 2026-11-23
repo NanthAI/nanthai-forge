@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Flip 5 (Issue 0695ab24): journal index rows as Work store records. Pure and runtime-neutral, shared by
 // the paged copy, the read-only compare and the dual write, so all three agree on one shape.
 import { planningItemSchema, planningCommentSchema } from './work-planning-types.js';

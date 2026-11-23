@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 5a22ee20: the four agent-CLI frictions of 2026-11-18, each with a test that fails without its fix.
 import test from 'node:test';
 import assert from 'node:assert/strict';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Invoices (Item 989c5695): the account's invoices, one statement per invoice, and the corrected-invoice request.
 // A phone shows the list or the selected invoice. Downloads and requests use the stub action contract; nothing is sent.
 import { useMemo, useState } from 'react';

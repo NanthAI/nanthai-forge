@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Landings on main with their Candidates' retained changed paths: the records a file's landing history reads
 // (convex/projectCodeFileHistory.ts). Shared by the web read's tests and the CLI landing log's.
 import { digest } from '../dist/hash.js';

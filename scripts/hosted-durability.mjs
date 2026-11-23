@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { childEnv } from './child-env.mjs';
 import { spawn } from 'node:child_process';
 import { chmod, link, mkdtemp, rm, stat } from 'node:fs/promises';

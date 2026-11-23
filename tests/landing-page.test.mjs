@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The public page (web/index.html) is static: its figures, links and copied prompt are checked here against the
 // published evidence and the repository, so a wording or number change cannot drift from its source.
 import test from 'node:test';

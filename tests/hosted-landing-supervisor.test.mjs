@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 19328518: no single driver can strand a landing. Each test loses or
 // breaks one driver (finish step, queue claim/advance, check callback, compose
 // wake, the supervisor's own repair) and replays the historical stall it

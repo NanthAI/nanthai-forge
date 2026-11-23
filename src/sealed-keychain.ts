@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // OS keychain backends for the device key store (Item a9f9b608). The keychain holds one random
 // 32-byte wrapping key per device; it encrypts the device key file. Key material reaches the
 // keychain tools through stdin only, never argv, and every tool call is bounded by a timeout so a

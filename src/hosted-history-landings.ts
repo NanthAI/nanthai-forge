@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // `history log` on a project with no imported Git history (Item 3968a655): one file's landings on main, the same
 // bounded window the web's file history reads (projectCode:fileHistory). One query per page, no polling.
 import { createHash } from 'node:crypto';

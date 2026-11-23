@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Weakened-test detector (Issue 11901a0c): compares a changed test file with its base version and
 // names, by file and test only, assertions that were removed or loosened, skips that were added and
 // tests whose input changed while their assertions stayed the same. Static: it parses, never runs.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The team invite field takes a Forge handle or an address (Item 2a47e8b3): a handle goes to the pending-handle action,
 // an address to the pending-address action, and a lost reply retries with the same operation id.
 import test from 'node:test';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { gzipSync, gunzipSync, inflateSync } from 'node:zlib';
 import { applyGitDelta } from './git-pack-delta.js';
 import { gitHash } from './hosted-github-git.js';

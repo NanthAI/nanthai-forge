@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { Limits, Position } from './types.js';
 
 /** Files that are never text, even if their bytes happen to decode as UTF-8. */

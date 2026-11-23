@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { hostedCheckTerminal, type HostedCheckRun, type CheckCause } from './hosted-check.js';
 import { hostedRunReuseKey } from './self-metrics-reuse-key.js';
 import { isScopedRecheck } from './scoped-recheck-policy.js';

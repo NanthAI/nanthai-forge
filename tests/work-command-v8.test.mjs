@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 85801d6f: the hosted Work command runs in the 64 MiB V8 runtime and hands only the commands
 // that need Node (acceptance, anchored notes, oversized rows) to the Node action.
 import test from 'node:test';

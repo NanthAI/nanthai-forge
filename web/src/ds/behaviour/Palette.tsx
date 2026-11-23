@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Go to or run (⌘K): the only Autocomplete in the app (a release-candidate part, pinned with the layer's exact version;
 // tests/ds-build-guard.test.mjs keeps it to this file). Typing filters; the first match is ready for Enter. With an empty
 // search nothing is chosen, so Enter runs nothing.

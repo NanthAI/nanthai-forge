@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { setImmediate as yieldTurn } from 'node:timers/promises';
 import { landingMatch, prepareLandingRecords } from './landing-records-index.js';
 import { readFragment } from './work-records.js';

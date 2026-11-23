@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Unified Work includes historical formats for backup and exact journal recovery.
 import { z } from 'zod';
 import { invariant } from './errors.js';

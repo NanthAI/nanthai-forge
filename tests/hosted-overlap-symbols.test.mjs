@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Cross-file symbol 1-hop advisory notes (Issue 3629cf24): facts at save, one note per Lane pair.
 import test from 'node:test';
 import assert from 'node:assert/strict';

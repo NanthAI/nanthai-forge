@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Which exchange root a base backup's readers read (Item b6588425 line 2d): the one a base-checkpoint scrub wrote
 // (src/work-base-scrub.ts), when the backup has one. Imports nothing, so Convex queries and mutations can use it.
 type BytePin = { sha256: string; size: number };

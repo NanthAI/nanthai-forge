@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { WorkStore } from '../dist/work-store.js';
 import { checkQuarantine, fixQuarantinedTest } from '../dist/check-quarantine.js';
 const [root, action = 'list', operationId, test] = process.argv.slice(2);

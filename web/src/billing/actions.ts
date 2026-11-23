@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // P7 billing actions: the typed contract P8 connects (Item 5822dd13). Each action carries an operation id and is
 // retry-safe by it. The stub keeps results in memory only: no provider, network, timers, storage, charge or email.
 import type { LimitChoice } from './preview';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Tests that read a changed Markdown file. A test that reads a document's text can fail on a docs-only
 // edit (a removed phrase it asserts, a renamed heading it parses), so that test is the document's
 // coverage. Everything else a docs-only change can break is a static check (the documents check,

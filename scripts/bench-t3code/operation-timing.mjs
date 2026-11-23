@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Read-side evidence only. Never infer server phases from an outer CLI call's duration.
 import { cliReplies } from './receipts.mjs';
 export function submissionTimings(output) {

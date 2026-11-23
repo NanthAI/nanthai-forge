@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // More CLI devices on the synthetic hosted project of sealed-hosted.mjs: each its own account, key store and pins,
 // against the same real sealed Convex module.
 import { mkdtempSync, rmSync } from 'node:fs';

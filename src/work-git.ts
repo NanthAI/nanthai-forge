@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { diskGuard } from './disk-guard.js';
 import { closeSync, existsSync, lstatSync, openSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

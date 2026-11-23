@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Racily clean stat-index entries (files changed just before they were indexed) are re-read until a
 // complete clean pass sees them safely old, then trusted, as Git refreshes its index. A file written
 // inside the racy window is never trusted on its lstat alone.

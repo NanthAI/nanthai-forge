@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Named switch arms (Item 0cba0afa) describe which tracked switches must be set.
 // Cells keep only switch names and presence on the bench deployment.
 import { execFile } from 'node:child_process';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Team access to a project (Item b6588425; docs/access.md#teams). The owner links their own teams, each with read or
 // write; every current member of a linked team gets that role, and leaving the team removes it on the next call.
 import { v } from 'convex/values';

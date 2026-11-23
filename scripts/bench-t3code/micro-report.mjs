@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Rung 2 is a protocol regression signal, never a scored model benchmark.
 export const MICRO = Object.freeze({
   workers: 3,

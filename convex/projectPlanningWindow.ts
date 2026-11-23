@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Bounded backlog audit window view (Item 1d51c91f): list Items closed, reopened or changed in a UTC
 // window, per Initiative or project-wide, reusing projectHostedRecords' existing indexes (zero new indexes).
 // A version's time is its record's _creationTime (as in initiativeCloseHistory). Classification reads

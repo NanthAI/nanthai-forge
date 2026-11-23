@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One file's landings (Item 3968a655), from one paged read (useFileHistory) drawn in two places: "Landings that
 // touched it" beside the file, and What landed narrowed to the file (`?path=`), whose toolbar, notice and foot are here.
 import { useState } from 'react';

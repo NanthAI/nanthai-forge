@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import type { HostedLandingState } from './hosted-landing.js';
 import type { EffectiveAgentDefaults } from './agent-parallel-defaults.js';

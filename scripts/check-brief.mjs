@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Brief lint: `node scripts/check-brief.mjs BRIEF.md` (or `-` for stdin) before delegating work.
 // Exit 1 and name each missing field. Output never echoes brief text, which may be private.
 // A brief may satisfy a field by pointing at the standard builder block (docs/agents/briefings.md)

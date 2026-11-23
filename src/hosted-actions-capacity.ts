@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Where the planning job leaves the `capacity` step's read of the runner's queue. */
 export const actionsCapacityFile = 'forge-actions-capacity.json';
 

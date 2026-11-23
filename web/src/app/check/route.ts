@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The landing check's address (Item b030c3c5): /<handle>/<project>/lanes/<laneId>/check. Kept apart from the screen so
 // the shell can match it without loading the screen's chunk.
 import type { AppRoute } from '../paths';

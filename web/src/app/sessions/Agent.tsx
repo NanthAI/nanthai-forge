@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // One agent run's page in a project (Item 6a251b23): who it is (run · model · for @person), its first and last action,
 // its Lanes, saves, landings and comments, and the identity it reported. One read per view (convex/projectAgentRun.ts), plus one per
 // "look further back"; it re-runs only when one of its Lanes changes. Its comments are read up to when the page opened

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // B1.5d no-model protocol/stress driver: dry edits exercise real coordination.
 // A scenario role (scenarios.mjs) adds fixed moves; with no role the driver is the smoke run.
 import { writeFileSync, chmodSync, copyFileSync } from 'node:fs';

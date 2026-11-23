@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Read-only replay: retained source is parsed as data, never imported or executed.
 import { readFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';

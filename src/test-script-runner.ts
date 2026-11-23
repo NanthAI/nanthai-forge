@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { safeRelative } from './safe-relative.js';
 
 /** Test runners read from a package.json `test` script (src/project-test-runner.ts rule 2). Reads the

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Parse repository bytes only: never import or execute the inspected modules.
 import { posix } from 'node:path';
 import { builtinModules } from 'node:module';

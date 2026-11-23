@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Mirror controls use policy/recovery and person-only binding removal; one retained request per retry.
 import { useRef, useState } from 'react';
 import { useConvex } from 'convex/react';

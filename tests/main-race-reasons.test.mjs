@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item c3c69c57: a re-check after main moves names its real reason instead of the catch-all
 // `not-eligible` (dogfood 2026-11-17: 139 main-race attempts, 1,667 min under that one code).
 import test from 'node:test';

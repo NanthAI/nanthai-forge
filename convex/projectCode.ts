@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Code place's history (Items 90e5bc9c, 3968a655): what landed on main, newest first, one receipt per row.
 // Metadata only. Referenced messages use one bounded body read per returned receipt, with no source reads.
 import { v } from 'convex/values';

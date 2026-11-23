@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Project as words (Item 966cb821): what the page says about the project and what the owner may change.
 // Pure: the page supplies the one read of the project and the viewer's handle.
 export type ProjectFacts = {

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Forge's one "first try" (owner 2026-11-19, Item a61d3c91): a change landed with no resubmission and no discarded
  * check. Stats (convex/projectStats.ts#statsLanding) and metrics 5.1 (src/self-metrics.ts) both use it.
  * - Resubmission: an earlier submission of the same Intent ended without landing (failed, cancelled, interrupted or

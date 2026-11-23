@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Bounded, paged audit timeline for one planning Item (Item 1d51c91f).
 // Reuses existing projectHostedRecords / projectHostedRecordHeads / projectWorkEvents /
 // projectIntentLandingNotes indexes with zero new tables or indexes.

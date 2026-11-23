@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Ferdinando Valsecchi
 # B1.5d oracle (harness-only; pushed as .bench/ci.sh on an ephemeral grading branch, never in
 # agent source): same toolchain, install, browser and scope as ci.sh (five full package
 # suites plus apps/server/src/preview), reported per case. Prints per file

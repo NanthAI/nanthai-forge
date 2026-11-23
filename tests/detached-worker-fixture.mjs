@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Synthetic owner that remains busy; no provider or real owner is contacted.
 import { WorkStore } from '../dist/work-store.js';
 import { workLocked } from '../dist/work-lock.js';

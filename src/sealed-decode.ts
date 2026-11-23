@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { SealedReply } from './sealed-verify.js';
 import type { PersonCheckpoint } from './sealed-future-records.js';
 import { bytes, checkTree, fullReply, number, record, roster } from './sealed-schema.js';

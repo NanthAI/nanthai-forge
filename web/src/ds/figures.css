@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* Design system: Figures and holders: yardsticks (five stops, the track, shards, the pool, the range stick, the two
    ends, who waits on whom), the overlap ruler, charts, the access table and presence, money and figures, devices and
    holders, and the yard. Scoped to [data-ds]; every value is a token from tokens.css, and the per-element inputs

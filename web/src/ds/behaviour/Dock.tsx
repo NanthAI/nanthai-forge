@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The dock: a screen's regions in a full-width row on top and two columns below. A region moves by its handle with the
 // same model as a list (Enter picks up, arrow keys choose, Enter drops, Escape cancels; Tab reaches the other parts of
 // the dock while carrying it), or by the handle's menu: up, down, to the other column, full width, reset the layout.

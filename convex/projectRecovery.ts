@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { v, ConvexError } from 'convex/values';
 import { CUTOVER_UPGRADE } from '../src/cutover-version';
 import { serverRecoveryAuthority } from '../src/recovery-authority';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Text versus binary the way Git decides it (Issue 113bc7b3): no NUL byte in the first
  * 8,000 bytes and no UTF-16 byte-order mark (a UTF-32 mark holds a NUL). UTF-8 validity
  * does not decide it: Windows-1252, Latin-1 and other ASCII-compatible encodings are text

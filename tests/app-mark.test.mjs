@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The top-bar F follows the live line feed (Item 641d887b): priorities, one-shots once per event (never on the first
 // read, a re-render or a repeated delivery), the failed and landed holds, and calming down.
 import test from 'node:test';

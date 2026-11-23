@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Names-first Secrets, on the shared design system. The protocol is gated: the live route uses a metadata-only
 // unavailable stub. Fixtures exercise the future view without adding a public fixture route or any secret endpoint.
 import { useState } from 'react';

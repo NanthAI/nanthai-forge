@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 8c50ce13: a landing message is stored once; the save and compose notes that travel with it
 // are capped at 1 KiB so a long message is never copied into every finish row.
 import test from 'node:test';

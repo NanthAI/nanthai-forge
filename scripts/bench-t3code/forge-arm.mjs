@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // B1.5d Forge arm: hosted project on t3code, a Lane per task, `land --save` with the
 // project's `verify` check (`bash .bench/ci.sh`) on GitHub Actions.
 // Every harness call here is async: workers never block one another, and agents' nforge

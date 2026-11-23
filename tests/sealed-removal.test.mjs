@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Design 5.5 removal: server-owned markers when a person leaves the project, the re-key on a person's next
 // write, `unshare --marked`, and the rotate list derived from signed records. Real sealed and contributor
 // Convex modules on a synthetic hosted project; synthetic keys and values only.

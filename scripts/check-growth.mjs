@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Growth ratchet (Issue ed28fc6b): Forge grew by patching, and friction -> slice -> guard never removed
 // anything. This counts the surfaces that pile up and fails when a count differs from the committed
 // baseline (tests/growth-baseline.json) without a recorded rise or reduction. Static: it reads source text, runs no

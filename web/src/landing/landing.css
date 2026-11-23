@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* The public page (web/index.html): static HTML, this sheet and two small scripts; no app code. */
 
 /* Tokens and fonts come from the design system's one source; <html data-ds> applies them. */

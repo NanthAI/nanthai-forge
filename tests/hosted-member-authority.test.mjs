@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Per-member authority (Issue 8809fba5, GitHub norm): a contributor changes only their own Lanes,
 // landings and overlap answers; the project owner may act on anyone's. Readers change nothing.
 import test from 'node:test';

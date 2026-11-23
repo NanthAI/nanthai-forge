@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item c2388099: every changed file on the Lane page shows its +/- counts, recorded once by the saving CLI from the
 // line sketches it already holds, against the Lane's first baseline. The row keeps them only in the room left after
 // paths and evidence (so overlap, preflight and landing read the same row), a count measured against another version

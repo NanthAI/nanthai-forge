@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 687d1eda, 'Check-definition changes': a change to Forge's own check definition gets main's
 // full check plus a trial of its own definition, run in addition, never instead.
 import test from 'node:test';

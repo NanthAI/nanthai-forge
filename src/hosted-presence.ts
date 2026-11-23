@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Presence (Issue 9c8490a4, Lane 1): which other open Lanes in the project work on something
  * related, ranked from the slim presence rows. Pure: Convex (V8) and the CLI both import it. */
 import { actorLabel, agentActor, splitAgentActor } from './agent-slug.js';

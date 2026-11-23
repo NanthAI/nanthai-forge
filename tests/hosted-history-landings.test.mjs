@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // `history log` with a path on a project made on Forge (no imported Git history, Item 3968a655) reads the web's
 // file history window: the real history action refuses, then one projectCode:fileHistory query per page.
 import assert from 'node:assert/strict';

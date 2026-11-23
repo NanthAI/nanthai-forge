@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Cross-engine reflow and focus checks on built screens with synthetic data.
 import test from 'node:test';
 import assert from 'node:assert/strict';

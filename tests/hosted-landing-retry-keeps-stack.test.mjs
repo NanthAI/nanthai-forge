@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue ea86f3fb (incident a7de3a93, 2026-11-05): a platform retry of a check
 // re-checks the same predicted head and keeps its receipt, so the dependent and
 // batch checks stacked on that (head, receipt) keep running. Before the fix a

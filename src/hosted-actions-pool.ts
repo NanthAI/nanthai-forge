@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Shard pool claims (Issue 0ea17a29): one create-only R2 object per pool unit. The plan call
 // returns a signed create-only PUT and a signed HEAD per unit; the fixed supervisor claims units
 // after its kept files. No Convex call per claim. docs/operations/github-actions-checks.md#shard-pool

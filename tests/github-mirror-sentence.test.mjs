@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item c63c2171: the GitHub mirror in one sentence, the same on the web Mirror screen and in `nforge github
 // status`, including an honest "no mirror", and a next action only when a person must act.
 import test from 'node:test';

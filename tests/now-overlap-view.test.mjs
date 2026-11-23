@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 1b66b35a: the Now page's overlap read stays under 20 KB per first view. The fixtures replay the dev
 // shapes measured on 2026-11-07: 100 full answer records per page (60 KB) plus every saved path of every
 // open Lane, each detection twice (84 KB at 16:12 UTC, 139 KB at 16:56 during a 10-builder wave), resent on

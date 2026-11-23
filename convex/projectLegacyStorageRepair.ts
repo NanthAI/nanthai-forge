@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Bounded, owner-scoped repair for R2-native project objects: rows inserted
 // already committed to R2 (location r2, r2Committed, a legacy storageId) never
 // went through the backfill flip, so r2BackfilledAt is unset and cleanup refuses

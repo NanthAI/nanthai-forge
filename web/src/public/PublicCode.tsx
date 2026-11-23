@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // A public project's code and history for a signed-out visitor (Item 4c164732): the members' Code views, read only, on
 // the site's cached public read (convex/publicCode.ts). The views read through VisitorCodeContext, so no read reaches
 // Convex and no Lane or Item link appears. Loaded with its route.

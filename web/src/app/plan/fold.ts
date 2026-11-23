@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Which Initiative groups of the backlog are folded (Item 4df3ee17; decision afcb5bc3): per viewer, on this browser
 // only, never a server write. One record per project: a base (everything open, or everything folded by Collapse all)
 // and the groups flipped from it since, so Collapse all also folds an Initiative created later.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Pause-exempt control only: no project/file deletion or application policy.
 import { maintenanceInternalMutation as internalMutation } from './server';
 import { v } from 'convex/values';

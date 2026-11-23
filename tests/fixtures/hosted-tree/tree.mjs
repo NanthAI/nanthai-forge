@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The data a signed-in viewer sees with one hosted project selected. Shared by the hosted tree test
 // and the review screenshots, so both exercise the same route tree.
 import { hostedCockpitFixture } from '../../hosted-cockpit-fixture.mjs';

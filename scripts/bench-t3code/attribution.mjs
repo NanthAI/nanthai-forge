@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // B1.5d grading attribution (S5): which test cases belong to which task. A task owns the cases
 // its upstream PR added or changed in its test files (PR version vs its parent). When several
 // tasks change one file, the oracle runs the latest version and each case goes to the last

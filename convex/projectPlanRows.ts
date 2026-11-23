@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Disposable Plan pages share the Work data partition; canonical Items and search roots stay exact.
 import { deflateSync, inflateSync, strToU8, strFromU8 } from 'fflate';
 import type { PlanRow } from '../src/planning-model';

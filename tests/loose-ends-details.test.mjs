@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item fc1831eb, lead mock check (c) and (d): Loose ends row details come from fields the writes that already happen
 // keep current, never from a read per row. Saves, landed-before and the check-pass stamp ride the Lane's overlap and
 // presence rows; open Lanes and size ride the project row. Each test names the behaviour it guards; the ones marked

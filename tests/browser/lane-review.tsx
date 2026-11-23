@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The Lane review screen (Items 52235fbf, 4bc460aa, a1e3d771) on synthetic data, through its real components. The
 // Convex client is a stand-in that answers the two download calls the screen makes and counts them; file bytes come
 // back as data: URLs and the real reader checks each against its digest. `?s=review` is a held Lane with a conflict

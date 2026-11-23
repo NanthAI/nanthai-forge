@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Failure-cause contract (Item 2c420916): one cause, four suspects in a fixed order and one next recovery
 // from retained evidence; unknown and missing evidence are said, never guessed.
 import test from 'node:test';

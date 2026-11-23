@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { assembleIndexValue, type IndexHeader } from '../src/work-index-value';
 import type { IndexEntry } from '../src/work-hosted-index';
 import type { HostedEvent } from '../src/work-types';

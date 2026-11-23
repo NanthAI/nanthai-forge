@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The first-write hook runs on every agent edit, so what it loads before it can answer is its cost.
 // Schemas (zod) and the Convex client belong to code it imports lazily, never to what it loads
 // first. A static import that pulls them in grew the hosted chunk from about 12 KB to 147 KB and

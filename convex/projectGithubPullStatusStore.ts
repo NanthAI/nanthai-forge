@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Whether a pull request head's final forge/verify status reached GitHub (Issue 68361cd5, SM-E).
 // Recorded only on failure (healthy posts write nothing), so a settled head is never mistaken for
 // a posted one while GitHub still shows the last accepted status.

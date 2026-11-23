@@ -1,6 +1,6 @@
 # NanthAi brand assets
 
-`nanthai-monogram.webp` is a lossless WebP encoding of the NanthAi company monogram, reused at the owner's explicit direction. Copyright 2026 Ferdinando Valsecchi. All brand and trademark rights reserved; this asset is excluded from the surrounding Apache-2.0 code license.
+`nanthai-monogram.webp` is a lossless WebP encoding of the NanthAi company monogram, reused at the owner's explicit direction. Copyright 2026 Ferdinando Valsecchi. All brand and trademark rights reserved; this asset is excluded from the surrounding AGPL-3.0-only code license.
 
 Source: `thevarsek/nanthai-edge`, commit `68e23215a7fdc3a58f5c56a8408073bb4fa69166`, `web/public/edge-brand/nanthai_edge_monogram_v2_transp.png`. Git blob: `ff988529e3ee8a1b0de4bbbb6e74805aee77a206`. Also served by the owner's public website at https://nanthai.tech/edge-brand/nanthai_edge_monogram_v2_transp.png.
 
@@ -26,4 +26,4 @@ Self-hosted variable typefaces for the public page (`web/index.html`, `web/src/l
 
 ## Forge mark
 
-The Forge Overlap mark, badge, lockups and browser/app icons in `brand/`, `web/public/`, the inline `ui/brand.tsx` component, its state styles in `ui/mark.css`, and the mark reference set in the repository's `design/hearth/` are the owner-supplied final Forge branding from Fable’s brand asset pack. Copyright 2026 Ferdinando Valsecchi. All brand and trademark rights reserved; these assets are excluded from the surrounding Apache-2.0 code license.
+The Forge Overlap mark, badge, lockups and browser/app icons in `brand/`, `web/public/`, the inline `ui/brand.tsx` component, its state styles in `ui/mark.css`, and the mark reference set in the repository's `design/hearth/` are the owner-supplied final Forge branding from Fable’s brand asset pack. Copyright 2026 Ferdinando Valsecchi. All brand and trademark rights reserved; these assets are excluded from the surrounding AGPL-3.0-only code license.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { mergeNativeText, nativeConflictRegions } from './native-text-merge.js';
 import { syntaxConflictReason } from './state/merge-syntax.js';
 import { conflictRule, resolveListText } from './native-docs-resolve.js';

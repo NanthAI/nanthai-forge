@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Reading a check's JUnit report directory (`FORGE_JUNIT_DIR`) with bounded, streamed files. */
 import { closeSync, lstatSync, mkdtempSync, openSync, readSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

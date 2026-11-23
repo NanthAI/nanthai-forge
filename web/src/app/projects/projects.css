@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* Account > Projects only (loaded with its route): a project row is the name and its one line of context, then its
  * facts, one unit per line; on a narrow region the facts drop under the name. */
 [data-ds] {

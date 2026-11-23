@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Synthetic API only: never create a real status or run a benchmark cell.
 import test from 'node:test';
 import assert from 'node:assert/strict';

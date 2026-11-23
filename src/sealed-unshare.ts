@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Design 5.5 removal: "remove and rotate". One owner-device write removes entries and re-keys: a new set key,
 // every value re-sealed, a wrap for each remaining recipient. A removed entry cannot open anything written from
 // then on; what it could already open is the rotate list (names only). Three routes share this one write:

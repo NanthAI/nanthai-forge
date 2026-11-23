@@ -19,7 +19,7 @@ Walked: the operations doc (self-host, backup and recovery headings, R2 storage)
 | 9 | Back up and restore | `npx convex export --include-file-storage …`. "A snapshot holds documents and files. It does not hold deployed code, backend environment, instance config or local Work stores." "File-inclusive snapshots hold only legacy copies, not the bucket." Restore: "start a fresh instance, import first, then deploy". | docs |
 | 10 | Upgrade | "Create a fresh instance with the new pin and restore a snapshot into it." | docs |
 | 11 | Check it works | `node scripts/selfhost-smoke.mjs` imports one small public repository; "it needs a read-only GITHUB_TOKEN". | docs |
-| 12 | Licences | Server AGPL-3.0-only; launcher and client Apache-2.0; the downloaded backend has its own terms. | docs |
+| 12 | Licences | All original Forge code AGPL-3.0-only; the downloaded backend has its own terms. | docs |
 | 13 | Operate it | `nforge maintenance …`, `nforge worker …`, `nforge metrics record-bill …`, `nforge cli release-sign` are in the same top-level help as everyday commands (journey 1, J1-5). | ran |
 
 ## Findings

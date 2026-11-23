@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue 48835eea cost line: the final check of a saving reply reuses the save's own recorded source
 // walk (Git's untracked cache: directory and ignore-file lstats) instead of walking the tree again.
 // It never trusts file events. Anything that could change the walk's result makes it walk again, so

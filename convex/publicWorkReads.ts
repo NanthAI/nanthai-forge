@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Registration-boundary projection for every role-less viewer, including signed-in visitors.
  * Current planning roots decide visibility even for historical versions and comment descriptors.
  * Reuses current roots read by the handler and resolves selected parents inside the same query; no board scan.

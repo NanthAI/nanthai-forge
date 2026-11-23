@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // BYOCI parity (Issue 63d241db, audit 1bb0d8e6): every landing fast path reaches the same outcome with
 // Forge's standard check and with a project's own command, on the same pnpm-style tree with a linked
 // folder and a submodule (the shape that hid 05df5aed). Differences are listed in

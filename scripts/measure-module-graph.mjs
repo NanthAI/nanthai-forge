@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Module-graph reach and package test selection for edits in any checkout, read from disk only:
 //   node scripts/measure-module-graph.mjs DIR PATH [PATH...]
 // Prints JSON: graph size and build time, then per edited path the reached files, the test units and

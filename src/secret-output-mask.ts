@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { Transform, type TransformCallback } from 'node:stream';
 import type { RunSecret } from './secret-run-environment.js';
 

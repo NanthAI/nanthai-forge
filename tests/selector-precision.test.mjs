@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // 5dcfce75: precision fixes that cut the selector's floor (a new, unimported file selected 1,061 of
 // ~1,276 tests). Each test pairs the narrower edge with the case that must still widen.
 import assert from 'node:assert/strict';

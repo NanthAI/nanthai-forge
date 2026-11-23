@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The People and access page's one read and its role change (Items b987e608, c6629fda; docs/access.md). The role is
 // resolved by convex/projectRole.ts and every answer comes from convex/projectAccessContract.ts; people are named by
 // the public identity rule (convex/publicPeople.ts), so a reader sees only themselves and invitation addresses reach

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Portable across the V8 and Node Convex runtimes: the shared transport uses
 // only fetch, AbortSignal, setTimeout, performance and web streams.
 import { networkFetch, networkTimeout, type NetworkOptions } from '../src/network-fetch';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Settings > Project, Visibility (Item 966cb821): the two confirmations. Making a project public types its name, like
 // Delete forever (SPEC-01-trash); making it private is one button. A person approves both in the browser; the server
 // refuses a device or agent sign-in.

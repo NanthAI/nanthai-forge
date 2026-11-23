@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The real project frame on synthetic data (Item 32e8de50). The top bar's main segment shows the count and
 // share without clipping, keeps its accessible name and stays idle. 390 px uses the separate phone row;
 // 861 px is the tightest docked row; 1000 px covers the reported overflow; 1440 px uses the wide line.

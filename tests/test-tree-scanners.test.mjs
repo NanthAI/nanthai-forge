@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Issue ec7960f9 item 4: a repo-wide guard that lists a folder and checks every file in it is that
 // folder's coverage, found from its own text, for any repository (synthetic inventories only).
 import assert from 'node:assert/strict';

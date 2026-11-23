@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Stats screen (Items 2cf30e0a, a61d3c91): the real StatsView in the project frame with synthetic closed days built by
 // the real contract (src/stats-estimate.ts). Guards: the headline is against the merge queue building 5 at once, the
 // baselines are named by mechanism with GitHub's setting names, discarded checks are split by cause, the replay states

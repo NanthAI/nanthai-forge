@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { deleteWorkRecord, setWorkRecord, workRecordRows } from './hosted-fixture.mjs';
 import { commitValidatedCheckpoint } from './project-exchange-fixture.mjs';
 import test from 'node:test';

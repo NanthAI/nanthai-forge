@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { byteString, displayLine, isTextBytes, stringBytes, utf8Text } from './text-bytes.js';
 import type { LineEdit } from './text-line-edits.js';
 type Op = { kind: 'context' | 'removed' | 'added'; text: string; before: number; after: number };

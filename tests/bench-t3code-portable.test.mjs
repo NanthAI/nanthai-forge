@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // The bench harness carries no machine paths (Issue 8c9b84fc): BENCH_ROOT is required, and the
 // CLI build, its dependencies and the measurement hold come from the product installation.
 // Synthetic folders only: no network, no Forge, no GitHub.

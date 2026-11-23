@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Keep the run (Item fa2c1383), the owner's condition (00a694d5): per kept run, the Convex cost
 // against the runner-minutes and time to main saved, at 1-2, 3-5 and 10 agents. The wiring ships
 // only if every multi-agent case saves clearly more than it costs, a quiet project stays near +0,

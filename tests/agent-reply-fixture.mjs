@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Fixed-width, synthetic receipts matching the hosted CLI boundary. Measure printed UTF-8 JSON,
 // including its newline; never compare these bytes with provider tokens or live billing.
 export const laneId = '11111111-1111-4111-8111-111111111111';

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
 /* P6 planning mockups. Tokens verbatim from web/src/ui/tokens.css; .fx-* component rules copied from web/src/ui (builder: reuse, do not re-add).
    New rules are prefixed .pl- and are the only CSS a builder adds (see SPEC.md §Components). */
 :root {

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item b6588425 part (4): agent coordination is team-only on every project. A public project opens its source and
 // Work reads to any signed-in account, never its coordination: an outsider gets the private project's refusal.
 import test from 'node:test';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Conservative local model of Convex document and indexed-range dependencies.
 export function trackReadSets(ctx, tables) {
   let reading = null;

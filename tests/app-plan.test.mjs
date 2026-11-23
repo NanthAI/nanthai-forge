@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Plan (Items d3357f40, b7a0dff1): projectPlanView:read lists the Initiatives and every live Item from the planning
 // search roots and counts each live Initiative's done and dropped Items, reading only those index ranges (closed
 // Items outside live Initiatives cost nothing); the screen's counts reconcile with its rows, "next" is the first free

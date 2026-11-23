@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { closeSync, openSync, rmSync, writeSync } from 'node:fs';
 import { createHash, type Hash } from 'node:crypto';
 import { checkoutIo } from './checkout-io.js';

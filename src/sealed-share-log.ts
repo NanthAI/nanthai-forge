@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Design 5.1 local state, kept in the private device key store under the pin lock, never on a server:
 // - this device's own Automatic join requests, the only local evidence the M2 anchor accepts;
 // - automatic shares this device made: the daily limit (guard 5) and the notice that survives restarts and

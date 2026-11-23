@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Two-way sync protection (owner decision A1, Issue 0b481f5f): Forge never writes a ruleset
 // and the App holds no Administration. This reads what GitHub enforces on main (Metadata read)
 // and prints the ruleset a repository admin imports once.

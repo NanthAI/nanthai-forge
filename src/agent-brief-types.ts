@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { DecisionRecord, DecisionContext } from './decision-types.js';
 import type { DeliveryHandoff } from './agent-handoff-types.js';
 import type { AutonomyPolicy } from './autonomy-policy.js';

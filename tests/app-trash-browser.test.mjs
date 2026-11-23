@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Trash and Move to trash as real components with synthetic rows (Items 8fba39a4, SPEC-01-trash): the Trash lists soonest
 // first with one row form per phase; Restore is one press with an Undo; Delete forever needs the typed name; only owners
 // get the "…" key in Projects; Move to trash is always a sheet that starts on "Keep it". Every state passes axe with no

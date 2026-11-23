@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { setupConvexAuth } from '@convex-dev/auth/server';
 import { setupGithub } from '@convex-dev/auth/methods/github/server';
 import { setupUsernamePasskey } from '@convex-dev/auth/methods/username-passkey/server';
