@@ -25,7 +25,7 @@ import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack
 import { sourceStorage } from './projectConvexSourceStorage';
 import { lfsBatch, uploadLfsObject } from '../src/github-lfs';
 import { runInbound } from './projectGithubInboundRun';
-import { unexpectedMirrorFailure } from '../src/hosted-github-retry';
+import { isRetryable4xx, unexpectedMirrorFailure } from '../src/hosted-github-retry';
 import { networkFailure } from '../src/network-fetch';
 import { writeMirrorVerification } from './projectGithubMirrorVerifyStatus';
 const publicNow = (ctx: ActionCtx, projectId: Id<'hostedProjects'>) =>
@@ -112,7 +112,7 @@ export const step = internalAction({
   returns: v.null(),
   handler: async (ctx, input): Promise<null> => {
     let plan: MirrorPlan | undefined;
-    let started: { phase: MirrorPlan['phase']; index: number } | undefined;
+    let started: { phase: MirrorPlan['phase']; index: number; tree: string } | undefined;
     let durable: ReturnType<typeof sourceStorage> | undefined;
     // Minted once per step; a failure detail never contains it.
     let token = '';
@@ -165,7 +165,7 @@ export const step = internalAction({
       } else plan = await prepareMirror(loaded.seed, io);
       await connect();
       invariant(plan, 'SOURCE_UNAVAILABLE', 'Mirror continuation is unavailable.');
-      started = { phase: plan.phase, index: plan.index };
+      started = { phase: plan.phase, index: plan.index, tree: JSON.stringify(plan.treeCursor ?? null) };
       plan = await stepMirror(plan, io);
       const verification =
         plan.entry?.commit !== (plan.seed.main?.expectedRef ?? plan.parent) ? loaded.verification : null;
@@ -208,11 +208,13 @@ export const step = internalAction({
     } catch (error) {
       // A failed request must not discard earlier verified blob replies in this
       // window. Persist that progress, but replay the failed call unchanged.
+      // Any failure, including a transport deadline, keeps progress GitHub already acknowledged.
       const progress =
-        error instanceof GithubMirrorApiError &&
         plan &&
         started &&
-        (plan.phase !== started.phase || plan.index !== started.index);
+        (plan.phase !== started.phase ||
+          plan.index !== started.index ||
+          JSON.stringify(plan.treeCursor ?? null) !== started.tree);
       let cursor: string | undefined;
       let progressUnavailable = false;
       if (progress) {
@@ -236,6 +238,10 @@ export const step = internalAction({
           ? { httpStatus: error.status, apiOperation: error.operation, requestBytes: error.requestBytes }
           : {}),
         ...(missingObjectError(error, plan) ? { missingObject: true } : {}),
+        ...(error instanceof GithubMirrorApiError &&
+        isRetryable4xx(error.status, error.operation, error.githubError)
+          ? { retryable: true }
+          : {}),
         detail:
           (unexpected?.detail ?? (error as ForgeError).message) +
           (progressUnavailable

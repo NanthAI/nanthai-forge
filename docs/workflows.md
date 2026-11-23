@@ -724,7 +724,11 @@ job in the same transaction. The fixed Convex action uses the installed GitHub
 App and Git Data API. It reads exact hosted/R2 source, creates only changed
 blobs in windows of at most 100 and 8 MiB (or one larger file), then creates a
 tree with `base_tree`, a deterministic commit and a non-forced fast-forward
-update of `main`. The commit keeps the supplied landing message and trailers, falling back to the
+update of `main`. A large change builds its tree in pieces of at most 500 entries or 150 KiB,
+chained through `base_tree`. When GitHub times a piece out (HTTP 422 "request timed out"), the piece
+is halved down to 25 entries. If that still times out, each changed directory is built
+children-first as one POST of its full entries without `base_tree`. A tree cursor in the job's plan
+resumes the build after a retry or across steps. The commit keeps the supplied landing message and trailers, falling back to the
 Intent outcome when no message was supplied, and uses the existing noreply sync identity. Its last
 paragraph is one trailer block: every message's trailers, a `Co-Authored-By:` credit for each covered
 landing's declared agent client unless its own message names a co-author, then Forge's trailers. A source-unchanged landing

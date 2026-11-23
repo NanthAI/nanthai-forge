@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { digest } from '../dist/hash.js';
 import { gitHash, gitTree, githubCommit, gitMode } from '../dist/hosted-github-git.js';
 import { GithubMirrorApiError } from '../dist/hosted-github-api.js';
+const fileMode = mode =>
+  mode === '160000' ? 'gitlink' : mode === '120000' ? 'symlink' : mode === '100755' ? 'executable' : 'file';
 export function mirrorFixture({
   before = { 'hello.txt': 'old' },
   after = { 'hello.txt': 'new' },
@@ -158,31 +160,53 @@ export function mirrorFixture({
       githubBlobs.set(sha, bytes);
       result = { sha };
     } else if (route === 'trees') {
-      assert(body.base_tree);
-      const files = new Map(trees.get(body.base_tree).map(file => [file.path, file]));
+      // With base_tree, path entries edit that tree; without it, entries are one directory's full
+      // listing whose `tree` entries name subtrees already known here (per-directory fallback).
+      if (!body.base_tree) assert(body.tree.every(change => !change.path.includes('/')));
+      const files = new Map(body.base_tree ? trees.get(body.base_tree).map(file => [file.path, file]) : []);
       for (const change of body.tree) {
         if (change.sha === null) files.delete(change.path);
-        else {
+        else if (change.type === 'tree') {
+          assert.equal(change.mode, '040000');
+          for (const file of trees.get(change.sha))
+            files.set(`${change.path}/${file.path}`, { ...file, path: `${change.path}/${file.path}` });
+        } else {
           if (change.type === 'commit') assert.equal(change.mode, '160000');
           else assert(githubBlobs.has(change.sha));
-          files.set(change.path, {
-            path: change.path,
-            mode:
-              change.mode === '160000'
-                ? 'gitlink'
-                : change.mode === '120000'
-                  ? 'symlink'
-                  : change.mode === '100755'
-                    ? 'executable'
-                    : 'file',
-            sha: change.sha,
-          });
+          files.set(change.path, { path: change.path, mode: fileMode(change.mode), sha: change.sha });
         }
       }
       const values = [...files.values()],
         sha = gitTree(values);
       trees.set(sha, values);
       result = { sha };
+    } else if (route.startsWith('trees/') && method === 'GET') {
+      const [sha, query] = route.slice(6).split('?');
+      const files = trees.get(sha);
+      assert(files);
+      const recursive = query === 'recursive=1';
+      const entries = new Map();
+      for (const file of files) {
+        const parts = file.path.split('/');
+        for (let i = 1; i < parts.length && (recursive || i === 1); i++) {
+          const dir = parts.slice(0, i).join('/');
+          if (entries.has(dir)) continue;
+          const sub = files
+            .filter(other => other.path.startsWith(`${dir}/`))
+            .map(other => ({ ...other, path: other.path.slice(dir.length + 1) }));
+          const subSha = gitTree(sub);
+          trees.set(subSha, sub);
+          entries.set(dir, { path: dir, mode: '040000', type: 'tree', sha: subSha });
+        }
+        if (recursive || parts.length === 1)
+          entries.set(file.path, {
+            path: file.path,
+            mode: gitMode(file.mode),
+            type: file.mode === 'gitlink' ? 'commit' : 'blob',
+            sha: file.sha,
+          });
+      }
+      result = { sha, tree: [...entries.values()], truncated: false };
     } else if (route === 'commits') {
       const entry = { ...body, parent: body.parents[0], seconds: Date.parse(body.committer.date) / 1000 };
       assert.equal(body.message.at(-1), '\n');

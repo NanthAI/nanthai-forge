@@ -14,7 +14,7 @@ import { digest } from '../dist/hash.js';
 import { prepareMirror, treeChunks, treeChunkBytes } from '../dist/hosted-github-mirror.js';
 import { githubRequest } from '../dist/hosted-github-api.js';
 import { gitHash } from '../dist/hosted-github-git.js';
-import { unexpectedMirrorFailure } from '../dist/hosted-github-retry.js';
+import { isRetryable4xx, unexpectedMirrorFailure } from '../dist/hosted-github-retry.js';
 import { hostedMirrorStatusText } from '../dist/hosted-github-mirror-status.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
@@ -906,6 +906,137 @@ test('replay 2026-11-23: a change touching every file lands in bounded tree piec
   assert.equal(posts.length, 3, '1200 entries land as 500 + 500 + 200');
   assert(posts.every(c => (c.body?.tree?.length ?? 0) <= 500));
   assert.equal(f.github.remote(), JSON.parse(f.job().mapping).commit);
+});
+
+// GitHub's real reply when the work behind one base_tree call is too big (State 6f14cecd).
+const treeTimeout = () =>
+  Response.json(
+    {
+      message:
+        "Sorry, your request timed out.  It's likely that your input was too large to process.  Consider building the tree incrementally, or building the commits you need in a local clone, pushing them to GitHub, and then using the API.",
+      documentation_url: 'https://docs.github.com/rest/git/trees#create-a-tree',
+    },
+    { status: 422 },
+  );
+
+test('replay State 6f14cecd: GitHub 422 timeouts on large tree pieces split them, a 502 resumes from the tree cursor, no owner action', async t => {
+  const before = {},
+    after = {};
+  for (let i = 0; i < 3000; i++) {
+    const path = `src/d${i % 30}/sub${i % 7}/f${i}.ts`;
+    before[path] = `// MIT\n${i}`;
+    after[path] = `// SPDX-License-Identifier: AGPL-3.0-only\n${i}`;
+  }
+  let timeouts = 0,
+    accepted = 0,
+    gateway = 0;
+  const f = await fixture(
+    t,
+    () => false,
+    { before, after },
+    (url, init) => {
+      if (!url.endsWith('/git/trees') || init?.method !== 'POST') return;
+      // Synthetic GitHub budget for the work behind one call: more than 60 entries times out.
+      if (JSON.parse(init.body).tree.length > 60) return (timeouts++, treeTimeout());
+      if (++accepted === 10 && !gateway++) return new Response('{"message":"Server Error"}', { status: 502 });
+    },
+  );
+  let guard = 0;
+  while (f.job().status !== 'done' && guard++ < 200) {
+    await f.step();
+    if (f.job().status === 'failed') assert.fail(`stopped: ${f.job().detail}`);
+  }
+  assert.equal(f.job().status, 'done');
+  assert.equal(timeouts, 4, '500, 250, 125 and 62 time out once each; the learned size is kept');
+  assert.equal(gateway, 1);
+  const posts = f.github.calls.filter(c => c.path.endsWith('/git/trees') && c.method === 'POST');
+  assert(posts.every(c => c.body.tree.length <= 31));
+  const firsts = new Set(posts.map(c => c.body.tree[0].path));
+  assert.equal(firsts.size, posts.length, 'no piece is posted twice: the 502 resumed from the cursor');
+  assert.equal(
+    posts.reduce((n, c) => n + c.body.tree.length, 0),
+    3000,
+  );
+  assert.equal(f.github.commits.get(f.github.remote()).tree, f.github.expected());
+  assert.equal(f.github.remote(), JSON.parse(f.job().mapping).commit);
+});
+
+test('a tree timeout at the smallest piece retries on the transient budget instead of stopping', async t => {
+  const before = {},
+    after = {};
+  for (let i = 0; i < 100; i++) {
+    before[`a/f${i}`] = `old ${i}`;
+    after[`a/f${i}`] = `new ${i}`;
+  }
+  const f = await fixture(
+    t,
+    () => false,
+    { before, after },
+    (url, init) => (url.endsWith('/git/trees') && init?.method === 'POST' ? treeTimeout() : undefined),
+  );
+  await f.step();
+  assert.equal(f.job().status, 'retrying');
+  assert.equal(f.job().httpStatus, 422);
+  assert.match(f.job().detail, /request timed out/);
+  assert(f.scheduled.at(-1).delay >= 48_000 && f.scheduled.at(-1).delay <= 72_000);
+  await f.step();
+  assert.equal(f.job().status, 'retrying');
+  assert.equal(f.job().failures, 2, 'a timeout at the floor makes no progress, so it spends the budget');
+});
+
+test('replay State 6f14cecd at the floor: when even small base_tree pieces time out, the tree is built per directory, children first', async t => {
+  const before = { notes: 'a file that becomes a directory', 'src/gone/x.ts': 'removed directory' },
+    after = { 'notes/a.md': 'now a directory', 'docs/new/y.md': 'new directory' };
+  for (let i = 0; i < 300; i++) {
+    const path = `src/d${i % 5}/sub${i % 3}/f${i}.ts`;
+    before[path] = `// MIT\n${i}`;
+    after[path] = `// SPDX-License-Identifier: AGPL-3.0-only\n${i}`;
+  }
+  let timeouts = 0;
+  const f = await fixture(
+    t,
+    () => false,
+    { before, after },
+    (url, init) => {
+      if (url.endsWith('/git/trees') && init?.method === 'POST' && JSON.parse(init.body).base_tree)
+        return (timeouts++, treeTimeout());
+    },
+  );
+  let guard = 0;
+  while (f.job().status !== 'done' && guard++ < 40) {
+    await f.step();
+    if (f.job().status === 'failed') assert.fail(`stopped: ${f.job().detail}`);
+  }
+  assert.equal(f.job().status, 'done');
+  assert.equal(
+    timeouts,
+    5,
+    'the 304-entry piece, then 152, 76, 38 and the 25-entry floor time out once each',
+  );
+  const posts = f.github.calls.filter(c => c.path.endsWith('/git/trees') && c.method === 'POST');
+  // src/d0..d4/sub0..2 (15), src/d0..d4 (5), src, notes, docs/new, docs and the root: 25 directories.
+  assert.equal(posts.length, 25, 'one POST per changed directory; the emptied src/gone needs none');
+  assert(posts.every(c => !c.body.base_tree && c.body.tree.every(e => !e.path.includes('/'))));
+  assert.equal(
+    f.github.calls.filter(c => c.method === 'GET' && c.path.includes('/git/trees/')).length,
+    1,
+    'one recursive read lists the old entries',
+  );
+  assert.equal(f.github.commits.get(f.github.remote()).tree, f.github.expected());
+});
+
+test('a GitHub 403 secondary or primary rate limit waits on the transient budget; a permission 403 and other 422s still stop', () => {
+  const secondary =
+    'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.';
+  assert.equal(isRetryable4xx(403, 'POST git/trees', secondary), true);
+  assert.equal(
+    isRetryable4xx(403, 'POST git/blobs', 'API rate limit exceeded for installation ID 42.'),
+    true,
+  );
+  assert.equal(isRetryable4xx(403, 'PATCH git/refs', 'Resource not accessible by integration'), false);
+  assert.equal(isRetryable4xx(422, 'POST git/trees', 'Sorry, your request timed out.'), true);
+  assert.equal(isRetryable4xx(422, 'POST git/commits', 'Sorry, your request timed out.'), false);
+  assert.equal(isRetryable4xx(422, 'POST git/trees', 'GitRPC::BadObjectState'), false);
 });
 
 test('tree chunks are bounded by UTF-8 request bytes as well as entries', () => {

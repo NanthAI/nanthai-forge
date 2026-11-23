@@ -19,7 +19,12 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { noteMessage } from '../src/landing-message';
 import { mirrorPublishMessage } from './projectGithubMirrorMessage';
-import { missingObjectDelays, transientDelay, transientMirrorCodes } from '../src/hosted-github-retry';
+import {
+  missingObjectDelays,
+  transientDelay,
+  transientMirrorCodes,
+  treeTimeoutPattern,
+} from '../src/hosted-github-retry';
 import { inboundBegin } from './projectGithubInbound';
 import { finish, inboundOutcomeSchema, yieldToInbound } from './projectGithubInboundQueue';
 import { openLane, projectLink, settlePull } from './projectGithubPullQueue';
@@ -323,6 +328,8 @@ export const failed = internalMutation({
     requestBytes: v.optional(v.number()),
     cursor: v.optional(v.string()),
     missingObject: v.optional(v.boolean()),
+    /** A GitHub 4xx that clears by waiting (isRetryable4xx): takes the transient budget. */
+    retryable: v.optional(v.boolean()),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
@@ -347,9 +354,15 @@ export const failed = internalMutation({
     const lag = input.missingObject === true && input.httpStatus === 422;
     if (lag)
       failures =
-        (!input.cursor && job.status === 'retrying' && job.httpStatus === 422 ? (job.failures ?? 0) : 0) + 1;
+        (!input.cursor &&
+        job.status === 'retrying' &&
+        job.httpStatus === 422 &&
+        !treeTimeoutPattern.test(job.detail ?? '')
+          ? (job.failures ?? 0)
+          : 0) + 1;
     const transient =
       transientMirrorCodes.includes(input.code) ||
+      input.retryable === true ||
       (input.code === 'GITHUB_SYNC_API' &&
         (input.httpStatus === 429 ||
           (input.httpStatus !== undefined && input.httpStatus >= 500 && input.httpStatus <= 599)));

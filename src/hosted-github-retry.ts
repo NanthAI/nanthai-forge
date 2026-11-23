@@ -13,6 +13,22 @@ export const treeBlobPattern = /\btree\.sha ([0-9a-f]{40}) is not a valid blob\b
 /** POST git/commits: "Tree SHA does not exist" for the tree this job just created. */
 export const commitTreePattern = /\bTree SHA(?: [0-9a-f]{40})? does not exist\b/i;
 
+/** POST git/trees: GitHub gave up on the work behind one base_tree call ("Sorry, your request
+ * timed out. ... Consider building the tree incrementally"), State 6f14cecd on 59-64 KB pieces.
+ * Not a refusal: the mirror splits the piece, then builds per directory (hosted-github-mirror.ts). */
+export const treeTimeoutPattern = /\brequest timed out\b/i;
+export function isTreeTimeout(status: number, operation: string, githubError: string | undefined): boolean {
+  return status === 422 && operation === 'POST git/trees' && treeTimeoutPattern.test(githubError ?? '');
+}
+/** GitHub 4xx answers that are not refusals and clear by waiting: a tree timeout that still
+ * reaches the scheduler, or a 403 primary or secondary rate limit. They take the 429/5xx budget. */
+export function isRetryable4xx(status: number, operation: string, githubError: string | undefined): boolean {
+  return (
+    isTreeTimeout(status, operation, githubError) ||
+    (status === 403 && /\brate limit\b/i.test(githubError ?? ''))
+  );
+}
+
 /** True when a 422 from git/trees or git/commits names a missing or invalid
  * SHA of this job's own objects. Every other 422 stays terminal. */
 export function isMissingObject(status: number, operation: string, githubError: string | undefined): boolean {

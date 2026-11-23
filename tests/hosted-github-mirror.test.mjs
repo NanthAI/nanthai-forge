@@ -340,6 +340,37 @@ test('slow GitHub replies yield a continuation after a bounded time window', asy
   await drain(f, next);
 });
 
+test('a tree build longer than its window continues in the next step from the tree cursor, never re-posting a piece', async () => {
+  const after = {};
+  for (let i = 0; i < 1200; i++) after[`d${i % 3}/f${i}`] = `new ${i}`;
+  const build = async slowMs => {
+    const f = mirrorFixture({ before: {}, after });
+    const api = f.io.api;
+    let clock = 0,
+      yielded = 0,
+      guard = 0;
+    f.io.api = async (path, method, body) => {
+      if (path.endsWith('/trees') && method === 'POST') clock += slowMs;
+      return api(path, method, body);
+    };
+    let plan = await prepareMirror(f.seed, f.io);
+    while (plan.phase !== 'done' && guard++ < 40) {
+      plan = await stepMirror(structuredClone(plan), f.io, () => clock);
+      if (plan.phase !== 'done' && plan.treeCursor) yielded = plan.treeCursor.done;
+    }
+    const posts = f.calls.filter(c => c.path.endsWith('/trees') && c.method === 'POST');
+    assert.deepEqual(
+      posts.map(c => c.body.tree.length),
+      [500, 500, 200],
+    );
+    assert.equal(plan.entry.tree, f.expected());
+    return yielded;
+  };
+  assert.equal(await build(1_000), 0, 'a normal build fits one step');
+  // 150 s per tree call: the 4-minute window takes two pieces, the next step the third.
+  assert.equal(await build(150_000), 1000);
+});
+
 test('gitlink bootstrap, unchanged pointer, SHA bump and deletion use commit entries without blob writes', async () => {
   const pointer = sha => ({ text: sha.repeat(40), mode: 'gitlink' });
   for (const verified of [true, false]) {

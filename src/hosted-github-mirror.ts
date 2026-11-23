@@ -4,7 +4,7 @@ import type { NativeFile, NativeState } from './state/format.js';
 import type { GithubSyncCommit } from './github-sync-types.js';
 import { GithubMirrorApiError, type GithubRequest } from './hosted-github-api.js';
 import { gitlinkCommit } from './gitlink.js';
-import { isMissingObject, treeBlobPattern } from './hosted-github-retry.js';
+import { isMissingObject, isTreeTimeout, treeBlobPattern } from './hosted-github-retry.js';
 import { gitHash, gitTree, gitMode, githubCommit } from './hosted-github-git.js';
 import { publicationExclusion, sourceExclusion } from './files.js';
 import { ForgeError, invariant } from './errors.js';
@@ -31,26 +31,32 @@ export const mirrorWindow = 100;
 export const mirrorBytes = 8 * 1024 * 1024;
 /** One POST git/trees carries at most this many entries or request bytes; larger changes chain
  * base_tree through intermediate trees (GitHub's tree limit is 100,000 entries / 7 MB; the
- * 2026-11-23 licence change sent one 560 KB request and drew five 502s). */
+ * 2026-11-23 licence change sent one 560 KB request and drew five 502s). GitHub also times out
+ * on the work behind one base_tree call (422 "request timed out", State 6f14cecd on 59-64 KB
+ * pieces), so a timed-out piece is halved down to `treeChunkFloor` entries. */
 export const treeChunkEntries = 500;
 export const treeChunkBytes = 150 * 1024;
+export const treeChunkFloor = 25;
+/** A tree build runs this long in one step before it continues in the next (the blob window
+ * keeps its own minute), so a normal large build adds no step. */
+export const treeWindowMs = 4 * 60_000;
 
-/** Split tree entries into bounded pieces, in order (paths are independent, so order is free). */
-export function treeChunks<T>(changes: T[]): T[][] {
-  const chunks: T[][] = [];
-  let current: T[] = [],
-    bytes = 200; // body wrapper and base_tree
-  for (const change of changes) {
-    const size = Buffer.byteLength(JSON.stringify(change)) + 1;
-    if (current.length && (current.length >= treeChunkEntries || bytes + size > treeChunkBytes)) {
-      chunks.push(current);
-      current = [];
-      bytes = 200;
-    }
-    current.push(change);
+/** The next bounded piece of `changes` from `start`: at most `cap` entries and `treeChunkBytes`. */
+export function treeChunk<T>(changes: T[], start: number, cap = treeChunkEntries): T[] {
+  const chunk: T[] = [];
+  let bytes = 200; // body wrapper and base_tree
+  for (let i = start; i < changes.length && chunk.length < cap; i++) {
+    const size = Buffer.byteLength(JSON.stringify(changes[i])) + 1;
+    if (chunk.length && bytes + size > treeChunkBytes) break;
+    chunk.push(changes[i]!);
     bytes += size;
   }
-  if (current.length) chunks.push(current);
+  return chunk;
+}
+/** Split tree entries into bounded pieces, in order. */
+export function treeChunks<T>(changes: T[], cap = treeChunkEntries): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < changes.length; i += chunks.at(-1)!.length) chunks.push(treeChunk(changes, i, cap));
   return chunks;
 }
 type GitFile = NativeFile & { sha: string };
@@ -123,6 +129,10 @@ export type MirrorPlan = {
   /** `.gitattributes` pins still to read; the first object window carries them,
    * so a mirror makes no extra source query for them. */
   lfsSources?: { baseline: string[]; target: string[] };
+  /** Tree build progress once the blobs are done: the intermediate tree holding the first `done`
+   * entries of `changes` and the piece size GitHub last accepted, so a retry or the
+   * next step resumes there instead of replaying every piece. */
+  treeCursor?: { base: string; done: number; cap: number; built?: Record<string, string | null> };
 };
 /** Paths a mirror commit's tree holds: every tracked path except Forge metadata
  * (`tracked`), or, for a commit an older mirror wrote, also without credential-looking
@@ -369,17 +379,119 @@ export function missingObjectError(error: unknown, plan: MirrorPlan | undefined)
     named.every(sha => plan.changes.some(entry => entry.type === 'blob' && entry.sha === sha))
   );
 }
+/** Builds the target tree in bounded pieces (see `treeChunkEntries`); null when the step's time
+ * is up and the next step continues from `plan.treeCursor`. */
+async function createTree(
+  plan: MirrorPlan,
+  io: MirrorIO,
+  prefix: string,
+  more: () => boolean,
+): Promise<string | null> {
+  const order = plan.changes;
+  const cursor = (plan.treeCursor ??= { base: plan.baseTree, done: 0, cap: treeChunkEntries });
+  let calls = 0;
+  while (!cursor.built && cursor.done < order.length) {
+    // Each call is bounded; a long build continues in the next step from this cursor.
+    if (calls++ && !more()) return null;
+    const chunk = treeChunk(order, cursor.done, cursor.cap);
+    try {
+      cursor.base = await createTreeChunk(plan, chunk, cursor.base, io, prefix);
+      cursor.done += chunk.length;
+    } catch (error) {
+      if (
+        !(error instanceof GithubMirrorApiError) ||
+        !isTreeTimeout(error.status, error.operation, error.githubError)
+      )
+        throw error;
+      if (chunk.length <= treeChunkFloor) cursor.built = {};
+      else cursor.cap = Math.max(treeChunkFloor, Math.floor(chunk.length / 2));
+    }
+  }
+  if (!cursor.built) return cursor.base;
+  return createTreeByDirectory(order.slice(cursor.done), cursor, io, prefix, () => !calls++ || more());
+}
+type TreeEntry = { path: string; mode: string; type: 'blob' | 'tree' | 'commit'; sha: string };
+const parentDir = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf('/')));
+const baseName = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+/** Fallback when even a floor-size base_tree piece times out (lead 19:35Z): every changed
+ * directory, children first, is one POST of its full entries without base_tree, so one call's
+ * work is one directory whatever the repository size. `cursor.built` (directory -> new tree, or
+ * null when it empties) is the resume point. Old entries come from one recursive read of the
+ * base tree per step, or, past GitHub's truncation limit, one read per changed directory. */
+async function createTreeByDirectory(
+  changes: MirrorPlan['changes'],
+  cursor: NonNullable<MirrorPlan['treeCursor']>,
+  io: MirrorIO,
+  prefix: string,
+  more: () => boolean,
+): Promise<string | null> {
+  const built = cursor.built!;
+  const own = new Map<string, MirrorPlan['changes']>(),
+    children = new Map<string, string[]>(),
+    dirs = new Set(['']);
+  const add = <T>(map: Map<string, T[]>, key: string, value: T) =>
+    map.get(key)?.push(value) ?? map.set(key, [value]);
+  for (const change of changes) {
+    add(own, parentDir(change.path), change);
+    for (let dir = parentDir(change.path); !dirs.has(dir); dir = parentDir(dir)) {
+      dirs.add(dir);
+      add(children, parentDir(dir), dir);
+    }
+  }
+  const depth = (dir: string) => (dir ? dir.split('/').length : 0);
+  const order = [...dirs].sort((a, b) => depth(b) - depth(a) || (a < b ? -1 : 1));
+  const listed = new Map<string, TreeEntry[]>();
+  let complete: boolean | undefined;
+  const entries = async (dir: string): Promise<TreeEntry[]> => {
+    if (listed.has(dir)) return listed.get(dir)!;
+    if (complete === undefined) {
+      const all = await io.api<{ tree: TreeEntry[]; truncated?: boolean }>(
+        `${prefix}/trees/${cursor.base}?recursive=1`,
+      );
+      complete = !all.truncated;
+      if (complete)
+        for (const entry of all.tree)
+          add(listed, parentDir(entry.path), { ...entry, path: baseName(entry.path) });
+    }
+    if (complete) return listed.get(dir) ?? [];
+    const sha = dir
+      ? (await entries(parentDir(dir))).find(entry => entry.type === 'tree' && entry.path === baseName(dir))
+          ?.sha
+      : cursor.base;
+    const found = sha ? (await io.api<{ tree: TreeEntry[] }>(`${prefix}/trees/${sha}`)).tree : [];
+    listed.set(dir, found);
+    return found;
+  };
+  for (const dir of order) {
+    if (dir in built) continue;
+    if (!more()) return null;
+    const next = new Map<string, TreeEntry>();
+    for (const { path, mode, type, sha } of await entries(dir)) next.set(path, { path, mode, type, sha });
+    for (const change of own.get(dir) ?? []) {
+      const name = baseName(change.path);
+      if (change.sha === null) next.delete(name);
+      else next.set(name, { ...change, path: name, sha: change.sha });
+    }
+    // After this directory's own entries, so a file replaced by a directory (or back) ends right.
+    for (const child of children.get(dir) ?? []) {
+      const name = baseName(child),
+        sha = built[child];
+      if (sha) next.set(name, { path: name, mode: '040000', type: 'tree', sha });
+      else if (next.get(name)?.type === 'tree') next.delete(name);
+    }
+    built[dir] =
+      next.size || !dir
+        ? (await io.api<{ sha: string }>(`${prefix}/trees`, 'POST', { tree: [...next.values()] })).sha
+        : null;
+  }
+  return built['']!;
+}
 /** GitHub can accept a blob POST (201, same SHA) yet reject that SHA in a later
  * tree POST, for example when the object already existed unreachable from a
  * deleted check ref (incident 8568bc76). Re-upload exactly the named blobs of
  * this tree from verified Forge bytes, then retry the identical tree once.
  * Bounded by the tree's own entries; a second failure throws to the shared
  * scheduled policy (hosted-github-retry.ts), which ends terminal. */
-async function createTree(plan: MirrorPlan, io: MirrorIO, prefix: string): Promise<string> {
-  let base = plan.baseTree;
-  for (const chunk of treeChunks(plan.changes)) base = await createTreeChunk(plan, chunk, base, io, prefix);
-  return base;
-}
 async function createTreeChunk(
   plan: MirrorPlan,
   chunk: MirrorPlan['changes'],
@@ -427,7 +539,8 @@ async function createTreeChunk(
 export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now): Promise<MirrorPlan> {
   if (plan.phase === 'done') return plan;
   const prefix = `/repos/${plan.seed.repository}/git`;
-  const deadline = now() + 60_000;
+  const started = now(),
+    deadline = started + 60_000;
   let count = 0,
     bytes = 0;
   while (plan.phase !== 'done') {
@@ -510,7 +623,11 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
       continue;
     }
     let tree = plan.baseTree;
-    if (plan.changes.length) tree = await createTree(plan, io, prefix);
+    if (plan.changes.length) {
+      const built = await createTree(plan, io, prefix, () => now() < started + treeWindowMs);
+      if (built === null) return plan;
+      tree = built;
+    }
     const seed = plan.seed;
     const entry = {
       publication: 'tracked' as const,
