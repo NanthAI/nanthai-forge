@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 // The Flow picture on Needs me (Item 85f456c1, Lane 2) in a real browser, on the Needs me fixture
 // (tests/browser/needs-me.tsx) through the real shell frame: every stop's count is the top bar's count and its blocks
-// (one source, the line feed); the approved home layout (picture left, Needs you right, FYI and Loose ends below, the
+// (one source, the line feed); the home layout (a 2 x 2: picture top left, Needs you top right, Loose ends bottom left, FYI bottom right, the
 // picture gives Needs you width while it holds anything, a phone reads Needs you first); widths 861 to 1440 have no
 // sideways scroll and the right size step; a held block's tag goes to its row under Needs you; worst-case text (long
 // handles, right-to-left and 50+ character titles) and a request asked ahead stay inside their boxes, axe clean in
@@ -387,77 +387,90 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       },
     );
 
-    await t.test('the home layout: picture left, Needs you right, FYI and Loose ends below', async t => {
-      const ratio = async page => {
-        const [flow, needs] = [await box(page, 'On the way to main'), await box(page, 'Needs you')];
-        return flow.width / needs.width;
-      };
-      const calm = await open(t, 1440, 'calm');
-      const [flow, needs, fyi, loose] = [
-        await box(calm, 'On the way to main'),
-        await box(calm, 'Needs you'),
-        await box(calm, 'FYI'),
-        await box(calm, 'Loose ends'),
-      ];
-      assert.ok(flow.x < needs.x && Math.abs(flow.y - needs.y) < 2, 'the picture is left of Needs you');
-      assert.ok(fyi.y > flow.y + flow.height - 2 && Math.abs(fyi.x - flow.x) < 2, 'FYI is below the picture');
-      assert.ok(loose.y > needs.y && Math.abs(loose.x - needs.x) < 2, 'Loose ends is below Needs you');
-      assert.ok(Math.abs((await ratio(calm)) - 1.6) < 0.05, 'nothing waits: the picture has 1.6 : 1');
-      assert.equal(await calm.locator('.fv-pic').getAttribute('data-tier'), '1');
-      const busy = await open(t, 1440, 'busy');
-      for (const [data, page] of [
-        ['busy', busy],
-        ['worst', await open(t, 1440, 'worst')],
-        ['over', await open(t, 1440, 'over')],
-      ]) {
-        const [picture, needsYou, fyi] = [
-          await box(page, 'On the way to main'),
-          await box(page, 'Needs you'),
-          await box(page, 'FYI'),
+    await t.test(
+      'the home layout: a 2 x 2, picture and Needs you above, Loose ends and FYI below (9e748e41)',
+      async t => {
+        const ratio = async page => {
+          const [flow, needs] = [await box(page, 'On the way to main'), await box(page, 'Needs you')];
+          return flow.width / needs.width;
+        };
+        const calm = await open(t, 1440, 'calm');
+        const [flow, needs, fyi, loose] = [
+          await box(calm, 'On the way to main'),
+          await box(calm, 'Needs you'),
+          await box(calm, 'FYI'),
+          await box(calm, 'Loose ends'),
         ];
+        assert.ok(flow.x < needs.x && Math.abs(flow.y - needs.y) < 2, 'the picture is left of Needs you');
         assert.ok(
-          picture.x < needsYou.x && Math.abs(picture.y - needsYou.y) < 2,
-          `Needs you stays at the top right for ${data}`,
+          loose.y > flow.y + flow.height - 2 && Math.abs(loose.x - flow.x) < 2,
+          'Loose ends is below the picture',
         );
-        assert.ok(needsYou.y < fyi.y, 'FYI never comes before Needs you');
-        assert.ok(Math.abs((await ratio(page)) - 1 / 1.1) < 0.05, 'something waits: Needs you gets 1.1 : 1');
-        assert.equal(
-          await page.locator('.fv-pic').getAttribute('data-tier'),
-          '0',
-          'the picture drops a size',
+        assert.ok(
+          fyi.y > needs.y + needs.height - 2 && Math.abs(fyi.x - needs.x) < 2,
+          'FYI is below Needs you',
         );
-      }
-      const phone = await open(t, 390, 'busy');
-      const order = await phone.evaluate(() =>
-        [...document.querySelectorAll('section.region')].map(section => section.getAttribute('aria-label')),
-      );
-      assert.deepEqual(
-        order,
-        ['Needs you', 'On the way to main', 'FYI', 'Loose ends'],
-        'a phone reads Needs you first',
-      );
-      await phone.locator('.needs-me .pstate a').last().focus();
-      const firstRegionFocused = [];
-      for (let i = 0; i < 80 && firstRegionFocused.length < 4; i++) {
-        await phone.keyboard.press('Tab');
-        const active = await phone.evaluate(
-          () => document.activeElement?.closest('section.region')?.ariaLabel,
+        assert.ok(Math.abs((await ratio(calm)) - 1.6) < 0.05, 'nothing waits: the picture has 1.6 : 1');
+        assert.equal(await calm.locator('.fv-pic').getAttribute('data-tier'), '1');
+        const busy = await open(t, 1440, 'busy');
+        for (const [data, page] of [
+          ['busy', busy],
+          ['worst', await open(t, 1440, 'worst')],
+          ['over', await open(t, 1440, 'over')],
+        ]) {
+          const [picture, needsYou, fyi] = [
+            await box(page, 'On the way to main'),
+            await box(page, 'Needs you'),
+            await box(page, 'FYI'),
+          ];
+          assert.ok(
+            picture.x < needsYou.x && Math.abs(picture.y - needsYou.y) < 2,
+            `Needs you stays at the top right for ${data}`,
+          );
+          assert.ok(needsYou.y < fyi.y, 'FYI never comes before Needs you');
+          assert.ok(
+            Math.abs((await ratio(page)) - 1 / 1.1) < 0.05,
+            'something waits: Needs you gets 1.1 : 1',
+          );
+          assert.equal(
+            await page.locator('.fv-pic').getAttribute('data-tier'),
+            '0',
+            'the picture drops a size',
+          );
+        }
+        const phone = await open(t, 390, 'busy');
+        const order = await phone.evaluate(() =>
+          [...document.querySelectorAll('section.region')].map(section => section.getAttribute('aria-label')),
         );
-        if (active && !firstRegionFocused.includes(active)) firstRegionFocused.push(active);
-      }
-      assert.deepEqual(firstRegionFocused, order, 'Tab enters every region in DOM order');
-      for (const page of [busy, phone]) assert.equal(await idleTimers(page), 0, 'an idle page sets no timer');
-      await phone.getByRole('button', { name: 'Move FYI' }).click();
-      await phone.getByRole('menuitem', { name: 'Up one' }).click();
-      const after = await phone
-        .locator('section.region')
-        .evaluateAll(sections => sections.map(section => section.ariaLabel));
-      assert.deepEqual(
-        after,
-        ['Needs you', 'FYI', 'On the way to main', 'Loose ends'],
-        'the phone grip can rearrange regions',
-      );
-    });
+        assert.deepEqual(
+          order,
+          ['Needs you', 'On the way to main', 'FYI', 'Loose ends'],
+          'a phone reads Needs you first',
+        );
+        await phone.locator('.needs-me .pstate a').last().focus();
+        const firstRegionFocused = [];
+        for (let i = 0; i < 80 && firstRegionFocused.length < 4; i++) {
+          await phone.keyboard.press('Tab');
+          const active = await phone.evaluate(
+            () => document.activeElement?.closest('section.region')?.ariaLabel,
+          );
+          if (active && !firstRegionFocused.includes(active)) firstRegionFocused.push(active);
+        }
+        assert.deepEqual(firstRegionFocused, order, 'Tab enters every region in DOM order');
+        for (const page of [busy, phone])
+          assert.equal(await idleTimers(page), 0, 'an idle page sets no timer');
+        await phone.getByRole('button', { name: 'Move FYI' }).click();
+        await phone.getByRole('menuitem', { name: 'Up one' }).click();
+        const after = await phone
+          .locator('section.region')
+          .evaluateAll(sections => sections.map(section => section.ariaLabel));
+        assert.deepEqual(
+          after,
+          ['Needs you', 'FYI', 'On the way to main', 'Loose ends'],
+          'the phone grip can rearrange regions',
+        );
+      },
+    );
 
     await t.test(
       'widths 861 to 1440: no sideways scroll, the size step, labels inside the picture',

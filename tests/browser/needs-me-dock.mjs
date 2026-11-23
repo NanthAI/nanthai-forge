@@ -2,7 +2,8 @@
 // Copyright 2026 Ferdinando Valsecchi
 import assert from 'node:assert/strict';
 
-const HOME = { top: [], a: ['flow', 'fyi'], b: ['needs', 'loose'] };
+// The default 2 x 2 (owner 2026-11-23 16:15Z): the picture over Loose ends, Needs you over FYI.
+const HOME = { top: [], a: ['flow', 'loose'], b: ['needs', 'fyi'] };
 const FLOW = 'On the way to main';
 const region = (page, title) => page.getByRole('region', { name: title, exact: true });
 const grip = (page, title) => region(page, title).getByRole('button', { name: `Move ${title}`, exact: true });
@@ -69,12 +70,12 @@ export async function checkDesktopDock(page) {
   await seeLayout(page, HOME);
   assert.deepEqual(await writes(page), [], 'reading the dock writes nothing');
 
-  const across = { top: [], a: ['fyi'], b: ['flow', 'needs', 'loose'] };
+  const across = { top: [], a: ['loose'], b: ['flow', 'needs', 'fyi'] };
   await dragBefore(page, FLOW, 'Needs you', 'b', '1st');
   await seeLayout(page, across);
   assert.deepEqual(await writes(page), ['set'], 'one write for a cross-column drop');
 
-  const reordered = { top: [], a: ['fyi'], b: ['needs', 'flow', 'loose'] };
+  const reordered = { top: [], a: ['loose'], b: ['needs', 'flow', 'fyi'] };
   await page.getByText('Drop a region here', { exact: true }).waitFor({ state: 'hidden' });
   await dragBefore(page, 'Needs you', FLOW, 'b', '1st');
   await seeLayout(page, reordered);
@@ -94,7 +95,7 @@ export async function checkDesktopDock(page) {
 
   await grip(page, FLOW).click();
   await page.getByRole('menuitem', { name: 'Full width' }).click();
-  await seeLayout(page, { top: ['flow'], a: ['fyi'], b: ['needs', 'loose'] });
+  await seeLayout(page, { top: ['flow'], a: ['loose'], b: ['needs', 'fyi'] });
   await page.getByRole('menu', { name: `Move ${FLOW}` }).waitFor({ state: 'hidden' });
 
   await page.locator('.dock-toast').getByRole('button', { name: 'Reset layout' }).click();

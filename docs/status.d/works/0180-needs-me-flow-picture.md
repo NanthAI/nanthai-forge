@@ -11,7 +11,7 @@
   latest full pass when the existing FYI audit page reports its finish time. CI minutes sit full width under
   the bar, as the day's accounted minutes. FYI has no tile row. It replaced "Moving without you",
   shares the top bar's line read and the page's Needs you and FYI reads, stands
-  left of Needs you with FYI and Loose ends below, gives Needs you width while it holds anything, and a
+  top left of a 2 x 2 (Needs you top right, Loose ends bottom left, FYI bottom right; Reset layout returns to it and a saved layout is kept), gives Needs you width while it holds anything, and a
   held block's tag goes to its row. On phones, flat rows follow Needs you in reading and keyboard order.
   A cube opens its Lane. The top-bar stops, station labels and the solid columns used past the 60-Lane
   feed cap open station drawers. A drawer makes at most one batched read when opened. Flow animates moving work when fresh

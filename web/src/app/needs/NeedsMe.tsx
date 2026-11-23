@@ -75,8 +75,9 @@ const dormantAbandon = makeFunctionReference<
   { projectId: Id<'hostedProjects'>; authorityEpoch: number; abandon: string[] },
   string
 >('projectHostedDormant:abandon');
-/** The approved home (Item 85f456c1): the picture and FYI on the left, Needs you and Loose ends on the right. */
-const LAYOUT: DockLayout = { top: [], a: ['flow', 'fyi'], b: ['needs', 'loose'] };
+/** The default home (owner 2026-11-23 16:15Z, Item 9e748e41): the picture over Loose ends on the left, Needs you over FYI
+ * on the right, a 2 x 2. These are only what Reset layout returns to; a saved layout is kept as it was. */
+const LAYOUT: DockLayout = { top: [], a: ['flow', 'loose'], b: ['needs', 'fyi'] };
 const PHONE_LAYOUT: DockLayout = { top: ['needs', 'flow', 'fyi', 'loose'], a: [], b: [] };
 const PHONE = '(max-width: 860px)';
 function watchPhone(change: () => void) {
