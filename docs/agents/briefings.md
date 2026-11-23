@@ -153,7 +153,9 @@ A brief or a lead comment on the Issue can override one for that slice.
   queue simulation reaches a queue module that is neither core nor a listed exception with its
   reason (the 2026-11-17 wake cut saved a little and cost hours of landing time; incident 5e3c3a3c).
   The landing check also requires a [qualifying proof](#attaching-queue-proof) for every
-  changed core queue path (Guard 1, Item d4289a6a).
+  changed core queue path (Guard 1, Item d4289a6a), except one whose only changed lines are its
+  leading `SPDX-License-Identifier` and `Copyright` comment lines: with both sides readable as text
+  in the same mode, that path needs no proof (Item ffb6cc49). Anything else stays core.
 - **Cost pins have a byte band.** The pinned Convex baselines in `tests/keep-the-run-scenarios.mjs`
   (`MEASURED`, `WIRED`) keep calls and document counts exact, and allow stored bytes to move inside a
   stated band: `WIRED` deltas by 256 B either way, `MEASURED` totals up to 0.25% (at least 64 B) over

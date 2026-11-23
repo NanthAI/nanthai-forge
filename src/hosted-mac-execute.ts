@@ -11,7 +11,7 @@ import {
   unstoredReportsNote,
 } from './contract-test-timings.js';
 import { isBrowserTest } from '../scripts/browser-test-policy.mjs';
-import { queueProofPaths } from '../scripts/core-queue-paths.mjs';
+import { coreQueuePath, queueProofPaths } from '../scripts/core-queue-paths.mjs';
 import { isStandardForgeCheck } from './standard-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { localMacLogFiles } from './check-local-log-files.js';
@@ -104,13 +104,32 @@ export async function machineSecretScan(
     { baseAllow: baseAllowFile ? readFileSync(join(cache.objects, baseAllowFile.blob)) : undefined },
   );
   // The scan needs new bytes only. Queue proof also covers paths absent from this State.
-  const queueProof =
-    pinQueueProof && before
-      ? queueProofPaths([
-          ...changed,
-          ...before.filter(file => !inventory.has(file.path)).map(file => file.path),
-        ])
-      : undefined;
+  let queueProof;
+  if (pinQueueProof && before) {
+    const paths = [...changed, ...before.filter(file => !inventory.has(file.path)).map(file => file.path)];
+    // A header-only edit of a core path is not core: main's and the new bytes of changed core paths only.
+    const main = new Map(before.map(file => [file.path, file]));
+    const core = paths.filter(coreQueuePath).flatMap(path => [main.get(path), inventory.get(path)]);
+    const text = (file: (typeof files)[number] | undefined) =>
+      !file
+        ? null
+        : file.mode === 'symlink'
+          ? undefined
+          : readFileSync(join(cache.objects, file.blob), 'utf8');
+    let read: ((path: string) => readonly [string | null | undefined, string | null | undefined]) | undefined;
+    try {
+      const blobs = core.flatMap(file => (file && file.mode !== 'symlink' ? [file.blob] : []));
+      if (blobs.length) await cache.ensure(blobs);
+      read = path => {
+        const [before, after] = [main.get(path), inventory.get(path)];
+        return before?.mode === after?.mode ? [text(before), text(after)] : [undefined, undefined];
+      };
+    } catch {
+      /* Unreadable: every changed core path stays core. */
+    }
+    signal.throwIfAborted();
+    queueProof = queueProofPaths(paths, read);
+  }
   return { ...scan, queueProof };
 }
 /** Check commands receive a private HOME/temp and only declared inputs. Source

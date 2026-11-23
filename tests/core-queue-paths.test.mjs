@@ -7,7 +7,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { existsSync, readFileSync } from 'node:fs';
-import { REGISTRY, coreQueuePath, coreQueueTests } from '../scripts/core-queue-paths.mjs';
+import {
+  REGISTRY,
+  coreQueuePath,
+  coreQueueTests,
+  headerOnlyChange,
+  queueProofPaths,
+} from '../scripts/core-queue-paths.mjs';
 import { interactionSelection, selectPreflightTests, selectTests } from '../scripts/test-impact.mjs';
 
 const registry = JSON.stringify({
@@ -241,4 +247,47 @@ test('6abdde40: every queue-family module the queue simulation reaches through c
     assert(!coreQueuePath(path), `${path} is core now; drop its exception`);
     assert(reached.has(path), `no queue code imports ${path} now; drop its exception`);
   }
+});
+
+// Item ffb6cc49: a licence-header flip of 244 core files needed a replay proof per path for comment lines.
+test('a header-only licence edit of a core path needs no queue proof; any other edit, or an unreadable side, stays core', () => {
+  const path = 'convex/projectHostedLandingStore.ts';
+  const code = "import { a } from './a';\nexport const landed = a + 1;\n";
+  const apache = `// SPDX-License-Identifier: Apache-2.0\n${code}`;
+  const agpl = `// SPDX-License-Identifier: AGPL-3.0-only\n// Copyright 2026 Ferdinando Valsecchi\n${code}`;
+  const plan = after => queueProofPaths([path, '.nforge/queue-proofs/p.json'], () => [apache, after]);
+  assert.equal(headerOnlyChange(path, apache, agpl), true);
+  assert.equal(plan(agpl), undefined);
+  const shebang = '#!/usr/bin/env node\n';
+  assert.equal(headerOnlyChange(path, shebang + apache, shebang + agpl), true);
+  assert.equal(headerOnlyChange(path, apache, shebang + agpl), false, 'an added shebang');
+  assert.equal(
+    headerOnlyChange(path, shebang + code, agpl.replace(code, shebang + code)),
+    false,
+    'a header above a shebang',
+  );
+  assert.equal(headerOnlyChange(path, apache.replace(/\n/g, '\r\n'), agpl.replace(/\n/g, '\r\n')), true);
+  const core = {
+    'one code character': agpl.replace('+ 1', '+ 2'),
+    'a header moved below the imports': code.replace('\n', '\n// SPDX-License-Identifier: AGPL-3.0-only\n'),
+    'code hidden behind a JS line separator': agpl.replace('only\n', 'only\u2028landed();\n'),
+    'a comment that is not a licence line': `// SPDX-License-Identifier: AGPL-3.0-only\n// landed early\n${code}`,
+    'an unreadable side': undefined,
+    'a deleted file': null,
+    'binary bytes': agpl + '\0',
+    'bytes lost in UTF-8 decoding': agpl + '\uFFFD',
+  };
+  for (const [label, after] of Object.entries(core))
+    assert.deepEqual(plan(after), { source: [path], receipts: ['.nforge/queue-proofs/p.json'] }, label);
+  assert.equal(headerOnlyChange(path, null, agpl), false, 'an added core file');
+  assert.equal(headerOnlyChange(path, apache, apache), false, 'unchanged bytes');
+  assert.equal(headerOnlyChange('convex/schema.json', apache, agpl), false, 'not a TypeScript file');
+  // No reader, or one that throws: every core path stays core.
+  assert.deepEqual(queueProofPaths([path])?.source, [path]);
+  assert.deepEqual(
+    queueProofPaths([path], () => {
+      throw new Error('object missing');
+    })?.source,
+    [path],
+  );
 });

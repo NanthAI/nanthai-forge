@@ -26,10 +26,44 @@ export const coreQueuePath = path => CORE.some(pattern => pattern.test(path));
 export const REGISTRY = 'tests/fixtures/incident-replays.json';
 export const queueProofPath = path => /^\.nforge\/queue-proofs\/[^/]+\.json$/.test(path);
 
-/** Pin only the paths Guard 1 needs, in the existing standard check plan. */
-export function queueProofPaths(paths) {
+// Header-only edits are not core (Item ffb6cc49): a licence flip of 244 core files needed a replay proof per
+// path for a comment change. One exact rule, fail closed: both sides read as TypeScript text (every core path
+// is .ts), and the files are equal once the leading `// SPDX-License-Identifier:` and `// Copyright` lines
+// (after any shebang) are removed from each. Header text is from a closed character set (no line terminators), so no code can hide in one. A
+// shebang below the header, NUL or U+FFFD (binary or lossy decoding) stays core; callers pass undefined for a
+// side whose mode differs or is a symlink.
+const LICENCE =
+  /^\/\/ (?:SPDX-License-Identifier: [A-Za-z0-9.+-]+(?: (?:AND|OR|WITH) [A-Za-z0-9.+-]+)*|Copyright \d{4}(?:-\d{4})?(?: [\p{L}\p{M}\p{N}.,&'-]+)+)\r?$/u;
+function body(text) {
+  const lines = text.split('\n');
+  const start = lines[0].startsWith('#!') ? 1 : 0;
+  let end = start;
+  while (end < lines.length && LICENCE.test(lines[end])) end++;
+  // A shebang right after a stripped header would move to line 1: keep the header in the body.
+  if (lines[end]?.startsWith('#!')) return text;
+  return [...lines.slice(0, start), ...lines.slice(end)].join('\n');
+}
+/** True only when `before` and `after` (text; null when absent, undefined when unreadable) differ in
+ * nothing but their leading licence-header comment lines. */
+export function headerOnlyChange(path, before, after) {
+  if (!path.endsWith('.ts') || typeof before !== 'string' || typeof after !== 'string' || before === after)
+    return false;
+  if (/[\0\uFFFD]/u.test(before) || /[\0\uFFFD]/u.test(after)) return false;
+  return body(before) === body(after);
+}
+
+/** Pin only the paths Guard 1 needs, in the existing standard check plan. `read(path)` gives a changed
+ * path's `[main, candidate]` text when the caller has both; without it every core path stays core. */
+export function queueProofPaths(paths, read) {
   if (!Array.isArray(paths)) return;
-  const source = paths.filter(coreQueuePath);
+  const headerOnly = path => {
+    try {
+      return Boolean(read) && headerOnlyChange(path, ...read(path));
+    } catch {
+      return false;
+    }
+  };
+  const source = paths.filter(path => coreQueuePath(path) && !headerOnly(path));
   if (source.length) return { source, receipts: paths.filter(queueProofPath) };
 }
 

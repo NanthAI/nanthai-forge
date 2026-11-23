@@ -1377,6 +1377,27 @@ test('incident 9cd6c0ec: a proof main made stale refuses in the plan before any 
   // Main's bytes cost at most one object read, only on this path.
   assert.ok(plans.scoped.downloads - plans.unscoped.downloads <= 1, JSON.stringify(plans));
 });
+test('Item ffb6cc49: the hosted plan asks no queue proof for a header-only licence edit of a core path, only for the code edit', async t => {
+  const code = 'export const wake = true;\n';
+  const apache = `// SPDX-License-Identifier: Apache-2.0\n${code}`;
+  const agpl = `// SPDX-License-Identifier: AGPL-3.0-only\n// Copyright 2026 Ferdinando Valsecchi\n${code}`;
+  const [header, edited] = ['convex/projectHostedFinishWake.ts', 'convex/projectHostedLandingWake.ts'];
+  const plan = async (label, candidate) => {
+    const s = fixture(t, {
+      composed: {
+        base: { [header]: apache, [edited]: apache, 'tests/demo.test.mjs': `import "../${header}";` },
+        candidate,
+      },
+    });
+    return (await prepareActionsJob(s.client, join(s.directory, label), join(s.directory, label + '-cache')))
+      .recipe.selection;
+  };
+  const both = await plan('both', { [header]: agpl, [edited]: agpl.replace('true', 'false') });
+  assert.deepEqual(both.queueProof?.source, [edited]);
+  const headerOnly = await plan('header', { [header]: agpl, [edited]: agpl });
+  assert.equal(headerOnly.queueProof, undefined);
+  assert.equal(headerOnly.planError, undefined);
+});
 test('the standard Actions plan pins changed and deleted queue paths with the Candidate proof files', async t => {
   const s = fixture(t, { queue: true });
   const prepared = await prepareActionsJob(

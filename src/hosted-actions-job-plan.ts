@@ -10,7 +10,7 @@ import { checkPin } from './hosted-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { guardedSelection, standardSelection } from '../scripts/test-impact.mjs';
 import { pinImportFacts } from '../scripts/test-import-cache.mjs';
-import { queueProofPaths, REGISTRY } from '../scripts/core-queue-paths.mjs';
+import { coreQueuePath, queueProofPaths, REGISTRY } from '../scripts/core-queue-paths.mjs';
 import { planQueueProof } from '../scripts/test-queue-proof.mjs';
 import { describeShardPlan, timedShards } from '../scripts/test-shards.mjs';
 import { browserSelection, browserGroups, browserShard } from '../scripts/browser-test-policy.mjs';
@@ -205,8 +205,18 @@ export async function prepareActionsJob(
         : ''),
   );
   // The actual Candidate delta, not a scoped test selection or an already accepted main audit.
-  const changedProof =
-    standard && run.gate?.mode !== 'audit' && run.gate?.mode !== 'probe' ? queueProofPaths(paths) : undefined;
+  // A header-only edit of a core path needs main's text: one object read per changed core path.
+  const proofed = standard && run.gate?.mode !== 'audit' && run.gate?.mode !== 'probe';
+  const core = proofed ? paths.filter(coreQueuePath) : [];
+  const mains = core.length ? await baseTexts(source, cache, core).catch(() => new Map()) : new Map();
+  const baseModes = new Map(core.length ? source.base.files.map(file => [file.path, file.mode]) : []);
+  const changedProof = proofed
+    ? queueProofPaths(paths, path => {
+        const mode = inventory.get(path)?.mode;
+        const same = mode !== 'symlink' && baseModes.get(path) === mode;
+        return same ? [mains.get(path), files.get(path)] : [undefined, undefined];
+      })
+    : undefined;
   // Guard 1 before any test job runs (Item ec229a55): a refusal fails every planned job at once, and a
   // proof that holds only by its recorded replay scope is pinned for the static job.
   let proofRefusal: string | undefined;

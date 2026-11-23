@@ -126,7 +126,19 @@ function previewQueueProof(
   // This is the checkout signature of the standard Forge recipe. Finish checks
   // the selected definition before turning a finding into a refusal.
   if (!after.has(STANDARD_CHECK_ENTRY)) return undefined;
-  const changed = queueProofPaths(paths.filter(path => !equal(after.get(path), main.get(path))));
+  // A header-only edit of a core path (the Lane's bytes against main's) is not core.
+  // Past the deadline the read throws, so the path stays core.
+  const text = (file: NativeFile | undefined) => {
+    if (performance.now() >= deadline) throw new Error();
+    return !file ? null : file.mode === 'symlink' ? undefined : read(file)?.toString('utf8');
+  };
+  const changed = queueProofPaths(
+    paths.filter(path => !equal(after.get(path), main.get(path))),
+    path =>
+      main.get(path)?.mode === after.get(path)?.mode
+        ? [text(main.get(path)), text(after.get(path))]
+        : [undefined, undefined],
+  );
   if (!changed) return undefined;
   const candidate = (path: string) => {
     if (performance.now() >= deadline) throw new Error();

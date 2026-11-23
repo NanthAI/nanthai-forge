@@ -263,6 +263,7 @@ export async function verifyQueueProof(env = process.env, root = '.') {
     if (env.FORGE_SELECTED_TESTS && JSON.parse(env.FORGE_SELECTED_TESTS).scope === 'partial') return;
     const { pinnedComparison } = await import('./test-impact.mjs');
     const comparison = pinnedComparison(env);
+    // Only the Candidate is on disk here, so a header-only edit stays core (the rule needs main's text).
     if (!comparison?.mainCheck) changes = queueProofPaths(comparison?.paths);
   }
   if (changes)

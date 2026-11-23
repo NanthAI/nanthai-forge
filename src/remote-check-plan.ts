@@ -34,6 +34,27 @@ type StoreAccess = Pick<
   | 'select'
 >;
 
+/** Main's and the Candidate's text of one path, for the header-only queue proof rule: null when absent,
+ * undefined (stays core) for a symlink or a mode change. Reads main's State once, and only the blobs asked for. */
+function mainAndCandidate(
+  source: NativeSource,
+  base: string | undefined,
+  files: readonly { path: string; blob: string; mode: string }[],
+) {
+  type File = (typeof files)[number];
+  const candidate = new Map(files.map(file => [file.path, file]));
+  const text = (file: File | undefined) =>
+    !file ? null : file.mode === 'symlink' ? undefined : source.object(file.blob).toString('utf8');
+  let main: Map<string, File> | undefined;
+  return (path: string) => {
+    main ??= new Map(source.state(base!).files.map(file => [file.path, file]));
+    const [before, after] = [main.get(path), candidate.get(path)];
+    return before?.mode === after?.mode
+      ? ([text(before), text(after)] as const)
+      : ([undefined, undefined] as const);
+  };
+}
+
 // Historical modal-* filenames are shared Actions receipt formats; retain them for replay.
 export async function remoteCheckPlan(
   store: StoreAccess,
@@ -90,7 +111,9 @@ export async function remoteCheckPlan(
     ? guardedSelection(planned, { files, paths: comparison.paths, interaction: run.interaction })
     : planned;
   const queueProof =
-    standard && !run.mainCheck && guarded.scope !== 'partial' ? queueProofPaths(comparison.paths) : undefined;
+    standard && !run.mainCheck && guarded.scope !== 'partial'
+      ? queueProofPaths(comparison.paths, mainAndCandidate(source, comparison.base, state.files))
+      : undefined;
   const selection = queueProof ? { ...guarded, queueProof } : guarded;
   if (run.checkSelection?.scope === 'partial' && selection.tests.some(path => !files.has(path)))
     throw new Error('An explicit test file is absent from the pinned source.');
