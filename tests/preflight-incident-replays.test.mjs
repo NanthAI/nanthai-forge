@@ -13,6 +13,7 @@ import {
   sourceFiles,
 } from '../scripts/test-impact.mjs';
 import { scanReaders } from '../scripts/test-tree-scanners.mjs';
+import { recursiveFolderReader } from '../scripts/script-impact.mjs';
 import { incompletePreflight, mustRunNotRun, preflightVerdict } from '../dist/agent-preflight-incomplete.js';
 import * as preflight from '../dist/agent-preflight.js';
 import { preflightGuards, selectGuards } from '../dist/agent-preflight-static.js';
@@ -258,9 +259,15 @@ test('425ecd74: a data fixture, its test and a doc retain byte and folder reader
   // A bare readdirSync('tests') observes the JSON folder too, even when the
   // returned names are filtered to test files. Retain that conservative reader.
   const directoryReaders = [at('tests', 'public-verify.test.mjs')];
+  // Test code that runs a tooling walk of tests/ (sourceFiles(), Item 196d5e4e) reads them as bytes.
+  const { reasons } = selectTests({ files, paths });
+  const walkReaders = plan.tests.filter(
+    test => reasons[test]?.detail === recursiveFolderReader && paths.includes(reasons[test].changedPath),
+  );
+  assert.ok(walkReaders.includes(at('tests', 'hosted-scoped-recheck.test.mjs')), 'a sourceFiles() reader');
   assert.deepEqual(
     [...plan.tests].sort(),
-    [...new Set([...readers, ...smokeTests, ...scanners, ...directoryReaders])].sort(),
+    [...new Set([...readers, ...smokeTests, ...scanners, ...directoryReaders, ...walkReaders])].sort(),
     'local tiers hold the fixture reader, folder readers and fixed smoke set only',
   );
   t.diagnostic(`local ${plan.tests.length}, deferred to pre-queue ${plan.deferredTests.length}`);

@@ -10,7 +10,13 @@ import { coverageShadow } from './test-coverage.mjs';
 import { classifyCheckPath, unclassifiedFolder, webTest } from './check-path-scopes.mjs';
 import { guardSelection } from './selection-guard.mjs';
 import { coreQueuePath, coreQueueReason, coreQueueTests } from './core-queue-paths.mjs';
-import { docsPackager, docsWrapper, scriptPath, scriptSelectionReason } from './script-impact.mjs';
+import {
+  docsPackager,
+  docsWrapper,
+  recursiveFolderReader,
+  scriptPath,
+  scriptSelectionReason,
+} from './script-impact.mjs';
 import { docsReaders } from './docs-readers.mjs';
 import { scanDetail, scanReaders } from './test-tree-scanners.mjs';
 
@@ -563,6 +569,8 @@ function selectWithGraph(
       const fenceStatic = productSource(previous.changedPath) || previous.changedPath.endsWith('.json');
       const currentSites = sites?.get(current);
       for (const [importer, edge] of evidence.get(current) ?? []) {
+        // A folder walk reads bytes: only a changed file's own bytes differ, never an affected file's.
+        if (edge.detail === recursiveFolderReader && previous.kind !== 'changed') continue;
         if (
           fenceStatic &&
           (packageGraph.staticCommands?.has(importer) ||

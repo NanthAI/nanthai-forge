@@ -73,9 +73,10 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/hosted-actions-job-plan.ts` | `npm-lockfile` | 2 | reads the exact Playwright version and names a missing pin only for a standard-check browser job | their own declared toolchains and check command |
 | `src/hosted-actions-job-run.ts` | `npm-lockfile` | 1 | the standard-check browser shard's one setup retry installs the same pinned Playwright version when the cache is missing | their own declared toolchains and check command; no retry runs |
 | `scripts/test-import-graph.mjs` | `forge-folders` | 3 | Forge's import graph resolves its source domains and Convex names | the generic JS/TS import graph |
-| `scripts/test-import-graph.mjs` | `tests-folder` | 1 | Forge's import graph limits edges to a test file to other test files | the generic JS/TS import graph |
+| `scripts/test-import-graph.mjs` | `tests-folder` | 3 | Forge's import graph limits edges to a test file to other test files, and a tooling folder walk stops at a test file | the generic JS/TS import graph |
 | `scripts/test-import-graph.mjs` | `npm-lockfile` | 4 | Forge's import graph: external packages from its npm lockfile | declared dependencies of every manifest |
 | `scripts/test-import-facts.mjs` | `forge-folders` | 2 | Forge's selector extracts unresolved path facts for its own source domains | the generic JS/TS import graph |
+| `scripts/test-import-facts.mjs` | `tests-folder` | 1 | Forge's selector records folder walks only in its own tooling, not in a test's own scan scopes | the generic JS/TS import graph; no folder-walk readers |
 | `scripts/test-import-loaders.mjs` | `forge-folders` | 1 | Forge's selector extracts domains from its computed loader calls | the generic JS/TS import graph |
 | `scripts/test-directory-path.mjs` | `forge-folders` | 2 | Forge's selector: directory reads in its tests and scripts | the generic JS/TS import graph |
 | `scripts/check-path-scopes.mjs` | `docs-folder` | 1 | Forge's own repository path-scope check treats `docs/` as documentation | not run |

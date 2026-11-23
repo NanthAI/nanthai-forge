@@ -20,6 +20,8 @@ const docsTests = [
 
 export const scriptPath = path => /^scripts\/.+\.(?:mjs|js|ts)$/.test(path);
 export const recursiveJsonReader = 'Recursive repository JSON reader';
+// A tooling walk reads files as data: it never makes them part of the walker's code or pipeline.
+export const recursiveFolderReader = 'Recursive repository folder reader';
 const commandNode = name => `package-script:${name}`;
 const scriptReferences = text =>
   [...text.matchAll(/(?:^|[^\w./-])(?:\.\/)?(scripts\/[\w./-]+\.(?:mjs|js|ts))(?=$|[^\w./-])/g)].map(
@@ -127,6 +129,7 @@ export function scriptSelectionReason(item, roots, tests, reverse, graph) {
     if (docs && docsWrapper(current, item.path)) continue;
     for (const importer of reverse.get(current) ?? []) {
       const edge = graph.evidence.get(current)?.get(importer);
+      if (edge?.detail === recursiveFolderReader) continue;
       const scansData = throughScan || (current === item.path && edge?.detail === recursiveJsonReader);
       // Static tools run on the exact Candidate; their data walks do not make
       // JSON an input to the orchestration that invokes those tools, even

@@ -29,12 +29,15 @@ export function parseImportFacts(path, text, withSymbols) {
   const ast = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
   const defines = definedLoaderNames(ast);
   if (ast.parseDiagnostics.length) return { invalid: true, defines };
-  const roots = recursiveRootListings(ast);
+  // Repository tooling (scripts and test helpers) reads this tree; product code reads a user's tree,
+  // and a test's own walks are its scan scopes (test-tree-scanners.mjs).
+  const isScriptOrTest = /^(?:tests|scripts)\//.test(path);
+  const walks = isScriptOrTest && !/^tests\/[^/]+\.test\.mjs$/.test(path) ? new Map() : undefined;
+  const roots = recursiveRootListings(ast, walks);
   const loader = loaderBindings(ast);
   const requireShadow = shadowsRequire(ast);
   const api = path.startsWith('convex/_generated/') ? [] : convexApiBindings(ast);
   const apiLocals = new Set(api.map(([name]) => name));
-  const isScriptOrTest = /^(?:tests|scripts)\//.test(path);
   const events = [];
   function record(node, kind, fact, whole = false) {
     const declaration =
@@ -53,6 +56,7 @@ export function parseImportFacts(path, text, withSymbols) {
     // The expression of `extends Base` executes. Nested type arguments do not.
     if (ts.isTypeNode(node) && !ts.isExpressionWithTypeArguments(node)) return;
     if (roots.has(node)) record(node, 'root', { suffix: roots.get(node) });
+    for (const { folder, code } of walks?.get(node) ?? []) record(node, 'walk', { folder, code });
     if (ts.isIdentifier(node) && apiLocals.has(node.text) && !declarationName(node)) {
       let segments = null;
       if (ts.isPropertyAccessExpression(node.parent) || ts.isElementAccessExpression(node.parent)) {

@@ -6,6 +6,7 @@
 //     node --import ./tests/check-runtime.mjs --test tests/queue-sim/doomed-check-shapes.mjs
 // Columns: runs, runs no landing used (lostRuns) and their runner ticks (lostTicks), landing ticks
 // after arrival (mean, max, plain and order-sensitive changes apart), Convex calls, DB bytes, idle tasks.
+// RECHECK_SHARE=0.3 makes a plain change's re-checks take 30% of a check (a scoped re-check).
 import test from 'node:test';
 import { appendFileSync } from 'node:fs';
 import { synthetic } from '../hosted-landing-batches-fixture.mjs';
@@ -20,6 +21,9 @@ const LABEL = process.env.LABEL ?? '';
 const OUT = process.env.MEASURE_OUT;
 const only = process.env.SHAPES ? process.env.SHAPES.split(',') : null;
 const D = 150 * Number(process.env.DSCALE || 1);
+// RECHECK_SHARE: a plain change's second and later checks take this share of its check, the runner
+// time a scoped re-check selects (Item 196d5e4e measures it on real landing pairs). Default 1.
+const RECHECK = Number(process.env.RECHECK_SHARE || 1);
 const spend = index => (f, ids) => {
   for (const row of f.tables.projectHostedLandingRequests.values())
     if (row.submissionId === ids[index])
@@ -136,9 +140,17 @@ for (const [name, shape] of Object.entries(shapes)) {
     let line;
     try {
       const width = process.env.WIDTH ? { concurrency: Number(process.env.WIDTH) } : {};
+      const duration =
+        RECHECK === 1
+          ? shape.duration
+          : (i, nth) =>
+              nth > 1 && /^src\//.test(shape.memberPaths[i] ?? '')
+                ? Math.max(1, Math.round(shape.duration(i, nth) * RECHECK))
+                : shape.duration(i, nth);
       const r = await drive(t, {
         ownerApprovalPaths: ['scripts/deploy*'],
         ...shape,
+        duration,
         fixture: { ...shape.fixture, ...width },
       });
       const landed = r.landedAt.filter(v => v !== undefined);

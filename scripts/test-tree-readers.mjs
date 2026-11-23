@@ -213,7 +213,7 @@ const potentiallyRecursive = option =>
           (!ts.isPropertyAssignment(property) || property.initializer.kind !== ts.SyntaxKind.FalseKeyword)),
     ));
 
-function analyse(ast, rootListings, manifestFiles, checker) {
+function analyse(ast, rootListings, manifestFiles, checker, folderListings) {
   const path = ast.fileName;
   const binding = treeBinding(ast, checker);
   const declarations = new Map();
@@ -709,6 +709,10 @@ function analyse(ast, rootListings, manifestFiles, checker) {
       const rootListing = !read && !partial && deep && folder === '';
       const suffix = rootListing ? listingSuffix(call) : undefined;
       if (rootListing) rootListings?.set(call, suffix);
+      else if (folderListings && folder && deep && !partial && (walks || !read)) {
+        if (!folderListings.has(call)) folderListings.set(call, []);
+        folderListings.get(call).push({ folder, ...(read ? { code: true } : {}) });
+      }
       addScan({
         folder,
         recursive: deep,
@@ -742,10 +746,13 @@ function analyse(ast, rootListings, manifestFiles, checker) {
 }
 
 /** Recursive listings of the repository root, keyed by AST site so graph edges
- * can follow the walk through importing helpers as well as standalone tests. */
-export function recursiveRootListings(ast) {
+ * can follow the walk through importing helpers as well as standalone tests. With `folders`, also
+ * the recursive walks of named repository folders (call -> [{folder, code}]): a helper that reads
+ * every file of `src/` is that folder's reader wherever a test calls it (Item 196d5e4e). */
+export function recursiveRootListings(ast, folders) {
   const listings = new Map();
-  if (LISTING.test(ast.text) && !/\bprocess\.chdir\s*\(/.test(ast.text)) analyse(ast, listings);
+  if (LISTING.test(ast.text) && !/\bprocess\.chdir\s*\(/.test(ast.text))
+    analyse(ast, listings, undefined, undefined, folders);
   return listings;
 }
 

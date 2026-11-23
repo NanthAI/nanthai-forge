@@ -9,9 +9,15 @@ import {
   pathKind,
   repositoryWorkspaceUser,
 } from './test-directory-path.mjs';
-import { docsPackager, packageScriptGraph, recursiveJsonReader, scriptPath } from './script-impact.mjs';
+import {
+  docsPackager,
+  packageScriptGraph,
+  recursiveFolderReader,
+  recursiveJsonReader,
+  scriptPath,
+} from './script-impact.mjs';
 import { byNameDispatch } from './convex-function-names.mjs';
-import { resolveSymbols } from './test-symbols.mjs';
+import { moduleTaint, resolveSymbols, wholeTaint } from './test-symbols.mjs';
 import { importFacts } from './test-import-cache.mjs';
 
 export function testImportGraph(files, scriptsChanged = [], { typeImports = false } = {}) {
@@ -35,12 +41,15 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
       if (sites) sites.set(dependency, row.sites);
     }
     const previous = row.evidence.get(importer);
-    // A workspace path is the narrowest evidence; dynamic is replaced by specific evidence.
+    // A workspace path is the narrowest evidence; dynamic is replaced by specific evidence. A folder
+    // read never replaces other evidence: that one says the file runs, which pipeline and by-name
+    // traversal must still see.
     if (
       !previous ||
-      (previous.detail === recursiveJsonReader && kind === 'import') ||
-      previous.kind === 'workspace-path' ||
-      (previous.kind === 'dynamic' && kind !== 'workspace-path')
+      ((previous.detail === recursiveJsonReader || previous.detail === recursiveFolderReader) &&
+        kind === 'import') ||
+      (detail !== recursiveFolderReader &&
+        (previous.kind === 'workspace-path' || (previous.kind === 'dynamic' && kind !== 'workspace-path')))
     ) {
       if (byName) {
         const cache = byNameEvidence[kind];
@@ -155,6 +164,18 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
     }
     return jsonGlobs.get(pattern);
   };
+  // Files a tooling walk of `folder` reads (Markdown is no code walk's input), indexed per folder.
+  const walkedFolders = new Map();
+  const folderFiles = (folder, code) => {
+    const key = `${code ? 'code' : 'all'}:${folder}`;
+    if (!walkedFolders.has(key))
+      walkedFolders.set(
+        key,
+        paths.filter(file => file.startsWith(`${folder}/`) && !(code && file.endsWith('.md'))),
+      );
+    return walkedFolders.get(key);
+  };
+  const walkSites = new Map();
   const jsonFolders = new Map();
   for (const file of jsonFiles)
     for (let folder = posix.dirname(file); folder !== '.'; folder = posix.dirname(folder)) {
@@ -171,15 +192,16 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
   const convexModules = paths
     .map(file => file.match(/^convex\/(?!_generated\/)(.+)\.[jt]s$/)?.[1])
     .filter(name => name && !name.endsWith('.d'));
+  // Module name → file, `.ts` before `.js`, indexed once from the inventory. Never compose
+  // `convex/${name}.ts` here: a path-shaped template is a computed read to the import graph, and
+  // this module is in nearly every test's closure (Item 196d5e4e), so it would tie every Convex
+  // file to most of the suite.
   const convexResolutions = new Map();
-  const convexModule = name => {
-    if (!convexResolutions.has(name)) {
-      const tsPath = `convex/${name}.ts`;
-      const jsPath = `convex/${name}.js`;
-      convexResolutions.set(name, files.has(tsPath) ? tsPath : files.has(jsPath) ? jsPath : undefined);
-    }
-    return convexResolutions.get(name);
-  };
+  for (const file of paths) {
+    const [, name, extension] = file.match(/^convex\/(.+)\.([jt]s)$/) ?? [];
+    if (name && (extension === 'ts' || !convexResolutions.has(name))) convexResolutions.set(name, file);
+  }
+  const convexModule = name => convexResolutions.get(name);
   // Convex calls functions by name ("module:function", api.module.function), not by
   // import. Every file's names are recorded; a name we cannot read stands for the
   // matching modules, or for every module. Backend and test code dispatch names
@@ -267,7 +289,7 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
       return { error: `Unparseable ${scriptPath(path) ? 'script' : 'module'}: ${path}` };
     }
     if (facts.workspaceUser) workspaceUsers.add(path);
-    const isScriptOrTest = /^(?:tests|scripts)\//.test(path);
+    const isScriptOrTest = toolingPath(path);
     site = false;
     sitePath = path;
     const resolved = new Map();
@@ -316,6 +338,12 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
           for (const target of jsonFiles)
             if (!fact.suffix || target.endsWith(fact.suffix))
               edge(target, path, 'runtime-path', recursiveJsonReader);
+          break;
+        case 'walk':
+          if (symbols) {
+            if (!walkSites.has(path)) walkSites.set(path, []);
+            walkSites.get(path).push(fact);
+          }
           break;
         case 'api': {
           const { name, segments } = fact;
@@ -433,11 +461,87 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
   }
   raw.flush();
   if (uncertain) return { error: uncertain };
+  // Every reader set is found before any folder edge exists, so a generated edge is never read as a call.
+  for (const [walker, readers] of folderWalkReaders(walkSites, symbols, evidence, sites))
+    for (const reader of readers)
+      for (const { folder, code } of walkSites.get(walker))
+        for (const file of folderFiles(folder, code))
+          if (file !== reader) edge(file, reader, 'runtime-path', recursiveFolderReader);
   if (scriptsChanged.length && packageGraph.error) return { error: packageGraph.error };
   byNameDispatch(files, evidence, edge, named, nameLoaders);
   const reverse = new Map();
   for (const [dependency, importers] of evidence) reverse.set(dependency, new Set(importers.keys()));
   return { reverse, evidence, packageGraph, workspaceUsers, symbols, sites };
+}
+
+/** Test code that may run a tooling walk: walker -> tests/ files. The walk's base is its caller's
+ * argument or working directory, so it reads this repository only from test code; through product
+ * code or a package script it runs on another tree. The walking statements' taint follows static
+ * imports in scripts/ and tests/ with the selector's own symbol rules (test-impact.mjs `transfer`),
+ * so a wrapper defaulting to the inventory carries it and a module that only shares a file with the
+ * walker does not; a dynamic import or spawn makes its importer a reader and goes no further
+ * (Item 196d5e4e). */
+const toolingPath = path => /^(?:tests|scripts)\//.test(path);
+
+function folderWalkReaders(walkSites, symbols, evidence, sites) {
+  const testFile = path => /^tests\/[^/]+\.test\.mjs$/.test(path);
+  const taintOf = (info, entries) => (!info || entries.whole ? wholeTaint : moduleTaint(info, entries));
+  const used = (taint, dependency, importer) => {
+    const info = symbols.get(importer);
+    const record = sites.get(dependency)?.get(importer);
+    const declared = info?.imports.get(dependency);
+    if (
+      !info ||
+      !record ||
+      record.whole ||
+      (!declared && !record.statements.size) ||
+      (declared && taint.whole)
+    )
+      return { whole: true };
+    const has = name => (name === '*' ? taint.names.size > 0 : taint.names.has(name));
+    const entries = {
+      whole: false,
+      statements: new Set(record.statements),
+      locals: new Set(),
+      exports: new Set(),
+    };
+    for (const [local, imported] of declared?.bindings ?? []) if (has(imported)) entries.locals.add(local);
+    for (const [imported, exported] of declared?.reexports ?? [])
+      if (has(imported)) entries.exports.add(exported);
+    if (declared?.star) for (const name of taint.names) if (name !== 'default') entries.exports.add(name);
+    return entries.statements.size || entries.locals.size || entries.exports.size ? entries : null;
+  };
+  const found = new Map();
+  for (const [walker, walks] of walkSites) {
+    const statements = new Set(walks.map(walk => walk.site));
+    const start = [...statements].every(site => typeof site === 'number')
+      ? { whole: false, statements, locals: new Set(), exports: new Set() }
+      : { whole: true };
+    const reached = new Map([[walker, taintOf(symbols.get(walker), start)]]);
+    const readers = new Set(),
+      queue = [walker];
+    for (let i = 0; i < queue.length; i++) {
+      const current = queue[i];
+      const taint = reached.get(current);
+      if (!taint.whole && !taint.names.size) continue;
+      for (const importer of evidence.get(current)?.keys() ?? []) {
+        if (!toolingPath(importer)) continue;
+        const entries = used(taint, current, importer);
+        if (!entries) continue;
+        if (importer.startsWith('tests/')) readers.add(importer);
+        // Only a static import says which of the importer's exports call the walk. Through a dynamic
+        // import or a spawn the importer itself reads; what runs it next is usually a tool on a fixture.
+        if (testFile(importer) || !symbols.get(importer)?.imports.has(current)) continue;
+        // A module reached twice keeps the wider of its taints: whole, conservatively.
+        const next = reached.has(importer) ? wholeTaint : taintOf(symbols.get(importer), entries);
+        if (reached.get(importer) === wholeTaint) continue;
+        reached.set(importer, next);
+        queue.push(importer);
+      }
+    }
+    found.set(walker, readers);
+  }
+  return found;
 }
 
 const unknownHome = Symbol('unknown loader home');

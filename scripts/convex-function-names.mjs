@@ -3,6 +3,7 @@
 // api.module.fn chains, "module:fn" strings and templates, and by-name loaders.
 import { posix } from 'node:path';
 import ts from 'typescript';
+import { recursiveFolderReader } from './script-impact.mjs';
 
 // Local names for the generated Convex API objects (api, internal, components) and
 // convex/server's anyApi. Only these bindings carry function references.
@@ -48,11 +49,13 @@ export function byNameDispatch(files, evidence, edge, named, nameLoaders) {
   if (!nameLoaders.size) return;
   // Code a process runs: imports, loaders and names everywhere; literal paths only
   // from test code (spawned children, fixtures). A path string in product code is data.
-  const runs = (dependency, importer, kind) =>
+  // A tooling folder walk reads files as data (script-impact.mjs): it runs none of them.
+  const runs = (dependency, importer, { kind, detail }) =>
     !dependency.startsWith('package-script:') &&
     !importer.startsWith('package-script:') &&
     kind !== 'package-command' &&
     kind !== 'workspace-path' &&
+    detail !== recursiveFolderReader &&
     (kind !== 'runtime-path' || importer.startsWith('tests/'));
   // Tests can reach the same broad loader closures. Index paths once so their
   // repeated breadth-first walks use a shared queue and visitation stamps.
@@ -69,7 +72,7 @@ export function byNameDispatch(files, evidence, edge, named, nameLoaders) {
   for (const [dependency, importers] of evidence) {
     const target = id(dependency);
     for (const [importer, item] of importers)
-      if (runs(dependency, importer, item.kind)) {
+      if (runs(dependency, importer, item)) {
         const from = id(importer);
         (forward[from] ??= []).push(target);
       }
@@ -78,7 +81,7 @@ export function byNameDispatch(files, evidence, edge, named, nameLoaders) {
     queue = [...nameLoaders];
   for (let i = 0; i < queue.length; i++)
     for (const [importer, item] of evidence.get(queue[i]) ?? [])
-      if (!reaching.has(importer) && runs(queue[i], importer, item.kind)) {
+      if (!reaching.has(importer) && runs(queue[i], importer, item)) {
         reaching.add(importer);
         queue.push(importer);
       }

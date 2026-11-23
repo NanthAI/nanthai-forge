@@ -401,6 +401,18 @@ ignore tables and cleanup helpers from turning those modules into catch-all hubs
 Unknown loaders include test and script helpers as well as product source. A known
 literal branch never hides an unknown branch of a conditional loader. Unparseable
 modules fail toward full coverage.
+A recursive walk of named folders in a script or test helper (`sourceFiles()` reads `src/`,
+`web/`, `convex/`, `site/`, `tests/` and `scripts/`) makes every file of those folders a
+`runtime-path` dependency of the test code that may run the walk. Its base is the caller's argument
+or working directory, so the walk reads this repository only from test code: its statements' taint
+follows static imports through `scripts/` and `tests/` (a wrapper whose default argument is the
+inventory carries it), and a dynamic import or spawn makes its importer a reader without going
+further. Only a changed file's own bytes reach a reader this way, never a file it merely affects. A
+folder read never replaces other evidence between two files, and it never makes those files part
+of the walker's code, pipeline or by-name closure. The selector's own modules read no computed repository path: its Convex module
+index is built from the inventory, since a `` `convex/${name}.ts` `` template there tied every
+Convex file to every test that loads the selector (Item 196d5e4e; a guard in
+`tests/hosted-scoped-recheck.test.mjs` checks the selector's import closure on the real tree).
 Web edits also run the UI regression files. A computed path widens only to files its
 literal skeleton can name (`head*mid*tail`, or a folder under it); source modules also
 match by their built `dist/` name, so `` `../dist/${name}.js` `` still names every module

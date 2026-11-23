@@ -2,7 +2,7 @@
 import { checkCause } from '../dist/hosted-check.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { scopedRecheckSelection } from '../dist/scoped-recheck.js';
 import {
   acceptScopedRecheck,
@@ -16,6 +16,7 @@ import { policyPreset as preset } from '../dist/autonomy-policy.js';
 const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 import { firstCheckReceipt, hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
 import { smokeTests, sourceFiles } from '../scripts/test-impact.mjs';
+import { pinImportFacts } from '../scripts/test-import-cache.mjs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { passWithSelection, seedFullMain, useSyntheticHostedEnv } from './hosted-race-fixture.mjs';
 import * as recheckSelection from '../dist/scoped-recheck.js';
@@ -920,12 +921,26 @@ test('O1 L2 replay: JSON on main narrows a 978-test lane reach to the shared rea
   assert.doesNotMatch(selected.reason, /main reaches every test/);
 });
 
+// One real inventory for the real-tree replays, its parsed facts pinned in memory as the runner pins
+// them, so the second replay's graph reuses the first one's parse.
+let real;
+const realTree = () => {
+  if (real) return real;
+  const files = sourceFiles();
+  pinImportFacts(
+    files,
+    new Map([...files].map(([path, text]) => [path, createHash('sha256').update(text).digest('hex')])),
+  );
+  return (real = { files, graphCache: {} });
+};
+
 test('O1 real-tree L2 recheck stops the JS-only static walker from widening main JSON', () => {
-  const tree = sourceFiles();
+  const { files: tree, graphCache } = realTree();
   const selected = scopedRecheckSelection({
     lanePaths: ['src/hosted-acceptance.ts'],
     mainPaths: ['scripts/response-compat/main.json'],
     files: tree,
+    graphCache,
   });
   assert.equal(selected.scope, 'scoped', selected.reason);
   assert.doesNotMatch(selected.reason, /main reaches every test/);
@@ -938,4 +953,45 @@ test('O1 real-tree L2 recheck stops the JS-only static walker from widening main
       selected: selected.tests.length,
     }),
   );
+});
+
+test('incident 196d5e4e real tree: a Convex lane racing a src main reruns shared tests and tree readers, not the suite', () => {
+  // Before: the selector's own `convex/${name}.ts` lookup tied every Convex file to ~400 tests, so
+  // both sides reached ~1,040 of 1,435 tests and the intersection cut almost nothing.
+  const { files: tree, graphCache } = realTree();
+  const selected = scopedRecheckSelection({
+    lanePaths: ['convex/authSessions.ts'],
+    mainPaths: ['src/hosted-agent-transport.ts'],
+    files: tree,
+    graphCache,
+  });
+  assert.equal(selected.scope, 'scoped', selected.reason);
+  assert(selected.tests.length < 250, `real Convex-vs-src recheck selected ${selected.tests.length}`);
+  // Tests that read the whole tree through sourceFiles() stay selected for any product change.
+  for (const reader of [
+    'tests/docs-readers-selection.test.mjs',
+    'tests/public-verify.test.mjs',
+    'tests/hosted-scoped-recheck.test.mjs',
+  ])
+    assert(selected.tests.includes(reader), reader);
+  // Class guard: no module the selector imports reads a computed repository path, since every test
+  // that loads the selector would then sit behind every file of that domain.
+  const forward = new Map();
+  for (const [dependency, importers] of graphCache.graph.evidence)
+    for (const [importer, edge] of importers) {
+      if (!forward.has(importer)) forward.set(importer, []);
+      forward.get(importer).push([dependency, edge]);
+    }
+  const closure = new Set(['scripts/test-impact.mjs']);
+  for (const path of closure)
+    for (const [dependency, edge] of forward.get(path) ?? [])
+      if (edge.kind === 'import' && dependency.startsWith('scripts/')) closure.add(dependency);
+  const computed = [...closure].flatMap(path =>
+    (forward.get(path) ?? [])
+      .filter(([, edge]) => edge.kind === 'dynamic')
+      .map(([dependency]) => `${path} <- ${dependency}`),
+  );
+  assert(closure.has('scripts/test-import-graph.mjs'));
+  assert.deepEqual(computed.slice(0, 5), []);
+  console.log('196d5e4e-real', JSON.stringify({ selected: selected.tests.length, closure: closure.size }));
 });
