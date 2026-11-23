@@ -52,6 +52,27 @@ import { commandSelection, commandShardCount, commandShardGroups } from './check
 import { lockfileDigest } from './project-lockfile.js';
 import { graphShareFor, isGraphFirstGate } from './graph-first-check.js';
 import { definitionTrialPaths, definitionTrialSelection } from './check-definition-trial.js';
+/** Main's objects that are not cached yet (Item ffb6cc49, submission 1c0d76bc). After materializing,
+ * the connection reads under the Candidate's State, and a server that binds reads to a State refuses a
+ * main-only blob there: every header-only core edit then stayed core. Read under main's State, then
+ * bind back to the Candidate. Plain catalog reads (no State binding) are unchanged. */
+async function fetchBaseObjects(
+  source: Awaited<ReturnType<typeof materializeActionsSource>>,
+  cache: string,
+  blobs: readonly string[],
+) {
+  const uncached = [...new Set(blobs)].filter(blob => !existsSync(join(cache, blob)));
+  if (!uncached.length) return;
+  const { connection, reader, heads } = source;
+  await connection.selectState(heads.base, false);
+  try {
+    await connection.resolve(uncached);
+    await connection.prepareRecipes(uncached);
+    await reader.resolveMany(uncached);
+  } finally {
+    await connection.selectState(heads.candidate, false);
+  }
+}
 /** The base (main) allow file's bytes. Usually cached already (unchanged, or from the base
  * pack); otherwise one small object read, only when the base has the file. Unreadable
  * means no allow entries: findings then fail, never pass. */
@@ -60,11 +81,7 @@ async function baseAllowBytes(source: Awaited<ReturnType<typeof materializeActio
   if (!file || file.mode === 'symlink') return undefined;
   const path = join(cache, file.blob);
   try {
-    if (!existsSync(path)) {
-      await source.connection.resolve([file.blob]);
-      await source.connection.prepareRecipes([file.blob]);
-      await source.reader.resolveMany([file.blob]);
-    }
+    await fetchBaseObjects(source, cache, [file.blob]);
     return readFileSync(path);
   } catch {
     console.log('secret scan: the base allow file is unreadable; no allow entries apply');
@@ -81,14 +98,11 @@ async function baseTexts(
   const byPath = new Map(
     source.base.files.filter(file => paths.includes(file.path)).map(file => [file.path, file]),
   );
-  const uncached = [...byPath.values()]
-    .filter(file => !existsSync(join(cache, file.blob)))
-    .map(file => file.blob);
-  if (uncached.length) {
-    await source.connection.resolve(uncached);
-    await source.connection.prepareRecipes(uncached);
-    await source.reader.resolveMany(uncached);
-  }
+  await fetchBaseObjects(
+    source,
+    cache,
+    [...byPath.values()].map(file => file.blob),
+  );
   const texts = new Map<string, string | null>();
   for (const path of paths) {
     const file = byPath.get(path);
@@ -209,7 +223,14 @@ export async function prepareActionsJob(
   // A header-only edit of a core path needs main's text: one object read per changed core path.
   const proofed = standard && run.gate?.mode !== 'audit' && run.gate?.mode !== 'probe';
   const core = proofed ? paths.filter(coreQueuePath) : [];
-  const mains = core.length ? await baseTexts(source, cache, core).catch(() => new Map()) : new Map();
+  const mains = core.length
+    ? await baseTexts(source, cache, core).catch(error => {
+        console.log(
+          `queue proof: main's text unreadable (${(error as { code?: string })?.code ?? 'error'}); header-only edits stay core`,
+        );
+        return new Map();
+      })
+    : new Map();
   const baseModes = new Map(core.length ? source.base.files.map(file => [file.path, file.mode]) : []);
   const changedProof = proofed
     ? queueProofPaths(paths, path => {

@@ -1403,6 +1403,51 @@ test('Item ffb6cc49: the hosted plan asks no queue proof for a header-only licen
   assert.equal(headerOnly.queueProof, undefined);
   assert.equal(headerOnly.planError, undefined);
 });
+test('Item ffb6cc49 (submission 1c0d76bc): main-only bytes are read under main’s State when the server binds reads to the selected State', async t => {
+  // The live server grants only members of the State a source read names (source version 2). After
+  // materializing, the connection is bound to the Candidate, so a main-only blob read there was refused
+  // and every header-only core edit stayed core in the hosted plan while the local gate passed.
+  const code = 'export const wake = true;\n';
+  const apache = `// SPDX-License-Identifier: Apache-2.0\n${code}`;
+  const agpl = `// SPDX-License-Identifier: AGPL-3.0-only\n// Copyright 2026 Ferdinando Valsecchi\n${code}`;
+  const header = 'convex/projectHostedFinishWake.ts';
+  const s = fixture(t, {
+    composed: {
+      base: {
+        [header]: apache,
+        'tests/demo.test.mjs': `import "../${header}";`,
+      },
+      candidate: { [header]: agpl },
+    },
+  });
+  // As in the refused run: the source pack predates main, so main's header file is not in it.
+  const older = s.files.map(file => (file.path === header ? s.entry(header, `${apache}// older\n`) : file));
+  await cachedPack(s, older, s.state(older).sha256);
+  await s.client.session(true);
+  const call = s.client.call.bind(s.client),
+    refused = [];
+  t.mock.method(s.client, 'call', async command => {
+    if (command.kind === 'source' && command.state) {
+      const members = new Set(JSON.parse(s.objects.get(command.state)).files.map(file => file.blob));
+      if (!command.digests.every(id => members.has(id))) {
+        refused.push(command.state);
+        throw Object.assign(new Error('Digest is outside the selected State.'), {
+          code: 'SOURCE_UNAVAILABLE',
+        });
+      }
+    }
+    const result = await call(command);
+    return command.kind === 'source' && command.bound ? { rows: result, sourceVersion: 2 } : result;
+  });
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'bound'),
+    join(s.directory, 'bound-cache'),
+  );
+  assert.deepEqual(refused, []);
+  assert.equal(prepared.recipe.selection.queueProof, undefined);
+  assert.equal(prepared.recipe.selection.planError, undefined);
+});
 test('the standard Actions plan pins changed and deleted queue paths with the Candidate proof files', async t => {
   const s = fixture(t, { queue: true });
   const prepared = await prepareActionsJob(

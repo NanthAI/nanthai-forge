@@ -362,6 +362,8 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   );
   return {
     phases,
+    // The pinned Candidate and base (main) State ids, for reads bound to one State.
+    heads: { candidate: heads[0]!, base: heads[1]! },
     state,
     stateBytes,
     base,
