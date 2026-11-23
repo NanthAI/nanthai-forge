@@ -228,7 +228,7 @@ pending, an address could be added directly; a retry of such an original add
 replays its retained receipt and grants, charges and invites nothing.
 
 An invitation by Forge handle (`teamActions.addMember`, `@handle` or the bare
-handle) binds to that account and asks no identity provider. It charges the same
+handle; the web People and teams forms take a handle or an address in one field and route by the `@` after the first character) binds to that account and asks no identity provider. It charges the same
 inviter counters, and the owner sees the typed target and "pending". It appears
 on that account's Home with **Accept**, **Decline** and **Decline and block
 inviter**; another account neither sees nor answers it. A block also keeps the

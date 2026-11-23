@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useReadRetry } from './ui/read-retry';
 import { ErrorToast } from './ui/Toast';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useViewerHandle } from './shell/viewer';
 import { useConvex, usePaginatedQuery } from 'convex/react';
 import type { FunctionReturnType } from 'convex/server';
@@ -9,6 +9,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { api } from '../../convex/_generated/api';
 import { hostedError } from './snapshot';
 import TeamPendingInvitations from './app/people/TeamPendingInvitations';
+import { useTeamInvite } from './app/people/use-team-invite';
 
 type Team = FunctionReturnType<typeof api.teams.list>['page'][number];
 export default function Teams({ open }: { open: (id: Id<'imports'>) => void }) {
@@ -100,7 +101,7 @@ function TeamDetail({
     [error, setError] = useState(''),
     [saved, setSaved] = useState('');
   const viewer = useViewerHandle();
-  const invitations = useRef(new Map<string, { operationId: string; pending?: true }>());
+  const invite = useTeamInvite();
   const [labels, setLabels] = useState<Record<string, string>>({});
   const memberKey = results.map(row => row.member).join(',');
   useEffect(() => {
@@ -164,28 +165,22 @@ function TeamDetail({
             onSubmit={e => {
               e.preventDefault();
               void act(async () => {
-                const email = member.trim();
-                const attempt = invitations.current.get(email) ?? { operationId: crypto.randomUUID() };
-                invitations.current.set(email, attempt);
-                const result = await client.action(api.teamActions.addByEmail, {
-                  id: team.id,
-                  email,
-                  ...attempt,
-                });
-                invitations.current.delete(email);
+                const result = await invite(team.id, member);
                 setMember('');
-                return result === 'pending' ? 'Team invitation pending.' : 'Team membership saved.';
+                return result === 'pending' ? 'Team invitation pending.' : 'Already on this team.';
               });
             }}
           >
             <label>
-              Invite by email
+              Invite by Forge handle or email
               <input
-                type="email"
                 required
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
                 value={member}
                 onChange={e => setMember(e.target.value)}
-                placeholder="name@example.com"
+                placeholder="@handle or name@example.com"
               />
             </label>
             <button disabled={busy}>Invite to team</button>

@@ -3,7 +3,7 @@
 // each with its owner and members by handle. One bounded read per visit (convex/accountTeams.ts, 20 teams a page;
 // "Show more" reads the next page by its cursor), read again when the tab is shown and after the person changes a
 // team. A one-off read, not a subscription: nothing runs while the tab is idle. Owners manage their teams on the
-// existing server paths (teams.create, teamActions.addByEmail, teams.removeMember); organizations stay proposed.
+// existing server paths (teams.create, teamActions.addMember and addByEmail (both pending until accepted), teams.removeMember); organizations stay proposed.
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useConvex } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
@@ -13,6 +13,7 @@ import { hrefFor } from '../paths';
 import { Head } from '../Place';
 import type { AccountProps } from '../screen-route';
 import Invitations from './Invitations';
+import { useTeamInvite } from './use-team-invite';
 import TeamPendingInvitations from './TeamPendingInvitations';
 import { teamMeta, teamsSentence, type TeamRow, type TeamsRead } from './teams-model';
 import './people.css';
@@ -21,7 +22,7 @@ const PAGE = 20;
 type Read = { state: 'loading' } | { state: 'failed'; last?: TeamsRead } | { state: 'ok'; data: TeamsRead };
 export type TeamActions = {
   create: (name: string) => Promise<void>;
-  add: (team: Id<'teams'>, email: string) => Promise<void | 'pending'>;
+  add: (team: Id<'teams'>, who: string) => Promise<void | 'pending'>;
   remove: (team: Id<'teams'>, key: string) => Promise<void>;
 };
 
@@ -64,7 +65,7 @@ function useAccountTeams() {
 export default function AccountPeople({ leave }: AccountProps) {
   const client = useConvex();
   const { read, retry, showMore } = useAccountTeams();
-  const invitations = useRef(new Map<string, { operationId: string }>());
+  const invite = useTeamInvite();
   const actions: TeamActions = {
     create: async name => {
       await client.mutation(api.teams.create, { name, operationId: crypto.randomUUID() }).catch(error => {
@@ -72,16 +73,10 @@ export default function AccountPeople({ leave }: AccountProps) {
       });
       retry();
     },
-    add: async (id, email) => {
-      const key = JSON.stringify([id, email]);
-      const attempt = invitations.current.get(key) ?? { operationId: crypto.randomUUID() };
-      invitations.current.set(key, attempt);
-      const result = await client
-        .action(api.teamActions.addByEmail, { id, email, ...attempt })
-        .catch(error => {
-          throw new Error(said(error));
-        });
-      invitations.current.delete(key);
+    add: async (id, who) => {
+      const result = await invite(id, who).catch(error => {
+        throw new Error(said(error));
+      });
       if (result === 'pending') return result;
       retry();
     },
@@ -206,9 +201,13 @@ function useSubmit(run: (value: string) => Promise<void>) {
 function TeamLine({ team, actions }: { team: TeamRow; actions: TeamActions }) {
   const owns = team.role === 'owner';
   const [invited, setInvited] = useState(false);
-  const add = useSubmit(async email => {
+  const [answer, setAnswer] = useState<'' | 'pending' | 'member'>('');
+  const add = useSubmit(async who => {
+    setAnswer('');
+    const result = await actions.add(team.id, who);
+    setAnswer(result === 'pending' ? 'pending' : 'member');
     // Once shown, the pending list stays: a failed later invite must not hide earlier ones and their Cancel.
-    if ((await actions.add(team.id, email)) === 'pending') setInvited(true);
+    if (result === 'pending') setInvited(true);
   });
   const [removing, setRemoving] = useState('');
   const [problem, setProblem] = useState('');
@@ -267,13 +266,13 @@ function TeamLine({ team, actions }: { team: TeamRow; actions: TeamActions }) {
         {owns ? (
           <form className="team-add" onSubmit={add.submit} aria-busy={add.busy}>
             <label className="f">
-              Invite by email
+              Invite by Forge handle or email
               <input
                 className="inp"
-                type="email"
                 autoComplete="off"
                 autoCapitalize="none"
                 spellCheck={false}
+                placeholder="@handle or name@example.com…"
                 aria-invalid={add.problem ? true : undefined}
                 value={add.value}
                 onChange={event => add.setValue(event.target.value)}
@@ -289,9 +288,9 @@ function TeamLine({ team, actions }: { team: TeamRow; actions: TeamActions }) {
             </Key>
           </form>
         ) : null}
-        {invited ? (
+        {answer ? (
           <p className="quietline" role="status">
-            Invitation pending.
+            {answer === 'pending' ? 'Invitation pending.' : 'Already on this team.'}
           </p>
         ) : null}
         {owns && (team.canReadInvitations || invited) ? <TeamPendingInvitations teamId={team.id} /> : null}

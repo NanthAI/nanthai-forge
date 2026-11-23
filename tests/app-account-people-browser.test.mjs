@@ -40,7 +40,7 @@ const read = mode === 'empty' ? { state: 'ok', data: { teams: [], more: false } 
   : { state: 'ok', data: { teams: mode === 'worst' ? worst : sample, more: mode === 'worst' } };
 const actions = {
   create: async name => { document.body.dataset.created = name; },
-  add: async (id, email) => { if (email === 'nobody@example.test') throw new Error('Invitations have reached a limit. Try after its UTC hour or day ends.'); document.body.dataset.added = id + ':' + email; },
+  add: async (id, email) => { if (email === 'nobody@example.test') throw new Error('Invitations have reached a limit. Try after its UTC hour or day ends.'); document.body.dataset.added = id + ':' + email; return email === '@sample-member' ? null : 'pending'; },
   remove: async (id, key) => { document.body.dataset.removed = id + ':' + key; },
 };
 createRoot(document.getElementById('root')).render(
@@ -155,7 +155,7 @@ test('account people: teams by handle, owner-only controls, and every state pass
     );
     await page.getByRole('button', { name: 'Remove sample-peer from core-maintainers' }).click();
     assert.equal(await page.evaluate(() => document.body.dataset.removed), 't1:k1');
-    const email = page.getByLabel('Invite by email');
+    const email = page.getByLabel('Invite by Forge handle or email');
     await email.fill('nobody@example.test');
     await email.press('Enter');
     await page.getByRole('alert').waitFor();
@@ -165,6 +165,14 @@ test('account people: teams by handle, owner-only controls, and every state pass
     await page.waitForFunction(() => document.body.dataset.added);
     assert.equal(await page.evaluate(() => document.body.dataset.added), 't1:peer@example.test');
     assert.equal(await email.inputValue(), '', 'the field clears after an invitation is sent');
+    await email.fill('@sample-guest');
+    await email.press('Enter');
+    await page.waitForFunction(() => document.body.dataset.added === 't1:@sample-guest');
+    assert.equal(await email.inputValue(), '', 'a handle invitation uses the same field');
+    await page.getByText('Invitation pending.').waitFor();
+    await email.fill('@sample-member');
+    await email.press('Enter');
+    await page.getByText('Already on this team.').waitFor();
     await page.getByLabel('Start a team').fill('reviewers');
     await page.getByLabel('Start a team').press('Enter');
     await page.waitForFunction(() => document.body.dataset.created);
