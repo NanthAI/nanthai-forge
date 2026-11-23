@@ -395,8 +395,12 @@ async function checkout(
       // arrived before this operation's access check, so a second read adds only a round trip.
       if (cache.downloadedObjects > 0)
         identity(parseHostedResponse(hostedLaneSelectionSchema, await transport.select(request.laneId)));
-      await withCheckoutWritePass(
-        cache.root,
+      // A delta that writes no file (resolve changes only the State header, b2d84b25) needs no
+      // device write pass: queueing it behind every other checkout on a busy machine cost 17 min.
+      const metadataOnly = Boolean(delta && !delta.install.length && !delta.remove.length);
+      const pass = <T>(run: () => Promise<T>, options: Parameters<typeof withCheckoutWritePass>[2]) =>
+        metadataOnly ? run() : withCheckoutWritePass(cache.root, run, options);
+      await pass(
         async () => {
           const stage = await checkoutIo(async () =>
             mkdtempSync(join(cache.root, delta ? 'delta-' : 'checkout-')),
@@ -479,8 +483,10 @@ async function checkout(
                     const inPlace =
                       Boolean(delta && request.previous) && current?.operationId !== request.operationId;
                     const changes: CheckoutChange[] = [];
+                    // Only the delta's paths can meet unsaved edits; a full walk is left to callers
+                    // that check the whole checkout after installing, or needed when nothing moves.
                     const scope =
-                      inPlace && prepared.finalCheck
+                      inPlace && (prepared.finalCheck || metadataOnly)
                         ? [...delta!.install, ...delta!.remove].map(file => file.path)
                         : undefined;
                     const artifacts = cleanHostedCheckout(

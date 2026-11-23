@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { homedir } from 'node:os';
 import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
@@ -93,10 +93,40 @@ export function recordLane(
       lastActionAt: input.lastActionAt ?? now,
     });
     write(entry);
+    if (entry.resolutionOf && laneResolutions()[entry.resolutionOf] !== entry.laneId)
+      noteResolution(entry.resolutionOf, entry.laneId);
     return entry;
   } catch {
     return null;
   }
+}
+
+/** Old Lane id → the resolution Lane that took over its folder in place (0f76b07e): one small file,
+ * written only when such a resolution is recorded, so following an old id (even along a chain of
+ * resolutions whose middle entries are gone) reads it instead of every registry entry. */
+const resolutionsFile = () => join(dirname(laneRegistryDirectory()), 'lane-resolutions.json');
+const RESOLUTION_LIMIT = 64;
+export function laneResolutions(): Record<string, string> {
+  if (disabled()) return {};
+  try {
+    const parsed = z
+      .record(z.uuid(), z.uuid())
+      .safeParse(JSON.parse(readFileSync(resolutionsFile(), 'utf8')));
+    return parsed.success ? parsed.data : {};
+  } catch {
+    return {};
+  }
+}
+function noteResolution(origin: string, laneId: string) {
+  const next = Object.entries({ ...laneResolutions(), [origin]: laneId })
+    .filter(([key]) => key !== origin)
+    .concat([[origin, laneId]])
+    .slice(-RESOLUTION_LIMIT);
+  const target = resolutionsFile(),
+    temporary = `${target}.${randomUUID()}`;
+  mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+  writeFileSync(temporary, JSON.stringify(Object.fromEntries(next)));
+  renameSync(temporary, target);
 }
 export function forgetLane(laneId: string) {
   rmSync(file(laneId), { force: true });

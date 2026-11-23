@@ -5,7 +5,12 @@ import { actionableNotFound, isShortLaneId, resolveShortLaneId } from './argumen
 import { join, resolve } from 'node:path';
 import { helpTopicIndex, helpTopicText, isHelpTopic } from './help-topics.js';
 import { addressOnlyRoot, hostedAgentAddress } from './hosted-agent-address.js';
-import { FOLDER_ACTIONS, laneCheckoutRoot, laneSuccessor } from './hosted-lane-location.js';
+import {
+  FOLDER_ACTIONS,
+  keepsRetainedLane,
+  laneCheckoutRoot,
+  laneSuccessor,
+} from './hosted-lane-location.js';
 import {
   bareStatus,
   discoversCapabilitiesFirst,
@@ -395,7 +400,8 @@ async function runAgentCli(
       // An old Lane id whose folder became its resolution Lane after a sync conflict (9bc3775b).
       if (FOLDER_ACTIONS.has(folderAction) && typeof selected.laneId === 'string') {
         const moved = laneSuccessor({ root: hostedAgentRoot(root), address: hosted }, selected.laneId);
-        if (moved) {
+        // A retained operation that began on the old id before the move replays it unchanged.
+        if (moved && !keepsRetainedLane(moved.root, selected.operationId, 'laneId', selected.laneId)) {
           process.stderr.write(
             `Lane ${selected.laneId} continues as resolution Lane ${moved.laneId} in ${moved.root} after a sync conflict; ${folderAction} runs on ${moved.laneId}. Use that id from now on.\n`,
           );

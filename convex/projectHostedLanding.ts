@@ -91,10 +91,12 @@ export const cancel = mutation({
   handler: async (ctx, input) => {
     try {
       const actor = await acceptanceActor(ctx, true);
+      const request = hostedLandingCancelSchema.parse(JSON.parse(input.request));
       const result = await cancelHostedLanding(ctx, {
         projectId: input.projectId,
         actor: actor.id,
-        request: hostedLandingCancelSchema.parse(JSON.parse(input.request)),
+        ...(request.reason ? { reason: request.reason } : {}),
+        request,
         replacementCause: { kind: 'cancelled', link: 'operator-cancel' },
       });
       return canonicalPayload(

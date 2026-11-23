@@ -83,10 +83,13 @@ const schema = z
   })
   .strict();
 /** Only transport recovery data. No Work authority or credential is stored here. */
+/** A refused operation gave its id back: the next request under it starts afresh. */
+const RELEASED = 'released-before-work';
 export class HostedAgentJournal {
   readonly operationId: string;
   private readonly path: string;
   private readonly lock: string;
+  private readonly identity: string;
   constructor(
     root: string,
     address: HostedAgentAddress,
@@ -108,19 +111,29 @@ export class HostedAgentJournal {
       action,
       command: sourceCommand(action, command),
     });
+    this.identity = identity;
     // Auto-addressed requests remain replayable even when stdout was lost after
     // the completed receipt was persisted. A fresh UUID explicitly starts new work.
     this.operationId = workLocked(this.lock, () => {
       const index = autoIndex(directory, identity, session);
       if (operationId) return z.uuid().parse(operationId);
-      if (!fresh && checkoutPathExists(index)) return z.uuid().parse(readAgentJson(index));
+      if (!fresh && checkoutPathExists(index)) {
+        const indexed = z.uuid().parse(readAgentJson(index));
+        // A released id another request took since (3f60d17a) no longer replays this one.
+        if (indexedFor(directory, indexed, identity)) return indexed;
+      }
       const id = randomUUID();
       durableReplace(index, JSON.stringify(id));
       return id;
     });
     this.path = join(directory, `${this.operationId}.json`);
     workLocked(this.lock, () => {
-      if (checkoutPathExists(this.path)) {
+      if (checkoutPathExists(this.path) && this.read().values[RELEASED] === true)
+        durableReplace(
+          this.path,
+          canonicalPayload({ schema: 1, operationId: this.operationId, identity, values: {} }),
+        );
+      else if (checkoutPathExists(this.path)) {
         invariant(
           this.read().identity === identity,
           'WORK_OPERATION_CHANGED',
@@ -155,7 +168,9 @@ export class HostedAgentJournal {
     const operationId = z.uuid().parse(readAgentJson(index)),
       path = join(directory, `${operationId}.json`);
     if (!checkoutPathExists(path)) return undefined;
-    return { operationId, values: schema.parse(readAgentJson(path)).values };
+    const saved = schema.parse(readAgentJson(path));
+    if (saved.identity !== identity || saved.values[RELEASED] === true) return undefined;
+    return { operationId, values: saved.values };
   }
   private read() {
     return schema.parse(readAgentJson(this.path));
@@ -197,6 +212,16 @@ export class HostedAgentJournal {
       return replacement;
     });
   }
+  /** Give the id back after a local refusal before any hosted write (3f60d17a): the caller may run
+   * the same operationId with the corrected request instead of WORK_OPERATION_CHANGED. */
+  release(startedKey: string) {
+    workLocked(this.lock, () => {
+      const current = this.read();
+      // Only this request's own operation, and only while its hosted work has not begun.
+      if (current.identity !== this.identity || Object.hasOwn(current.values, startedKey)) return;
+      durableReplace(this.path, canonicalPayload({ ...current, values: { [RELEASED]: true } }));
+    });
+  }
   /** Drop one retained value the server refused before any operation began (for example a request
    * pinned to a Lane version that moved), so the next replay rebuilds it from current pins. */
   forget(key: string, refused?: unknown) {
@@ -209,6 +234,14 @@ export class HostedAgentJournal {
       durableReplace(this.path, canonicalPayload(current));
     });
   }
+}
+
+/** The indexed operation still belongs to IDENTITY: no journal yet, a released one, or its own. */
+function indexedFor(directory: string, operationId: string, identity: string) {
+  const path = join(directory, `${operationId}.json`);
+  if (!checkoutPathExists(path)) return true;
+  const saved = schema.parse(readAgentJson(path));
+  return saved.values[RELEASED] === true || saved.identity === identity;
 }
 
 /** A candidate or compose reference alone does not identify its Lane inputs. */
@@ -232,7 +265,9 @@ export function retainedHostedOperation(root: string, operationId: string) {
     const directory = join(cache, 'agent');
     if (!lstatSync(cache).isDirectory() || !lstatSync(directory).isDirectory()) return null;
     const path = join(directory, `${operationId}.json`);
-    const identity = JSON.parse(schema.parse(readAgentJson(path)).identity) as {
+    const saved = schema.parse(readAgentJson(path));
+    if (saved.values[RELEASED] === true) return null;
+    const identity = JSON.parse(saved.identity) as {
       action?: unknown;
       command?: unknown;
     };

@@ -157,7 +157,7 @@ import {
   type SavedChangedPaths,
 } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
-import { laneUndo, missingRequiredFeatures } from './hosted-contract-features.js';
+import { landingCancelReason, laneUndo, missingRequiredFeatures } from './hosted-contract-features.js';
 import type { LandingHold } from './hosted-landing-hold.js';
 import {
   bareStatus,
@@ -190,7 +190,12 @@ import { rememberSnapshotsKept } from './lane-snapshot-hint.js';
 import { launchSnapshotWorker } from './hosted-snapshot-worker.js';
 import { LANE_SNAPSHOT } from './lane-snapshot-contract.js';
 import { executeSnapshots } from './hosted-lane-snapshot-restore.js';
-import { checkoutRequired, laneSuccessor, openLaneRoot } from './hosted-lane-location.js';
+import {
+  checkoutRequired,
+  followResolutionLane,
+  openLaneRoot,
+  resolutionFollow,
+} from './hosted-lane-location.js';
 import { localObjects } from './machine-object-store.js';
 import { digest } from './state/hash.js';
 import { parseNativeState } from './state/format.js';
@@ -504,6 +509,11 @@ export class HostedAgentTransport {
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
     input = planningIssueArguments(requestedAction, input);
+    input = followResolutionLane(
+      () => ({ root: hostedAgentRoot(this.root), address: this.address }),
+      requestedAction,
+      input,
+    );
     if (requestedAction === 'provenance')
       return {
         schema: 1,
@@ -1127,6 +1137,8 @@ export class HostedAgentTransport {
           options = { ...options, features: [...(options.features as string[]), 'landing-client-hold'] };
         if (action === 'undo')
           options = { ...options, features: [...(options.features as string[]), laneUndo] };
+        if (action === 'withdraw' && typeof input.submissionId === 'string')
+          options = { ...options, features: [...(options.features as string[]), landingCancelReason] };
         // The CLI may have started this exact read alongside its release check: take it once.
         let early = takeEarlyCapabilities(this.address, { clientVersion: CUTOVER_CLI_VERSION, ...options });
         for (;;) {
@@ -2772,7 +2784,7 @@ export class HostedAgentTransport {
     return laneDiskUsage(root);
   }
   private async localLane(laneId: string, observed: unknown) {
-    const successor = laneSuccessor({ root: hostedAgentRoot(this.root), address: this.address }, laneId);
+    const successor = resolutionFollow({ root: hostedAgentRoot(this.root), address: this.address }, laneId);
     const inFlight = (observed as { inFlight?: { operationId?: unknown } } | null)?.inFlight;
     const root = [readLaneEntry(laneId)?.root, this.root].find(path => {
       const marker = path ? markerIdentity(path) : null;

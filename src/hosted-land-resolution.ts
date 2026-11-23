@@ -11,6 +11,7 @@ import { landingNote } from './landing-message.js';
 import { retainedHostedOperation } from './hosted-agent-journal.js';
 import { validateNotVerified } from './agent-handoff-types.js';
 import {
+  inPlaceOrigin,
   inPlaceResolution,
   markedPendingPaths,
   pendingConflictLane,
@@ -30,7 +31,7 @@ function resolutionHere(root: string, named: string | undefined) {
   const marker = readHostedLaneCheckout(root);
   const laneId = marker?.selection.laneId;
   if (!laneId) return undefined;
-  const origin = named && named !== laneId ? inPlaceResolution(root, named) : undefined;
+  const origin = named && named !== laneId ? inPlaceResolution(root, named, true) : undefined;
   if (named && named !== laneId && origin?.laneId !== laneId) return undefined;
   return { laneId, pending: pendingConflictLane(root) === laneId };
 }
@@ -69,12 +70,15 @@ export async function landEditedResolution(
   note: (line: string) => void,
   heldOperationId?: string,
 ): Promise<{ finish: Command } | { response: { result?: unknown } | undefined } | undefined> {
-  if (
-    (command.operationId !== undefined && !heldOperationId) ||
-    command.candidateId !== undefined ||
-    command.inputs !== undefined
-  )
-    return undefined;
+  if (command.candidateId !== undefined || command.inputs !== undefined) return undefined;
+  // A fresh operationId the caller chose is this land's id, as a held land's is (1088a357,
+  // 3f60d17a): land runs the retained resolve and lands under it, never refusing and burning it.
+  // An id this folder already ran replays its own request unchanged.
+  if (command.operationId !== undefined && !heldOperationId) {
+    const chosen = z.uuid().safeParse(command.operationId);
+    if (!chosen.success || retainedHostedOperation(root, chosen.data)) return undefined;
+    heldOperationId = chosen.data;
+  }
   const named = typeof command.laneId === 'string' ? command.laneId : undefined;
   const here = resolutionHere(root, named);
   if (!here) return undefined;
@@ -107,7 +111,14 @@ export async function landEditedResolution(
     }
     return { finish };
   }
-  if (!here.pending || !edited(root, here.laneId)) return undefined;
+  if (!here.pending || !edited(root, here.laneId)) {
+    // An earlier Lane of a chain of in-place resolutions has no folder of its own: land follows the
+    // Lane this resolution was made for, as a land naming that Lane does (b5e8e2d5).
+    const direct = inPlaceOrigin(root);
+    return named && named !== here.laneId && direct && direct !== named
+      ? { finish: { ...command, laneId: direct } }
+      : undefined;
+  }
   validateNotVerified(command.notVerified);
   const parameters = parametersOf(resolutionContinuation(root, here.laneId, []).next);
   const message = typeof command.message === 'string' ? { message: landingNote(command.message) } : {};

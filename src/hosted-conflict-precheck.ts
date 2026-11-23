@@ -28,6 +28,8 @@ type ConflictContext = {
   finishParameters?: Record<string, unknown> | undefined;
   /** Set when this folder itself became the resolution Lane of its own conflicted Lane. */
   originLaneId?: string | undefined;
+  /** Earlier Lanes of a chain of in-place resolutions in this folder, oldest first (b5e8e2d5). */
+  earlierOrigins?: string[] | undefined;
   /** The head the sync merged in (main, or the stack parent), and the resolution Lane's recorded base
    * at that time: its own change is measured from the merged head, not from that older base. */
   merged?: { head: string; base: string } | undefined;
@@ -70,6 +72,9 @@ function context(root: string, laneId?: string): ConflictContext | undefined {
           ? saved.finishParameters
           : undefined,
       originLaneId: z.uuid().safeParse(saved.originLaneId).success ? saved.originLaneId : undefined,
+      earlierOrigins: Array.isArray(saved.earlierOrigins)
+        ? saved.earlierOrigins.filter((id: unknown) => z.uuid().safeParse(id).success).slice(-8)
+        : undefined,
       merged:
         sha256.test(saved.merged?.head) && sha256.test(saved.merged?.base)
           ? { head: saved.merged.head, base: saved.merged.base }
@@ -90,6 +95,13 @@ export function rememberConflictPaths(
 ) {
   const prior = context(root, laneId);
   resolveParameters = (!replaceOperation && prior?.resolveParameters) || resolveParameters;
+  // This folder was already a resolution Lane and now resolves it in turn: keep the chain, so a
+  // command naming any earlier Lane of it still finds this one.
+  const previous = !prior && originLaneId ? context(root) : undefined;
+  const earlierOrigins =
+    previous && previous.laneId === originLaneId && previous.originLaneId
+      ? [...(previous.earlierOrigins ?? []), previous.originLaneId].slice(-8)
+      : prior?.earlierOrigins;
   durableReplace(
     pathFor(root),
     JSON.stringify({
@@ -100,6 +112,7 @@ export function rememberConflictPaths(
       finishOptions: prior?.finishOptions,
       finishParameters: prior?.finishParameters,
       originLaneId: originLaneId ?? prior?.originLaneId,
+      ...(earlierOrigins?.length ? { earlierOrigins } : {}),
       merged: merged ?? prior?.merged,
     }),
   );
@@ -116,10 +129,11 @@ export function laneChangeBase(root: string, selection: { laneId: string; base: 
 export function inPlaceOrigin(root: string) {
   return context(root)?.originLaneId;
 }
-/** The resolution Lane this folder became for `originLaneId`, with its retained paths. */
-export function inPlaceResolution(root: string, originLaneId: string) {
+/** The resolution Lane this folder became for `originLaneId`, with its retained paths. `chain` also
+ * matches an earlier Lane of a chain of in-place resolutions here (b5e8e2d5). */
+export function inPlaceResolution(root: string, originLaneId: string, chain = false) {
   const saved = context(root);
-  return saved?.originLaneId === originLaneId
+  return saved?.originLaneId === originLaneId || (chain && saved?.earlierOrigins?.includes(originLaneId))
     ? { laneId: saved.laneId, paths: saved.paths, resolved: saved.resolved === true }
     : undefined;
 }

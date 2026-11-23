@@ -257,9 +257,12 @@ export async function prepareHostedSync(
         const entry = lane.stack.entryId
           ? (await loadLanding(ctx, { projectId: auth.projectId, submissionId: lane.stack.entryId })).state
           : null;
+        // A completed parent (landed, or its resolution landed) is on main: merging its frozen head
+        // again would report merged while the base stays on the old main (bfb693d8).
         const detached =
           request.ontoMain ||
           parent.state === 'abandoned' ||
+          parent.state === 'completed' ||
           exact?.landed ||
           entry?.phase === 'landed' ||
           entry?.phase === 'terminal-failed';

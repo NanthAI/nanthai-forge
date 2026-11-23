@@ -18,7 +18,7 @@ as the child's next target, including when the parent lands with unrelated Lanes
 in a cumulative batch Candidate belonging to another Intent. This retargeting does
 not rewrite a child working copy while its agent is editing: `sync`, or the existing automatic sync during `finish`,
 brings in the accepted source. Status identifies the landing receipt; a later
-main advance is included on sync. An abandoned parent remains visible until an
+main advance is included on sync. A parent that has completed (it landed, or its resolution Lane did) detaches the child on its next sync onto main, so the child's base moves to that main as for any merged sync. An abandoned parent remains visible until an
 explicit `save --sync {"laneId":"CHILD_LANE_ID","ontoMain":true}` detaches the child.
 This reapplies only the child's delta onto main (or the native bootstrap source
 when main has no receipt yet); parent-only changes are omitted and overlaps remain

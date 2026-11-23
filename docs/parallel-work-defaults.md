@@ -41,6 +41,8 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 - The client keeps a small local index of the Lane checkouts it opened, at
   `$XDG_STATE_HOME/forge/lanes` (default `~/.local/state/forge/lanes`). It writes one small file
   when it opens a Lane and when an agent action touches one. Nothing runs in the background.
+  Beside it, `forge/lane-resolutions.json` maps an old Lane id to the resolution Lane that took over
+  its folder in place (at most 64 entries), so an old id is followed without listing the index.
 - An online `start` or a client observing a successful landing with identified inputs can
   sweep due registered roots.
   Both share one machine-local window of 60 minutes. The next such command after the window

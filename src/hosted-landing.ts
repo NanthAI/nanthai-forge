@@ -93,7 +93,13 @@ export const hostedLandingRequestSchema = z
   .strict();
 /** A landing request is cancelled separately from its Lane or shared check run. */
 export const hostedLandingCancelSchema = z
-  .object({ operationId: z.uuid(), authorityEpoch: checkNumber, submissionId: z.uuid() })
+  .object({
+    operationId: z.uuid(),
+    authorityEpoch: checkNumber,
+    submissionId: z.uuid(),
+    /** Recorded on the cancellation (feature landing-cancel-reason, 9bc8204c). */
+    reason: z.string().min(1).max(500).optional(),
+  })
   .strict();
 /** Agent withdraw (78a97771): cancel the live landing of one Lane, named by the Lane. */
 export const hostedLandingWithdrawSchema = z

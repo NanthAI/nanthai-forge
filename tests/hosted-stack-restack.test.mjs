@@ -8,6 +8,7 @@ import { syncFixture } from './hosted-sync-fixture.mjs';
 import { restackAfterSave, restackOperationId } from '../dist/hosted-stack-restack.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { digest } from '../dist/hash.js';
 
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
 const stackNotice = await import(moduleUrl('../convex/projectHostedStackNotice.ts'));
@@ -249,4 +250,42 @@ test('a conflict or a failure keeps the save and names the manual sync', async (
   }));
   assert.equal(pending.restack.status, 'in-progress');
   assert.match(pending.restack.next, /wait/);
+});
+
+test('bfb693d8: a sync after the stack parent completed detaches onto main and moves the base with it', async () => {
+  const { s, parent, child } = await stacked();
+  // The parent landed (its work is on main) and completed; the child holds no landing pin on it.
+  for (const row of [...s.tables.projectHostedRecords.values()].filter(
+    record => record.kind === 'lane' && record.key === parent.laneId,
+  )) {
+    const body = s.tables.projectHostedRecordBodies.get(row.bodyId);
+    const value = JSON.stringify({ ...JSON.parse(body.value), state: 'completed' });
+    s.patch('projectHostedRecordBodies', row.bodyId, { value });
+    s.patch('projectHostedRecords', row._id, {
+      status: 'completed',
+      digest: digest(value),
+      bytes: new TextEncoder().encode(value).length,
+    });
+  }
+  const main = s.state(
+    [s.baseFile, s.hidden, s.file('p.txt', 'p0\n'), s.file('m.txt', 'm\n')],
+    [s.baseline.sha256],
+  );
+  s.moveMain(main.sha256, 'parent-landed');
+  const entry = (await s.readLane(child.laneId)).entry;
+  const result = (
+    await s.execute(
+      s.request('sync', {
+        laneId: child.laneId,
+        expected: s.pins(entry),
+        target: { kind: 'main', head: main.sha256, receiptId: 'parent-landed' },
+      }),
+    )
+  ).terminal.outcome.result;
+  assert.equal(result.status, 'merged');
+  assert.deepEqual(result.lane.base, { head: main.sha256, receiptId: 'parent-landed' }, 'base follows main');
+  assert.equal((await s.readLane(child.laneId)).record.stack.detached, true);
+  const files = filesOf(s, result.lane.head);
+  assert.equal(files['m.txt'], 'm\n', 'main came in');
+  assert.equal(files['c.txt'], 'c0\n', 'the child keeps its own work');
 });

@@ -20,6 +20,9 @@ export const feedCommitOrder = 'feed-commit-order';
 export const startLaneTitle = 'start-lane-title';
 /** Undo asks for its mutation in the slot reserved for bare status. */
 export const laneUndo = 'lane-undo';
+/** Withdraw asks in the slot reserved for bare status (9bc8204c): projectHostedLanding:cancel takes and
+ * records `reason`, so a withdraw by submissionId keeps its why. Without it the CLI refuses a reason there. */
+export const landingCancelReason = 'landing-cancel-reason';
 /** Planning asks for versioned wait reasons in the slot reserved for bare status. */
 export const planningWaitingFeature = 'planning-waiting-on';
 /** The unfiltered Initiative count uses the planning wait feature's discovery slot. */
@@ -253,6 +256,7 @@ export const advertisedFeatures = (asked: readonly string[]) => [
   ...(asked.includes(feedCommitOrder) ? [feedCommitOrder] : []),
   ...(asked.includes(startLaneTitle) ? [startLaneTitle] : []),
   ...(asked.includes(laneUndo) ? [laneUndo] : []),
+  ...(asked.includes(landingCancelReason) ? [landingCancelReason] : []),
   ...(asked.includes(planningWaitingFeature) ? [planningWaitingFeature] : []),
   ...(asked.includes(planningInitiativeCountsFeature) ? [planningInitiativeCountsFeature] : []),
   ...(asked.includes(planningHistoryFeature) ? [planningHistoryFeature] : []),

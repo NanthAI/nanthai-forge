@@ -425,11 +425,7 @@ export const hostedAgentCommandSchemas = {
       reason: z.string().min(1).max(500).optional(),
     })
     .strict()
-    .refine(command => !(command.submissionId && command.laneId), 'Select laneId or submissionId, not both.')
-    .refine(
-      command => !(command.submissionId && command.reason),
-      'reason is recorded only for a withdraw by Lane; omit it with submissionId.',
-    ),
+    .refine(command => !(command.submissionId && command.laneId), 'Select laneId or submissionId, not both.'),
   revert: z.object({ ...message, target: revertTargetSchema }).strict(),
   abandon: z
     .object({

@@ -15,6 +15,7 @@ import type { HostedAgentSession } from './hosted-agent-transport.js';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import { sendAuthorityPinned } from './hosted-main-pin.js';
+import { landingCancelReason } from './hosted-contract-features.js';
 
 export const WITHDRAW_COST =
   'Withdraw ends only this submission: its queue place and its unfinished check (stopped once no other landing needs it). The Lane, its saves, Candidates and the recorded check results stay. Undo by landing again: land --save resubmits the same Lane under a new operation.';
@@ -27,7 +28,7 @@ export const WITHDRAW_COST =
  */
 export async function executeHostedWithdraw(session: HostedAgentSession, input: unknown) {
   const command = hostedAgentCommandSchemas.withdraw.parse(input);
-  if (command.submissionId) return withdrawSubmission(session, command.submissionId);
+  if (command.submissionId) return withdrawSubmission(session, command.submissionId, command.reason);
   const laneId = command.laneId ?? session.marker()?.selection.laneId;
   invariant(laneId, 'BAD_ARGUMENT', 'Select laneId, or run land --withdraw from the Lane checkout.');
   if (!session.capabilities.features?.includes('landing-withdraw'))
@@ -64,7 +65,12 @@ export async function executeHostedWithdraw(session: HostedAgentSession, input: 
 
 /** By submission (friction a0faf3a9): the landing the queue lists, even when it moved to a resolution
  * Lane the caller does not know. The existing cancel mutation: one call, Lane author or project owner. */
-async function withdrawSubmission(session: HostedAgentSession, submissionId: string) {
+async function withdrawSubmission(session: HostedAgentSession, submissionId: string, reason?: string) {
+  if (reason && !session.capabilities.features?.includes(landingCancelReason))
+    throw new ForgeError(
+      'HOSTED_ACTION_UNSUPPORTED',
+      'This Forge server does not record a reason for a withdraw by submissionId yet. Nothing was withdrawn; run it without reason.',
+    );
   const epoch = session.capabilities.authority.epoch;
   const landing = await sendAuthorityPinned(
     session.journal,
@@ -75,6 +81,7 @@ async function withdrawSubmission(session: HostedAgentSession, submissionId: str
         operationId: session.journal.operationId,
         authorityEpoch: epoch,
         submissionId,
+        ...(reason ? { reason } : {}),
       }),
     async request =>
       parseHostedResponse(

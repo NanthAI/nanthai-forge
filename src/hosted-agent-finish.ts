@@ -694,8 +694,15 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     !command.candidateId &&
     !command.inputs &&
     session.marker()?.selection.laneId !== command.laneId
-  )
-    refuseUnsavedResolution(session.root, command.laneId);
+  ) {
+    try {
+      refuseUnsavedResolution(session.root, command.laneId);
+    } catch (error) {
+      // Nothing hosted ran for this id: the same id may land the resolution Lane (3f60d17a).
+      session.journal.release('finish-work-started');
+      throw error;
+    }
+  }
   await session.journal.retain('finish-work-started', () => true);
   const checked = await reuseCheckedFinish(session, command);
   if (checked) {
@@ -739,14 +746,17 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           },
         },
       };
+    // Resolved here already: the resolution Lane carries the work, and the origin's head is the
+    // pre-resolution save that conflicts again (7351b8d7). Land the resolution Lane's head.
+    const carrier = resolvedHere.resolved ? await selectAgentLane(session, resolvedHere.laneId) : lane;
     command.inputs = [
       {
-        laneId: lane.laneId,
+        laneId: carrier.laneId,
         expected: {
-          head: lane.head,
-          version: lane.version,
-          sourceVersion: lane.sourceVersion,
-          lifecycleVersion: lane.lifecycleVersion,
+          head: carrier.head,
+          version: carrier.version,
+          sourceVersion: carrier.sourceVersion,
+          lifecycleVersion: carrier.lifecycleVersion,
         },
       },
     ];

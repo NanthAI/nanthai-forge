@@ -27,7 +27,7 @@ test.after(() => {
     else process.env[key] = value;
   }
 });
-async function setup(t, { features = true } = {}) {
+async function setup(t, { features = true, strip = [] } = {}) {
   const f = await revertFixture(t),
     directory = mkdtempSync(join(tmpdir(), 'forge-agent-withdraw-'));
   t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
@@ -39,9 +39,10 @@ async function setup(t, { features = true } = {}) {
     assert(modules[module]?.[member], `Only synthetic registered API handlers: ${name}`);
     calls.push(name);
     let result = await f.tx(`agent:${name}`, modules[module][member], args);
-    if (!features && name === 'projectHostedAgent:capabilities') {
-      const reply = JSON.parse(result);
-      result = JSON.stringify({ ...reply, features: reply.features.filter(x => x !== 'landing-withdraw') });
+    if ((!features || strip.length) && name === 'projectHostedAgent:capabilities') {
+      const reply = JSON.parse(result),
+        drop = features ? strip : ['landing-withdraw', ...strip];
+      result = JSON.stringify({ ...reply, features: reply.features.filter(x => !drop.includes(x)) });
     }
     if (name === lost) {
       lost = null;
@@ -118,6 +119,27 @@ test('withdraw by submissionId cancels that landing in one call, whatever Lane h
     s.transport().dispatch('withdraw', { submissionId: first.id, laneId: s.f.lane.laneId }),
     /not both/,
   );
+});
+
+test('9bc8204c: withdraw by submissionId records its reason on the cancelled landing', async t => {
+  const s = await setup(t),
+    first = await landing(s.f);
+  const reason = 'Known failing assertion; fixing it in the same Lane';
+  const withdrawn = await s.transport().dispatch('withdraw', { submissionId: first.id, reason });
+  assert.equal(withdrawn.result.withdrawn, true);
+  assert.equal(withdrawn.result.landing.error.message, reason);
+  assert.equal((await s.f.current(first.id)).submission.error.message, reason);
+});
+
+test('9bc8204c: a server that cannot record a submission withdraw reason is refused before any mutation', async t => {
+  const s = await setup(t, { strip: ['landing-cancel-reason'] }),
+    first = await landing(s.f);
+  await assert.rejects(
+    s.transport().dispatch('withdraw', { submissionId: first.id, reason: 'why' }),
+    error => error.code === 'HOSTED_ACTION_UNSUPPORTED' && /without reason/.test(error.message),
+  );
+  assert(!s.calls.includes('projectHostedLanding:cancel'));
+  assert.equal((await s.f.current(first.id)).submission.phase === 'cancelled', false, 'still live');
 });
 
 for (const verb of ['withdraw', 'cancel'])

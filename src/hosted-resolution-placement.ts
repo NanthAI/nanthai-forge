@@ -43,9 +43,17 @@ export async function placeResolution(
   if (ours && marker.selection.laneId === laneId) return inPlaceResolution(session, source, listed);
   // A folder still holding an unresolved draft keeps it: a second, explicit draft opens beside.
   const draftHere = ours && pendingConflictPaths(session.root, marker.selection.laneId).length > 0;
+  // A Candidate resolution names this folder's Lane but merged an older save of it (7351b8d7): its
+  // draft does not continue these files, so rebasing here would roll newer saved edits back.
+  const stale =
+    !!origin &&
+    !!source.resolution &&
+    source.resolution.left !== origin.head &&
+    source.resolution.right !== origin.head;
   if (
     ours &&
     !draftHere &&
+    !stale &&
     origin &&
     marker.selection.laneId === origin.laneId &&
     marker.selection.head === origin.head &&
@@ -77,7 +85,9 @@ export async function placeResolution(
     },
     hostedRootLanePath(session.root, session.address, laneId),
   );
-  const why = resolutionFolderReason(marker?.selection, origin, draftHere);
+  const why = stale
+    ? 'the conflicted Candidate holds an older save of this Lane than this folder, so its newer saved work stays here'
+    : resolutionFolderReason(marker?.selection, origin, draftHere);
   return {
     root: opened.root,
     inPlace: false,
