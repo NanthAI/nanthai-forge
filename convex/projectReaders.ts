@@ -10,6 +10,7 @@ import { activeOwnedProject, ownedProject } from './projectAuthority';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { syncPersonOrder } from './accountProjectOrder';
+import { hasWriteRole } from './projectRole';
 
 export const set = internalMutation({
   args: {
@@ -75,7 +76,7 @@ export async function setReader(
   },
 ): Promise<null> {
   try {
-    await activeOwnedProject(ctx, input.projectId, input.owner);
+    const project = await activeOwnedProject(ctx, input.projectId, input.owner);
     invariant(
       /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.operationId),
       'BAD_ARGUMENT',
@@ -97,15 +98,9 @@ export async function setReader(
       );
       return null;
     }
-    // Reader grants never replace or downgrade an owner's existing contributor grants.
-    const contributor = await ctx.db
-      .query('projectContributors')
-      .withIndex('by_project_and_contributor', q =>
-        q.eq('projectId', input.projectId).eq('contributor', input.reader),
-      )
-      .unique();
+    // Reader grants never replace or downgrade existing write access, direct or through a linked team.
     invariant(
-      !input.present || (!contributor && input.reader !== input.owner),
+      !input.present || (input.reader !== input.owner && !(await hasWriteRole(ctx, project, input.reader))),
       'BAD_ARGUMENT',
       'This account already has write access; a reader grant cannot make it read-only.',
     );

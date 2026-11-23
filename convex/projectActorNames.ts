@@ -8,9 +8,10 @@ import { selectedGeneration, recordPartition } from './projectWorkIndexStore';
 import { accessibleProject } from './projectAuthority';
 import { coordinationAccess } from './projectAudience';
 import { invariant } from '../src/errors';
-import { projectRole } from './projectRole';
+import { checkedProjectRole, hasWriteRole, projectRole } from './projectRole';
 import { endInvitationEpoch } from './projectInvitationRevocation';
 import { markRemovedAccount } from './sealedSecretMarkers';
+import { teamGrant } from './teamGrant';
 async function known(
   ctx: QueryCtx | MutationCtx,
   project: Doc<'hostedProjects'>,
@@ -29,11 +30,11 @@ async function known(
     )?.wasMember
   )
     return true;
-  const participant = await ctx.db
-    .query('projectContributors')
-    .withIndex('by_project_and_contributor', q => q.eq('projectId', project._id).eq('contributor', actor))
-    .unique();
-  if (reader === project.owner && participant) return true; // The owner can already read the roster.
+  // A writer, direct or through a linked team. The owner can already read the roster and owns every linked team.
+  // `membership` just resolved this actor's role in the same query: reuse it instead of repeating the team lookup.
+  const resolved = checkedProjectRole(ctx as QueryCtx, project, actor);
+  const participant = resolved !== undefined ? resolved === 'write' : await hasWriteRole(ctx, project, actor);
+  if (reader === project.owner && participant) return true;
   // Sessions and messages are coordination: they name an actor only for a reader of coordination, so an outsider
   // cannot learn from this answer whether a member ran a session or sent or received a message (Item b6588425).
   const coordination = await readsCoordination();
@@ -169,7 +170,12 @@ export async function retainMembership(
     .query('projectContributors')
     .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId).eq('contributor', actor))
     .unique();
-  if (writer) await markRemovedAccount(ctx, projectId, actor);
+  // A person who still writes through a linked team keeps their entries: revocation follows the loss of write access.
+  if (writer) {
+    const project = await ctx.db.get(projectId);
+    const team = project ? await teamGrant(ctx, project, actor) : null;
+    if (team?.role !== 'write') await markRemovedAccount(ctx, projectId, actor);
+  }
 }
 
 async function membership(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, actor: string) {

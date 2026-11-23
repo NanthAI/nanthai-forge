@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
+import { hasWriteRole } from './projectRole';
 import { completeHostedCheck, writableHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
 import { checkPin, hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
 import { requireStoredRepositoryBinding, type RunnerScope } from './githubBindingAccess';
@@ -8,21 +9,15 @@ import { ForgeError } from '../src/errors';
 import { ciStatusEntryPaths, type CiVerdict } from '../src/ci-status';
 import { infraWaitSince, jobApiReason } from '../src/ci-provider-recovery';
 
-/** The project role of one account: anyone who is neither the owner nor a contributor is outside. */
+/** The project role of one account: anyone who is neither the owner nor a writer (direct or through a linked team)
+ * is outside. */
 export async function roleOf(
   ctx: MutationCtx,
-  projectId: Id<'hostedProjects'>,
-  owner: string,
+  project: Pick<Doc<'hostedProjects'>, '_id' | 'owner' | 'teamLinks'>,
   actor: string,
 ) {
-  if (actor && actor === owner) return 'owner' as const;
-  const contributor = actor
-    ? await ctx.db
-        .query('projectContributors')
-        .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId).eq('contributor', actor))
-        .unique()
-    : null;
-  return contributor ? ('contributor' as const) : ('outside' as const);
+  if (actor && actor === project.owner) return 'owner' as const;
+  return actor && (await hasWriteRole(ctx, project, actor)) ? ('contributor' as const) : ('outside' as const);
 }
 
 /** Settles a ci-status run once: the provider's verdict, or why Forge could not run it. */

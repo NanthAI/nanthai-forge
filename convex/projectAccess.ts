@@ -188,19 +188,21 @@ export const setRole = accountMutation('person')({
         'BAD_ARGUMENT',
         'This person is not in the project.',
       );
-      if (current !== input.role) {
-        const contributor = await ctx.db
-          .query('projectContributors')
-          .withIndex('by_project_and_contributor', q =>
-            q.eq('projectId', input.projectId).eq('contributor', input.person),
-          )
-          .unique();
-        const reader = await ctx.db
-          .query('projectReaders')
-          .withIndex('by_project_and_reader', q =>
-            q.eq('projectId', input.projectId).eq('reader', input.person),
-          )
-          .unique();
+      // Compare with the direct grant: a person who writes through a team can still be given, or lose, their own.
+      const contributor = await ctx.db
+        .query('projectContributors')
+        .withIndex('by_project_and_contributor', q =>
+          q.eq('projectId', input.projectId).eq('contributor', input.person),
+        )
+        .unique();
+      const reader = await ctx.db
+        .query('projectReaders')
+        .withIndex('by_project_and_reader', q =>
+          q.eq('projectId', input.projectId).eq('reader', input.person),
+        )
+        .unique();
+      const direct = contributor ? 'write' : reader ? 'read' : 'none';
+      if (direct !== input.role) {
         if (input.role !== 'write') await retainMembership(ctx, input.projectId, input.person, project.owner);
         if (input.role !== 'write') {
           if (contributor) await ctx.db.delete(contributor._id);

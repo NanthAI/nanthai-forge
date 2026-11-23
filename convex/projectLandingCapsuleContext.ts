@@ -5,6 +5,7 @@ import type { LandingCapsulePointer } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
+import { hasWriteRole } from './projectRole';
 
 /** Public metadata commits to server-only bytes; no object key, URL or transaction pins. */
 export async function capsuleHistoryContext(
@@ -72,19 +73,11 @@ export async function historyViewVersion(ctx: QueryCtx, project: Doc<'hostedProj
   invariant(viewer, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted landing history.');
   // A public project's role can change without changing its source or current snapshot.
   // Retain that dependency even when only the viewer is named in the live context.
-  const contributor =
-    viewer.subject === project.owner
-      ? null
-      : await ctx.db
-          .query('projectContributors')
-          .withIndex('by_project_and_contributor', q =>
-            q.eq('projectId', project._id).eq('contributor', viewer.subject),
-          )
-          .unique();
+  const owner = viewer.subject === project.owner;
   return digest(
     canonicalPayload({
       viewer: viewer.subject,
-      role: viewer.subject === project.owner ? 'owner' : contributor ? 'writer' : 'reader',
+      role: owner ? 'owner' : (await hasWriteRole(ctx, project, viewer.subject)) ? 'writer' : 'reader',
     }),
   );
 }

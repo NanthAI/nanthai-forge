@@ -18,6 +18,7 @@ import { PERSON_LATEST } from '../src/person-days';
 import { isAgentSlug } from '../src/agent-slug';
 import { DAY_MS, isAccount } from './statsLanes';
 import { landingMessageText } from './projectHostedLandingMessageBody';
+import { teamWriters } from './teamGrant';
 
 export { isAccount };
 
@@ -240,17 +241,19 @@ export function planningPartialDays(input: {
   };
 }
 
-/** Everyone who can do planning work in the project: its owner and its writers (at most PERSON_PARTIAL_MEMBERS).
- * A partial close marks them all, so a person whose only planning work it left unread still sees "+". */
+/** Everyone who can do planning work in the project: its owner, its direct writers and the writers of its linked
+ * teams (each at most PERSON_PARTIAL_MEMBERS; a project without team links reads no team row). A partial close marks
+ * them all, so a person whose only planning work it left unread still sees "+". */
 export async function planningMembers(
   ctx: QueryCtx,
-  project: { _id: Id<'hostedProjects'>; owner: string },
+  project: Pick<Doc<'hostedProjects'>, '_id' | 'owner' | 'teamLinks'>,
 ): Promise<string[]> {
   const writers = await ctx.db
     .query('projectContributors')
     .withIndex('by_project_and_contributor', q => q.eq('projectId', project._id))
     .take(PERSON_PARTIAL_MEMBERS);
-  return [project.owner, ...writers.map(row => row.contributor)].filter(isAccount);
+  const team = await teamWriters(ctx, project, PERSON_PARTIAL_MEMBERS);
+  return [...new Set([project.owner, ...writers.map(row => row.contributor), ...team])].filter(isAccount);
 }
 
 export const firstLine = (text: string | undefined, fallback: string) =>

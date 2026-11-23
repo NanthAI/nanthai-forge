@@ -104,6 +104,36 @@ test('Done-when removal: a person who leaves is marked, the next person write re
   }
 });
 
+test('removing a direct grant does not mark a person who still writes through a linked team', async t => {
+  const h = setup(t),
+    o = owner(h);
+  await o.client.write('API_TOKEN', VALUE);
+  const m = await joined(h, t, o, 'fixture-member');
+  for (const table of ['teams', 'teamMembers', 'projectTeams']) h.s.tables[table] ??= new Map();
+  h.s.tables.hostedProjects.get(h.project).teamLinks = 1;
+  h.s.tables.teams.set('crew', { _id: 'crew', owner: 'fixture-owner', name: 'crew' });
+  h.s.tables.teamMembers.set('crew-m', { _id: 'crew-m', teamId: 'crew', member: 'fixture-member' });
+  h.s.tables.projectTeams.set('crew-link', {
+    _id: 'crew-link',
+    projectId: h.project,
+    teamId: 'crew',
+    role: 'write',
+  });
+  await removePerson(h, 'fixture-member');
+  assert.deepEqual(marks(h), []);
+  clear(await m.client.read());
+  // A team that gives read only does not keep the entry.
+  h.s.tables.projectTeams.get('crew-link').role = 'read';
+  h.s.tables.projectContributors.set('pc-again', {
+    _id: 'pc-again',
+    _creationTime: 1,
+    projectId: h.project,
+    contributor: 'fixture-member',
+  });
+  await removePerson(h, 'fixture-member');
+  assert.deepEqual(marks(h), [m.keys.id.toString('hex')]);
+});
+
 test('unshare --marked removes every marked entry in one write, and automatic sharing waits until it has', async t => {
   const h = setup(t),
     o = owner(h);

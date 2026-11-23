@@ -48,3 +48,26 @@ export async function teamGrant(ctx: QueryCtx | MutationCtx, project: Project, a
   }
   return null;
 }
+
+/** People holding write through the project's linked teams (at most `limit`), for the rare listing of everyone who can
+ * work here. A project without links reads nothing; otherwise one bounded read of its links, then a point read and one
+ * bounded member read per write team. Never on a per-call authorization path (`teamGrant` is that). */
+export async function teamWriters(ctx: QueryCtx | MutationCtx, project: Project, limit: number) {
+  if (!project.teamLinks) return [];
+  const links = await ctx.db
+    .query('projectTeams')
+    .withIndex('by_projectId_and_teamId', q => q.eq('projectId', project._id))
+    .take(PROJECT_TEAM_LINKS);
+  const writers = new Set<string>();
+  for (const link of links) {
+    if (link.role !== 'write' || writers.size >= limit) continue;
+    const team = await ctx.db.get(link.teamId);
+    if (!team || team.removal || team.owner !== project.owner) continue;
+    const rows = await ctx.db
+      .query('teamMembers')
+      .withIndex('by_teamId_and_member', q => q.eq('teamId', link.teamId))
+      .take(limit);
+    for (const row of rows) if (writers.size < limit) writers.add(row.member);
+  }
+  return [...writers];
+}

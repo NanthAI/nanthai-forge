@@ -90,7 +90,7 @@ export const prepare = internalMutation({
     const authors = project
       ? await Promise.all(
           [...new Set([run.actor, candidate?.creatorAccountId ?? ''])].map(actor =>
-            roleOf(ctx, input.projectId, project.owner, actor),
+            roleOf(ctx, project, actor),
           ),
         )
       : [];

@@ -166,7 +166,7 @@ const unchangedReply = (reply: string) => reply;
 /** The existing write-authority lookup also supplies the counter on replays, which skip charging. */
 export function rememberMemberWorkBudget(
   ctx: QueryCtx | MutationCtx,
-  member: Doc<'projectContributors'>,
+  member: Pick<Doc<'projectContributors'>, 'projectId' | 'contributor' | 'workBudget'>,
   current = member.workBudget,
 ) {
   const capture = memberBudgetCaptures.get(ctx);
@@ -237,7 +237,9 @@ export async function chargeMemberWork(
     const team = await teamGrant(ctx, project, actor);
     if (team?.role !== 'write')
       throw new ForgeError('PROJECT_UNAVAILABLE', 'Current contributor membership is required.');
-    await ctx.db.patch(team.member._id, { workBudget: nextMemberWorkBudget(team.member.workBudget, kind) });
+    const workBudget = nextMemberWorkBudget(team.member.workBudget, kind);
+    await ctx.db.patch(team.member._id, { workBudget });
+    rememberMemberWorkBudget(ctx, { projectId: project._id, contributor: actor }, workBudget);
     return;
   }
   const workBudget = nextMemberWorkBudget(member.workBudget, kind);

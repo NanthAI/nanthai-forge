@@ -46,7 +46,11 @@ export async function hasWriteRole(ctx: QueryCtx | MutationCtx, project: Project
     return true;
   }
   const team = await teamGrant(ctx, project, actor);
-  if (team) checked(ctx, project, actor, team.role);
+  if (team) {
+    if (team.role === 'write')
+      rememberMemberWorkBudget(ctx, { projectId: project._id, contributor: actor }, team.member.workBudget);
+    checked(ctx, project, actor, team.role);
+  }
   return team?.role === 'write';
 }
 
