@@ -501,9 +501,14 @@ test('live cost counts: R2 requests and runner minutes are stamped on the landin
       classB = 1,
       bytesPut = Math.floor(byId('landing-r2-bytes-put-mean').max / 2),
       excessiveB = Math.ceil(byId('landing-r2-request-usd-mean').max / 0.36e-6) + 1;
-    for (let i = 0; i < WINDOW; i++) assert.deepEqual(feed([classA, classB, bytesPut, 3260, 280, 1120]), []);
+    // Three of the twenty landings threw a check away (about 4.7 runner minutes a landing, 3 checks).
+    for (let i = 0; i < WINDOW; i++)
+      assert.deepEqual(feed([classA, classB, bytesPut, 3260, i < 3 ? 1880 : 0, 1120]), []);
     assert.equal(windowValue(rows.samples, 'runnerAccepted', 'mean', WINDOW), 54.3);
     assert.equal(windowValue(rows.samples, 'runnerDiscarded', 'mean', WINDOW), 4.7);
+    // Minutes stay as a secondary number; the budget judges checks (a landing with discarded seconds and
+    // two attempts threw one check away).
+    assert.equal(windowValue(rows.samples, 'discardedChecks', 'sum', WINDOW), 3);
     assert.equal(windowValue(rows.samples, 'runnerAudit', 'mean', WINDOW), 18.7);
     assert.equal(windowValue(rows.samples, 'r2ClassB', 'mean', WINDOW), classB);
     assert.equal(
@@ -514,7 +519,7 @@ test('live cost counts: R2 requests and runner minutes are stamped on the landin
     // A compose that re-reads every object (class B) and a test set that doubles each break their own
     // budget once, naming the next step, and stay quiet after.
     const broke = [];
-    for (let i = 0; i < WINDOW; i++) broke.push(...feed([classA, excessiveB, bytesPut, 7000, 280, 1120]));
+    for (let i = 0; i < WINDOW; i++) broke.push(...feed([classA, excessiveB, bytesPut, 7000, 0, 1120]));
     assert.deepEqual(broke.map(e => [e.kind, e.budget.id]).sort(), [
       ['broken', 'landing-r2-request-usd-mean'],
       ['broken', 'landing-runner-accepted-mean'],
@@ -531,7 +536,7 @@ test('live cost counts: R2 requests and runner minutes are stamped on the landin
     );
     assert.match(speedBudgetMessage(r2, 'forge', budgets).text, /forge-source-step/);
     assert.match(speedBudgetIssue(r2, 'p', budgets).body, /Decision it protects: Issue ac5200f5/);
-    assert.deepEqual(feed([classA, excessiveB, bytesPut, 7000, 280, 1120]), []);
+    assert.deepEqual(feed([classA, excessiveB, bytesPut, 7000, 0, 1120]), []);
   });
 });
 
@@ -802,6 +807,8 @@ test('incident f5c45985: discarded operation stamp survives a missing accepted-r
     windowValue(history.samples, 'runnerDiscarded', 'mean', WINDOW),
     Math.round((((WINDOW - 1) * 600 + 3317) / 60 / WINDOW) * 10) / 10,
   );
+  // Each of these landings (two attempts, discarded seconds known) threw one check away.
+  assert.equal(windowValue(history.samples, 'discardedChecks', 'sum', WINDOW), WINDOW);
   const unknown = landingSpeedSample({ ...state, counts: undefined });
   assert.equal(unknown.counts[4], null);
   feed(unknown.counts);
@@ -819,7 +826,9 @@ test('incident f5c45985: discarded operation stamp survives a missing accepted-r
     b => b.id === 'landing-runner-discarded-mean',
   );
   assert.match(report.note, /1 newest landings have unknown stamps/);
-  assert.equal(report.value, windowValue(history.samples, 'runnerDiscarded', 'mean', WINDOW));
+  assert.equal(report.value, windowValue(history.samples, 'discardedChecks', 'sum', WINDOW));
+  assert.equal(report.unit, 'checks');
+  assert.match(report.note, /secondary: \S+ runner min of discarded checks per landing/);
   // A transition based on known samples names recent missing stamps instead of pretending they cost zero.
   const previous = { ...history, broken: {} };
   previous.samples = previous.samples.map(row => {
@@ -832,10 +841,86 @@ test('incident f5c45985: discarded operation stamp survives a missing accepted-r
     { ...sample, at: noon + n++ * minute, id: 'crossing' },
     budgets,
   );
-  const event = events.find(e => e.budget.metric === 'runnerDiscarded');
+  const event = events.find(e => e.budget.metric === 'discardedChecks');
   assert.equal(event.unknown, 1);
   assert.match(
     speedBudgetMessage(event, 'synthetic', budgets).text,
-    /unknown runnerDiscarded stamp; excluded, never counted as zero/,
+    /unknown discarded runner seconds stamp; excluded, never counted as zero \(the sum reaches back/,
   );
+});
+
+test('Item 1018d0f8: the discarded budget counts thrown-away checks per window of landings (limit 4), minutes beside it', () => {
+  const budget = byId('landing-runner-discarded-mean');
+  assert.deepEqual(
+    [budget.metric, budget.stat, budget.unit, budget.max],
+    ['discardedChecks', 'sum', 'checks', 4],
+    'four checks in 20 landings, the original intent of the 12-minute line',
+  );
+  assert.match(budget.source, /Unit changed from runner minutes to checks/);
+  assert.match(budget.reason, /Four discarded checks in 20 landings/);
+  // Per landing: no discarded seconds is none thrown away (a reused check is kept); unknown stays unknown.
+  const checks = (attempts, seconds) =>
+    windowValue(
+      [[noon, 1, 1, 'c', 1, attempts, 1, [null, null, null, null, seconds, null]]],
+      'discardedChecks',
+      'sum',
+      1,
+    );
+  assert.equal(checks(1, 0), 0);
+  assert.equal(checks(3, 0), 0, 'attempts that reused their check threw nothing away');
+  assert.equal(checks(2, 3000), 1);
+  assert.equal(checks(4, 9000), 3);
+  assert.equal(checks(1, 600), 1, "a batch member's share of a failed cohort run is one check");
+  assert.equal(checks(null, 600), 1);
+  assert.equal(checks(2, null), null, 'unknown seconds are excluded, never counted as zero');
+
+  // Break and recover: a window of clean landings, then four discards are within the budget, the fifth breaks.
+  let state = null,
+    index = 0;
+  const feed = (attempts, seconds) => {
+    const out = observeLandingSpeed(
+      state,
+      {
+        at: noon + 9_000 * minute + index * minute,
+        id: `chk${index++}`.padEnd(8, '0'),
+        toMain: 10,
+        check: 5,
+        settle: 8.5,
+        attempts,
+        writes: 8,
+        counts: [1, 1, 1000, 3000, seconds, 1000],
+        stages: { queue: 4, check: 5, settle: 0.1 },
+      },
+      budgets,
+    );
+    state = out.state;
+    return out.events.filter(e => e.budget.id === budget.id);
+  };
+  for (let i = 0; i < WINDOW; i++) assert.deepEqual(feed(1, 0), []);
+  for (let i = 0; i < 4; i++)
+    assert.deepEqual(feed(2, 3000), [], `discard ${i + 1} of 4 is within the budget`);
+  assert.equal(windowValue(state.samples, 'discardedChecks', 'sum', WINDOW), 4);
+  const broke = feed(2, 3000);
+  assert.deepEqual(
+    broke.map(e => [e.kind, e.value, e.line]),
+    [['broken', 5, 4]],
+  );
+  assert.equal(broke[0].minutes, 12.5, 'five checks of 50 runner-min in 20 landings, 12.5 min a landing');
+  const message = speedBudgetMessage(broke[0], 'forge', budgets).text;
+  assert.match(message, /discarded checks over the last 20 landings is 5 checks; budget 4 checks/);
+  assert.match(message, /Secondary: 12.5 runner min of discarded checks per landing/);
+  const issue = speedBudgetIssue(broke[0], 'p', budgets);
+  assert.match(issue.title, /^P0 speed budget broken: discarded checks/);
+  assert.match(issue.body, /discarded checks over the last 20 landings must stay at or under 4 checks\./);
+  assert.deepEqual(feed(2, 3000), [], 'stays quiet while broken');
+  // Clean landings push the discards out of the window; at four it recovers, once.
+  const recovered = [];
+  for (let i = 0; i < WINDOW; i++) recovered.push(...feed(1, 0));
+  assert.deepEqual(
+    recovered.map(e => [e.kind, e.value]),
+    [['recovered', 4]],
+  );
+  assert.match(speedBudgetMessage(recovered[0], 'forge', budgets).text, /is 4 checks; budget 4 checks/);
+  // A count budget never ratchets.
+  assert.equal(state.ratchet?.[budget.id], undefined);
 });

@@ -398,14 +398,14 @@
     },
     {
       "id": "landing-runner-discarded-mean",
-      "area": "GitHub runner minutes of discarded checks, including cancelled provider job execution, per landing",
+      "area": "checks a landing's attempts threw away, counted per window of landings (queue waste; their runner minutes are shown beside it)",
       "measuredBy": "landing-record",
-      "metric": "runnerDiscarded",
-      "stat": "mean",
-      "unit": "min",
-      "max": 12,
-      "source": "Shard execution seconds of the check runs of the 36 landings that settled 2026-11-10 04:06Z to 08:31Z, from each run's stored summary (timings.executionSeconds); completed checks use the same execution stamp, while cancelled checks use final provider job intervals from the existing completion event. Discarded baseline: mean 4.7 min, rolling 20-landing mean 2.5 to 5.9 (3 discarded runs of about 50 to 60 min in 36 landings).",
-      "reason": "One full discarded run in 20 landings adds about 3 minutes; 12 is four of them, so it breaks when main races keep throwing checks away (incident 10d253c6), not on one unlucky window. Counts recorded discarded execution and final provider job intervals for cancelled runs. Cancelled usage remains pending and unknown until the existing provider completion event supplies complete timings; late corrections update retained samples and closed UTC days once per run.",
+      "metric": "discardedChecks",
+      "stat": "sum",
+      "unit": "checks",
+      "max": 4,
+      "source": "Unit changed from runner minutes to checks (owner 2026-11-23, Issue 1018d0f8): check length has its own budgets, so this one measures queue waste only. The count comes from the stamps a landing already carries: its discarded runner seconds (none means nothing thrown away, a reused check is kept; unknown stays unknown) and its attempts (each attempt after the first replaced a check, so at least one and at most attempts - 1 per landing; it is an estimate: it runs high when an attempt reused its check beside a discard, and low when resubmissions carried discarded seconds but restarted the attempt ordinal, a later submission landing on its first attempt counting one). The id keeps its old name so the Issue and its alert history stay one record. Runner minutes of the same checks (the old unit, still stamped on every landing): shard execution seconds of the check runs of the 36 landings that settled 2026-11-10 04:06Z to 08:31Z, from each run's stored summary (timings.executionSeconds); completed checks use the same execution stamp, while cancelled checks use final provider job intervals from the existing completion event. Baseline: mean 4.7 min, rolling 20-landing mean 2.5 to 5.9 (3 discarded runs of about 50 to 60 min in 36 landings), that is 3 discarded checks in 36 landings, 1.7 in a 20-landing window.",
+      "reason": "Four discarded checks in 20 landings is the original intent of the 12-minute line (one full check was about 3 minutes of the mean, 12 is four of them), now kept at four whatever a check costs (86 runner-min per full check by 2026-11-22). It breaks when main races keep throwing checks away (incident 10d253c6), not on one unlucky window: the baseline is 1.7 in 20. Counts the discarded checks of the newest window of landings; cancelled usage stays pending and unknown until the existing provider completion event supplies complete timings, and late corrections update retained samples and closed UTC days once per run. The ratchet does not apply to a count.",
       "issue": "51bbbd00"
     },
     {
@@ -441,7 +441,7 @@
       "unit": "min",
       "max": 2100,
       "source": "Dogfood landings read 2026-11-09 to 11-19 (755 accepted landings, costs.runnerDiscarded, the stamp the Stats day close reads), per UTC day of commit: 11-11 1,620 min (84 landings), 11-12 83, 11-13 0, 11-14 0, 11-15 377, 11-16 392, 11-17 6,613 (114 landings, queue incident 5e3c3a3c), 11-18 1,339, 11-19 7,945 (101 landings, a main-race recheck wave); 11-09 and 11-10 were before the stamp (130 of 130 and 76 of 171 unknown).",
-      "reason": "The per-landing discarded budget (12 min, landing-runner-discarded-mean) at the busiest day's volume (171 landings) is 2,052 min, rounded up to 2,100: a busy normal day passes, while both waste days seen (6,613 and 7,945) break it on their day close. A per-landing mean dilutes one bad day across 20 landings; this totals the day. About $17 a day at list price for a private repository. Judged once per day from the stamp already on each sample (no read); the ratchet tightens it with the F1 rules after 7 held days.",
+      "reason": "The per-landing discarded budget as first set (12 min, landing-runner-discarded-mean, since counted in checks: 4 per 20 landings) at the busiest day's volume (171 landings) is 2,052 min, rounded up to 2,100: a busy normal day passes, while both waste days seen (6,613 and 7,945) break it on their day close. A per-landing mean dilutes one bad day across 20 landings; this totals the day. About $17 a day at list price for a private repository. Judged once per day from the stamp already on each sample (no read); the ratchet tightens it with the F1 rules after 7 held days.",
       "issue": "a217b83e"
     },
     {

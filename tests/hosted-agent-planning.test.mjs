@@ -3070,7 +3070,7 @@ test('incident 1018d0f8: alert refresh preserves every outstanding Done-when lin
   const { speedBudgetIssue } = await import('../dist/landing-speed-alerts.js');
   const event = {
     kind: 'broken',
-    budget: speedBudgets.budgets.find(b => b.metric === 'runnerDiscarded'),
+    budget: speedBudgets.budgets.find(b => b.metric === 'discardedChecks'),
     value: 60,
     landing: 'first',
     since: '2026-11-04T12:00:00.000Z',

@@ -19,7 +19,8 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 | Idle Convex calls | the build (`check-idle-queries`, landing tests) | 0; budget 0 |
 | Attempts and landing-state writes per landing, mean (cost drift, Issue 3e3f9fe6) | every landing | attempts 1.6 over the 36 landings of 2026-11-10 (2.3 over 285 landings 11-08 to 11-10; worst 20-landing window 3.55); writes 11.1 live (8, 12, 20 to 22 for one, two, three attempts); budget 4 / 22 |
 | R2 request dollars and bytes put by a landing's composes, mean (Issue 3e3f9fe6) | every recomposed landing | Latest 20 jointly stamped dev landings at 2026-11-12 23:20Z: 2.55 A / 1.00 B, or $0.000011835 per landing; request budget $0.000018 (about 1.5x, rounded up to a microdollar, absolute floor $0.000010). Separate bytes budget remains 1.35 MB; missing stamps are skipped |
-| GitHub runner minutes of a landing's checks, mean: accepted / discarded / audit (Issue 3e3f9fe6) | every landing | 54.4 / 4.7 / 18.8 shard minutes over the 36 landings of 2026-11-10 (rolling 20-landing means 49 to 57 / 2.5 to 5.9 / 13 to 23); budget 70 / 12 / 32 min |
+| GitHub runner minutes of a landing's checks, mean: accepted / audit (Issue 3e3f9fe6) | every landing | 54.4 / 18.8 shard minutes over the 36 landings of 2026-11-10 (rolling 20-landing means 49 to 57 / 13 to 23); budget 70 / 32 min |
+| Discarded checks (checks a landing's attempts threw away), sum over the last 20 landings (Issue 1018d0f8, owner 2026-11-23) | every landing | 3 discarded runs in the 36 landings of 2026-11-10 (1.7 in 20); budget 4 checks. Counts queue waste only: check length has its own budgets. Runner minutes of the same checks (4.7 a landing then) stay beside it in the report and the alert, secondary, never judged ([below](#discarded-checks-budget)) |
 | Runner minutes per full check, p50 (shard execution of the accepted run when it ran in full) | every landing with a full check | 76.4 min over the first 8 full checks after d5de1c98 (121.6 over 34 before it); budget 92 min |
 | Cancelled or discarded runner minutes per UTC day (Item a217b83e) | the Stats day close, once per closed day | live 2026-11-11 to 11-19: 0 to 1,620 on ordinary days, 6,613 on the 11-17 incident day, 7,945 on 11-19; budget 2,100 min ([below](#daily-waste-tripwire)) |
 | Save / preflight, p90 | every landing with a recorded duration | initial budgets 30 / 120 s; sources and calibration below |
@@ -27,7 +28,7 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 
 ## How a budget breaks
 
-A landing-judged budget is the statistic (p50, p90, or the mean for cost counts) over the **last 20 landings** that know the value, so one outlier
+A landing-judged budget is the statistic (p50, p90, the mean for cost counts, or the sum for a count over the window) over the **last 20 landings** that know the value, so one outlier
 never breaks it (the p90 of 20 is the second slowest). A project with fewer than 20 landings has no verdict.
 The accept mutation of each landing appends its own stamps (`timing`, already on the landed state) to the one
 `projectLandingSpeed` row, judges every budget, and compares with the row's `broken` map:
@@ -165,7 +166,7 @@ day. A day where more than half the landings have no discarded-minutes stamp yet
 close's read cap) cannot be compared with a line set from whole days: it sends one "not enough data" note and is
 not judged. Late usage that arrives after a day closed corrects Stats, not the judged day. Checks of work that
 never landed (withdrawn) are on Stats' discarded tally, not here. The file max (2,100 min, about $17 a day at list
-price) is the per-landing discarded budget (12 min) × the busiest day's 171 landings. `nforge metrics` takes the
+price) is the per-landing discarded budget as first set (12 min, now counted in checks) × the busiest day's 171 landings. `nforge metrics` takes the
 automatic line and the held days left from the newest Stats day row (one indexed read on the first metrics page;
 the landing row never holds them) and says which closed day that state is from. Only the file max fails the row,
 the same as the close: a day over a tightened line but under the file max undoes the ratchet with a message, and
@@ -216,10 +217,38 @@ budget catches that class.
 Cost: no new call, read or write. The run record grows by at most about 1.5 KB (24 paths), the timing history
 by a few bytes per young file, and the receipt and landing state by a few hundred bytes for a named landing only.
 
+## Discarded checks budget
+
+`landing-runner-discarded-mean` (Issue 1018d0f8, owner 2026-11-23) counts **checks**, not minutes: the sum over the
+last 20 landings of the checks each landing's attempts threw away, at most **4**. That is the original intent of the
+first 12-minute line (one full check was about 3 minutes of the mean, 12 was four of them), kept at four whatever a
+check costs (86 runner-min by 2026-11-22). Check length has its own budgets (runner minutes per full check, check
+minutes), so this one measures queue waste only. The id keeps its old name so the one P0 Issue and its history stay
+one record.
+
+- **Per landing**, from stamps the landing sample already holds, no new stamp, call or read: no discarded runner
+  seconds is nothing thrown away (a reused check is kept); known seconds mean `max(1, attempts - 1)` checks (each
+  attempt after the first replaced a check; a batch member's share of a failed cohort run is one). It is an
+  estimate: it runs high when an attempt reused its check beside a discard, and low when resubmissions carried
+  discarded seconds but restarted the attempt ordinal (a later submission landing on its first attempt counts one).
+  An exact per-landing stamp is a follow-up. Unknown seconds (usage still pending, or a row from before the stamp)
+  stay unknown and are excluded, never counted as zero: the sum then reaches back to the newest 20 landings that
+  know it, and the alert says so and names discarded runner seconds as the missing stamp. This is a count over a
+  window, not a percentile: one landing estimated at five discards breaks it, which is the intent (four in 20 is
+  the line).
+- **Secondary number**: the same window's mean discarded runner minutes per landing is shown beside the count in
+  the `metrics` row note and in the break and recovery messages. It judges nothing.
+- A count never ratchets. `src/landing-speed-alerts.ts` (`discardedChecks`, stat `sum`) judges it; tests
+  `tests/landing-speed-alerts.test.mjs` ("Item 1018d0f8") cover the unit, the break at the fifth check in the
+  window, the single quiet repeat, and the recovery at four.
+- Baseline: 3 discarded runs in the 36 landings of 2026-11-10 to 08:31Z (1.7 per 20). The Item's cause fix (hold a
+  plain change's Lane check while a spent order-sensitive holder is checking) is built separately; this line only
+  changes what the budget counts.
+
 ## Ratchet
 
 The landing-judged percentile budgets (time to main, check, check to commit, save, preflight and runner
-minutes per full check) tighten by themselves; cost means keep the cost ledger's own ratchet
+minutes per full check) tighten by themselves; cost means and the discarded-check count keep the cost ledger's own ratchet or none
 ([`src/landing-speed-alerts.ts`](../../src/landing-speed-alerts.ts)). The rule, judged inside the landing that
 already writes the budget row:
 

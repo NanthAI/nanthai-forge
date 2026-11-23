@@ -245,9 +245,10 @@ export const speedBudgetSchema = z
     measuredBy: z.enum(['landing-record', 'perf-harness', 'build-guard', 'unrecorded']),
     metric: z.string().min(1),
     /** mean: cost budgets, where every landing's share adds up; p50/p90: speed budgets; day: the total
-     * of one closed UTC day (the waste tripwire), judged once when the day's last landing is followed. */
-    stat: z.enum(['p50', 'p90', 'mean', 'day']).optional(),
-    unit: z.enum(['min', 's', 'ms', 'calls', 'bytes', 'attempts', 'writes', 'ops', 'USD']),
+     * of one closed UTC day (the waste tripwire), judged once when the day's last landing is followed.
+     * sum: a count budget, the total over the window (checks thrown away per 20 landings). */
+    stat: z.enum(['p50', 'p90', 'mean', 'sum', 'day']).optional(),
+    unit: z.enum(['min', 's', 'ms', 'calls', 'bytes', 'attempts', 'writes', 'ops', 'USD', 'checks']),
     max: z.number().min(0).nullable(),
     source: z.string().min(1),
     reason: z.string().min(1),
@@ -291,10 +292,11 @@ export type LandingMetric =
   | 'r2BytesPut'
   | 'runnerAccepted'
   | 'runnerDiscarded'
+  | 'discardedChecks'
   | 'runnerAudit'
   | 'runnerFull'
   | 'wasteDaily';
-type Stat = 'p50' | 'p90' | 'mean' | 'day';
+type Stat = 'p50' | 'p90' | 'mean' | 'sum' | 'day';
 const INDEX: Partial<Record<LandingMetric, number>> = {
   toMain: 1,
   saveMs: 8,
@@ -318,6 +320,7 @@ const COUNT: Partial<Record<LandingMetric, [number, number]>> = {
 const METRICS = [
   ...Object.keys(INDEX),
   ...Object.keys(COUNT),
+  'discardedChecks',
   'r2RequestUsd',
   'wasteDaily',
 ] as LandingMetric[];
@@ -325,6 +328,19 @@ const isLanding = (b: SpeedBudget): b is SpeedBudget & { metric: LandingMetric; 
   b.measuredBy === 'landing-record' && !!b.stat && b.max !== null && (METRICS as string[]).includes(b.metric);
 /** The budgets a landing's own stamps can judge. */
 export const landingBudgets = (budgets: SpeedBudgets) => budgets.budgets.filter(isLanding);
+
+/** Checks a landing's attempts threw away (Issue 1018d0f8, owner 2026-11-23: the unit of the discarded
+ * budget is checks, not minutes), from stamps the sample already holds. A landing with no discarded
+ * runner seconds threw nothing away (a reused check is kept); one that did threw away at least one, and
+ * each attempt after the first replaced a check, so `attempts - 1` is the count (a batch member's share of
+ * a failed cohort run has one attempt and counts one). It is an estimate from existing stamps: it runs high
+ * when an attempt reused its check beside a discard, and low when resubmissions carried discarded seconds
+ * but restarted the attempt ordinal (a later submission landing on its first attempt counts one). Unknown
+ * seconds stay unknown, never zero. An exact per-landing stamp is a follow-up (Item 1018d0f8). */
+export const discardedChecks = (
+  attempts: number | null | undefined,
+  discardedSeconds: number | null | undefined,
+) => (discardedSeconds == null ? null : discardedSeconds > 0 ? Math.max(1, (attempts ?? 0) - 1) : 0);
 
 const minute = 60_000;
 /** Retained samples per project (about 3.7 KB with counts): the window plus gaps where a stamp was missing. */
@@ -507,6 +523,8 @@ export type SpeedBudgetEvent = {
   stage?: string;
   /** Missing stamps in the newest landing window, excluded rather than charged as zero. */
   unknown?: number;
+  /** Discarded-check budget: the same window's runner minutes of those checks per landing, shown beside the count. */
+  minutes?: number;
   /** Day budgets: the closed UTC day judged, and its landings. */
   day?: string;
   landings?: number;
@@ -623,15 +641,21 @@ export function windowValue(
           b = row[7]?.[1];
         return a == null || b == null ? [] : [(a * 4.5 + b * 0.36) / 1e6];
       }
+      if (metric === 'discardedChecks') {
+        const checks = discardedChecks(row[5], row[7]?.[4]);
+        return checks === null ? [] : [checks];
+      }
       const value: number | null | undefined = count ? row[7]?.[count[0]] : (row[index!] as number | null);
       return value == null ? [] : [value / (count?.[1] ?? 1)];
     })
     .slice(-window);
   if (values.length < window) return null;
   const value =
-    stat === 'mean'
-      ? values.reduce((sum, value) => sum + value, 0) / values.length
-      : percentile(values, stat === 'p50' ? 0.5 : 0.9)!;
+    stat === 'sum'
+      ? values.reduce((sum, value) => sum + value, 0)
+      : stat === 'mean'
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : percentile(values, stat === 'p50' ? 0.5 : 0.9)!;
   // Dollar fractions must survive judgment and reporting; other metrics keep their precision.
   return metric === 'r2RequestUsd' ? Math.round(value * 1e12) / 1e12 : round(value);
 }
@@ -731,7 +755,7 @@ export function observeLandingSpeed(
     // Speed budgets (percentiles) ratchet here; cost means keep the cost ledger's own ratchet.
     const tightenedAt = Date.parse(ratchet[budget.id]?.at ?? '');
     const step =
-      budget.stat === 'mean'
+      budget.stat === 'mean' || budget.stat === 'sum'
         ? null
         : stepRatchet(
             ratchet[budget.id],
@@ -758,6 +782,11 @@ export function observeLandingSpeed(
         ...(step?.undone ? { flow: { landed: step.undone.landed, changed: step.undone.changed } } : {}),
       });
     const open = broken[budget.id];
+    const minutes =
+      budget.metric === 'discardedChecks'
+        ? windowValue(samples, 'runnerDiscarded', 'mean', budgets.window.landings)
+        : null;
+    const secondary = minutes === null ? {} : { minutes };
     if (value > line && !open) {
       const stage = longestStage(sample.stages);
       broken[budget.id] = { since, landing: sample.id, value, ...(stage ? { stage } : {}) };
@@ -770,6 +799,7 @@ export function observeLandingSpeed(
         since,
         ...(stage ? { stage } : {}),
         ...(unknown ? { unknown } : {}),
+        ...secondary,
       });
     } else if (value <= line && open) {
       delete broken[budget.id];
@@ -781,6 +811,7 @@ export function observeLandingSpeed(
         landing: open.landing,
         since: open.since,
         ...(unknown ? { unknown } : {}),
+        ...secondary,
       });
     }
   }
@@ -988,12 +1019,15 @@ const NAME: Record<LandingMetric, string> = {
   r2BytesPut: 'R2 bytes put per landing',
   runnerAccepted: 'runner minutes of the accepted check per landing',
   runnerDiscarded: 'runner minutes of discarded checks per landing',
+  discardedChecks: 'discarded checks',
   runnerAudit: 'runner minutes of main audits per landing',
   runnerFull: 'runner minutes per full check',
   wasteDaily: 'cancelled or discarded runner minutes per UTC day',
 };
 const describe = (b: SpeedBudget) =>
-  b.stat === 'day' ? NAME[b.metric as LandingMetric] : `${NAME[b.metric as LandingMetric]} ${b.stat}`;
+  b.stat === 'day' || b.stat === 'sum'
+    ? NAME[b.metric as LandingMetric]
+    : `${NAME[b.metric as LandingMetric]} ${b.stat}`;
 const NEXT: Record<LandingMetric, string> = {
   saveMs:
     'Next: compare the crossing landing save receipt durationMs and its CLI capture, upload and server step timings; inspect the latest save path change.',
@@ -1033,6 +1067,10 @@ const NEXT: Record<LandingMetric, string> = {
   runnerDiscarded:
     'Next: runs its attempts threw away rose: read `nforge agent ROOT landings` for the window (checkRunIds, recomposeCount); ' +
     'each main race that cannot reuse its check costs a whole run (incident 10d253c6).',
+  discardedChecks:
+    'Next: checks its attempts threw away rose: read `nforge agent ROOT landings` for the window (checkRunIds, recomposeCount); ' +
+    'each main race that cannot reuse its check costs a whole run (incident 10d253c6). This counts checks, queue waste only: ' +
+    'check length has its own budgets (runner minutes per full check, check minutes).',
   runnerAudit:
     'Next: audits ran longer or more often: read the main audit state (`nforge agent ROOT status`, audit) and the audit cadence setting.',
   runnerFull:
@@ -1050,6 +1088,9 @@ const NEXT: Record<LandingMetric, string> = {
 };
 const lastLandings = (budgets: SpeedBudgets) => `the last ${budgets.window.landings} landings`;
 
+/** The stamp a budget's unknown rows lack: the discarded-check count is read from discarded runner seconds. */
+const stampName = (b: SpeedBudget) =>
+  b.metric === 'discardedChecks' ? 'discarded runner seconds' : b.metric;
 /** The owner-facing message: which budget, which landing crossed it, where to look, the next step. */
 export function speedBudgetMessage(event: SpeedBudgetEvent, project: string, budgets: SpeedBudgets) {
   const b = event.budget;
@@ -1063,9 +1104,12 @@ export function speedBudgetMessage(event: SpeedBudgetEvent, project: string, bud
     '.' +
     (event.unknown
       ? event.day
-        ? ` ${event.unknown} of that day's landings have an unknown ${b.metric} stamp; excluded, never counted as zero.`
-        : ` ${event.unknown} of the newest ${budgets.window.landings} landings have an unknown ${b.metric} stamp; excluded, never counted as zero.`
-      : '');
+        ? ` ${event.unknown} of that day's landings have an unknown ${stampName(b)} stamp; excluded, never counted as zero.`
+        : ` ${event.unknown} of the newest ${budgets.window.landings} landings have an unknown ${stampName(b)} stamp; excluded, never counted as zero${b.metric === 'discardedChecks' ? ` (the sum reaches back to the newest ${budgets.window.landings} landings that know it)` : ''}.`
+      : '') +
+    (event.minutes === undefined
+      ? ''
+      : ` Secondary: ${event.minutes} runner min of discarded checks per landing over the same window (minutes are not judged here).`);
   if (event.kind === 'ratcheted')
     return {
       subject: `[Forge] Speed budget tightened: ${describe(b)}: ${project}`,
@@ -1101,7 +1145,7 @@ export function speedBudgetMessage(event: SpeedBudgetEvent, project: string, bud
     return {
       subject: `[Forge] Speed budget has too little data: ${describe(b)}: ${project}`,
       text:
-        `Speed budget ${b.id} cannot judge UTC day ${event.day} on ${project}: ${event.unknown ?? 0} of its ${event.landings ?? 0} landings have an unknown ${b.metric} stamp (cancelled usage not reported yet, or written before the stamp). ` +
+        `Speed budget ${b.id} cannot judge UTC day ${event.day} on ${project}: ${event.unknown ?? 0} of its ${event.landings ?? 0} landings have an unknown ${stampName(b)} stamp (cancelled usage not reported yet, or written before the stamp). ` +
         'Not enough data: a day missing more than half its landings cannot be compared with its line, so that day neither breaks nor recovers it. ' +
         'This message does not repeat until a day has been judged again.',
     };

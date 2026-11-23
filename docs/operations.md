@@ -1691,7 +1691,11 @@ one P0 Issue per break, a recovery message, nothing while it stays broken
   landing adds each attempt's sum to `counts.r2`. A landing whose Candidate was not composed for it
   (a solo fixture, a batch member) carries none and is skipped, never counted as zero. Check shard
   logs and saves are not in these counts.
-- `landing-runner-accepted-mean`, `-discarded-mean`, `-audit-mean`: GitHub runner minutes, from the
+- `landing-runner-discarded-mean` counts discarded **checks**, not minutes: the sum over the last 20 landings, limit 4
+  (Issue 1018d0f8; [speed budgets](agents/speed-budgets.md#discarded-checks-budget)). Per landing it reads the stamps below: no
+  discarded seconds is none, known seconds are at least one and at most attempts minus one; unknown stays unknown.
+  The runner minutes of those checks stay visible beside it, secondary.
+- `landing-runner-accepted-mean`, `-discarded-mean` (minutes, secondary), `-audit-mean`: GitHub runner minutes, from the
   shard execution seconds the check run row stores (`execution.seconds`, summed over shards). The
   accepted run's seconds are stamped when the landing sees the run end; a recompose that cannot reuse
   the check moves them to the discarded total; the main audit run's seconds join the newest landing's

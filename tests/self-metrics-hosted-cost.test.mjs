@@ -239,7 +239,7 @@ test('metrics projects every live cost budget from existing landing and run page
   assert.equal(value('landing-r2-request-usd-mean'), 0.00001782);
   assert.equal(value('landing-r2-bytes-put-mean'), 1000000);
   assert.equal(value('landing-runner-accepted-mean'), 50);
-  assert.equal(value('landing-runner-discarded-mean'), 0);
+  assert.equal(value('landing-runner-discarded-mean'), 0, 'no discarded check');
   const gaps = records.finishTimings.map((row, i) => ({
     ...row,
     costs: { ...row.costs, r2ClassA: i < 2 ? null : 3 },
@@ -302,7 +302,7 @@ test('metrics projects every live cost budget from existing landing and run page
   assert.equal(f.meter.documents - before.documents, latestDocuments, 'same DB rows on each read');
   assert(addedBytes < projectedRows * 300, 'bounded additive reply bytes per row');
   const unknown = speedBudgetRows(legacy.records, period, speedBudgets).filter(
-    row => row.stat === 'mean' && row.measuredBy === 'landing-record',
+    row => (row.stat === 'mean' || row.stat === 'sum') && row.measuredBy === 'landing-record',
   );
   assert(
     unknown.every(row => row.status === 'unrun' && row.value === null),

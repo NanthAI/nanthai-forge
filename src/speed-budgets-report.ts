@@ -15,7 +15,7 @@ export type SpeedBudgetRow = {
   id: string;
   area: string;
   measuredBy: SpeedBudget['measuredBy'];
-  stat: 'p50' | 'p90' | 'mean' | 'day' | null;
+  stat: 'p50' | 'p90' | 'mean' | 'sum' | 'day' | null;
   unit: SpeedBudget['unit'];
   max: number | null;
   value: number | null;
@@ -130,7 +130,9 @@ export function speedBudgetRows(
         ...dayRow(landingSamples, period, b.max, records.dayBudgets, b.id, b.ratchet === false),
       };
     const auto =
-      live && b.stat !== 'mean' ? ratchetStatus(live.ratchet?.[b.id], b.max, b.ratchet === false) : null;
+      live && b.stat !== 'mean' && b.stat !== 'sum'
+        ? ratchetStatus(live.ratchet?.[b.id], b.max, b.ratchet === false)
+        : null;
     const ratchetNote = !auto
       ? ''
       : (auto.line < b.max
@@ -159,6 +161,13 @@ export function speedBudgetRows(
       row => windowValue([row], b.metric as LandingMetric, b.stat!, 1) !== null,
     ).length;
     const line = auto && auto.line < b.max ? { line: auto.line } : {};
+    const minutes =
+      b.metric === 'discardedChecks'
+        ? windowValue(rows, 'runnerDiscarded', 'mean', budgets.window.landings)
+        : null;
+    // Minutes stay visible beside the count (owner 2026-11-23); they judge nothing.
+    const secondary =
+      minutes === null ? '' : `; secondary: ${minutes} runner min of discarded checks per landing`;
     return value === null
       ? {
           ...base,
@@ -173,7 +182,7 @@ export function speedBudgetRows(
           value,
           // Only the file max is a P0: a window over a ratcheted line undoes the ratchet instead.
           status: value > b.max ? 'fail' : 'pass',
-          note: `last ${budgets.window.landings} ${stamped} in the period${coverage}${shortNote}${ratchetNote}${b.metric === 'runnerAudit' ? '; audit seconds attributed by run end (delayed reports can shift the live stamp)' : ''}`,
+          note: `last ${budgets.window.landings} ${stamped} in the period${coverage}${shortNote}${ratchetNote}${secondary}${b.metric === 'runnerAudit' ? '; audit seconds attributed by run end (delayed reports can shift the live stamp)' : ''}`,
         };
   });
 }
