@@ -93,7 +93,7 @@
   "tests/coordination-live.test.mjs": {"date":2},
   "tests/coordination-scale.test.mjs": {"date":4},
   "tests/counts-expiry.test.mjs": {"date":3},
-  "tests/current-recipient.test.mjs": {"date":10},
+  "tests/current-recipient.test.mjs": {"date":9},
   "tests/deployments.test.mjs": {"poll":1},
   "tests/detached-worker-fixture.mjs": {"poll":1},
   "tests/device-account-scope.test.mjs": {"date":1},

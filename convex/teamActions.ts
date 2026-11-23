@@ -4,7 +4,6 @@ import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { accountAction } from './cliServer';
 import { emailRecipient } from './projectPeople';
-import { teamEmailInvitationsEnabled } from './projectInvitationPolicy';
 import { teamInvitationAnswerArgs } from './teamInvitationWrites';
 import { assertTeamEmailOperation } from './teamInvitationMembership';
 import { api, internal } from './_generated/api';
@@ -76,43 +75,22 @@ export const addByEmail = accountAction('person')({
     id: v.id('teams'),
     email: v.string(),
     operationId: v.optional(v.string()),
+    // Older browsers still send this; every address invitation is pending now.
     pending: v.optional(v.literal(true)),
   },
   returns: v.union(v.null(), v.literal('pending')),
-  handler: async (ctx, { id, email, operationId, pending }): Promise<null | 'pending'> => {
+  handler: async (ctx, { id, email, operationId }): Promise<null | 'pending'> => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'GITHUB_UNAVAILABLE', 'Sign in to manage a team.');
       assertTeamEmailOperation(operationId);
-      if (teamEmailInvitationsEnabled()) {
-        const result = await ctx.runMutation(internal.teamInvitationWrites.create, {
-          teamId: id,
-          target: email,
-          ...(operationId === undefined ? {} : { operationId }),
-        });
-        return operationId !== undefined && result === 'pending' ? 'pending' : null;
-      }
-      // A retry of a pending-mode request cannot switch to the direct grant path.
-      const lookup = await ctx.runQuery(internal.teams.owned, {
-        id,
-        owner: user.subject,
-        email,
-        ...(operationId === undefined ? {} : { operationId }),
-        ...(pending ? { pending } : {}),
-      });
-      if (lookup === 'pending') return operationId === undefined ? null : 'pending';
-      if (lookup === 'direct') return null;
-      invariant(lookup !== 'unavailable', 'BAD_ARGUMENT', 'Team email invitations are unavailable.');
-      const native = lookup?.recipient ?? null;
-      const person = (await emailRecipient(email, native, true))!;
-      const result = await ctx.runMutation(internal.teams.add, {
-        id,
-        owner: user.subject,
-        member: person.id,
-        ...(native ? { email } : { legacyEmail: email }),
+      // An address never becomes membership here: it stays pending until its verified owner accepts on Home.
+      const result = await ctx.runMutation(internal.teamInvitationWrites.create, {
+        teamId: id,
+        target: email,
         ...(operationId === undefined ? {} : { operationId }),
       });
-      return operationId === undefined ? null : result;
+      return operationId !== undefined && result === 'pending' ? 'pending' : null;
     } catch (error) {
       return report(error);
     }

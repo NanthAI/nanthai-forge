@@ -26,7 +26,7 @@ export function assertTeamEmailOperation(operationId?: string) {
 export const teamEmailOperationKey = (email: string, operationId?: string) =>
   operationId ?? 'team-email:' + invitationEmailHash(email.trim().toLowerCase());
 
-/** Direct grants keep a retry receipt without retaining the address or entering the inbox. */
+/** Direct grants made before address invitations became pending kept a retry receipt without the address. */
 export function teamEmailReplay(row: Doc<'projectInvites'>, email: string) {
   const normalized = email.trim().toLowerCase();
   const direct = row.email === '' && row.state === 'accepted';
@@ -36,21 +36,6 @@ export function teamEmailReplay(row: Doc<'projectInvites'>, email: string) {
     'Retry the original team email request.',
   );
   return direct ? ('direct' as const) : ('pending' as const);
-}
-
-export async function recordDirectTeamEmail(
-  ctx: MutationCtx,
-  teamId: Id<'teams'>,
-  email: string,
-  operationId: string,
-) {
-  await ctx.db.insert('projectInvites', {
-    teamId,
-    email: '',
-    target: invitationEmailHash(email.trim().toLowerCase()),
-    state: 'accepted',
-    operationId,
-  });
 }
 
 const revocationKey = (member: string) => 'team-revocation:' + member;

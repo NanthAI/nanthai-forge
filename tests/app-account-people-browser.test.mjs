@@ -40,7 +40,7 @@ const read = mode === 'empty' ? { state: 'ok', data: { teams: [], more: false } 
   : { state: 'ok', data: { teams: mode === 'worst' ? worst : sample, more: mode === 'worst' } };
 const actions = {
   create: async name => { document.body.dataset.created = name; },
-  add: async (id, email) => { if (email === 'nobody@example.test') throw new Error('No Forge account currently matches that verified address.'); document.body.dataset.added = id + ':' + email; },
+  add: async (id, email) => { if (email === 'nobody@example.test') throw new Error('Invitations have reached a limit. Try after its UTC hour or day ends.'); document.body.dataset.added = id + ':' + email; },
   remove: async (id, key) => { document.body.dataset.removed = id + ':' + key; },
 };
 createRoot(document.getElementById('root')).render(
@@ -149,22 +149,22 @@ test('account people: teams by handle, owner-only controls, and every state pass
       await main
         .locator('.row.team')
         .nth(1)
-        .getByRole('button', { name: /Remove|Add/ })
+        .getByRole('button', { name: /Remove|Invite/ })
         .count(),
       0,
     );
     await page.getByRole('button', { name: 'Remove sample-peer from core-maintainers' }).click();
     assert.equal(await page.evaluate(() => document.body.dataset.removed), 't1:k1');
-    const email = page.getByLabel('Add a member by their verified email');
+    const email = page.getByLabel('Invite by email');
     await email.fill('nobody@example.test');
     await email.press('Enter');
     await page.getByRole('alert').waitFor();
-    assert.match(await page.getByRole('alert').textContent(), /No Forge account currently matches/);
+    assert.match(await page.getByRole('alert').textContent(), /Invitations have reached a limit/);
     await email.fill('peer@example.test');
-    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await page.getByRole('button', { name: 'Invite', exact: true }).click();
     await page.waitForFunction(() => document.body.dataset.added);
     assert.equal(await page.evaluate(() => document.body.dataset.added), 't1:peer@example.test');
-    assert.equal(await email.inputValue(), '', 'the field clears after a member is added');
+    assert.equal(await email.inputValue(), '', 'the field clears after an invitation is sent');
     await page.getByLabel('Start a team').fill('reviewers');
     await page.getByLabel('Start a team').press('Enter');
     await page.waitForFunction(() => document.body.dataset.created);

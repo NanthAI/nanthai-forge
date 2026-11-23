@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Invitation creation no longer probes another person's identity. Current verified
-// binding checks still protect acceptance and the unchanged team integration API.
+// binding checks still protect acceptance.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -9,8 +9,6 @@ import { moduleUrl } from './convex-module.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { invitationFixture, refusal, mail } from './invitation-fixture.mjs';
 const actions = await import(moduleUrl('../convex/projectContributorActions.ts'));
-const teams = await import(moduleUrl('../convex/teams.ts'));
-const teamActions = await import(moduleUrl('../convex/teamActions.ts'));
 const users = await import(moduleUrl('../convex/authUsers.ts'));
 const work = await import(moduleUrl('../convex/projectWork.ts'));
 const contributors = await import(moduleUrl('../convex/projectContributors.ts'));
@@ -88,65 +86,6 @@ test('delayed membership approval creates a pending invitation and ignores a pre
   });
   assert.equal(s.tables.projectContributors.size, 0);
   assert.equal([...s.tables.projectInvites.values()][0].recipient, undefined);
-});
-test('team email additions retain mixed-provider ambiguity refusal and revalidate inside the grant mutation', async t => {
-  const s = invitationFixture(t),
-    fetch = globalThis.fetch,
-    key = process.env.CLERK_SECRET_KEY;
-  t.after(() => {
-    globalThis.fetch = fetch;
-    if (key === undefined) delete process.env.CLERK_SECRET_KEY;
-    else process.env.CLERK_SECRET_KEY = key;
-  });
-  process.env.CLERK_SECRET_KEY = 'synthetic';
-  const native = {
-    _id: 'native',
-    _creationTime: 1,
-    accountKey: 'guest',
-    email,
-    emailVerified: true,
-    emailConfirmedAt: Date.now(),
-  };
-  s.tables.users.set('native', native);
-  s.tables.teams.set('team', {
-    _id: 'team',
-    _creationTime: 1,
-    owner: 'owner',
-    name: 'Synthetic',
-    operationId: randomUUID(),
-  });
-  let legacy = 'other',
-    beforeGrant;
-  globalThis.fetch = async () =>
-    Response.json([
-      { id: legacy, email_addresses: [{ email_address: email, verification: { status: 'verified' } }] },
-    ]);
-  const original = s.ctx.runQuery;
-  s.ctx.runQuery = s.ctx.runMutation = (ref, args) => {
-    const [module, method] = getFunctionName(ref).split(':');
-    if (module === 'teams') {
-      if (method === 'add') beforeGrant?.();
-      return teams[method]._handler(s.ctx, args);
-    }
-    return original(ref, args);
-  };
-  await assert.rejects(
-    teamActions.addByEmail._handler(s.ctx, { id: 'team', email }),
-    refusal('BAD_ARGUMENT'),
-  );
-  assert.equal(s.tables.teamMembers.size, 0);
-  legacy = 'guest';
-  await teamActions.addByEmail._handler(s.ctx, { id: 'team', email });
-  assert.equal(s.tables.teamMembers.size, 1);
-  s.tables.teamMembers.clear();
-  beforeGrant = () => {
-    native.emailVerified = false;
-  };
-  await assert.rejects(
-    teamActions.addByEmail._handler(s.ctx, { id: 'team', email }),
-    refusal('BAD_ARGUMENT'),
-  );
-  assert.equal(s.tables.teamMembers.size, 0);
 });
 test('recipient lookup remains one bounded indexed read at 400 and 800 people', async () => {
   for (const total of [400, 800]) {

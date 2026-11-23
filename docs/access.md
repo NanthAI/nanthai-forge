@@ -208,20 +208,20 @@ answer operation ids retain their original retry behavior.
 
 ### Team invitations by address
 
-The team email invitation path is staged behind `FORGE_TEAM_EMAIL_INVITATIONS=1`.
-The switch is off by default. With it enabled, an owner invites an email
-address in **People and teams**. The owner can see and cancel the typed pending
-target regardless of whether an account uses that address. The invitation
-becomes team membership only after the person with the current verified
-address chooses **Accept** on Home. Declining leaves membership as it was.
-Blocking uses the same recipient-owned preference as project invitations.
-Removing a member ends earlier invitations to that account. A new invitation
-can be accepted after removal.
+An owner invites an email address to a team in **People and teams**. Creating
+the invitation looks up no account and asks no identity provider. The owner sees
+the typed target and "pending" and can cancel it; that read is the same whether
+or not an account uses the address. The invitation becomes team membership only
+after the person with the current verified address chooses **Accept** on Home.
+Declining leaves membership as it was. Blocking uses the same recipient-owned
+preference as project invitations. Removing a member ends earlier invitations to
+that account. A new invitation can be accepted after removal.
 
-The same inviter counters cover project and team invitations with the switch
-on (20 per UTC hour and 100 per UTC day for an inviter). The team path uses
-Home for delivery and is independent of the project invitation mail switch.
-Leave the team writer off until the owner approves applying the shared counters.
+The same inviter counters cover project and team invitations (20 per UTC hour
+and 100 per UTC day for an inviter, owner-approved 2026-11-21). The team path
+uses Home for delivery and sends no mail. Before address invitations became
+pending, an address could be added directly; a retry of such an original add
+replays its retained receipt and grants, charges and invites nothing.
 
 ## Teams
 

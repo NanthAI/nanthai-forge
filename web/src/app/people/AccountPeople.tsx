@@ -21,7 +21,7 @@ const PAGE = 20;
 type Read = { state: 'loading' } | { state: 'failed'; last?: TeamsRead } | { state: 'ok'; data: TeamsRead };
 export type TeamActions = {
   create: (name: string) => Promise<void>;
-  add: (team: Id<'teams'>, email: string, pending?: true) => Promise<void | 'pending'>;
+  add: (team: Id<'teams'>, email: string) => Promise<void | 'pending'>;
   remove: (team: Id<'teams'>, key: string) => Promise<void>;
 };
 
@@ -64,7 +64,7 @@ function useAccountTeams() {
 export default function AccountPeople({ leave }: AccountProps) {
   const client = useConvex();
   const { read, retry, showMore } = useAccountTeams();
-  const invitations = useRef(new Map<string, { operationId: string; pending?: true }>());
+  const invitations = useRef(new Map<string, { operationId: string }>());
   const actions: TeamActions = {
     create: async name => {
       await client.mutation(api.teams.create, { name, operationId: crypto.randomUUID() }).catch(error => {
@@ -72,12 +72,9 @@ export default function AccountPeople({ leave }: AccountProps) {
       });
       retry();
     },
-    add: async (id, email, pending) => {
+    add: async (id, email) => {
       const key = JSON.stringify([id, email]);
-      const attempt = invitations.current.get(key) ?? {
-        operationId: crypto.randomUUID(),
-        ...(pending ? { pending } : {}),
-      };
+      const attempt = invitations.current.get(key) ?? { operationId: crypto.randomUUID() };
       invitations.current.set(key, attempt);
       const result = await client
         .action(api.teamActions.addByEmail, { id, email, ...attempt })
@@ -210,8 +207,8 @@ function TeamLine({ team, actions }: { team: TeamRow; actions: TeamActions }) {
   const owns = team.role === 'owner';
   const [invited, setInvited] = useState(false);
   const add = useSubmit(async email => {
-    setInvited(false);
-    setInvited((await actions.add(team.id, email, team.emailInvitations)) === 'pending');
+    // Once shown, the pending list stays: a failed later invite must not hide earlier ones and their Cancel.
+    if ((await actions.add(team.id, email)) === 'pending') setInvited(true);
   });
   const [removing, setRemoving] = useState('');
   const [problem, setProblem] = useState('');
@@ -270,7 +267,7 @@ function TeamLine({ team, actions }: { team: TeamRow; actions: TeamActions }) {
         {owns ? (
           <form className="team-add" onSubmit={add.submit} aria-busy={add.busy}>
             <label className="f">
-              {team.emailInvitations ? 'Invite by email' : 'Add a member by their verified email'}
+              Invite by email
               <input
                 className="inp"
                 type="email"
@@ -288,7 +285,7 @@ function TeamLine({ team, actions }: { team: TeamRow; actions: TeamActions }) {
               ) : null}
             </label>
             <Key size="sm" type="submit" disabled={add.busy}>
-              {team.emailInvitations ? 'Invite' : 'Add'}
+              Invite
             </Key>
           </form>
         ) : null}
@@ -297,9 +294,7 @@ function TeamLine({ team, actions }: { team: TeamRow; actions: TeamActions }) {
             Invitation pending.
           </p>
         ) : null}
-        {owns && (team.emailInvitations || team.canReadInvitations || invited) ? (
-          <TeamPendingInvitations teamId={team.id} />
-        ) : null}
+        {owns && (team.canReadInvitations || invited) ? <TeamPendingInvitations teamId={team.id} /> : null}
         {problem ? (
           <p className="notice" role="alert">
             {problem}

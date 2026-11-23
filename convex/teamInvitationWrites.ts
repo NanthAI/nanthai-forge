@@ -7,12 +7,7 @@ import { requireOwnerPerson } from './ownerPerson';
 import { teamOwner } from './teams';
 import { pendingTeamInvitation } from './teamInvitationReads';
 import { setInvitationBlock, invitationBlock, recipientEmailProof } from './projectInvitationRecipient';
-import {
-  assertInvitationTarget,
-  emailShape,
-  invitationBudget,
-  teamEmailInvitationsEnabled,
-} from './projectInvitationPolicy';
+import { assertInvitationTarget, emailShape, invitationBudget } from './projectInvitationPolicy';
 import {
   addTeamMembership,
   assertTeamEmailOperation,
@@ -29,9 +24,9 @@ export const create = internalMutation({
   args: { teamId: v.id('teams'), target: v.string(), operationId: v.optional(v.string()) },
   returns: v.union(v.literal('direct'), v.literal('pending')),
   handler: async (ctx, { teamId, target, operationId }) => {
-    invariant(teamEmailInvitationsEnabled(), 'BAD_ARGUMENT', 'Team email invitations are unavailable.');
     const user = await requireOwnerPerson(ctx, 'invite people to a team');
-    assertInvitationTarget(target);
+    // The retired direct add trimmed without a raw limit; limit the trimmed address so its exact retries still replay.
+    assertInvitationTarget(target.trim());
     const email = target.trim().toLowerCase();
     invariant(emailShape.test(email), 'BAD_ARGUMENT', 'Enter an email address.');
     assertTeamEmailOperation(operationId);

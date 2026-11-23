@@ -273,39 +273,26 @@ test('team/member/import pagination preserves all choices, Trash hides readers a
   }
 });
 
-test('team email entry and handle labels preserve owner authorization and recheck the team', async () => {
+test('team handle labels preserve owner authorization, never call the identity provider and recheck the team', async () => {
   const s = state([]),
     cleanup = providers();
   const id = await make(s),
     originalFetch = globalThis.fetch;
-  let calls = 0;
-  globalThis.fetch = async url => {
-    calls++;
-    const address = new URL(String(url));
-    assert(address.searchParams.has('email_address'), 'labels never look up the identity provider');
-    return Response.json([
-      {
-        id: 'reader',
-        email_addresses: [{ email_address: 'reader@example.com', verification: { status: 'verified' } }],
-        first_name: 'Reader',
-      },
-    ]);
-  };
+  globalThis.fetch = () => assert.fail('labels never look up the identity provider');
   try {
-    s.caller('stranger');
-    await assert.rejects(actions.addByEmail._handler(s.ctx, { id, email: 'reader@example.com' }), denied);
-    assert.equal(calls, 0);
-    s.caller('owner');
-    await actions.addByEmail._handler(s.ctx, { id, email: 'reader@example.com' });
+    // Membership by address is a pending invitation now (tests/team-invitations.test.mjs); seed an accepted member.
+    await teams.add._handler(s.ctx, { id, owner: 'owner', member: 'reader' });
     assert.equal(s.tables.teamMembers.size, 2);
     s.tables.forgeAccounts.set('a-owner', { _id: 'a-owner', owner: 'owner', handle: 'team-owner' });
     s.tables.forgeAccounts.set('a-reader', { _id: 'a-reader', owner: 'reader', handle: 'team-reader' });
+    s.caller('stranger');
+    await assert.rejects(actions.labels._handler(s.ctx, { id, paginationOpts }), denied);
+    s.caller('owner');
     const labels = await actions.labels._handler(s.ctx, { id, paginationOpts });
     assert.deepEqual(labels.page.map(row => [row.member, row.label]).sort(), [
       ['team-owner', 'team-owner'],
       ['team-reader', 'team-reader'],
     ]);
-    assert.equal(calls, 1);
     s.caller('reader');
     await assert.rejects(actions.labels._handler(s.ctx, { id, paginationOpts }), denied);
     s.caller('owner');

@@ -8,13 +8,13 @@ import { storageClock } from './storage-clock.mjs';
 import { invitationFixture, inbox, refusal, values } from './invitation-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 
-const [teamActions, teams, teamInvitationReads, teamInvitationWrites] = await Promise.all(
-  ['teamActions', 'teams', 'teamInvitationReads', 'teamInvitationWrites'].map(
+const [teamActions, teams, teamInvitationReads, teamInvitationWrites, policy] = await Promise.all(
+  ['teamActions', 'teams', 'teamInvitationReads', 'teamInvitationWrites', 'projectInvitationPolicy'].map(
     name => import(moduleUrl('../convex/' + name + '.ts')),
   ),
 );
 const address = 'guest@example.test';
-const inviteMode = 'FORGE_TEAM_EMAIL_INVITATIONS';
+const { invitationEmailHash } = policy;
 
 function env(t, name, value) {
   const before = process.env[name];
@@ -26,8 +26,7 @@ function env(t, name, value) {
   });
 }
 
-function fixture(t, enabled = true, clerkKey) {
-  env(t, inviteMode, enabled ? '1' : undefined);
+function fixture(t, clerkKey) {
   env(t, 'CLERK_SECRET_KEY', clerkKey);
   const s = invitationFixture(t);
   s.tables.teams.set('team', {
@@ -142,7 +141,7 @@ test('removing a team member ends earlier email invitations and leaves a fresh i
 
 test('a mismatched legacy provider account or a changed native binding prevents team acceptance', async t => {
   storageClock(t);
-  const s = fixture(t, true, 'synthetic-team-fixture');
+  const s = fixture(t, 'synthetic-team-fixture');
   s.known();
   await s.issue();
   const row = values(s, 'projectInvites')[0];
@@ -167,22 +166,8 @@ test('a mismatched legacy provider account or a changed native binding prevents 
   assert.equal(s.tables.teamMembers.size, 0);
 });
 
-test('default-off retains direct team email behavior, and an explicit pending retry cannot grant directly', async t => {
-  storageClock(t);
-  const s = fixture(t, false);
-  s.known();
-  const op = { operationId: randomUUID(), pending: true };
-  await assert.rejects(s.issue(address, op), refusal('BAD_ARGUMENT'));
-  assert.equal(s.tables.teamMembers.size, 0);
-  assert.equal(s.tables.projectInvites.size, 0);
-  assert.equal(await s.issue(address, {}), null);
-  assert.equal(values(s, 'teamMembers')[0].member, 'guest');
-  assert.equal(s.tables.projectInvites.size, 0);
-});
-
 test('team email invitation creation shares inviter counters, without a mail or recipient budget', async t => {
   storageClock(t);
-  env(t, inviteMode, '1');
   const f = lanesFixture();
   const teamId = f.insert('teams', { owner: 'owner', name: 'Synthetic team', operationId: randomUUID() });
   f.insert('deviceAttempts', {
@@ -213,18 +198,6 @@ test('team email invitation creation shares inviter counters, without a mail or 
       teamCreateWriteBytes: meter.writeBytes,
     }),
   );
-});
-
-test('a recorded pending request still replays without a direct grant if the switch is turned off', async t => {
-  storageClock(t);
-  const s = fixture(t);
-  s.known();
-  const op = { operationId: randomUUID() };
-  assert.equal(await s.issue(address, op), 'pending');
-  delete process.env[inviteMode];
-  assert.equal(await s.issue(address, op), 'pending');
-  assert.equal(s.tables.teamMembers.size, 0);
-  assert.equal(s.tables.projectInvites.size, 1);
 });
 
 test('only the owner can cancel a pending address, and declining or blocking grants no team membership', async t => {
@@ -292,42 +265,28 @@ test('an active device cannot create or accept team invitations as the person', 
   assert.equal(s.tables.teamMembers.size, 0);
 });
 
-test('activation reconciles an original direct add without queuing an invitation or granting a second time', async t => {
+test('an original direct add from before pending invitations replays without an invitation, charge or second grant', async t => {
   storageClock(t);
-  const s = fixture(t, false);
+  const s = fixture(t);
   s.known();
   const op = { operationId: randomUUID() };
+  // The receipt shape the retired direct path wrote: no address, only its digest.
+  s.tables.projectInvites.set('receipt', {
+    _id: 'receipt',
+    _creationTime: 1,
+    teamId: 'team',
+    email: '',
+    target: invitationEmailHash(address),
+    state: 'accepted',
+    operationId: op.operationId,
+  });
   assert.equal(await s.issue(address, op), null);
-  assert.equal(values(s, 'teamMembers')[0].member, 'guest');
-  const [receipt] = values(s, 'projectInvites');
-  assert.equal(receipt.email, '');
-  assert.match(receipt.target, /^[a-f0-9]{64}$/);
-  await teams.removeMember._handler(s.ctx, { id: 'team', member: 'guest' });
-  process.env[inviteMode] = '1';
-  assert.equal(await s.issue(address, op), null);
+  // The retired path trimmed without a raw limit: an exact padded retry still replays its receipt.
+  assert.equal(await s.issue(' '.repeat(300) + address, op), null);
   await assert.rejects(s.issue('another@example.test', op), refusal('WORK_OPERATION_CHANGED'));
   assert.equal(s.tables.teamMembers.size, 0);
   assert.equal(s.tables.deviceAttempts.size, 0);
   assert.equal(s.tables.projectInvites.size, 1);
-});
-
-test('a disabled pending request gives the same reply for unknown, known and ambiguous addresses', async t => {
-  storageClock(t);
-  const s = fixture(t, false);
-  const op = { operationId: randomUUID(), pending: true };
-  const expected = { code: 'BAD_ARGUMENT', message: 'Team email invitations are unavailable.' };
-  const read = () =>
-    assert.rejects(s.issue(address, op), error => {
-      assert.deepEqual(error.data, expected);
-      return true;
-    });
-  await read();
-  s.known();
-  await read();
-  s.known('other');
-  await read();
-  assert.equal(s.tables.projectInvites.size, 0);
-  assert.equal(s.tables.teamMembers.size, 0);
 });
 
 test('large answer and cancellation operation keys keep fixed-size receipts and replay exactly', async t => {

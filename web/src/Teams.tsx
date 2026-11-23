@@ -165,10 +165,7 @@ function TeamDetail({
               e.preventDefault();
               void act(async () => {
                 const email = member.trim();
-                const attempt = invitations.current.get(email) ?? {
-                  operationId: crypto.randomUUID(),
-                  ...(team.emailInvitations ? { pending: team.emailInvitations } : {}),
-                };
+                const attempt = invitations.current.get(email) ?? { operationId: crypto.randomUUID() };
                 invitations.current.set(email, attempt);
                 const result = await client.action(api.teamActions.addByEmail, {
                   id: team.id,
@@ -182,7 +179,7 @@ function TeamDetail({
             }}
           >
             <label>
-              {team.emailInvitations ? 'Invite by email' : 'Team member email'}
+              Invite by email
               <input
                 type="email"
                 required
@@ -191,11 +188,9 @@ function TeamDetail({
                 placeholder="name@example.com"
               />
             </label>
-            <button disabled={busy}>{team.emailInvitations ? 'Invite to team' : 'Add team member'}</button>
+            <button disabled={busy}>Invite to team</button>
           </form>
-          {team.emailInvitations || team.canReadInvitations ? (
-            <TeamPendingInvitations teamId={team.id} />
-          ) : null}
+          <TeamPendingInvitations teamId={team.id} />
           {status === 'LoadingFirstPage' ? (
             <p>Loading members…</p>
           ) : (

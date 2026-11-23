@@ -20,7 +20,6 @@ export function invitationPageCursor(page: PaginationResult<unknown>) {
 export const invitationLifetime = 7 * 24 * 60 * 60_000;
 export const invitationSendTimeout = 10 * 60_000;
 export const invitationEmailEnabled = () => process.env.FORGE_INVITATION_EMAIL === '1';
-export const teamEmailInvitationsEnabled = () => process.env.FORGE_TEAM_EMAIL_INVITATIONS === '1';
 export const invitationEmailHash = (email: string) => bytesToHex(sha256(new TextEncoder().encode(email)));
 export const emailShape = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function assertInvitationTarget(person: string) {

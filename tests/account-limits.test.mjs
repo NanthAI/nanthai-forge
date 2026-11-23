@@ -284,12 +284,6 @@ test('suspended account: an invitation resend and a team invitation are refused 
   );
   assert.equal(s.tables.projectAccessOperations.size, operations, 'no resend record');
   // Team invitations are owner-only and charge the same inviter budget.
-  const before = process.env.FORGE_TEAM_EMAIL_INVITATIONS;
-  process.env.FORGE_TEAM_EMAIL_INVITATIONS = '1';
-  t.after(() => {
-    if (before === undefined) delete process.env.FORGE_TEAM_EMAIL_INVITATIONS;
-    else process.env.FORGE_TEAM_EMAIL_INVITATIONS = before;
-  });
   s.tables.teams.set('team', {
     _id: 'team',
     _creationTime: 1,

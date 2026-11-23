@@ -4,7 +4,7 @@ Each GitHub sign-in replaces both the address and verified flag from its current
 profile. If GitHub reports no verified address, Forge clears the old address and
 flag, including on the linking path. Each such write also records when GitHub
 confirmed the address. The age applies only where access is granted (recipient lookup
-for invitations and team adds, and invitation acceptance): those ignore an address
+for invitations, and invitation acceptance): those ignore an address
 not confirmed in the last 90 days (counted from account creation for older rows)
 until the next GitHub sign-in or link refreshes it. Protections that grant nothing
 keep using the address at any age: invitation-mail suppression still finds the
@@ -20,10 +20,9 @@ checks the live session and a fresh account-bound passkey or GitHub proof before
 revoking other sessions; no session id supplied by a client selects another
 account's sessions.
 
-Team email grants check the exact current verified native binding and the
-configured legacy provider comparison. The granting transaction rechecks the
-native binding. With the default-off team invitation switch enabled, this
-comparison happens only when the recipient accepts. Creation stores a pending
+Team email invitations check the exact current verified native binding and the
+configured legacy provider comparison only when the recipient accepts; the
+accepting transaction rechecks the native binding. Creation stores a pending
 address without looking up any recipient. The owner's pending list shows the
 typed target and state. Project membership also uses explicit acceptance:
 retained agent approvals and older project add APIs create invitations and

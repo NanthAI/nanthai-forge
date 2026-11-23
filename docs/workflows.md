@@ -1012,7 +1012,7 @@ record. Hosted output reads the selected object checkpoint; when the log is only
 
 ### Settings and outside contributions
 
-Access lists people by name and @handle with an avatar, without email fallbacks. Owners can autocomplete an existing @handle or enter an email address. An existing account receives contributor access; an email without an account creates a pending invitation, visible only to the project’s access manager. No invitation email is sent. When the recipient signs in with that verified email, account setup reconciles the invitation into contributor access. Invitations retain operation identities so retrying a completed invitation does not restore access after removal. Pending invitations can be cancelled.
+Access lists people by name and @handle with an avatar, without email fallbacks. Owners can autocomplete an existing @handle or enter an email address. Either creates a pending invitation, visible to the project’s access manager and to the invited person on Home, that grants nothing until that person accepts it (see [access](access.md#invitations)). Invitations retain operation identities so retrying a completed invitation does not restore access after removal. Pending invitations can be cancelled.
 
 Contributions lists outside contributors’ proposals. With no outside contributors or proposals it shows one quiet sentence. Contributors with a selected Intent can send changes from their computer through the existing archive proposal flow.
 

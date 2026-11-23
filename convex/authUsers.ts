@@ -137,19 +137,3 @@ export const verifiedRecipient = internalQuery({
   returns: v.union(v.string(), v.null()),
   handler: (ctx, { email }) => findVerifiedRecipient(ctx, email),
 });
-
-/** Recheck a provider-attested recipient inside the granting transaction. */
-export async function currentEmailRecipient(
-  ctx: QueryCtx | MutationCtx,
-  email: string,
-  recipient: string,
-  native: boolean,
-) {
-  const current = await findVerifiedRecipient(ctx, email);
-  invariant(
-    !current || current === recipient,
-    'BAD_ARGUMENT',
-    'This email matches different Forge accounts. Invite by Forge handle instead.',
-  );
-  return !native || current === recipient;
-}

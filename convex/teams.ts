@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { findVerifiedRecipient, currentEmailRecipient } from './authUsers';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query, internalQuery, internalMutation, accountMutation } from './cliServer';
@@ -9,15 +8,7 @@ import { isDeviceIdentity } from './cliServer';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { memberHandle } from './teamHandles';
-import {
-  addTeamMembership,
-  endTeamInvitations,
-  recordDirectTeamEmail,
-  teamEmailOperationKey,
-  teamEmailReplay,
-  teamInvitationOperation,
-} from './teamInvitationMembership';
-import { teamEmailInvitationsEnabled } from './projectInvitationPolicy';
+import { addTeamMembership, endTeamInvitations } from './teamInvitationMembership';
 import { markLeftTeam } from './sealedSecretMarkers';
 
 const item = v.object({ id: v.id('teams'), name: v.string(), owner: v.string() });
@@ -82,7 +73,6 @@ export const list = query({
   returns: paginationResultValidator(
     v.object({
       ...item.fields,
-      emailInvitations: v.optional(v.literal(true)),
       canReadInvitations: v.optional(v.literal(true)),
     }),
   ),
@@ -101,9 +91,6 @@ export const list = query({
           id: team._id,
           name: team.name,
           owner: team.owner,
-          ...(team.owner === user.subject && teamEmailInvitationsEnabled()
-            ? { emailInvitations: true as const }
-            : {}),
           ...(team.owner === user.subject && team.invitationEpoch !== undefined
             ? { canReadInvitations: true as const }
             : {}),
@@ -129,66 +116,24 @@ export const members = query({
   },
 });
 export const owned = internalQuery({
-  args: {
-    id: v.id('teams'),
-    owner: v.string(),
-    email: v.optional(v.string()),
-    operationId: v.optional(v.string()),
-    pending: v.optional(v.literal(true)),
-  },
-  returns: v.union(
-    v.null(),
-    v.object({ recipient: v.union(v.string(), v.null()) }),
-    v.literal('direct'),
-    v.literal('pending'),
-    v.literal('unavailable'),
-  ),
-  handler: async (ctx, { id, owner, email, operationId, pending }) => {
-    const team = await teamOwner(ctx, id, owner);
-    if (email === undefined) return null;
-    if (operationId !== undefined || team.invitationEpoch !== undefined) {
-      const replay = await teamInvitationOperation(ctx, id, teamEmailOperationKey(email, operationId));
-      if (replay) return teamEmailReplay(replay, email);
-    }
-    if (pending) return 'unavailable' as const;
-    return { recipient: await findVerifiedRecipient(ctx, email) };
+  args: { id: v.id('teams'), owner: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { id, owner }) => {
+    await teamOwner(ctx, id, owner);
+    return null;
   },
 });
 export const add = internalMutation({
-  args: {
-    id: v.id('teams'),
-    owner: v.string(),
-    member: v.string(),
-    email: v.optional(v.string()),
-    legacyEmail: v.optional(v.string()),
-    operationId: v.optional(v.string()),
-  },
-  returns: v.union(v.null(), v.literal('pending')),
-  handler: async (ctx, { id, owner, member, email, legacyEmail, operationId }) => {
+  args: { id: v.id('teams'), owner: v.string(), member: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { id, owner, member }) => {
     invariant(
       !isDeviceIdentity((await ctx.auth.getUserIdentity()) ?? {}),
       'AUTH_SCOPE_DENIED',
       'Add team members in your Forge browser.',
     );
-    const team = await teamOwner(ctx, id, owner);
-    const address = email ?? legacyEmail;
-    if (address && (operationId !== undefined || team.invitationEpoch !== undefined)) {
-      const replay = await teamInvitationOperation(ctx, id, teamEmailOperationKey(address, operationId));
-      if (replay) return teamEmailReplay(replay, address) === 'pending' ? 'pending' : null;
-    }
-    invariant(
-      !address || !teamEmailInvitationsEnabled(),
-      'WORK_OPERATION_CHANGED',
-      'Team email invitations are now available. Retry your request.',
-    );
-    invariant(
-      !email || (await currentEmailRecipient(ctx, email, member, true)),
-      'BAD_ARGUMENT',
-      'No Forge account currently matches that verified address.',
-    );
-    if (legacyEmail) await currentEmailRecipient(ctx, legacyEmail, member, false);
+    await teamOwner(ctx, id, owner);
     await addTeamMembership(ctx, id, member);
-    if (address && operationId !== undefined) await recordDirectTeamEmail(ctx, id, address, operationId);
     return null;
   },
 });
