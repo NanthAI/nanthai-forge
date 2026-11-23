@@ -832,6 +832,46 @@ test('incident replay 08169467: completed compose replaces a running desired wak
   assert.equal((await read(f, command.operationId)).submission.id, state.id);
 });
 
+test('incident replay 9809f716: compose completion wakes the live goal, not an older ended goal on the same compose', async t => {
+  const f = await finishFixture(t),
+    resume = pauseSource(f);
+  const first = await submit(f, request(f));
+  // The older goal ends before admission (as a cancel or pre-admission failure leaves it): no wake.
+  const ended = [...f.tables.projectHostedLandingDesired.values()][0];
+  await f.tx('desiredFail', desired.fail, {
+    projectId: f.projectId,
+    submissionId: first.id,
+    wakeId: ended.wake.id,
+    code: 'LANDING_CANCELLED',
+    message: 'The source preparation was cancelled.',
+  });
+  assert.equal([...f.tables.projectHostedLandingDesired.values()][0].wake, null);
+  const command = request(f);
+  const live = await submit(f, command);
+  assert.notEqual(live.id, first.id, 'the ended goal is not joined');
+  const goal = () =>
+    [...f.tables.projectHostedLandingDesired.values()].find(row => row.submissionId === live.id);
+  // Its first wake finds the source still running and leaves only the backed-off watchdog.
+  await f.execute(f.tables._scheduled_functions.get(goal().wake.taskId));
+  const watchdog = f.tables._scheduled_functions.get(goal().wake.taskId);
+  assert(watchdog.scheduledTime > f.now(), 'a running source arms only the backed-off watchdog');
+  resume();
+  await f.tx(
+    'sourceCompletion',
+    { _handler: ctx => notifyDesiredCompose(ctx, f.projectId, command.composeOperationId) },
+    {},
+  );
+  const wake = f.tables._scheduled_functions.get(goal().wake.taskId);
+  assert(wake.scheduledTime <= f.now(), 'the terminal compose wakes the live goal at once');
+  assert.equal(f.tables._scheduled_functions.get(watchdog._id).state.kind, 'canceled');
+  await f.execute(wake);
+  assert.equal(goal().preparing, undefined, 'admitted without waiting for the watchdog');
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  assert.equal((await read(f, command.operationId)).submission.phase, 'landed');
+});
+
 test('08169467: replaying the original desired request repairs its failed wake without another submission', async t => {
   const f = await finishFixture(t),
     command = request(f);
@@ -839,6 +879,43 @@ test('08169467: replaying the original desired request repairs its failed wake w
   const row = [...f.tables.projectHostedLandingDesired.values()][0];
   f.patch('_scheduled_functions', row.wake.taskId, { state: { kind: 'failed' } });
   assert.equal((await submit(f, command)).id, state.id);
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  assert.equal((await read(f, command.operationId)).submission.phase, 'landed');
+  assert.equal(f.tables.projectHostedLandingDesired.size, 1);
+  assert.equal(f.tables.projectHostedAcceptances.size, 1);
+});
+
+test('9809f716: replaying the original request admits a goal whose compose ended while only its watchdog was armed', async t => {
+  const f = await finishFixture(t),
+    command = request(f),
+    resume = pauseSource(f);
+  const state = await submit(f, command);
+  const goal = () => [...f.tables.projectHostedLandingDesired.values()][0];
+  const task = () => f.tables._scheduled_functions.get(goal().wake.taskId);
+  const identity = { projectId: f.projectId, submissionId: state.id };
+  // A slow compose: by the first wake the watchdog has backed off to minutes.
+  f.advanceClock(5 * 60_000);
+  await f.execute(task());
+  const watchdog = goal().wake;
+  assert(task().scheduledTime > f.now() + 60_000);
+  // The compose ends without a completion wake reaching this goal.
+  resume();
+  const joined = { ...request(f), operationId: randomUUID() };
+  assert.equal((await submit(f, joined)).id, state.id, 'a second request joins the same goal');
+  assert.equal(goal().wake.taskId, watchdog.taskId);
+  assert.equal((await submit(f, joined)).id, state.id);
+  assert(task().scheduledTime <= f.now(), "the joined request's replay drives the goal at once");
+  assert.equal(task().name, 'projectHostedLandingDesired:drive');
+  assert.notEqual(goal().wake.taskId, watchdog.taskId);
+  // A driver claims, arming its next watchdog; a replay lands between its claim and advance.
+  const claimed = await f.tx('desiredClaim', desired.claim, { ...identity, wakeId: goal().wake.id });
+  assert.equal((await submit(f, command)).id, state.id);
+  assert.equal(goal().wake.id, claimed, 'the replay keeps the claimed wake id');
+  assert(task().scheduledTime <= f.now());
+  await f.tx('desiredAdvance', desired.advance, { ...identity, wakeId: claimed });
+  assert.equal(goal().preparing, undefined, 'the claimed driver still admits the goal');
   await f.drain();
   await f.passChecks();
   await f.drain();

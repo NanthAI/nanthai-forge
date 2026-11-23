@@ -83,7 +83,9 @@ at 2, 4, 8 and 16 hours and then stops; it never ends live work. Cancelling a
 batch member hands the individual fallback turn to the next member at once. Idle and settled queues have no recurring
 alarm wake. The hosted preparation watchdog grows from 30 seconds to one hour
 while no progress is recorded (three controller calls per hour at that cap);
-source completion still wakes it immediately.
+source completion still wakes it immediately, including a newer landing on a compose that an
+earlier cancelled one shared. Replaying the original `land` request (or a request that joined it)
+drives a preparing landing at once when its wake can no longer run or its source has already ended.
 
 Native receipts include `durable`, `landingWorker` and `observe` commands for
 `landing`, Lane `status`, `pending-status` and `wait`. The caller holds no source or Work lock

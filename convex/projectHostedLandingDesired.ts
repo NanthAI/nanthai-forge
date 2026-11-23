@@ -7,7 +7,11 @@ import { chargeMemberWork, memberWorkBudgetReply } from './abuseLimits';
 import { landingPriority } from './projectHostedLandingOrder';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { desiredWatchdogMs } from '../src/hosted-landing-stall';
-import { desiredLanding, scheduleDesired as schedule } from './projectHostedLandingDesiredWake';
+import {
+  desiredLanding,
+  scheduleDesired as schedule,
+  repairDesiredWake,
+} from './projectHostedLandingDesiredWake';
 import { landGateGuardEvidence, landGateTiming } from '../src/hosted-land-gates';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -157,10 +161,7 @@ export async function submitDesiredLanding(
   if (old) {
     invariant(old.request === request, 'WORK_OPERATION_CHANGED', 'Replay the original desired landing.');
     const canonical = await landingRow(ctx, old);
-    if (!canonical && old.wake) {
-      const task = await ctx.db.system.get(old.wake.taskId);
-      if (!task || task.state.kind === 'failed') await schedule(ctx, old, 0);
-    }
+    if (!canonical) await repairDesiredWake(ctx, old);
     return reply(canonical ?? old);
   }
   const alias = await landingAlias(ctx, {
@@ -177,6 +178,8 @@ export async function submitDesiredLanding(
     const canonical = await landingRow(ctx, alias);
     const desired = canonical ? null : await desiredLanding(ctx, alias);
     invariant(canonical || desired, 'SOURCE_UNAVAILABLE', 'Original desired landing is unavailable.');
+    // A joined request's replay repairs the goal it joined, as the original's does.
+    if (desired) await repairDesiredWake(ctx, desired);
     return reply(canonical ?? desired!);
   }
   requireWriteEpoch(project, command.authorityEpoch);
