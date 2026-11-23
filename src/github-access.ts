@@ -5,9 +5,8 @@ import { githubRepository, type GithubFetch, type GithubRepository } from './git
 import { ForgeError, invariant } from './errors.js';
 
 export interface GithubAccessConfig {
-  /** Forge's encrypted user-token store; null selects the retained provider path. */
-  userToken?: ((owner: string) => Promise<string | null>) | undefined;
-  clerkSecret?: string | undefined;
+  /** Forge's encrypted user-token store (the owner's GitHub App connection). */
+  userToken?: ((owner: string) => Promise<string>) | undefined;
   appClientId?: string | undefined;
   appClientSecret?: string | undefined;
   publicToken?: string | undefined;
@@ -79,15 +78,6 @@ async function installationFailure(
     `GitHub did not return ${repository} although the Forge GitHub App is installed for ${owner}. Check the repository name and your access to it; installation settings: ${configure}.`,
   );
 }
-/** Explicit setup diagnostic; checks sign-in independently of repository visibility. */
-export async function checkGithubSignIn(
-  userId: string | undefined,
-  config: GithubAccessConfig,
-  request: GithubFetch = networkFetch,
-): Promise<void> {
-  await githubUserToken(userId, config, request);
-}
-
 async function githubUserToken(
   userId: string | undefined,
   config: GithubAccessConfig,
@@ -98,31 +88,19 @@ async function githubUserToken(
     'GITHUB_UNAVAILABLE',
     'This repository is unavailable with the current access. Sign in with GitHub for private repositories.',
   );
-  let token = await config.userToken?.(userId);
   invariant(
-    (token || config.clerkSecret) && config.appClientId && config.appClientSecret,
+    config.appClientId && config.appClientSecret,
     'GITHUB_SETUP_REQUIRED',
     'Forge’s GitHub connection is not configured yet.',
   );
-  if (!token) {
-    const credentials = await request(
-      `https://api.clerk.com/v1/users/${encodeURIComponent(userId)}/oauth_access_tokens/oauth_github`,
-      {
-        headers: { Authorization: `Bearer ${config.clerkSecret}` },
-        signal: networkTimeout(30_000),
-        redirect: 'error',
-      },
-    );
-    invariant(
-      credentials.ok,
-      'GITHUB_UNAVAILABLE',
-      'GitHub access is unavailable. Connect your GitHub account and selected repositories.',
-    );
-    const tokens = (await credentials.json()) as { token?: string }[];
-    token = tokens[0]?.token;
-  }
+  const token = await config.userToken?.(userId);
   invariant(
-    token && token.startsWith('ghu_'),
+    token,
+    'GITHUB_UNAVAILABLE',
+    'GitHub access is unavailable. Connect your GitHub account and selected repositories.',
+  );
+  invariant(
+    token.startsWith('ghu_'),
     'GITHUB_UNAVAILABLE',
     'Use the Forge GitHub App connection for private repositories.',
   );
@@ -163,7 +141,7 @@ async function githubUserToken(
       if (user.ok)
         throw new ForgeError(
           'GITHUB_SETUP_REQUIRED',
-          'GitHub sign-in uses a different GitHub App than this deployment. Set the sign-in provider’s GitHub client ID and secret to this deployment’s App, then reconnect GitHub. Use a separate sign-in instance when deployments use different Apps.',
+          'The saved GitHub connection belongs to a different GitHub App than this deployment. Reconnect GitHub with this deployment’s App.',
         );
       if (user.status === 401)
         throw new ForgeError(

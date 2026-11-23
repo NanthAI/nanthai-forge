@@ -30,7 +30,7 @@ Walked: `policy`, `nforge github status`, `help github`, `help git`, the GitHub 
 | J11-5 | S2 | **The mirror page speaks in internals.** Four heads with names such as "Forge Git head" and "Expected GitHub head", and "both heads retained". An owner wants one sentence: the mirror is up to date as of this landing, or it is behind by N landings because of X. | source |
 | J11-6 | S2 | **What a leaver gets on GitHub is not stated.** The mirror receives one commit per landing. Import says "Git history is separate". Nothing tells an owner whether the GitHub copy holds the full history they imported, the landings only, or both. | docs |
 | J11-7 | S2 | **No export is offered at the moment of deletion.** The delete dialog is clear about what stops, the 90 days and that "Local copies and GitHub are unchanged", but it has no link to download the project first. | source |
-| J11-8 | S3 | **A vendor name on the account page.** "Your Clerk identity …". Open Issue de67c77d moves sign-in off that vendor. | source |
+| J11-8 | S3 | **A vendor name on the account page.** Fixed by de67c77d: sign-in is Forge's own and no sign-in vendor is named. | source |
 | J11-9 | S3 | **The account data page is written as an operations console.** "Reconcile original operation", "Original operation selection", "Retained original requests", "Metadata and pin". | source |
 | J11-10 | S3 | **`GITHUB_SYNC_*` and mirror stall states are explained only in the help topic.** "a mirror push did not finish; Forge main is unaffected and the next landing or nforge github-sync retries it." This is the right sentence; the web shows **Resume mirror** without it. | ran, source |
 

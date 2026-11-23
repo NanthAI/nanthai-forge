@@ -481,7 +481,7 @@ test('proposal final completion rechecks grant after asynchronous archive read; 
   assert.deepEqual(s.tables.hostedProjects.get('project'), before);
 });
 
-test('grant add verifies existing Forge identity and current owner after provider round-trip; contributor cannot manage grants', async t => {
+test('grant add verifies existing Forge identity and current owner after the account lookup; contributor cannot manage grants', async t => {
   const s = await setup(t);
   await assert.rejects(
     grants.add._handler(s.ctx, { projectId: 'project', contributor: 'missing' }),
@@ -497,10 +497,12 @@ test('grant add verifies existing Forge identity and current owner after provide
     unavailable,
   );
   s.caller('owner');
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (...args) => {
-    const result = await originalFetch(...args);
-    s.tables.hostedProjects.get('project').owner = 'new-owner';
+  // The owner changes while the contributor's account is looked up; the grant still refuses.
+  const route = s.ctx.runQuery;
+  s.ctx.runQuery = async (ref, args) => {
+    const result = await route(ref, args);
+    if (getFunctionName(ref) === 'sharing:accountExists')
+      s.tables.hostedProjects.get('project').owner = 'new-owner';
     return result;
   };
   try {
@@ -509,8 +511,9 @@ test('grant add verifies existing Forge identity and current owner after provide
       unavailable,
     );
   } finally {
-    globalThis.fetch = originalFetch;
+    s.ctx.runQuery = route;
   }
+  assert.equal(s.tables.hostedProjects.get('project').owner, 'new-owner', 'the lookup ran');
   assert.equal(
     [...s.tables.projectContributors.values()].some(x => x.contributor === 'third'),
     false,

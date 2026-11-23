@@ -7,14 +7,13 @@ import { resolve, join } from 'node:path';
 export class ShotError extends Error {}
 export const usage = `Hosted Forge screenshots (outside verify).
 node scripts/ui-shots.mjs --base URL --out DIR \\
-  --pages 'now,intents,lane:<id>,review:<id>,settings,device' \\
+  --pages 'now,intents,lane:<id>,settings,device' \\
   --widths 1500,390 --themes dark,light
 
-Optional: --intent-layout list|board (Intents layout), --diff-file PATH (select a Lane/Review diff), --project ID (defaults to credentials.projectId), --height 1000,
+Optional: --intent-layout list|board (Intents layout), --diff-file PATH (open a Lane file or a Code file), --project ID (defaults to credentials.projectId), --height 1000,
 --credentials FILE (defaults to ~/.config/forge-ui-bot/credentials.json).
 --pages landing captures the public page (stills per width and theme, keyboard, no-JS, a hero strip), its
 motion lifecycle and cold-load cost; point --base at a built preview. No bot credentials are read.
-Lane/View variants: --variants unified,split,inline,side-closed,files-closed,map
 Install Chromium once: npx playwright install chromium`;
 
 export function options(args) {
@@ -33,7 +32,6 @@ export function options(args) {
         themes: { type: 'string', default: 'dark,light' },
         height: { type: 'string', default: '1000' },
         credentials: { type: 'string' },
-        variants: { type: 'string', default: 'unified' },
         help: { type: 'boolean' },
       },
     }));
@@ -62,13 +60,13 @@ export function options(args) {
   if (
     pages.some(
       p =>
-        !/^(landing|home|now|intents|lanes|planning|stats|activity|code|code-graph|settings(?::(?:general|agents|autonomy|checks|access|backups|appearance|devices|contributions|transfer|github))?|device|(?:lane|review|intent|view|initiative):[A-Za-z0-9_-]+)$/.test(
+        !/^(landing|home|now|intents|lanes|planning|stats|code|settings(?::(?:checks|access|devices|github))?|device|(?:lane|initiative):[A-Za-z0-9_-]+)$/.test(
           p,
         ),
     )
   )
     throw new ShotError(
-      'Unknown page. Use landing,now,intents,lanes,stats,lane:<id>,review:<id>,settings,device.',
+      'Unknown page. Use landing,home,now,intents,lanes,planning,stats,code,lane:<id>,initiative:<id>,settings[:checks|access|devices|github],device.',
     );
   if (pages.includes('landing') && pages.length !== 1)
     throw new ShotError('Capture landing separately from signed-in pages.');
@@ -78,15 +76,7 @@ export function options(args) {
     throw new ShotError('Widths and height must be positive integer pixels.');
   const themes = values.themes.split(',');
   if (themes.some(t => !['dark', 'light'].includes(t))) throw new ShotError('Themes must be dark or light.');
-  const variants = values.variants.split(',');
-  if (
-    variants.some(
-      variant => !['unified', 'split', 'inline', 'side-closed', 'files-closed', 'map'].includes(variant),
-    )
-  )
-    throw new ShotError('Unknown Lane variant. Use unified,split,inline,side-closed,files-closed,map.');
   return {
-    variants,
     base: base.href,
     out: resolve(values.out),
     project: values.project,
@@ -100,70 +90,4 @@ export function options(args) {
       ? resolve(values.credentials)
       : join(homedir(), '.config/forge-ui-bot/credentials.json'),
   };
-}
-
-export function destination(base, project, page, intentId) {
-  const url = new URL(base);
-  if (page === 'landing') return url.href;
-  if (page === 'home') {
-    url.searchParams.set('surface', 'projects');
-    return url.href;
-  }
-  if (page === 'device') return new URL('/device', base).href;
-  url.search = '';
-  url.searchParams.set('surface', 'projects');
-  url.searchParams.set('project', project);
-  const [kind, id] = page.split(':');
-  url.searchParams.set(
-    'projectTab',
-    {
-      now: 'overview',
-      intents: 'intent',
-      lanes: 'lanes',
-      planning: 'planning',
-      initiative: 'planning',
-      activity: 'coordination',
-      code: 'delivery',
-      'code-graph': 'delivery',
-      settings: 'sharing',
-      lane: 'lanes',
-      review: 'intent',
-      intent: 'intent',
-      view: 'views',
-    }[kind],
-  );
-  if (kind === 'code-graph') url.searchParams.set('codeView', 'graph');
-  if (kind === 'settings' && id) url.searchParams.set('settingsSection', id);
-  if (kind === 'initiative') {
-    url.searchParams.set('planningItem', id);
-    url.searchParams.set('planningRoute', `initiative:${id}`);
-  }
-  if (kind === 'intent') url.searchParams.set('intent', id);
-  if (kind === 'view') url.searchParams.set('viewId', id);
-  if (kind === 'lane') url.searchParams.set('lane', id);
-  if (kind === 'review') {
-    if (!intentId) throw new ShotError('The requested View has no parent Intent.');
-    url.searchParams.set('classic', '1');
-    url.searchParams.set('intent', intentId);
-    url.searchParams.set('intentTab', 'delivery');
-    url.searchParams.set('reviewView', id);
-  }
-  return url.href;
-}
-
-/** Accept only the selected project's lossless View URL after the app canonicalizes legacy links. */
-export function selectedReviewRoute(actual, requested, projectId, viewId) {
-  const a = new URL(actual),
-    b = new URL(requested);
-  const short = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(viewId)
-    ? `v-${Buffer.from(viewId.replaceAll('-', ''), 'hex').toString('base64url')}`
-    : viewId;
-  const parts = a.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-  return (
-    a.origin === b.origin &&
-    parts.length === 4 &&
-    parts[1].endsWith(`~${projectId}`) &&
-    parts[2] === 'review' &&
-    parts[3] === short
-  );
 }

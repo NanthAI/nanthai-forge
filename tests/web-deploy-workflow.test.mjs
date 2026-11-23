@@ -96,15 +96,13 @@ test('the deploy checks and uploads the same build, with the Cloudflare credenti
   assert.match(deploy, /CLOUDFLARE_ACCOUNT_ID: \$\{\{ vars\.CLOUDFLARE_ACCOUNT_ID \}\}/);
   assert.doesNotMatch(workflow.replace(deploy, ''), /\bCLOUDFLARE_API_TOKEN\b/);
   assert.equal(workflow.match(/secrets\./g).length, 2);
-  for (const name of ['VITE_CONVEX_URL', 'VITE_CONVEX_SITE_URL', 'VITE_CLERK_PUBLISHABLE_KEY']) {
+  for (const name of ['VITE_CONVEX_URL', 'VITE_CONVEX_SITE_URL']) {
     assert.equal(
       workflow.match(new RegExp(`${name}: \\$\\{\\{ vars\\.${name} \\}\\}`, 'g'))?.length,
       2,
       `${name} reaches build and smoke`,
     );
-    assert(
-      workflow.includes(`hosted-web-dist VITE_CONVEX_URL VITE_CONVEX_SITE_URL VITE_CLERK_PUBLISHABLE_KEY`),
-    );
+    assert(workflow.includes(`hosted-web-dist VITE_CONVEX_URL VITE_CONVEX_SITE_URL`));
   }
   assert.doesNotMatch(workflow, /echo[^\n]*(?:TOKEN|CLOUDFLARE)|set -x|--secrets-file/);
   assert.match(workflow, /CF_SEND_TELEMETRY: 'false'/);

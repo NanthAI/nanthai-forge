@@ -50,28 +50,4 @@ CLI agent links refresh identity when authenticated. An offline caller with an
 already readable saved binding can still construct a link from that binding;
 renamed bindings resolve through the project's 10 most recent previous addresses
 when opened; an older one is Project not found. Legacy ID-based
-bindings need the existing account lookup to obtain a readable identity.
-
-## Existing accounts and projects
-
-Deploy the optional schema fields and functions before running the backfill. The
-operator runs this from the deployed source checkout, with the existing Convex
-operator credentials and Clerk configuration:
-
-```sh
-npx convex run urlsBackfill:run '{"cursor":null}'
-```
-
-Repeat that command with the exact returned `cursor` until `isDone` is true, for
-example `'{"cursor":"accounts:25"}'` or `'{"cursor":"projects:"}'`. Forge uses the
-development Convex deployment only. No backfill runs on deploy.
-
-The action fetches 25 Clerk naming profiles per page and invokes the internal
-idempotent `urlsBackfill:accounts` mutation, including accounts without projects.
-It then reads 25 projects per page and invokes the idempotent cursor mutation
-`urlsBackfill:page`. Existing assignments remain unchanged on replay. A failed
-page can be retried with its original cursor. Restart from null after concurrent
-Clerk account deletions to cover accounts shifted between offset pages; existing
-assignments are preserved. Accounts created during the sweep receive handles at
-sign-in. Run through the final project page before relying on readable links for
-existing projects.
+bindings resolve through the owner's Forge account handle.

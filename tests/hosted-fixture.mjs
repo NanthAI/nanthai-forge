@@ -73,6 +73,38 @@ const projectWorkIndexActions = await import(moduleUrl('../convex/projectWorkInd
 const publicPeople = await import(moduleUrl('../convex/publicPeople.ts'));
 const authUsers = await import(moduleUrl('../convex/authUsers.ts'));
 const githubUserTokens = await import(moduleUrl('../convex/githubUserTokens.ts'));
+const { sealSecret, secretKeyring } = await import(moduleUrl('../src/secret-crypto.ts'));
+/** While providers() runs, the account and GitHub connection stores answer like a populated deployment: every key
+ * except `missing` is a Forge account, and each holds a Forge GitHub App connection whose token is `ghu_<key>`. */
+let providerAccounts = false;
+export const fixtureKeyring = JSON.stringify({
+  active: 'fixture',
+  keys: { fixture: Buffer.alloc(32, 7).toString('base64') },
+});
+const tokenBinding = owner => ({
+  owner,
+  operationId: 'github-user-token',
+  repository: 'github',
+  ref: 'oauth',
+  version: 1,
+});
+/** A stored Forge GitHub App connection token, sealed as the deployment stores it (FORGE_GITHUB_TOKEN_KEYRING = fixtureKeyring). */
+export const sealedGithubToken = (owner, token = `ghu_${owner}`) =>
+  sealSecret(secretKeyring(fixtureKeyring), tokenBinding(owner), token);
+function whileProviders(real, fake) {
+  const run = real[rawHandler] ?? real._handler;
+  return Object.assign(Object.create(real), {
+    [rawHandler]: (ctx, args) => (providerAccounts ? fake(args) : run(ctx, args)),
+  });
+}
+const fixtureGithubUserTokens = {
+  ...githubUserTokens,
+  read: whileProviders(githubUserTokens.read, ({ owner }) => ({ token: sealedGithubToken(owner) })),
+};
+const fixtureSharing = {
+  ...sharing,
+  accountExists: whileProviders(sharing.accountExists, ({ owner }) => owner !== 'missing'),
+};
 const projectHistoryStore = await import(moduleUrl('../convex/projectHistoryStore.ts'));
 /** A hand-written row, checked against the schema when it is built: a seed no schema-validated
  * write can produce makes return checks fail far from its cause (Issue b7c8e4dd). */
@@ -565,7 +597,7 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
   });
   const modules = {
     authUsers,
-    githubUserTokens,
+    githubUserTokens: fixtureGithubUserTokens,
     ...checkLogModules,
     projectR2Backfill,
     r2ArchiveSource,
@@ -585,7 +617,7 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
     imports,
     lifecycle,
     sync,
-    sharing,
+    sharing: fixtureSharing,
     savedViews,
     teams,
     secrets,
@@ -646,11 +678,13 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
 
 export function providers(revoked = () => false, privateRepository = true, head = 'a'.repeat(40)) {
   const previousFetch = globalThis.fetch,
-    names = ['CLERK_SECRET_KEY', 'GITHUB_APP_CLIENT_ID', 'GITHUB_APP_CLIENT_SECRET'],
+    names = ['FORGE_GITHUB_TOKEN_KEYRING', 'GITHUB_APP_CLIENT_ID', 'GITHUB_APP_CLIENT_SECRET'],
     previous = names.map(name => process.env[name]);
   names.forEach(name => {
     process.env[name] = 'test';
   });
+  process.env.FORGE_GITHUB_TOKEN_KEYRING = fixtureKeyring;
+  providerAccounts = true;
   globalThis.fetch = async (input, init) => {
     const url = new URL(input);
     if (
@@ -659,12 +693,6 @@ export function providers(revoked = () => false, privateRepository = true, head 
       url.hostname.endsWith('.r2.cloudflarestorage.com')
     )
       return previousFetch(input, init);
-    if (url.hostname === 'api.clerk.com') {
-      const user = decodeURIComponent(url.pathname.split('/')[3]);
-      return url.pathname.endsWith('/oauth_github')
-        ? Response.json([{ token: `ghu_${user}` }])
-        : Response.json({ id: user }, { status: user === 'missing' ? 404 : 200 });
-    }
     if (url.pathname.startsWith('/applications/'))
       return Response.json({}, { status: revoked(JSON.parse(init.body).access_token.slice(4)) ? 404 : 200 });
     if (url.pathname === '/user')
@@ -688,6 +716,7 @@ export function providers(revoked = () => false, privateRepository = true, head 
   };
   return () => {
     globalThis.fetch = previousFetch;
+    providerAccounts = false;
     names.forEach((name, i) => {
       if (previous[i] === undefined) delete process.env[name];
       else process.env[name] = previous[i];

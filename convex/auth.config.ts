@@ -6,17 +6,13 @@ import { convexAuthProvider } from '@convex-dev/auth/server';
 if (
   process.env.FORGE_CLI_ISSUER &&
   (new URL(process.env.FORGE_CLI_ISSUER).origin !== process.env.FORGE_CLI_ISSUER ||
-    new URL(process.env.FORGE_CLI_ISSUER).protocol !== 'https:' ||
-    process.env.FORGE_CLI_ISSUER === process.env.CLERK_JWT_ISSUER_DOMAIN)
+    new URL(process.env.FORGE_CLI_ISSUER).protocol !== 'https:')
 )
   throw new Error('FORGE_CLI_ISSUER must be a distinct HTTPS HTTP origin without a trailing slash.');
 
 export default {
   providers: [
     ...(process.env.CONVEX_CLOUD_URL ? [convexAuthProvider()] : []),
-    ...(process.env.CLERK_JWT_ISSUER_DOMAIN
-      ? [{ domain: process.env.CLERK_JWT_ISSUER_DOMAIN, applicationID: 'convex' }]
-      : []),
     ...(process.env.FORGE_CLI_ISSUER
       ? [
           {

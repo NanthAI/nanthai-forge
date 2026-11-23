@@ -78,7 +78,6 @@ export function ToastProvider({
     <ToastContext.Provider value={store}>
       {children}
       <BrowserConnection />
-      <SignInErrors />
       <div className="fx fx-toast-stack" aria-label="Notifications">
         {entries.slice(0, 3).map(entry => (
           <ToastItem key={entry.id} entry={entry} store={store} />
@@ -235,30 +234,4 @@ function BrowserConnection() {
     };
   }, []);
   return <ConnectionToast disconnected={offline} />;
-}
-
-/** Clerk owns its modal DOM. Bridge its error slots without replacing its sign-in flow. */
-function SignInErrors() {
-  const store = useToast();
-  useEffect(() => {
-    const seen = new WeakMap<Element, string>();
-    const scan = () => {
-      for (const node of document.querySelectorAll('.cl-alertText, .cl-formFieldErrorText')) {
-        const text = node.textContent?.trim();
-        if (!text || seen.get(node) === text) continue;
-        seen.set(node, text);
-        const id = store.show({ message: toastErrorText(text) });
-        const field = node.closest('.cl-formField')?.querySelector('input');
-        if (field) {
-          field.setAttribute('aria-invalid', 'true');
-          field.setAttribute('aria-describedby', id);
-        }
-      }
-    };
-    const observer = new MutationObserver(scan);
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    scan();
-    return () => observer.disconnect();
-  }, [store]);
-  return null;
 }

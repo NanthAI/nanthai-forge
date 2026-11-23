@@ -31,55 +31,16 @@ async function challenge(verifier: string) {
     .replace(/\+/g, '-')
     .replace(/\//g, '_');
 }
-/** Verified GitHub account ids linked to this Forge account (identity provider
- * lookup, one call per new connection). The callback binds only for one of them. */
-export async function linkedGithubAccounts(
-  subject: string,
-  request: typeof fetch = convexFetch,
-  ctx?: import('./_generated/server').ActionCtx,
-) {
-  if (ctx) {
-    const ids = await ctx.runQuery(internal.authUsers.githubAccounts, { accountKey: subject });
-    if (ids !== null) {
-      invariant(
-        ids.length > 0,
-        'GITHUB_ACCOUNT_REQUIRED',
-        'Link a GitHub account to this Forge account, then connect again.',
-      );
-      return ids;
-    }
-  }
-  const secret = process.env.CLERK_SECRET_KEY;
-  invariant(secret, 'GITHUB_APP_CONFIG', 'Forge identity is not configured.');
-  const response = await request(`https://api.clerk.com/v1/users/${encodeURIComponent(subject)}`, {
-    headers: { Authorization: `Bearer ${secret}` },
-    redirect: 'error',
-    signal: networkTimeout(30_000),
-  });
-  invariant(response.ok, 'GITHUB_UNAVAILABLE', 'Forge could not check this account. Try again.');
-  const person = (await response.json()) as {
-    id?: string;
-    external_accounts?: {
-      provider?: string;
-      provider_user_id?: unknown;
-      verification?: { status?: string } | null;
-    }[];
-  };
-  invariant(person.id === subject, 'GITHUB_RESPONSE', 'The identity provider returned another user.');
-  const ids = (person.external_accounts ?? []).flatMap(account =>
-    account.provider === 'oauth_github' &&
-    account.verification?.status === 'verified' &&
-    typeof account.provider_user_id === 'string' &&
-    /^[1-9][0-9]{0,19}$/.test(account.provider_user_id)
-      ? [account.provider_user_id]
-      : [],
-  );
+/** The verified GitHub account id linked to this Forge account (one indexed read per new
+ * connection). The callback binds only for it. */
+export async function linkedGithubAccounts(ctx: import('./_generated/server').ActionCtx, subject: string) {
+  const ids = await ctx.runQuery(internal.authUsers.githubAccounts, { accountKey: subject });
   invariant(
     ids.length > 0,
     'GITHUB_ACCOUNT_REQUIRED',
     'Link a GitHub account to this Forge account, then connect again.',
   );
-  return [...new Set(ids)].slice(0, 10);
+  return ids;
 }
 export const connect = action({
   args: {
@@ -114,7 +75,7 @@ export const connect = action({
       // installation only after the authorizing user proves repository access.
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to connect GitHub.');
-      const githubAccounts = await linkedGithubAccounts(user.subject, convexFetch, ctx);
+      const githubAccounts = await linkedGithubAccounts(ctx, user.subject);
       const state = random(),
         verifier = random();
       const url = new URL('https://github.com/login/oauth/authorize');
@@ -229,7 +190,13 @@ export const callback = httpAction(async (ctx, request) => {
       }),
     });
     invariant(response.ok, 'GITHUB_OAUTH_FAILED', 'GitHub authorization exchange failed.');
-    const value = (await response.json()) as { access_token?: string; error?: string; token_type?: string };
+    const value = (await response.json()) as {
+      access_token?: string;
+      error?: string;
+      token_type?: string;
+      refresh_token?: string;
+      expires_in?: number;
+    };
     invariant(
       typeof value.access_token === 'string' && value.access_token.length > 0 && !value.error,
       'GITHUB_OAUTH_FAILED',
@@ -245,6 +212,13 @@ export const callback = httpAction(async (ctx, request) => {
         state,
         owner: op.authOwner,
         token: value.access_token,
+        // An App with expiring user tokens also returns these; Forge renews on first use after expiry.
+        ...(typeof value.refresh_token === 'string' && value.refresh_token
+          ? { refreshToken: value.refresh_token }
+          : {}),
+        ...(typeof value.expires_in === 'number' && value.expires_in > 0
+          ? { expiresIn: value.expires_in }
+          : {}),
       });
     const mirror = await ctx.runMutation(mutation('complete'), { state, ...proof });
     return new Response(

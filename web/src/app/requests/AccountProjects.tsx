@@ -4,7 +4,6 @@
 // 7456856f); without one it is the projects list (projects/Projects.tsx, Item 3d5d8839). Each loads its own chunk.
 import { lazy, Suspense } from 'react';
 import { Head } from '../Place';
-import { deleteRequestHref } from '../paths';
 import { useSearch } from '../router';
 import type { AccountProps } from '../screen-route';
 
@@ -29,14 +28,7 @@ export default function AccountProjects(props: AccountProps) {
     );
   return (
     <Suspense fallback={<Head trail={[{ label: 'Delete request' }]} sentence="Loading the request…" />}>
-      <DeleteRequest
-        requestId={request}
-        alternate={
-          import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
-            ? { href: deleteRequestHref(request, true), label: 'Use your existing sign-in' }
-            : undefined
-        }
-      />
+      <DeleteRequest requestId={request} />
     </Suspense>
   );
 }

@@ -7,7 +7,7 @@ import { defaultR2Config, defaultR2Objects, interceptDefaultR2 } from './default
 import { randomUUID, createHash, generateKeyPairSync } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { state } from './hosted-fixture.mjs';
+import { fixtureKeyring, sealedGithubToken, state } from './hosted-fixture.mjs';
 import { githubHostedProject } from '../dist/hosted-github-bootstrap.js';
 import { setup as r2Setup } from './r2-harness.mjs';
 import { digest } from '../dist/hash.js';
@@ -29,6 +29,10 @@ for (const name of [
   'projectObjectRecipeStore',
 ])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
+// Each importer's stored Forge GitHub App connection.
+modules.githubUserTokens = {
+  read: { _handler: async (_ctx, { owner }) => ({ token: sealedGithubToken(owner, 'ghu_synthetic') }) },
+};
 const gitSha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 function fixture(
   t,
@@ -55,7 +59,7 @@ function fixture(
         return original(ref, args);
       };
   const envKeys = [
-    'CLERK_SECRET_KEY',
+    'FORGE_GITHUB_TOKEN_KEYRING',
     'GITHUB_APP_CLIENT_ID',
     'GITHUB_APP_CLIENT_SECRET',
     'GITHUB_APP_ID',
@@ -66,6 +70,7 @@ function fixture(
   const priorEnv = envKeys.map(key => process.env[key]);
   delete process.env.FORGE_MIGRATION_LEDGER;
   if (privateRepository) for (const key of envKeys.slice(0, 3)) process.env[key] = 'synthetic-fixture';
+  if (privateRepository) process.env.FORGE_GITHUB_TOKEN_KEYRING = fixtureKeyring;
   if (app) {
     process.env.GITHUB_APP_ID = '123';
     process.env.GITHUB_APP_PRIVATE_KEY = generateKeyPairSync('rsa', {
@@ -115,7 +120,6 @@ function fixture(
       github.push({ path: p, method: options?.method ?? 'GET', auth: options?.headers?.Authorization });
     if (rejectedPublicCredential && options?.headers?.Authorization === 'Bearer synthetic-rejected-public')
       return new Response('{}', { status: 403 });
-    if (p.includes('/oauth_access_tokens/oauth_github')) return Response.json([{ token: 'ghu_synthetic' }]);
     if (p.startsWith('/applications/')) return new Response('{}');
     if (app && p === '/repos/example/repo/installation') return Response.json({ id: 7 });
     if (app && p === '/app/installations/7/access_tokens') return Response.json({ token: 'ghs_synthetic' });

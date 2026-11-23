@@ -92,8 +92,8 @@ test('every OIDC job pins every action it runs', () => {
     .flatMap(name =>
       oidcJobs(`.github/workflows/${name}`, readFileSync(`.github/workflows/${name}`, 'utf8')),
     );
-  // forge-check.yml hosted-plan/hosted-check/hosted-pack and foundation.yml native-selfhost today.
-  assert(jobs.length >= 4, `found ${jobs.map(j => j.job).join(', ')}`);
+  // forge-check.yml hosted-plan/hosted-check/hosted-pack today (native-selfhost mints none).
+  assert(jobs.length >= 3, `found ${jobs.map(j => j.job).join(', ')}`);
   for (const { job, block } of jobs) {
     assert.match(block, /uses: /, job);
     assert.deepEqual(actionPinFindings(job, block), [], job);

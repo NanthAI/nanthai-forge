@@ -20,7 +20,7 @@ const origin = 'https://forge-bot.example.test';
 const deployment = 'https://fixture-backend.example.test';
 const handle = 'forge-ui-bot';
 const token = 'synthetic-bot-session';
-const config = { origin, deployment, clerkHandle: async () => handle };
+const config = { origin, deployment };
 
 async function privateHome(t) {
   const path = await mkdtemp(join(tmpdir(), 'forge-bot-setup-'));
@@ -119,21 +119,9 @@ test('setup rejects any site or deployment other than Forge dev before touching 
 
 const form = `<form class="signin"><label>Your handle<input name="username"></label>
   <button>Continue</button><span hidden role="alert"></span></form>`;
-const legacy = `<button id="existing">Continue with your existing sign-in</button>
-  <div id="modal" hidden><input name="identifier"><input name="password"><button id="continue">Continue</button></div>
-  <div class="signin"><span hidden role="alert">Synthetic failure</span></div>
-  <button id="link" hidden>Add a passkey to this account</button><h1 id="done" hidden>Your account has a passkey</h1>`;
-
-function browserFixture({
-  challenge,
-  credentialId,
-  loseReply,
-  linkedPage,
-  reservedHandle,
-  registrationHandle,
-}) {
+function browserFixture({ challenge, credentialId, loseReply, reservedHandle, registrationHandle }) {
   return `<!doctype html>
-    ${linkedPage ? legacy : form}
+    ${form}
     <script>
       const form = document.querySelector('form');
       const bytes = value => Uint8Array.from(atob(value), c => c.charCodeAt(0));
@@ -192,37 +180,20 @@ function browserFixture({
           form.querySelector('[role="alert"]').textContent = 'SYNTHETIC_PROVIDER_ERROR';
         }
       };
-      else if (document.querySelector('#existing')) {
-        window.Clerk = { loaded: true };
-        document.querySelector('#existing').onclick = () => document.querySelector('#modal').hidden = false;
-        document.querySelector('#continue').onclick = () => {
-          if (document.querySelector('[name="password"]').value !== 'synthetic-clerk-password') return;
-          window.Clerk.user = { id: 'synthetic-clerk-user', emailAddresses: [{ emailAddress: 'forge-ui-bot+clerk_test@example.com' }] };
-          document.querySelector('#link').hidden = false;
-        };
-        document.querySelector('#link').onclick = async () => {
-          try {
-            await register();
-            document.querySelector('#done').hidden = false;
-          } catch {
-            document.querySelector('.signin [role="alert"]').hidden = false;
-          }
-        };
-      }
     </script>`;
 }
 
 async function setupBrowser(
   t,
   home,
-  { withClerk = false, loseReply = false, registrationHandle = handle } = {},
+  { reservedHandle = false, loseReply = false, registrationHandle = handle } = {},
 ) {
   const executablePath = process.env.FORGE_UI_BROWSER || chromium.executablePath();
   if (!existsSync(executablePath)) {
     t.skip('A test browser is not installed. Set FORGE_UI_BROWSER.');
     return null;
   }
-  const realBrowser = await launchBotBrowser({ kind: 'passkey' }, { executablePath });
+  const realBrowser = await launchBotBrowser({ executablePath });
   t.after(() => realBrowser.close());
   const challenge = randomBytes(32);
   let credentialId = null;
@@ -301,8 +272,7 @@ async function setupBrowser(
                 challenge,
                 credentialId,
                 loseReply,
-                linkedPage: withClerk && url.searchParams.has('link'),
-                reservedHandle: withClerk,
+                reservedHandle,
                 registrationHandle,
               }),
             });
@@ -315,28 +285,14 @@ async function setupBrowser(
 }
 
 for (const scenario of [
-  { name: 'enrolls a new handle', withClerk: false, loseReply: false },
-  { name: 'links the existing Clerk bot without another account', withClerk: true, loseReply: false },
-  {
-    name: 'reuses the staged key after registration committed and its reply was lost',
-    withClerk: false,
-    loseReply: true,
-  },
+  { name: 'enrolls a new handle', loseReply: false },
+  { name: 'reuses the staged key after registration committed and its reply was lost', loseReply: true },
 ]) {
   test(`Chromium setup ${scenario.name}`, async t => {
     const home = await privateHome(t);
     const fixture = await setupBrowser(t, home, scenario);
     if (!fixture) return;
     const state = await openBotCredentialStore(home);
-    if (scenario.withClerk) {
-      Object.assign(state.data, {
-        deployment,
-        email: 'forge-ui-bot+clerk_test@example.com',
-        password: 'synthetic-clerk-password',
-        userId: 'synthetic-clerk-user',
-      });
-      await state.save();
-    }
     const setup = ({ data, save }) => provisionBotPasskey(fixture.browser, config, data, save);
     if (scenario.loseReply)
       await assert.rejects(setup(state), error => {
@@ -351,7 +307,6 @@ for (const scenario of [
     const stored = await readBotCredentials(readerFile, origin);
     assert.equal(stored.credential.signCount, -1);
     assert.equal(reloaded.data.pendingPasskey, undefined);
-    if (scenario.withClerk) assert.equal(reloaded.data.userId, 'synthetic-clerk-user');
     assert.deepEqual(
       fixture.ceremonies,
       scenario.loseReply ? ['register', 'assert'] : ['register', 'assert', 'assert'],
@@ -359,25 +314,16 @@ for (const scenario of [
   });
 }
 
-test('the retained provider cannot enroll a passkey on a different Forge handle', async t => {
+test('a taken bot handle without its saved passkey stops and creates no second account', async t => {
   const home = await privateHome(t);
-  const fixture = await setupBrowser(t, home, { withClerk: true, registrationHandle: 'other-account' });
+  const fixture = await setupBrowser(t, home, { reservedHandle: true });
   if (!fixture) return;
   const { data, save } = await openBotCredentialStore(home);
-  Object.assign(data, {
-    deployment,
-    email: 'forge-ui-bot+clerk_test@example.com',
-    password: 'synthetic-clerk-password',
-    userId: 'synthetic-clerk-user',
-  });
   await assert.rejects(
     provisionBotPasskey(fixture.browser, config, data, save),
-    /Could not attach a passkey/,
-  );
-  await assert.rejects(
-    provisionBotPasskey(fixture.browser, { ...config, clerkHandle: async () => 'other-account' }, data, save),
-    /does not own the Forge bot handle/,
+    /already has an account, but no saved passkey matches it/,
   );
   assert.deepEqual(fixture.ceremonies, []);
   assert.equal(data.pendingPasskey, undefined);
+  assert.equal(data.passkey, undefined);
 });

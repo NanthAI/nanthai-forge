@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Public identity rule (Issue 9a19b304): nothing an agent or a reader is shown carries a raw account id.
-// Clerk account ids are `user_` plus a long alphanumeric tail; this scan covers every string in a value,
+// Account ids are `user_` plus a long alphanumeric tail; this scan covers every string in a value,
 // including text embedded in nudges, notices, receipts and JSON strings.
 export const accountIdShape = /\b(?:user|org)_[A-Za-z0-9]{8,}/;
 

@@ -47,8 +47,7 @@ export async function deviceApproval(ctx: QueryCtx | MutationCtx, row: Doc<'devi
     let enabled = effectivePolicy(project).accessIdentities?.devices === true;
     if (enabled) {
       const identity = await ctx.auth.getUserIdentity();
-      // Existing legacy-only accounts keep their earlier approval flow; stable auth
-      // receipts never force an account migration as part of device login.
+      // A browser session, or any caller whose account has a native user row.
       enabled =
         Boolean(identity?.subject === owner && typeof identity.forgeAuthUser === 'string') ||
         Boolean(

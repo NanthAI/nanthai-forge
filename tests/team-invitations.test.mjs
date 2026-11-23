@@ -22,18 +22,7 @@ const [teamActions, teams, teamInvitationReads, teamInvitationWrites, policy, me
 const address = 'guest@example.test';
 const { invitationEmailHash } = policy;
 
-function env(t, name, value) {
-  const before = process.env[name];
-  if (value === undefined) delete process.env[name];
-  else process.env[name] = value;
-  t.after(() => {
-    if (before === undefined) delete process.env[name];
-    else process.env[name] = before;
-  });
-}
-
-function fixture(t, clerkKey) {
-  env(t, 'CLERK_SECRET_KEY', clerkKey);
+function fixture(t) {
   const s = invitationFixture(t);
   s.tables.teams.set('team', {
     _id: 'team',
@@ -145,31 +134,32 @@ test('removing a team member ends earlier email invitations and leaves a fresh i
   assert.equal(values(s, 'teamMembers')[0].member, 'guest');
 });
 
-test('a mismatched legacy provider account or a changed native binding prevents team acceptance', async t => {
+test('de67c77d: only the Forge account holding the verified address accepts; another sign-in with the same address or a changed binding cannot', async t => {
   storageClock(t);
-  const s = fixture(t, 'synthetic-team-fixture');
+  const s = fixture(t);
   s.known();
   await s.issue();
   const row = values(s, 'projectInvites')[0];
   const before = globalThis.fetch;
+  globalThis.fetch = () => assert.fail('Acceptance never asks an outside identity provider.');
   t.after(() => {
     globalThis.fetch = before;
   });
-  let legacyId = 'other';
-  let changeNative = false;
-  globalThis.fetch = async () => {
-    if (changeNative) s.tables.users.get('guest').emailVerified = false;
-    return Response.json([
-      { id: legacyId, email_addresses: [{ email_address: address, verification: { status: 'verified' } }] },
-    ]);
-  };
+  // An old-style sign-in (no Forge account behind it) claiming the same verified address.
+  s.caller('user_2synthetic0ldsignin', address);
+  await assert.rejects(s.reply(row), () => true);
+  // A different Forge account with the same claim.
+  s.caller('other', address, { forgeAuthUser: 'other' });
+  await assert.rejects(s.reply(row), () => true);
+  assert.equal(s.tables.teamMembers.size, 0);
+  // The holder's binding changes before acceptance.
+  s.tables.users.get('guest').emailVerified = false;
   s.caller('guest', address, { forgeAuthUser: 'guest' });
-  await assert.rejects(s.reply(row), refusal('BAD_ARGUMENT'));
+  await assert.rejects(s.reply(row), () => true);
   assert.equal(s.tables.teamMembers.size, 0);
-  legacyId = 'guest';
-  changeNative = true;
-  await assert.rejects(s.reply(row), refusal('PROJECT_UNAVAILABLE'));
-  assert.equal(s.tables.teamMembers.size, 0);
+  s.tables.users.get('guest').emailVerified = true;
+  await s.reply(row);
+  assert.equal(s.tables.teamMembers.size, 1);
 });
 
 test('team email invitation creation shares inviter counters, without a mail or recipient budget', async t => {
@@ -316,7 +306,7 @@ test('large answer and cancellation operation keys keep fixed-size receipts and 
 
 test('team add by Forge handle stays pending until that account accepts on Home; the owner sees only what they typed', async t => {
   storageClock(t);
-  const s = fixture(t, 'synthetic-team-fixture'),
+  const s = fixture(t),
     fetch = globalThis.fetch;
   globalThis.fetch = () => assert.fail('A handle invitation never asks the identity provider');
   t.after(() => {

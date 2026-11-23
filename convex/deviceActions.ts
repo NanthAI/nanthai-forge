@@ -25,7 +25,6 @@ export function deviceConfig() {
   invariant(
     new URL(issuer).protocol === 'https:' &&
       new URL(issuer).origin === issuer &&
-      issuer !== process.env.CLERK_JWT_ISSUER_DOMAIN &&
       new URL(web).protocol === 'https:',
     'AUTH_CONFIGURATION',
     'Configure HTTPS login endpoints.',

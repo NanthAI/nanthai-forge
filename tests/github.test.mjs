@@ -110,7 +110,7 @@ test('import meter classifies who pays for each GitHub request and caps the impo
     headers: new Headers({ authorization: 'Bearer ghs_x' }),
   });
   await github('https://codeload.github.com/o/r/tar.gz/x', {});
-  await github('https://api.clerk.com/v1/users/u/oauth_access_tokens/oauth_github', user);
+  await github('https://example.invalid/not-github', user);
   for (let i = 0; i < 5; i++) await github('https://api.github.com/repos/o/r/git/blobs/x', user);
   // 10 percent of a 50-request window is 5: the sixth user request is refused before it is sent.
   await assert.rejects(github('https://api.github.com/repos/o/r/git/blobs/x', user), error => {

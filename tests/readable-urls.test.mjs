@@ -17,7 +17,6 @@ import { state } from './hosted-fixture.mjs';
 const accounts = await import(moduleUrl('../convex/urlAccounts.ts'));
 const projects = await import(moduleUrl('../convex/urlProjects.ts'));
 const identity = await import(moduleUrl('../convex/urlIdentity.ts'));
-const backfill = await import(moduleUrl('../convex/urlsBackfill.ts'));
 const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
 const base = 'https://forge.example/';
 function fixture() {
@@ -107,15 +106,14 @@ test('a handle not chosen and not the default is prompted for once; picking or k
   assert.match(bare.handle, /^user-/);
   assert.equal(bare.handlePrompt, true);
 });
-test('cursor backfill is idempotent and assigns owner-scoped slug clashes', async () => {
+test('project slugs are idempotent and owner-scoped slug clashes get a suffix', async () => {
   const s = fixture();
   s.tables.hostedProjects.set('p2', { ...s.tables.hostedProjects.get('p1'), _id: 'p2', key: 'key2' });
-  const input = { cursor: null, profiles: [{ owner: 'owner', username: 'Dino' }] };
-  const page = await backfill.page._handler(s.ctx, input);
-  assert.equal(page.isDone, true);
+  await identity.ensureAccount(s.ctx, 'owner', { username: 'Dino' });
+  for (let round = 0; round < 2; round++)
+    for (const id of ['p1', 'p2']) await identity.ensureProjectSlug(s.ctx, s.tables.hostedProjects.get(id));
   assert.equal(s.tables.hostedProjects.get('p1').slug, 'forge');
   assert.equal(s.tables.hostedProjects.get('p2').slug, 'forge-2');
-  await backfill.page._handler(s.ctx, input);
   assert.equal(s.tables.projectSlugs.size, 2);
   assert.equal(s.tables.forgeAccounts.size, 1);
 });
@@ -172,7 +170,8 @@ test('old root, Lane, View and file+line links redirect to canonical current han
 });
 test('private missing and forbidden routes return the same null, including aliases and old IDs', async () => {
   const s = fixture();
-  await backfill.page._handler(s.ctx, { cursor: null, profiles: [{ owner: 'owner', username: 'dino' }] });
+  await identity.ensureAccount(s.ctx, 'owner', { username: 'dino' });
+  await identity.ensureProjectSlug(s.ctx, s.tables.hostedProjects.get('p1'));
   for (const caller of ['stranger', undefined]) {
     s.caller(caller);
     for (const input of [
@@ -214,49 +213,4 @@ test('web delegates URL construction to the shared codec without id-suffixed bui
       path,
     );
   }
-});
-
-test('backfill action pages Clerk accounts before projects, omits emails, and fails without partial mutation on provider errors', async t => {
-  const s = fixture();
-  const { getFunctionName } = await import('convex/server');
-  s.ctx.runQuery = (reference, args) =>
-    backfill[getFunctionName(reference).split(':')[1]]._handler(s.ctx, args);
-  s.ctx.runMutation = s.ctx.runQuery;
-  const originalFetch = globalThis.fetch;
-  const originalKey = process.env.CLERK_SECRET_KEY;
-  process.env.CLERK_SECRET_KEY = 'synthetic-key';
-  t.after(() => {
-    globalThis.fetch = originalFetch;
-    if (originalKey === undefined) delete process.env.CLERK_SECRET_KEY;
-    else process.env.CLERK_SECRET_KEY = originalKey;
-  });
-  globalThis.fetch = async url => {
-    const person = {
-      id: 'owner',
-      username: 'Dino',
-      email_addresses: [{ email_address: 'never-use@example.invalid' }],
-    };
-    return new Response(
-      JSON.stringify(
-        String(url).includes('?') ? [person, { id: 'no-projects', first_name: 'Maya' }] : person,
-      ),
-    );
-  };
-  const first = await backfill.run._handler(s.ctx, { cursor: null });
-  assert.deepEqual(first, { cursor: 'projects:', isDone: false });
-  assert.equal(s.tables.forgeAccounts.size, 2);
-  // A person with only a real name gets a random placeholder and is asked once to pick.
-  const unnamed = await identity.accountFor(s.ctx, 'no-projects');
-  assert.match(unnamed.handle, /^user-[a-z0-9]+$/);
-  assert.equal(unnamed.handlePrompt, true);
-  assert.ok(!JSON.stringify([...s.tables.forgeAccounts]).includes('example.invalid'));
-  assert.equal((await backfill.run._handler(s.ctx, { cursor: first.cursor })).isDone, true);
-  await backfill.run._handler(s.ctx, { cursor: null });
-  assert.equal(s.tables.forgeAccounts.size, 2);
-  const before = JSON.stringify([...s.tables.forgeAccounts]);
-  globalThis.fetch = async () => new Response('Unavailable', { status: 503 });
-  await assert.rejects(backfill.run._handler(s.ctx, { cursor: null }));
-  assert.equal(JSON.stringify([...s.tables.forgeAccounts]), before);
-  await assert.rejects(backfill.run._handler(s.ctx, { cursor: 'accounts:NaN' }));
-  await assert.rejects(backfill.run._handler(s.ctx, { cursor: 'unknown' }));
 });

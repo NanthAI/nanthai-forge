@@ -257,7 +257,7 @@ export const grant = accountAction('same')({
         capability: 'delegate',
       });
       const principal = input.capabilities.length
-        ? await checkForgeUser(input.principal)
+        ? await checkForgeUser(ctx, input.principal)
         : input.principal.trim();
       invariant(principal, 'BAD_ARGUMENT', 'Enter an existing Forge user ID.');
       return await ctx.runMutation(internal.secrets.grant, { ...input, principal, actor: caller });

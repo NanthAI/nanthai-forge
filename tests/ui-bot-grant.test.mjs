@@ -4,11 +4,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BotNoReaderGrant,
-  explainBotAccess,
   grantPasskeyBotReader,
   grantKey,
   readerGrantOperationId,
-  setupCommand,
 } from '../scripts/ui-bot-grant.mjs';
 import { ShotError } from '../scripts/ui-shots/options.mjs';
 
@@ -47,22 +45,11 @@ test('the legacy single operation id is dropped so it can never be replayed on a
   assert.equal('readerGrantOperationId' in credentials, false);
 });
 
-test('PROJECT_UNAVAILABLE becomes a typed no-reader-grant error with the exact setup command', () => {
-  for (const denied of [{ data: { code: 'PROJECT_UNAVAILABLE' } }, { code: 'PROJECT_UNAVAILABLE' }]) {
-    const error = explainBotAccess(denied, dev, 'project-a');
-    assert.ok(error instanceof BotNoReaderGrant && error instanceof ShotError);
-    assert.equal(error.code, 'BOT_NO_READER_GRANT');
-    assert.ok(error.message.includes(setupCommand(dev, 'project-a')));
-    assert.match(error.message, /no reader grant on project project-a/);
-    assert.ok(error.message.includes('--grant-reader'));
-  }
-});
-
-test('other failures pass through unchanged', () => {
-  const other = { data: { code: 'HOSTED_REQUEST_FAILED' } };
-  assert.equal(explainBotAccess(other, dev, 'project-a'), other);
-  const denied = { data: { code: 'PROJECT_UNAVAILABLE' } };
-  assert.equal(explainBotAccess(denied, undefined, 'project-a'), denied);
+test('a bot without project access gets a typed no-reader-grant error', () => {
+  const error = new BotNoReaderGrant();
+  assert.ok(error instanceof ShotError);
+  assert.equal(error.code, 'BOT_NO_READER_GRANT');
+  assert.match(error.message, /native UI bot cannot read the requested project/);
 });
 
 function accessFixture({ role = null, held = false, disabled = false } = {}) {

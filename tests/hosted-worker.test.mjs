@@ -5,13 +5,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+import { fixtureKeyring, sealedGithubToken } from './hosted-fixture.mjs';
 import { setup as r2Setup } from './r2-harness.mjs';
 import { decodeHostedArtifact } from '../dist/hosted-artifact.js';
 import { validateArtifact } from '../dist/artifact-validation.js';
 
 const indexer = await import(moduleUrl('../convex/indexer.ts'));
 const imports = await import(moduleUrl('../convex/imports.ts'));
-const githubUserTokens = await import(moduleUrl('../convex/githubUserTokens.ts'));
 const hosted = await import(moduleUrl('../convex/hosted.ts'));
 const { default: http } = await import(moduleUrl('../convex/http.ts'));
 const repository = {
@@ -128,7 +128,7 @@ test('Convex analysis captures exact synthetic Git blobs and publishes them as o
 test('registered private status/read actions authorize the current importer before exposing jobs or opening storage', async () => {
   const originalFetch = globalThis.fetch;
   const variables = [
-    'CLERK_SECRET_KEY',
+    'FORGE_GITHUB_TOKEN_KEYRING',
     'GITHUB_APP_CLIENT_ID',
     'GITHUB_APP_CLIENT_SECRET',
     'GITHUB_PUBLIC_TOKEN',
@@ -146,8 +146,10 @@ test('registered private status/read actions authorize the current importer befo
     providerReads = 0;
   const ctx = {
     auth: { getUserIdentity: async () => (caller ? { subject: caller } : null) },
-    runQuery: async ref => {
+    runQuery: async (ref, args) => {
       assert(['imports:get', 'githubUserTokens:read', 'sharing:allowed'].includes(getFunctionName(ref)));
+      if (getFunctionName(ref) === 'githubUserTokens:read')
+        return { token: sealedGithubToken(args.owner, 'ghu_test') };
       return getFunctionName(ref) === 'imports:get' ? privateJob : null;
     },
     storage: { get: () => assert.fail('Denied access must never open private storage.') },
@@ -166,14 +168,13 @@ test('registered private status/read actions authorize the current importer befo
         );
       }
     }
-    process.env.CLERK_SECRET_KEY = 'test-clerk';
+    process.env.FORGE_GITHUB_TOKEN_KEYRING = fixtureKeyring;
     process.env.GITHUB_APP_CLIENT_ID = 'test-app';
     process.env.GITHUB_APP_CLIENT_SECRET = 'test-secret';
     delete process.env.GITHUB_PUBLIC_TOKEN;
     globalThis.fetch = async (input, init) => {
       const url = new URL(input);
       providerReads++;
-      if (url.hostname === 'api.clerk.com') return Response.json([{ token: 'ghu_test' }]);
       if (url.pathname.startsWith('/applications/'))
         return Response.json({}, { status: revoked ? 404 : 200 });
       if (url.pathname === '/user') return Response.json({}, { status: revoked ? 401 : 200 });
@@ -216,6 +217,10 @@ function syncContext(jobs) {
     deliveries = new Map(),
     scheduled = [],
     tasks = new Map();
+  // Each owner's stored Forge GitHub App connection.
+  const githubUserTokens = {
+    read: { _handler: async (_ctx, { owner }) => ({ token: sealedGithubToken(owner, 'ghu_test') }) },
+  };
   const modules = { imports, sync, syncActions, githubUserTokens };
   const ctx = {
     db: {
@@ -419,16 +424,16 @@ test('signed GitHub HTTP delivery authenticates raw bytes and stores only a mini
 
 test('delivery deduplication, paginated current-ref reconciliation, access revocation and restoration retain indexed source', async () => {
   const beforeFetch = globalThis.fetch;
-  const env = ['CLERK_SECRET_KEY', 'GITHUB_APP_CLIENT_ID', 'GITHUB_APP_CLIENT_SECRET'];
+  const env = ['FORGE_GITHUB_TOKEN_KEYRING', 'GITHUB_APP_CLIENT_ID', 'GITHUB_APP_CLIENT_SECRET'];
   const before = env.map(name => process.env[name]);
   env.forEach(name => {
     process.env[name] = 'test';
   });
+  process.env.FORGE_GITHUB_TOKEN_KEYRING = fixtureKeyring;
   let head = 'b'.repeat(40),
     revoked = false;
   globalThis.fetch = async (input, init) => {
     const url = new URL(input);
-    if (url.hostname === 'api.clerk.com') return Response.json([{ token: 'ghu_test' }]);
     if (url.pathname.startsWith('/applications/')) return Response.json({}, { status: revoked ? 404 : 200 });
     if (url.pathname === '/user') return Response.json({}, { status: revoked ? 401 : 200 });
     if (url.pathname.includes('/commits/')) return Response.json({ sha: head });

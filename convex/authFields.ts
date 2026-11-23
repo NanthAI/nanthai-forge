@@ -40,7 +40,7 @@ export const authTables = {
     githubId: v.optional(v.string()),
     /** Backfill found an unresolved competing verified identity claim. */
     githubConflict: v.optional(v.boolean()),
-    /** Preserve the existing provider-token path while Clerk remains configured. */
+    /** Historical: set by the finished account move; nothing reads it. Kept so stored rows still validate. */
     legacyGithubProvider: v.optional(v.boolean()),
     githubLogin: v.optional(v.string()),
     /** One current linking proof/request and successful legacy ceremony receipt per user. */
@@ -52,6 +52,7 @@ export const authTables = {
         stateHash: v.optional(v.string()),
       }),
     ),
+    /** Historical, like legacyGithubProvider: the finished existing-account passkey link. */
     legacyPasskeyFlow: v.optional(
       v.object({ operationId: v.string(), sessionId: v.string(), confirmed: v.boolean() }),
     ),
@@ -62,6 +63,19 @@ export const authTables = {
     emailConfirmedAt: v.optional(v.number()),
     githubToken: v.optional(
       v.object({ keyId: v.string(), nonce: v.string(), tag: v.string(), ciphertext: v.string() }),
+    ),
+    /** Present when the GitHub App issues expiring user tokens: the sealed refresh token and when the
+     * access token expires. Forge renews on first use after expiry, never on a timer. */
+    githubTokenRenewal: v.optional(
+      v.object({
+        refreshToken: v.object({
+          keyId: v.string(),
+          nonce: v.string(),
+          tag: v.string(),
+          ciphertext: v.string(),
+        }),
+        expiresAt: v.number(),
+      }),
     ),
   })
     .index('by_email', ['email'])

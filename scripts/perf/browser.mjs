@@ -2,12 +2,10 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { deadlineConvexClient } from '../../dist/network-convex-client.js';
 import { makeFunctionReference } from 'convex/server';
-import { botBrowserIdentity, launchBotBrowser, observeBotSession, signIn } from '../ui-shots/browser.mjs';
+import { launchBotBrowser, observeBotSession, signIn } from '../ui-shots/browser.mjs';
 import { readBotCredentials } from '../ui-shots/bot-credentials.mjs';
-import { destination } from '../ui-shots/options.mjs';
 import { passkeyDestination, passkeyLaneFile } from '../ui-shots/passkey-routes.mjs';
-import { BotNoReaderGrant, explainBotAccess } from '../ui-bot-grant.mjs';
-import { routeUrlState, projectIdentity } from '../../src/project-routes.ts';
+import { BotNoReaderGrant } from '../ui-bot-grant.mjs';
 
 export function successfulSample(
   { mark, runtimeError, hasAlert, hasDiff, authenticated, routeMatches },
@@ -29,51 +27,35 @@ export async function browserSamples(config) {
   let browser;
   try {
     const credentials = await readBotCredentials(config.credentials, config.base);
-    const passkey = credentials.kind === 'passkey';
     const project = config.project || credentials.projectId;
     if (!project) throw new Error('PERF_PROJECT');
-    browser = await launchBotBrowser(credentials);
-    const browserIdentity = await botBrowserIdentity(browser, credentials);
-    const auth = await browser.newContext(browserIdentity);
+    browser = await launchBotBrowser();
+    const auth = await browser.newContext();
     const signInPage = await auth.newPage();
     const bot = observeBotSession(signInPage, credentials);
     signInPage.setDefaultTimeout(config.timeout);
     await signIn(signInPage, config.base, credentials, bot, config.timeout);
     // Resolve canonical readable URLs before timing, using this site's current read authority.
-    if (!passkey) {
-      await signInPage.goto(destination(config.base, project, 'now'), { waitUntil: 'domcontentloaded' });
-      await signInPage.waitForFunction(() => Boolean(window.Clerk?.session));
-    }
     const token = await bot.readyToken(config.timeout);
     const deployment = bot.deployment();
     if (!token || !deployment) throw new Error('PERF_PROJECT_CONNECTION');
     const client = deadlineConvexClient(deployment, { logger: false });
     client.setAuth(token);
-    if (!passkey) {
-      try {
-        await client.query(makeFunctionReference('projectWork:state'), { projectId: project });
-      } catch (error) {
-        throw explainBotAccess(error, deployment, project);
-      }
-    }
     const identity = await client.query(makeFunctionReference('urlProjects:resolve'), { projectId: project });
-    if (passkey && !identity) throw new BotNoReaderGrant(deployment, project, credentials.kind);
-    if (identity?.id !== project) throw new Error('PERF_PROJECT_IDENTITY');
-    if (!passkey) projectIdentity(identity.id, identity.handle, identity.name, identity.slug);
+    if (!identity) throw new BotNoReaderGrant();
+    if (identity.id !== project) throw new Error('PERF_PROJECT_IDENTITY');
     // In memory only; no cookies, tokens, emails or browser storage are persisted.
     const storageState = await auth.storageState();
     await auth.close();
-    for (const [kind, pageName, legacyMarker, nativeMarker] of [
-      ['now', 'now', 'Now', 'Needs me'],
-      ['work', 'intents', 'Work', 'Plan'],
-      ['laneFirstDiff', `lane:${config.lane}`, 'Lane', 'Lane first diff'],
+    for (const [kind, pageName, marker] of [
+      ['now', 'now', 'Needs me'],
+      ['work', 'intents', 'Plan'],
+      ['laneFirstDiff', `lane:${config.lane}`, 'Lane first diff'],
     ]) {
       if (kind === 'laneFirstDiff' && !config.lane) continue;
-      const marker = passkey ? nativeMarker : legacyMarker;
       for (let i = 0; i < config.samples; i++) {
         const context = await browser.newContext({
           storageState,
-          ...browserIdentity,
           serviceWorkers: 'block',
           viewport: { width: 1500, height: 1000 },
         });
@@ -87,35 +69,28 @@ export async function browserSamples(config) {
         const cdp = await context.newCDPSession(page);
         await cdp.send('Network.enable');
         await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
-        const requested = passkey
-          ? passkeyDestination(config.base, identity, pageName)
-          : destination(config.base, project, pageName);
+        const requested = passkeyDestination(config.base, identity, pageName);
         const startedAt = new Date().toISOString();
         try {
           await page.goto(requested, { waitUntil: 'domcontentloaded', timeout: config.timeout });
-          if (passkey && kind === 'laneFirstDiff') await passkeyLaneFile(page).click();
+          if (kind === 'laneFirstDiff') await passkeyLaneFile(page).click();
           await page.waitForFunction(
             marker => Number.isFinite(window.__forgeCritical?.[marker]?.complete),
             marker,
             { timeout: config.timeout },
           );
-          const observed = await page.evaluate(
-            ({ marker, passkey }) => {
-              const visible = e =>
-                Boolean(e.getClientRects().length) && getComputedStyle(e).visibility !== 'hidden';
-              return {
-                mark: window.__forgeCritical?.[marker],
-                hasAlert: [...document.querySelectorAll('[role="alert"]')].some(
-                  e => visible(e) && e.textContent.trim(),
-                ),
-                hasDiff: [...document.querySelectorAll(passkey ? '.lr-file .hunk' : '.fx-diff')].some(
-                  visible,
-                ),
-              };
-            },
-            { marker, passkey },
-          );
-          const routeMatches = passkey ? page.url() === requested : legacyRouteMatches(page.url(), requested);
+          const observed = await page.evaluate(marker => {
+            const visible = e =>
+              Boolean(e.getClientRects().length) && getComputedStyle(e).visibility !== 'hidden';
+            return {
+              mark: window.__forgeCritical?.[marker],
+              hasAlert: [...document.querySelectorAll('[role="alert"]')].some(
+                e => visible(e) && e.textContent.trim(),
+              ),
+              hasDiff: [...document.querySelectorAll('.lr-file .hunk')].some(visible),
+            };
+          }, marker);
+          const routeMatches = page.url() === requested;
           const authenticated = await sampleBot.authenticated();
           if (!successfulSample({ ...observed, authenticated, runtimeError, routeMatches }, kind))
             throw new Error('PERF_PAGE_FAILED');
@@ -158,15 +133,4 @@ export async function browserSamples(config) {
   } finally {
     await browser?.close();
   }
-}
-
-function legacyRouteMatches(actualUrl, requested) {
-  const actual = routeUrlState(actualUrl),
-    expected = routeUrlState(requested);
-  return (
-    actual.origin === expected.origin &&
-    ['project', 'projectTab', 'lane'].every(
-      key => expected.searchParams.get(key) === actual.searchParams.get(key),
-    )
-  );
 }

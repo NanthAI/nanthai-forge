@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Lifecycle rule 2 for Convex Auth (docs/development.md, "Convex Auth core beside Clerk"; spike case 5): the sign-in
+// Lifecycle rule 2 for Convex Auth (docs/development.md, "Convex Auth"; spike case 5): the sign-in
 // screen holds a passkey autofill challenge only while its tab is visible and active. The library starts one when its
 // hook mounts and renews it about every eight minutes while mounted, so the gate decides how many challenges exist.
 import test from 'node:test';

@@ -8,6 +8,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { githubBlobPack } from '../dist/github-blob-pack.js';
 import { streamGithubBlobPack } from '../dist/github-blob-pack-stream.js';
 import { blobPackResponse, wantedBlobResponse } from './github-blob-pack-fixture.mjs';
+import { fixtureKeyring, sealedGithubToken } from './hosted-fixture.mjs';
 const { authorizeImportGithub } = await import(moduleUrl('../convex/githubImportAccess.ts'));
 const sha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 const entry = (bytes, path = 'source') => ({ path, sha: sha(bytes), size: bytes.length, mode: '100644' });
@@ -18,7 +19,7 @@ function accessFixture(t, { privateRepo = false, denied = false, installed = tru
     GITHUB_APP_ID: '123',
     GITHUB_APP_PRIVATE_KEY: keys.privateKey.export({ type: 'pkcs8', format: 'pem' }),
     GITHUB_PUBLIC_TOKEN: 'deployment-fixture',
-    CLERK_SECRET_KEY: 'clerk-fixture',
+    FORGE_GITHUB_TOKEN_KEYRING: fixtureKeyring,
     GITHUB_APP_CLIENT_ID: 'client-fixture',
     GITHUB_APP_CLIENT_SECRET: 'client-secret-fixture',
   };
@@ -41,7 +42,6 @@ function accessFixture(t, { privateRepo = false, denied = false, installed = tru
       tokens.push(JSON.parse(init.body));
       return Response.json({ token: 'ghs_metadata_fixture' });
     }
-    if (path.startsWith('/v1/users/')) return Response.json([{ token: 'ghu_importer_fixture' }]);
     if (path === '/applications/client-fixture/token') return Response.json({});
     if (path === '/repos/fixture/source') {
       if (exhausted && (!auth || auth === 'Bearer deployment-fixture'))
@@ -68,7 +68,15 @@ function accessFixture(t, { privateRepo = false, denied = false, installed = tru
     if (path === '/user/installations') return Response.json({ installations: [] });
     throw Error(`unexpected fixture endpoint ${path}`);
   };
-  return { request, paths, tokens };
+  const tokenReads = [];
+  // The importer's stored Forge GitHub App connection, read through the action context.
+  const ctx = {
+    runQuery: async (_ref, { owner }) => {
+      tokenReads.push(owner);
+      return { token: sealedGithubToken(owner, 'ghu_importer_fixture') };
+    },
+  };
+  return { request, paths, tokens, ctx, tokenReads };
 }
 
 test('shared metadata exhaustion reaches the App quota with a metadata-only repository probe', async t => {
@@ -93,15 +101,15 @@ test('App metadata cannot authorize private import: current importer access stil
     await t.test(denied ? 'revoked importer' : 'authorized importer', async t => {
       const f = accessFixture(t, { privateRepo: true, denied });
       if (denied)
-        await assert.rejects(authorizeImportGithub('fixture/source', 'importer', f.request), {
+        await assert.rejects(authorizeImportGithub('fixture/source', 'importer', f.request, f.ctx), {
           code: 'GITHUB_UNAVAILABLE',
         });
       else
         assert.equal(
-          (await authorizeImportGithub('fixture/source', 'importer', f.request)).token,
+          (await authorizeImportGithub('fixture/source', 'importer', f.request, f.ctx)).token,
           'ghu_importer_fixture',
         );
-      assert.ok(f.paths.some(path => path.startsWith('/v1/users/')));
+      assert.deepEqual(f.tokenReads, ['importer']);
       assert.deepEqual(f.tokens[0].permissions, { metadata: 'read' });
     });
 });

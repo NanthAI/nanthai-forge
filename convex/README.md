@@ -1,6 +1,6 @@
 # Forge Convex backend
 
-This is Forge's own Convex project, separate from Edge's. Setup, environment variables, the GitHub webhook, Clerk and the web site (a Cloudflare Worker) are documented in [development](../docs/development.md). To run the same schema on your own machine, see [operations](../docs/operations.md).
+This is Forge's own Convex project, separate from Edge's. Setup, environment variables, the GitHub webhook, Convex Auth and the web site (a Cloudflare Worker) are documented in [development](../docs/development.md). To run the same schema on your own machine, see [operations](../docs/operations.md).
 
 ## Layout
 

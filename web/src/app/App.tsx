@@ -36,7 +36,6 @@ import { forget, recall, safeNext } from './session';
 import { FirstPasskey, SignIn } from './SignIn';
 import './app.css';
 const Legal = lazy(() => import('./Legal'));
-const ExistingDeleteRequest = lazy(() => import('./requests/ExistingDeleteRequest'));
 const ApproveRedirect = lazy(() =>
   import('./ApproveRedirect').then(module => ({ default: module.ApproveRedirect })),
 );
@@ -73,19 +72,15 @@ function makeClient() {
 
 export default function App() {
   const route = useRoute();
-  const search = useSearch();
   if (route.frame === 'public' && (route.page === 'terms' || route.page === 'privacy'))
     return (
       <Suspense fallback={loadingPlace}>
         <Legal page={route.page} />
       </Suspense>
     );
-  const request = route.frame === 'account' && route.place === 'projects' ? search.get('request') : null;
-  const clerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
-  const existing = request && clerkKey && search.get('auth') === 'existing' ? { request, clerkKey } : null;
-  return <ConnectedApp key={existing ? 'existing' : 'default'} existing={existing} />;
+  return <ConnectedApp />;
 }
-function ConnectedApp({ existing }: { existing: { request: string; clerkKey: string } | null }) {
+function ConnectedApp() {
   const [client] = useState(makeClient);
   // The provider clears auth in its own unmount effect before the socket closes.
   useEffect(() => () => queueMicrotask(() => void client?.close()), [client]);
@@ -99,16 +94,6 @@ function ConnectedApp({ existing }: { existing: { request: string; clerkKey: str
           <p>Set VITE_CONVEX_URL for this development build.</p>
         </div>
       </PublicFrame>
-    );
-  if (existing)
-    return (
-      <Suspense fallback={loadingPlace}>
-        <ExistingDeleteRequest
-          client={client}
-          requestId={existing.request}
-          publishableKey={existing.clerkKey}
-        />
-      </Suspense>
     );
   return (
     <ConvexAuthProvider
@@ -192,8 +177,7 @@ function Pages() {
           <Legal page={route.page} />
         </Suspense>
       );
-    if (route.page === 'signin')
-      return isAuthenticated && search.get('link') !== 'existing' ? <AfterSignIn /> : <SignIn />;
+    if (route.page === 'signin') return isAuthenticated ? <AfterSignIn /> : <SignIn />;
     if (route.page === 'passkey') return <FirstPasskey onDone={finishPasskeyStep} />;
     if (route.page === 'approve')
       return (

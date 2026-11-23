@@ -89,8 +89,8 @@ export const approvalTarget = query({
       if (error instanceof ForgeError && error.code === 'PROJECT_UNAVAILABLE') return null;
       throw error;
     }
-    // Creation assigns the owner's handle and the project's address (convex/projectCreation.ts), and urlsBackfill
-    // assigned them to older projects (docs/readable-urls.md); without one the new app has no page for the project.
+    // Creation assigns the owner's handle and the project's address (convex/projectCreation.ts); without one the new app
+    // has no page for the project.
     const account = await accountFor(ctx, project.owner);
     if (!account || !project.slug) return null;
     const address = { handle: account.handle, slug: project.slug };

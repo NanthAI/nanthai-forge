@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Lifecycle rule 2 for Convex Auth (docs/development.md, "Convex Auth core beside Clerk"): passkey autofill runs only
+// Lifecycle rule 2 for Convex Auth (docs/development.md, "Convex Auth"): passkey autofill runs only
 // while the sign-in tab is visible and active. The library starts autofill when its hook mounts and renews the
 // challenge about every eight minutes while mounted, so the sign-in screen mounts that hook inside WhileAwake: a hidden
 // or idle tab holds no challenge and makes no calls, and the return mounts it once.

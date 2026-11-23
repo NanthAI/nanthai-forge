@@ -995,8 +995,7 @@ nforge host ROOT --delete-projects --withdraw REQUEST_ID
 
 Preparing deletes nothing. It freezes the exact list (slug, revision, newest landing, stored size, in the trash or
 not), prints it with the approval link `/account?request=ID`, and exits. A request holds at most 100 projects (with `--trash`, the first 100 in the trash; the rest
-stay for the next request) and expires 30 minutes after it is made. An expired request deletes nothing. While Clerk sign-in is available, the link
-also offers **Review with your existing sign-in** so the owner can review with that account session. On the page the
+stay for the next request) and expires 30 minutes after it is made. An expired request deletes nothing. On the page the
 owner reads the whole list, keeps any project out, types the number left and approves once. **Decline** tells the agent
 through the same read. Approval re-checks every project in
 that one transaction: a project with a new landing, a new revision or a new owner since the list was made is skipped
@@ -1779,7 +1778,7 @@ With `lifecycle.cleanRegenerableCopies:true`, Lane completion and abandonment au
 
 Account, then "Your Forge data", then "Refresh inventory" lists everything you own across seven families. "Download metadata" saves the inventory with hashes. It holds no source, raw Work, secret values or credentials. Use project archives, import snapshot controls and Secret Object export for those.
 
-You can select owned items for removal. Projects and imports use their normal final-deletion paths, agent grants are revoked, teams are cleaned up and personal saved items are removed. "Leave incoming access" removes only your own rows in things shared with you. Other people's grants and records are untouched. An interrupted request resumes from "Retained original requests". Receipts, downloaded copies and Clerk and GitHub identities remain.
+You can select owned items for removal. Projects and imports use their normal final-deletion paths, agent grants are revoked, teams are cleaned up and personal saved items are removed. "Leave incoming access" removes only your own rows in things shared with you. Other people's grants and records are untouched. An interrupted request resumes from "Retained original requests". Receipts, downloaded copies and your GitHub account itself remain.
 
 ## Client error reports
 
@@ -1840,14 +1839,13 @@ Download the backend zip for your platform from the pinned `get-convex/convex-ba
 Always pass `--env-file DIR/deployment.env` to every `npx convex` command so you never touch the cloud dev project. Keep `deployment.env` private since it holds the admin key. For a new anonymous instance:
 
 ```sh
-npx convex env set CLERK_JWT_ISSUER_DOMAIN '' --env-file DIR/deployment.env
 npx convex env set FORGE_CLI_ISSUER '' --env-file DIR/deployment.env
 npx convex deploy --env-file DIR/deployment.env --typecheck enable --yes
 ```
 
-Convex rejects reads of unset auth-config variables even inside an optional guard. Set both issuer variables explicitly; an empty string keeps that provider disabled.
+Convex rejects reads of unset auth-config variables even inside an optional guard. Set `FORGE_CLI_ISSUER` explicitly; an empty string keeps the CLI issuer disabled.
 
-Build the browser with `VITE_CLERK_PUBLISHABLE_KEY=''` and `node --env-file=DIR/deployment.env ... vite build web --mode hosted`. For private access, set the Clerk and GitHub App variables from [development](development.md) on the instance. They are not part of snapshots, so set them again on a restored instance.
+Build the browser with `node --env-file=DIR/deployment.env ... vite build web --mode hosted`. For private access, set the Convex Auth and GitHub App variables from [development](development.md) on the instance. They are not part of snapshots, so set them again on a restored instance.
 
 **Backup:** `npx convex export --include-file-storage --path DIR/backup.zip --env-file DIR/deployment.env`. A snapshot holds documents and files. It does not hold deployed code, backend environment, instance config or local Work stores. Save the Forge commit and lockfile with it.
 

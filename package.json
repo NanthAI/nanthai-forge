@@ -374,7 +374,6 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@clerk/react": "6.17.3",
     "@convex-dev/auth": "2.0.0",
     "@pierre/diffs": "1.7.1",
     "@pierre/highlights": "0.5.2",

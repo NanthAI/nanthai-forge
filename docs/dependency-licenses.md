@@ -1,13 +1,11 @@
 # Pinned npm dependency license inventory
 
-Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 436 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
+Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 431 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
 
 The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Apache-2.0 license](https://github.com/get-convex/convex-backend/blob/precompiled-2026-09-28-5c7cb5b/LICENSE.md), not the npm client license. Its bundled native dependencies are outside this npm inventory; [native license coverage](native-dependency-licenses.md) records the inspected pins and remaining gaps. Forge's own boundaries are in [the licensing map](../LICENSE.md).
 
 | Locked path | Version | Declared license | Use |
 | --- | --- | --- | --- |
-| node_modules/@clerk/react | 6.17.3 | MIT | runtime |
-| node_modules/@clerk/shared | 4.40.0 | MIT | runtime |
 | node_modules/@convex-dev/auth | 2.0.0 | Apache-2.0 | development |
 | node_modules/@convex-dev/auth/node_modules/cookie | 1.1.1 | MIT | development |
 | node_modules/@convex-dev/auth/node_modules/jose | 5.10.0 | MIT | development |
@@ -152,7 +150,6 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/@simplewebauthn/browser | 14.0.0 | MIT | development |
 | node_modules/@simplewebauthn/server | 14.1.0 | MIT | development |
 | node_modules/@swc/helpers | 0.5.24 | Apache-2.0 | development |
-| node_modules/@tanstack/query-core | 5.104.0 | MIT | runtime |
 | node_modules/@types/debug | 4.1.13 | MIT | development |
 | node_modules/@types/estree | 1.0.9 | MIT | development |
 | node_modules/@types/estree-jsx | 1.0.5 | MIT | development |
@@ -250,7 +247,6 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/function-bind | 1.1.2 | MIT | runtime |
 | node_modules/get-intrinsic | 1.3.0 | MIT | runtime |
 | node_modules/get-proto | 1.0.1 | MIT | runtime |
-| node_modules/glob-to-regexp | 0.4.1 | BSD-2-Clause | runtime |
 | node_modules/gopd | 1.2.0 | MIT | runtime |
 | node_modules/has-symbols | 1.1.0 | MIT | runtime |
 | node_modules/hasown | 2.0.4 | MIT | runtime |
@@ -275,7 +271,6 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/is-promise | 4.0.0 | MIT | runtime |
 | node_modules/isexe | 2.0.0 | ISC | runtime |
 | node_modules/jose | 6.2.12 | MIT | runtime |
-| node_modules/js-cookie | 3.0.8 | MIT | runtime |
 | node_modules/json-schema-traverse | 1.0.0 | MIT | runtime |
 | node_modules/json-schema-typed | 8.0.2 | BSD-2-Clause | runtime |
 | node_modules/lightningcss | 1.33.0 | MPL-2.0 | development |

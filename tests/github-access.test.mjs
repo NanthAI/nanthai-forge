@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { authorizeGithub, assertImporter, checkGithubSignIn } from '../dist/github-access.js';
+import { authorizeGithub, assertImporter } from '../dist/github-access.js';
 
 test('private reads require the importer and a current human token issued by the Forge GitHub App', async () => {
   const repository = {
@@ -12,11 +12,10 @@ test('private reads require the importer and a current human token issued by the
     html_url: 'https://github.com/example/project',
     license: null,
   };
-  const config = { clerkSecret: 'test-clerk', appClientId: 'test-app', appClientSecret: 'test-secret' };
   let revoked = false,
     provider = 'ghu_test';
+  const config = { userToken: async () => provider, appClientId: 'test-app', appClientSecret: 'test-secret' };
   const request = async (url, options) => {
-    if (url.startsWith('https://api.clerk.com/')) return new Response(JSON.stringify([{ token: provider }]));
     if (url.includes('/applications/')) return new Response('{}', { status: revoked ? 404 : 200 });
     if (url.endsWith('/user')) return new Response('{}', { status: revoked ? 401 : 200 });
     if (!options.headers.Authorization) return new Response('{}', { status: 404 });
@@ -57,14 +56,16 @@ test('anonymous access uses current public visibility and never inherits private
 });
 
 test('a repository outside the App installation names the exact install step', async () => {
-  const config = { clerkSecret: 'test-clerk', appClientId: 'test-app', appClientSecret: 'test-secret' };
+  const config = {
+    userToken: async () => 'ghu_test',
+    appClientId: 'test-app',
+    appClientSecret: 'test-secret',
+  };
   let installations = [],
     installationStatus = 200;
   const urls = [];
   const request = async (url, options) => {
     urls.push(url);
-    if (url.startsWith('https://api.clerk.com/'))
-      return new Response(JSON.stringify([{ token: 'ghu_test' }]));
     if (url.includes('/applications/')) return new Response('{}');
     if (url.includes('/user/installations'))
       return new Response(JSON.stringify({ installations }), { status: installationStatus });
@@ -183,48 +184,56 @@ test('public recovery never grants private access or bypasses GitHub rate limits
   }
 });
 
-test('setup detects a live sign-in token from a different App before any repository import', async () => {
+test('a saved connection from a different App is named before any repository read with it', async () => {
   const config = {
-    clerkSecret: 'synthetic-clerk-secret',
+    userToken: async () => 'ghu_synthetic',
     appClientId: 'synthetic-app',
     appClientSecret: 'synthetic-app-secret',
   };
   let checkedStatus = 404,
     userStatus = 200;
-  const request = async url => {
-    if (url.startsWith('https://api.clerk.com/')) return Response.json([{ token: 'ghu_synthetic' }]);
+  const authorized = [];
+  const request = async (url, options) => {
     if (url.includes('/applications/')) return new Response('{}', { status: checkedStatus });
-    assert.equal(url, 'https://api.github.com/user', 'setup does not read or create a repository');
-    return new Response('{}', { status: userStatus });
+    if (url === 'https://api.github.com/user') return new Response('{}', { status: userStatus });
+    // Anonymous lookups cannot see the private repository; a token read happens only after the App check.
+    if (!options.headers.Authorization) return new Response('{}', { status: 404 });
+    authorized.push(url);
+    return Response.json({
+      full_name: 'example/private',
+      private: true,
+      default_branch: 'main',
+      html_url: 'https://github.com/example/private',
+      license: null,
+    });
   };
-  await assert.rejects(checkGithubSignIn('synthetic-user', config, request), error => {
+  const access = () => authorizeGithub('example/private', 'synthetic-user', config, request);
+  await assert.rejects(access(), error => {
     assert.equal(error.code, 'GITHUB_SETUP_REQUIRED');
     assert.match(error.message, /different GitHub App/);
-    assert.match(error.message, /sign-in provider.*client ID and secret/);
     assert.doesNotMatch(error.message, /expired|synthetic/);
     return true;
   });
   userStatus = 401;
-  await assert.rejects(checkGithubSignIn('synthetic-user', config, request), {
-    code: 'GITHUB_UNAVAILABLE',
-    message: /expired or been revoked/,
-  });
+  await assert.rejects(access(), { code: 'GITHUB_UNAVAILABLE', message: /expired or been revoked/ });
   checkedStatus = 401;
-  await assert.rejects(checkGithubSignIn('synthetic-user', config, request), {
-    code: 'GITHUB_SETUP_REQUIRED',
-    message: /App client credentials/,
-  });
+  await assert.rejects(access(), { code: 'GITHUB_SETUP_REQUIRED', message: /App client credentials/ });
   checkedStatus = 503;
-  await assert.rejects(checkGithubSignIn('synthetic-user', config, request), {
-    code: 'GITHUB_UNAVAILABLE',
-    message: /could not validate/,
-  });
+  await assert.rejects(access(), { code: 'GITHUB_UNAVAILABLE', message: /could not validate/ });
   checkedStatus = 404;
   userStatus = 503;
-  await assert.rejects(checkGithubSignIn('synthetic-user', config, request), {
-    code: 'GITHUB_UNAVAILABLE',
-    message: /could not validate/,
-  });
+  await assert.rejects(access(), { code: 'GITHUB_UNAVAILABLE', message: /could not validate/ });
+  assert.deepEqual(authorized, []);
   checkedStatus = 200;
-  await checkGithubSignIn('synthetic-user', config, request);
+  assert.equal((await access()).repository.private, true);
+  assert.equal(authorized.length, 1);
+});
+
+test('no saved GitHub connection asks the person to connect', async () => {
+  const config = { userToken: async () => undefined, appClientId: 'app', appClientSecret: 'secret' };
+  const request = async () => new Response('{}', { status: 404 });
+  await assert.rejects(authorizeGithub('example/private', 'person', config, request), {
+    code: 'GITHUB_UNAVAILABLE',
+    message: /Connect your GitHub account/,
+  });
 });

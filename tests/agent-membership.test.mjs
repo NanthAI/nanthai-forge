@@ -83,26 +83,7 @@ const cases = [
 ];
 for (const [module, name, fields] of cases)
   test(`owner device ${name} waits for exact person approval and recipient acceptance, including project bootstrap`, async t => {
-    const s = fixture(t),
-      oldFetch = globalThis.fetch;
-    globalThis.fetch = async url =>
-      String(url).includes('api.clerk.com')
-        ? Response.json(
-            String(url).includes('?')
-              ? [
-                  {
-                    id: 'target',
-                    email_addresses: [
-                      { email_address: 'target@example.test', verification: { status: 'verified' } },
-                    ],
-                  },
-                ]
-              : { id: 'target' },
-          )
-        : oldFetch(url);
-    t.after(() => {
-      globalThis.fetch = oldFetch;
-    });
+    const s = fixture(t);
     const input = { projectId: 'project', ...fields };
     const call = () => modules[module][name]._handler(s.ctx, input);
     await assert.rejects(

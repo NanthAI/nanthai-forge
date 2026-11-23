@@ -51,8 +51,8 @@ const privateProvenance = new Set(['holder']);
 const keyPattern = new RegExp(
   `\\\\?"(?:${[...personKeys, ...nameKeys, ...emailKeys, ...ownerOnlyKeys].join('|')})\\\\?"\\s*:`,
 );
-/** Clerk account ids. Any other provider's subjects are recognised by their account row, which
- * every web sign-in and CLI device approval creates (urlAccounts.ensure). */
+/** Account keys (`user_` + an id). A key without an account row (closed, or not yet signed in) still names a person;
+ * every web sign-in and CLI device approval creates the row (urlAccounts.ensure). */
 const subjectShape = /^user_[A-Za-z0-9]{8,}$/;
 const handleShape = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])$/;
 /** Account ids and handles never contain whitespace or ':'; such values are system actors. */

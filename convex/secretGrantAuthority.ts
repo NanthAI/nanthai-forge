@@ -42,9 +42,8 @@ export async function grantEpoch(ctx: Ctx, principal: string) {
 }
 /** Issues the person's next review epoch in one write to their account row. A retry of the same review (operation id)
  * returns the epoch it was issued; any other review supersedes it. Each epoch is above the row's last one, which is
- * what orders it; it is also at least the current time, so epochs keep rising when a closed account's row is made again
- * for the same key (an old-provider sign-in): a grant recorded under the old row is still below the new row's first
- * review. */
+ * what orders it; it is also at least the current time, so epochs keep rising if a closed account's row is ever made
+ * again for the same key: a grant recorded under the old row is still below the new row's first review. */
 export async function nextReview(ctx: MutationCtx, account: Doc<'forgeAccounts'>, operationId: string) {
   const last = account.secretsReview;
   if (last?.operationId === operationId) return last.epoch;

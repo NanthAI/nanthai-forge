@@ -41,7 +41,6 @@ test('the configured browser bundle contains no Node-only code and evaluates eve
           ...process.env,
           VITE_CONVEX_URL: 'https://forge-smoke.convex.cloud',
           VITE_CONVEX_SITE_URL: 'https://forge-smoke.convex.site',
-          VITE_CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from('smoke.clerk.accounts.dev$').toString('base64')}`,
           VITE_GITHUB_APP_SLUG: 'forge-smoke',
           VITE_FORGE_DEMO_REPOSITORY: 'synthetic/demo',
         },

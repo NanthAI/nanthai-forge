@@ -205,39 +205,32 @@ test('browser identity resolves session to Forge account once per invocation, at
   assert.deepEqual(s.reads(), { componentReads: 2, userReads: 2 });
 });
 
-test('Clerk and a linked Convex Auth session approve bulk requests for the same Forge owner', async t => {
+test('de67c77d: a token from a removed sign-in provider cannot request or approve for the same account key', async t => {
   const s = fixture(t);
+  const signedOut = error => ['AUTH_REQUIRED', 'PROJECT_UNAVAILABLE'].includes(error.data?.code);
   const convex = s.browser();
-  const clerk = {
-    issuer: 'https://clerk.example',
-    subject: s.user.accountKey,
-    tokenIdentifier: 'clerk|owner',
-  };
-  for (const [i, requester, approver] of [
-    [0, clerk, convex],
-    [1, convex, clerk],
-  ]) {
-    const projectId = `scratch-${i}`;
-    s.tables.hostedProjects.set(projectId, projectRow({ _id: projectId, owner: s.user.accountKey }));
-    s.identity(requester);
-    const request = JSON.parse(
-      await deleteRequests.prepare._handler(s.ctx, {
-        operationId: randomUUID(),
-        select: { ids: [projectId] },
-      }),
-    );
-    s.identity(approver);
-    const done = JSON.parse(
-      await deleteRequests.decide._handler(s.ctx, {
-        requestId: request.id,
-        operationId: randomUUID(),
-        decision: 'approve',
-        count: 1,
-      }),
-    );
-    assert.equal(done.projects[0].outcome, 'started');
-    assert.equal(s.tables.hostedProjects.get(projectId).removal, 'deleting');
-  }
+  // An old provider token naming the same account key: it is signed out, never that owner.
+  const old = { issuer: 'https://legacy.example', subject: s.user.accountKey, tokenIdentifier: 'old|owner' };
+  const projectId = 'scratch';
+  s.tables.hostedProjects.set(projectId, projectRow({ _id: projectId, owner: s.user.accountKey }));
+  const prepare = () =>
+    deleteRequests.prepare._handler(s.ctx, { operationId: randomUUID(), select: { ids: [projectId] } });
+  s.identity(old);
+  await assert.rejects(prepare(), signedOut);
+  s.identity(convex);
+  const request = JSON.parse(await prepare());
+  const decide = () =>
+    deleteRequests.decide._handler(s.ctx, {
+      requestId: request.id,
+      operationId: randomUUID(),
+      decision: 'approve',
+      count: 1,
+    });
+  s.identity(old);
+  await assert.rejects(decide(), signedOut);
+  assert.equal(s.tables.hostedProjects.get(projectId).removal, undefined);
+  s.identity(convex);
+  assert.equal(JSON.parse(await decide()).projects[0].outcome, 'started');
 });
 
 test('a copied browser token loses reads and device approval after session revocation', async t => {
@@ -259,15 +252,16 @@ test('a copied browser token loses reads and device approval after session revoc
   assert.equal(s.tables.cliCredentials.size, 0);
 });
 
-test('CLI and retained Clerk identities add no session or users reads; missing user never becomes an owner', async t => {
+test('CLI identities and other issuers add no session or users reads; other issuers and a missing user are signed out', async t => {
   const s = fixture(t);
-  for (const raw of [
-    null,
-    { subject: 'user_legacy', issuer: 'https://legacy.example' },
-    { subject: 'user_cli', issuer: process.env.FORGE_CLI_ISSUER, forgeCredential: 'credential' },
+  const cli = { subject: 'user_cli', issuer: process.env.FORGE_CLI_ISSUER, forgeCredential: 'credential' };
+  for (const [raw, mapped] of [
+    [null, null],
+    [{ subject: 'user_legacy', issuer: 'https://legacy.example' }, null],
+    [cli, cli],
   ]) {
     s.identity(raw);
-    assert.deepEqual(await identity.identityContext(s.ctx).auth.getUserIdentity(), raw);
+    assert.deepEqual(await identity.identityContext(s.ctx).auth.getUserIdentity(), mapped);
   }
   assert.deepEqual(s.reads(), { componentReads: 0, userReads: 0 });
   s.identity({ issuer: `${process.env.CONVEX_CLOUD_URL}/components/auth`, subject: 'session' });
@@ -542,7 +536,7 @@ test('direct passkey calls enforce Forge handle syntax and reserved destinations
   assert.equal(s.tables.users.size, 1);
 });
 
-test('a legacy Forge handle directs the person to their existing sign-in without creating an account', async t => {
+test('a handle held by another account refuses passkey sign-up without creating an account', async t => {
   const s = fixture(t);
   s.tables.accountHandles.set('legacy', {
     _id: 'legacy',
@@ -635,123 +629,4 @@ test('SI-01 review: direct passkey sign-in completion preserves the library resu
     { status: 'error', userError: { error: 'PROTOCOL_ERROR' } },
   );
   assert.deepEqual(s.tables.users.get(s.user._id).deviceApprovalProof, proof);
-});
-
-const legacyStore = await import(moduleUrl('../convex/authLegacyStore.ts'));
-const { policyPreset } = await import(moduleUrl('../src/autonomy-policy.ts'));
-test('de67c77d: a Clerk-only account adds a passkey from its live old session, signs in natively and approves a CLI device; linking never takes over another account', async t => {
-  const s = fixture(t);
-  const oldIssuer = process.env.CLERK_JWT_ISSUER_DOMAIN;
-  process.env.CLERK_JWT_ISSUER_DOMAIN = 'https://legacy.example';
-  t.after(() =>
-    oldIssuer === undefined
-      ? delete process.env.CLERK_JWT_ISSUER_DOMAIN
-      : (process.env.CLERK_JWT_ISSUER_DOMAIN = oldIssuer),
-  );
-  const owner = 'user_clerkOnly';
-  s.tables.forgeAccounts.set('clerk-account', {
-    _id: 'clerk-account',
-    _creationTime: 1,
-    owner,
-    handle: 'clerk-person',
-  });
-  s.tables.accountHandles.set('clerk-handle', {
-    _id: 'clerk-handle',
-    _creationTime: 1,
-    owner,
-    handle: 'clerk-person',
-  });
-  const clerk = (subject, sid) => ({ subject, issuer: 'https://legacy.example', sid });
-  const ownUsers = () => [...s.tables.users.values()].filter(row => row.accountKey === owner);
-  // Stranded before linking: no native sign-in for this handle, and no account is created for it.
-  s.identity(null);
-  assert.deepEqual(await auth.startSignInWithUsernamePasskey._handler(s.ctx, { username: 'clerk-person' }), {
-    success: false,
-    userError: { error: 'USERNAME_TAKEN' },
-  });
-  // Another person's live old session cannot start or finish a link for this account.
-  const proof = { accountKey: owner, sessionId: 'old-session', operationId: 'link' };
-  s.identity(clerk('user_attacker', 'old-session'));
-  await assert.rejects(legacyStore.start._handler(s.ctx, proof), refused('AUTH_REQUIRED'));
-  await assert.rejects(
-    legacyStore.finish._handler(s.ctx, { ...proof, response: registration }),
-    refused('AUTH_REQUIRED'),
-  );
-  assert.equal(ownUsers().length, 0);
-  // The account's own live old session adds its first passkey to the same account key.
-  s.identity(clerk(owner, 'old-session'));
-  assert.equal((await legacyStore.start._handler(s.ctx, proof)).step, 'register');
-  assert.equal(
-    (await legacyStore.finish._handler(s.ctx, { ...proof, response: registration })).success,
-    true,
-  );
-  const [linked] = ownUsers();
-  assert.equal(ownUsers().length, 1);
-  assert.equal(s.passkeys.filter(key => key.userId === linked._id).length, 1);
-  assert.equal(
-    s.tables.users.get(s.user._id).accountKey,
-    s.user.accountKey,
-    'the other account is untouched',
-  );
-  // Native passkey sign-in reaches that account and records the fresh device proof for its new session.
-  s.identity(null);
-  const started = await auth.startSignInWithUsernamePasskey._handler(s.ctx, { username: 'clerk-person' });
-  assert.equal(started.step, 'authenticate');
-  assert.equal(s.starts.at(-1).userId, linked._id);
-  const dispatch = s.ctx.runMutation;
-  s.ctx.runMutation = async (ref, args) => {
-    const name = getFunctionAddress(ref).reference ?? '';
-    if (name.endsWith('/finishAuthentication')) return { success: true, userId: linked._id };
-    if (name.endsWith('/_internal_dangerous_signIn')) {
-      s.sessions.set('native-session', { userId: args.userId });
-      return {
-        userId: args.userId,
-        accessToken: `header.${Buffer.from(JSON.stringify({ sub: 'native-session' })).toString('base64url')}.signature`,
-        refreshToken: 'synthetic-refresh',
-        refreshTokenExpiresAt: 1000,
-      };
-    }
-    return dispatch(ref, args);
-  };
-  const response = {
-    id: 'existing',
-    rawId: 'existing',
-    type: 'public-key',
-    response: { clientDataJSON: '', authenticatorData: '', signature: '' },
-    clientExtensionResults: {},
-  };
-  assert.equal((await auth.finishSignInWithUsernamePasskey._handler(s.ctx, { response })).status, 'complete');
-  s.ctx.runMutation = dispatch;
-  assert.equal(s.tables.users.get(linked._id).deviceApprovalProof.sessionId, 'native-session');
-  // Signed in natively, the account approves a project device sign-in at /device; the approval needs that fresh
-  // passkey proof, and the credential belongs to the same Forge account.
-  s.tables.hostedProjects.set(
-    'clerk-project',
-    projectRow({
-      _id: 'clerk-project',
-      owner,
-      autonomyPolicy: { ...policyPreset('trusted'), accessIdentities: { devices: true } },
-    }),
-  );
-  s.identity({ issuer: `${process.env.CONVEX_CLOUD_URL}/components/auth`, subject: 'native-session' });
-  const flow = await begin(s.ctx, {
-    operationId: randomUUID(),
-    clientNonce: randomBytes(32).toString('hex'),
-    name: 'Synthetic CLI',
-    scope: 'cli',
-    projectId: 'clerk-project',
-  });
-  const fresh = s.tables.users.get(linked._id).deviceApprovalProof;
-  s.tables.users.set(linked._id, { ...s.tables.users.get(linked._id), deviceApprovalProof: undefined });
-  await assert.rejects(
-    device.decide._handler(s.ctx, { code: flow.user_code, approve: true, operationId: randomUUID() }),
-    refused('AUTH_REQUIRED'),
-  );
-  s.tables.users.set(linked._id, { ...s.tables.users.get(linked._id), deviceApprovalProof: fresh });
-  await device.decide._handler(s.ctx, { code: flow.user_code, approve: true, operationId: randomUUID() });
-  const issued = await device.poll._handler(s.ctx, {
-    deviceCode: flow.device_code,
-    operationId: randomUUID(),
-  });
-  assert.equal(JSON.parse(Buffer.from(issued.token.split('.')[1], 'base64url')).sub, owner);
 });

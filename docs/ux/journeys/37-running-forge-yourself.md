@@ -12,7 +12,7 @@ Walked: the operations doc (self-host, backup and recovery headings, R2 storage)
 | 2 | Start a backend | `npm ci --ignore-scripts`; `node scripts/selfhost.mjs init DIR BACKEND.zip PORT` ("verifies the pinned SHA-256 first"); `node scripts/selfhost.mjs start DIR` ("foreground; Ctrl-C stops it"). The backend zip is downloaded by hand from a pinned release. | docs |
 | 3 | Deploy Forge's server code to it | Three `npx convex` commands with `--env-file DIR/deployment.env`. "Convex rejects reads of unset auth-config variables … Set both issuer variables explicitly; an empty string keeps that provider disabled." | docs |
 | 4 | Storage | "A self-hosted instance stores bytes in R2 like every deployment … Set the `R2_*` settings, or `R2_ENDPOINT` for another S3-compatible bucket. Without them, every byte write fails with `R2_NOT_CONFIGURED`." | docs |
-| 5 | Sign-in | "For a new anonymous instance" both sign-in providers are disabled. "For private access, set the Clerk and GitHub App variables." After the planned move (de67c77d), "self-hosters no longer need a third-party auth account". | docs |
+| 5 | Sign-in | "For a new anonymous instance" the CLI issuer is disabled. "For private access, set the Convex Auth and GitHub App variables." Since de67c77d, self-hosters need no third-party auth account. | docs |
 | 6 | The web app | Build with two environment values and "vite build web --mode hosted". Where to serve it is not described. | docs |
 | 7 | GitHub App | Needed for private imports, the mirror and checks on GitHub Actions. An operator registers their own App. | docs |
 | 8 | Point the CLI at it | `nforge login DEPLOYMENT_URL`. "Use the development app and deployment URL supplied by its operator." | docs |

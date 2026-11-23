@@ -41,9 +41,10 @@ function fixture(t) {
     GITHUB_APP_CLIENT_ID: 'synthetic-client',
     GITHUB_APP_CLIENT_SECRET: 'synthetic-secret',
     CONVEX_SITE_URL: 'https://forge.example',
-    CLERK_SECRET_KEY: 'synthetic-identity-secret',
   });
   const s = lanesFixture();
+  // The owner's Forge account has its GitHub account linked natively.
+  s.insert('users', { accountKey: 'owner', githubId: linkedAccount, emailVerified: false });
   const projectId = s.insert('hostedProjects', {
     owner: 'owner',
     key: randomUUID(),
@@ -111,15 +112,6 @@ function fixture(t) {
   return { s, ctx, projectId, call, start, bind, proving };
 }
 const linkedAccount = '1001';
-const identity = (id = 'owner', accounts = [linkedAccount]) =>
-  Response.json({
-    id,
-    external_accounts: accounts.map(provider_user_id => ({
-      provider: 'oauth_github',
-      provider_user_id,
-      verification: { status: 'verified' },
-    })),
-  });
 function github(
   t,
   { repoId = 42, name = 'synthetic/repo', role = null, roleUser = Number(linkedAccount) } = {},
@@ -129,7 +121,6 @@ function github(
   let serial = 0;
   const request = async (url, init) => {
     calls.push({ url, method: init.method ?? 'GET', body: init.body ? JSON.parse(init.body) : null });
-    if (url.startsWith('https://api.clerk.com/v1/users/')) return identity();
     if (url.endsWith('/installation'))
       return Response.json({ id: 9, permissions: { actions: 'write', contents: 'write' } });
     if (url.endsWith('/access_tokens')) {
@@ -449,8 +440,8 @@ test('authorize URL uses server callback, random state and SHA256 PKCE', async t
   const started = JSON.parse(await oauth.connect._handler(f.ctx, input));
   assert.deepEqual(
     provider.calls.map(call => call.url),
-    ['https://api.clerk.com/v1/users/owner'],
-    'Connect reads only the caller identity; no repository or App lookup.',
+    [],
+    'Connect reads only the stored account link; no provider, repository or App lookup.',
   );
   const url = new URL(started.authorizeUrl),
     op = [...f.s.tables.githubBindingOperations.values()][0];
@@ -464,7 +455,7 @@ test('authorize URL uses server callback, random state and SHA256 PKCE', async t
   );
   assert(!started.authorizeUrl.includes('synthetic-secret'));
   assert.deepEqual(JSON.parse(await oauth.connect._handler(f.ctx, input)), started);
-  assert.equal(provider.calls.length, 1, 'A replayed connect makes no external call.');
+  assert.equal(provider.calls.length, 0, 'A replayed connect makes no external call.');
 });
 test('binding by a different GitHub account than the starter is refused and writes no binding', async t => {
   const f = fixture(t);
@@ -494,7 +485,6 @@ test('connect gives the same answer for unknown, uninstalled and installed repos
   const calls = [];
   t.mock.method(globalThis, 'fetch', async url => {
     calls.push(url);
-    if (url.startsWith('https://api.clerk.com/v1/users/')) return identity();
     return new Response('not found', { status: 404 });
   });
   const shapes = [];
@@ -509,37 +499,39 @@ test('connect gives the same answer for unknown, uninstalled and installed repos
     ]);
   }
   assert.equal(new Set(shapes.map(shape => JSON.stringify(shape))).size, 1);
-  assert(
-    calls.every(url => url.startsWith('https://api.clerk.com/')),
-    'No GitHub call before user proof.',
-  );
+  assert.deepEqual(calls, [], 'No external call before user proof.');
   assert(
     [...f.s.tables.githubBindingOperations.values()].every(op => op.installationId === undefined),
     'No installation state is stored before the callback proof.',
   );
 });
-test('connect requires a verified GitHub account linked to the Forge account', async t => {
+test('connect requires a GitHub account linked to the Forge account', async t => {
   const f = fixture(t);
-  for (const person of [
-    { id: 'owner', external_accounts: [] },
-    {
-      id: 'owner',
-      external_accounts: [
-        { provider: 'oauth_github', provider_user_id: '1001', verification: { status: 'unverified' } },
-      ],
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async url => (calls.push(url), Response.json({})));
+  const users = f.s.tables.users;
+  const [id, owner] = [...users].find(([, row]) => row.accountKey === 'owner');
+  // A conflicted id, an id another account also claims, no GitHub sign-in method, then no Forge account.
+  for (const change of [
+    () => users.set(id, { ...owner, githubConflict: true }),
+    () => {
+      users.set(id, owner);
+      f.s.insert('users', { accountKey: 'someone-else', githubId: linkedAccount, emailVerified: false });
     },
-    { id: 'someone-else', external_accounts: [] },
+    () => users.set(id, { ...owner, githubId: undefined }),
+    () => users.delete(id),
   ]) {
-    t.mock.method(globalThis, 'fetch', async () => Response.json(person));
+    change();
     await assert.rejects(
       oauth.connect._handler(f.ctx, {
         projectId: f.projectId,
         operationId: randomUUID(),
         repository: 'synthetic/repo',
       }),
-      error => code('GITHUB_ACCOUNT_REQUIRED')(error) || code('GITHUB_RESPONSE')(error),
+      code('GITHUB_ACCOUNT_REQUIRED'),
     );
   }
+  assert.deepEqual(calls, []);
   assert.equal(f.s.tables.githubBindingOperations?.size ?? 0, 0);
 });
 test('a connection operation started before account binding fails closed at the callback', async t => {

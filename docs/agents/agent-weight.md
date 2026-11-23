@@ -35,7 +35,7 @@ are guarded here; per-harness token/schema budgets remain owned by Issue
 
 The runtime boundary retains TypeScript (source analysis/public SDK), Lezer
 parsers/common/highlight (syntax analysis and merge), Convex and its helpers,
-MCP SDK, Noble, ignore, undici and Zod. React, React DOM, Clerk, react-markdown
+MCP SDK, Noble, ignore, undici and Zod. React, React DOM, react-markdown
 and remark-gfm are web-only development dependencies bundled by Vite. Every bare
 runtime import in emitted CLI/SDK modules and packaged scripts must belong to
 `dependencies`. The real CLI bundle rejects imports of web source, UI packages

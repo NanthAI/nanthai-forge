@@ -132,16 +132,12 @@ test('sign-in returns only to an address inside the rebuilt app', () => {
     assert.equal(safeNext(bad), `${ROOT}/account`, String(bad));
 });
 
-test('de67c77d: the existing-account passkey link and its way back keep a device approval return address', () => {
+test('de67c77d: sign-in keeps a device approval return address and has no old-account link mode', () => {
   const device = `${ROOT}/device?request=synthetic-request`;
-  const link = new URL(paths.signInHref(device, true), 'https://forge.example');
+  const link = new URL(paths.signInHref(device), 'https://forge.example');
   assert.equal(link.pathname, `${ROOT}/signin`);
-  assert.equal(link.searchParams.get('link'), 'existing');
+  assert.equal(link.searchParams.get('link'), null);
   assert.equal(safeNext(link.searchParams.get('next')), device);
-  // After the passkey is added, "Continue with your passkey" opens the plain sign-in with the same return.
-  const back = new URL(paths.signInHref(safeNext(link.searchParams.get('next'))), 'https://forge.example');
-  assert.equal(back.searchParams.get('link'), null);
-  assert.equal(safeNext(back.searchParams.get('next')), device);
   assert.equal(paths.signInHref(), `${ROOT}/signin`);
 });
 

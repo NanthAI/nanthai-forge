@@ -1,31 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 'use node';
-import { convexFetch, networkTimeout } from './networkFetch';
 import { v } from 'convex/values';
 import { paginationOptsValidator } from 'convex/server';
-import { action, accountAction } from './cliServer';
+import { action, accountAction, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { currentAccess } from './access';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 
-export async function checkForgeUser(value: string) {
+export async function checkForgeUser(ctx: ActionCtx, value: string) {
   const reader = value.trim();
   invariant(reader, 'BAD_ARGUMENT', 'Enter an existing Forge user ID.');
-  invariant(process.env.CLERK_SECRET_KEY, 'GITHUB_SETUP_REQUIRED', 'Forge identity is not configured.');
-  const response = await convexFetch(`https://api.clerk.com/v1/users/${encodeURIComponent(reader)}`, {
-    headers: { Authorization: `Bearer ${process.env.CLERK_SECRET_KEY}` },
-    redirect: 'error',
-    signal: networkTimeout(30_000),
-  });
-  invariant(response.status !== 404, 'BAD_ARGUMENT', 'This Forge user ID does not exist.');
-  invariant(response.ok, 'GITHUB_UNAVAILABLE', 'Forge could not check this user. Try again.');
   invariant(
-    ((await response.json()) as { id?: string }).id === reader,
-    'GITHUB_RESPONSE',
-    'The identity provider returned another user.',
+    await ctx.runQuery(internal.sharing.accountExists, { owner: reader }),
+    'BAD_ARGUMENT',
+    'This Forge user ID does not exist.',
   );
   return reader;
 }
@@ -42,7 +33,7 @@ export const add = action({
         'GITHUB_UNAVAILABLE',
         'This Codescape is unavailable with the current access.',
       );
-      reader = await checkForgeUser(reader);
+      reader = await checkForgeUser(ctx, reader);
       return await ctx.runMutation(internal.sharing.add, { id, owner: user.subject, reader });
     } catch (error) {
       return report(error);

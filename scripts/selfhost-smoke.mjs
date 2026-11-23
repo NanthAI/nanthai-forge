@@ -13,7 +13,6 @@ import { networkFetch, networkTimeout } from '../dist/network-fetch.js';
 import { api, internal } from '../convex/_generated/api.js';
 import { decodeHostedArtifact } from '../dist/hosted-artifact.js';
 import { releases, release, digest, main, portNumber } from './selfhost.mjs';
-import { githubOidcIssuer, verifyGithubOidc } from './selfhost-oidc.mjs';
 import { assertSmokeImport, deploySmoke, smokeCommand, smokeFailure } from './selfhost-smoke-support.mjs';
 import { startFakeR2, fakeR2Config } from '../tests/fake-r2.mjs';
 
@@ -28,8 +27,6 @@ const port = portNumber(process.env.FORGE_NATIVE_PORT ?? '3320'),
   owner = 'forge_native_smoke';
 const targetRelease = process.env.FORGE_NATIVE_TARGET_RELEASE ?? release;
 const storageEnv = process.env.FORGE_NATIVE_S3_ENV && resolve(process.env.FORGE_NATIVE_S3_ENV);
-const realOidc = process.env.FORGE_NATIVE_GITHUB_OIDC === '1';
-let oidc;
 const issuer = 'https://native-smoke.invalid',
   paginationOpts = { cursor: null, numItems: 20 };
 const keys = JSON.stringify({
@@ -127,7 +124,6 @@ const r2 = {
 };
 async function deploy(directory) {
   await deploySmoke(args => cli(directory, args), {
-    issuer: realOidc ? githubOidcIssuer : '',
     token,
     keys,
     r2,
@@ -248,10 +244,6 @@ try {
   const originalSecret = await primary.admin.query(internal.secrets.created, { owner, operationId });
   assert(originalSecret);
   assert(!JSON.stringify(originalSecret).includes(secretValue));
-  if (realOidc) {
-    stage = 'real GitHub OIDC owner and negative verification';
-    oidc = await verifyGithubOidc(primary, repository, ref);
-  }
   stage = 'snapshot export';
   const backup = join(root, 'backup.zip');
   cli(primaryPath, ['export', '--include-file-storage', '--path', backup]);
@@ -307,7 +299,6 @@ try {
       (await clients.admin.action(api.secretActions.reveal, { id: secret, operationId: randomUUID() })).value,
       secretValue,
     );
-    if (realOidc) oidc = await verifyGithubOidc(clients, repository, ref, oidc);
   };
   stage = 'restored original data';
   await verify(restored);
@@ -355,17 +346,6 @@ try {
       applicationRedeployAndRestart: true,
       freshPinUpgradeAndRollback: targetRelease !== release,
       localToS3AndLocalRestore: Boolean(storageEnv),
-      realOidc: realOidc
-        ? {
-            issuer: githubOidcIssuer,
-            audience: 'convex',
-            signedOwnerAuthenticated: true,
-            refreshedOwnerPreserved: true,
-            wrongAudienceDenied: true,
-            forgedSubjectDenied: true,
-            anonymousAndSimulatedOwnersDenied: true,
-          }
-        : null,
     }),
   );
   succeeded = true;

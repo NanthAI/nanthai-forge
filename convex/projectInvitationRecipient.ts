@@ -22,7 +22,7 @@ export async function recipientEmailProof(
 ) {
   if (!user.emailVerified || !user.email) return null;
   const email = user.email.trim().toLowerCase();
-  // Ambiguous native bindings never authorize acceptance, including a legacy session.
+  // Ambiguous native bindings never authorize acceptance.
   try {
     const current = await findVerifiedRecipient(ctx, email, options);
     if ((current && current !== user.subject) || (user.forgeAuthUser && current !== user.subject))

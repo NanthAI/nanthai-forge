@@ -11,7 +11,6 @@ import { requireUnlinkedImportAccess } from './accessPolicy';
 
 export function githubConfig(ctx?: ActionCtx) {
   return {
-    clerkSecret: process.env.CLERK_SECRET_KEY,
     appClientId: process.env.GITHUB_APP_CLIENT_ID,
     appClientSecret: process.env.GITHUB_APP_CLIENT_SECRET,
     publicToken: process.env.GITHUB_PUBLIC_TOKEN,

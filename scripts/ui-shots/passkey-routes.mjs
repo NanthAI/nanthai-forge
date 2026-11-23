@@ -24,7 +24,7 @@ export function passkeyDestination(base, project, page, { diffFile, intentLayout
     return url({ frame: 'account', place: kind === 'home' ? 'projects' : 'devices' }).href;
   const place = projectPlaces[kind];
   if (!place || (kind === 'settings' && id && !Object.hasOwn(settingsSections, id)))
-    throw new ShotError('The requested capture is only available in the Clerk screenshot flow.');
+    throw new ShotError('The requested page is not one of the rebuilt screens.');
   const target = url({
     frame: 'project',
     handle: project.handle,

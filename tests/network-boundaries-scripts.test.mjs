@@ -99,7 +99,7 @@ test('guard accepts convexFetch in convex/ and skips generated code and web/', (
     'await convexFetch(url, { signal: networkTimeout(20_000) });',
     'export function request(send: typeof fetch = convexFetch) { return send(url); }',
   ].join('\n');
-  assert.deepEqual(networkBoundaryFindings('convex/projectPeople.ts', safe), []);
+  assert.deepEqual(networkBoundaryFindings('convex/githubBindingOAuth.ts', safe), []);
   assert.deepEqual(networkBoundaryFindings('convex/_generated/api.js', 'await fetch(url);'), []);
   // web/ is out by decision: browser requests are user-cancellable, strand no server
   // work, and archive transfers are sized by the user's file (see the guard header).

@@ -21,26 +21,14 @@ export function readerGrantOperationId(credentials, deployment, projectId, mint 
   return (ids[key] ??= mint());
 }
 
-export function setupCommand(deployment, projectId) {
-  return `node scripts/ui-bot-setup.mjs --deployment ${deployment} --project ${projectId} --convex-cwd "$FORGE_OWNER" --grant-reader`;
-}
-
-/** Typed error for a bot that cannot read the project, with the exact repair command. */
+/** Typed error for a bot that cannot read the project. */
 export class BotNoReaderGrant extends ShotError {
   code = 'BOT_NO_READER_GRANT';
-  constructor(deployment, projectId, kind) {
+  constructor() {
     super(
-      kind === 'passkey'
-        ? 'The native UI bot cannot read the requested project. The project owner can grant the native account reader access.'
-        : `The UI bot has no reader grant on project ${projectId}. Re-grant it with (owner login required): ${setupCommand(deployment, projectId)}`,
+      'The native UI bot cannot read the requested project. The project owner can grant the native account reader access.',
     );
   }
-}
-
-/** Converts a bare PROJECT_UNAVAILABLE from the bot's first project read into BotNoReaderGrant. */
-export function explainBotAccess(error, deployment, projectId) {
-  const code = error?.data?.code ?? error?.code;
-  return code === 'PROJECT_UNAVAILABLE' && deployment ? new BotNoReaderGrant(deployment, projectId) : error;
 }
 
 /** New accounts use the existing handle invitation. The owner starts it, and only

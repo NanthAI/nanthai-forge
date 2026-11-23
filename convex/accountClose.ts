@@ -18,7 +18,7 @@
  *   2. `receipts` deletes finished deletion receipts, and unsealed (`preparing`) ones from before the close, with their
  *      items; an unfinished one, or one begun after the close started, stops the close.
  *   3. `signout` revokes every device sign-in page by page, denies device codes still waiting to be redeemed and ends
- *      every native browser session. From then on nothing but an old-provider (Clerk) browser acts as the account.
+ *      every browser session. From then on nothing acts as the account.
  *   4. `finish` removes handle operations, ordering hints, link receipts and earlier handles, then, in one final
  *      transaction, re-checks the holdings and removes the native sign-in, the current handle and the account row
  *      together. Anything held by then stops the close and keeps the account whole, its sign-in included.
@@ -26,9 +26,7 @@
  * Hidden secret grants never show in a reply, refusal or count. The native `users` row gets a fresh account key, so a
  * later sign-in never acts as the closed key again (no grant, invitation or credential given to the old key reaches
  * it). A GitHub sign-in keeps its numeric id (and any conflict mark) on that row, because the GitHub component keeps its
- * own account link: signing in with GitHub again starts a new, empty account. A passkey-only user row goes. Under the old
- * sign-in (Clerk, until its removal in Item de67c77d) the provider keeps its identity and its sessions: signing in there
- * again starts a new account on the old key. Scale: `close` reads one small page per owned and shared kind plus up to
+ * own account link: signing in with GitHub again starts a new, empty account. A passkey-only user row goes. Scale: `close` reads one small page per owned and shared kind plus up to
  * RECEIPTS_SCAN receipts and writes one row; each step reads and writes at most about STEP rows; idle 0. */
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';

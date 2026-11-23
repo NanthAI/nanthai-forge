@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Sign in on Convex Auth (Item de67c77d; docs/development.md "Convex Auth core beside Clerk"): one handle field that
-// signs in with a passkey (or creates the account and its passkey for a new handle), and GitHub. After a GitHub
-// sign-in with no passkey yet, the next page offers one (FirstPasskey). The old Clerk screens stay until removal.
+// Sign in on Convex Auth (Item de67c77d; docs/development.md "Convex Auth"): one handle field that signs in with a
+// passkey (or creates the account and its passkey for a new handle), and GitHub. After a GitHub sign-in with no
+// passkey yet, the next page offers one (FirstPasskey).
 //
 // Lifecycle rule 2: passkey autofill runs only while this tab is visible and active (awake.tsx).
-import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useOauth, useSignInWithGithub } from '@convex-dev/auth/methods/github/react';
 import { useSignInWithUsernamePasskey } from '@convex-dev/auth/methods/username-passkey/react';
 import { useMutation, useQuery } from 'convex/react';
@@ -13,7 +13,7 @@ import { api } from '../../../convex/_generated/api';
 import { Key, State } from '../ds';
 import { WhileAwake } from './awake';
 import { PublicFrame } from './frames';
-import { existingDeleteRequestHref, hrefFor, signInHref } from './paths';
+import { hrefFor } from './paths';
 import { useSearch } from './router';
 import { errorCode, recall, remember, safeNext } from './session';
 import { createPasskey, assertPasskey, type CeremonyFailure, type CreationOptions } from './webauthn';
@@ -29,8 +29,7 @@ const words: Record<string, string> = {
   CHALLENGE_EXPIRED: 'That took longer than ten minutes. Try again.',
   WEBAUTHN_UNSUPPORTED: 'This browser cannot use passkeys here. Continue with GitHub.',
   PASSKEY_ALREADY_REGISTERED: 'This device already holds a Forge passkey. Sign in with it.',
-  USERNAME_TAKEN:
-    'That handle is taken. If it is yours, sign in with its passkey or GitHub, or add a passkey from your existing sign-in below.',
+  USERNAME_TAKEN: 'That handle is taken. If it is yours, sign in with its passkey or GitHub.',
   RATE_LIMITED: 'Too many sign-in attempts just now. Wait a minute, then try again.',
 };
 const say = (code: string | undefined) =>
@@ -45,26 +44,7 @@ function PasskeyDriver({ onState }: { onState: (hook: PasskeyHook) => void }) {
 
 export function SignIn() {
   const search = useSearch();
-  return search.get('link') === 'existing' ? (
-    <Suspense
-      fallback={
-        <PublicFrame>
-          <div className="intro" aria-busy="true">
-            <h1>Opening your existing sign-in…</h1>
-          </div>
-        </PublicFrame>
-      }
-    >
-      <LegacyLink />
-    </Suspense>
-  ) : (
-    <HandleSignIn />
-  );
-}
-function HandleSignIn() {
-  const search = useSearch();
   const next = safeNext(search.get('next'));
-  const existing = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ? existingDeleteRequestHref(next) : undefined;
   const { flowError } = useOauth();
   const { signIn: github } = useSignInWithGithub(api.auth);
   const driver = useRef<PasskeyHook | null>(null);
@@ -173,11 +153,6 @@ function HandleSignIn() {
           .
         </span>
         <span>New here? Type the handle you want.</span>
-        {existing ? (
-          <a href={existing}>Review with your existing sign-in</a>
-        ) : (
-          <a href={signInHref(next, true)}>Add a passkey from your existing sign-in</a>
-        )}
         <span>
           From a terminal: <code>nforge login</code>
         </span>
@@ -286,6 +261,3 @@ export function FirstPasskey({ onDone }: { onDone: (next: string) => void }) {
     </PublicFrame>
   );
 }
-
-// The retained provider loads only for explicit existing-account linking.
-const LegacyLink = lazy(() => import('./LegacyLink'));

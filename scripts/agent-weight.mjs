@@ -5,7 +5,7 @@ import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const webOnlyPackages = ['@clerk/react', 'react', 'react-dom', 'react-markdown', 'remark-gfm'];
+export const webOnlyPackages = ['react', 'react-dom', 'react-markdown', 'remark-gfm'];
 export function webImport(id, root) {
   const path = relative(root, id.split('?')[0]).split(sep).join('/');
   return (

@@ -7,6 +7,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { accountFor } from './urlIdentity';
 
 async function owned(ctx: MutationCtx, id: Id<'imports'>, owner: string | undefined) {
   const job = await ctx.db.get(id);
@@ -74,6 +75,12 @@ export const add = internalMutation({
     if (!grant) await ctx.db.insert('importReaders', { importId: id, reader });
     return null;
   },
+});
+/** One indexed read: the key names a Forge account (every sign-in and device approval makes its row; closing removes it). */
+export const accountExists = internalQuery({
+  args: { owner: v.string() },
+  returns: v.boolean(),
+  handler: async (ctx, { owner }) => (await accountFor(ctx, owner)) !== null,
 });
 export const allowed = internalQuery({
   args: { id: v.id('imports'), reader: v.string() },

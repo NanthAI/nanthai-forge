@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Browser lifecycle rule 1 for Convex Auth (docs/development.md, "Convex Auth core beside Clerk"): a token refresh that
+// Browser lifecycle rule 1 for Convex Auth (docs/development.md, "Convex Auth"): a token refresh that
 // falls due while the tab is hidden or dormant waits, and every refresh asked for meanwhile is answered by exactly one
 // refresh when the tab wakes. Without it a hidden tab refreshes once an hour for as long as it stays open.
 // App code around the Convex client's auth hook; the library is not patched. No timer: it waits on events only.

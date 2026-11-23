@@ -13,7 +13,7 @@ These rules hold the design together. Break one only with an explicit owner deci
 9. **History is kept.** No automatic age or count deletion, no quotas and no retention deadlines unless the owner asks. Collection removes only verified unreferenced objects. The owner-approved operational windows below exclude Git/source history, receipts, audit and planning.
 10. **Live signals are advisory.** Sessions and messages are never locks, never authorization and never acceptance. Declared readiness is not checked or accepted source.
 11. **No sandbox claims.** Do not describe Lanes, worktrees, MCP permissions or scoped grants as confinement.
-12. **Hosted stack is fixed for development.** Convex for records, Cloudflare R2 for every byte, Clerk identity, the Forge GitHub App and Cloudflare Workers hosting for the web site (free plan). R2 is required on every deployment, self-host included (any S3-compatible bucket through `R2_ENDPOINT`). Convex file storage holds only legacy copies awaiting cleanup ([data placement](data-placement.md)). The [product analytics decision](operations/product-analytics.md) approves optional PostHog capture for development only.
+12. **Hosted stack is fixed for development.** Convex for records, Cloudflare R2 for every byte, Convex Auth identity (passkeys and GitHub), the Forge GitHub App and Cloudflare Workers hosting for the web site (free plan). R2 is required on every deployment, self-host included (any S3-compatible bucket through `R2_ENDPOINT`). Convex file storage holds only legacy copies awaiting cleanup ([data placement](data-placement.md)). The [product analytics decision](operations/product-analytics.md) approves optional PostHog capture for development only.
 13. **No new restrictions without being asked.** Do not add user-facing limits, extra steps, delays, access conditions or retention rules. A review finding does not authorize them.
 
 Constraint 7 was replaced by the owner on 2026-10-25, superseding "Native is the daily format". The [SP1 storage decision](research/sp1-storage.md) records the evidence and implementation order.
@@ -222,7 +222,7 @@ Case 1 passed on the library's code path with recorded GitHub responses; its liv
 
 Two checks still need the owner: case 3 on real phones, and that live GitHub leg. They gate removing the current provider, not starting the implementation.
 
-The implementation is a fresh slice. It keeps the Forge account key as the owner everywhere, never a session id. Every browser guard resolves the session. Dormant tabs hold token refresh (0 calls; 1 refresh per hour while awake at a 1 hour token lifetime), and passkey autofill runs only while the tab is visible and active. Forge gets its own GitHub user-token store. Constraint 12 changes from "Clerk identity" when the current provider is removed. A security review covers the decisions listed in the findings before that removal.
+The implementation is a fresh slice. It keeps the Forge account key as the owner everywhere, never a session id. Every browser guard resolves the session. Dormant tabs hold token refresh (0 calls; 1 refresh per hour while awake at a 1 hour token lifetime), and passkey autofill runs only while the tab is visible and active. Forge gets its own GitHub user-token store. Constraint 12 now names Convex Auth identity. A security review covered the decisions listed in the findings before the old provider was removed (de67c77d).
 
 ## Decisions from 11 November
 

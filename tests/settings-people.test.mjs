@@ -59,14 +59,10 @@ test('handle search and invitations require current access management authority'
 });
 test('pending email invitation is private, retry-safe, and redeemed only by verified identity', async t => {
   const s = setup(),
-    oldFetch = globalThis.fetch,
-    oldKey = process.env.CLERK_SECRET_KEY;
-  process.env.CLERK_SECRET_KEY = 'synthetic';
+    oldFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json([]);
   t.after(() => {
     globalThis.fetch = oldFetch;
-    if (oldKey === undefined) delete process.env.CLERK_SECRET_KEY;
-    else process.env.CLERK_SECRET_KEY = oldKey;
   });
   for (let i = 0; i < 2; i++)
     await actions.invitePerson._handler(s.ctx, {
@@ -86,30 +82,6 @@ test('pending email invitation is private, retry-safe, and redeemed only by veri
   assert.equal(s.tables.projectInvites.size, 1);
   assert.equal(s.tables.projectContributors.size, 0, 'sign-in leaves acceptance to the person');
 });
-test('handle seeds use only the chosen username or GitHub login, never names or emails', async t => {
-  const previous = globalThis.fetch,
-    oldKey = process.env.CLERK_SECRET_KEY;
-  process.env.CLERK_SECRET_KEY = 'synthetic';
-  let person = {
-    id: 'person',
-    first_name: 'Private',
-    last_name: 'Person',
-    email_addresses: [{ email_address: 'private@example.test' }],
-  };
-  globalThis.fetch = async () => Response.json(person);
-  t.after(() => {
-    globalThis.fetch = previous;
-    if (oldKey === undefined) delete process.env.CLERK_SECRET_KEY;
-    else process.env.CLERK_SECRET_KEY = oldKey;
-  });
-  const { personUrlProfile } = await import(moduleUrl('../convex/projectPeople.ts'));
-  assert.deepEqual(await personUrlProfile('person'), {});
-  person = { ...person, external_accounts: [{ provider: 'oauth_github', username: 'octo-person' }] };
-  assert.deepEqual(await personUrlProfile('person'), { githubLogin: 'octo-person' });
-  person = { ...person, username: 'chosen' };
-  assert.deepEqual(await personUrlProfile('person'), { username: 'chosen', githubLogin: 'octo-person' });
-});
-
 test('cancelled invitations remain cancelled on retry and cannot be cancelled across projects', async () => {
   const s = setup();
   const input = {

@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { botHandle, botPasskey } from './bot-credentials.mjs';
-import { botBrowserIdentity, finishClerkBotSignIn } from './browser.mjs';
 import { ShotError } from './options.mjs';
-import { signInHref } from '../../web/src/app/paths.ts';
 import {
   observePasskeySession,
   openNativeBotSignIn,
@@ -42,26 +40,9 @@ async function verify(browser, config, entry) {
   });
 }
 
-async function linkExistingBot(page, { origin, deployment, clerkHandle }, clerk) {
-  const url = new URL(signInHref(undefined, true), origin);
-  await page.goto(url.href, { waitUntil: 'domcontentloaded' });
-  if (page.url() !== url.href) throw new ShotError('Expected the existing-account passkey page.');
-  await page.getByRole('button', { name: 'Continue with your existing sign-in', exact: true }).click();
-  await finishClerkBotSignIn(page, clerk);
-  if ((await clerkHandle(page, deployment)) !== botHandle)
-    throw new ShotError('The existing Clerk sign-in does not own the Forge bot handle.');
-  if (page.url() !== url.href) throw new ShotError('Expected the existing-account passkey page.');
-  await page.getByRole('button', { name: 'Add a passkey to this account', exact: true }).click();
-  const added = page.getByRole('heading', { name: 'Your account has a passkey', exact: true });
-  await added.or(page.locator('.signin [role="alert"]:visible')).first().waitFor();
-  if (!(await added.isVisible()))
-    throw new ShotError('Could not attach a passkey to the existing Forge bot account.');
-}
-
-async function enroll(browser, config, clerk, stage) {
+async function enroll(browser, config, stage) {
   const { origin, deployment } = config;
-  const options = clerk ? await botBrowserIdentity(browser, { kind: 'clerk' }) : {};
-  return withPage(browser, options, async page => {
+  return withPage(browser, {}, async page => {
     let sawDeployment = false;
     let pending;
     page.on('request', request => {
@@ -105,24 +86,21 @@ async function enroll(browser, config, clerk, stage) {
         { origin, botHandle },
       );
 
-      if (clerk) await linkExistingBot(page, config, clerk);
-      else {
-        const session = observePasskeySession(page, deployment);
-        const signInUrl = await openNativeBotSignIn(page, origin);
-        try {
-          await submitNativeBotSignIn(page, origin, session, timeout);
-        } catch (error) {
-          if (
-            !pending &&
-            page.url() === signInUrl &&
-            (await page
-              .locator('form.signin [role="alert"]')
-              .filter({ hasText: 'That handle is taken.' })
-              .isVisible())
-          )
-            return retainedHandle;
-          throw error;
-        }
+      const session = observePasskeySession(page, deployment);
+      const signInUrl = await openNativeBotSignIn(page, origin);
+      try {
+        await submitNativeBotSignIn(page, origin, session, timeout);
+      } catch (error) {
+        if (
+          !pending &&
+          page.url() === signInUrl &&
+          (await page
+            .locator('form.signin [role="alert"]')
+            .filter({ hasText: 'That handle is taken.' })
+            .isVisible())
+        )
+          return retainedHandle;
+        throw error;
       }
       if (!pending) throw new ShotError('The site did not create a bot passkey.');
       return pending;
@@ -142,27 +120,15 @@ export async function provisionBotPasskey(browser, config, credentials, save) {
     token = await verify(browser, config, passkey).catch(() => undefined);
   }
   if (!token) {
-    const clerk =
-      credentials.email === 'forge-ui-bot+clerk_test@example.com' &&
-      credentials.deployment === config.deployment &&
-      typeof credentials.password === 'string' &&
-      credentials.password &&
-      typeof credentials.userId === 'string' &&
-      credentials.userId
-        ? credentials
-        : undefined;
     const stage = async pending => {
       credentials.pendingPasskey = pending;
       await save();
     };
-    passkey = await enroll(browser, config, undefined, stage);
-    if (passkey === retainedHandle) {
-      if (!clerk)
-        throw new ShotError(
-          'The existing Forge bot needs its saved Clerk credentials to attach a first passkey.',
-        );
-      passkey = await enroll(browser, config, clerk, stage);
-    }
+    passkey = await enroll(browser, config, stage);
+    if (passkey === retainedHandle)
+      throw new ShotError(
+        'The Forge bot handle already has an account, but no saved passkey matches it. Restore the saved bot passkey.',
+      );
     token = await verify(browser, config, passkey);
   }
   credentials.passkey = passkey;

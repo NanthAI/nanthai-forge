@@ -98,13 +98,20 @@ export const createPasskey = internalMutation({
 /** Used only on authenticated server paths, including the GitHub App connection. */
 export const githubAccounts = internalQuery({
   args: { accountKey: v.string() },
-  returns: v.union(v.array(v.string()), v.null()),
+  returns: v.array(v.string()),
   handler: async (ctx, { accountKey }) => {
     const user = await ctx.db
       .query('users')
       .withIndex('by_accountKey', q => q.eq('accountKey', accountKey))
       .unique();
-    return user ? (user.githubId ? [user.githubId] : user.legacyGithubProvider ? null : []) : null;
+    const githubId = user?.githubId;
+    if (!githubId || user.githubConflict) return [];
+    // The same rule as GitHub sign-in: an id another account also claims proves nothing.
+    const claims = await ctx.db
+      .query('users')
+      .withIndex('by_githubId', q => q.eq('githubId', githubId))
+      .take(2);
+    return claims.length === 1 ? [githubId] : [];
   },
 });
 

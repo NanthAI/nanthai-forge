@@ -13,8 +13,6 @@ after(() =>
 );
 const { state } = await import('./hosted-fixture.mjs');
 
-export const legacy = await import(moduleUrl('../convex/authLegacy.ts'));
-export const legacyStore = await import(moduleUrl('../convex/authLegacyStore.ts'));
 export const links = await import(moduleUrl('../convex/authLinks.ts'));
 export const users = await import(moduleUrl('../convex/authUsers.ts'));
 export const auth = await import(moduleUrl('../convex/auth.ts'));
@@ -42,8 +40,6 @@ export const assertion = {
 export function fixture(t, { mapped = true, github = false } = {}) {
   const values = {
     CONVEX_CLOUD_URL: 'https://auth-fixture.convex.cloud',
-    CLERK_JWT_ISSUER_DOMAIN: 'https://legacy.example',
-    CLERK_SECRET_KEY: 'synthetic-secret',
     AUTH_GITHUB_CLIENT_ID: 'synthetic-client',
     AUTH_GITHUB_CLIENT_SECRET: 'synthetic-secret',
   };
@@ -94,7 +90,7 @@ export function fixture(t, { mapped = true, github = false } = {}) {
   let assertionOwner = 'user',
     failBinding = false;
   const ctx = { ...s.ctx, auth: { getUserIdentity: async () => identity } };
-  const modules = { authLegacyStore: legacyStore, authUsers: users };
+  const modules = { authUsers: users };
   async function dispatch(ref, args) {
     const address = getFunctionAddress(ref),
       name = address.reference;
@@ -224,7 +220,6 @@ export function fixture(t, { mapped = true, github = false } = {}) {
     tickets,
     ticket,
     identity: value => (identity = value),
-    legacy: () => (identity = { subject: owner, issuer: values.CLERK_JWT_ISSUER_DOMAIN, sid: 'old-session' }),
     wrongPasskey: () => (assertionOwner = 'other'),
     failBinding: () => (failBinding = true),
   };

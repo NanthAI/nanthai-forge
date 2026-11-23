@@ -4,11 +4,9 @@
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { accountAction } from './cliServer';
-import { emailRecipient } from './projectPeople';
 import { teamInvitationAnswerArgs } from './teamInvitationWrites';
 import { assertTeamEmailOperation } from './teamInvitationMembership';
 import { api, internal } from './_generated/api';
-
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
@@ -68,10 +66,11 @@ export const answerInvitation = accountAction('person')({
       const proof = await ctx.runQuery(internal.teamInvitationWrites.prepareAccept, input);
       if (!proof) return null;
       if (proof === 'handle') return await ctx.runMutation(internal.teamInvitationWrites.answer, input);
-      const recipient = await emailRecipient(proof.email, proof.native, true);
+      // Only the account that holds the verified address can accept; no other sign-in is consulted.
+      invariant(proof.native, 'BAD_ARGUMENT', 'No Forge account matches that email address.');
       return await ctx.runMutation(internal.teamInvitationWrites.answer, {
         ...input,
-        providerSubject: recipient!.id,
+        providerSubject: proof.native,
       });
     } catch (error) {
       return report(error);

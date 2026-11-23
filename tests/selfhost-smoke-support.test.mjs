@@ -43,39 +43,31 @@ function auth(variables) {
 }
 
 test('fresh native auth reproduces the unset optional issuer failure; smoke defines it before deploy', async () => {
-  assert.throws(
-    () => auth({ CLERK_JWT_ISSUER_DOMAIN: 'https://token.actions.githubusercontent.com' }),
-    /FORGE_CLI_ISSUER.*not set/,
+  assert.throws(() => auth({}), /FORGE_CLI_ISSUER.*not set/);
+  const variables = {},
+    commands = [];
+  await deploySmoke(
+    args => {
+      commands.push(args);
+      if (args[0] === 'env') variables[args[2]] = args[3];
+      // Only Forge's own issuers remain: no third-party sign-in provider is configured (Item de67c77d).
+      else assert.deepEqual(auth(variables).providers, []);
+    },
+    {
+      token: 'synthetic-token',
+      keys: 'synthetic-keyring',
+      r2: { R2_BUCKET: 'synthetic-bucket', R2_ENDPOINT: 'http://127.0.0.1:9' },
+    },
   );
-  for (const issuer of ['', 'https://token.actions.githubusercontent.com']) {
-    const variables = {},
-      commands = [];
-    await deploySmoke(
-      args => {
-        commands.push(args);
-        if (args[0] === 'env') variables[args[2]] = args[3];
-        else
-          assert.deepEqual(
-            auth(variables).providers,
-            issuer ? [{ domain: issuer, applicationID: 'convex' }] : [],
-          );
-      },
-      {
-        issuer,
-        token: 'synthetic-token',
-        keys: 'synthetic-keyring',
-        r2: { R2_BUCKET: 'synthetic-bucket', R2_ENDPOINT: 'http://127.0.0.1:9' },
-      },
-    );
-    assert.equal(variables.FORGE_CLI_ISSUER, '');
-    // Self-host has no Convex byte mode: the smoke always configures object storage.
-    assert.equal(variables.FORGE_BLOBS, undefined);
-    assert.equal(variables.R2_BUCKET, 'synthetic-bucket');
-    assert.equal(variables.R2_ENDPOINT, 'http://127.0.0.1:9');
-    assert.equal(variables.GITHUB_PUBLIC_TOKEN, 'synthetic-token');
-    assert.equal(variables.FORGE_SECRET_KEYS, 'synthetic-keyring');
-    assert.deepEqual(commands.at(-1), ['deploy', '--typecheck', 'enable', '--yes']);
-  }
+  assert.equal(variables.FORGE_CLI_ISSUER, '');
+  assert.equal('CLERK_JWT_ISSUER_DOMAIN' in variables, false);
+  // Self-host has no Convex byte mode: the smoke always configures object storage.
+  assert.equal(variables.FORGE_BLOBS, undefined);
+  assert.equal(variables.R2_BUCKET, 'synthetic-bucket');
+  assert.equal(variables.R2_ENDPOINT, 'http://127.0.0.1:9');
+  assert.equal(variables.GITHUB_PUBLIC_TOKEN, 'synthetic-token');
+  assert.equal(variables.FORGE_SECRET_KEYS, 'synthetic-keyring');
+  assert.deepEqual(commands.at(-1), ['deploy', '--typecheck', 'enable', '--yes']);
 });
 
 test('import failures expose the job reason through redacted smoke diagnostics', () => {

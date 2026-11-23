@@ -42,13 +42,17 @@ and [installation tokens](https://docs.github.com/en/rest/apps/apps#create-an-in
 
 ## Import sign-in setup
 
-Private imports use the GitHub App user token from Clerk's `oauth_github`
-connection. Its client ID and secret must belong to the same App as this
-deployment's `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET`. A live
-user token from another App is a setup mismatch; reconnecting to that same
-provider does not fix it. Deployments using different Apps need separate
-Clerk instances or a provider configuration that issues tokens for each App.
-Changing a shared instance's GitHub provider affects its other deployments.
+Private imports use the person's GitHub App user token. Forge stores it sealed
+(`FORGE_GITHUB_TOKEN_KEYRING`) when the person connects GitHub through this
+deployment's App, whose client is `GITHUB_APP_CLIENT_ID` and
+`GITHUB_APP_CLIENT_SECRET`. Without a saved connection the import asks the
+person to connect GitHub. A saved token from another App is a setup mismatch;
+the person reconnects GitHub with this deployment's App.
+
+An App with expiring user tokens also returns a refresh token. Forge stores it
+sealed with the access token's expiry and renews on first use after expiry: one
+GitHub request and one write per renewal, nothing on a timer. A refused renewal
+leaves the stored token, and GitHub's check then asks the person to reconnect.
 
 Set `GITHUB_APP_SLUG` to this deployment's App URL slug in the backend and
 `VITE_GITHUB_APP_SLUG` to the same slug in the web build environment. Vite
@@ -60,24 +64,7 @@ the `GITHUB_` variable prefix). The preview deploy script reads
 as `VITE_GITHUB_APP_SLUG` automatically. No App
 client secret or private key belongs in the web build.
 
-Before importing a private repository, the operator can check the connection
-without starting an import. Build core, then run:
-
-```sh
-node --env-file=PRIVATE_ENV_FILE scripts/check-github-setup.mjs
-```
-
-The owner-only environment file supplies `CLERK_SECRET_KEY`,
-`GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` and `FORGE_GITHUB_SETUP_USER`
-(the Clerk user ID of an account linked to GitHub). Deliver these directly to
-the operator's file, never through an agent or chat. The check retrieves that
-user's current token and checks it against the deployment App. A rejected App
-client, another App's live token, an expired token and provider unavailability
-have distinct messages. Output contains no credential values. This optional
-setup diagnostic makes one Clerk request, one GitHub App check and, only after
-an unrecognized token, one GitHub user read; no Convex calls, writes or idle work.
-
-Public imports need no GitHub user token or Clerk GitHub connection. When the
+Public imports need no GitHub user token or GitHub connection. When the
 configured public credential is rejected, Forge proves current public visibility
 with an anonymous repository read and carries anonymous access into source
 acquisition. Private repositories still require the importer token; GitHub rate

@@ -34,7 +34,7 @@ export const set = action({
     try {
       const owner = await caller(ctx);
       await ctx.runQuery(internal.projectWork.owner, { projectId: input.projectId, owner });
-      const reader = input.present ? await checkForgeUser(input.reader) : input.reader.trim();
+      const reader = input.present ? await checkForgeUser(ctx, input.reader) : input.reader.trim();
       if (
         input.present &&
         (await requestMemberApproval(
@@ -45,7 +45,7 @@ export const set = action({
         ))
       )
         return null;
-      // Rechecks owner, project state and existing write grants after the provider round-trip.
+      // Rechecks owner, project state and existing write grants after the account lookup.
       return await ctx.runMutation(save, { ...input, reader, owner });
     } catch (error) {
       return report(error);

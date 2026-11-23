@@ -2,42 +2,11 @@
 // Copyright 2026 Ferdinando Valsecchi
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { options, destination, selectedReviewRoute } from '../scripts/ui-shots/options.mjs';
-
-test('screenshot routes preserve the hosted project and resolve review parent Intent', () => {
-  const base = 'https://preview.example.test/';
-  const expected = {
-    now: 'overview',
-    intents: 'intent',
-    lanes: 'lanes',
-    planning: 'planning',
-    activity: 'coordination',
-    code: 'delivery',
-    'code-graph': 'delivery',
-    settings: 'sharing',
-    'lane:lane-id': 'lanes',
-    'review:view-id': 'intent',
-  };
-  for (const [page, section] of Object.entries(expected)) {
-    const url = new URL(destination(base, 'private-project', page, 'parent-intent'));
-    assert.equal(url.origin, new URL(base).origin);
-    assert.equal(url.searchParams.get('project'), 'private-project');
-    assert.equal(url.searchParams.get('surface'), 'projects');
-    assert.equal(url.searchParams.get('projectTab'), section);
-    if (page.startsWith('review:')) {
-      assert.equal(url.searchParams.get('reviewView'), 'view-id');
-      assert.equal(url.searchParams.get('intent'), 'parent-intent');
-      assert.equal(url.searchParams.get('intentTab'), 'delivery');
-      assert.equal(url.searchParams.get('classic'), '1');
-    }
-  }
-  assert.equal(destination(base, 'project', 'device'), `${base}device`);
-  assert.throws(() => destination(base, 'project', 'review:id'), /parent Intent/);
-});
+import { options } from '../scripts/ui-shots/options.mjs';
 
 test('screenshot CLI validates pages and dimensions before using credentials or network', () => {
   const args = ['--base', 'http://localhost:5179', '--out', '/tmp/ui'];
-  const result = options([...args, '--pages', 'now,intents,lane:abc,review:def,settings,device']);
+  const result = options([...args, '--pages', 'now,intents,lane:abc,initiative:def,settings,device']);
   assert.equal(options([...args, '--diff-file', 'src/large.ts']).diffFile, 'src/large.ts');
   assert.deepEqual(result.widths, [1500, 390]);
   assert.deepEqual(result.themes, ['dark', 'light']);
@@ -48,6 +17,11 @@ test('screenshot CLI validates pages and dimensions before using credentials or 
     ['--pages', 'fake'],
     ['--pages', 'bootstrap'],
     ['--pages', 'review:'],
+    // Old screenshot-flow pages have no rebuilt screen.
+    ['--pages', 'review:def'],
+    ['--pages', 'intent:one'],
+    ['--pages', 'view:two'],
+    ['--pages', 'settings:autonomy'],
   ])
     assert.throws(() => options([...args, ...bad]));
   assert.throws(
@@ -119,92 +93,10 @@ test('CLI errors redact malformed credentials and argument values before opening
   assert.ok(!`${invalid.stdout}${invalid.stderr}`.includes(marker));
 });
 
-test('Convex token selection supports both the current Clerk integration and legacy templates', async t => {
-  const { convexToken } = await import('../scripts/ui-shots/browser.mjs');
-  const previous = globalThis.window;
-  t.after(() => {
-    if (previous === undefined) delete globalThis.window;
-    else globalThis.window = previous;
-  });
-  const sessionToken = audience =>
-    `header.${Buffer.from(JSON.stringify({ aud: audience })).toString('base64url')}.signature`;
-  const page = { evaluate: callback => callback() },
-    calls = [];
-  const native = sessionToken('convex');
-  globalThis.window = {
-    Clerk: {
-      session: {
-        getToken: async options => {
-          calls.push(options);
-          assert.equal(options, undefined, 'native integration must never request a missing legacy template');
-          return native;
-        },
-      },
-    },
-  };
-  assert.equal(await convexToken(page), native);
-  assert.equal(calls.length, 1);
-  calls.length = 0;
-  globalThis.window.Clerk.session.getToken = async options => {
-    calls.push(options);
-    return options?.template === 'convex' ? 'legacy-convex-token' : sessionToken(undefined);
-  };
-  assert.equal(await convexToken(page), 'legacy-convex-token');
-  assert.deepEqual(calls, [undefined, { template: 'convex' }]);
-  globalThis.window.Clerk.session = null;
-  assert.equal(await convexToken(page), null);
-});
-
 test('signed-out landing captures are separate from credentialed project captures', () => {
   const args = ['--base', 'http://localhost:5295', '--out', '/tmp/ui', '--pages'];
   assert.deepEqual(options([...args, 'landing']).pages, ['landing']);
-  assert.equal(destination('http://localhost:5295/', undefined, 'landing'), 'http://localhost:5295/');
   assert.throws(() => options([...args, 'landing,now']), /separately/);
-});
-
-test('Lane screenshot variants validate before sign-in and keep default captures unified', () => {
-  const args = ['--base', 'http://localhost:5294', '--out', '/tmp/ui'];
-  assert.deepEqual(options(args).variants, ['unified']);
-  assert.deepEqual(options([...args, '--variants', 'split,inline,side-closed,files-closed']).variants, [
-    'split',
-    'inline',
-    'side-closed',
-    'files-closed',
-  ]);
-  assert.throws(() => options([...args, '--variants', 'unknown']), /Unknown Lane variant/);
-});
-
-test('review capture follows only the same project and exact lossless View route', () => {
-  const id = '0199e87f-78a6-4388-bfa4-d8f8f6ba279b';
-  const selected = `https://preview.test/dino/forge~project/review/v-${Buffer.from(id.replaceAll('-', ''), 'hex').toString('base64url')}`;
-  assert.equal(selectedReviewRoute(selected, 'https://preview.test/?project=project', 'project', id), true);
-  assert.equal(
-    selectedReviewRoute(selected.replace('~project', '~other'), 'https://preview.test/', 'project', id),
-    false,
-  );
-  assert.equal(
-    selectedReviewRoute(
-      selected.replace('preview.test', 'other.test'),
-      'https://preview.test/',
-      'project',
-      id,
-    ),
-    false,
-  );
-  assert.equal(selectedReviewRoute(selected, 'https://preview.test/', 'project', 'another-view'), false);
-});
-
-test('Intent and View screenshot destinations preserve their selected record', () => {
-  const base = 'http://localhost:5393';
-  const intent = new URL(destination(base, 'project', 'intent:intent-id'));
-  assert.equal(intent.searchParams.get('intent'), 'intent-id');
-  const view = new URL(destination(base, 'project', 'view:view-id'));
-  assert.equal(view.searchParams.get('projectTab'), 'views');
-  assert.equal(view.searchParams.get('viewId'), 'view-id');
-  assert.deepEqual(options(['--base', base, '--out', '/tmp/ui', '--pages', 'intent:one,view:two']).pages, [
-    'intent:one',
-    'view:two',
-  ]);
 });
 
 test('home and Settings sections have signed-in screenshot routes', () => {
@@ -214,14 +106,9 @@ test('home and Settings sections have signed-in screenshot routes', () => {
     '--out',
     '/tmp/ui',
     '--pages',
-    'home,settings:autonomy,settings:checks,settings:access',
+    'home,settings:checks,settings:access',
   ];
-  assert.deepEqual(options(args).pages, ['home', 'settings:autonomy', 'settings:checks', 'settings:access']);
-  const home = new URL(destination('http://localhost:5179', 'p', 'home'));
-  assert.equal(home.searchParams.get('project'), null);
-  assert.equal(home.searchParams.get('surface'), 'projects');
-  const settings = new URL(destination('http://localhost:5179', 'p', 'settings:autonomy'));
-  assert.equal(settings.searchParams.get('settingsSection'), 'autonomy');
+  assert.deepEqual(options(args).pages, ['home', 'settings:checks', 'settings:access']);
 });
 
 test('missing reader discovery is an optional rollout; other query failures remain errors', async () => {

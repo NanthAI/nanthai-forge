@@ -37,13 +37,8 @@ export async function readBotCredentials(file, base) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw))
     throw new ShotError('Invalid bot credentials file.');
   const projectId = nonempty(raw.projectId) ? raw.projectId : undefined;
-  if (!Object.hasOwn(raw, 'passkey')) {
-    const { email, password, userId } = raw;
-    if (![email, password, userId].every(nonempty))
-      throw new ShotError('Bot credentials need email, password and userId.');
-    return { kind: 'clerk', email, password, userId, projectId };
-  }
-
+  if (!Object.hasOwn(raw, 'passkey'))
+    throw new ShotError('Bot credentials need a passkey. Run node scripts/ui-bot-setup.mjs --passkey.');
   return { ...botPasskey(raw.passkey, base), projectId };
 }
 

@@ -49,11 +49,15 @@ function credentialFixture() {
   };
 }
 
-test('tooling keeps existing Clerk files working and refuses an invalid or mismatched passkey without falling back', async t => {
+test('tooling refuses an old password-only file, an invalid or mismatched passkey, and never falls back', async t => {
   const file = await credentialsFile(t);
   const clerk = { email: 'fixture@example.test', password: 'fixture-secret', userId: 'fixture-user' };
   await writeFile(file, JSON.stringify(clerk), { mode: 0o600 });
-  assert.deepEqual(await readBotCredentials(file, base), { ...clerk, kind: 'clerk', projectId: undefined });
+  await assert.rejects(readBotCredentials(file, base), error => {
+    assert.match(error.message, /need a passkey.*ui-bot-setup\.mjs --passkey/);
+    assert.doesNotMatch(error.message, /fixture-secret/);
+    return true;
+  });
   await symlink(file, file + '.link');
   await assert.rejects(readBotCredentials(file + '.link', base), /private bot credentials/);
   const { config } = credentialFixture();
@@ -66,7 +70,7 @@ test('tooling keeps existing Clerk files working and refuses an invalid or misma
     assert.doesNotMatch(error.message, /FIXTURE-PRIVATE-KEY|fixture-secret/);
     return true;
   });
-  const denied = new BotNoReaderGrant(deployment, 'fixture-secret', 'passkey');
+  const denied = new BotNoReaderGrant();
   assert.match(denied.message, /native UI bot cannot read/);
   assert.doesNotMatch(denied.message, /fixture-secret|ui-bot-setup/);
 });
@@ -173,8 +177,8 @@ test('native capture uses rebuilt addresses and refuses legacy-only screens expl
     `${root}/code/files/src/has%20space.ts`,
   );
   assert.equal(passkeyDestination(base, undefined, 'device'), `${base}/device`);
-  assert.throws(() => passkeyDestination(base, project, 'intent:example'), /Clerk screenshot flow/);
-  assert.throws(() => passkeyDestination(base, project, 'review:example'), /Clerk screenshot flow/);
+  assert.throws(() => passkeyDestination(base, project, 'intent:example'), /not one of the rebuilt screens/);
+  assert.throws(() => passkeyDestination(base, project, 'review:example'), /not one of the rebuilt screens/);
 });
 
 test('signed-in Chromium suppresses opted-in wire logging before any credential payload can be recorded', async t => {
@@ -189,7 +193,7 @@ test('signed-in Chromium suppresses opted-in wire logging before any credential 
       '-e',
       `
       import { launchBotBrowser } from './scripts/ui-shots/browser.mjs';
-      const browser = await launchBotBrowser({ kind: 'passkey' }, { executablePath: process.argv[1] });
+      const browser = await launchBotBrowser({ executablePath: process.argv[1] });
       try {
         const page = await browser.newPage();
         if (await page.evaluate(value => value, process.argv[2]) !== process.argv[2]) process.exitCode = 1;

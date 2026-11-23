@@ -655,17 +655,15 @@ npm run dev:hosted -- --port 5179
 
 Configuration is written to the ignored `.env.local`.
 
-**Browser variables** (root `.env.local`): `VITE_CONVEX_URL`, `VITE_CLERK_PUBLISHABLE_KEY`, and optionally `VITE_FORGE_DEMO_REPOSITORY`. Anything starting `VITE_` is public.
+**Browser variables** (root `.env.local`): `VITE_CONVEX_URL` and optionally `VITE_FORGE_DEMO_REPOSITORY`. Anything starting `VITE_` is public.
 
 **Backend variables** (Convex dashboard only, never Vite):
 
-- `CLERK_JWT_ISSUER_DOMAIN`: the Forge Clerk app's Frontend API domain, with its Convex integration set to audience `convex`. Leave it empty for anonymous public-only use.
-- `CLERK_SECRET_KEY`
-- `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET`: the Forge GitHub App. Configure Clerk's GitHub connection with this same client.
+- `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET`: the Forge GitHub App. Private-repository access uses the person's GitHub App user token, saved sealed when they connect GitHub (see [Convex Auth](#convex-auth)).
 - `GITHUB_WEBHOOK_SECRET`: set the App webhook to `/github/webhook` on the deployment's `.convex.site` URL, with SSL verification and the Push event. Deliveries are verified by HMAC-SHA256 over the original bytes. Webhooks only record diagnostics. Re-index stays an explicit action.
 - `FORGE_CLI_PRIVATE_KEY`: RSA PKCS#8 private PEM for Forge-issued CLI credentials. Generate a dedicated RSA 2048-bit or larger key; keep it server-side, never under `VITE_`.
-- `FORGE_CLI_ISSUER`: exact HTTPS Convex HTTP origin, e.g. `https://your-deployment.convex.site`, without a trailing slash. It must differ from the Clerk issuer. `/auth/jwks` publishes only its public RSA JWK; the new custom JWT provider accepts audience `forge-cli`.
-- `FORGE_WEB_URL`: HTTPS origin of the Forge web app serving `/device` (the earlier `/-/device` address redirects to it). Deploy the Convex auth config, HTTP actions, functions and schema together, then publish the hosted web build. Existing Clerk/GitHub settings remain required. For a custom HTTP origin, set `FORGE_HTTP_URL` in the CLI environment; standard `.convex.cloud` deployment URLs derive `.convex.site`.
+- `FORGE_CLI_ISSUER`: exact HTTPS Convex HTTP origin, e.g. `https://your-deployment.convex.site`, without a trailing slash. `/auth/jwks` publishes only its public RSA JWK; the custom JWT provider accepts audience `forge-cli`. A token from any other issuer is treated as signed out.
+- `FORGE_WEB_URL`: HTTPS origin of the Forge web app serving `/device` (the earlier `/-/device` address redirects to it). Deploy the Convex auth config, HTTP actions, functions and schema together, then publish the hosted web build. For a custom HTTP origin, set `FORGE_HTTP_URL` in the CLI environment; standard `.convex.cloud` deployment URLs derive `.convex.site`.
 - `FORGE_SECRET_KEYS`: the Secret Object keyring (see [operations](operations.md)).
 - `GITHUB_PUBLIC_TOKEN`: optional, for public GitHub API reads only.
 - `GITHUB_APP_SLUG`: optional, the Forge GitHub App's URL slug. An import refusal for an owner without an installation links `https://github.com/apps/SLUG/installations/new` when it is set.
@@ -933,15 +931,12 @@ The shared [stub contract](billing.md) adds no accounting calls.
 synthetic data. Set `FORGE_BILLING_SHOTS` to a private output directory when running them to capture
 both themes at 1440 and 390 px. It does not verify an authenticated account.
 
-### Convex Auth core beside Clerk
+### Convex Auth
 
 Convex upgrades must replay scheduler self-cancellation: use `cancelPendingTask` with request `scheduledFunctionId` and a pending-only check (running mutations still appear pending); pass an already-read task to avoid a second read.
 
 The backend mounts Convex Auth 2.0.0 on Convex 1.50.0 as `auth`, `authGithub`,
-`authPasskey` and `authUsername`. The current browser screens still use Clerk.
-The app (below) signs in with these functions only. There
-is no provider switch flag. Clerk removal follows the live GitHub and phone
-checks and the pre-removal security review.
+`authPasskey` and `authUsername`. The app signs in with these functions only.
 
 New deployment settings (names only; values stay in the deployment):
 
@@ -978,9 +973,8 @@ New deployment settings (names only; values stay in the deployment):
 passkey management. The identifier is the current Forge handle, using the same
 2–39 lowercase ASCII letter/digit/hyphen rules and reserved destinations as
 account settings. Registration refuses every retained handle owned by another
-account and claims the chosen handle in the registration transaction. Existing
-accounts use their original sign-in until they attach a passkey; typing their
-handle cannot create another account. A handle change moves the passkey sign-in
+account and claims the chosen handle in the registration transaction. Typing an
+existing handle cannot create another account. A handle change moves the passkey sign-in
 name in that transaction; retained URL aliases do not become sign-in names. Passkey challenge starts share a fixed-minute deployment budget of 120 and an
 exact per-handle budget of 6; sign-up finish attempts use 20 and 3 respectively.
 Autofill shares the global start budget. The two counter rows reset in place on
@@ -1004,8 +998,7 @@ GitHub's sudo mode: a copied browser token inside it can change passkeys, and ev
 shows the new-passkey notice. `finish` checks the 20-passkey cap again and answers a repeat for an already stored
 credential with that passkey. Sign-in
 ceremonies request no extensions; the secret-envelope PRF ceremony uses its own
-relying party/origin. Review first-passkey freshness and the pinned internal API
-before removing Clerk.
+relying party/origin.
 
 The shared function builders apply `forgeIdentity.ts`: a live component session
 and its `users` row resolve to a Forge account key. Revoked sessions become signed
@@ -1016,13 +1009,44 @@ credential; a CLI credential cannot approve another device.
 The granting mutation checks the live browser account inside its transaction,
 so revocation between inspection and approval leaves the device pending.
 
-New account keys retain `user_` plus the Convex user id. Callbacks store numeric
-GitHub ids and verified email only; accounts never link by email. Before switching
-the UI, seed existing account keys and verified numeric GitHub ids into `users`
-following the [spike mapping](research/convex-auth-spike.md#id-mapping-dry-run-case-7).
-Project owners are not rewritten. The existing GitHub App connection seals its
-user token in the account row for private-repository checks; the OAuth sign-in
-token itself is not retained.
+New account keys are `user_` plus the Convex user id. GitHub sign-in stores the
+numeric GitHub id (`users.githubId`) and verified email only; accounts never link
+by email. An identity that belongs to another account returns
+`GITHUB_ACCOUNT_MISMATCH`; nothing is merged or reassigned. The OAuth sign-in
+token itself is not retained. When a person connects GitHub through Forge's own
+OAuth callback, their GitHub App user token is stored sealed in `users.githubToken`
+under `FORGE_GITHUB_TOKEN_KEYRING`, and private-repository checks read it there.
+With no saved connection the error says "Connect your GitHub account and selected
+repositories." The schema keeps `legacyGithubProvider`, `legacyPasskeyFlow` and the
+auth link event kind `legacy-passkey` only so stored rows still validate.
+
+Successful GitHub links write an `authLinkEvents` audit receipt with the granting
+session, operation/request digest, method, identity and time, in the grant's
+transaction. It contains no OAuth ticket, token or provider profile. GitHub
+tickets stay single-use: a repeated completion makes no new binding, session or
+audit entry and returns the library's `INVALID_CODE`.
+
+Self-hosters set their own HTTPS `FORGE_WEB_URL`, GitHub App credentials/callback
+and independent service-token keyring, and include the auth component data in
+backups. Never copy another deployment's credentials or infer account ownership
+from an email address.
+
+Access tokens last one hour; session/refresh lifetimes retain library defaults.
+Browser builders must apply both lifecycle rules:
+
+1. Hold refresh while hidden **or dormant**, coalescing wake-up into exactly one
+   refresh before authenticated reads resume.
+2. Enable passkey autofill only while the sign-in tab is visible and active;
+   focus-triggered autofill follows the same rule. Continuous mounting renews challenges
+   about every eight minutes.
+
+With those rules, idle clients add zero calls. No cron is added. The library's
+finite challenge cleanup and sign-out token deletion drain, then stop: zero
+scheduled calls per day at fully idle. A browser identity reads one component
+session and one small user row per invocation; actions repeat this after external
+I/O. Cost is constant at 7/14 accounts and 312/624 projects. Sign-in records occupy
+a few KB; source/artifacts stay in R2. These are code-path budgets, not a new
+dev billed-usage measurement.
 
 #### Secrets screen interface
 
@@ -1050,182 +1074,6 @@ See [trust boundaries and current check-secret guidance](security.md#secrets-for
 Gate A remains open; this UI does not start an encryption slice. Future device
 encryption must remain separate from `FORGE_SECRET_KEYS`, sign-in keys and
 `FORGE_GITHUB_TOKEN_KEYRING`; this slice adds or changes no keyring setting.
-
-#### Attach sign-in methods to an existing account
-
-Keep Clerk configured while accounts move. On `/signin`, choose **Add a
-passkey from your existing sign-in** (`?link=existing`). Sign in through the
-retained provider, then add a passkey. Forge verifies the active provider
-session server-to-server on every ceremony leg and checks the authenticated
-account and session again in the granting transaction. The existing Forge
-account key, handle, project ownership and CLI credentials stay intact. If
-that account already has a passkey, it must confirm the addition with one.
-No account is selected by a typed handle or email address. The link keeps
-the sign-in page's return address: after the passkey is added, **Continue with
-your passkey** signs in and returns there, so an account that only had the
-old sign-in can approve an `nforge login` at `/device`.
-
-Sign in with the added passkey, open **Sign-in and devices → Manage sign-in
-methods**, then **Link GitHub to this account**. A passkey confirms the link
-when present. The pinned library completes GitHub's state/PKCE OAuth round
-trip and supplies the numeric identity. Forge checks both the app's `users`
-index and the component binding inside the same transaction. An identity
-belonging to another account returns `GITHUB_ACCOUNT_MISMATCH`; nothing is
-merged or reassigned. A person with several old-provider GitHub identities
-chooses the one they authorize in that round trip. A passkey-only account can
-then use the existing repository connection flow with its attached identity.
-Legacy accounts retain their old repository-token and identity lookup fallback
-until the removal slice replaces it.
-
-Successful links write an `authLinkEvents` audit receipt with the granting
-session, operation/request digest, method, identity and time, in the grant's
-transaction. It contains no OAuth ticket, token or provider profile. Legacy
-finish retries return the recorded passkey; changed requests cannot reuse its
-operation id. GitHub tickets stay single-use: a repeated completion makes no
-new binding, session or audit entry and returns the library's `INVALID_CODE`;
-the methods screen reconciles through its current linked state. Provider
-session verification precedes the Convex transaction; cross-service atomicity
-with a simultaneous provider-side revocation is not claimed.
-
-Non-provider agent and bot account keys are excluded from **browser identity
-migration**, because no provider session can prove ownership of those keys.
-Their existing Forge CLI credentials and owners are retained. The browser flow
-never assigns one to a person by handle/email or by presenting a CLI token.
-Before Clerk removal the owner must review which such accounts are retained,
-and arrange an owner-approved credential-renewal route where necessary; existing
-expiring credentials alone do not prove long-term access. This exclusion adds
-no runtime denial to their current CLI capability. Keep the removal checklist
-open until that review and the final dry run are complete. Current development
-audit counts: 7 accounts, 1 mapped, 6 unmapped, including 5 without a provider
-identity. Counts are an observation before using this linking flow, not proof
-that every account has migrated.
-
-At 7/14 accounts and 312/624 projects, linking reads only indexed account/user
-rows and component records, with no project scans. Each legacy leg is one public
-action, one provider session request and one internal mutation, plus bounded
-component ceremony calls. The first leg inserts at most one missing user and
-updates its pending proof; success adds one passkey and one small audit row.
-GitHub reuses the existing OAuth flow; confirmation/start/finish are explicit
-mutations, and success adds one component identity binding, one audit row and
-updates the existing user. State is O(1) per in-flight user plus one receipt per
-successful link (estimated under 1 KiB per receipt); normal auth component data
-is unchanged. Peak additional app data is a few KiB per operation, independent
-of project count; provider latency dominates wall time (seconds, not measured
-live). Small identity/audit records stay in Convex; source and artifacts stay
-in R2. Landing operations add **0 calls, 0 DB I/O and $0 per 1,000 landings**
-against the $1.682603 reference; the storage guard records zero link-audit bytes
-per landing. Open idle/hidden tabs add zero Convex calls and DB I/O: no polling,
-new timer or scheduled migration job. These are code-path budgets, not a billed
-usage measurement. Live enrollment/linking and owner review remain required
-before provider removal; deploying the flow does not migrate anyone.
-
-#### Existing-account backfill
-
-Deploy the accepted backend before running the operator script, while the old
-sign-in remains available. It needs deployment-admin CLI access and the current
-provider's `CLERK_SECRET_KEY` on the target deployment. No provider or GitHub
-account settings are changed. Use a checkout configured for the intended dev or
-self-host deployment; there is no production selection option in the script.
-
-```sh
-node scripts/auth-backfill.mjs --convex-cwd /path/to/configured/checkout
-node scripts/auth-backfill.mjs --convex-cwd /path/to/configured/checkout --apply
-node scripts/auth-backfill.mjs --convex-cwd /path/to/configured/checkout
-```
-
-The first and last commands are read-only dry runs. `--apply` also runs a full
-dry run before writing. Output contains account/matched/unmatched/conflict
-counts, planned or applied user/account writes, page continuations and handles
-only for unmatched or ambiguous accounts. It never prints provider ids, account
-keys, email, profiles or credentials. Each discovery page reads 25 Forge
-accounts and fetches their provider identities in one filtered request using
-the provider's [user-id list filter](https://clerk.com/docs/reference/backend/user/get-user-list).
-Only `oauth_github` links with verified status and a positive numeric string id
-are candidates. Email is never a matching key or copied by the backfill.
-
-Discovery makes two page passes: the first keeps numeric-id claim counts to
-find duplicates across page boundaries; the second inspects or applies pages.
-Accounts with no verified numeric id are unchanged and listed by handle for
-passkey or later linking. Multiple ids on one account are reported as ambiguous
-for later linking. A verified id claimed by two accounts retains both claims in
-`users`, without creating or reassigning its GitHub component binding. Both
-create-user and existing-account sign-in callbacks then refuse the ambiguous id
-with `GITHUB_ACCOUNT_MISMATCH`. An optional conflict marker also refuses a
-partial-page claim before its competing row has been seeded. Existing incompatible user rows or component
-bindings are reported as conflicts and never overwritten. Conflict resolution
-is a separate, explicit linking decision; the script does not merge accounts.
-
-A unique match gets a `users` row retaining its exact `accountKey`, plus an
-`authGithub` component account binding to that row. No project, permission,
-handle or CLI credential owner is rewritten. A new GitHub identity still gets
-the usual `user_` key when signing in. Repeating apply creates no duplicate rows;
-the final dry run should report zero planned writes. Inspect the conflict count
-as well: an unchanged conflicting run is not a successful mapping.
-
-Seeded accounts retain the existing provider-token lookup until a Forge-owned
-encrypted GitHub App token exists. The seed records that provenance on `users`;
-new Convex Auth accounts keep their existing connection flow. Creating a mapping
-therefore does not force existing people to reconnect repositories. The provider
-removal slice must replace these retained token lookups before deleting Clerk.
-
-On interruption, repeat apply from the beginning or pass
-`--apply --cursor 'LAST_COMPLETED_PAGE_CURSOR'`. The script repeats discovery
-from the beginning to retain cross-page duplicate detection, then resumes
-writes at that page boundary. A lost reply can safely replay its page. Nothing
-is scheduled in the background, and no identity export is saved locally.
-Page digests detect identity changes between discovery passes and stop that page
-before writes; repeating discovery uses the current provider identities.
-`authBackfillStore:seeded {"handle":"HANDLE"}` is an internal read-only check
-that returns just `true` or `false` for a consistent user/component seed.
-
-For `N` accounts, `P=ceil(N/25)` pages and `M` mapped accounts, a standalone
-dry run uses `5P+M` Convex executions: two page actions and their queries, one
-inspection mutation per page, and one component query per mapped account.
-Apply adds at most `M` component mutations for missing bindings; its automatic
-preview adds another dry run. At 7 accounts/2 matches this is 7 executions per
-dry run, 16 for preview plus apply; at 14/4 it is 9 and 22. Page reads are `2N`
-small account rows, with at most six indexed row reads per match and one extra
-component uniqueness read on insert. Apply writes at most `M` users and `M`
-component accounts, a few KB at this scale. Peak server mapping data is one
-25-account page (estimated under 25 KiB); the operator retains only an
-O(distinct GitHub ids) count map plus one page, under 1 KiB for 7/14 ids excluding
-process/library overhead. Runtime is provider/CLI latency per page (seconds,
-estimate); no project-count work occurs. These are one-time migration costs,
-not per-landing costs or measured billing. Landing and idle paths add zero
-calls or bytes; source and artifact bytes remain in R2.
-
-Self-hosters starting fresh need no backfill or old-provider account. Existing
-instances run it against their configured deployment before replacing sign-in,
-keep the original account keys and include the auth component data in backups.
-They set their own HTTPS `FORGE_WEB_URL`, GitHub App credentials/callback and
-independent service-token keyring. Never copy another deployment's credentials
-or infer account ownership from an email address.
-
-Access tokens last one hour; session/refresh lifetimes retain library defaults.
-Browser builders must apply both lifecycle rules:
-
-1. Hold refresh while hidden **or dormant**, coalescing wake-up into exactly one
-   refresh before authenticated reads resume.
-2. Enable passkey autofill only while the sign-in tab is visible and active;
-   focus-triggered autofill follows the same rule. Continuous mounting renews challenges
-   about every eight minutes.
-
-With those rules, idle clients add zero calls. No cron is added. The library's
-finite challenge cleanup and sign-out token deletion drain, then stop: zero
-scheduled calls per day at fully idle. A browser identity reads one component
-session and one small user row per invocation; actions repeat this after external
-I/O. Cost is constant at 7/14 accounts and 312/624 projects. Sign-in records occupy
-a few KB; source/artifacts stay in R2. These are code-path budgets, not a new
-dev billed-usage measurement.
-
-The removal slice deletes Clerk's web provider/dependency, issuer entry and
-distinctness checks, `CLERK_*` setup/bot helpers, and retained provider lookups in
-GitHub access, linked identities, recipient checks and project people. The
-CLI approval link already points at `/device` and `web/src/DeviceLogin.tsx` is gone
-(`tests/ui-device.test.mjs` fails if the link names a page nobody serves). Integrate
-recipient/account lookup with `users` and the unified devices UI first, then
-remove the old path. Live GitHub, real phones/cross-device sign-in, refresh/autofill
-UI behavior, backfill and security review remain open on Item de67c77d.
 
 ### Signed-out landing review
 
@@ -1284,19 +1132,19 @@ node scripts/ui-shots.mjs --base https://<your-site>.workers.dev \
   --widths 1500,390 --themes dark,light
 ```
 
-`--base` also accepts a draft origin or `http://localhost:5179`. Lane captures also accept `--variants unified,split,inline,side-closed,files-closed,map`; each variant starts from an explicit diff/rail state and gets its own filename. `--project ID` overrides the project stored with the credentials; `--height` defaults to 1000. Include specific retained records with `--pages 'now,intents,lane:LANE_ID,settings,device'`. The tool seeds its route codec from the access-checked project identity before validating readable-URL redirects. Add `--diff-file src/example.ts` to select a specific file in Lane/Review screenshots. `settings` opens the shared Settings destination's Contributors page; owner-only lifecycle settings are unavailable to the reader. `device` captures the rebuilt code-entry screen without approving any login. Every capture needs the passkey credential below: the earlier screens and their Clerk sign-in flow are no longer served, so a Clerk credential file is refused.
+`--base` also accepts a draft origin or `http://localhost:5179`. `--project ID` overrides the project stored with the credentials; `--height` defaults to 1000. `--pages` accepts `landing` (alone), `home`, `now`, `intents`, `lanes`, `planning`, `stats`, `code`, `settings` (or `settings:checks`, `settings:access`, `settings:devices`, `settings:github`), `device`, `lane:ID` and `initiative:ID`. Include specific records with `--pages 'now,intents,lane:LANE_ID,settings,device'`. The tool seeds its route codec from the access-checked project identity before validating readable-URL redirects. Add `--diff-file src/example.ts` to select a specific file in Lane/Review screenshots. `settings` opens the shared Settings destination's Contributors page; owner-only lifecycle settings are unavailable to the reader. `device` captures the rebuilt code-entry screen without approving any login. Every capture needs the passkey credential below. A credentials file without a `passkey` entry is refused with "Bot credentials need a passkey. Run node scripts/ui-bot-setup.mjs --passkey."
 
 Intent Review actions require a passing check matching the current Candidate head and exclude accepted or superseded Candidates. Intent detail work maps cluster dense save histories and show the latest five Candidates when more than six exist; the earlier link leads to the expandable Candidates list. Candidate detail uses Intent-relative numbering, and lists larger than 50 files group each loaded page by top-level folder. Folder rows count their visible files and show a diffstat when available. The final row expands the remaining paginated files; file/save provenance remains expandable. Hosted read models do not currently supply line diff totals, so those values remain absent rather than estimated.
 
 Each selection produces `PAGE-WIDTH-THEME.png` (first viewport) and `PAGE-WIDTH-THEME-full.png` (whole page), plus a `manifest.json` with exact routes and dimensions. Inspect both: a legacy page above a cockpit can push meaningful content below the first viewport. A successful capture requires the bot's identity, project read access, rendered page content, completed loading and no visible alerts or uncaught JavaScript errors. Missing records, sign-in failures and inaccessible projects exit nonzero. This is screenshot evidence, not automatic visual approval or pixel comparison.
 
-The dedicated Clerk **DEV** user is `forge-ui-bot`, using `forge-ui-bot+clerk_test@example.com`. Its strong random password and user/project IDs live only in `~/.config/forge-ui-bot/credentials.json` (user-owned `0600`, directory `0700`), outside repositories. The tool signs in through Clerk's real password UI and uses the DEV email verification code when required. It creates a fresh, in-memory browser context, never saves sessions/traces, and redacts library errors. It selects the same token as the web app: the Clerk `convex` JWT template (10-minute lifetime). Chromium keeps its normal browser user agent and disables the automation-controlled Blink feature because Clerk otherwise reports uncached token refresh as offline even while network requests succeed. No application auth state or backend authorization is mocked. Keep screenshots private and outside source control; they contain private project data.
+The dedicated bot is the Forge dev handle `forge-ui-bot`. Its passkey and project ID live only in `~/.config/forge-ui-bot/credentials.json` (user-owned `0600`, directory `0700`), outside repositories. The tool signs in with a Chromium virtual authenticator on the real sign-in page. It creates a fresh, in-memory browser context and never saves sessions or traces. No application auth state or backend authorization is mocked. Keep screenshots private and outside source control; they contain private project data.
 
 Setup allows per-user `.forge` and `.nforge` directories directly in the resolved home directory. A home with Forge checkout or Work metadata is still refused, as are Git repositories, Forge Lanes and checkout caches in the resolved credential path.
 
-To use Convex Auth, point either tool at the private file with `--credentials`. A top-level `passkey` entry selects the native flow. The entry contains `origin` (the exact HTTPS site origin), `deployment` (the HTTPS Convex origin) and `credential` (Chromium's resident WebAuthn credential with `credentialId`, `privateKey`, `userHandle`, `rpId` and `isResidentCredential: true`). The binary fields use standard base64, as returned by Chromium. Keep the optional top-level `projectId` or supply `--project`. Native sign-in uses a Chromium virtual authenticator and the existing Forge sign-in page. The tools verify the authenticated handle and keep the web session in memory.
+Point either tool at the private file with `--credentials`. Its top-level `passkey` entry contains `origin` (the exact HTTPS site origin), `deployment` (the HTTPS Convex origin) and `credential` (Chromium's resident WebAuthn credential with `credentialId`, `privateKey`, `userHandle`, `rpId` and `isResidentCredential: true`). The binary fields use standard base64, as returned by Chromium. Keep the optional top-level `projectId` or supply `--project`. The tools verify the authenticated handle and keep the web session in memory.
 
-The passkey path opens the rebuilt screens. Use `now,intents,settings` for Needs me, Plan and People and access. It also supports `lane:ID` with the default variant and an optional `--diff-file`, plus native project, device and account pages. Captures of an execution Intent, retained Candidate Review and View pages, the Code graph, Activity, the classic Lane variants and classic-only Settings sections were Clerk-only and are gone with the earlier screens. A malformed or mismatched passkey file fails in the native flow. Signed-in runs disable Playwright wire logging because browser protocol frames carry credentials.
+Use `now,intents,settings` for Needs me, Plan and People and access. `lane:ID` takes an optional `--diff-file`; native project, device and account pages are supported too. A malformed or mismatched passkey file fails in the native flow. Signed-in runs disable Playwright wire logging because browser protocol frames carry credentials.
 
 From a built checkout with Chromium installed and a current owner `nforge login` for dev, run:
 
@@ -1307,24 +1155,15 @@ node scripts/ui-bot-setup.mjs --passkey \
   --project mh7aafndrxmj8c2q0931zbjk2n8h4ffs --grant-reader
 ```
 
-The command registers directly when the dev handle is available. When the existing Forge account holds the handle, it uses the bot's saved Clerk credentials to attach a passkey during coexistence. It verifies the new passkey in a fresh browser, keeps the older credentials in the private file and reuses a saved passkey on later runs. Keep a copy of the private file if the bot must sign in after the retained provider goes away.
+`--base` and `--deployment` must be the Forge dev values; setup refuses any other.
+
+The command registers the bot's passkey when the dev handle is available, verifies it in a fresh browser and reuses the saved passkey on later runs. If the bot handle already has an account but no saved passkey matches, setup stops with "Restore the saved bot passkey." Keep a copy of the private file.
 
 With `--grant-reader`, the saved owner login starts a Read invitation, and the native bot accepts it. The project’s existing membership policy may hold the request for owner approval. Approve in Forge and rerun the same command. On deployments without CLI membership approval requests, send a Read invitation to `@forge-ui-bot` in **People and access**, then rerun to accept it. An existing reader grant is verified and reused. The bot's browser session stays in memory.
 
-Provision or reconcile the Clerk bot idempotently with:
+A reader can see project source, retained Work, policy and activity, but cannot write Work, publish coordination, run checks, return source, accept Channels or change project policy. Existing owner/contributor permissions are unchanged. A write-access bot cannot be made read-only by adding a reader grant.
 
-```sh
-node scripts/ui-bot-setup.mjs \
-  --deployment https://<your-deployment>.convex.cloud \
-  --project PROJECT_ID \
-  --convex-cwd "$FORGE_OWNER" --grant-reader
-```
-
-The setup reads `CLERK_SECRET_KEY` at runtime with `npx convex env get` from the configured directory and requires a DEV key. It never prints or persists the key. Existing users are matched by exact email; the password is retained when the local credential file exists. For an existing dedicated bot without local credentials, setup installs a fresh password. Omit `--grant-reader` to provision before the reader API is deployed.
-
-In the Clerk setup, `--grant-reader` uses the owner's existing `nforge login` credential from the private Forge auth store. It calls `projectReaderActions:set`, which checks the current owner, verifies the Clerk user and records an original operation UUID; it never writes tables directly or grants contributor access. A reader can see project source, retained Work, policy and activity, but cannot write Work, publish coordination, run checks, return source, accept Channels or change project policy. Existing owner/contributor permissions are unchanged. Owner and contributor grants cannot be made read-only merely by adding a reader grant.
-
-Reader administration is currently API-based: owner action `projectReaderActions:set` accepts `{ projectId, reader, present, operationId }`; `present: false` revokes, using a new UUID. `projectReaders:list` is an owner-only paginated query. Replaying an earlier successful grant after revocation does not recreate access. The setup script keeps one grant operation id per deployment and project (`readerGrantOperationIds`), so switching `--project` requests a new grant. A bot without access makes either tool stop with `BOT_NO_READER_GRANT`. Clerk runs report the setup command. For passkey captures, use the native setup above to request reader access. Readers open projects by direct project URL; they are not listed in the contributor-only “Shared with you” collection. Browser captures need only the bot credential file.
+Reader access is the normal Read invitation to the bot's handle. The setup script keeps one invitation operation id per deployment and project (`readerGrantOperationIds`), so switching `--project` requests a new invitation, and reuses a pending Read invitation instead of replacing it. It refuses a bot that already has write access. A bot without access makes either tool stop with `BOT_NO_READER_GRANT`. Readers open projects by direct project URL; they are not listed in the contributor-only “Shared with you” collection. Browser captures need only the bot credential file.
 
 ### Web site
 

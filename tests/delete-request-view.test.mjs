@@ -7,9 +7,7 @@ import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
 const { requestView, rowState, bytesText } = await import(moduleUrl('../web/src/app/requests/model.ts'));
-const { deleteRequestHref, existingDeleteRequestHref, parseAppPath } = await import(
-  moduleUrl('../web/src/app/paths.ts')
-);
+const { deleteRequestHref, parseAppPath } = await import(moduleUrl('../web/src/app/paths.ts'));
 const { safeNext } = await import(moduleUrl('../web/src/app/session.ts'));
 
 const project = (i, extra = {}) => ({
@@ -81,17 +79,13 @@ test('progress, failures and skips read per project after approval', () => {
   assert.equal(rowState(project(1, { outcome: 'changed' }), new Set()).word, 'Skipped, it changed');
 });
 
-test('both sign-in routes retain the same account request through the sign-in redirect', () => {
+test('sign-in keeps the same account request through its redirect', () => {
   const href = deleteRequestHref('request + exact');
   const fromSignIn = safeNext(href);
-  const existing = existingDeleteRequestHref(fromSignIn);
   assert.equal(fromSignIn, href);
-  const url = new URL(existing, 'https://forge.example');
+  const url = new URL(fromSignIn, 'https://forge.example');
   assert.deepEqual(parseAppPath(url.pathname), { frame: 'account', place: 'projects' });
   assert.equal(url.searchParams.get('request'), 'request + exact');
-  assert.equal(url.searchParams.get('auth'), 'existing');
-  assert.equal(existingDeleteRequestHref('/account/billing?request=other'), undefined);
-  assert.equal(existingDeleteRequestHref('https://elsewhere.example/account?request=other'), undefined);
 });
 
 test('an expired or declined request says nothing was deleted and cannot be confirmed', () => {

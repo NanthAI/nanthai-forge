@@ -95,8 +95,6 @@ removes the passkeys, username, current handle and account row. If anything is
 held by then, the account stays whole. The native user gets a fresh account key
 and keeps only a GitHub numeric id (and any conflict mark). The next GitHub
 sign-in therefore starts a new, empty account and never acts as the closed key.
-Old-provider (Clerk) sessions cannot be ended from Forge. Until that provider is
-removed, signing in there again starts a new account on the old key.
 
 Selected-project and read-only devices cannot make account-level writes, including
 team changes, project creation, import starts and saved-view writes. The public

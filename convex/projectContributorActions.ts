@@ -16,7 +16,7 @@ export const add = action({
     try {
       const owner = await caller(ctx);
       await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
-      contributor = await checkForgeUser(contributor);
+      contributor = await checkForgeUser(ctx, contributor);
       if (await requestMemberApproval(ctx, projectId, { kind: 'contributor', contributor })) return null;
       return await ctx.runMutation(internal.projectContributors.add, { projectId, owner, contributor });
     } catch (error) {

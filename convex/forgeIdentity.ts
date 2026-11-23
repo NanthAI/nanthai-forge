@@ -20,6 +20,9 @@ export function isAuthSession(identity: UserIdentity) {
   const cloud = process.env.CONVEX_CLOUD_URL;
   return Boolean(cloud && identity.issuer === `${cloud}/components/auth`);
 }
+function isForeignIssuer(identity: UserIdentity) {
+  return Boolean(identity.issuer && identity.issuer !== process.env.FORGE_CLI_ISSUER);
+}
 /** Resolve the live component session, never a user id copied out of a token. */
 export async function accountFromSession(
   ctx: QueryCtx | MutationCtx,
@@ -57,8 +60,10 @@ export function identityContext<C extends Context>(ctx: C): C {
       let pending: Promise<UserIdentity | null> | undefined;
       const resolve = async (): Promise<UserIdentity | null> => {
         const identity = await auth.getUserIdentity();
-        // CLI and Clerk add zero component calls or DB reads.
-        if (!identity || !isAuthSession(identity)) return identity;
+        if (!identity) return null;
+        // CLI credentials add zero component calls or DB reads. Forge signs in only through Convex Auth
+        // and its own CLI issuer: a token from any other issuer is signed out (de67c77d).
+        if (!isAuthSession(identity)) return isForeignIssuer(identity) ? null : identity;
         const account =
           'db' in ctx ? await accountFromSession(ctx, identity) : await ctx.runQuery(sessionAccount, {});
         return account

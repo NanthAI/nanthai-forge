@@ -10,6 +10,4 @@
   new, empty account. Deleted-project and team records stay. An account that still holds
   anything is refused with the next step. The close is retry-safe by operation id and runs
   only for the signed-in person in the browser. A close that stopped shows Continue closing.
-  An operator closes a synthetic key with `accountClose:closeFor`. Old-provider (Clerk)
-  sessions cannot be ended from Forge; signing in there again starts a new account on the
-  old key until that provider is removed.
+  An operator closes a synthetic key with `accountClose:closeFor`.

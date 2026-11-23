@@ -64,7 +64,6 @@ jobs:
           # Public build-time config; the deploy below uploads this build as is.
           VITE_CONVEX_URL: ${{ vars.VITE_CONVEX_URL }}
           VITE_CONVEX_SITE_URL: ${{ vars.VITE_CONVEX_SITE_URL }}
-          VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
           VITE_GITHUB_APP_SLUG: ${{ vars.VITE_GITHUB_APP_SLUG }}
           VITE_FORGE_POSTHOG_PROJECT_TOKEN: ${{ secrets.VITE_FORGE_POSTHOG_PROJECT_TOKEN }}
           VITE_FORGE_POSTHOG_REGION: ${{ vars.VITE_FORGE_POSTHOG_REGION }}
@@ -75,11 +74,10 @@ jobs:
       - name: Smoke-load the built Hosted chunk and check the build config is baked in
         if: steps.plan.outputs.build == 'true'
         # Fails on a module-evaluation error, or on a build that would show "Forge backend is not configured".
-        run: node scripts/web-smoke-load.mjs hosted-web-dist VITE_CONVEX_URL VITE_CONVEX_SITE_URL VITE_CLERK_PUBLISHABLE_KEY
+        run: node scripts/web-smoke-load.mjs hosted-web-dist VITE_CONVEX_URL VITE_CONVEX_SITE_URL
         env:
           VITE_CONVEX_URL: ${{ vars.VITE_CONVEX_URL }}
           VITE_CONVEX_SITE_URL: ${{ vars.VITE_CONVEX_SITE_URL }}
-          VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
       - name: Build the site
         if: steps.plan.outputs.build == 'true'
         run: node scripts/build-site.mjs site-output --commit "$(git rev-parse HEAD)"

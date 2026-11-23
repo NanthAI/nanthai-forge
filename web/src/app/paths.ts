@@ -131,29 +131,17 @@ export function normalizeAccountPathname(pathname: string) {
   return pathname.replace(/^\/{2,}(?=account(?:\/|$))/, '/');
 }
 
-export function deleteRequestHref(requestId: string, existingSignIn = false) {
+export function deleteRequestHref(requestId: string) {
   const search = new URLSearchParams({ request: requestId });
-  if (existingSignIn) search.set('auth', 'existing');
   return `${hrefFor({ frame: 'account', place: 'projects' })}?${search}`;
 }
 
-/** The sign-in page, keeping where to return; `existing` opens the existing-account passkey link (de67c77d). */
-export function signInHref(next?: string, existing = false) {
-  const search = new URLSearchParams(existing ? { link: 'existing' } : {});
+/** The sign-in page, keeping where to return. */
+export function signInHref(next?: string) {
+  const search = new URLSearchParams();
   if (next) search.set('next', next);
   const query = search.toString();
   return hrefFor({ frame: 'public', page: 'signin' }) + (query ? `?${query}` : '');
-}
-
-export function existingDeleteRequestHref(next: string) {
-  const url = new URL(next, 'https://forge.invalid');
-  const request = url.searchParams.get('request');
-  if (
-    request &&
-    url.origin === 'https://forge.invalid' &&
-    url.pathname === hrefFor({ frame: 'account', place: 'projects' })
-  )
-    return deleteRequestHref(request, true);
 }
 
 export function hrefFor(route: AppRoute): string {

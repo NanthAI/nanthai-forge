@@ -244,7 +244,7 @@ test('reader revocation is immediate; replaying an old grant cannot resurrect it
   }
 });
 
-test('reader grants verify Clerk identity, recheck owner, and never alter contributors', async t => {
+test('reader grants verify the Forge account, recheck owner, and never alter contributors', async t => {
   const s = setup(t);
   await assert.rejects(s.set({ reader: 'missing' }), e => e.data?.code === 'BAD_ARGUMENT');
   s.tables.projectContributors.set('member', { _id: 'member', projectId: 'project', contributor: 'writer' });
@@ -256,17 +256,20 @@ test('reader grants verify Clerk identity, recheck owner, and never alter contri
   const authority = await import(moduleUrl('../convex/projectAuthority.ts'));
   assert.equal((await authority.activeProject(s.ctx, 'project', 'writer'))._id, 'project');
   s.caller('owner');
-  const native = globalThis.fetch;
-  globalThis.fetch = async (...args) => {
-    const response = await native(...args);
-    s.tables.hostedProjects.get('project').owner = 'changed';
-    return response;
+  // The owner changes while the reader's account is looked up; the save still refuses.
+  const route = s.ctx.runQuery;
+  s.ctx.runQuery = async (ref, args) => {
+    const result = await route(ref, args);
+    if (getFunctionName(ref) === 'sharing:accountExists')
+      s.tables.hostedProjects.get('project').owner = 'changed';
+    return result;
   };
   try {
     await assert.rejects(s.set({}), denied);
   } finally {
-    globalThis.fetch = native;
+    s.ctx.runQuery = route;
   }
+  assert.equal(s.tables.hostedProjects.get('project').owner, 'changed', 'the lookup ran');
   assert.equal(s.tables.projectReaders.size, 0);
 });
 
