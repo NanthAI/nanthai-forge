@@ -8,6 +8,7 @@ import type { StateKind, StateWord } from '../../ds';
 import type { SaveFailure } from '../SaveFailureNotice';
 import type { LandingStateName } from '../../../../src/landing-state';
 import { QUIET_MS } from '../../../../src/lane-quiet';
+import { sameUtcDay } from '../../../../src/flow-day';
 import { currentEntries, landingOf, laneState, notLandedWhy, stopWords, waitLine } from '../lane-state';
 import {
   NEEDS_UNKNOWN,
@@ -709,15 +710,19 @@ export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) 
   );
 }
 
-/** The bands: landed today, then each earlier day, newest first. */
-export function groupByDay<T extends { at: string }>(rows: readonly T[], today: string) {
+/** The bands: landed today, then each earlier day, newest first. Days are UTC project days, the boundary of the top
+ * bar's and Stats' "today" (Item 6bd1cf57), whatever the reader's time zone. */
+export function groupByDay<T extends { at: string }>(rows: readonly T[], now: number) {
   const groups: { title: string; rows: T[] }[] = [];
   for (const row of rows) {
-    const d = new Date(row.at).toDateString();
-    const title =
-      d === today
-        ? 'Today'
-        : new Date(row.at).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
+    const title = sameUtcDay(Date.parse(row.at), now)
+      ? 'Today'
+      : new Date(row.at).toLocaleDateString('en-GB', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          timeZone: 'UTC',
+        });
     const last = groups.at(-1);
     if (last?.title === title) last.rows.push(row);
     else groups.push({ title, rows: [row] });

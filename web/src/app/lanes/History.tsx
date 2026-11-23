@@ -301,7 +301,7 @@ export function HistoryView(props: HistoryViewProps) {
               <div className="sk" />
             </div>
           ) : null}
-          {groupByDay(rows, new Date().toDateString()).map(group => (
+          {groupByDay(rows, Date.now()).map(group => (
             <Group
               key={group.title}
               id={`lanes.history.${group.title}`}

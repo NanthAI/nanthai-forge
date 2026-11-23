@@ -289,6 +289,10 @@ export function flowToday(value: unknown, now: number, dayStart: number): FlowTo
 /** The project day is the UTC day, as on Stats: its start (ms) for a time. */
 export const utcDayStart = (now: number) => Math.floor(now / 86_400_000) * 86_400_000;
 
+/** True when two times fall on the same UTC project day. Every "today" in the app uses this boundary (Item 6bd1cf57):
+ * a local-day check puts the same landing in "Today" for one reader and "Yesterday" for another. */
+export const sameUtcDay = (a: number, b: number) => utcDayStart(a) === utcDayStart(b);
+
 /** The top bar's main figure and the one agents read (Item 32e8de50): landings on main today (the UTC project day)
  * and the share of today's judged landings that were a first try. One source: the line feed's Flow day. */
 export type MainToday = { landed: number; firstTry: number; judged: number; share: number | null };

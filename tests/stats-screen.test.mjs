@@ -125,7 +125,8 @@ async function fixture(out) {
       const data = statsRangeReply(days, period);
       // Each fold's part, recorded so the test can tell an unopened fold made no read.
       const usePart = part => ((window.foldReads ??= new Set()).add(part), statsRangeReply(days, period, part));
-      return h(StatsView, {data, period, busy: new URLSearchParams(search).has('busy'), now, usePart, historyHref: '/example/tidepool/lanes/history', onPeriod: setSearch});
+      const live = new URLSearchParams(location.search).get('live');
+      return h(StatsView, {data, period, busy: new URLSearchParams(search).has('busy'), now, liveLanded: live === null ? null : Number(live), usePart, historyHref: '/example/tidepool/lanes/history', onPeriod: setSearch});
     }
     createRoot(document.getElementById('root')).render(h(ConvexProvider, {client},
       h(ProjectFrame, {route, name: 'tidepool', projects: [], controls: {onPalette(){}, onKeys(){}, onPicker(){}, viewerHandle: 'example'}},
@@ -216,6 +217,18 @@ test('stats: short headline, one freshness line, today so far, comparison, table
     'Includes today up to 10:00 UTC.',
   ]);
   assert.match(await today.locator('.sit').textContent(), /landings, 1–19 Nov\./, 'today is in the totals');
+  // Item 6bd1cf57: today's landings are the live figure (20, the top bar's), not the close's 12 at 10:00 UTC; the
+  // derived figures keep the close and say so beside them.
+  const live = await open(1440, 'today', 'dark', 'live=20');
+  assert.match(await live.locator('main').textContent(), /306 landings · plan usage in Billing/);
+  assert.match(
+    await live.locator('.sit').textContent(),
+    /for these 298 landings, 1–19 Nov, as of 10:00 UTC\./,
+  );
+  assert.deepEqual(await live.locator('.stats-freshness').allTextContents(), [
+    'Landings are live; the other figures count today up to 10:00 UTC.',
+  ]);
+  assert.match(await live.locator('main').textContent(), /Measured.*as of 10:00 UTC/);
   const pending = await open(1440, 'now', 'dark', 'busy');
   assert.equal(
     await pending.locator('.stats-freshness').count(),

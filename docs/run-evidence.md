@@ -299,6 +299,10 @@ stays in the chart, and replayed figures are marked as estimates there. Below a 
 landings over the closed days ("over 17–18 Nov 2026 (2 closed days)"). A day left not measured is not a closed day:
 it is in neither the span nor the count, and a period holding one has not wholly closed. One line says how far the
 figures reach: "Includes today up to 10:00 UTC." when the period holds today and today's row counts so far, otherwise
-"Through Sat 21 Nov.", the newest day counted.
+"Through Sat 21 Nov.", the newest day counted. Landings today are the live figure the top bar shows (Item 6bd1cf57: the
+shell's feed Stats already has, no extra read), in the page count and today's bar; the hourly close keeps the derived
+figures (first-try rate, CI minutes, medians, the comparison), which carry "as of 10:00 UTC" (or "through Sat 22 Nov"
+before today's first close) beside them, and the line then reads "Landings are live; the other figures count today up
+to 10:00 UTC." Every "today" in the app is the UTC project day (`sameUtcDay`, `mainToday` in src/flow-day.ts).
 By agent shows agents in four first-try buckets (100%, 75–99%, 50–74%, under 50%), never a list per agent; each landing's own
 time to main and stops are on its Lane page.

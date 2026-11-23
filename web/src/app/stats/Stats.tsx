@@ -6,14 +6,15 @@
 // re-runs only when a day in its period closes; choosing another period or opening a fold are the only other calls.
 // All time reads one stored rollup per closed month and the open month's days; "Against the days before" (a range
 // only) is a fold too. Today counts so far (Item 580b1a1a): opening a period that holds today asks once for a
-// provisional close of today, which the server runs at most hourly and only after a landing today.
+// provisional close of today, which the server runs at most hourly and only after a landing today. Landings today are
+// the live figure the top bar shows (Item 6bd1cf57); the close keeps only the derived figures, marked "as of".
 import './stats.css';
 import '../../ds/figures.css';
 import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import { Region, useFold } from '../../ds';
-import { flowToday, utcDayStart } from '../../../../src/flow-day';
+import { flowToday, mainToday, utcDayStart } from '../../../../src/flow-day';
 import { STATS_TODAY_REFRESH_MS, rangeDays } from '../../../../src/stats-period';
 import type {
   StatsAgents,
@@ -35,6 +36,8 @@ import {
   duration,
   filledDays,
   gapWords,
+  derivedAsOf,
+  hintAsOf,
   holdsToday,
   partialWords,
   int,
@@ -45,6 +48,7 @@ import {
   plural,
   spanWords,
   soFarOf,
+  withLiveToday,
   weekdayName,
   type Period,
   type StatsRead,
@@ -147,6 +151,7 @@ function StatsRead(props: PlaceProps) {
       period={period}
       busy={busy}
       now={now}
+      liveLanded={flow ? mainToday(flow, now).landed : null}
       historyHref={hrefFor({ ...props.route, place: 'lanes', section: 'history', rest: '' })}
       usePart={usePart}
       onPeriod={search => navigate(`${location.pathname}${search ? `?${search}` : ''}`)}
@@ -155,10 +160,11 @@ function StatsRead(props: PlaceProps) {
 }
 
 export function StatsView({
-  data,
+  data: read,
   period,
   busy = false,
   now,
+  liveLanded = null,
   historyHref,
   usePart,
   onPeriod,
@@ -167,6 +173,8 @@ export function StatsView({
   period: Period;
   busy?: boolean;
   now: number;
+  /** Landings today from the shell's live feed (src/flow-day.ts `mainToday`), the top bar's figure; null without it. */
+  liveLanded?: number | null;
   historyHref: string;
   usePart: UsePart;
   /** The new address query for a chosen period ('' is this month). */
@@ -176,26 +184,29 @@ export function StatsView({
   const picker = (
     <PeriodPicker key={`${period.kind}/${period.from}/${period.to}`} period={period} onPeriod={onPeriod} />
   );
-  if (data === undefined)
+  if (read === undefined)
     return (
       <Head trail={trail} sentence={<span aria-busy="true">Reading this project’s closed days…</span>}>
         {picker}
       </Head>
     );
-  if ('error' in data)
+  if ('error' in read)
     return (
       <>
         <Head trail={trail} sentence={<b>Stats could not be read.</b>}>
           {picker}
         </Head>
         <p role="alert" className="stats-note">
-          {data.error.message}
+          {read.error.message}
         </p>
       </>
     );
+  const shown = withLiveToday(read, liveLanded, period, now);
+  const data = shown.data;
   const w = data.window;
+  const asOf = derivedAsOf(data, period, now, shown.live, liveLanded ?? 0);
   const billing = hrefFor({ frame: 'account', place: 'billing' });
-  const freshness = busy ? null : <Freshness data={data} period={period} now={now} />;
+  const freshness = busy ? null : <Freshness data={data} period={period} now={now} live={shown.live} />;
   const notice = period.error ? (
     <p role="alert" className="stats-note">
       {period.error}
@@ -230,7 +241,7 @@ export function StatsView({
         trail={trail}
         sentence={
           <>
-            <Sentence data={data} period={period} />
+            <Sentence data={data} period={period} asOf={asOf} />
             {freshness}
           </>
         }
@@ -239,8 +250,8 @@ export function StatsView({
       </Head>
       {notice}
       <div className="stats" aria-busy={busy}>
-        <Compare data={data} w={w} />
-        <Measured w={w} />
+        <Compare data={data} w={w} asOf={asOf} />
+        <Measured w={w} asOf={asOf} />
         <Region
           title={data.perMonth ? 'Landings per month' : 'Landings per day'}
           hint={
@@ -258,7 +269,7 @@ export function StatsView({
           <Fold
             id="trend"
             title="Against the days before"
-            hint={`the ${plural(rangeDays(period), 'day')} before`}
+            hint={hintAsOf(`the ${plural(rangeDays(period), 'day')} before`, asOf)}
           >
             {() => <Part usePart={usePart} part="trend" body={(r: StatsTrend) => <Trend r={r} />} />}
           </Fold>
@@ -266,13 +277,13 @@ export function StatsView({
         <Fold
           id="waited"
           title="Where work waited"
-          hint="median of each stop, in minutes:seconds; the total adds the three"
+          hint={hintAsOf('median of each stop, in minutes:seconds; the total adds the three', asOf)}
         >
           {() => (
             <Part usePart={usePart} part="waited" body={(r: StatsWaited) => <Waited stops={r.stops} />} />
           )}
         </Fold>
-        <Fold id="agents" title="By agent" hint="agents and people by first-try rate">
+        <Fold id="agents" title="By agent" hint={hintAsOf('agents and people by first-try rate', asOf)}>
           {() => (
             <Part
               usePart={usePart}
@@ -286,7 +297,7 @@ export function StatsView({
           <Fold
             id="months"
             title="By month"
-            hint={data.perMonth ? 'each month so far' : 'each month of this period'}
+            hint={hintAsOf(data.perMonth ? 'each month so far' : 'each month of this period', asOf)}
           >
             {() => <Part usePart={usePart} part="months" body={(r: StatsMonths) => <ByMonth r={r} />} />}
           </Fold>
@@ -298,20 +309,32 @@ export function StatsView({
 
 /** One short line: how far the figures reach. "Includes today up to 10:00 UTC." when the period holds today and today's
  * row counts so far; otherwise the newest day counted, with the time when that day still counts only so far. */
-function Freshness({ data, period, now }: { data: StatsRead; period: Period; now: number }) {
+function Freshness({
+  data,
+  period,
+  now,
+  live,
+}: {
+  data: StatsRead;
+  period: Period;
+  now: number;
+  live: boolean;
+}) {
   const soFar = soFarOf(data.todayUpTo);
   const last = data.cover.last;
   const today = new Date(now).toISOString().slice(0, 10);
   const text =
     soFar && soFar.day === today && holdsToday(period, now)
-      ? `Includes today up to ${soFar.time} UTC.`
+      ? live
+        ? `Landings are live; the other figures count today up to ${soFar.time} UTC.`
+        : `Includes today up to ${soFar.time} UTC.`
       : last
         ? `Through ${weekdayName(last)}${soFar?.day === last ? `, ${soFar.time} UTC` : ''}.`
         : null;
   return text ? <span className="stats-freshness">{text}</span> : null;
 }
 
-function Sentence({ data, period }: { data: StatsRead; period: Period }) {
+function Sentence({ data, period, asOf }: { data: StatsRead; period: Period; asOf: string | null }) {
   const w = data.window,
     c = w.comparison,
     when = coverWords(period, data.cover),
@@ -345,7 +368,8 @@ function Sentence({ data, period }: { data: StatsRead; period: Period }) {
   return (
     <>
       <b>{ci} than a GitHub merge queue would have used</b> for these {plural(c.landings, 'landing')}
-      {spanWords(data.cover, period)}.{time}
+      {spanWords(data.cover, period)}
+      {asOf ? `, ${asOf}` : ''}.{time}
       {part ? ` ${part.saved}` : ''}
     </>
   );

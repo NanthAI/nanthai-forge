@@ -17,15 +17,18 @@ export type CodeProps = {
   projectName: string;
   /** main's head State; undefined while it loads, null when the project has no main yet. */
   mainHead: string | null | undefined;
+  /** The line feed's running day (src/flow-day.ts), for landings today as the top bar counts them. */
+  flow?: unknown;
 };
 
 /** The Code place as the project frame mounts it (code/route.ts): main's head comes from the line it already reads. */
-export default function CodePlace({ route, projectId, projectName, feed }: PlaceProps) {
+export default function CodePlace({ route, projectId, projectName, feed, feedError }: PlaceProps) {
   const props: CodeProps = {
     route,
     projectId,
     projectName,
     mainHead: feed === undefined ? undefined : (feed.main?.head ?? null),
+    flow: feedError ? undefined : feed?.flow,
   };
   return route.section === 'files' ? <Files {...props} /> : <History {...props} />;
 }

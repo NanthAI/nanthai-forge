@@ -236,6 +236,8 @@ function reply(
     cover: StatsCover;
     /** The newest row is today so far, up to this time (epoch ms); null when every row is a closed day. */
     todayUpTo: number | null;
+    /** Landings that row counted (Item 6bd1cf57): the screen swaps them for the live figure; null with no such row. */
+    todayLanded: number | null;
   },
   part: StatsPart,
   figures: ReturnType<typeof statsFigures>,
@@ -277,6 +279,7 @@ export function statsRangeReply(
     through: rows.at(-1)?.day ?? null,
     cover: coverOf(rows),
     todayUpTo: provisionalAt(rows.at(-1)),
+    todayLanded: provisionalAt(rows.at(-1)) === null ? null : rows.at(-1)!.landings,
   };
   if (part === 'trend')
     return {
@@ -322,6 +325,7 @@ export function statsAllReply(
     through: cover.last,
     cover,
     todayUpTo: provisionalAt(tail.at(-1)),
+    todayLanded: provisionalAt(tail.at(-1)) === null ? null : tail.at(-1)!.landings,
   };
   // All time has no previous period to set beside it: a trend read gets the head.
   const p = part === 'trend' ? 'head' : part;

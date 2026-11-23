@@ -9,6 +9,7 @@ import {
   int,
   minutes,
   gapWords,
+  hintAsOf,
   partialWords,
   percent,
   plural,
@@ -58,7 +59,7 @@ function Axis() {
   );
 }
 
-export function Compare({ w }: { data: StatsRead; w: StatsWindow }) {
+export function Compare({ w, asOf = null }: { data: StatsRead; w: StatsWindow; asOf?: string | null }) {
   const [how, setHow] = useState(false);
   const c = w.comparison;
   if (!c) {
@@ -81,7 +82,10 @@ export function Compare({ w }: { data: StatsRead; w: StatsWindow }) {
   return (
     <Region
       title="Against your own history"
-      hint="measured in this project, beside the same days replayed through two GitHub setups"
+      hint={hintAsOf(
+        'measured in this project, beside the same days replayed through two GitHub setups',
+        asOf,
+      )}
     >
       <div className="stats-pair">
         <div className="fig">
@@ -263,11 +267,11 @@ const CAUSES = [
   ['superseded', 'superseded'],
 ] as const;
 
-export function Measured({ w }: { w: StatsWindow }) {
+export function Measured({ w, asOf = null }: { w: StatsWindow; asOf?: string | null }) {
   const m = w.measured;
   const d = m.discarded;
   return (
-    <Region title="Measured" hint="facts from this project’s check runs and landings">
+    <Region title="Measured" hint={hintAsOf('facts from this project’s check runs and landings', asOf)}>
       {partialWords(w) ? (
         <p className="stats-readout" role="note">
           {partialWords(w)!.measured}

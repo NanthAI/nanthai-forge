@@ -2,11 +2,25 @@
 // The Code place's words for times, people, States and addresses. Pure, so the screens and their tests share them.
 import type { CodeHistoryRow } from '../../../../src/code-history';
 export { landedBy } from '../../../../src/code-history';
+import { mainToday, sameUtcDay } from '../../../../src/flow-day';
 
 /** `?at=` pins an exact State (a landing's, a Lane's or a Candidate's); without it the files follow main. */
 export function pinnedState(search: string): string | null {
   const at = new URLSearchParams(search).get('at');
   return at && /^[a-f0-9]{64}$/.test(at) ? at : null;
+}
+
+/** Landings today for the sentence over History (Item 6bd1cf57): the live figure the top bar shows when the shell's feed
+ * has one, else the listed rows on the UTC project day (a lower bound when more rows exist than were read). */
+export function landedTodaySentence(
+  rows: readonly Pick<CodeHistoryRow, 'at'>[],
+  more: boolean,
+  flow: unknown,
+  now: number,
+): { n: number; atLeast: boolean } {
+  if (flow) return { n: mainToday(flow, now).landed, atLeast: false };
+  const n = rows.filter(row => sameUtcDay(Date.parse(row.at), now)).length;
+  return { n, atLeast: n === rows.length && more };
 }
 
 export const titleOf = (row: Pick<CodeHistoryRow, 'title' | 'head'>) =>

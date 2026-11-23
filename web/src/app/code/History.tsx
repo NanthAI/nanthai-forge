@@ -10,7 +10,16 @@ import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { useSearch } from '../router';
 import { RegionBoundary, type CodeProps } from './CodePlace';
-import { ago, landedAt, landedBy, pathHref, plural, timelinePath, titleOf } from './code-words';
+import {
+  ago,
+  landedAt,
+  landedBy,
+  landedTodaySentence,
+  pathHref,
+  plural,
+  timelinePath,
+  titleOf,
+} from './code-words';
 import { PathBar, PathFoot, PathNotice, pathSentence } from './FileHistory';
 import { Changes } from './Changes';
 import { LandedBy, Receipt } from './Receipt';
@@ -41,7 +50,7 @@ export function History(props: CodeProps) {
   const receipt = useCodeReceipt(projectId, listed || loading ? '' : route.rest, retry);
   const selected = listed ?? receipt.value?.landings.find(row => row.receiptId === route.rest) ?? null;
   const at = (rest: string) => pathHref(hrefFor({ ...route, rest }), path);
-  const sentence = path ? pathSentence(path, file) : everySentence(history);
+  const sentence = path ? pathSentence(path, file) : everySentence(history, props.flow);
   const [cli, setCli] = useState(false);
   const args = JSON.stringify(path ? { op: 'log', path, limit: 50 } : { op: 'log', limit: 50 });
   const command = `nforge agent . history '${args.replace(/'/g, "'\\''")}'`;
@@ -147,19 +156,18 @@ export function History(props: CodeProps) {
   );
 }
 
-function everySentence(history: ReturnType<typeof useHistory>) {
+function everySentence(history: ReturnType<typeof useHistory>, flow: unknown) {
   const rows = history.rows;
   if (history.loading) return 'What landed on main.';
   if (!rows.length)
     return 'Nothing has landed on main yet. A landing appears here the moment it reaches main.';
-  const today = new Date().toDateString();
-  const todays = rows.filter(row => new Date(row.at).toDateString() === today).length;
+  const today = landedTodaySentence(rows, history.next !== null, flow, Date.now());
   const newest = rows[0]!;
   return (
     <>
       <b>
-        {todays === rows.length && history.next !== null ? 'At least ' : ''}
-        {plural(todays, 'landing')} today.
+        {today.atLeast ? 'At least ' : ''}
+        {plural(today.n, 'landing')} today.
       </b>{' '}
       The newest landed {ago(newest.at)}
       {landedBy(newest) ? `, by ${landedBy(newest)}` : ''}.

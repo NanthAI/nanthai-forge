@@ -99,6 +99,54 @@ export function holdsToday(period: Period, now: number) {
   const today = utc(now);
   return period.kind === 'all' || (period.from <= today && today <= period.to);
 }
+/** Today's landings live (Item 6bd1cf57): the figure the top bar shows, in place of the hourly close's. The landings of
+ * today (the page's counts, the per-day bar, the month's bar) take `live`; every derived figure (first-try rate, CI
+ * minutes, medians, the comparison) stays the close's and says so (`derivedAsOf`). With no live figure, a period
+ * without today, or a today whose close did not finish, the read is returned as it came. */
+export function withLiveToday(
+  data: StatsRead,
+  live: number | null | undefined,
+  period: Period,
+  now: number,
+): { data: StatsRead; live: boolean } {
+  if (live === null || live === undefined || !Number.isFinite(live) || !holdsToday(period, now))
+    return { data, live: false };
+  const today = utc(now);
+  const closed = data.todayLanded ?? data.perDay.find(([day]) => day === today)?.[1] ?? null;
+  const row = data.perDay.find(([day]) => day === today);
+  if (data.perMonth === null && row?.[1] === null) return { data, live: false };
+  // An older server reply names no figure for an All time read: leave that read as it is.
+  if (data.perMonth !== null && data.todayLanded === undefined) return { data, live: false };
+  const delta = live - (closed ?? 0);
+  if (!delta) return { data, live: true };
+  const month = today.slice(0, 7);
+  const perMonth = data.perMonth
+    ? data.perMonth.some(([m]) => m === month)
+      ? data.perMonth.map(([m, n]): [string, number] => (m === month ? [m, n + delta] : [m, n]))
+      : [...data.perMonth, [month, live] as [string, number]]
+    : null;
+  const perDay: Array<[string, number | null]> = data.perMonth
+    ? data.perDay
+    : row
+      ? data.perDay.map(([day, n]) => (day === today ? [day, live] : [day, n]))
+      : [...data.perDay, [today, live]];
+  const landings = data.window.landings + delta;
+  return {
+    live: true,
+    data: { ...data, landings, perDay, perMonth, window: { ...data.window, landings } },
+  };
+}
+/** Where the derived figures stop while today's landings are live: "as of 10:00 UTC" (today's close), or "through
+ * Sat 22 Nov" when today has no close yet; null when they are as current as the landings. */
+export function derivedAsOf(data: StatsRead, period: Period, now: number, live: boolean, landed: number) {
+  if (!live || !holdsToday(period, now)) return null;
+  const soFar = soFarOf(data.todayUpTo);
+  if (soFar && soFar.day === utc(now)) return `as of ${soFar.time} UTC`;
+  return landed > 0 && data.cover.last ? `through ${weekdayName(data.cover.last)}` : null;
+}
+/** A region's hint with where its figures stop appended, when they stop short of the live landings. */
+export const hintAsOf = (hint: string, asOf: string | null) => (asOf ? `${hint} · ${asOf}` : hint);
+
 /** The days the headline covers, after its landings: " in October 2026" when the whole period is counted, else short:
  * ", 22 Nov", ", 1–22 Nov", ", 28 Oct – 22 Nov", with years only across a new year. */
 export function spanWords(cover: StatsCover, period: Period) {
