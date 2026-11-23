@@ -471,3 +471,23 @@ test('12fde646: a blocked agent that gave up drops out of the count (mark cleare
   });
   assert.equal(needsCount({ ...read([], [blocked]), canDecide: false }, now).n, 0);
 });
+
+test('8b6efb50: a failed deploy or post-deploy smoke notice counts in Needs you and formats with Check failed', () => {
+  const input = {
+    ...read([], []),
+    notices: [
+      {
+        kind: 'deploy',
+        id: 'deploy:web',
+        summary: 'Dev web post-deploy smoke failed at main #42: sitemap HTTP 502',
+        next: 'https://github.com/NanthAI/nanthai-forge/actions/runs/99',
+      },
+    ],
+  };
+  const view = needsView(input);
+  assert.equal(view.count, 1);
+  assert.equal(needsCount(input).n, 1);
+  assert.equal(view.notices[0].tag, 'Deploy failed');
+  assert.equal(view.notices[0].word, 'Check failed');
+  assert.match(view.notices[0].head, /Dev web post-deploy smoke failed/);
+});

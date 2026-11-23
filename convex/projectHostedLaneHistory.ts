@@ -7,6 +7,7 @@ import { query, type QueryCtx } from './cliServer';
 import { readHostedRecord } from './projectHostedRecords';
 import { accessibleProject, authorizedReadProject } from './projectAuthority';
 import { laneHolderFor } from './projectAudience';
+import { deploysForSequence } from './projectDeployStore';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { isPlanningPrefix, planningIdMaxCandidates } from '../src/planning-id';
 import { hostedLaneSchema } from '../src/hosted-lane';
@@ -80,6 +81,15 @@ export async function journalLaneHistoryRead(
         .unique()
     )?.landed;
     journalDependency(ctx, 'landing-stamp', landed ?? null);
+    const acceptance = landed
+      ? await ctx.db
+          .query('projectHostedAcceptances')
+          .withIndex('by_project_and_receipt', q =>
+            q.eq('projectId', input.projectId).eq('receiptId', landed.receiptId),
+          )
+          .unique()
+      : null;
+    const deploys = acceptance ? await deploysForSequence(ctx, input.projectId, acceptance.sequence) : null;
     // Version 0 is the record written at start: its time is the open time, its base the first main.
     const first = lane.version === 0 ? current : await readHostedRecord(ctx, { ...key, version: 0 });
     const opened = first ? hostedLaneSchema.parse(JSON.parse(first.value)) : null;
@@ -110,6 +120,8 @@ export async function journalLaneHistoryRead(
             ...(landed.revertedBy ? { revertedBy: landed.revertedBy } : {}),
             // Main-red holds it waited under before this landing (held, released; Item 687d1eda).
             ...(landed.mainRedHolds ? { mainRedHolds: landed.mainRedHolds } : {}),
+            // First successful deploy per target whose head contains this landing (Item 8b6efb50).
+            ...(deploys ? { deploys } : {}),
           }
         : null,
     });

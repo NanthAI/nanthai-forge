@@ -224,11 +224,12 @@ const noticeTags = {
   reverted: 'Reverted from main',
   'needs-fix': 'Fix needed',
   mirror: 'GitHub mirror',
+  deploy: 'Deploy failed',
 } as const;
 function noticeRow(notice: Notice): NoticeRow {
   return {
     ...notice,
-    word: notice.kind === 'reverted' ? 'Check failed' : 'Needs you',
+    word: notice.kind === 'reverted' || notice.kind === 'deploy' ? 'Check failed' : 'Needs you',
     tag: noticeTags[notice.kind],
     head: notice.summary || `${noticeTags[notice.kind]}.`,
   };

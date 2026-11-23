@@ -354,16 +354,16 @@ export function registerHostedAgentWorkflow(
       let notifications = Promise.resolve();
       let progress = 0;
       try {
-        const alone = input.peer ?? input.approval ?? input.main;
+        const alone = input.peer ?? input.approval ?? input.main ?? input.deploy;
         invariant(
           alone
             ? !input.runId &&
                 !input.operationIds?.length &&
-                [input.peer, input.approval, input.main].filter(Boolean).length === 1
+                [input.peer, input.approval, input.main, input.deploy].filter(Boolean).length === 1
             : Boolean(input.runId) !== Boolean(input.operationIds?.length),
           'BAD_ARGUMENT',
           alone
-            ? 'Wait for a peer Lane, an approval or main in its own call, without runId or operationIds.'
+            ? 'Wait for a peer Lane, an approval, main or a deploy in its own call, without runId or operationIds.'
             : 'Choose one run or hosted landing operationIds.',
         );
         const response = await result(async () => {
@@ -391,6 +391,23 @@ export function registerHostedAgentWorkflow(
             });
             return { next, command, waitCommand, inProgress };
           };
+          if (input.deploy) {
+            const { deployWaitResult, observeDeploy } = await import('./hosted-deploy-wait.js');
+            const outcome = await observeDeploy(
+              transport,
+              { selection: input.deploy, timeoutSeconds: budgetSeconds },
+              controller.signal,
+              subscribe,
+            );
+            return {
+              schema: 1 as const,
+              transport: 'hosted' as const,
+              action: 'observe' as const,
+              operationId: null,
+              resolved: null,
+              result: deployWaitResult(outcome, budgetSeconds, resumeOf()),
+            };
+          }
           if (input.main) {
             // Loaded only for this wait, so the MCP server starts no heavier (agent weight ceilings).
             const { mainWaitResult, observeMainGreen } = await import('./hosted-main-wait.js');

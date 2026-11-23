@@ -27,6 +27,25 @@ import { followLink, navigate } from './router';
 // The report sheet loads only when someone opens it, so the shell's first paint carries none of it.
 const ReportSheet = lazy(() => import('./ReportAbuse').then(module => ({ default: module.ReportSheet })));
 
+/** Read the deployed build version stamped onto `<html data-build-version>` by scripts/build-site.mjs
+ * (after the content digest, so Vite JS bundles stay content-identical and local dev/tests make zero
+ * network fetches or 404 console errors). */
+function BuildStamp() {
+  const label =
+    typeof document === 'undefined' ? null : (document.documentElement.dataset.buildVersion ?? null);
+  if (!label) return null;
+  return (
+    <a
+      className="rail-link rail-build"
+      href="/_forge/build.json"
+      translate="no"
+      title="Deployed build record"
+    >
+      <span className="rail-label cut">{label}</span>
+    </a>
+  );
+}
+
 export function A({
   href,
   children,
@@ -284,6 +303,7 @@ function ProjectShell({
           label="Project"
           address={address}
           {...rail}
+          bottom={<BuildStamp />}
           places={projectPlaces.map((place, index) => {
             const current = route.place === place;
             const nested = pages[place].length > 1;
@@ -375,14 +395,17 @@ export function AccountFrame({
             icon: <PlaceIcon name={name} />,
           }))}
           bottom={
-            back ? (
-              <A className="rail-link rail-back" href={back.href}>
-                <PlaceIcon name="back" />
-                <span className="rail-label cut" translate="no">
-                  {back.name}
-                </span>
-              </A>
-            ) : null
+            <>
+              {back ? (
+                <A className="rail-link rail-back" href={back.href}>
+                  <PlaceIcon name="back" />
+                  <span className="rail-label cut" translate="no">
+                    {back.name}
+                  </span>
+                </A>
+              ) : null}
+              <BuildStamp />
+            </>
           }
         />
         <main id="main" tabIndex={-1} onFocus={showPageFocus}>

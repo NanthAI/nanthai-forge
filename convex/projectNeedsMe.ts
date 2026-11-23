@@ -12,6 +12,7 @@ import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject, coordinationAccess } from './projectAuthority';
 import { githubMirrorStatus } from './projectGithubMirrorStatus.idle';
+import { failedDeployNotices } from './projectDeployStore';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { mirrorSummary } from '../src/github-mirror-sentence';
 import { needsFix } from '../src/culprit-bisect';
@@ -123,8 +124,13 @@ export const needsMeResult = v.object({
   notices: v.optional(
     v.array(
       v.object({
-        kind: v.union(v.literal('reverted'), v.literal('needs-fix'), v.literal('mirror')),
-        /** The reverted Intent's id, or `mirror`. */
+        kind: v.union(
+          v.literal('reverted'),
+          v.literal('needs-fix'),
+          v.literal('mirror'),
+          v.literal('deploy'),
+        ),
+        /** The reverted Intent's id, `mirror`, or `deploy:<target>`. */
         id: v.string(),
         summary: v.string(),
         next: v.union(v.string(), v.null()),
@@ -243,7 +249,7 @@ async function dependencyLane(ctx: QueryCtx, projectId: Id<'hostedProjects'>, su
 }
 
 type Notice = {
-  kind: 'reverted' | 'needs-fix' | 'mirror';
+  kind: 'reverted' | 'needs-fix' | 'mirror' | 'deploy';
   id: string;
   summary: string;
   next: string | null;
@@ -402,6 +408,8 @@ export const read = query({
       }
       const mirror = team && owner ? await stoppedMirror(ctx, project) : null;
       if (mirror) notices.push(mirror);
+      if (team && owner && effectivePolicy(project).githubMirror?.repo)
+        notices.push(...(await failedDeployNotices(ctx, projectId)));
       return {
         held,
         parked,

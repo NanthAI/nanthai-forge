@@ -24,6 +24,10 @@ const exempt = new Map([
   // Plans the dev site deploy before the job installs or builds anything (no dist/ helper): one GET
   // of the live deploy record with its own 15 s deadline; any failure means "build" (Item ef6aa22a).
   ['scripts/site-deploy-plan.mjs', 'standalone'],
+  // Runs in dev deploy GitHub jobs with plain Node before install/build (no dist/ helper): OIDC
+  // calls to Forge /deploy/actions, R2 delta downloads, and post-deploy smoke checks, each with its
+  // own AbortSignal.timeout deadline (Item 8b6efb50).
+  ['scripts/forge-deploy-ci.mjs', 'standalone'],
   // A builder runs this from a Lane with plain Node (no install or build, so no dist/ helper): one
   // POST to a model API with its own 5-minute deadline and no retry, because a retried POST bills twice
   // (Item f082efd6).

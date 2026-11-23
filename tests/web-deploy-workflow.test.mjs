@@ -8,7 +8,9 @@ import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { SITE_INPUTS, buildFiles } from '../scripts/site-deploy-plan.mjs';
+import { moduleUrl } from './convex-module.mjs';
 
+const deployDispatch = await import(moduleUrl('../convex/projectDeployDispatch.ts'));
 const workflow = readFileSync('.github/workflows/web-deploy.yml', 'utf8');
 const step = name => workflow.indexOf(name);
 const namedStep = name => {
@@ -17,20 +19,20 @@ const namedStep = name => {
   return entry;
 };
 
-test('dev web deploys only from main pushes inside the locked environment', () => {
-  assert.match(workflow, /push:\n\s+branches: \[main\]/);
+test('Item 8b6efb50: dev web deploys from Forge workflow_dispatch and catch-up schedule on main, never mirror push', () => {
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /^\s+push:/m);
   assert.doesNotMatch(workflow, /pull_request/);
+  assert.match(workflow, /if: github\.ref == 'refs\/heads\/main' && vars\.FORGE_RELEASE_PROJECT != ''/);
   assert.match(workflow, /environment: cloudflare-dev/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /node-version: '24\.22\.1'/);
   assert.match(workflow, /cancel-in-progress: false/);
-  assert.match(workflow, /^permissions:\n {2}contents: read$/m);
+  assert.match(workflow, /^permissions:\n {2}contents: read\n {2}id-token: write$/m);
 });
 
-test('the trigger paths cover everything the plan counts as served', () => {
-  const paths = [...workflow.matchAll(/^ {6}- '([^']+)'$/gm)].map(match => match[1]);
-  const covered = path =>
-    paths.some(glob => (glob.endsWith('/**') ? path.startsWith(glob.slice(0, -2)) : path === glob));
+test('Item 8b6efb50: the Forge dispatch path filter covers everything the site deploy plan counts as served', () => {
+  const covered = path => deployDispatch.WEB_DEPLOY_PATHS.some(re => re.test(path));
   // Every whole input, every file the build imports, and every folder a bundle may contain.
   const samples = [
     'web/x',
@@ -49,45 +51,51 @@ test('the trigger paths cover everything the plan counts as served', () => {
       samples.some(path => input.test(path)),
       `${input}: add a sample here`,
     );
-  for (const path of samples) assert(covered(path), `${path}: no trigger path`);
-  for (const file of buildFiles(process.cwd())) assert(covered(file), `${file}: no trigger path`);
-  for (const folder of ['src/**', 'convex/**', 'scripts/**']) assert(paths.includes(folder), folder);
-  assert(!paths.includes('tests/**'), 'a test-only landing never starts a run');
+  for (const path of samples) assert(covered(path), `${path}: no dispatch path`);
+  for (const file of buildFiles(process.cwd())) assert(covered(file), `${file}: no dispatch path`);
+  for (const sample of ['src/x.ts', 'convex/x.ts', 'scripts/x.mjs']) assert(covered(sample), sample);
+  assert(!covered('tests/x.test.mjs'), 'a test-only landing never dispatches a web deploy');
 });
 
 test('the plan gates every later step, and only a new digest reaches the deploy', () => {
   const steps = workflow.split(/^ {6}- /m).slice(1);
-  const plan = steps.findIndex(text => text.includes('scripts/site-deploy-plan.mjs plan'));
+  const plan = steps.findIndex(text => text.includes('scripts/forge-deploy-ci.mjs plan'));
   assert(plan >= 2, 'checkout and Node come first, then the plan, before any install');
   assert.doesNotMatch(steps.slice(0, plan + 1).join(''), /npm ci/);
   for (const text of steps.slice(plan + 1))
     assert.match(
       text,
-      /if: steps\.(?:plan\.outputs\.build|compare\.outputs\.deploy) == 'true'/,
+      /if: (?:always\(\) && )?(?:\()?steps\.(?:plan\.outputs\.build|compare\.outputs\.deploy) == 'true'/,
       text.slice(0, 60),
     );
+  for (const text of steps.filter(text => /npm ci|build:web|build-site|cf deploy/.test(text)))
+    assert.doesNotMatch(text, /skipped_unchanged/);
   for (const text of steps.filter(text => /site\/deploy|cf deploy/.test(text)))
     assert.match(text, /if: steps\.compare\.outputs\.deploy == 'true'/);
   // No runner waits out the window: a deferred change is taken by the next landing or the scheduled run.
   assert.doesNotMatch(workflow, /\bsleep\b/);
-  // Every run builds the current main, so a late or re-run job never deploys an older main over a newer one.
+  // Every run builds Forge main's newest State, so a late or re-run job never deploys an older main over a newer one.
   assert.match(workflow, /actions\/checkout@[0-9a-f]{40} # v4\n\s+with:\n(?:\s+#.*\n)*\s+ref: main\n/);
+  assert.match(workflow, /id-token: write/);
   assert.match(
     namedStep('Plan the deploy'),
-    /plan "\$SITE_URL" \$\{\{ github\.event_name != 'push' && '--deep' \|\| '' \}\}/,
+    /forge-deploy-ci\.mjs plan --target web --site "\$SITE_URL" \$\{\{ github\.event_name == 'schedule' && '--deep' \|\| '' \}\}/,
   );
   assert.match(workflow, /^ {2}schedule:\n {4}- cron: '7 \*\/3 \* \* \*'$/m);
 });
 
 test('the deploy checks and uploads the same build, with the Cloudflare credential scoped to upload', () => {
   const order = [
-    'scripts/site-deploy-plan.mjs plan',
+    'scripts/forge-deploy-ci.mjs plan',
+    'scripts/forge-deploy-ci.mjs checkout',
     'npm run build:web',
     'tests/web-bundle-node-free.test.mjs',
     'scripts/web-smoke-load.mjs hosted-web-dist VITE_CONVEX_URL',
     'scripts/build-site.mjs site-output --commit',
     'scripts/site-deploy-plan.mjs compare',
     'cf deploy --prebuilt --no-provision',
+    'scripts/forge-deploy-ci.mjs smoke',
+    'scripts/forge-deploy-ci.mjs report',
   ].map(step);
   assert(order.every(index => index > 0) && order.every((index, i) => i === 0 || index > order[i - 1]));
   const deploy = namedStep('Deploy to the dev site');
@@ -107,6 +115,15 @@ test('the deploy checks and uploads the same build, with the Cloudflare credenti
   assert.doesNotMatch(workflow, /echo[^\n]*(?:TOKEN|CLOUDFLARE)|set -x|--secrets-file/);
   assert.match(workflow, /CF_SEND_TELEMETRY: 'false'/);
   assert.equal(workflow.match(/VITE_FORGE_DEMO_REPOSITORY: \S+/g)?.length, 1);
+  // Build version is read from /_forge/build.json at runtime so JS chunks never churn per head.
+  assert.doesNotMatch(namedStep('Build the web app'), /VITE_FORGE_BUILD_VERSION/);
+  // Unchanged rebuilds still run post-deploy smoke before reporting succeeded, and mark --unchanged so
+  // receipts never falsely credit an un-uploaded head as the live build.
+  assert.match(namedStep('Post-deploy smoke'), /steps\.compare\.outputs\.deploy != 'true'/);
+  const report = namedStep('Report deploy outcome to Forge');
+  assert.match(report, /if \[ "\$SMOKE_OK" = "true" \]/);
+  assert.match(report, /PLAN_SKIPPED_UNCHANGED/);
+  assert.match(report, /unchanged="--unchanged"/);
 });
 
 test('PostHog build configuration is scoped to the dev web build', () => {

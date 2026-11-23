@@ -99,16 +99,17 @@ async function dispatchHostedAgentCli(
     ]);
     const { boardWaitOption, boardWakeEnvelope, observePeerLane, freshBoardDelivery } = board$;
     const selectedWait = hostedWaitSchema.parse(command);
-    const alone = selectedWait.peer ?? selectedWait.approval ?? selectedWait.main;
+    const alone = selectedWait.peer ?? selectedWait.approval ?? selectedWait.main ?? selectedWait.deploy;
     invariant(
       alone
         ? !selectedWait.runId &&
             !selectedWait.operationIds?.length &&
-            [selectedWait.peer, selectedWait.approval, selectedWait.main].filter(Boolean).length === 1
+            [selectedWait.peer, selectedWait.approval, selectedWait.main, selectedWait.deploy].filter(Boolean)
+              .length === 1
         : Boolean(selectedWait.runId) !== Boolean(selectedWait.operationIds?.length),
       'BAD_ARGUMENT',
       alone
-        ? 'Wait for a peer Lane, an approval or main in its own command, without runId or operationIds.'
+        ? 'Wait for a peer Lane, an approval, main or a deploy in its own command, without runId or operationIds.'
         : 'Choose one run or hosted landing operationIds.',
     );
     const [onlyOperation] = selectedWait.operationIds ?? [];
@@ -272,6 +273,30 @@ async function dispatchHostedAgentCli(
       const board = boardWaitOption(root, laneId);
       const { next, waitCommand, inProgress } = continuation;
       const resume = { next, command: waitCommand, waitCommand, inProgress };
+      if (selectedWait.deploy) {
+        const { deployWaitResult, observeDeploy } = await import('./hosted-deploy-wait.js');
+        const outcome = await observeDeploy(
+          transport,
+          { selection: selectedWait.deploy, timeoutSeconds: budgetSeconds },
+          controller.signal,
+        );
+        process.exitCode =
+          outcome.status === 'deployed'
+            ? 0
+            : outcome.status === 'failed'
+              ? 2
+              : outcome.status === 'cancelled'
+                ? 130
+                : 3;
+        return {
+          schema: 1 as const,
+          transport: 'hosted' as const,
+          action: 'observe' as const,
+          operationId: null,
+          resolved: null,
+          result: deployWaitResult(outcome, budgetSeconds, resume),
+        };
+      }
       if (selectedWait.main) {
         const outcome = await observeMainGreen(
           transport,

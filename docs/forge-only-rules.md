@@ -182,6 +182,12 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/package-graph-python.ts` | `ecosystem-folders` | 1 | the Python reader skips Python build and virtualenv folders | each ecosystem skips its own |
 | `src/junit-report.ts` | `js-extension` | 1 | labels code files of every listed language, JS/TS among them (written out: the module ships self-contained) | the same |
 | `src/junit-report.ts` | `ecosystem-extensions` | 1 | ships self-contained in the check payload (no local imports); a test keeps it equal to the registry's code extensions | the same for every repository |
+| `convex/projectDeployDispatch.ts` | `docs-folder` | 1 | Forge's own dev web deploy path filter counts `docs/` changes (Item 8b6efb50, gated on release-signature enrollment) | per-project deploy targets and on-landing webhooks in Item 954340ea |
+| `convex/projectDeployDispatch.ts` | `forge-folders` | 1 | Forge's own dev deploy target pair `['convex', 'web']` (Item 8b6efb50, gated on release-signature enrollment) | per-project deploy targets and on-landing webhooks in Item 954340ea |
+| `convex/projectDeployHttp.ts` | `forge-folders` | 1 | Forge's own dev deploy target enum `['convex', 'web']` on `/deploy/actions` (Item 8b6efb50) | per-project deploy targets and on-landing webhooks in Item 954340ea |
+| `convex/projectDeployStore.ts` | `forge-folders` | 1 | Forge's own dev deploy target list `['convex', 'web']` (Item 8b6efb50) | per-project deploy targets and on-landing webhooks in Item 954340ea |
+| `src/hosted-deploy-wait.ts` | `forge-folders` | 1 | Forge's own dev deploy target enum `['convex', 'web', 'all']` for `wait {"deploy":...}` (Item 8b6efb50) | per-project deploy targets and on-landing webhooks in Item 954340ea |
+| `src/hosted-wait-schema.ts` | `forge-folders` | 1 | Forge's own dev deploy target enum `['convex', 'web', 'all']` in the wait schema (Item 8b6efb50) | per-project deploy targets and on-landing webhooks in Item 954340ea |
 
 ## BYOCI parity
 

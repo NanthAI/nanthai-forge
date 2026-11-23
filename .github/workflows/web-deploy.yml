@@ -1,29 +1,28 @@
 name: Deploy dev web
+run-name: Deploy dev web ${{ inputs.sequence || github.event_name }}
 
-# The dev site (Cloudflare Worker nanthai-forge-dev, docs/development.md#web-site) deploys only when what it serves
-# changed, at most once per window (scripts/site-deploy-plan.mjs). A run for an unserved change, or inside the window,
-# ends after the plan; the three-hourly run deploys whatever the window held back.
+# Starts from Forge main landings via workflow_dispatch (Item 8b6efb50), not from the GitHub mirror
+# push. The dev site (Cloudflare Worker nanthai-forge-dev, docs/development.md#web-site) deploys
+# only when what it serves changed, at most once per 5-minute window (scripts/site-deploy-plan.mjs).
+# Forge schedules one trailing flush when a landing arrives inside the 5-minute window (zero idle cost);
+# the 3-hour schedule run stays only as disaster catch-up.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'web/**'
-      - 'site/**'
-      - 'src/**'
-      - 'convex/**'
-      - 'scripts/**'
-      - 'docs/**'
-      - 'skills/**'
-      - 'README.md'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/web-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      state:
+        description: Forge State that triggered the deploy (empty deploys Forge main's newest)
+        required: false
+        type: string
+      sequence:
+        description: Main sequence number Forge reported (shown only; the server decides)
+        required: false
+        type: string
   schedule:
     - cron: '7 */3 * * *'
-  workflow_dispatch:
 
 permissions:
   contents: read
+  id-token: write
 
 # One deploy at a time; a newer main replaces a queued one, never interrupts a running one.
 concurrency:
@@ -32,17 +31,19 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main' && vars.FORGE_RELEASE_PROJECT != ''
     runs-on: ubuntu-latest
     # The Cloudflare token lives only in this environment; it deploys from main alone, so forks and PRs never see it.
     environment: cloudflare-dev
+    timeout-minutes: 15
     env:
-      SITE_URL: https://nanthai-forge-dev.nanthai-forge.workers.dev
+      SITE_URL: https://dev.forge.nanthai.tech
+      FORGE_CONVEX_SITE: ${{ vars.VITE_CONVEX_SITE_URL }}
+      FORGE_PROJECT_ID: ${{ vars.FORGE_RELEASE_PROJECT }}
       CF_SEND_TELEMETRY: 'false'
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          # Always the current main, never the run's own commit: a late or re-run job cannot deploy an older main
-          # over a newer one, and runs are serialized, so each builds a main at least as new as the one before.
           ref: main
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -50,9 +51,15 @@ jobs:
           node-version: '24.22.1'
       - name: Plan the deploy
         id: plan
-        # Reads the live site's record; needs no dependencies, so a skipped run costs seconds.
-        # Scheduled and manual runs also count src/ and scripts/, which the generated references read through imports.
-        run: node scripts/site-deploy-plan.mjs plan "$SITE_URL" ${{ github.event_name != 'push' && '--deep' || '' }}
+        # Read-only query against Forge main and the live site's build record; needs no dependencies.
+        # Scheduled runs also count src/ and scripts/, which the generated references read through imports.
+        run: node scripts/forge-deploy-ci.mjs plan --target web --site "$SITE_URL" ${{ github.event_name == 'schedule' && '--deep' || '' }}
+      - name: Check out Forge main State
+        if: steps.plan.outputs.build == 'true'
+        env:
+          DEPLOY_HEAD: ${{ steps.plan.outputs.head }}
+          DEPLOY_SEQUENCE: ${{ steps.plan.outputs.sequence }}
+        run: node scripts/forge-deploy-ci.mjs checkout --target web --state "$DEPLOY_HEAD" --sequence "$DEPLOY_SEQUENCE" --dir .
       - if: steps.plan.outputs.build == 'true'
         run: npm ci --ignore-scripts
       - if: steps.plan.outputs.build == 'true'
@@ -80,7 +87,10 @@ jobs:
           VITE_CONVEX_SITE_URL: ${{ vars.VITE_CONVEX_SITE_URL }}
       - name: Build the site
         if: steps.plan.outputs.build == 'true'
-        run: node scripts/build-site.mjs site-output --commit "$(git rev-parse HEAD)"
+        env:
+          DEPLOY_HEAD: ${{ steps.plan.outputs.head }}
+          DEPLOY_SEQUENCE: ${{ steps.plan.outputs.sequence }}
+        run: node scripts/build-site.mjs site-output --commit "$(git rev-parse HEAD)" --state "$DEPLOY_HEAD" --sequence "$DEPLOY_SEQUENCE"
       - name: Compare with the live site
         id: compare
         if: steps.plan.outputs.build == 'true'
@@ -89,9 +99,83 @@ jobs:
         # The Cloudflare CLI is pinned by its own lockfile, so only this job downloads it.
         run: npm ci --ignore-scripts --prefix site/deploy
       - name: Deploy to the dev site
+        id: upload
         if: steps.compare.outputs.deploy == 'true'
         working-directory: site-output
-        run: ../site/deploy/node_modules/.bin/cf deploy --prebuilt --no-provision --message "main $(git rev-parse --short HEAD)"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          DEPLOY_HEAD: ${{ steps.plan.outputs.head }}
+          DEPLOY_SEQUENCE: ${{ steps.plan.outputs.sequence }}
+        run: ../site/deploy/node_modules/.bin/cf deploy --prebuilt --no-provision --message "main #$DEPLOY_SEQUENCE $DEPLOY_HEAD"
+      - name: Post-deploy smoke
+        id: smoke
+        if: steps.plan.outputs.build == 'true' && ((steps.compare.outputs.deploy == 'true' && steps.upload.outcome == 'success') || (steps.compare.outcome == 'success' && steps.compare.outputs.deploy != 'true'))
+        env:
+          DEPLOY_HEAD: ${{ steps.plan.outputs.head }}
+          COMPARE_DEPLOY: ${{ steps.compare.outputs.deploy }}
+        run: |
+          if [ "$COMPARE_DEPLOY" = "true" ]; then
+            node scripts/forge-deploy-ci.mjs smoke --site "$SITE_URL" --state "$DEPLOY_HEAD" --out "$RUNNER_TEMP/web-smoke.json" --no-fail
+          else
+            node scripts/forge-deploy-ci.mjs smoke --site "$SITE_URL" --out "$RUNNER_TEMP/web-smoke.json" --no-fail
+          fi
+      - name: Report deploy outcome to Forge
+        if: always() && (steps.plan.outputs.build == 'true' || steps.plan.outputs.skipped_unchanged == 'true') && steps.plan.outputs.head != ''
+        env:
+          PLAN_BUILD: ${{ steps.plan.outputs.build }}
+          PLAN_SKIPPED_UNCHANGED: ${{ steps.plan.outputs.skipped_unchanged }}
+          DEPLOY_HEAD: ${{ steps.plan.outputs.head }}
+          DEPLOY_SEQUENCE: ${{ steps.plan.outputs.sequence }}
+          LIVE_HEAD: ${{ steps.plan.outputs.live_head }}
+          LIVE_SEQUENCE: ${{ steps.plan.outputs.live_sequence }}
+          COMPARE_OUTCOME: ${{ steps.compare.outcome }}
+          COMPARE_DEPLOY: ${{ steps.compare.outputs.deploy }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+          SMOKE_OK: ${{ steps.smoke.outputs.smoke_ok }}
+          SMOKE_SUMMARY: ${{ steps.smoke.outputs.smoke_summary }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          status="failed"
+          summary="Dev web deploy failed before post-deploy smoke completed."
+          unchanged=""
+          if [ "$PLAN_BUILD" != "true" ] && [ "$PLAN_SKIPPED_UNCHANGED" = "true" ]; then
+            status="succeeded"
+            summary=""
+            unchanged="--unchanged"
+          elif [ "$UPLOAD_OUTCOME" = "success" ]; then
+            if [ "$SMOKE_OK" = "true" ]; then
+              status="succeeded"
+              summary=""
+            else
+              status="smoke-failed"
+              summary="${SMOKE_SUMMARY:-Post-deploy smoke did not pass.}"
+            fi
+          elif [ "$COMPARE_OUTCOME" = "success" ] && [ "$COMPARE_DEPLOY" != "true" ]; then
+            if [ "$SMOKE_OK" = "true" ]; then
+              status="succeeded"
+              summary=""
+              unchanged="--unchanged"
+            else
+              status="smoke-failed"
+              summary="${SMOKE_SUMMARY:-Post-deploy smoke did not pass.}"
+            fi
+          fi
+          node scripts/forge-deploy-ci.mjs report \
+            --target web \
+            --state "$DEPLOY_HEAD" \
+            --sequence "$DEPLOY_SEQUENCE" \
+            --status "$status" \
+            --url "$RUN_URL" \
+            ${unchanged:+$unchanged} \
+            ${LIVE_HEAD:+--live-state "$LIVE_HEAD"} \
+            ${LIVE_SEQUENCE:+--live-sequence "$LIVE_SEQUENCE"} \
+            ${summary:+--summary "$summary"} \
+            --smoke-file "$RUNNER_TEMP/web-smoke.json"
+      - name: Fail job when post-deploy smoke failed
+        if: steps.plan.outputs.build == 'true' && ((steps.compare.outputs.deploy == 'true' && steps.upload.outcome == 'success') || (steps.compare.outcome == 'success' && steps.compare.outputs.deploy != 'true')) && steps.smoke.outputs.smoke_ok != 'true'
+        env:
+          SMOKE_SUMMARY: ${{ steps.smoke.outputs.smoke_summary }}
+        run: |
+          echo "::error::Post-deploy smoke failed: $SMOKE_SUMMARY"
+          exit 1

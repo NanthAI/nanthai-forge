@@ -87,11 +87,12 @@ export type Ask = {
   ahead?: true;
   handBack?: { head: string; left: string; to: string };
 };
-/** A shared-state decision a person settles (convex/projectNeedsMe.ts `notices`, Item 12fde646): work reverted from main,
- * work that still needs a fix, or a GitHub mirror that stopped. It stays until the state changes. */
+/** A shared-state decision a person settles (convex/projectNeedsMe.ts `notices`, Items 12fde646, 8b6efb50): work
+ * reverted from main, work that still needs a fix, a GitHub mirror that stopped, or a failed deploy / post-deploy smoke.
+ * It stays until the state changes. */
 export type Notice = {
-  kind: 'reverted' | 'needs-fix' | 'mirror';
-  /** The reverted Intent's id, or `mirror`. */
+  kind: 'reverted' | 'needs-fix' | 'mirror' | 'deploy';
+  /** The reverted Intent's id, `mirror`, or `deploy:<target>`. */
   id: string;
   summary: string;
   next: string | null;

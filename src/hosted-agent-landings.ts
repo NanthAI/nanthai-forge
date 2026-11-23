@@ -58,7 +58,22 @@ export async function landingsHostedSource(transport: HostedAgentTransport, inpu
     ...(from && to ? { from: new Date(from).toISOString(), to: new Date(to).toISOString() } : {}),
     ...rest,
   });
-  if (typeof result.messageBase64 !== 'string') return result;
+  if (typeof result.messageBase64 !== 'string') {
+    if (Array.isArray(result.landings))
+      return {
+        ...result,
+        landings: result.landings.map(entry => {
+          const item = entry as { mirror?: Record<string, unknown>; deploys?: unknown } | null;
+          if (!item || item.deploys !== undefined || item.mirror?.deploys === undefined) return entry;
+          const { deploys, ...restMirror } = item.mirror;
+          if (Object.keys(restMirror).length) return { ...item, mirror: restMirror, deploys };
+          const next = { ...item, deploys };
+          delete next.mirror;
+          return next;
+        }),
+      };
+    return result;
+  }
   const { messageBase64, ...identity } = result;
   return { ...identity, ...JSON.parse(Buffer.from(messageBase64, 'base64').toString('utf8')) };
 }

@@ -11,6 +11,7 @@ import { ensureMirrorRow } from './projectGithubMirrorRows';
 import { mirrorAudit, startMirrorPublish, wakeHeldMirror } from './projectGithubMirrorCadence';
 import { notifyMirrorCoverage } from './projectGithubMirrorVerify';
 import { scheduleReleaseSign } from './projectReleaseSignDispatch';
+import { scheduleDevDeploys } from './projectDeployDispatch';
 export { ensureMirrorRow, mirrorJob, mirrorRow, scheduleMirror } from './projectGithubMirrorRows';
 /** Publication and wake are one transaction. No watcher, timer or idle job. */
 export async function enqueueGithubMirror(
@@ -35,9 +36,11 @@ export async function enqueueGithubMirror(
   // receipt's latest target; a retry for that target reuses it, including case-only renames.
   if (old?.repository.toLowerCase() === policy.repo.toLowerCase())
     return { jobId: old._id, scheduled: false };
-  // Release signing starts from the landing, before and whatever the mirror does: paused (no
-  // auto-push), held, failing or refused (Item 17ce38ba). A retry of a queued publish returned above.
-  await scheduleReleaseSign(ctx, project, receipt);
+  // Release signing and dev deploys start from the landing, before and whatever the mirror does:
+  // paused (no auto-push), held, failing or refused (Items 17ce38ba, 8b6efb50). A retry of a queued
+  // publish returned above. Dev deploys reuse scheduleReleaseSign's opt-in read (zero added reads).
+  if (await scheduleReleaseSign(ctx, project, receipt))
+    await scheduleDevDeploys(ctx, project, receipt, evidence?.paths);
   if (!policy.autoPush) return;
   let queue = await ensureMirrorRow(ctx, project._id, policy.repo);
   if (queue.repositoryKey !== queue.repository.toLowerCase())

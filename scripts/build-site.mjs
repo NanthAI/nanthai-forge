@@ -15,16 +15,24 @@ import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { build } from 'vite';
-import { SITE_RECORD, errorCodeDigest, servedSources } from './site-deploy-plan.mjs';
+import { SITE_RECORD, servedSources } from './site-deploy-plan.mjs';
+import { errorCodeDigest } from './site-error-codes.mjs';
 import { headersFile } from '../site/headers.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { name: { type: 'string', default: 'nanthai-forge-dev' }, commit: { type: 'string' } },
+  options: {
+    name: { type: 'string', default: 'nanthai-forge-dev' },
+    commit: { type: 'string' },
+    state: { type: 'string' },
+    sequence: { type: 'string' },
+  },
 });
 const destination = positionals[0];
 if (!destination)
-  throw new Error('Usage: node scripts/build-site.mjs OUTPUT_DIRECTORY [--name NAME] [--commit SHA]');
+  throw new Error(
+    'Usage: node scripts/build-site.mjs OUTPUT_DIRECTORY [--name NAME] [--commit SHA] [--state HEAD] [--sequence N]',
+  );
 const root = fileURLToPath(new URL('..', import.meta.url));
 const web = join(root, 'hosted-web-dist');
 const output = resolve(destination, '.cloudflare/output/v0');
@@ -102,6 +110,8 @@ async function files(directory) {
     .filter(path => path !== `workers/default/assets/${SITE_RECORD}`)
     .sort();
 }
+// Compute the content digest BEFORE stamping the per-head build label into index.html so a build
+// whose served files did not change keeps the exact same digest and skips Cloudflare upload.
 const digest = createHash('sha256');
 for (const path of await files(output))
   digest.update(
@@ -109,11 +119,39 @@ for (const path of await files(output))
       .update(await readFile(join(output, path)))
       .digest('hex')}\n`,
   );
+// Stamp the visible build version into the static public page footer and signed-in app shell (Item 8b6efb50).
+const seqNum = values.sequence && /^\d+$/.test(values.sequence) ? Number(values.sequence) : null;
+const buildLabel =
+  values.state && seqNum !== null
+    ? `Build #${seqNum} · ${values.state.slice(0, 8)}`
+    : values.state
+      ? `Build ${values.state.slice(0, 8)}`
+      : values.commit
+        ? `Build ${values.commit.slice(0, 8)}`
+        : null;
+if (buildLabel) {
+  const indexPath = join(assets, 'index.html');
+  const indexHtml = await readFile(indexPath, 'utf8');
+  const stamped = indexHtml.replace(
+    /(<a href="\/_forge\/build\.json"[^>]*data-build-version[^>]*>)[^<]*(<\/a>)/,
+    `$1${buildLabel}$2`,
+  );
+  if (stamped !== indexHtml) await writeFile(indexPath, stamped);
+  const appPath = join(assets, 'app.html');
+  const appHtml = await readFile(appPath, 'utf8').catch(() => null);
+  if (appHtml) {
+    const stampedApp = appHtml.replace(/<html\b([^>]*)>/, `<html$1 data-build-version="${buildLabel}">`);
+    if (stampedApp !== appHtml) await writeFile(appPath, stampedApp);
+  }
+}
 await mkdir(join(assets, '_forge'), { recursive: true });
 await writeFile(
   join(assets, SITE_RECORD),
   `${JSON.stringify({
     commit: values.commit ?? null,
+    ...(values.state ? { state: values.state } : {}),
+    ...(seqNum !== null ? { sequence: seqNum } : {}),
+    ...(buildLabel ? { version: buildLabel } : {}),
     deployedAt: new Date().toISOString(),
     digest: digest.digest('hex'),
     errorCodes: errorCodeDigest(root),

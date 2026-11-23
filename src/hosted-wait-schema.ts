@@ -23,5 +23,24 @@ export const hostedWaitSchema = z
       .optional(),
     /** Wait until main is green again (friction 1e94d000); returns at once when it is. Exclusive with the others. */
     main: z.literal('green').optional(),
+    /** Wait until a landing (receiptId, 8+ char prefix, "latest", or {receiptId?, sequence?, target?}) is
+     * contained in a successful deploy (Item 8b6efb50). Exclusive with the others. */
+    deploy: z
+      .union([
+        z
+          .string()
+          .regex(/^(?:latest|[0-9a-fA-F]{8}[0-9a-fA-F-]{0,56})$/, 'a receipt id (8+ chars) or "latest"'),
+        z
+          .object({
+            receiptId: z
+              .string()
+              .regex(/^[0-9a-fA-F]{8}[0-9a-fA-F-]{0,56}$/, 'a receipt id or 8+ character prefix')
+              .optional(),
+            sequence: z.number().int().positive().optional(),
+            target: z.enum(['convex', 'web', 'all']).optional(),
+          })
+          .strict(),
+      ])
+      .optional(),
   })
   .strict();

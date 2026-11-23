@@ -12,15 +12,15 @@
  * Both print one JSON line and, under GitHub Actions, write their answer to $GITHUB_OUTPUT. A missing or unreadable
  * record means "build and deploy": the rule can only skip work, never hide a change. */
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { appendFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { appendFileSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { errorCodes } from './check-growth.mjs';
 
 export const SITE_RECORD = '_forge/build.json';
-/** Landings closer together than this share one deploy. Measured on 100 landings (docs/development.md#web-site). */
-export const DEPLOY_WINDOW_SECONDS = 1200;
+/** Landings closer together than this share one deploy (5 min; shortened from 20 min in Item 8b6efb50,
+ * paired with Forge's trailing flush so deferred changes deploy right after the 5-min window opens, with
+ * the 3-hour schedule kept only as disaster catch-up). */
+export const DEPLOY_WINDOW_SECONDS = 300;
 /** Folders and files the site is built from as a whole. Any other file counts when a deployed bundle contains it (the
  * record's `sources`) or the build imports it (`buildFiles`). */
 export const SITE_INPUTS = [
@@ -38,11 +38,12 @@ export const SITE_INPUTS = [
 /** The generated references also take schemas and help text from most of src/ through imports, too wide to count on
  * every landing. The scheduled and manual runs (`plan --deep`) count these folders too; the digest decides. */
 export const DEEP_INPUTS = [/^src\//, /^scripts\//];
-/** What runs the build: the web build's config, the site build, this plan and the smoke check. */
+/** What runs the build: the web build's config, the site build, this plan, the deploy runner and the smoke check. */
 export const BUILD_ENTRIES = [
   'web/vite.config.ts',
   'scripts/build-site.mjs',
   'scripts/site-deploy-plan.mjs',
+  'scripts/forge-deploy-ci.mjs',
   'scripts/web-smoke-load.mjs',
 ];
 
@@ -97,25 +98,6 @@ export function servedChanges(changed, sources, build = [], deep = false) {
   return changed.filter(path => served.has(path) || inputs.some(re => re.test(path)));
 }
 
-/** A digest of the public error codes in src/, convex/ and site/ (the error reference lists them), recorded by the
- * build so the plan sees a code added or removed anywhere. */
-export function errorCodeDigest(root) {
-  const codes = new Set();
-  const scan = directory => {
-    for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
-      if (entry.name === '_generated' || entry.name === 'node_modules') continue;
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) scan(path);
-      else if (/\.(?:ts|mts)$/.test(entry.name))
-        for (const code of errorCodes(readFileSync(join(root, path), 'utf8'))) codes.add(code);
-    }
-  };
-  for (const directory of ['src', 'convex', 'site']) scan(directory);
-  return createHash('sha256')
-    .update([...codes].sort().join('\n'))
-    .digest('hex');
-}
-
 /** Build or skip. `live` is the deployed record (or null), `changed` the files changed since its commit (or null
  * when they cannot be listed). A served change inside the window is deferred, never dropped: it is still a change
  * since the deployed commit when the next run plans. */
@@ -129,7 +111,8 @@ export function deployPlan({
   errorCodes,
 }) {
   const deployedAt = Date.parse(live?.deployedAt ?? '');
-  if (!live || !Array.isArray(live.sources) || typeof live.commit !== 'string')
+  const hasOrigin = typeof live?.commit === 'string' || typeof live?.state === 'string';
+  if (!live || !Array.isArray(live.sources) || !hasOrigin)
     return { build: true, reason: 'the site has no deploy record' };
   // A clock behind the record counts as inside the window until it catches up, at most one window.
   const age = (now - deployedAt) / 1000;
@@ -150,11 +133,14 @@ export function deployPlan({
   return { build: true, reason: `${served.length} served files changed since the deploy` };
 }
 
-/** After building: upload when the bytes are new. A record without its commit (a deploy by hand) is replaced even by
- * the same bytes, so later plans can list changes again instead of rebuilding on every run. */
-export const shouldDeploy = (live, built) => typeof live?.commit !== 'string' || built.digest !== live.digest;
+/** After building: upload when the bytes are new. A record without its commit/state (a deploy by hand) is
+ * replaced even by the same bytes, so later plans can list changes again instead of rebuilding on every run. */
+export const shouldDeploy = (live, built) =>
+  (typeof live?.commit !== 'string' && typeof live?.state !== 'string') ||
+  (typeof built?.state === 'string' && typeof live?.state !== 'string') ||
+  built.digest !== live.digest;
 
-async function liveRecord(site) {
+export async function liveRecord(site) {
   try {
     const response = await globalThis.fetch(new URL(`/${SITE_RECORD}`, site), {
       redirect: 'error',
@@ -202,6 +188,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const live = await liveRecord(site);
   if (command === 'plan') {
     const root = fileURLToPath(new URL('..', import.meta.url));
+    const { errorCodeDigest } = await import('./site-error-codes.mjs');
     answer(
       deployPlan({
         live,

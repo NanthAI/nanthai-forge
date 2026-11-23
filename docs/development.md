@@ -1185,36 +1185,54 @@ sign-in (`site/device-auth.ts`), the cached public read and the 301 for every ea
 (`site/public-read.ts`), and the app shell for any other path. Every Worker response gets the same security headers.
 The Worker reads the visitor's address from `CF-Connecting-IP` and forwards only its keyed hash.
 
-`node scripts/build-site.mjs OUT --commit SHA` writes the build (static files, the bundled Worker,
-`worker.config.json` with its bindings and secret names, and `/_forge/build.json` with the commit, the time and a
-digest of everything served). `cf deploy --prebuilt --no-provision`, run in `OUT`, uploads it. The `cf` CLI is
+`node scripts/build-site.mjs OUT --commit SHA --state HEAD --sequence N` writes the build (static files, the bundled Worker,
+`worker.config.json` with its bindings and secret names, and `/_forge/build.json` with the Forge State, main sequence, commit, build time and a
+digest of everything served), and stamps the build version into the public page footer (`index.html`) and `<html data-build-version>` on `app.html` (read synchronously by the signed-in app rail with no extra request). `cf deploy --prebuilt --no-provision`, run in `OUT`, uploads it. The `cf` CLI is
 pinned with its own lockfile in `site/deploy/`, so only the deploy job downloads it.
 
-**When it deploys.** `scripts/site-deploy-plan.mjs` decides; the workflow runs on pushes to main that may touch
-the site, every three hours (at 7 past) and on manual dispatch, one run at a time (a newer queued run replaces an
-older queued one; a running deploy is never interrupted). Every run checks out the current main, never its own
-commit, so a late or re-run job cannot put an older main over a newer one.
+**When it deploys.** Both `.github/workflows/convex-deploy.yml` and `.github/workflows/web-deploy.yml` start straight from
+Forge main landings via `workflow_dispatch` (`convex/projectDeployDispatch.ts`, called from `enqueueGithubMirror` ahead of the
+mirror queue so a stopped or paused mirror never blocks dev deploys); neither workflow triggers on GitHub pushes. Each run
+authenticates to `/deploy/actions` with GitHub Actions OIDC (`id-token: write`), reads Forge `main`'s newest `(head, sequence)`
+and changed paths since the last recorded deploy, and overlays only the changed blobs from R2 (`scripts/forge-deploy-ci.mjs`),
+keeping one deploy running and one queued per target (`cancel-in-progress: false`). Both workflows also keep a 3-hour disaster
+catch-up schedule (`7 */3 * * *` for dev web, `17 */3 * * *` for dev Convex).
 
-1. **Plan**, with no install: read the live `/_forge/build.json`, then list the changes since its commit. If none
-   touches a served file (`web/`, `site/`, `docs/`, `skills/`, `README.md`, the package files, the
-   workflow, the build scripts, the document manifests, the files the generated CLI, MCP and error references read,
-   or any file the last web build read), and the public error codes are unchanged, the run ends here. A `src/`-only
-   or test-only landing does not deploy. The references also take schemas and help text from most of `src/` through
-   imports, so the three-hourly and manual runs (`plan --deep`) count any `src/` or `scripts/` change too and let
-   the digest decide.
-2. **Window**: if the live site was built less than 20 minutes ago (the record's time), the run ends too. No runner waits: the next
-   landing after the window, or the three-hourly run, deploys everything held back, so landings in that time share
-   one deploy.
-3. **Compare**: build, then deploy only if the digest differs from the live one, or the live record has no commit (a
-   deploy by hand), so the next plans can list changes again.
+For the dev site, `scripts/site-deploy-plan.mjs` gates every build:
+
+1. **Plan**, with no install: read Forge `main` (and changed paths since the last recorded web deploy) plus the live
+   `/_forge/build.json`. If `main` is already live, or if none of the changed paths touches a served file (`web/`, `site/`,
+   `docs/`, `skills/`, `README.md`, the package files, the workflow, the build scripts, the document manifests, the files the
+   generated CLI, MCP and error references read, or any file the last web build read) and the public error codes are unchanged,
+   the run ends here. A test-only landing dispatches nothing. Scheduled runs (`plan --deep`) count any `src/` or `scripts/`
+   change too and let the digest decide.
+2. **Window**: if the live site was built less than **5 minutes** (`DEPLOY_WINDOW_SECONDS = 300`, shortened from 20 minutes in
+   Item 8b6efb50) ago, the run ends without waiting. When a landing arrives inside the window, Forge schedules a single
+   trailing flush right after the 5-minute window opens (zero polling, zero idle cost), and the 3-hour schedule stays as
+   disaster catch-up, so active-work lag falls from up to 20–180 minutes to at most 5 minutes.
+3. **Compare, upload, smoke and report**: build, upload only when the digest is new (or the live record lacks a Forge `state`),
+   then run `scripts/forge-deploy-ci.mjs smoke` against `https://dev.forge.nanthai.tech` checking `/_forge/build.json`
+   (matching the deployed State on upload, or live health on an unchanged rebuild so a prior smoke failure is never
+   cleared without passing smoke), one public-read JSON path (`/-/public/v1/explore/active.json`), `/sitemap.xml` and one
+   old `/-/` 301 redirect (`/-/explore` → `/explore`). `scripts/build-site.mjs` computes the content digest before stamping
+   `Build #<seq> · <head8>` into `index.html` and `app.html` (`data-build-version`), so unchanged
+   builds keep the same digest and skip Cloudflare upload. Every attempted deploy reports its outcome (`succeeded`, `failed`,
+   or `smoke-failed`, keyed per `${run_id}:${run_attempt}`) back to `projectDeploys` via `/deploy/actions` (authorized only
+   for enrolled projects matching the CI adapter repository), so `landings {receiptId}` and `lane-history` show the first
+   successful deploy whose head contains a landing (`deploy.sequence >= landing.sequence`, or the prior successful deploy
+   marked `unchanged: true` when no paths affecting that target changed), `wait {"deploy": ...}` subscribes reactively
+   without polling, and any deploy or smoke failure surfaces as a **Needs you** notice until a newer deploy passes.
 
 Measured on the 100 landings of 2026-11-22 14:38 to 2026-11-23 04:45 UTC (85 of them changed a served file), which
-reached GitHub in 56 pushes: the old rule ran a full build and deploy on every one, **56 deploys per 100 landings**
-(42 went out; the deploy step failed on the last 14, after the shared Netlify credits ran out), 89 billed runner minutes (61 actual).
-Replayed on the same pushes, this rule makes **23 deploys per 100 landings** (62 runs; the other 39, the three-hourly
-ones included, end after the plan in about 20 seconds), about 85 billed runner minutes (about 51 actual), and a change
-reaches the site in a median of 27 minutes; the longest wait, 133 minutes, fell in a two-hour gap without pushes. A
-waiting runner was rejected: it would have spent about 280 more runner minutes per 100 landings.
+reached GitHub in 56 pushes: the old push-per-landing rule made **56 deploys per 100 landings** (89 billed runner minutes, 61 actual);
+the 20-minute window with a 3-hour catch-up made **23 deploys per 100 landings** (85 billed minutes, 51 actual, median 27 min,
+max 133 min wait). Shortening the window to **5 minutes** (`300 s`) with 10-second burst coalescing and a single
+Forge-scheduled trailing flush when a landing arrives inside the window keeps **zero idle polling** while keeping the
+3-hour schedule (`7 */3 * * *` web, `17 */3 * * *` Convex; read-only plan query) only as disaster catch-up. Projected from
+the path mix: ~30–40 web deploys and ~20–30 Convex deploys per 100 landings (~90–125 runner minutes/day on free public
+runners; Cloudflare Workers deploys are unbilled). *Unrun until the GitHub mirror resumes and the updated workflow files
+are approved and pushed to GitHub: live replay of frictions `c498d10a`, `82aa0201`, `659d778b`, `4af9bba4` and the
+10-landing before/after timing sample.*
 
 The Worker's settings are Worker secrets, never in the build: `FORGE_WEB_URL`, `FORGE_CONVEX_SITE_URL`,
 `FORGE_PUBLIC_READ_SECRET`, `FORGE_CLIENT_HASH_KEY` and `FORGE_SITE_DEVICE_KEY` (every declared secret must

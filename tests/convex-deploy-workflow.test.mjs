@@ -2,106 +2,93 @@
 // Copyright 2026 Ferdinando Valsecchi
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { planConvexDeploy } from '../scripts/forge-deploy-ci.mjs';
+import { moduleUrl } from './convex-module.mjs';
 
+const deployDispatch = await import(moduleUrl('../convex/projectDeployDispatch.ts'));
 const workflow = readFileSync('.github/workflows/convex-deploy.yml', 'utf8');
 
-test('dev Convex deploys only from main pushes inside the locked environment', () => {
-  assert.match(workflow, /push:\n\s+branches: \[main\]/);
+test('Item 8b6efb50: dev Convex deploys from Forge workflow_dispatch and catch-up schedule on main, never mirror push', () => {
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /schedule:\n\s+- cron: '17 \*\/3 \* \* \*'/);
+  assert.doesNotMatch(workflow, /^\s+push:/m);
   assert.doesNotMatch(workflow, /pull_request/);
+  assert.match(workflow, /if: github\.ref == 'refs\/heads\/main' && vars\.FORGE_RELEASE_PROJECT != ''/);
   assert.match(workflow, /environment: convex-dev/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /node-version: '24\.22\.1'/);
   assert.match(workflow, /cancel-in-progress: false/);
+  assert.match(workflow, /^permissions:\n {2}contents: read\n {2}id-token: write$/m);
   assert.match(workflow, /CONVEX_DEPLOY_KEY: \$\{\{ secrets\.CONVEX_DEPLOY_KEY \}\}/);
   assert.equal(workflow.match(/secrets\./g).length, 1);
 });
 
-// Convex imports shared reducers and transports from src; changes there must reach the server.
-test('backend and shared source changes automatically deploy Convex', () => {
+// Convex imports shared reducers and transports from src; changes there must dispatch Convex deploys.
+test('Item 8b6efb50: backend and shared source changes dispatch dev Convex deploys; docs and tests do not', () => {
   for (const path of [
-    'convex/**',
-    'src/**',
+    'convex/x.ts',
+    'src/x.ts',
+    'package.json',
+    'package-lock.json',
+    '.github/workflows/convex-deploy.yml',
+    'scripts/forge-deploy-ci.mjs',
+  ])
+    assert.deepEqual(deployDispatch.selectDeployTargets([path]).includes('convex'), true, path);
+  for (const path of ['docs/a.md', 'tests/b.mjs', 'web/src/app/App.tsx'])
+    assert.deepEqual(deployDispatch.selectDeployTargets([path]).includes('convex'), false, path);
+});
+
+// Forge main sequence and changed-path planning replaces the old GitHub compare job and works even when the mirror stops.
+test('Item 8b6efb50: Convex deploy plans via Forge OIDC, checks out Forge main State and reports outcome', () => {
+  const order = [
+    'scripts/forge-deploy-ci.mjs plan --target convex',
+    'scripts/forge-deploy-ci.mjs checkout --target convex',
+    'npm ci --ignore-scripts',
+    'npx --no-install convex deploy',
+    'scripts/forge-deploy-ci.mjs report',
+  ].map(s => workflow.indexOf(s));
+  assert(order.every(i => i > 0) && order.every((v, i) => i === 0 || v > order[i - 1]));
+  const deployStep = workflow
+    .split(/^      - /m)
+    .find(text => text.startsWith('name: Deploy functions and schema to dev\n'));
+  assert(deployStep, 'deploy step present');
+  assert.doesNotMatch(workflow.replace(deployStep, ''), /\bCONVEX_DEPLOY_KEY\b/);
+});
+
+test('Item 8b6efb50: planConvexDeploy skips already-deployed or non-Convex changes and deploys on Convex or unknown changes', () => {
+  const head = 'a'.repeat(64);
+  assert.equal(
+    planConvexDeploy({ head, sequence: 10, lastDeployed: { sequence: 10 }, changedPaths: [] }).deploy,
+    false,
+  );
+  assert.equal(
+    planConvexDeploy({
+      head,
+      sequence: 11,
+      lastDeployed: { sequence: 10 },
+      changedPaths: ['docs/a.md', 'tests/b.mjs', 'web/src/a.tsx'],
+    }).deploy,
+    false,
+  );
+  for (const path of [
+    'convex/x.ts',
+    'src/a.ts',
     'package.json',
     'package-lock.json',
     '.github/workflows/convex-deploy.yml',
   ])
-    assert(workflow.includes(`      - '${path}'`), `paths filter covers ${path}`);
-});
-
-// A mirror backlog drain starts one run per head; only the newest deploy-relevant head may deploy.
-test('deploy job needs the stale-head check and keeps one queued run', () => {
-  assert.match(workflow, /\n  check:\n/);
-  assert.match(workflow, /\n  deploy:\n    needs: check\n    if: needs\.check\.outputs\.deploy == 'true'\n/);
-  assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-  const check = workflow.slice(workflow.indexOf('\n  check:'), workflow.indexOf('\n  deploy:'));
-  assert.doesNotMatch(check, /secrets\.|CONVEX_DEPLOY_KEY|environment:/);
-});
-
-function runTipCheck(compare) {
-  const dir = mkdtempSync(join(tmpdir(), 'convex-deploy-tip-'));
-  try {
-    const script = workflow
-      .match(/- id: tip\n(?:.*\n)*?        run: \|\n((?:          .*\n)+)/)[1]
-      .replace(/^ {10}/gm, '');
-    // Fake gh: applies the workflow's own --jq filter to the fixture with the real jq.
-    writeFileSync(join(dir, 'fixture.json'), JSON.stringify(compare ?? {}));
-    writeFileSync(
-      join(dir, 'gh'),
-      `#!/bin/bash\n[ "$FAKE_GH_FAIL" = 1 ] && exit 1\nwhile [ $# -gt 0 ]; do [ "$1" = --jq ] && filter=$2; shift; done\njq -r "$filter" < "${dir}/fixture.json"\n`,
-      { mode: 0o755 },
+    assert.equal(
+      planConvexDeploy({ head, sequence: 11, lastDeployed: { sequence: 10 }, changedPaths: [path] }).deploy,
+      true,
+      path,
     );
-    const out = join(dir, 'out');
-    writeFileSync(out, '');
-    const result = spawnSync('bash', ['-c', script], {
-      encoding: 'utf8',
-      env: {
-        PATH: `${dir}:${process.env.PATH}`,
-        GITHUB_OUTPUT: out,
-        REPO: 'o/r',
-        SHA: 'abc',
-        FAKE_GH_FAIL: compare === null ? '1' : '0',
-      },
-    });
-    assert.equal(result.status, 0, result.stderr);
-    return { output: readFileSync(out, 'utf8').trim(), stdout: result.stdout };
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-const files = (...names) => names.map(filename => ({ filename }));
-
-test('stale-head check skips only when a newer commit changes a watched path', () => {
-  const skip = runTipCheck({
-    status: 'ahead',
-    files: files('docs/a.md', 'convex/x.ts'),
-  });
-  assert.equal(skip.output, 'deploy=false');
-  assert.match(skip.stdout, /^::notice::Skipped: .*abc/m);
-  for (const path of ['src/a.ts', 'package.json', 'package-lock.json', '.github/workflows/convex-deploy.yml'])
-    assert.equal(runTipCheck({ status: 'ahead', files: files(path) }).output, 'deploy=false', path);
-});
-
-test('stale-head check deploys at the tip, after docs-only commits and on unclear answers', () => {
-  assert.equal(runTipCheck({ status: 'identical', files: [] }).output, 'deploy=true');
   assert.equal(
-    runTipCheck({
-      status: 'ahead',
-      files: files('docs/a.md', 'tests/b.mjs', 'xsrc/c.ts', 'convex-other/d.ts'),
-    }).output,
-    'deploy=true',
+    planConvexDeploy({ head, sequence: 11, lastDeployed: { sequence: 10 }, changedPaths: null }).deploy,
+    true,
   );
-  assert.equal(runTipCheck({ status: 'behind', files: files('convex/x.ts') }).output, 'deploy=true');
-  assert.equal(runTipCheck({ status: 'diverged', files: files('convex/x.ts') }).output, 'deploy=true');
-  const truncated = Array.from({ length: 300 }, (_, i) => `src/f${i}.ts`);
-  assert.equal(runTipCheck({ status: 'ahead', files: files(...truncated) }).output, 'deploy=true');
-  const failed = runTipCheck(null);
-  assert.equal(failed.output, 'deploy=true');
-  assert.match(failed.stdout, /^::warning::/m);
+  assert.equal(planConvexDeploy({ head, sequence: 1, lastDeployed: null, changedPaths: null }).deploy, true);
 });
 
 // The exit bench's own deployment (Issue 2e1f5fbd): deployed code may move only when the lead

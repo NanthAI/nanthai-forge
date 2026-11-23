@@ -7,6 +7,8 @@ import { finishReadReader } from './projectFinishReadReader';
 import { boardWake } from './projectBoardDelivery';
 import { peerLatestLanding } from './projectBoardPeerLanding';
 import { mainEvidence } from './projectFailureCauseRead';
+import { deployWaitStatus } from './projectDeployStore';
+import { hostedStartMain } from './projectHostedChannels';
 import { agentActor } from '../src/agent-slug';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -155,6 +157,85 @@ export const main = query({
             ? { state: 'green' }
             : { state: 'pending' };
       return canonicalPayload({ main });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/**
+ * Wait until a landing (by receiptId, sequence, or current main) is contained in a successful deploy
+ * (`wait {"deploy": ...}`, Item 8b6efb50). ONE live Convex subscription on `projectDeploys`; re-runs
+ * only when a deploy row changes. Zero polling, zero idle cost.
+ */
+export const deploy = query({
+  args: {
+    projectId: v.id('hostedProjects'),
+    receiptId: v.optional(v.string()),
+    sequence: v.optional(v.number()),
+    target: v.optional(v.union(v.literal('convex'), v.literal('web'), v.literal('all'))),
+  },
+  returns: v.string(),
+  handler: async (rawCtx, input) => {
+    try {
+      const ctx = finishReadReader(rawCtx);
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to wait for a deploy.');
+      await activeProject(ctx, input.projectId, user.subject);
+      let sequence = input.sequence;
+      let receiptId: string | undefined;
+      if (input.receiptId !== undefined) {
+        const wanted = input.receiptId.trim().toLowerCase();
+        invariant(
+          wanted.length >= 8 && wanted.length <= 64,
+          'BAD_ARGUMENT',
+          'Pass a receipt id or at least 8 characters of one.',
+        );
+        const exact = await rawCtx.db
+          .query('projectHostedAcceptances')
+          .withIndex('by_project_and_receipt', q =>
+            q.eq('projectId', input.projectId).eq('receiptId', wanted),
+          )
+          .unique();
+        const found = exact
+          ? [exact]
+          : await rawCtx.db
+              .query('projectHostedAcceptances')
+              .withIndex('by_project_and_receipt', q =>
+                q
+                  .eq('projectId', input.projectId)
+                  .gte('receiptId', wanted)
+                  .lt('receiptId', `${wanted}\uffff`),
+              )
+              .take(2);
+        invariant(found.length, 'NOT_FOUND', `No landing in this project has receipt id ${wanted}.`);
+        invariant(
+          found.length === 1,
+          'AMBIGUOUS_ID',
+          `Receipt prefix ${wanted} matches more than one landing; pass more characters.`,
+        );
+        sequence = found[0]!.sequence;
+        receiptId = found[0]!.receiptId;
+      } else if (sequence === undefined) {
+        const current = await hostedStartMain(rawCtx, input.projectId);
+        sequence = current.sourceRevision;
+      }
+      invariant(
+        Number.isSafeInteger(sequence) && sequence > 0,
+        'BAD_ARGUMENT',
+        'Select a positive landing sequence or receipt id.',
+      );
+      const target = input.target ?? 'all';
+      const status = await deployWaitStatus(rawCtx, input.projectId, sequence, target);
+      return canonicalPayload({
+        deploy: {
+          sequence,
+          ...(receiptId ? { receiptId } : {}),
+          target,
+          state: status.state,
+          deploys: status.deploys,
+        },
+      });
     } catch (error) {
       return report(error);
     }

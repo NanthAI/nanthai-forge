@@ -17,7 +17,7 @@
     },
     {
       "id": "dev-deploys",
-      "how": "Convex and web deploys to dev run from GitHub Actions on every deploy-relevant push to main."
+      "how": "Convex and web deploys to dev are dispatched directly from Forge main landings to GitHub Actions (with schedule catch-up), fetching the landed Forge State from R2 via OIDC."
     },
     {
       "id": "release-signing",

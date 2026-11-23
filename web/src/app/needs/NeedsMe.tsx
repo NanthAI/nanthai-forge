@@ -383,7 +383,11 @@ export function NeedsMeView({
                               href={
                                 row.kind === 'mirror'
                                   ? at({ place: 'settings', section: 'mirror' })
-                                  : at({ place: 'plan', rest: row.id })
+                                  : row.kind === 'deploy'
+                                    ? row.next?.startsWith('https://')
+                                      ? row.next
+                                      : at({ place: 'settings', section: 'checks' })
+                                    : at({ place: 'plan', rest: row.id })
                               }
                             />
                           ) : 'question' in row ? (
@@ -734,9 +738,19 @@ function NoticeCard({ row, href }: { row: NoticeRow; href: string }) {
         </p>
       ) : null}
       <div className="btns">
-        <A className="btn ghost sm" href={href}>
-          {row.kind === 'mirror' ? 'Open the mirror' : 'Open the Item'}
-        </A>
+        {row.kind === 'deploy' && href.startsWith('https://') ? (
+          <a className="btn ghost sm" href={href} target="_blank" rel="noreferrer">
+            Open workflow run
+          </a>
+        ) : (
+          <A className="btn ghost sm" href={href}>
+            {row.kind === 'mirror'
+              ? 'Open the mirror'
+              : row.kind === 'deploy'
+                ? 'Open checks'
+                : 'Open the Item'}
+          </A>
+        )}
       </div>
     </div>
   );

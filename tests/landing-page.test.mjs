@@ -165,8 +165,9 @@ test('every link on the page has a real destination', () => {
       assert.equal(href, 'https://github.com/NanthAI/nanthai-forge', href);
     else
       assert.ok(
-        ['/', '/signin', '/new/import', '/llms.txt', '/privacy', '/terms'].includes(href) ||
-          /^\/docs\/(?:[a-z0-9/-]+\/)?$/.test(href),
+        ['/', '/signin', '/new/import', '/llms.txt', '/privacy', '/terms', '/_forge/build.json'].includes(
+          href,
+        ) || /^\/docs\/(?:[a-z0-9/-]+\/)?$/.test(href),
         `${href} is a page the site serves`,
       );
   }

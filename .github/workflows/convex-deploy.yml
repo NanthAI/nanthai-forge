@@ -1,69 +1,89 @@
 name: Deploy dev Convex
+run-name: Deploy dev Convex ${{ inputs.sequence || github.event_name }}
 
+# Starts from Forge main landings via workflow_dispatch (Item 8b6efb50), not from the GitHub mirror
+# push. Checks out Forge main's exact State from R2 so deploys keep running even while the mirror is
+# behind or paused. The 3-hour schedule run stays only as disaster catch-up (read-only plan query).
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'convex/**'
-      - 'src/**'
-      - '.github/workflows/convex-deploy.yml'
-      - 'package.json'
-      - 'package-lock.json'
   workflow_dispatch:
+    inputs:
+      state:
+        description: Forge State that triggered the deploy (empty deploys Forge main's newest)
+        required: false
+        type: string
+      sequence:
+        description: Main sequence number Forge reported (shown only; the server decides)
+        required: false
+        type: string
+  schedule:
+    - cron: '17 */3 * * *'
 
 permissions:
   contents: read
+  id-token: write
 
-# One deploy at a time; a newer main replaces a queued one, never interrupts a running one.
-# The check job below then skips a run whose commit a newer deploy-relevant main commit has passed.
+# One dev deploy at a time; a newer landing replaces a queued run, never interrupts one mid-deploy.
 concurrency:
-  group: convex-deploy-benevolent-wildebeest-974
+  group: convex-deploy-dev
   cancel-in-progress: false
 
 jobs:
-  # Runs after the concurrency queue, so a mirror backlog drain deploys only the newest head.
-  check:
-    runs-on: ubuntu-latest
-    outputs:
-      deploy: ${{ steps.tip.outputs.deploy }}
-    steps:
-      - id: tip
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          # Compare this commit with the current main: skip only when a newer commit changed a path
-          # this workflow watches (a newer docs-only commit starts no deploy and must not hide this one).
-          # An unreadable or truncated (300 file) comparison deploys, as before this check existed.
-          if ! out=$(gh api "repos/$REPO/compare/$SHA...main" --jq '[.status, ([(.files // [])[].filename | select(test("^(convex/|src/|package\\.json$|package-lock\\.json$|\\.github/workflows/convex-deploy\\.yml$)"))] | length), ((.files // []) | length)] | @tsv'); then
-            out="unknown 0 0"
-            echo "::warning::Could not compare $SHA with main; deploying."
-          fi
-          read -r status watched total <<< "$out"
-          if [ "$status" = ahead ] && [ "$watched" -gt 0 ] && [ "$total" -lt 300 ]; then
-            echo "deploy=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipped: a newer main commit changes deploy paths, so its own run deploys instead of $SHA."
-          else
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-          fi
   deploy:
-    needs: check
-    if: needs.check.outputs.deploy == 'true'
+    if: github.ref == 'refs/heads/main' && vars.FORGE_RELEASE_PROJECT != ''
     runs-on: ubuntu-latest
-    # The deploy key lives only in this environment; it deploys from main alone, so forks and PRs never see it.
+    # The dev deploy key lives only in this environment; it deploys from main alone, so forks and PRs never see it.
     environment: convex-dev
+    timeout-minutes: 15
+    env:
+      FORGE_CONVEX_SITE: ${{ vars.VITE_CONVEX_SITE_URL }}
+      FORGE_PROJECT_ID: ${{ vars.FORGE_RELEASE_PROJECT }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
+          ref: main
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.22.1'
-      - run: npm ci --ignore-scripts
+      - name: Plan the deploy
+        id: plan
+        # Read-only query against Forge main (or 404 bootstrap fallback on first deploy of /deploy/actions).
+        run: node scripts/forge-deploy-ci.mjs plan --target convex
+      - name: Check out Forge main State
+        if: steps.plan.outputs.deploy == 'true' && steps.plan.outputs.head != ''
+        env:
+          DEPLOY_HEAD: ${{ steps.plan.outputs.head }}
+          DEPLOY_SEQUENCE: ${{ steps.plan.outputs.sequence }}
+        run: node scripts/forge-deploy-ci.mjs checkout --target convex --state "$DEPLOY_HEAD" --sequence "$DEPLOY_SEQUENCE" --dir .
+      - if: steps.plan.outputs.deploy == 'true'
+        run: npm ci --ignore-scripts
       - name: Deploy functions and schema to dev
-        # The schema index guard (tests/convex-schema-indexes.test.mjs) decides deletions; re-adding an index only costs a rebuild.
-        run: npx --no-install convex deploy --typecheck enable --allow-deleting-large-indexes
+        id: push
+        if: steps.plan.outputs.deploy == 'true'
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: npx --no-install convex deploy --typecheck enable --allow-deleting-large-indexes
+      - name: Report deploy outcome to Forge
+        if: always() && steps.plan.outputs.deploy == 'true' && steps.plan.outputs.head != ''
+        env:
+          DEPLOY_HEAD: ${{ steps.plan.outputs.head }}
+          DEPLOY_SEQUENCE: ${{ steps.plan.outputs.sequence }}
+          PUSH_OUTCOME: ${{ steps.push.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$PUSH_OUTCOME" = "success" ]; then
+            node scripts/forge-deploy-ci.mjs report \
+              --target convex \
+              --state "$DEPLOY_HEAD" \
+              --sequence "$DEPLOY_SEQUENCE" \
+              --status succeeded \
+              --url "$RUN_URL"
+          else
+            node scripts/forge-deploy-ci.mjs report \
+              --target convex \
+              --state "$DEPLOY_HEAD" \
+              --sequence "$DEPLOY_SEQUENCE" \
+              --status failed \
+              --url "$RUN_URL" \
+              --summary "Dev Convex deploy failed (see workflow run)."
+          fi

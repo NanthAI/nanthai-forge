@@ -13,6 +13,7 @@ import { strandedMirrorJobs } from './projectGithubMirrorRetarget';
 import { inboundLanding, inboundOutcomeSchema } from './projectGithubInboundQueue';
 import { mirrorCadenceRead } from './projectGithubMirrorCadence';
 import { mirrorCadence } from '../src/hosted-github-mirror-status';
+import { deploysForSequence } from './projectDeployStore';
 
 /** Called only after project authorization. Three selected rows, no history scan,
  * timer or additional client request; retry/job writes invalidate existing reads. */
@@ -135,8 +136,20 @@ export async function mirrorReceipt(ctx: QueryCtx, project: Doc<'hostedProjects'
     .withIndex('by_project_and_receipt', q => q.eq('projectId', project._id).eq('receiptId', receiptId))
     .order('desc')
     .first();
-  if (!job) return;
-  const queue = await mirrorRow(ctx, project._id);
+  if (!job) {
+    const acceptance = await ctx.db
+      .query('projectHostedAcceptances')
+      .withIndex('by_project_and_receipt', q => q.eq('projectId', project._id).eq('receiptId', receiptId))
+      .unique();
+    const deploys = acceptance ? await deploysForSequence(ctx, project._id, acceptance.sequence) : null;
+    if (!deploys) return;
+    // Carry deploy ancestry without inventing a synthetic mirror status when no mirror job exists.
+    return { deploys };
+  }
+  const [queue, deploys] = await Promise.all([
+    mirrorRow(ctx, project._id),
+    deploysForSequence(ctx, project._id, job.sequence),
+  ]);
   const push = await mirrorCadenceRead(ctx, project, queue);
   const burst = job.burstJobId ? await ctx.db.get(job.burstJobId) : null;
   const mapping = job.mapping ? githubSyncCommitSchema.parse(JSON.parse(job.mapping)) : null;
@@ -157,5 +170,6 @@ export async function mirrorReceipt(ctx: QueryCtx, project: Doc<'hostedProjects'
     postedVerification: job.verifySent ?? null,
     held,
     push,
+    ...(deploys ? { deploys } : {}),
   };
 }

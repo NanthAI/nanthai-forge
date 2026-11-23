@@ -5,6 +5,7 @@ import { collectResultBatch } from './projectHostedActionsBatch';
 import { cleanupCiBranch } from './projectCiStatusCleanup';
 import { callback as githubOAuthCallback } from './githubBindingOAuth';
 import { handle as actionsHttp } from './projectHostedActionsHttp';
+import { handle as deployHttp } from './projectDeployHttp';
 import { serve as gitServe } from './gitServe';
 import { serve as publicServe } from './publicHttp';
 import { serve as discussionAttachment } from './discussionAttachmentHttp';
@@ -21,6 +22,7 @@ import { INSTALLATION_EVENT_PAGE, installationRepositories } from './sync';
 const http = httpRouter();
 http.route({ path: '/github/oauth/callback', method: 'GET', handler: githubOAuthCallback });
 http.route({ path: '/checks/actions', method: 'POST', handler: actionsHttp });
+http.route({ path: '/deploy/actions', method: 'POST', handler: deployHttp });
 // Read-only Git smart HTTP (clone/fetch); pushes go through Lanes.
 // gitw/ carries the signed sessions the large-pack Worker forwards (docs/git-serving.md).
 for (const method of ['GET', 'POST'] as const)

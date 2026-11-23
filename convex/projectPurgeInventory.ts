@@ -20,6 +20,7 @@ export const projectPurgeTables = {
   projectGithubMirrors: 'by_project',
   projectGithubMirrorJobs: 'by_project_and_state',
   projectGithubMirrorStops: 'by_project',
+  projectDeploys: 'by_project_and_target_and_sequence',
   projectGithubBindings: 'by_project_and_name',
   githubBindingOperations: 'by_project_and_operation',
   githubBindingRemovals: 'by_project_and_operation',

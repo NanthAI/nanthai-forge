@@ -141,3 +141,67 @@ export async function verifyActionsOidc(
   );
   return claims;
 }
+
+const deployActionsClaimsSchema = z.object({
+  iss: z.literal(actionsIssuer),
+  aud: z.string(),
+  exp: z.number(),
+  nbf: z.number(),
+  iat: z.number(),
+  repository: z.string(),
+  workflow_ref: z.string(),
+  workflow_sha: z.string().regex(/^[a-f0-9]{40}$/),
+  ref: z.literal('refs/heads/main'),
+  event_name: z.enum(['workflow_dispatch', 'schedule']),
+  run_id: z.string().regex(/^[1-9][0-9]*$/),
+  run_attempt: z.string().regex(/^[1-9][0-9]*$/),
+  runner_environment: z.literal('github-hosted'),
+});
+export type DeployActionsClaims = z.infer<typeof deployActionsClaimsSchema> & { workflow: string };
+
+/** Verify a GitHub Actions OIDC token for one of the named deploy workflows on refs/heads/main
+ * (Item 8b6efb50). Uses the same fixed-issuer JWKS cache as verifyActionsOidc. */
+export async function verifyDeployActionsOidc(
+  token: string,
+  audience: string,
+  allowedWorkflows: readonly string[],
+  request = networkFetch,
+  now = Date.now(),
+): Promise<DeployActionsClaims> {
+  invariant(token.length <= 16_384, 'EVIDENCE_CHANGED', 'Invalid GitHub OIDC token.');
+  const parts = token.split('.');
+  invariant(parts.length === 3, 'EVIDENCE_CHANGED', 'Invalid GitHub OIDC token.');
+  const decode = (part: string) =>
+    Uint8Array.from(atob(part.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+  const header = z
+    .object({ alg: z.literal('RS256'), kid: z.string() })
+    .parse(JSON.parse(new TextDecoder().decode(decode(parts[0]!))));
+  const c = deployActionsClaimsSchema.parse(JSON.parse(new TextDecoder().decode(decode(parts[1]!))));
+  const workflow = allowedWorkflows.find(
+    name => c.workflow_ref === `${c.repository}/.github/workflows/${name}@refs/heads/main`,
+  );
+  invariant(
+    c.aud === audience && c.exp > now / 1000 && c.nbf <= now / 1000 && c.iat <= now / 1000 && workflow,
+    'EVIDENCE_CHANGED',
+    'GitHub OIDC claims differ from an authorized deploy workflow on main.',
+  );
+  const jwk = await signingJwk(header.kid, request, now);
+  const key = await crypto.subtle.importKey(
+    'jwk',
+    jwk,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['verify'],
+  );
+  invariant(
+    await crypto.subtle.verify(
+      'RSASSA-PKCS1-v1_5',
+      key,
+      decode(parts[2]!),
+      new TextEncoder().encode(`${parts[0]}.${parts[1]}`),
+    ),
+    'EVIDENCE_CHANGED',
+    'GitHub OIDC signature is invalid.',
+  );
+  return { ...c, workflow };
+}

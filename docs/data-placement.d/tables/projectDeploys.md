@@ -1,0 +1,1 @@
+| `projectDeploys` | CI deploy outcomes (target, workflow, deployed Forge State and main sequence, status, run id, optional post-deploy smoke summary) reported by OIDC-authenticated deploy workflows; queried by ancestry (`sequence >= L`) for receipts, lane-history, `wait` and Needs you notices (Item 8b6efb50). | Deploys |

@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Item 8b6efb50: removes GitHub mirror push triggers and stale-head compare job from dev deploys; adds projectDeploys table for O(1) ancestry receipts, reactive wait and Needs you smoke notices (cannot merge into audit/mirror/release tables which have distinct lifecycles)",
+  "date": "2026-11-23"
+}

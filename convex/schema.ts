@@ -26,6 +26,7 @@ import { hostedDecisionTables } from './projectHostedDecisionsFields';
 import { hostedTrustTables } from './projectHostedTrustFields';
 import { githubBindingTables } from './githubBindingFields';
 import { githubMirrorTables } from './projectGithubMirrorFields';
+import { deployTables } from './projectDeployFields';
 import { sourceStepTables } from './projectSourceStepFields';
 import { workDetailMigration, workDetailTables } from './projectWorkDetailFields';
 import { hostedSeedTables } from './projectHostedSeedFields';
@@ -690,6 +691,7 @@ export default defineSchema({
     result: v.string(),
   }).index('by_operation_and_part', ['operationId', 'part']),
   ...githubMirrorTables,
+  ...deployTables,
   ...githubBindingTables,
   ...sourceStepTables,
   ...workDetailTables,
