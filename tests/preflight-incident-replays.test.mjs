@@ -130,7 +130,13 @@ test('eb0491bb: direct importers of changed job modules run before any recent fa
   const pinSeconds = plan.pins.length * 4;
   assert.ok(pinSeconds <= CONTRACT_PIN_SECONDS);
   const fits = seconds =>
-    new Set(fitPreflightBudget({ tiers: plan.tiers, budgetSeconds: seconds, secondsPerFile: 4 }).tests);
+    new Set(
+      fitPreflightBudget({
+        tiers: plan.tiers,
+        budgetSeconds: seconds,
+        secondsPerFile: 4,
+      }).tests,
+    );
   for (const test of importers.slice(0, 3)) assert.ok(fits(180).has(test), `${test} fits the default budget`);
   for (const test of importers)
     assert.ok(fits(180 + pinSeconds).has(test), `${test} fits the default budget plus the pins`);
@@ -201,7 +207,11 @@ test('e5e6fca8: the four files a wide source change broke are selected and prote
   for (const test of failed) assert.ok(direct.includes(test), `${test} runs a changed module: direct`);
   assert.ok(protectedTiers.has('direct'));
   // So wide a change protects far more than the local budget: the plan says so instead of trimming.
-  const fit = fitPreflightBudget({ tiers: plan.tiers, budgetSeconds: 180, secondsPerFile: 4 });
+  const fit = fitPreflightBudget({
+    tiers: plan.tiers,
+    budgetSeconds: 180,
+    secondsPerFile: 4,
+  });
   assert.equal(fit.protectedOverBudget, true);
   for (const test of failed) assert.ok(fit.tests.includes(test), `${test} is never trimmed`);
   // The run's 180 s wall clock at 4 s per file starts the first 45 planned files and stops the rest.
@@ -239,7 +249,13 @@ test('e5e6fca8: the four files a wide source change broke are selected and prote
   assert.equal(preflightVerdict({ passed: false, incomplete }), 'NOT COMPLETE');
   // When the protected tier fits, nothing changes: no must-run file was stopped.
   assert.equal(
-    incompletePreflight({ root: '/lane', laneId: 'L', tierTests, notRun: [], secondsPerFile: 4 }),
+    incompletePreflight({
+      root: '/lane',
+      laneId: 'L',
+      tierTests,
+      notRun: [],
+      secondsPerFile: 4,
+    }),
     undefined,
   );
   t.diagnostic(
@@ -254,7 +270,7 @@ test('de6620eb: a new literal in a scanned source file selects the repo-wide gua
   const changed = at('src', 'dependency-link.ts');
   const plan = select([changed]);
   assert.ok(tier(plan, 'mandatory').includes(guard), 'the guard scans the changed folder');
-  assert.deepEqual(selectTests({ files, paths: [changed] }).reasons[guard], {
+  assert.deepEqual(selectTests({ files, paths: [changed] }, graphCache).reasons[guard], {
     kind: 'explicit',
     changedPath: changed,
     detail: `Scans src/, which holds changed ${changed}`,
@@ -281,7 +297,7 @@ test('425ecd74: a data fixture, its test and a doc retain byte and folder reader
   // returned names are filtered to test files. Retain that conservative reader.
   const directoryReaders = [at('tests', 'public-verify.test.mjs')];
   // Test code that runs a tooling walk of tests/ (sourceFiles(), Item 196d5e4e) reads them as bytes.
-  const { reasons } = selectTests({ files, paths });
+  const { reasons } = selectTests({ files, paths }, graphCache);
   const walkReaders = plan.tests.filter(
     test => reasons[test]?.detail === recursiveFolderReader && paths.includes(reasons[test].changedPath),
   );
@@ -496,7 +512,7 @@ const startsAt = (queue, test, measured = {}) =>
 test('baaec084 (receipt 4f687721): the read reduction in convex/ starts its cost and inventory pins inside 90 s', () => {
   // Lane 01cd81c8 changed these two backend modules; three exact cost pins failed only in the queue check.
   const paths = [at('convex', 'projectConvexSourceObjects.ts'), at('convex', 'projectPlanningList.ts')];
-  const plan = selectPreflightTests({ files, paths, guards: guards(paths), hubBudget: budget }, {});
+  const plan = selectPreflightTests({ files, paths, guards: guards(paths), hubBudget: budget }, graphCache);
   assert.ok(plan.pins.length >= 3, `pins ${plan.pins.length}`);
   assert.ok(plan.pins.length * 4 <= CONTRACT_PIN_SECONDS, 'pins stay inside their allowance');
   const mandatory = tier(plan, 'mandatory');
@@ -516,7 +532,7 @@ test('baaec084 (receipt 4f687721): the read reduction in convex/ starts its cost
 
 test('60d68b5f (Lane ef5d2a08): a schema change starts the registration and inventory guards first, even behind slow guards', () => {
   const paths = [at('convex', 'schema.ts')];
-  const plan = selectPreflightTests({ files, paths, guards: guards(paths), hubBudget: budget }, {});
+  const plan = selectPreflightTests({ files, paths, guards: guards(paths), hubBudget: budget }, graphCache);
   const registrations = at('tests', 'table-registrations.test.mjs');
   const inventory = at('tests', 'project-purge-inventory.test.mjs');
   for (const pin of [registrations, inventory]) {
@@ -540,16 +556,19 @@ test('42e2a995: the tool-list contract test runs first when a contract schema ch
   const toolList = at('tests', 'mcp-tool-list.test.mjs');
   assert.ok(contractGuardTest(toolList));
   const paths = [at('src', 'hosted-agent-contract.ts')];
-  const plan = selectPreflightTests({ files, paths, guards: guards(paths), hubBudget: budget }, {});
+  const plan = selectPreflightTests({ files, paths, guards: guards(paths), hubBudget: budget }, graphCache);
   assert.ok(tier(plan, 'mandatory').includes(toolList), 'mcp-tool-list is protected for a contract change');
 });
 
 test('8cf45311: a source-text guard that reads a changed file is must-run (the detached:true literal)', () => {
-  const plan = selectPreflightTests({
-    files,
-    paths: [at('src', 'agent-preflight-capture.ts')],
-    hubBudget: budget,
-  });
+  const plan = selectPreflightTests(
+    {
+      files,
+      paths: [at('src', 'agent-preflight-capture.ts')],
+      hubBudget: budget,
+    },
+    graphCache,
+  );
   assert.ok(tier(plan, 'mandatory').includes(at('tests', 'no-resident-process.test.mjs')));
 });
 
@@ -652,7 +671,7 @@ test('daedb321 and 57ab011b: a new module runs the package ceilings (the cheap c
 });
 
 test('df1eca81: a data file under src stays scoped when only prose, manifests, ledgers and type includes name it', () => {
-  const real = selectTests({ files, paths: [at('src', 'speed-budgets.json')] });
+  const real = selectTests({ files, paths: [at('src', 'speed-budgets.json')] }, graphCache);
   assert.equal(real.scope, 'scoped');
   const data = at('src', 'new-limits.json');
   const base = new Map([
@@ -667,7 +686,10 @@ test('df1eca81: a data file under src stays scoped when only prose, manifests, l
   // A shell script or workflow naming it may read it: the data file stays unobserved.
   const read = new Map([...base, ['scripts/run.sh', 'cat src/new-limits.json']]);
   assert.equal(selectTests({ files: read, paths: [data] }).scope, 'full');
-  const shipped = { ...JSON.parse(files.get('package.json')), files: ['src/new-limits.json'] };
+  const shipped = {
+    ...JSON.parse(files.get('package.json')),
+    files: ['src/new-limits.json'],
+  };
   // A fixture a test reads may hand the path to code: the readers of that fixture become readers of the
   // data file (never dropped), and a fixture nobody reads is inert.
   const fixture = new Map([

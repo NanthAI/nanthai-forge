@@ -13,10 +13,20 @@ const sha256 = bytes => createHash('sha256').update(bytes).digest();
 const validHash = hash => typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash);
 const maxBytes = 8 * 1024 * 1024;
 const inputs = new WeakMap();
+// One fact per path for this process, valid while the file's text is unchanged: inventories that differ
+// in a few files (a changed Lane tree, a synthetic fixture) re-parse only the files that differ.
+// One entry per path, and the map restarts empty past a fixed bound, so a long process keeps no unbounded text.
+const parsed = new Map();
+const maxParsed = 5000;
 
 /** Associate an immutable inventory with verified source pins and optionally a private local cache. */
 export function pinImportFacts(files, blobs, cacheDirectory) {
-  inputs.set(files, { blobs, cacheDirectory, buckets: new Map(), current: new Map() });
+  inputs.set(files, {
+    blobs,
+    cacheDirectory,
+    buckets: new Map(),
+    current: new Map(),
+  });
 }
 
 // A fixed number of read batches, independent of file count. Only buckets
@@ -48,7 +58,10 @@ function writeCache(path, entries) {
     const body = serialize({ schema, entries });
     if (body.length + 32 > maxBytes) return;
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    writeFileSync(temporary, Buffer.concat([sha256(body), body]), { mode: 0o600, flag: 'wx' });
+    writeFileSync(temporary, Buffer.concat([sha256(body), body]), {
+      mode: 0o600,
+      flag: 'wx',
+    });
     renameSync(temporary, path);
   } catch {
     try {
@@ -118,7 +131,16 @@ export function importFacts(files, withSymbols) {
         current.set(file, entry[1]);
         return entry[1];
       }
-      const fact = parseImportFacts(file, files.get(file) ?? '', withSymbols);
+      const text = files.get(file) ?? '';
+      const seen = parsed.get(file);
+      const fact =
+        seen && seen.text === text && complete(seen.fact)
+          ? seen.fact
+          : parseImportFacts(file, text, withSymbols);
+      if (fact !== seen?.fact) {
+        if (parsed.size >= maxParsed) parsed.clear();
+        parsed.set(file, { text, fact });
+      }
       current.set(file, fact);
       if (entries) {
         entries.set(file, entry?.[0] === hash && entry[2] ? [hash, fact, entry[2]] : [hash, fact]);
