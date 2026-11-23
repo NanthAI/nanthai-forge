@@ -84,8 +84,11 @@ async function sameReviewedFiles(
   grants: [ExactGrant | null, ExactGrant | null],
   pins: [string, string],
   protect: ReviewProtect | undefined,
+  scopedOnly = false,
 ) {
   const approved = await reviewedDigests(grants[0], pins[0], protect);
+  // Part B (scopedOnly): only protected entries may stand for an earlier approval; none is no match.
+  if (scopedOnly && !approved?.scoped) return false;
   const current = approved && (await reviewedDigests(grants[1], pins[1], protect));
   if (!approved || !current) return false;
   return approved.scoped ? approved.scoped === current.scoped : approved.all === current.all;
@@ -241,7 +244,7 @@ export const drive = internalAction({
       });
       return null;
     }
-    if (command.kind === 'review') {
+    if (command.kind === 'review' || command.kind === 'protected') {
       const { before, after } = command;
       const grants: [ExactGrant | null, ExactGrant | null] | null = await ctx.runQuery(
         makeFunctionReference<'query'>('projectHostedFinishDriver:reviewFiles'),
@@ -253,7 +256,12 @@ export const drive = internalAction({
         },
       );
       if (!grants) return null;
-      const same = await sameReviewedFiles(grants, [before.sha256, after.sha256], command.protect);
+      const same = await sameReviewedFiles(
+        grants,
+        [before.sha256, after.sha256],
+        command.protect,
+        command.kind === 'protected',
+      );
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedFinishDriver:resume'), {
         ...input,
         command: raw,

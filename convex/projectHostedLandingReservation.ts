@@ -18,7 +18,9 @@ export async function priorLandingForReservation(
   const { intentId } = input;
   const [prior] = await ctx.db
     .query('projectHostedLandingRequests')
-    .withIndex('by_project_and_intent', q => q.eq('projectId', input.projectId).eq('intentId', intentId))
+    .withIndex('by_project_and_intent_and_held_intent', q =>
+      q.eq('projectId', input.projectId).eq('intentId', intentId).eq('heldIntent', undefined),
+    )
     .order('desc')
     .take(1);
   if (!prior) return null;

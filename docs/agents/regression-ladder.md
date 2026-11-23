@@ -139,6 +139,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `9bc8204c` | Friction (Item 0f76b07e): withdraw by submissionId refused a reason, so a withdrawn landing said nothing about why. The cancel mutation now records the reason (feature `landing-cancel-reason`); an older server refuses the reason before any mutation. |
 | `b5e8e2d5` | Friction (Item 0f76b07e): a second sync conflict in a resolution Lane drafted another resolution Lane, so its folder, ids and resolve commands moved to a third Lane. The server now puts the new draft in the caller's own live resolution Lane (same id, first origin kept) and the folder rebases onto it with a fresh resolve. |
 | `c49fae56` | The licence submission (Item ffb6cc49, 2026-11-23) asked the owner again after each of four main moves through files the Lane also changed, though its approved protected file never changed. The approval now binds to the protected entries' before and after content (Item fe2b0a86, `tests/protected-approval-carry.test.mjs`) |
+| `37016080` | The licence Lane (Item ffb6cc49, 2026-11-23): approved submission 37016080 failed its check; the fixes 1b489c1f and c750f126 and the resolution Lane's c49fae56 each asked the owner again for the same protected change. A held submission of the same Intent now reuses that approval for its protected paths only (Item fe2b0a86 part B, `tests/protected-approval-across-submissions.test.mjs`) |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

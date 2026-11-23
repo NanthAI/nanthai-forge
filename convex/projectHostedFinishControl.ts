@@ -43,6 +43,8 @@ import { packRange, packHeaders } from '../src/object-pack-range';
 import { ownerReviewFiles } from './projectHostedOwnerGrant';
 import { reviewProtect } from '../src/protected-review';
 import { effectivePolicy } from '../src/autonomy-policy';
+import { protectedCarryReview, settleProtectedCarry } from './projectHostedOwnerGrantCarry';
+import { releaseApprovedReview } from './projectHostedOwnerReview';
 export type FinishIdentity = LandingIdentity & { wakeId: string; attempt?: number };
 export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promise<FinishCommand | null> {
   const { row, value } = await loadFinish(ctx, input);
@@ -229,6 +231,29 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       };
     }
     if (state.phase !== 'ready' && !reviewHeld) return null; // H13's run/queue events resume it
+    // Item fe2b0a86 part B: a held landing that may reuse an earlier owner approval of the same Intent
+    // compares its protected entries once per Candidate (one listing pair), then lifts only that reason.
+    if (
+      reviewHeld &&
+      landing.protectedCarry &&
+      landing.protectedCarry.settled !== state.attemptId &&
+      !landing.ownerGrant
+    ) {
+      const attempt = await loadLandingAttempt(ctx, {
+        projectId: input.projectId,
+        attemptId: state.attemptId,
+      });
+      const review = await protectedCarryReview(ctx, landing, attempt, project);
+      if (review) {
+        await retryFinish(ctx, row, input);
+        return {
+          kind: 'protected',
+          attemptId: attempt.id,
+          candidateDigest: attempt.candidate.digest,
+          ...review,
+        };
+      }
+    }
     if (
       state.batchNeedsSoloCompose &&
       !state.batchOriginId &&
@@ -397,6 +422,31 @@ async function resumeFinishIOOnce(
       undefined, // auditDonor
       input.page === true ? command.candidateDigest : undefined,
     );
+    return;
+  }
+  if (input.command.kind === 'protected') {
+    const command = input.command;
+    if (
+      value.pending ||
+      state.attemptId !== command.attemptId ||
+      !landing.protectedCarry ||
+      landing.ownerGrant
+    )
+      return;
+    await cancelPendingTask(ctx, row.wake.taskId);
+    await ctx.db.patch(row._id, { wake: null });
+    const same = input.page === true;
+    await settleProtectedCarry(
+      ctx,
+      landing,
+      command.attemptId,
+      command.candidateDigest,
+      same ? command.paths : undefined,
+    );
+    // The same release as an owner approval: the entry returns to its check and turn, and publication
+    // lifts only the protected reason for this exact Candidate (carriedProtectedPaths).
+    if (same) await releaseApprovedReview(ctx, input);
+    await scheduleFinish(ctx, (await ctx.db.get(row._id))!);
     return;
   }
   if (input.command.kind === 'page') {

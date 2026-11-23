@@ -42,6 +42,7 @@ import {
   submissionReservation,
   landingReservationForReader,
 } from './projectHostedLandingReservation';
+import { priorProtectedApproval } from './projectHostedOwnerGrantCarry';
 import { preQueueCheck } from '../src/hosted-landing-admission';
 import { landGateGuardEvidence, landGateTiming } from '../src/hosted-land-gates';
 import { v } from 'convex/values';
@@ -571,6 +572,17 @@ export async function enqueueHostedLanding(
     observation: landingObservation(earlyReview ? 'waiting-for-review' : admission ? 'checking' : 'queued'),
     error: earlyReview ? { code: 'REVIEW_REQUIRED', message: earlyReview } : null,
   });
+  // Item fe2b0a86 part B: a held agent submission looks once for an earlier owner approval of the same
+  // work. A person's acceptance never takes it (publication), so a person's submission does not look.
+  const protectedCarry =
+    earlyReview && intentId && attempt.actor.kind !== 'person'
+      ? await priorProtectedApproval(ctx, {
+          projectId: input.projectId,
+          intentId,
+          owner: project.owner,
+          policyDigest: attempt.policyDigest,
+        })
+      : undefined;
   await insertLandingAttempt(ctx, attempt);
   // Freeze the message before serializing the existing request row, while
   // preserving the original queue/finish wake order and transaction IO count.
@@ -630,7 +642,14 @@ export async function enqueueHostedLanding(
         }
       : {}),
     ...(request.revertOf ? { revertOf: request.revertOf } : {}),
-    ...(earlyReview ? { earlyReview: true as const, reviewState: 'held' as const } : reservation),
+    ...(earlyReview
+      ? {
+          earlyReview: true as const,
+          reviewState: 'held' as const,
+          ...(intentId ? { heldIntent: intentId } : {}),
+          ...(protectedCarry ? { protectedCarry } : {}),
+        }
+      : reservation),
     actor: actor.id,
     ...landingPriority(project, actor, request.priority),
     priorityVersion: 0,

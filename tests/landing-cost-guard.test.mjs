@@ -922,6 +922,9 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   // 184c7d95): the purge reference proof reads stored-key indexes (by_r2Key on objects, backups, proposals,
   // upload cleanup; by_archive_r2Key), so each object row written carries one more ~110 B index entry. That
   // replaces a scan of every other project's rows per deletion (3.1 GB on 11-22).
+  // Stored index key bytes +5/+5/+20/+20 in the four scenarios, and +5 on fresh and dogfood (Item fe2b0a86 part B):
+  // by_project_and_intent gains a trailing heldIntent slot, so later held submissions of an Intent find the owner's
+  // approval without a second index. That is 1 B per landing row (an undefined component), no extra entry or write.
   const indexBudget = storageBudgets.tenLandingIndexes;
   const aliasWrites = ten.reduce((n, s) => n + s.metricAliasWrites, 0);
   // 0de95ef2: the separately priced aliases must fit their measured budget.

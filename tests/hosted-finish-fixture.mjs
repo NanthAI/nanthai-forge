@@ -658,6 +658,24 @@ export async function finishFixture(
     });
     return f.currentMain();
   };
+  // Item fe2b0a86 part B: a later submission of the same Intent (a fix after a failed check, or a
+  // resolution Lane's) with these selected files: its own Lane and Candidate, composed on current main.
+  const resubmission = async files => {
+    const next = await c.lane(
+      c.state([c.baseFile, c.hidden, ...apply(extraBase, files)], [c.baseline.sha256]),
+    );
+    const main = f.currentMain();
+    const chosen = c.selection([next], [], {
+      expectedMain: { head: main.head, receiptId: main.receipt.id },
+    });
+    const composed = await compose(c, chosen);
+    return request({
+      candidateId: composed.id,
+      expectedHead: composed.result.head,
+      expectedMain: { head: main.head, receiptId: main.receipt.id },
+      finish: { composeOperationId: chosen.request.operationId, after: null },
+    });
+  };
   const originalFetch = globalThis.fetch;
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     if (init?.method === 'PUT') {
@@ -715,6 +733,7 @@ export async function finishFixture(
     runReuseAction,
     sourceStorage,
     moveMain,
+    resubmission,
     metrics,
     reuseDecisions,
     now: () => clock.now,

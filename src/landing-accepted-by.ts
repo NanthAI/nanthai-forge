@@ -28,6 +28,17 @@ const acceptedByObject = z
     pathsMore: z.number().int().positive().optional(),
     /** person: main moved after the acceptance; identical source was checked again and landed with it. */
     carried: z.literal(true).optional(),
+    /** auto, Item fe2b0a86 part B: the protected paths the project owner approved on an earlier
+     * submission of the same work, whose entries this Candidate kept; policy accepted the rest. */
+    protectedApproval: z
+      .object({
+        submissionId: z.uuid(),
+        at: z.iso.datetime(),
+        paths: z.array(z.string()).max(ACCEPTED_BY_PATHS),
+        pathsMore: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
     /** Read from the receipt's actor: landed before acceptance stamps, so `at` is the landing time. */
     fromReceipt: z.literal(true).optional(),
     note: z.string().min(1),
@@ -56,9 +67,28 @@ export function landingAcceptedBy(input: {
   head?: string | undefined;
   protectedPaths?: string[] | null | undefined;
   carried?: boolean | undefined;
+  /** auto: an earlier owner approval of the same work stood for these protected paths. */
+  protectedApproval?: { submissionId: string; at: number; paths: string[] } | undefined;
 }): LandingAcceptedBy {
-  if (input.actor.kind !== 'person')
-    return { kind: 'auto', actor: input.actor.id, at: input.at, note: AUTO_ACCEPTED_NOTE };
+  if (input.actor.kind !== 'person') {
+    const approval = input.protectedApproval;
+    if (!approval) return { kind: 'auto', actor: input.actor.id, at: input.at, note: AUTO_ACCEPTED_NOTE };
+    const approvedAt = new Date(approval.at).toISOString();
+    const shown = approval.paths.slice(0, ACCEPTED_BY_PATHS);
+    const more = approval.paths.length - shown.length;
+    return {
+      kind: 'auto',
+      actor: input.actor.id,
+      at: input.at,
+      protectedApproval: {
+        submissionId: approval.submissionId,
+        at: approvedAt,
+        paths: shown,
+        ...(more ? { pathsMore: more } : {}),
+      },
+      note: `Accepted automatically under project policy after its check passed. Its protected paths ${shown.join(', ')}${more ? ` +${more} more` : ''} carry the project owner's approval of submission ${short(approval.submissionId)} at ${approvedAt}, whose protected changes it kept.`,
+    };
+  }
   const at = input.acceptedAt === undefined ? input.at : new Date(input.acceptedAt).toISOString();
   const all = input.protectedPaths;
   const paths = all ? all.slice(0, ACCEPTED_BY_PATHS) : all;

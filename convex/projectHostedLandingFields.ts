@@ -439,6 +439,30 @@ export const hostedLandingTables = {
         head: v.optional(v.string()),
       }),
     ),
+    /** Item fe2b0a86 part B: the owner's approval of an earlier submission of the same Intent, which
+     * may stand for this held landing's protected paths only (the submitter stays the acceptor).
+     * `verified`/`refused`: the Candidate digest whose protected entries matched or did not; server-only. */
+    /** Item fe2b0a86 part B: the Intent of a submission held for review at submission, so a later held
+     * submission of the same work finds this row's owner approval (by_project_and_intent_and_held_intent). */
+    heldIntent: v.optional(v.string()),
+    protectedCarry: v.optional(
+      v.object({
+        submissionId: v.string(),
+        attemptId: v.string(),
+        /** The approved submission's submitter (its Candidate record is read as them). */
+        requester: v.string(),
+        /** The owner person who approved it. */
+        actor: v.string(),
+        policyDigest: v.string(),
+        at: v.number(),
+        verified: v.optional(v.string()),
+        /** The protected paths compared equal for `verified`; publication lifts only these. */
+        paths: v.optional(v.array(v.string())),
+        refused: v.optional(v.string()),
+        /** The attempt last compared; its later finish steps skip the comparison. */
+        settled: v.optional(v.string()),
+      }),
+    ),
     value: v.string(),
   })
     // index-order: caller: convex/projectSelfMetrics.ts#page; order: metrics bound _creationTime for submission windows.
@@ -508,7 +532,10 @@ export const hostedLandingTables = {
       'sequence',
     ])
     .index('by_project_and_channel_and_deciding', ['projectId', 'channel', 'deciding'])
-    .index('by_project_and_intent', ['projectId', 'intentId'])
+    // heldIntent trails intentId (Item fe2b0a86 part B): a held row has no intentId, so its Intent's held
+    // rows are (intentId undefined, heldIntent) and every other row is (intentId, undefined). One index,
+    // no extra entry per write.
+    .index('by_project_and_intent_and_held_intent', ['projectId', 'intentId', 'heldIntent'])
     .index('by_project_and_channel_and_reservedUntil', ['projectId', 'channel', 'reservedUntil'])
 
     .index('by_project_run_phase_checkWakeVersion', ['projectId', 'runId', 'phase', 'checkWakeVersion']),

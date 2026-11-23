@@ -157,8 +157,12 @@ export async function resubmittedBefore(
   const earlier = (before: number, n: number) =>
     db
       .query('projectHostedLandingRequests')
-      .withIndex('by_project_and_intent', q =>
-        q.eq('projectId', projectId).eq('intentId', request.intentId).lt('_creationTime', before),
+      .withIndex('by_project_and_intent_and_held_intent', q =>
+        q
+          .eq('projectId', projectId)
+          .eq('intentId', request.intentId)
+          .eq('heldIntent', undefined)
+          .lt('_creationTime', before),
       )
       .order('desc')
       .take(n);

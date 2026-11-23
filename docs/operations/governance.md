@@ -141,7 +141,9 @@ comparison, the selected inputs and dependencies, the owner and policy are the s
 the receipt names the main it was checked against (`previous`; the submission's `acceptedBy.carried` is true).
 The replacement takes a publication turn while its exact full check runs. CI does not
 hold a publication lease. A changed reviewed diff gets a fresh approval link for the
-current attempt. Agents cannot create a grant.
+current attempt. Agents cannot create a grant. A later held submission of the same Intent
+reuses the approval for its protected paths only, when their entries match
+([later submissions](../access.md#protected-path-approvals)).
 
 A held landing stays pinned to the policy its attempt was prepared under. A policy edit
 never re-checks it, and no sweep, alarm or recompose touches a held entry. Both `approve-link`

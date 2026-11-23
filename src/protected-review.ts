@@ -61,3 +61,38 @@ export function protectedEntries<T extends { path: string }>(files: readonly T[]
   );
   return files.filter(file => matched.has(file.path) || file.path === SECRET_SCAN_ALLOW_FILE);
 }
+
+/** Item fe2b0a86 part B: the protected scope for reusing an earlier submission's owner approval of the
+ * same work. Unlike reviewProtect it does not require the hold to be about protected paths alone: only
+ * the protected reason is lifted, so every other reason still holds. Undefined (no reuse) when either
+ * Candidate's changed paths or the project's derived check entries are unknown, or either Candidate
+ * touches no protected path. */
+export function carryScope(
+  policy: Pick<AutonomyPolicy, 'acceptance'>,
+  paths: (string[] | null)[],
+  checkEntries: string[] | undefined,
+): ReviewProtect | undefined {
+  if (!checkEntries || paths.length !== 2) return undefined;
+  const scope: ReviewProtect = {
+    acceptance: {
+      protectedPaths: policy.acceptance.protectedPaths,
+      ...(policy.acceptance.ownerApprovalPaths
+        ? { ownerApprovalPaths: policy.acceptance.ownerApprovalPaths }
+        : {}),
+    },
+    checkEntries,
+  };
+  for (const list of paths) if (list === null || !protectedPaths(scope, list).length) return undefined;
+  return scope;
+}
+
+/** The changed paths `scope` protects (the paths an earlier owner approval may stand for). */
+export function protectedPaths(scope: ReviewProtect, paths: readonly string[]): string[] {
+  return (
+    protectedPathMatches(
+      scope as unknown as Pick<AutonomyPolicy, 'acceptance'>,
+      [...paths],
+      scope.checkEntries,
+    ) ?? []
+  );
+}

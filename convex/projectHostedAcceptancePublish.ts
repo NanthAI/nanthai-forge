@@ -59,6 +59,7 @@ import { receiptMessageField } from './projectHostedLandingMessageBody';
 import { alertSecretAllowAdded } from './projectHostedSecretAllow';
 import { secretAllowMark, secretAllowReview } from '../src/secret-allow';
 import { grantedApproval } from './projectHostedOwnerGrant';
+import { carriedProtectedPaths } from './projectHostedOwnerGrantCarry';
 import { approvalHoldReason, attemptApprovals, endLandedApprovals } from './projectHostedApprovalStore';
 import { landingAcceptedBy } from '../src/landing-accepted-by';
 /** One constant-size publication transaction. A completed replay authorizes the
@@ -360,13 +361,21 @@ export async function publishAcceptance(
   const approvals = await attemptApprovals(ctx, claim.projectId, attempt.operations.accept);
   const approvalReason =
     actor.kind === 'person' && actor.id === project.owner ? null : approvalHoldReason(approvals);
+  // Item fe2b0a86 part B: an earlier owner approval of the same Intent stands for the protected paths
+  // whose entries it verifiably matched on this exact Candidate (the secret-allow file among them); the
+  // submitter stays the acceptor, so every other reason still applies. From the row already loaded.
+  const changedPaths = candidate.governance?.paths ?? null;
+  const carriedPaths =
+    actor.kind === 'person' ? undefined : carriedProtectedPaths(row.protectedCarry, attempt, project.owner);
   const reason =
     [
       governanceReason(
         project,
         policy,
         actor,
-        candidate.governance?.paths ?? null,
+        carriedPaths && changedPaths
+          ? changedPaths.filter(path => !carriedPaths.includes(path))
+          : changedPaths,
         checks,
         uncheckedPerson,
       ) ?? secretAllowReview(policy, actor, secretAllowAdded),
@@ -398,6 +407,15 @@ export async function publishAcceptance(
         ? protectedPathMatches(policy, candidate.governance?.paths ?? null, checks)
         : undefined,
     carried: grant ? grant.attemptId !== attempt.id : false,
+    ...(carriedPaths?.length && row.protectedCarry
+      ? {
+          protectedApproval: {
+            submissionId: row.protectedCarry.submissionId,
+            at: row.protectedCarry.at,
+            paths: carriedPaths,
+          },
+        }
+      : {}),
   });
   const receipt = hostedAcceptanceSchema.parse({
     ...(state.request.authorship ? { authorship: { ...state.request.authorship, actor: state.actor } } : {}),

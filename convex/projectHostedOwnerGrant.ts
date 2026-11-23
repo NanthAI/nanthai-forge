@@ -21,18 +21,36 @@ export async function ownerReviewFiles(
 ) {
   const grant = landing.ownerGrant;
   if (!grant) return null;
-  const approved = await loadLandingAttempt(ctx, {
+  return reviewedCandidateFiles(ctx, {
     projectId: landing.projectId,
-    attemptId: grant.attemptId,
+    approved: { attemptId: grant.attemptId, actor: landing.actor },
+    actor: landing.actor,
+    candidateId,
   });
-  const read = (key: string) =>
-    readHostedRecord(ctx, {
-      projectId: landing.projectId,
-      actor: landing.actor,
-      kind: 'candidate',
-      key,
-    });
-  const [before, after] = await Promise.all([read(approved.candidate.id), read(candidateId)]);
+}
+
+/** The approved attempt's and the current Candidate's pinned changed-file listings and changed paths
+ * (null when a record is gone or changed). Each record is read as its own submitter. Item fe2b0a86
+ * part B: the approved attempt may belong to an earlier submission of the same Intent. */
+export async function reviewedCandidateFiles(
+  ctx: QueryCtx | MutationCtx,
+  input: {
+    projectId: LandingRow['projectId'];
+    approved: { attemptId: string; actor: string };
+    actor: string;
+    candidateId: string;
+  },
+) {
+  const approved = await loadLandingAttempt(ctx, {
+    projectId: input.projectId,
+    attemptId: input.approved.attemptId,
+  });
+  const read = (actor: string, key: string) =>
+    readHostedRecord(ctx, { projectId: input.projectId, actor, kind: 'candidate', key });
+  const [before, after] = await Promise.all([
+    read(input.approved.actor, approved.candidate.id),
+    read(input.actor, input.candidateId),
+  ]);
   if (before?.digest !== approved.candidate.digest || !before.candidateFiles || !after?.candidateFiles)
     return null;
   // Item fe2b0a86: each Candidate's changed paths, from the records already read (null when unknown).

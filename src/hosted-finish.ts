@@ -65,6 +65,18 @@ export type FinishCommand =
       protect?: import('./protected-review.js').ReviewProtect;
     }
   | {
+      /** Item fe2b0a86 part B: whether a held attempt's protected entries equal those of an earlier
+       * owner-approved submission of the same Intent (`before`); only then is that reason lifted. */
+      kind: 'protected';
+      attemptId: string;
+      candidateDigest: string;
+      before: { sha256: string; size: number };
+      after: { sha256: string; size: number };
+      protect: import('./protected-review.js').ReviewProtect;
+      /** The protected paths compared; recorded as carried only when they are equal. */
+      paths: string[];
+    }
+  | {
       kind: 'page';
       url: string;
       range?: import('./object-pack-range.js').PackRange;

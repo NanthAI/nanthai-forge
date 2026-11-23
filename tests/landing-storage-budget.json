@@ -69,11 +69,11 @@
       },
       "immediate": {
         "entries": 424,
-        "keyBytes": 32956
+        "keyBytes": 32961
       },
       "retained": {
         "entries": 429,
-        "keyBytes": 33257
+        "keyBytes": 33262
       },
       "written": 1611
     },
@@ -163,11 +163,11 @@
       },
       "immediate": {
         "entries": 29281,
-        "keyBytes": 2187214
+        "keyBytes": 2187219
       },
       "retained": {
         "entries": 29314,
-        "keyBytes": 2189961
+        "keyBytes": 2189966
       },
       "written": 3028
     },
@@ -232,19 +232,19 @@
     "stored": [
       {
         "entries": 878,
-        "keyBytes": 53932
+        "keyBytes": 53937
       },
       {
         "entries": 1078,
-        "keyBytes": 69588
+        "keyBytes": 69593
       },
       {
         "entries": 2229,
-        "keyBytes": 160868
+        "keyBytes": 160888
       },
       {
         "entries": 2229,
-        "keyBytes": 160868
+        "keyBytes": 160888
       }
     ]
   }
