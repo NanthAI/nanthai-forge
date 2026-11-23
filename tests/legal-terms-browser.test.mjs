@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// The terms page (Item b6588425, line 1): the acceptable-use section renders, the page stays a draft, it links no
-// report-abuse page that does not exist, and the page passes axe with no sideways scroll at phone and desk width in
-// both themes.
+// The terms page (Item b6588425, lines 1 and 7): the acceptable-use section renders, names in-app reporting and the
+// support@nanthai.tech abuse-report contact without keeping the placeholder, stays a draft, and passes axe with no
+// sideways scroll at phone and desk width in both themes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
@@ -87,12 +87,21 @@ test('terms: the acceptable-use section renders, the page stays a draft, and it 
       assert.equal(await section.count(), 1, `${label}: the section heading renders once`);
       const article = await page.locator('article').innerText();
       assert.match(article, /rate-limit, suspend or\s+remove your account/, label);
-      assert.match(article, /A way to report abuse is coming/, label);
+      assert.match(
+        article,
+        /Report abuse in the app where Report is available, or email support@nanthai\.tech\./,
+        label,
+      );
+      assert.doesNotMatch(article, /A way to report abuse is coming/, label);
       assert.match(await page.locator('.intro').innerText(), /Draft draft-1, not legal advice/, label);
       const hrefs = await page
         .locator('article a')
         .evaluateAll(links => links.map(a => a.getAttribute('href')));
-      assert.deepEqual(hrefs, ['/signin', '/privacy'], `${label}: no link to a page that does not exist`);
+      assert.deepEqual(
+        hrefs,
+        ['mailto:support@nanthai.tech', '/signin', '/privacy'],
+        `${label}: links the abuse-report contact, sign-in and privacy`,
+      );
       assert.equal(
         await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
         false,

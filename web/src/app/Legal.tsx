@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { PublicFrame } from './frames';
 import { LEGAL_VERSION } from '../../../src/legal-version';
+import { forgeSupportAddress } from '../upstream-request';
 export default function Legal({ page }: { page: 'terms' | 'privacy' }) {
   return (
     <PublicFrame>
@@ -43,10 +44,16 @@ export default function Legal({ page }: { page: 'terms' | 'privacy' }) {
               remove your account. Forge may also remove content involved in that activity. Forge may act
               immediately when delay would cause harm. Removed content may not be recoverable.
             </p>
-            <p>A way to report abuse is coming.</p>
+            <p>
+              Report abuse in the app where Report is available, or email{' '}
+              <a className="lk" href={`mailto:${forgeSupportAddress}`}>
+                {forgeSupportAddress}
+              </a>
+              .
+            </p>
             <h2>Before launch</h2>
             <p>
-              This draft describes the service. Contract terms, operator identity, support contact and
+              This draft describes the service. Contract terms, operator identity, general support contact and
               applicable legal terms await owner approval.
             </p>
           </>
