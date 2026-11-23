@@ -16,7 +16,7 @@ const direct = {
   'abuseLimits.ts':
     'the daily member work budget lives on the direct row; a team writer is charged on the team row',
   'projectContributors.ts':
-    'the owner manages direct grants: invite, add, remove and the direct roster; `shared` pages the person own direct grants, so a team-only project is not listed there yet',
+    'the owner manages direct grants: invite, add, remove and the direct roster; `shared` pages the person own direct grants and adds the team-reached projects on its first page (teamGrant.ts)',
   'projectAccess.ts':
     'People and access lists and changes direct grants (setRole compares with the direct grant, not the effective role); linked teams show beside them (projectTeamAccess)',
   'projectInvitationAnswers.ts':

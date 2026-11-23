@@ -18,7 +18,8 @@ import {
   type QueryCtx,
   type MutationCtx,
 } from './cliServer';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
+import { teamReachedProjects } from './teamGrant';
 import { ownedProject, activeProject, activeOwnedProject } from './projectAuthority';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -127,6 +128,13 @@ export const list = query({
     }
   },
 });
+const listed = (project: Doc<'hostedProjects'>) => ({
+  id: project._id,
+  key: project.key,
+  name: project.name,
+  currentBackup: project.currentBackup,
+  revision: project.revision,
+});
 export const shared = query({
   args: { paginationOpts: paginationOptsValidator },
   returns: paginationResultValidator(
@@ -149,15 +157,16 @@ export const shared = query({
     const page = [];
     for (const grant of grants.page) {
       const project = await ctx.db.get(grant.projectId);
-      if (project && !project.removal)
-        page.push({
-          id: project._id,
-          key: project.key,
-          name: project.name,
-          currentBackup: project.currentBackup,
-          revision: project.revision,
-        });
+      if (project && !project.removal) page.push(listed(project));
     }
+    // First page only: projects reached through a linked team have no grant row of their own (convex/teamGrant.ts).
+    // A device limited to one project is shown none of the others.
+    const scoped =
+      (ctx as { forgeDevice?: Doc<'cliCredentials'> | null }).forgeDevice?.settings?.projects.kind ===
+      'project';
+    if (!paginationOpts.cursor && !scoped)
+      for (const { project } of await teamReachedProjects(ctx, user.subject, false))
+        if (!page.some(row => row.id === project._id)) page.push(listed(project));
     return { ...grants, page };
   },
 });

@@ -9,11 +9,16 @@
  * (once per owner), the line summary, ≤ 21 held and ≤ 61 open Lane marks, and on compact planning partitions ≤ 4
  * pages per live Item state plus ≤ 40 done pages (positions only). A device limited to one project reads only that
  * project. For a person, the page includes their one indexed star lookup per public row.
+ *
+ * Projects reached only through a linked team (no direct grant, so no order row) join the FIRST page, merged by
+ * activity (convex/teamGrant.ts: bounded, ≤ 25 projects, one empty range and nothing else for a person in no
+ * team); later pages read none. Their rows cost the same per project as any other.
  * Nothing is written; no per-project client query. */
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { projectRole } from './projectRole';
-import { HOUR_MS } from './accountProjectOrderHour';
+import { teamReachedProjects } from './teamGrant';
+import { activityHour, HOUR_MS } from './accountProjectOrderHour';
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { isDeviceIdentity, query } from './cliServer';
@@ -180,11 +185,17 @@ export const list = query({
     const numItems = Math.max(1, Math.min(ACCOUNT_PROJECTS_PAGE_MAX, Math.floor(paginationOpts.numItems)));
     // Activity order (whole hours, ties by project id) with Convex's own cursor; removal and grant writes keep the
     // rows current in their own transaction, and the role is re-checked here so a row never grants a read.
+    // First page only: the team-reached projects have no order row, so no cursor could ever reach them. They are read
+    // first so the page never hydrates more than the page maximum in all.
+    const reached = paginationOpts.cursor ? [] : await teamReachedProjects(ctx, user.subject);
     const result = await ctx.db
       .query('accountProjectOrder')
       .withIndex('by_person_and_activity', q => q.eq('person', user.subject))
       .order('desc')
-      .paginate({ ...paginationOpts, numItems });
+      .paginate({
+        ...paginationOpts,
+        numItems: Math.min(numItems, ACCOUNT_PROJECTS_PAGE_MAX - reached.length),
+      });
     const page = [];
     for (const order of result.page) {
       const project = await ctx.db.get(order.projectId);
@@ -192,14 +203,23 @@ export const list = query({
       const role = project.owner === user.subject ? 'owner' : await projectRole(ctx, project, user.subject);
       if (role) page.push({ project, role, activityAt: order.activityHour * HOUR_MS });
     }
-    return {
-      ...result,
-      page: await Promise.all(
-        page.map(async ({ project, role, activityAt }) => ({
-          ...(await row(ctx, project, role, handles, starAccount)),
-          activityAt,
-        })),
-      ),
-    };
+    const rows = await Promise.all(
+      page.map(async ({ project, role, activityAt }) => ({
+        ...(await row(ctx, project, role, handles, starAccount)),
+        activityAt,
+      })),
+    );
+    const viaTeam = await Promise.all(
+      reached.map(async ({ project, role }) => {
+        const shown = await row(ctx, project, role, handles, starAccount);
+        return { ...shown, activityAt: activityHour(shown.activityAt) * HOUR_MS };
+      }),
+    );
+    // Merge by activity without reordering the direct rows (their order is the index's).
+    for (const item of viaTeam.sort((a, b) => b.activityAt - a.activityAt)) {
+      const at = rows.findIndex(other => other.activityAt < item.activityAt);
+      rows.splice(at < 0 ? rows.length : at, 0, item);
+    }
+    return { ...result, page: rows };
   },
 });
