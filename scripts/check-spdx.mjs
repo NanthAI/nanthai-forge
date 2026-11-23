@@ -7,7 +7,6 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { coreQueuePath } from './core-queue-paths.mjs';
 
 export const SPDX_SOURCE = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']);
 // Other kinds carrying the header, each with its comment syntax. Fixtures stay byte-exact test inputs.
@@ -16,11 +15,9 @@ export const COPYRIGHT = 'Copyright 2026 Ferdinando Valsecchi';
 export const LICENSE_ID = 'AGPL-3.0-only';
 // Convex writes these (convex/_generated/ and each component's _generated/); they are regenerated on every codegen. Vendored third-party notices keep their own text.
 // The brand mark styles and component stay all-rights-reserved (web/src/assets/NOTICE.md).
-// Temporary: core queue paths (Guard 4, scripts/core-queue-paths.mjs) need a replay proof and review per path
-// for any edit, so their headers move in their own Item; the exemption goes away with it (Item ffb6cc49).
 const EXEMPT =
   /^(?:(?:[^/]+\/)*_generated\/|docs\/vendor-notices\/|node_modules\/|web\/src\/ui\/(?:mark\.css|brand\.tsx)$)/;
-const exempt = path => EXEMPT.test(path) || coreQueuePath(path);
+const exempt = path => EXEMPT.test(path);
 
 const wrap = path => COMMENT[extname(path)] ?? ['// ', ''];
 const spdxLine = path => `${wrap(path)[0]}SPDX-License-Identifier: ${LICENSE_ID}${wrap(path)[1]}`;

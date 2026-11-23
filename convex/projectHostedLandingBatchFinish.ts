@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { checkCause, type CheckCause } from '../src/hosted-check';
 import { cancelPendingTask } from './schedulerCancel';
 import { retainedStallOwner } from '../src/hosted-landing-stall';

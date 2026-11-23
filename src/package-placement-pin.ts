@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { Buffer } from 'node:buffer';
 import { certifyJsInbound } from './js-inbound-imports.js';
 import { buildPackageGraph, PACKAGE_GRAPH_MAX_BYTES, PACKAGE_GRAPH_MAX_MANIFESTS } from './package-graph.js';

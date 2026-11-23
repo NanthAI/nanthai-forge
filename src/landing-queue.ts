@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { assertLandingWorkerActive, landingWaitMs } from './landing-worker-context.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { join } from 'node:path';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { AutonomyPolicy } from './autonomy-policy.js';
 import { HOSTED_BATCH_MEMBERS, hostedBatching } from './hosted-landing-batch.js';
 

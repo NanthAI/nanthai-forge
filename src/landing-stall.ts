@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 export const LANDING_STALL_MS = 15 * 60_000;
 /** Metric 5.3: a pending landing with no progress for this long is dropped unless it gets an outcome. */
 export const LANDING_DROP_MS = 60 * 60_000;

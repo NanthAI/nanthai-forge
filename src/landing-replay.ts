@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { localCost } from './check-cost.js';
 import { ReplayPlanner } from './landing-replay-planner.js';
 import type { LandingBatch } from './landing-batch-types.js';

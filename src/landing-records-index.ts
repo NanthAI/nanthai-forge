@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { assertLandingWorkerActive } from './landing-worker-context.js';
 import { setImmediate as yieldTurn } from 'node:timers/promises';
 import { readFragment, readCollection, pageHashes, pageSize } from './work-records.js';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 687d1eda, "main red is not the Lane's failure" past the admission check (fix D parks only
 // admission runs). Switch FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED, off by default (queue-regression
 // guard). A queue check that fails only on the tests main itself fails is not the change's failure:

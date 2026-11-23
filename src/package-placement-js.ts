@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { ecosystemEntry, JS_PACKAGE_MANIFEST, pinLockfiles } from './ecosystems.js';
 import { checkEntryMatcher, ciConfigurationPath } from './first-check-risk.js';
 import { JS_TEST, jsWorkspaceMembership, pnpmGlobs } from './package-graph-dotnet-js.js';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { hostedActionError } from './hosted-action-error.js';
 import { retryableExchangeError } from './exchange-retry.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';

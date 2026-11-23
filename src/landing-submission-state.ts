@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { LandingDiagnosisReport } from './landing-diagnosis.js';
 /** `unknown`: a status this build does not recognize, so it cannot say landed, failed or running
  * (SM-C M6). It is never terminal; the wait keeps its own budget and the diagnostic names the status. */

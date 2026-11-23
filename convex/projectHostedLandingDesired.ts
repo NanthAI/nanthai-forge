@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { latestCancelledRun, supersededCheckCosts } from './projectHostedLandingRunnerCosts';
 import { withoutAuthorship, personStampValid } from '../src/work-actor-types';
 import { cancelPendingTask } from './schedulerCancel';

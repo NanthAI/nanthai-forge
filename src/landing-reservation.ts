@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { pathsOverlap } from './hosted-cross-head-proof.js';
 
 /** Landing reservation (core-claim incident 10d253c6, 2026-11-10). A 130-path Lane took 10 land

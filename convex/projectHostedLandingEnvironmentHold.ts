@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Item 0d14c456 (from bf111983 line 4): the environment side of the CI-down hold
 // (convex/projectHostedLandingCiDown.ts, switch FORGE_QUEUE_HOLD_ON_CI_DOWN). It reads a failed run's
 // environment end, and while the hold is tripped for one check command it parks an entry with that

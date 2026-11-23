@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Keep the run (Item fa2c1383): the post-acceptance sweep's keep wiring, behind its own default-off
  * switch. The rule is pure (src/stale-check-keep.ts); this module feeds it from rows the sweep
  * already holds, plus three reads memoised per sweep and made only when a checking row reaches the

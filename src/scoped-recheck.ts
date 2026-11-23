@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { documentation, selectImpactPair, smokeTests } from '../scripts/test-impact.mjs';
 import { docsReaders } from '../scripts/docs-readers.mjs';
 import { scopedRootConfig as rootConfig } from './scoped-root-config.js';

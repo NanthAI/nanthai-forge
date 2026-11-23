@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Incident e62d834b, line 5 (2026-11-20 05:27-06:41Z): every landing check ended RUNNER_UNAVAILABLE,
 // so each landing spent its platform retries on a broken CI and failed for good, and every builder
 // had to land again once CI recovered. The CI-down hold (switch FORGE_QUEUE_HOLD_ON_CI_DOWN, off by

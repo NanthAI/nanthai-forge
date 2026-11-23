@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { NativeFile } from './state/format.js';
 import { mergeNativeText, type NativeTextResolution } from './native-text-merge.js';
 import { syntaxCheckedPath, syntaxConflictReason } from './state/merge-syntax.js';

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { finishReadCheck } from './projectFinishReadPins';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { hostedLandingStall, retainedStallOwner } from '../src/hosted-landing-stall';

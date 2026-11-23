@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { sourceSizeDocs } from './source-state-size.js';
 import { landingHold, type LandingHold } from './hosted-landing-hold.js';
 import type { StateTone } from './check-run-state.js';

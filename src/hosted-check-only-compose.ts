@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { sourceWaitSnapshot } from './hosted-agent-source-wait.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 

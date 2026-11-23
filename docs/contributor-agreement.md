@@ -1,6 +1,6 @@
-# Contributor licence agreement (draft)
+# Contributor licence agreement
 
-**Status: draft, not in force.** The owner has not approved this text or the signing mechanism. Outside contributions stay closed until they do (Item ffb6cc49). This page is not legal advice.
+**Status: Approved 2026-11-23; signing is not built yet, so outside contributions stay closed.** The owner approved this text and the signing mechanism below. Outside contributions open once signing is built. This page is not legal advice.
 
 This agreement is between you ("Contributor") and Ferdinando Valsecchi ("Project Owner"), who holds the copyright in NanthAi:Forge, or any successor or company to which they assign the project (see [LICENSE.md](../LICENSE.md)).
 
@@ -12,6 +12,6 @@ This agreement is between you ("Contributor") and Ferdinando Valsecchi ("Project
 6. **No warranty or obligation.** Contributions are provided "as is". The Project Owner need not accept or use any Contribution.
 7. **Moral rights.** You keep authorship credit in the history; to the extent the law allows you waive moral rights that would block these licences.
 
-## Signing mechanism (proposal for owner approval)
+## Signing mechanism (approved, not yet built)
 
-A first-time contributor signs once, per GitHub login or Forge handle, before their first Contribution is accepted. Proposal: a signed-in confirmation in Forge that records the agreement version, the handle and the time, with the record kept by the project; contributions from handles without a current record are held at acceptance. The owner decides the mechanism and may change the text before it takes effect.
+A first-time contributor signs once, per GitHub login or Forge handle, before their first Contribution is accepted: a signed-in confirmation in Forge that records the agreement version, the handle and the time, with the record kept by the project. Contributions from handles without a current record are held at acceptance. Until this step is built, no outside Contribution is accepted.

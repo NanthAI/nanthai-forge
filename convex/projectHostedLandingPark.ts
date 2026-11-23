@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 // Fix D of Item 687d1eda: park, don't fail. A landing whose admission check fails only on the tests
 // main itself fails is not at fault. It waits under the existing main-red hold and joins the queue
 // again when main passes (releaseMainHolds), where its ordinary check runs on green main.

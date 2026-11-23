@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Queue throughput after combined failures (51bbbd00, wave 1 2026-11-05).
  * Pure decisions shared by the landing controller, the landing-queue model map
  * and the synthetic queue harness. None of them grants publication authority:

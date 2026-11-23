@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import type { LandingStall } from './landing-stall.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
 import type { CheckRun } from './work-types.js';

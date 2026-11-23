@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { z } from 'zod';
 import { discardedRunnerSeconds } from './cost-budgets.js';
 import type { HostedLandingAttempt, HostedLandingState } from './hosted-landing.js';

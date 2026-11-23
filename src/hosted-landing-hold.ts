@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { reviewHoldLine } from './receipt-slim.js';
 
 // Item 0d14c456: the environment hold reason (convex/projectHostedLandingCiDown.ts writes it), kept here

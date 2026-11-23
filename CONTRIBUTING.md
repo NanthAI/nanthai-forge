@@ -21,6 +21,6 @@ Follow [LICENSE.md](LICENSE.md): everything original here is AGPL-3.0-only, and 
 
 ## Outside contributions: contributor agreement required
 
-Outside contributions are closed. Before any is accepted, the contributor must sign a contributor licence agreement (CLA). It licenses the contribution to the project owner with the right to relicense it, including under dual and commercial licences, and to assign the project to a future company. The draft is [docs/contributor-agreement.md](docs/contributor-agreement.md). The owner has not yet approved the CLA text or the signing mechanism; no contribution is accepted until they have.
+Outside contributions are closed. Before any is accepted, the contributor must sign a contributor licence agreement (CLA). It licenses the contribution to the project owner with the right to relicense it, including under dual and commercial licences, and to assign the project to a future company. The agreement is [docs/contributor-agreement.md](docs/contributor-agreement.md). The owner approved its text and signing mechanism on 2026-11-23; signing is not built yet, so no outside contribution is accepted until it is.
 
 Never put credentials or private data in issues or pull requests. Report vulnerabilities as described in [SECURITY.md](SECURITY.md).

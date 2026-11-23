@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 import { packShardReports, unpackShardReports } from '../src/check-report-cap';
 import { runFlakes } from '../src/self-metrics-flakes';
 import type { QueryCtx, MutationCtx } from './_generated/server';

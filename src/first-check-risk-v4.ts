@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Rule v4 of the first-check global-risk list (src/first-check-risk.ts): files that can change how
  * every test, build or check of a repository behaves, matched by shape at any depth for every
  * ecosystem, not by Forge's layout. Paths only, any CI. A false match costs one recheck; a miss

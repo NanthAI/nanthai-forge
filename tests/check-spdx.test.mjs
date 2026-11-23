@@ -100,11 +100,11 @@ test('Item ffb6cc49 review: the fix removes only the header comment, accepts CRL
   assert.equal(fixSpdx(crlf, 'src/a.ts'), crlf);
 });
 
-test('Item ffb6cc49: core queue paths and brand styles are exempt until their own Item', () => {
+test('Item ffb6cc49: core queue paths carry the AGPL header like any file; only the brand styles stay exempt', () => {
   const apache = '// SPDX-License-Identifier: Apache-2.0\n';
-  for (const path of ['convex/projectHostedFinish.ts', 'src/hosted-finish.ts', 'web/src/ui/brand.tsx'])
-    assert.deepEqual(spdxFindings(path, apache), [], path);
-  assert.equal(spdxFindings('convex/projectAccess.ts', apache).length, 1);
+  assert.deepEqual(spdxFindings('web/src/ui/brand.tsx', apache), []);
+  for (const path of ['convex/projectHostedFinish.ts', 'src/hosted-finish.ts', 'convex/projectAccess.ts'])
+    assert.equal(spdxFindings(path, apache).length, 1, path);
 });
 
 test('Item ffb6cc49: the guard finds no Apache-2.0 or missing header in any original file of the tree', () => {

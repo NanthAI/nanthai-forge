@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Ferdinando Valsecchi
 /** Global-risk paths for landing on the first (admission) check.
  *
  * A change lands on the check it already passed, after main moved, only when
