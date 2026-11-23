@@ -1108,3 +1108,28 @@ test("a landing from a reopened Item's follow-up Intent is titled with the goal 
     [1],
   );
 });
+
+test('9b9057a9: the yard says Conflict only for a landing Forge observed ending in conflict; a shared file or a failed check is not one', () => {
+  const ended = (laneId, cause) => ({
+    ...meta(laneId, laneId),
+    landing: { submissionId: `s-${laneId}`, state: 'terminal-failed', cause },
+  });
+  const yard = model.buildYard(
+    feed([
+      mark('c', 'saved', { held: true, overlap: false }),
+      mark('f', 'saved', { held: true, overlap: true }),
+      mark('s', 'saved', { overlap: true }),
+    ]),
+    [ended('c', 'conflict'), ended('f', 'check-failed'), meta('s', 'shares a file')],
+    undefined,
+    0,
+  );
+  const row = id => yard.rows.find(entry => entry.laneId === id);
+  assert.equal(row('c').state, 'conflict', 'the observed cause is a conflict');
+  assert.equal(
+    row('f').state,
+    'failed',
+    'a failed check stays a failed check whatever the overlap flag says',
+  );
+  assert.notEqual(row('s').state, 'conflict', 'a saved Lane that only shares a file is no conflict');
+});

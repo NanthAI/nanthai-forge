@@ -15,6 +15,7 @@ const landing = await import(moduleUrl('../convex/projectHostedLandingStore.ts')
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const superseded = await import(moduleUrl('../convex/projectHostedSuperseded.ts'));
 const repair = await import(moduleUrl('../convex/projectLiveLineRepair.ts'));
+const liveLanes = await import(moduleUrl('../convex/projectHostedLiveLanes.ts'));
 const { needsCount } = await import(moduleUrl('../web/src/app/needs/count.ts'));
 const { baseMark } = await import(moduleUrl('../web/src/app/mark.ts'));
 const { lineStopCounts, lineStops } = await import(moduleUrl('../web/src/app/Line.tsx'));
@@ -250,6 +251,42 @@ test('Needs you counts only holds that wait on a person: review on the project l
   await writeLane(failed, () => ({ head: 'ef'.repeat(32) }));
   assert.equal(marks(failed)[0].held, false);
   assert.equal(marks(failed)[0].fix, undefined);
+});
+
+test('9b9057a9: the live-Lanes read says what Forge observed when a landing ended: conflict is not check failed', async t => {
+  const lanesOf = f =>
+    f
+      .tx(
+        'liveLanes',
+        liveLanes.list,
+        { projectId: f.projectId, cursor: null, limit: 10, byline: true },
+        'owner',
+      )
+      .then(JSON.parse);
+  const conflict = await finishFixture(t);
+  await heldAtSave(conflict);
+  const [conflicted] = (await lanesOf(conflict)).page;
+  assert.equal(conflicted.landing.state, 'terminal-failed');
+  assert.equal(conflicted.landing.cause, 'conflict');
+
+  const failed = await finishFixture(t);
+  const submission = await failed.enqueue(failed.request());
+  await holdWith(failed, submission, before => ({
+    phase: 'terminal-failed',
+    observation: {
+      ...before.observation,
+      state: 'terminal-failed',
+      cause: 'check-failed',
+      pendingReason: null,
+    },
+    error: { code: 'CHECK_FAILED', message: 'Check failed.' },
+  }));
+  assert.equal((await lanesOf(failed)).page[0].landing.cause, 'check-failed');
+
+  // A landing still pending names no cause.
+  const pending = await finishFixture(t);
+  await pending.enqueue(pending.request());
+  assert.equal((await lanesOf(pending)).page[0].landing.cause, undefined);
 });
 
 test('9b9057a9: a failed end that recorded no cause still names its reason on Needs me, never "not reported"', async t => {

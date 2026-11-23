@@ -6,6 +6,7 @@
 import { lineStopCounts, lineStops, type LineFeed, type LineStage } from '../Line';
 import type { StateKind, StateWord } from '../../ds';
 import type { SaveFailure } from '../SaveFailureNotice';
+import type { LandingStateName } from '../../../../src/landing-state';
 import { QUIET_MS } from '../../../../src/lane-quiet';
 import { currentEntries, landingOf, laneState, notLandedWhy, stopWords, waitLine } from '../lane-state';
 import {
@@ -29,7 +30,8 @@ export type LaneMeta = {
   agentClient?: string;
   lastSaveAt: string | null;
   saveFailure?: SaveFailure;
-  landing: { submissionId: string; state: string } | null;
+  /** `cause`: what Forge observed when the landing ended (src/landing-state.ts), only for an ended landing. */
+  landing: { submissionId: string; state: string; cause?: LandingStateName } | null;
   dormant?: boolean;
   lastActivityAt?: string;
   /** A resolution Lane: the conflicted Lane of the same Item it continues. */
@@ -330,7 +332,9 @@ export function buildYard(
     // Lane read says whether a save exists; with none, the row says what is true: editing, no save yet.
     const unsaved = mark.stage === 'saved' && !mark.held && !entry && lane !== undefined && !lane.lastSaveAt;
     const shown = unsaved ? { ...mark, stage: 'editing' as const } : mark;
-    const said = laneState(shown, entry ? landingOf(entry) : null);
+    // The queue lists pending entries only, so an ended landing's cause comes from the Lane read.
+    const ended = lane?.landing?.cause ? { state: lane.landing.cause } : null;
+    const said = laneState(shown, entry ? landingOf(entry) : ended);
     const by = replaced.get(mark.laneId) ?? null;
     const base = {
       laneId: mark.laneId,

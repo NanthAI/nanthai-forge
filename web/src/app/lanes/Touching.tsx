@@ -23,7 +23,6 @@ import {
   waits,
   yardReady,
   type QueueEntry,
-  type QueueView,
   type Wait,
   type YardRow,
 } from './model';
@@ -32,13 +31,12 @@ import { useLaneMeta, useQueue, useSharedFiles } from './reads';
 const LAYOUT: DockLayout = { top: ['cross'], a: ['waits', 'queue'], b: ['has'] };
 const CAP = 8;
 
-/** Which Lanes Forge observed a conflict on: the Lane's current submission did not compose. The line feed's overlap
- * flag is only a shared saved file, never a conflict (owner 2026-11-23), so it ranks nothing here. Item 9b9057a9 wires
- * its observed-conflict signal into this one predicate; until then the queue lists no ended submission and it finds
- * none, so the Conflict band stays hidden. */
-function conflictsOf(queue: QueueView | undefined) {
-  const latest = currentEntries(queue?.entries ?? []);
-  return (laneId: string) => latest.get(laneId)?.landingState?.state === 'conflict';
+/** Which Lanes Forge observed a conflict on: the yard's own state for a Lane (lane-state.ts `isConflict`: a held Lane
+ * whose landing ended in conflict, by the cause the Lanes read carries). The line feed's overlap flag is only a shared
+ * saved file or a trial-merge flag, never a conflict (owner 2026-11-23), so it ranks nothing here (Item 9b9057a9). */
+function conflictsOf(yard: { rows: readonly Pick<YardRow, 'laneId' | 'state'>[] } | null | undefined) {
+  const found = new Set(yard?.rows.filter(row => row.state === 'conflict').map(row => row.laneId));
+  return (laneId: string) => found.has(laneId);
 }
 
 const age = (from: string, now: number) => {
@@ -72,7 +70,7 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
   const everyFile = hrefFor({ ...route, section: 'touching', rest: '' });
   const markOf = new Map(feed?.lanes.map(mark => [mark.laneId, mark]));
   const current = currentEntries(queue?.entries ?? []);
-  const conflicted = useMemo(() => conflictsOf(queue), [queue]);
+  const conflicted = useMemo(() => conflictsOf(yard), [yard]);
   // One side per Item, so an Item with three Lanes is named once; a Lane the Lane page did not list stands alone.
   // Worked out again only when a read changes.
   const cross = useMemo(() => {

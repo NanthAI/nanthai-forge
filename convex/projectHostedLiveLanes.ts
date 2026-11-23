@@ -9,6 +9,8 @@ import {
   recordHead,
 } from './projectHostedRecords';
 import { isAgentSlug } from '../src/agent-slug';
+import { storedLandingStateSchema } from '../src/hosted-landing';
+import { landingStateOf, type LandingStateName } from '../src/landing-state';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError, invariant } from '../src/errors';
@@ -56,6 +58,28 @@ function pageOverlaps(lanes: TreeRow[]) {
     if (found.length) overlaps.set(lane.laneId, found);
   }
   return overlaps;
+}
+
+const ENDED_CAUSES: readonly LandingStateName[] = [
+  'conflict',
+  'check-failed',
+  'not-run',
+  'cancelled',
+  'stale-head',
+  'rejected',
+];
+/** The observed cause of an ended landing (src/landing-state.ts), from its stored record; nothing when it cannot be read. */
+function endedCause(value: string) {
+  let record: unknown;
+  try {
+    record = JSON.parse(value);
+  } catch {
+    return {};
+  }
+  const parsed = storedLandingStateSchema.safeParse(record);
+  if (!parsed.success) return {};
+  const cause = landingStateOf(parsed.data).state;
+  return ENDED_CAUSES.includes(cause) ? { cause } : {};
 }
 
 export const list = query({
@@ -256,7 +280,14 @@ export const list = query({
           // Last Lane-record change (save, start, sync, landing), from the record already read (f0d0fdd6).
           lastActivityAt: lane.at,
           landing: landing
-            ? { submissionId: landing.submissionId, state: landing.phase, scope: 'intent' }
+            ? {
+                submissionId: landing.submissionId,
+                state: landing.phase,
+                scope: 'intent',
+                // What Forge observed when the landing ended (Item 9b9057a9): the same one reading every screen and
+                // agent reply uses, from the row already read. Only an ended landing has one.
+                ...(landing.phase === 'terminal-failed' ? endedCause(landing.value) : {}),
+              }
             : null,
           ...(superseded
             ? {
