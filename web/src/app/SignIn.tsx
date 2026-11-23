@@ -53,13 +53,17 @@ export function SignIn() {
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
+  // A queued handle can start a second ceremony that aborts the first; only the newest run may report a failure.
+  const latestRun = useRef(0);
   const run = async (username: string) => {
     const hook = driver.current;
     if (!hook) return setQueued(username);
     setQueued(null);
     setProblem(null);
     remember({ next, method: 'passkey', handle: username });
+    const mine = ++latestRun.current;
     const result = await hook.signIn({ username });
+    if (mine !== latestRun.current) return;
     // Our own server refusals (the passkey rate limit) arrive folded as OTHER_ERROR with the ConvexError as cause.
     if (result.status === 'error' && result.userError.error !== 'ALREADY_PENDING')
       setProblem(

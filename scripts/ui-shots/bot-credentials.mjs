@@ -5,6 +5,8 @@ import { open } from 'node:fs/promises';
 import { ShotError } from './options.mjs';
 
 export const botHandle = 'forge-ui-bot';
+/** The sign-in name is `botHandle`; on dev the account's display handle is `forge-ui-bot-dev` (the plain one is retained). */
+export const isBotHandle = handle => handle === botHandle || handle === `${botHandle}-dev`;
 const nonempty = value => typeof value === 'string' && value.length > 0;
 const base64 = value => nonempty(value) && /^[A-Za-z0-9+/]+={0,2}$/.test(value);
 

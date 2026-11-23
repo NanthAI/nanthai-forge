@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { botHandle } from './bot-credentials.mjs';
+import { isBotHandle } from './bot-credentials.mjs';
 import { observePasskeySession, signInWithPasskey } from './passkey-session.mjs';
 
 export async function launchBotBrowser(options = {}) {
@@ -18,7 +18,7 @@ export function observeBotSession(page, credentials) {
   return {
     ...session,
     deployment: () => credentials.deployment,
-    authenticated: () => session.viewer() === botHandle,
+    authenticated: () => isBotHandle(session.viewer()),
   };
 }
 

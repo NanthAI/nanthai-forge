@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { EventEmitter, once } from 'node:events';
 import { hrefFor } from '../../web/src/app/paths.ts';
-import { botHandle } from './bot-credentials.mjs';
+import { botHandle, isBotHandle } from './bot-credentials.mjs';
 import { convexFrames } from './convex-frames.mjs';
 import { ShotError } from './options.mjs';
 
@@ -69,7 +69,7 @@ export function observePasskeySession(page, deployment) {
       clearTimeout(timer);
     }
   }
-  const token = () => (viewer() === botHandle ? current.token : null);
+  const token = () => (isBotHandle(viewer()) ? current.token : null);
   return {
     viewer,
     waitForViewer,
@@ -77,7 +77,7 @@ export function observePasskeySession(page, deployment) {
     /** The app re-authenticates right after sign-in; wait until the server confirms the bot on the new token. */
     async readyToken(timeout) {
       try {
-        return (await waitForViewer(timeout)) === botHandle ? token() : null;
+        return isBotHandle(await waitForViewer(timeout)) ? token() : null;
       } catch {
         return null;
       }
@@ -123,7 +123,11 @@ export async function submitNativeBotSignIn(page, origin, session, timeout) {
     ({ origin, accountPath }) =>
       location.origin !== origin ||
       location.pathname === accountPath ||
-      Boolean(document.querySelector('form.signin [role="alert"]')?.getClientRects().length),
+      // The page can show "The passkey prompt closed" for an aborted first ceremony, then finish a second one.
+      (/^(?!The passkey prompt closed)/.test(
+        document.querySelector('form.signin [role="alert"]:not([hidden])')?.textContent?.trim() ?? 'x',
+      ) &&
+        Boolean(document.querySelector('form.signin [role="alert"]')?.getClientRects().length)),
     { origin, accountPath },
   );
   await outcome.dispose();
@@ -141,7 +145,7 @@ export async function submitNativeBotSignIn(page, origin, session, timeout) {
     );
   }
   try {
-    if ((await session.waitForViewer(timeout)) === botHandle && session.token()) return;
+    if (isBotHandle(await session.waitForViewer(timeout)) && session.token()) return;
   } catch {
     throw new ShotError(
       'Could not verify the native bot browser session on the configured Convex deployment.',

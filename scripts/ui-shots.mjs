@@ -5,7 +5,7 @@ import { deadlineConvexClient } from '../dist/network-convex-client.js';
 import { makeFunctionReference } from 'convex/server';
 import { options, usage, ShotError } from './ui-shots/options.mjs';
 import { launchBotBrowser, observeBotSession, signIn, waitForPage } from './ui-shots/browser.mjs';
-import { readBotCredentials, botHandle } from './ui-shots/bot-credentials.mjs';
+import { readBotCredentials, isBotHandle } from './ui-shots/bot-credentials.mjs';
 import { passkeyDestination, passkeyLaneFile } from './ui-shots/passkey-routes.mjs';
 import { observeData } from './ui-shots/data.mjs';
 import { BotNoReaderGrant } from './ui-bot-grant.mjs';
@@ -88,7 +88,7 @@ try {
               'The page raised a JavaScript runtime error; no successful screenshot recorded.',
             );
           if (page.url() !== route.url) throw new ShotError('Navigation left the requested route.');
-          if ((await session.waitForViewer(timeout)) !== botHandle)
+          if (!isBotHandle(await session.waitForViewer(timeout)))
             throw new ShotError('Signed-in identity does not match the configured bot.');
           const name = `${route.selected.replace(':', '-')}-${width}-${theme}`;
           const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);

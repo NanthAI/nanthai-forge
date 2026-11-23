@@ -10,8 +10,10 @@ import { grantPasskeyBotReader } from './ui-bot-grant.mjs';
 import { launchBotBrowser } from './ui-shots/browser.mjs';
 import { openBotCredentialStore } from './ui-shots/bot-credential-store.mjs';
 import { provisionBotPasskey } from './ui-shots/passkey-enrollment.mjs';
+import { oldPasskeyRefused, rotateBotPasskey } from './ui-shots/passkey-rotation.mjs';
 
-const devOrigin = 'https://dev.forge.nanthai.tech';
+// Dev site origin: FORGE_DEV_WEB_ORIGIN overrides this default after a site move; --base must equal it.
+const devOrigin = process.env.FORGE_DEV_WEB_ORIGIN ?? 'https://dev.forge.nanthai.tech';
 const devDeployment = 'https://benevolent-wildebeest-974.convex.cloud';
 
 function ownerClient(deployment) {
@@ -26,7 +28,13 @@ function ownerClient(deployment) {
 async function setupPasskey(values, phase) {
   const origin = values.base ?? devOrigin;
   const deployment = values.deployment ?? devDeployment;
-  if (origin !== devOrigin || deployment !== devDeployment)
+  const web = new URL(devOrigin);
+  if (
+    web.protocol !== 'https:' ||
+    web.origin !== devOrigin ||
+    origin !== devOrigin ||
+    deployment !== devDeployment
+  )
     throw new ShotError('Native bot enrollment is for the Forge dev site and deployment.');
 
   const { data, save } = await openBotCredentialStore(homedir());
@@ -41,7 +49,20 @@ async function setupPasskey(values, phase) {
   const browser = await launchBotBrowser();
   let token;
   try {
-    token = await provisionBotPasskey(browser, { origin, deployment }, data, save);
+    const config = { origin, deployment };
+    if (values.rotate) {
+      // Replace every passkey on the bot account with one new one, then prove the old ones are refused.
+      if (!data.passkey)
+        throw new ShotError('Rotation needs a saved passkey to sign in with; run --passkey first.');
+      const old = structuredClone(data.passkey);
+      const done = await rotateBotPasskey(browser, config, data, save);
+      const refused = await oldPasskeyRefused(browser, config, old);
+      console.log(
+        `Rotated: added ${done.added}, removed ${done.removed.join(', ')}; old dev id refused: ${refused}.`,
+      );
+      if (!refused) throw new ShotError('The old passkey still signs in.');
+    }
+    token = await provisionBotPasskey(browser, config, data, save);
     data.projectId = projectId;
     await save();
   } finally {
@@ -73,6 +94,7 @@ try {
       deployment: { type: 'string' },
       base: { type: 'string' },
       passkey: { type: 'boolean' },
+      rotate: { type: 'boolean' },
       project: { type: 'string' },
       'grant-reader': { type: 'boolean' },
       help: { type: 'boolean' },
@@ -80,7 +102,7 @@ try {
   });
   if (values.help) {
     console.log(
-      'node scripts/ui-bot-setup.mjs --passkey --project ID [--grant-reader]\nEnrolls or verifies the native DEV bot. --grant-reader uses the saved nforge owner login.',
+      'node scripts/ui-bot-setup.mjs --passkey --project ID [--grant-reader]\nEnrolls or verifies the native DEV bot. --rotate replaces all its passkeys with one new one. --grant-reader uses the saved nforge owner login.',
     );
   } else {
     await setupPasskey(values, next => (stage = next));

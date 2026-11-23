@@ -43,7 +43,8 @@ export async function grantPasskeyBotReader({
   projectId,
   deployment,
 }) {
-  const person = `@${botHandle}`;
+  // The invitation names the account's current handle (dev: forge-ui-bot-dev), which the bot itself can read.
+  const person = `@${(await bot.query(ref('urlAccounts:current'), {}))?.handle ?? botHandle}`;
   const people = ref('projectAccess:people');
   const args = { projectId, limit: 1 };
   async function isReader() {
@@ -93,7 +94,7 @@ export async function grantPasskeyBotReader({
       }
       if (detail.includes('Membership approval requests are not enabled'))
         throw new ShotError(
-          'Send a Read invitation to @forge-ui-bot from People and access, then rerun this command.',
+          `Send a Read invitation to ${person} from People and access, then rerun this command.`,
         );
       throw error;
     }

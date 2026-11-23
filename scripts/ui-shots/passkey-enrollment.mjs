@@ -109,6 +109,12 @@ async function enroll(browser, config, stage) {
 }
 
 export async function provisionBotPasskey(browser, config, credentials, save) {
+  if (credentials.passkey && credentials.passkey.origin !== config.origin) {
+    // A passkey belongs to one site address; after a site move it cannot sign in. Retire it and enrol for this one.
+    credentials.retiredPasskey = credentials.passkey;
+    delete credentials.passkey;
+    await save();
+  }
   if (credentials.passkey) return verify(browser, config, credentials.passkey);
   let passkey = credentials.pendingPasskey;
   let token;
