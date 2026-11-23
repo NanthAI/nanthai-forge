@@ -128,7 +128,7 @@ test('48049998: Needs you holds the held Lanes this reader decides, Held the res
       ['b', 'held', 'Check failed'],
       ['c', 'queue', 'Checking'],
       ['d', 'work', 'Saved'],
-      ['e', 'work', 'Conflict'],
+      ['e', 'work', 'Editing'], // shares a saved file: no state colour (Item 9b9057a9)
     ],
   );
   assert.equal(yard.rows[1].why, 't1 and 1 more');
@@ -1071,7 +1071,11 @@ test('e1633718: a parked Lane’s yard row says who it waits on and since when, 
     [row('b').why, row('b').detail],
     ['parked, no one named 5 h ago', 'Until the lead decides.'],
   );
-  assert.equal(row('c').why, 'its saved changes conflict with another Lane', 'a conflict still comes first');
+  assert.equal(
+    row('c').why,
+    'parked for @sample-lead 45 min ago',
+    'a shared saved file is no conflict: the park is what it waits on (Item 9b9057a9)',
+  );
   const hidden = model.buildYard(
     feed([mark('a', 'saved')]),
     [{ ...meta('a', 'Parked work'), park: { ...park, to: undefined } }],

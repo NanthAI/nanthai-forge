@@ -8,7 +8,14 @@ import type { StateKind, StateWord } from '../../ds';
 import type { SaveFailure } from '../SaveFailureNotice';
 import { QUIET_MS } from '../../../../src/lane-quiet';
 import { currentEntries, landingOf, laneState, notLandedWhy, stopWords, waitLine } from '../lane-state';
-import { laneRequests, parkShown, parkWords, waitsOnPerson, type NeedsRead, type Park } from '../needs/count';
+import {
+  NEEDS_UNKNOWN,
+  needsYouLanes,
+  parkWords,
+  waitingLanes,
+  type NeedsYou,
+  type Park,
+} from '../needs/count';
 
 /** One open Lane from `projectHostedLiveLanes:list` (the agent `lanes` page). */
 export type LaneMeta = {
@@ -269,21 +276,7 @@ export function replacedBy(lanes: readonly Sibling[], now: number) {
   return out;
 }
 
-/** The open Lanes that wait on the reader, by Needs me's one rule (needs/count.ts): held for a decision this reader
- * makes, or parked for them and shown now. From the read the top bar's count already holds (projectNeedsMe:read, one
- * subscription shared with the frame), so the yard adds no read. Undefined while that read is out. */
-export type NeedsYou = { lanes: ReadonlySet<string>; known: 'all' | 'partial' | 'unknown' };
-export function needsYouLanes(read: NeedsRead | undefined, now: number): NeedsYou | undefined {
-  if (!read) return undefined;
-  const asked = laneRequests(read.approvals);
-  const out = new Set<string>();
-  for (const lane of read.held)
-    if (lane.laneId && waitsOnPerson(lane, asked.has(lane.laneId), read.canDecide)) out.add(lane.laneId);
-  for (const row of read.parked ?? []) if (parkShown(row, now)) out.add(row.laneId);
-  return { lanes: out, known: read.more > 0 || read.parkedMore === true ? 'partial' : 'all' };
-}
-/** Needs me's read failed: no held Lane is known to wait on the reader, and the page says it could not tell. */
-export const NEEDS_UNKNOWN: NeedsYou = { lanes: new Set(), known: 'unknown' };
+export { NEEDS_UNKNOWN, needsYouLanes, type NeedsYou };
 
 /** The yard: every Lane the feed shows, in its band, stuck work first; Lanes of one Item sit together, a replaced one
  * below the one that replaced it. `now` is the render time, never a query arg. `needsYou` (needsYouLanes) puts the
@@ -296,6 +289,7 @@ export function buildYard(
   needsYou: NeedsYou = NEEDS_UNKNOWN,
 ): Yard {
   const waitsOnYou = needsYou.lanes;
+  const waiting = waitingLanes(needsYou);
   const meta = new Map(lanes.map(lane => [lane.laneId, lane]));
   const entries = currentEntries(queue?.entries ?? []);
   const perItem = new Map<string, number>();
@@ -449,9 +443,10 @@ export function buildYard(
     checking: lineStopCounts(
       feed,
       lineStops.find(stop => stop.stage === 'checking')!,
+      waiting,
     ),
     stops: lineStops.map(stop => {
-      const { count, passed } = lineStopCounts(feed, stop);
+      const { count, passed } = lineStopCounts(feed, stop, waiting);
       return { count, passed, atLeast: feed.more > 0 };
     }),
     needsKnown: needsYou.known,

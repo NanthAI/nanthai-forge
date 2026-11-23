@@ -202,10 +202,10 @@ test('the longest hold comes first; FYI says the real cause; a bare id is never 
   assert.equal(whoOf(null, 'quiet-otter'), null, 'no person is invented when the reader may not see people');
 });
 
-test('an unrecorded reason is not reported, never guessed; a waiting Lane request names it', () => {
+test('a hold with no landing outcome on record says so and names the next step, never a guess; a waiting Lane request names it', () => {
   const unknown = needsView(read([held('l1', 'unknown', 1, { title: null, agent: null })], []));
-  assert.equal(unknown.fyi[0].head, 'Lane l1 is held. Why: not reported.');
-  assert.match(unknown.fyi[0].next, /Forge did not record what it waits on/);
+  assert.equal(unknown.fyi[0].head, 'Lane l1 is held; Forge has no landing outcome on record for it.');
+  assert.match(unknown.fyi[0].next, /lands it again from the Lane/);
   const review = needsView(read([held('l1', 'unknown', 1)], [request('l1', 'lane')]));
   assert.equal(review.now[0].why, 'review');
 });

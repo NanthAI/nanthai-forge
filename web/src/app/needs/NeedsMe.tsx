@@ -27,20 +27,7 @@ import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
-import {
-  Band,
-  Dock,
-  Key,
-  Region,
-  Row,
-  Segment,
-  Standing,
-  State,
-  Who,
-  useDockLayout,
-  useFold,
-  type DockLayout,
-} from '../../ds';
+import { Band, Dock, Key, Region, Standing, State, useDockLayout, useFold, type DockLayout } from '../../ds';
 import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
 import { usePageCritical } from '../../ui/page-critical';
 import { A } from '../frames';
@@ -58,16 +45,10 @@ import { AnswerKeys, HandBackDetails } from '../discussion/ConversationEntry';
 import type { Answer } from '../discussion/conversation';
 import { useAnswer } from '../discussion/useConversation';
 import { needsRead } from './count';
-import {
-  fyiSum,
-  fyiView,
-  sinceText,
-  tileText,
-  type Area,
-  type FyiRead,
-  type FyiRow,
-  type FyiState,
-} from './fyi';
+import { fyiView, type FyiRead, type FyiState } from './fyi';
+import { Capped, CAP } from './Capped';
+import { fyiDismiss, fyiRead } from './fyi-reads';
+import { Fyi } from './FyiRegion';
 import { HeldSetting } from './HeldSetting';
 import { LooseFold } from './LooseFold';
 import {
@@ -85,14 +66,6 @@ import { AheadKeys, DecisionKeys } from './DecisionKeys';
 import './needs.css';
 
 type ProjectRoute = PlaceProps['route'];
-const fyiRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, string>(
-  'projectNeedsFyi:read',
-);
-const fyiDismiss = makeFunctionReference<
-  'mutation',
-  { projectId: Id<'hostedProjects'>; keys?: string[]; clearAll?: boolean; restore?: FyiState },
-  string
->('projectNeedsFyi:dismiss');
 const dormantAbandon = makeFunctionReference<
   'mutation',
   { projectId: Id<'hostedProjects'>; authorityEpoch: number; abandon: string[] },
@@ -107,12 +80,9 @@ function watchPhone(change: () => void) {
   query.addEventListener('change', change);
   return () => query.removeEventListener('change', change);
 }
-/** Shown at most this many per band; the rest open in place, oldest last (DESIGN.md rule 43). */
-const CAP = 4;
-/** FYI rows shown before "Show more". */
-const FYI_CAP = 6;
 
 const LooseEnds = lazy(() => import('./LooseEnds'));
+const HeldPage = lazy(() => import('./HeldPage'));
 
 export default function NeedsMe(props: PlaceProps) {
   if (props.route.section === 'loose-ends')
@@ -123,7 +93,16 @@ export default function NeedsMe(props: PlaceProps) {
         <LooseEnds {...props} />
       </Suspense>
     );
-  // The held section keeps its placeholder until it is rebuilt.
+  if (props.route.section === 'held')
+    return (
+      <Suspense
+        fallback={
+          <Head trail={crumbsFor(props.route, props.projectName)} sentence="Loading what was held…" />
+        }
+      >
+        <HeldPage {...props} />
+      </Suspense>
+    );
   if (props.route.section) return <Placeholder route={props.route} projectName={props.projectName} />;
   return <NeedsMeScreen {...props} />;
 }
@@ -575,48 +554,6 @@ export function NeedsMeView({
   );
 }
 
-/** The first rows, then the rest opening in place (oldest last). A count beyond the read says so (rule 1). */
-function Capped<T>({
-  rows,
-  more,
-  atLeast,
-  cap = CAP,
-  order = 'longest held first',
-  children,
-}: {
-  rows: readonly T[];
-  more: number;
-  atLeast: boolean;
-  cap?: number;
-  order?: string;
-  children: (row: T) => ReactNode;
-}) {
-  const [all, setAll] = useState(false);
-  const shown = all ? rows : rows.slice(0, cap);
-  const hidden = rows.length - shown.length;
-  return (
-    <>
-      {shown.map(children)}
-      {hidden ? (
-        <div className="pf needs-fold">
-          <span>
-            {shown.length} of {rows.length + more}
-            {atLeast ? ' or more' : ''}, {order}
-          </span>
-          <Key size="sm" onClick={() => setAll(true)}>
-            Show {hidden} more
-          </Key>
-        </div>
-      ) : more ? (
-        <div className="pf">
-          {rows.length} of {atLeast ? 'at least ' : ''}
-          {rows.length + more} shown; the rest are in Lanes.
-        </div>
-      ) : null}
-    </>
-  );
-}
-
 /** "Later": the row folds to one line for this visit. It stays open, still counted, and nobody is told. */
 function Later({ head, onShow }: { head: string; onShow: () => void }) {
   return (
@@ -887,192 +824,6 @@ function Ahead({
         ) : null}
       </div>
     </details>
-  );
-}
-
-const FILTERS: { value: 'all' | Area; text: string }[] = [
-  { value: 'all', text: 'All' },
-  { value: 'code', text: 'Code' },
-  { value: 'outside', text: 'Outside the code' },
-];
-
-/** "09:58" today, "Yesterday", or the date: when a row happened, in the reader's time. */
-function when(at: number, now: number) {
-  const day = new Date(now);
-  day.setHours(0, 0, 0, 0);
-  const date = new Date(at);
-  if (at >= day.getTime()) return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  if (at >= day.getTime() - 86_400_000) return 'Yesterday';
-  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-}
-
-function Fyi({
-  handle,
-  view,
-  state,
-  drawnAt,
-  dismiss,
-  announce,
-  href,
-  heldHref,
-}: {
-  handle: ReactNode;
-  view: ReturnType<typeof fyiView> | null;
-  state: FyiState | undefined;
-  drawnAt: number;
-  dismiss: Dismiss;
-  announce: (text: string) => void;
-  href: (to: FyiRow['links'][number]['to']) => string;
-  heldHref: string;
-}) {
-  const [filter, setFilter] = useState<'all' | Area>('all');
-  const [undo, setUndo] = useState<FyiState | null>(null);
-  const [busy, setBusy] = useState(false);
-  const send = async (input: Parameters<Dismiss>[0], done: string) => {
-    setBusy(true);
-    try {
-      const reply = JSON.parse(await dismiss(input)) as { before?: FyiState; error?: { message?: string } };
-      if (reply.error) announce(`Not done: ${reply.error.message ?? 'Forge refused it.'}`);
-      else {
-        announce(done);
-        return reply.before ?? null;
-      }
-    } catch {
-      announce('Not done: Forge could not be reached. Nothing changed; try again.');
-    } finally {
-      setBusy(false);
-    }
-    return null;
-  };
-  const rows = view ? view.rows.filter(row => filter === 'all' || row.area === filter) : [];
-  return (
-    <Region
-      title="FYI"
-      weight="watch"
-      count={view ? view.counts.all : undefined}
-      handle={handle}
-      sum={view ? fyiSum(view) : undefined}
-      hint={view ? `nothing to act on; counted ${sinceText(view.since, drawnAt)}` : undefined}
-      tools={
-        view && view.rows.length ? (
-          <Key
-            size="sm"
-            kind="ghost"
-            disabled={busy || !state}
-            onClick={async () => {
-              const before = await send({ clearAll: true }, 'Cleared. Newer rows still show here.');
-              if (before) setUndo(before);
-            }}
-          >
-            Clear all
-          </Key>
-        ) : undefined
-      }
-    >
-      {!view ? (
-        <div className="quietline" aria-busy="true">
-          Loading what happened…
-        </div>
-      ) : (
-        <>
-          <div className="nums" aria-label={`Counted ${sinceText(view.since, drawnAt)}`} role="group">
-            {tileText(view.tiles).map(tile => (
-              <div key={tile.label}>
-                <b className={tile.n === 'not reported' ? 'nr' : undefined}>{tile.n}</b>
-                <span>{tile.label}</span>
-              </div>
-            ))}
-          </div>
-          {undo ? (
-            <div className="pf needs-fold">
-              <span>Cleared.</span>
-              <Key
-                size="sm"
-                disabled={busy}
-                onClick={async () => {
-                  if (await send({ restore: undo }, 'The list is back as it was.')) setUndo(null);
-                }}
-              >
-                Undo
-              </Key>
-            </div>
-          ) : null}
-          {view.rows.length ? (
-            <div className="fyi-filter">
-              <Segment
-                label="Show"
-                value={filter}
-                options={FILTERS.map(option => ({
-                  value: option.value,
-                  text: `${option.text} ${view.counts[option.value].toLocaleString('en')}`,
-                }))}
-                onChange={setFilter}
-              />
-            </div>
-          ) : null}
-          {rows.length ? (
-            <Capped rows={rows} more={0} atLeast={false} cap={FYI_CAP} order="newest first">
-              {row => (
-                <Row key={row.key} cols="auto minmax(0, 1fr) auto auto" className="fyi-row">
-                  <span className="mono t3 fyi-at">{when(row.at, drawnAt)}</span>
-                  <span className="ttl" dir="auto">
-                    <State word={row.word}>{row.tag}</State> {row.title}
-                    <span className="meta fyi-fact">
-                      {row.who ? (
-                        <>
-                          <Who handle={row.who} />
-                          {row.fact ? ' · ' : ''}
-                        </>
-                      ) : null}
-                      {row.fact}
-                    </span>
-                  </span>
-                  <span className="fyi-links">
-                    {row.links.map(link => (
-                      <A key={link.label} className="lk" href={href(link.to)}>
-                        {link.label}
-                      </A>
-                    ))}
-                  </span>
-                  <button
-                    type="button"
-                    className="fyi-x"
-                    aria-label={`Dismiss: ${row.title}`}
-                    title="Dismiss"
-                    disabled={busy}
-                    onClick={() => void send({ keys: [row.key] }, 'Dismissed. It shows again if it changes.')}
-                  >
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 16 16"
-                      aria-hidden="true"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                    >
-                      <path d="M4 4l8 8M12 4l-8 8" />
-                    </svg>
-                  </button>
-                </Row>
-              )}
-            </Capped>
-          ) : (
-            <div className="quietline">
-              {view.rows.length ? 'Nothing of this kind.' : `Nothing new ${sinceText(view.since, drawnAt)}.`}
-            </div>
-          )}
-          <Row cols="minmax(0, 1fr) auto">
-            <A href={heldHref} className="lk">
-              Everything Forge held, redid or refused
-            </A>
-            <span className="t3" aria-hidden="true">
-              ›
-            </span>
-          </Row>
-        </>
-      )}
-    </Region>
   );
 }
 

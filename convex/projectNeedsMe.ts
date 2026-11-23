@@ -18,6 +18,7 @@ import { messagesTo } from './projectNeedsFyi';
 import { openLandingReviews, reviewSubmitter } from './projectHostedReviewInbox';
 import { approvalLinks, type ApprovalLink } from './projectHostedApprovalStore';
 import { storedLandingStateSchema } from '../src/hosted-landing';
+import { landingStateOf, type LandingStateName } from '../src/landing-state';
 import { report } from './errors';
 import { invariant } from '../src/errors';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
@@ -42,7 +43,8 @@ export const needsMeWhy = v.union(
   v.literal('dependency'),
   /** Its own agent (or a person) withdrew the landing: nothing to decide, shown under FYI (Item 0cb9b064). */
   v.literal('withdrawn'),
-  /** Held, but the bound landing is gone or names no reason: shown as not reported, never guessed. */
+  /** Held, and Forge has no landing outcome on record for it (the bound landing is gone): said as exactly that, with
+   * the next step, never guessed (Item 9b9057a9). */
   v.literal('unknown'),
 );
 export const needsMeResult = v.object({
@@ -128,6 +130,23 @@ export const needsMeResult = v.object({
 
 type Held = Doc<'projectLiveLineLanes'>;
 
+/** The hold a failed end names by its error code when it recorded no `cause` (older or other write paths): the one
+ * reading every screen and agent reply shares (src/landing-state.ts), so Forge never says "why not reported" for an
+ * end it made itself. Nothing on record: unknown. */
+function endedWhy(state: ReturnType<typeof storedLandingStateSchema.parse> | null) {
+  if (!state || state.observation?.state !== 'terminal-failed') return 'unknown';
+  const named: Partial<
+    Record<LandingStateName, 'conflict' | 'check-failed' | 'infra' | 'stale-head' | 'rejected'>
+  > = {
+    conflict: 'conflict',
+    'check-failed': 'check-failed',
+    'not-run': 'infra',
+    'stale-head': 'stale-head',
+    rejected: 'rejected',
+  };
+  return named[landingStateOf(state).state] ?? 'unknown';
+}
+
 /** Why one held Lane is held: the landing its mark is bound to, read once. Its recorded cause wins over an overlap mark. */
 async function reason(
   ctx: QueryCtx,
@@ -156,7 +175,7 @@ async function reason(
             ? 'conflict'
             : observed?.pendingReason === 'waiting-for-dependency'
               ? 'dependency'
-              : 'unknown'));
+              : endedWhy(state)));
   const ended = state?.timing?.ciEndedAt ?? state?.timing?.settledAt;
   const parentLaneId = why === 'dependency' && state ? await dependencyLane(ctx, projectId, state.id) : null;
   return {

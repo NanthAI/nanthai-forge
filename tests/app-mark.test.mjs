@@ -24,13 +24,18 @@ const run = (...feeds) => {
   return memory;
 };
 
-test('standing priority: landing > waiting > overlap > checks > working, many > working > idle', () => {
+test('standing priority: landing > waiting > conflict > checks > working, many > working > idle', () => {
   assert.equal(baseMark(undefined), 'idle');
   assert.equal(baseMark(feed([])), 'idle');
   assert.equal(baseMark(feed([lane('a', 'editing')])), 'w1');
   assert.equal(baseMark(feed([lane('a', 'editing')], null, 1)), 'wN');
   assert.equal(baseMark(feed([lane('a', 'checking'), lane('b', 'editing')])), 'checks');
-  assert.equal(baseMark(feed([lane('a', 'checking'), lane('b', 'saved', { overlap: true })])), 'overlap');
+  // Item 9b9057a9: a saved file shared with another Lane is no conflict; a held Lane's exact conflict is.
+  assert.equal(baseMark(feed([lane('a', 'checking'), lane('b', 'saved', { overlap: true })])), 'checks');
+  assert.equal(
+    baseMark(feed([lane('a', 'checking'), lane('b', 'saved', { held: true, fix: true, overlap: true })])),
+    'overlap',
+  );
   assert.equal(
     baseMark(feed([lane('a', 'saved', { held: true }), lane('b', 'saved', { overlap: true })])),
     'waiting',

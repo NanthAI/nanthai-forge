@@ -107,7 +107,7 @@ const questions: Record<HeldWhy, (title: string) => string> = {
   review: title => `${title} waits for your approval to land.`,
   dependency: title => `${title} waits for the Lane it depends on.`,
   withdrawn: title => `${title}: its agent withdrew the landing.`,
-  unknown: title => `${title} is held. Why: not reported.`,
+  unknown: title => `${title} is held; Forge has no landing outcome on record for it.`,
 };
 /** FYI lines: what happened, without a question (nobody here is asked to decide). */
 const facts: Record<HeldWhy, (title: string) => string> = {
@@ -119,7 +119,7 @@ const facts: Record<HeldWhy, (title: string) => string> = {
   review: title => `${title} waits for an approval.`,
   dependency: title => `${title} waits for the Lane it depends on.`,
   withdrawn: title => `${title}: its agent withdrew the landing.`,
-  unknown: title => `${title} is held. Why: not reported.`,
+  unknown: title => `${title} is held; Forge has no landing outcome on record for it.`,
 };
 /** Who acts next on an FYI row, and how. `who` is the agent (or person) holding the Lane. */
 function nextStep(why: HeldWhy, who: string | null) {
@@ -142,7 +142,7 @@ function nextStep(why: HeldWhy, who: string | null) {
     case 'review':
       return 'the project owner approves or declines it';
     default:
-      return 'Forge did not record what it waits on';
+      return `${by} lands it again from the Lane`;
   }
 }
 
@@ -311,9 +311,27 @@ export function needsSentence(view: NeedsView): { bold: string; rest: string } {
   if (view.count)
     return { bold: `${lanes} ${view.count === 1 ? 'holds' : 'hold'} work until you decide.`, rest: ahead };
   if (view.atLeast) return { bold: 'Some requests could not be listed.', rest: ahead };
+  // A hold that asks nobody is still a hold: never "nothing is held" while one is (Item 9b9057a9).
+  const stuck = view.fyi.length;
   return {
     bold: 'Nothing needs you.',
-    rest: ahead || 'Nothing is held and no agent is waiting for an answer.',
+    rest:
+      ahead ||
+      (stuck
+        ? `${plural(stuck, 'Lane')} ${stuck === 1 ? 'is' : 'are'} held; ${stuck === 1 ? 'its' : 'their'} agent or holder acts next.`
+        : 'Nothing is held and no agent is waiting for an answer.'),
+  };
+}
+
+/** The Held page's sentence: how many Lanes are held now (those waiting on the reader and those waiting on their
+ * agent or holder), by the same rows Needs me draws, then what the list below it is. */
+export function heldSentence(view: NeedsView): { bold: string; rest: string } {
+  const held = view.now.length + view.fyi.length;
+  return {
+    bold: held ? `${plural(held, 'Lane')} ${held === 1 ? 'is' : 'are'} held now.` : 'Nothing is held now.',
+    rest: view.now.length
+      ? `${view.now.length.toLocaleString()} wait${view.now.length === 1 ? 's' : ''} on you, decided on Needs me. Below: everything Forge held, redid or refused.`
+      : 'Below: everything Forge held, redid or refused.',
   };
 }
 
@@ -341,7 +359,6 @@ export function holdLine(view: NeedsView | undefined, laneId: string, now: numbe
   if (mine) return `Held for your approval (${waited(mine.since, now)}).`;
   const other = view?.fyi.find(row => row.laneId === laneId);
   if (!other) return 'Held.';
-  if (other.why === 'unknown') return `Held (${waited(other.since, now)}). Why: not reported.`;
   const next = other.next ? ` Next: ${other.next}.` : '';
   return `Held (${waited(other.since, now)}): ${heldState({ state: stateOf(other.why) }).why}.${next}`;
 }

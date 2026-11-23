@@ -24,7 +24,7 @@ import { useLiveLine } from './use-live-line';
 import { withRefreshHold } from './auth-hold';
 import { Device } from './Device';
 import { AccountFrame, BareFrame, ProjectFrame, PublicFrame, type FrameControls } from './frames';
-import { needsCount, needsRead } from './needs/count';
+import { needsCount, needsRead, needsYouLanes, waitingLanes } from './needs/count';
 import { Keys, useFrameKeys, type Go } from './keys';
 import { oldAddress, type OldAddress } from './old-address';
 import { hrefFor, isPublicProjectView, parseAppPath, signInHref, type AppRoute } from './paths';
@@ -366,6 +366,8 @@ function ProjectView({
   );
   // A parked Lane with no one named counts once 4 h idle, by the time the read arrived (count.ts parkShown).
   const needs = useMemo(() => needsCount(needsLive, Date.now()), [needsLive]);
+  // The Lanes behind that count, for the top bar's line and F: one rule, so none of them can disagree with it.
+  const waiting = useMemo(() => waitingLanes(needsYouLanes(needsLive, Date.now())), [needsLive]);
   const [picker, setPicker] = useState<readonly PickerEntry[] | null>(null);
   const asked = useRef(false);
   const name = project?.name ?? route.project;
@@ -410,6 +412,7 @@ function ProjectView({
       name={name}
       feed={feed}
       needs={needs}
+      waiting={waiting}
       projects={picker}
       controls={{ ...controls, onPicker }}
     >

@@ -344,7 +344,7 @@ test('e2f436b6: the Lane page says "for you" only when Needs me says the hold wa
       'u',
       NOW,
     ),
-    'Held (1 h). Why: not reported.',
+    'Held (1 h): no landing outcome on record. Next: mara/quiet-otter lands it again from the Lane.',
   );
 });
 
@@ -482,28 +482,39 @@ test('43b51a5e: a parked passed entry reads waiting-for-order on CLI replies, th
   );
 });
 
-test('85f456c1: a Lane In queue whose saved files conflict with another Lane reads Conflict; without one, In queue', () => {
-  assert.equal(state.laneState(mark('q1', 'queued', { overlap: true })).kind, 'conflict');
+test('9b9057a9: a Lane that only shares saved files with another is never Conflict; a held conflict and a landing conflict are', () => {
+  // The owner saw purple Conflict on Lanes that had not landed: saved files shared, or a trial-merge flag, no landing
+  // that ended in conflict. One rule (isConflict) now decides, for Lanes, the Flow view and the top bar's F.
+  for (const stage of ['editing', 'saved', 'queued', 'checking', 'ready']) {
+    const shared = { stage, held: false, overlap: true };
+    assert.equal(state.isConflict(shared), false, stage);
+    assert.notEqual(state.laneState(shared, null).kind, 'conflict', stage);
+  }
   const queued = state.laneState(mark('q2', 'queued'));
   assert.deepEqual([queued.kind, queued.why], ['waiting', 'waits for its check']);
+  // A held Lane is in conflict when its landing says so; with no landing in hand, when its exact conflict is flagged.
+  const held = { stage: 'saved', held: true, overlap: true };
+  assert.equal(state.isConflict(held, { state: 'conflict' }), true);
+  assert.equal(state.isConflict(held, null), true, 'feed-only readers keep the held conflict');
+  assert.equal(
+    state.isConflict(held, { state: 'check-failed' }),
+    false,
+    'its landing says why, not the flag',
+  );
+  assert.equal(state.isConflict({ ...held, overlap: false }, { state: 'conflict' }), true);
+  assert.equal(state.laneState(held, { state: 'conflict' }).kind, 'conflict');
 });
 
-test('85f456c1 review: Lanes and the Flow view share one rule for a saved-file conflict on the way to main', () => {
-  for (const [stage, conflict] of [
-    ['editing', true],
-    ['saved', true],
-    ['queued', true],
-    ['checking', false],
-    ['ready', false],
+test("9b9057a9: only a landing held for review says Needs you; every other hold is its agent's, in its own word", () => {
+  for (const [landing, word] of [
+    [{ state: 'held-review' }, 'Needs you'],
+    [{ state: 'stale-head' }, 'Stopped'],
+    [{ state: 'rejected' }, 'Stopped'],
+    [{ state: 'unknown' }, 'Stopped'],
+    [null, 'Waiting its turn'],
   ]) {
-    const mark = { stage, held: false, overlap: true };
-    assert.equal(state.unheldConflict(mark), conflict, stage);
-    assert.equal(state.laneState(mark, null).kind === 'conflict', conflict, stage);
+    const said = state.laneState({ stage: 'saved', held: true }, landing);
+    assert.equal(said.glyph, word, landing?.state ?? 'no landing');
+    assert.doesNotMatch(said.why, /why not reported/);
   }
-  assert.equal(state.unheldConflict({ stage: 'queued', held: false, overlap: false }), false);
-  assert.equal(
-    state.unheldConflict({ stage: 'queued', held: true, overlap: true }),
-    false,
-    'held: heldState decides',
-  );
 });

@@ -136,3 +136,23 @@ export function needsCount(
     atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true,
   };
 }
+
+/** The open Lanes that wait on the reader, by the rule above: held for a decision this reader makes, or parked for
+ * them and shown now. Every screen that marks a held Lane (the top bar's line and F, the yard, the flow) takes it from
+ * here, never its own rule, so they cannot disagree with the count (Item 9b9057a9). Undefined while the read is out. */
+export type NeedsYou = { lanes: ReadonlySet<string>; known: 'all' | 'partial' | 'unknown' };
+export function needsYouLanes(read: NeedsRead | undefined, now: number): NeedsYou | undefined {
+  if (!read) return undefined;
+  const asked = laneRequests(read.approvals);
+  const out = new Set<string>();
+  for (const lane of read.held)
+    if (lane.laneId && waitsOnPerson(lane, asked.has(lane.laneId), read.canDecide)) out.add(lane.laneId);
+  for (const row of read.parked ?? []) if (parkShown(row, now)) out.add(row.laneId);
+  return { lanes: out, known: read.more > 0 || read.parkedMore === true ? 'partial' : 'all' };
+}
+/** Needs me's read failed: no held Lane is known to wait on the reader, and the page says it could not tell. */
+export const NEEDS_UNKNOWN: NeedsYou = { lanes: new Set(), known: 'unknown' };
+/** The Lanes known to wait on the reader, for a screen that marks held Lanes: only when every held Lane was
+ * classified. Otherwise undefined, and the screen falls back to the line's own `fix` flag. */
+export const waitingLanes = (needs: NeedsYou | undefined): ReadonlySet<string> | undefined =>
+  needs?.known === 'all' ? needs.lanes : undefined;

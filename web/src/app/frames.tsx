@@ -74,8 +74,16 @@ function showPageFocus(event: FocusEvent<HTMLElement>) {
 }
 
 /** The F follows the project (mark.ts). Its word takes the name's place while the state needs one, and is announced. */
-function Brand({ href, feed }: { href: string; feed?: LineFeed }) {
-  const { state, motion, word } = useMark(feed);
+function Brand({
+  href,
+  feed,
+  waiting,
+}: {
+  href: string;
+  feed?: LineFeed;
+  waiting?: ReadonlySet<string> | undefined;
+}) {
+  const { state, motion, word } = useMark(feed, waiting);
   return (
     <>
       <A className="brand" href={href} translate="no" aria-label="Forge">
@@ -176,6 +184,9 @@ type ProjectFrameProps = {
   feed: LineFeed | undefined;
   /** What waits on the reader (needs/count.ts `needsCount`), the same number Needs me shows. */
   needs: { n: number; atLeast: boolean } | undefined;
+  /** The Lanes that wait on the reader (needs/count.ts `waitingLanes`), for the line and the F; undefined until
+   * Needs me's read has classified every held Lane. */
+  waiting?: ReadonlySet<string> | undefined;
   /** The project picker's entries; null until the picker is first opened. */
   projects: readonly { handle: string; slug: string; name: string }[] | null;
   controls: FrameControls & { onPicker: () => void };
@@ -199,6 +210,7 @@ function ProjectShell({
   name,
   feed,
   needs,
+  waiting,
   projects,
   controls,
   children,
@@ -242,7 +254,7 @@ function ProjectShell({
       <div className="shell" data-frame="project" data-rail={rail.shut ? 'shut' : 'open'}>
         <Skip />
         <header className="top">
-          <Brand href={placeHref(route, 'needs')} feed={feed} />
+          <Brand href={placeHref(route, 'needs')} feed={feed} waiting={waiting} />
           <span
             onPointerEnter={controls.onPicker}
             onFocus={controls.onPicker}
@@ -254,7 +266,7 @@ function ProjectShell({
               </span>
             </Menu>
           </span>
-          <Line feed={feed} handle={route.handle} project={route.project} />
+          <Line feed={feed} handle={route.handle} project={route.project} waiting={waiting} />
           <End handle={controls.viewerHandle} onPalette={controls.onPalette} onKeys={controls.onKeys}>
             <A className="needs" href={placeHref(route, 'needs')} aria-label={needsLabel}>
               <span className="hide-ph">Needs you</span>
@@ -264,7 +276,7 @@ function ProjectShell({
             </A>
           </End>
         </header>
-        <Line feed={feed} handle={route.handle} project={route.project} phone />
+        <Line feed={feed} handle={route.handle} project={route.project} phone waiting={waiting} />
         <Rail
           label="Project"
           address={address}

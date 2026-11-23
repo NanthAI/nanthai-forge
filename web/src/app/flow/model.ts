@@ -6,7 +6,7 @@
 // time the page was drawn. Pure.
 import { flowToday, flowVerdict, mainFailedToday, utcDayStart } from '../../../../src/flow-day';
 import { lineStopCounts, lineStops, type LineFeed, type LineStop } from '../Line';
-import { unheldConflict } from '../lane-state';
+import { isConflict } from '../lane-state';
 import type { StateWord } from '../../ds';
 
 /** A block's colour (the state tokens) and the glyph cut into its top. */
@@ -71,7 +71,7 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
         ? 'waiting'
         : row
           ? colourOf(row.word)
-          : (lane.held && lane.overlap) || unheldConflict(lane)
+          : isConflict(lane)
             ? 'conflict'
             : lane.held || lane.stage === 'queued' || lane.stage === 'ready'
               ? 'waiting'
@@ -86,7 +86,7 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
           : row
             ? row.tag
             : lane.held
-              ? lane.overlap
+              ? isConflict(lane)
                 ? 'Conflict'
                 : 'Held'
               : lane.stage === 'ready'

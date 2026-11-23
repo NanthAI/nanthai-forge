@@ -7,7 +7,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useReadsAsleep } from '../live-reads';
 import type { StateWord } from '../ds';
 import type { MarkState } from '../ui/brand';
-import type { LineFeed } from './Line';
+import { isConflict } from './lane-state';
+import { waitsOnYou, type LineFeed } from './Line';
 
 const FAILED_MS = 10_000;
 const LANDED_MS = 3_000;
@@ -26,13 +27,13 @@ export type MarkMemory = { feed?: LineFeed; checking: Set<string>; exit?: string
 export const markMemory = (): MarkMemory => ({ checking: new Set() });
 
 /** The strongest standing fact in the feed: landing > waiting > overlap > checks > working, many > working > idle. */
-export function baseMark(feed: LineFeed | undefined): MarkState {
+export function baseMark(feed: LineFeed | undefined, waiting?: ReadonlySet<string>): MarkState {
   if (!feed) return 'idle';
   const { lanes } = feed;
   if (lanes.some(lane => lane.stage === 'ready')) return 'landing';
   // Only a hold that waits on a person (approval or review); a Lane held on its own next step is agent work.
-  if (lanes.some(lane => lane.held && !lane.fix)) return 'waiting';
-  if (lanes.some(lane => lane.overlap)) return 'overlap';
+  if (lanes.some(lane => waitsOnYou(lane, waiting))) return 'waiting';
+  if (lanes.some(lane => isConflict(lane))) return 'overlap';
   if (lanes.some(lane => lane.stage === 'checking')) return 'checks';
   const open = lanes.length + feed.more;
   return open === 0 ? 'idle' : open === 1 ? 'w1' : 'wN';
@@ -62,8 +63,12 @@ export function observe(memory: MarkMemory, feed: LineFeed | undefined, now: num
 
 /** The state to draw now, and when it would change by itself (a hold ending). Failed holds 10 s; landed and set
  * aside hold at least 3 s and then until the next delivery; landing outranks them, failed outranks landing. */
-export function shownMark(memory: MarkMemory, now: number): { state: MarkState; until?: number } {
-  const base = baseMark(memory.feed);
+export function shownMark(
+  memory: MarkMemory,
+  now: number,
+  waiting?: ReadonlySet<string>,
+): { state: MarkState; until?: number } {
+  const base = baseMark(memory.feed, waiting);
   const shot = memory.shot;
   if (shot?.state === 'failed' && now < shot.at + FAILED_MS)
     return { state: 'failed', until: shot.at + FAILED_MS };
@@ -79,13 +84,13 @@ export function markMotion(state: MarkState, quietMs: number, asleep: boolean): 
   return asleep || quietMs >= STILL_MS ? 'still' : quietMs >= CALM_MS ? 'calm' : undefined;
 }
 
-export function useMark(feed: LineFeed | undefined) {
+export function useMark(feed: LineFeed | undefined, waiting?: ReadonlySet<string>) {
   const memory = useRef<MarkMemory>(null);
   memory.current ??= markMemory();
   const [, redraw] = useState(0);
   const now = Date.now();
   observe(memory.current, feed, now);
-  const { state, until } = shownMark(memory.current, now);
+  const { state, until } = shownMark(memory.current, now, waiting);
   const asleep = useReadsAsleep();
   const clock = useRef({ state, at: now, asleep });
   if (clock.current.state !== state || (clock.current.asleep && !asleep))

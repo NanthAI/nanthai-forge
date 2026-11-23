@@ -44,11 +44,13 @@ export const stopWords: Record<LineStage, string> = {
 };
 
 type Held = { glyph: StateWord; why: string; note: string; word?: string };
-/** Why it is held, by the current submission's state. Nothing known: "held", never a guess at the reason or at
- * whom it waits on (friction e2f436b6: "held for you" read as the viewer's own hold when it was another's). */
-function heldBy(landing: CurrentLanding | null | undefined, overlap: boolean): Held {
+/** Why it is held, by the current submission's state. Only a landing held for review is "Needs you": the one hold
+ * that waits on a person (needs/count.ts `waitsOnPerson`); every other hold is its agent's next step, said in its own
+ * word, so a row never reads Needs you where Needs me says nothing waits (Item 9b9057a9, friction e2f436b6). Nothing
+ * known: say so, never a guess at the reason or at whom it waits on. */
+function heldBy(landing: CurrentLanding | null | undefined, conflict: boolean): Held {
   const state = landing?.state;
-  if (state === 'conflict' || (overlap && (!state || state === 'unknown')))
+  if (conflict || state === 'conflict')
     return { glyph: 'Conflict', why: 'its saved changes conflict with another Lane', note: 'conflict' };
   switch (state) {
     case 'check-failed': {
@@ -63,9 +65,9 @@ function heldBy(landing: CurrentLanding | null | undefined, overlap: boolean): H
     case 'not-run':
       return { glyph: 'Not run', why: 'its check could not run', note: 'check not run' };
     case 'stale-head':
-      return { glyph: 'Needs you', why: 'main moved under it', note: 'main moved' };
+      return { glyph: 'Stopped', why: 'main moved under it', note: 'main moved' };
     case 'rejected':
-      return { glyph: 'Needs you', why: 'Forge refused the landing', note: 'refused' };
+      return { glyph: 'Stopped', why: 'Forge refused the landing', note: 'refused' };
     case 'held-review': {
       const paths = landing?.protectedPaths;
       return {
@@ -91,34 +93,41 @@ function heldBy(landing: CurrentLanding | null | undefined, overlap: boolean): H
       };
     case 'held-main-red':
       return { glyph: 'Waiting its turn', why: 'held while main’s check is red', note: 'main is red' };
+    case 'unknown':
+      // Forge read the landing and has no outcome on record for it: said as that, with the next step beside it.
+      return { glyph: 'Stopped', why: 'no landing outcome on record', note: 'held' };
     default:
-      return { glyph: 'Needs you', why: 'held, why not reported', note: 'held' };
+      // A reader with the mark only (no landing in hand): held, its reason is on the Lane page and Needs me.
+      return { glyph: 'Waiting its turn', word: 'Held', why: 'held', note: 'held' };
   }
 }
 
 /** A held Lane's state, wherever it stands on the line: Needs you reads held Lanes without their stop. */
-export function heldState(landing: CurrentLanding | null | undefined, overlap = false) {
-  const held = heldBy(landing, overlap);
+export function heldState(landing: CurrentLanding | null | undefined, conflict = false) {
+  const held = heldBy(landing, conflict);
   const kind: StateKind =
     held.glyph === 'Conflict'
       ? 'conflict'
       : held.glyph === 'Check failed'
         ? 'failed'
-        : held.glyph === 'Set aside'
+        : held.glyph === 'Set aside' || held.glyph === 'Stopped'
           ? 'stale'
           : 'waiting';
   return { kind, glyph: held.glyph, word: held.word ?? held.glyph, why: held.why, note: held.note };
 }
 
+/** The one rule for "Conflict" (purple, the diamond, the F), for every screen and agent read (Item 9b9057a9): a Lane
+ * whose landing ended in a conflict, or, where its landing is not in hand (the line feed, the Lane page), a held Lane
+ * whose exact trial merge flagged one. A Lane that has not landed yet is never "in conflict" because it shares saved
+ * files with another Lane, or because a trial merge at save flagged a possible one: that stays the quiet "shares N
+ * files" note and the dotted tick on the line, with no state colour. */
+export function isConflict(mark: Pick<LaneMark, 'held' | 'overlap'>, landing?: CurrentLanding | null) {
+  if (!mark.held) return false;
+  if (landing && landing.state !== 'unknown') return landing.state === 'conflict';
+  return mark.overlap === true;
+}
+
 /** The one Lane state. `landing` is the current submission only (see `currentEntries`), or nothing. */
-/** A Lane on its way to main (not held) whose saved files conflict with another Lane's: before its check, not during
- * or after it. Lanes and the Flow view both read this (one rule, Item 85f456c1). */
-export const unheldConflict = (mark: LaneMark) =>
-  !mark.held &&
-  mark.overlap === true &&
-  mark.stage !== 'checking' &&
-  mark.stage !== 'ready' &&
-  mark.stage !== 'main';
 export function laneState(mark: LaneMark, landing?: CurrentLanding | null): LaneState {
   const base = { stage: mark.stage, held: mark.held };
   if (mark.stage === 'main')
@@ -131,8 +140,8 @@ export function laneState(mark: LaneMark, landing?: CurrentLanding | null): Lane
       why: 'on main',
       note: null,
     };
-  if (mark.held) return { ...base, ...heldState(landing, mark.overlap === true) };
-  // On the way to main: the stop is the state. A saved-file overlap matters before the check, not during it.
+  if (mark.held) return { ...base, ...heldState(landing, isConflict(mark, landing)) };
+  // On the way to main: the stop is the state.
   if (mark.stage === 'checking')
     return {
       ...base,
@@ -160,16 +169,6 @@ export function laneState(mark: LaneMark, landing?: CurrentLanding | null): Lane
       why: landing?.state === 'waiting-for-order' ? 'waits for an older landing' : 'lands next',
       note: null,
     };
-  if (unheldConflict(mark))
-    return {
-      ...base,
-      kind: 'conflict',
-      glyph: 'Conflict',
-      word: 'Conflict',
-      why: 'its saved changes conflict with another Lane',
-      note: 'conflict',
-    };
-  // In queue is still before the check: a conflict with another Lane's saved files reads first.
   if (mark.stage === 'queued')
     return {
       ...base,

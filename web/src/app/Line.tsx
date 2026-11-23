@@ -61,10 +61,22 @@ export const lineStops: readonly {
   { stage: 'checking', label: 'Checking', short: 'Check', of: ['checking', 'ready'] },
 ];
 
+/** Whether a held mark waits on a person. Needs me's read decides, when it has classified every held Lane
+ * (`waiting`, needs/count.ts `waitingLanes`): the line, the F, the count and every page then say one thing (Item
+ * 9b9057a9). Until it has, the line's own `fix` flag stands in: a Lane held on its own next step is agent work. */
+export const waitsOnYou = (
+  lane: { laneId: string; held: boolean; fix?: true },
+  waiting: ReadonlySet<string> | undefined,
+) => lane.held && (waiting ? waiting.has(lane.laneId) : !lane.fix);
+
 /** Count Lanes in the check phase and passed Lanes separately. A recorded run can check several Lanes together.
- * `held` counts only holds that wait on a person; a Lane held on its own next step (`fix`) is agent work, as on the
- * project list and the top bar's F (Issue f5c4d136). */
-export function lineStopCounts(feed: LineFeed | undefined, stop: (typeof lineStops)[number]) {
+ * `held` counts only holds that wait on a person (`waitsOnYou`); a Lane held on its own next step is agent work, as on
+ * the project list and the top bar's F (Issue f5c4d136). */
+export function lineStopCounts(
+  feed: LineFeed | undefined,
+  stop: (typeof lineStops)[number],
+  waiting?: ReadonlySet<string>,
+) {
   let total = 0;
   let held = 0;
   let passed = 0;
@@ -72,7 +84,7 @@ export function lineStopCounts(feed: LineFeed | undefined, stop: (typeof lineSto
   for (const lane of feed?.lanes ?? []) {
     if (!stop.of.includes(lane.stage)) continue;
     total++;
-    if (lane.held && !lane.fix) held++;
+    if (waitsOnYou(lane, waiting)) held++;
     if (lane.stage === 'ready') passed++;
     else if (lane.stage !== 'checking' || !lane.held) count++;
   }
@@ -87,11 +99,14 @@ export function Line({
   handle,
   project,
   phone = false,
+  waiting,
 }: {
   feed: LineFeed | undefined;
   handle: string;
   project: string;
   phone?: boolean;
+  /** The Lanes that wait on the reader (needs/count.ts `waitingLanes`), when Needs me's read has them all. */
+  waiting?: ReadonlySet<string> | undefined;
 }) {
   const flowHref = hrefFor({ frame: 'project', handle, project, place: 'needs', section: '', rest: '' });
   const plus = feed?.more ? '+' : '';
@@ -104,14 +119,14 @@ export function Line({
       aria-busy={feed ? undefined : true}
     >
       {lineStops.map(stop => {
-        const { total, count, held, passed } = lineStopCounts(feed, stop);
+        const { total, count, held, passed } = lineStopCounts(feed, stop, waiting);
         const shown = phone ? stop.short : stop.label;
         // The name starts with what the stop shows ("Editing 1"), so speech and voice control match the screen.
         const amount = `${count}${plus} ${units(count)}`;
         const fullStop = shown !== stop.label ? `, ${stop.label.toLowerCase()}` : '';
-        const waiting = `${passed}${plus} ${units(passed)} passed, ${waitingToLand}`;
+        const passedWords = `${passed}${plus} ${units(passed)} passed, ${waitingToLand}`;
         const words = feed
-          ? `${shown} ${amount}${passed ? `, ${waiting}` : ''}${held ? `, ${held}${plus} held` : ''}${scope}${fullStop}`
+          ? `${shown} ${amount}${passed ? `, ${passedWords}` : ''}${held ? `, ${held}${plus} held` : ''}${scope}${fullStop}`
           : `${shown}, not loaded yet`;
         const label = (
           <span className="lbl" aria-hidden="true">
@@ -141,7 +156,7 @@ export function Line({
                 <span className="line-checking">
                   {label} {number}
                 </span>{' '}
-                <span className="line-passed" aria-hidden="true" title={waiting}>
+                <span className="line-passed" aria-hidden="true" title={passedWords}>
                   {passed}
                   {plus}
                   <span className="line-unit"> {units(passed)}</span> passed

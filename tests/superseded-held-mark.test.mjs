@@ -252,6 +252,27 @@ test('Needs you counts only holds that wait on a person: review on the project l
   assert.equal(marks(failed)[0].fix, undefined);
 });
 
+test('9b9057a9: a failed end that recorded no cause still names its reason on Needs me, never "not reported"', async t => {
+  const f = await finishFixture(t);
+  const submission = await f.enqueue(f.request());
+  // An older or other write path: the error code is there, the observation's `cause` is not.
+  await holdWith(f, submission, before => ({
+    phase: 'terminal-failed',
+    observation: { ...before.observation, state: 'terminal-failed', cause: null, pendingReason: null },
+    error: { code: 'CHECK_FAILED', message: 'Check failed.' },
+  }));
+  const [row] = (await needsRead(f)).held;
+  assert.equal(row.why, 'check-failed');
+  // A hold whose landing is gone says exactly that: unknown, which every screen words with its next step.
+  await run(f, 'landingGone', async ctx => {
+    const owner = [...f.tables.projectFinishReadRows.values()].find(
+      entry => entry.kind === 'projectLiveLineOwner' && entry.sourceId === f.lane.laneId,
+    );
+    await ctx.db.patch(owner._id, { submissionId: undefined });
+  });
+  assert.equal((await needsRead(f)).held[0].why, 'unknown');
+});
+
 test('the top bar line counts only person holds as held: a failed check reads as agent work, review as held', async t => {
   const stop = lineStops.find(entry => entry.stage === 'saved');
   const feed = lanes => ({ lanes, more: 0, moreIsLowerBound: false, main: null });
