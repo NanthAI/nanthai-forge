@@ -1151,4 +1151,31 @@ test('only the owner switches the plan to members-only and back, and the public 
   await discovery.setSettings._handler(s.ctx, { projectId: 'project', planVisibility: 'public' });
   assert.equal(s.tables.hostedProjects.get('project').planVisibility, undefined);
   assert.equal((await page()).plan.shown, true, 'reversible');
+  // Item 65b6d701: each real change is one policy-history row with who, when and old/new; repeats record nothing.
+  await discovery.setSettings._handler(s.ctx, { projectId: 'project', planVisibility: 'public' });
+  const changes = [...s.tables.projectPolicyChanges.values()].sort((a, b) => a.at.localeCompare(b.at));
+  assert.deepEqual(
+    changes.map(row => [row.actor, row.planChange, row.rule]),
+    [
+      ['owner', { from: 'public', to: 'members' }, 'owner-person'],
+      ['owner', { from: 'members', to: 'public' }, 'owner-person'],
+    ],
+    'plan visibility changes are recorded in the policy history',
+  );
+  assert.deepEqual(changes[0].previous, changes[0].policy, 'the policy itself is unchanged');
+  // A retry of a change whose reply was lost reconciles: it is not applied again over a later change by another session.
+  const op = { projectId: 'project', planVisibility: 'members', operationId: 'op-1' };
+  await discovery.setSettings._handler(s.ctx, op);
+  await discovery.setSettings._handler(s.ctx, { projectId: 'project', planVisibility: 'public' });
+  assert.equal(
+    (await discovery.setSettings._handler(s.ctx, op)).planVisibility,
+    'public',
+    'the retry reports the project as it is now',
+  );
+  assert.equal(s.tables.hostedProjects.get('project').planVisibility, undefined);
+  assert.equal(s.tables.projectPolicyChanges.size, 4, 'the retry recorded nothing');
+  await assert.rejects(
+    discovery.setSettings._handler(s.ctx, { ...op, planVisibility: 'public' }),
+    error => JSON.parse(error.message).code === 'WORK_OPERATION_CHANGED',
+  );
 });

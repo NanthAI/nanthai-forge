@@ -172,6 +172,14 @@ export const autonomyTables = {
     policy: autonomyPolicy,
     /** Queued landings this edit invalidated, kept so a replay returns the same reply. */
     ...policyImpactFields,
+    /** Issue 65b6d701: a plan-visibility change is its own kind of row. `previous` and `policy` are then the same
+     * unchanged policy (readers of the latest policy stay correct); this holds the old and new plan value. */
+    planChange: v.optional(
+      v.object({
+        from: v.union(v.literal('public'), v.literal('members')),
+        to: v.union(v.literal('public'), v.literal('members')),
+      }),
+    ),
     /** Issue 470ef29b: who could write it (SettingRule in convex/projectSettingApprovals.ts). */
     rule: v.optional(
       v.union(

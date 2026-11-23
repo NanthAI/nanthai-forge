@@ -50,7 +50,7 @@ export function ProjectSettingsView({
   /** Owner person only: the server refuses anyone else. Going public carries the typed name. */
   setVisibility: (change: VisibilityChange) => Promise<void>;
   /** Owner person only: the server refuses anyone else. One reversible write; repeating it changes nothing. */
-  setPlanVisibility: (plan: ProjectFacts['planVisibility']) => Promise<void>;
+  setPlanVisibility: (plan: ProjectFacts['planVisibility'], operationId: string) => Promise<void>;
   /** Further regions of the page (backups, transfer, imports), after the lifecycle. */
   extra?: ReactNode;
 }) {
@@ -178,16 +178,21 @@ function PlanSwitch({
   set,
 }: {
   facts: ProjectFacts;
-  set: (plan: ProjectFacts['planVisibility']) => Promise<void>;
+  set: (plan: ProjectFacts['planVisibility'], operationId: string) => Promise<void>;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const members = facts.planVisibility === 'members';
+  // One operation id per change, kept until it succeeds, so a retry after a lost reply reconciles.
+  const attempt = useRef<{ plan: ProjectFacts['planVisibility']; id: string } | null>(null);
   const change = async () => {
     setPending(true);
     setError('');
     try {
-      await set(members ? 'public' : 'members');
+      const plan = members ? 'public' : 'members';
+      attempt.current = attempt.current?.plan === plan ? attempt.current : { plan, id: crypto.randomUUID() };
+      await set(plan, attempt.current.id);
+      attempt.current = null;
     } catch (failure) {
       setError(hostedError(failure));
     } finally {

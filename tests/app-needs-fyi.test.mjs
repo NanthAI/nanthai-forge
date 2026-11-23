@@ -143,6 +143,27 @@ test('never cleared: the window is today, and the figures say "or more" past the
   );
 });
 
+test('a plan-visibility change shows who, what and old to new in the settings rows (Item 65b6d701)', () => {
+  const view = fyiView(
+    fyiRead({
+      settings: [
+        {
+          id: 'p1',
+          at: minutesAgo(5),
+          actor: 'sample-one',
+          areas: ['planVisibility'],
+          rule: 'owner-person',
+          plan: { from: 'public', to: 'members' },
+        },
+      ],
+    }),
+    [],
+    NOW,
+  );
+  assert.equal(view.rows[0].title, 'Settings changed: plan visibility');
+  assert.equal(view.rows[0].fact, 'public plan → members-only plan · by the owner');
+});
+
 test('an email invitation never shows its address; a settings change names its areas', () => {
   const view = fyiView(
     fyiRead({

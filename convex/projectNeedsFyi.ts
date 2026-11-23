@@ -126,9 +126,11 @@ export async function messagesTo(
 function changedAreas(row: Doc<'projectPolicyChanges'>) {
   const before = row.previous as Record<string, unknown>;
   const after = row.policy as Record<string, unknown>;
-  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+  const areas = [...new Set([...Object.keys(before), ...Object.keys(after)])]
     .filter(key => JSON.stringify(before[key]) !== JSON.stringify(after[key]))
     .sort();
+  // Item 65b6d701: a plan-visibility change leaves the policy as it was; it is its own area.
+  return row.planChange ? [...areas, 'planVisibility'] : areas;
 }
 
 export const read = query({
@@ -238,7 +240,16 @@ export const read = query({
       const settings = policies.flatMap(row => {
         const areas = changedAreas(row);
         return areas.length
-          ? [{ id: row.operationId, at: Date.parse(row.at), actor: row.actor, areas, rule: row.rule ?? null }]
+          ? [
+              {
+                id: row.operationId,
+                at: Date.parse(row.at),
+                actor: row.actor,
+                areas,
+                rule: row.rule ?? null,
+                ...(row.planChange ? { plan: row.planChange } : {}),
+              },
+            ]
           : [];
       });
       const access = invites.map(row => ({

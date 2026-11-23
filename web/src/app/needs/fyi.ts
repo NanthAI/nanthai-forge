@@ -30,7 +30,15 @@ export type FyiRead = {
   landingsMore: boolean;
   broke: { sequence: number; at: number; head: string; culprit: string | null; drill: boolean }[];
   mainCheckedAt?: number;
-  settings: { id: string; at: number; actor: string; areas: string[]; rule: string | null }[];
+  settings: {
+    id: string;
+    at: number;
+    actor: string;
+    areas: string[];
+    rule: string | null;
+    /** A plan-visibility change: the old and new value. */
+    plan?: { from: 'public' | 'members'; to: 'public' | 'members' };
+  }[];
   access: {
     id: string;
     at: number;
@@ -99,6 +107,7 @@ const AREAS: Record<string, string> = {
   ownerRootUpdates: 'owner updates',
   accessIdentities: 'access identities',
   checkLogs: 'check logs',
+  planVisibility: 'plan visibility',
 };
 const areaWords = (areas: readonly string[]) => {
   const words = areas.map(area => AREAS[area] ?? area);
@@ -106,6 +115,7 @@ const areaWords = (areas: readonly string[]) => {
     ? `${words.slice(0, 2).join(', ')} and ${words.length - 2} more`
     : words.join(' and ');
 };
+const PLAN_WORDS = { public: 'public plan', members: 'members-only plan' } as const;
 const RULES: Record<string, string> = {
   'owner-person': 'by the owner',
   'owner-approved': 'asked for, then approved by the owner',
@@ -201,7 +211,12 @@ function readRows(read: FyiRead): FyiRow[] {
       tag: 'Setting',
       title: `Settings changed: ${areaWords(change.areas)}`,
       who: whoOf(change.actor, null),
-      fact: change.rule ? (RULES[change.rule] ?? change.rule) : '',
+      fact: [
+        change.plan ? `${PLAN_WORDS[change.plan.from]} → ${PLAN_WORDS[change.plan.to]}` : '',
+        change.rule ? (RULES[change.rule] ?? change.rule) : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
       links: [{ label: 'Open Settings', to: { place: 'settings' } }],
     });
   for (const invite of read.access)

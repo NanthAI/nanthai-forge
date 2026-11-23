@@ -86,8 +86,8 @@ export default function ProjectSettings(props: PlaceProps) {
         }
         read();
       }}
-      setPlanVisibility={async planVisibility => {
-        await client.mutation(api.publicDiscovery.setSettings, { projectId, planVisibility });
+      setPlanVisibility={async (planVisibility, operationId) => {
+        await client.mutation(api.publicDiscovery.setSettings, { projectId, planVisibility, operationId });
         read();
       }}
       extra={

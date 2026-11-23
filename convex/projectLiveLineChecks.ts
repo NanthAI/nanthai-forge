@@ -30,7 +30,9 @@ async function freeCheckSlots(db: QueryCtx['db'], project: Doc<'hostedProjects'>
     .withIndex('by_project', q => q.eq('projectId', project._id))
     .order('desc')
     .first();
-  const policy = latest?.policy ?? (project.autonomyPolicy ? effectivePolicy(project) : undefined);
+  // A plan-visibility row (Item 65b6d701) carries the default policy on a project that never stored one; it is not a receipt.
+  const receipt = latest?.planChange && !project.autonomyPolicy ? undefined : latest?.policy;
+  const policy = receipt ?? (project.autonomyPolicy ? effectivePolicy(project) : undefined);
   if (!policy && !checking) return undefined;
   const queue = await db
     .query('projectHostedLandingQueues')

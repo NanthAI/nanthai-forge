@@ -236,6 +236,28 @@ test('settings changes are the owner’s; readers never see them', async () => {
   assert.deepEqual((await f.read('reader')).settings, []);
 });
 
+test('a plan-visibility row shows as its own area with old and new, not as a policy edit (Item 65b6d701)', async () => {
+  const f = fixture();
+  const policy = policyPreset('trusted');
+  f.s.insert('projectPolicyChanges', {
+    projectId: f.projectId,
+    operationId: randomUUID(),
+    actor: 'owner',
+    request: 'r',
+    at: new Date(DAY).toISOString(),
+    previous: policy,
+    policy,
+    planChange: { from: 'public', to: 'members' },
+    rule: 'owner-person',
+  });
+  const owner = await f.read();
+  assert.deepEqual(
+    owner.settings.map(row => [row.areas, row.plan]),
+    [[['planVisibility'], { from: 'public', to: 'members' }]],
+  );
+  assert.deepEqual((await f.read('reader')).settings, []);
+});
+
 test('Dismiss and Clear all persist per account, write only on click, and Undo puts the list back', async () => {
   const f = fixture();
   for (let i = 1; i <= 3; i++) f.accept(i, `L${i}`);

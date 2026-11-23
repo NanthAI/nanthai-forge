@@ -11,6 +11,7 @@ import { requireOwnerPerson } from './ownerPerson';
 import { accountFor } from './urlIdentity';
 import { report } from './errors';
 import { invariant } from '../src/errors';
+import { effectivePolicy } from '../src/autonomy-policy';
 import { isPublicProject } from './publicVisibility';
 import { ensurePublicRow, publicRow } from './publicListing';
 import { entry, listedProjects } from './publicRead';
@@ -195,9 +196,11 @@ export const setSettings = mutation({
     projectId: v.id('hostedProjects'),
     laneTitles: v.optional(v.boolean()),
     planVisibility: v.optional(planVisibility),
+    /** One id per attempt: a retry of a plan change whose reply was lost reconciles instead of applying it again. */
+    operationId: v.optional(v.string()),
   },
   returns: settingsResult,
-  handler: async (ctx, { projectId, laneTitles: requested, planVisibility: plan }) => {
+  handler: async (ctx, { projectId, laneTitles: requested, planVisibility: plan, operationId }) => {
     try {
       const user = await requireOwnerPerson(ctx, 'change what visitors see');
       const project = await ownedProject(ctx, projectId, user.subject);
@@ -205,8 +208,42 @@ export const setSettings = mutation({
       const laneTitles = requested ?? row.laneTitles === true;
       if (row.laneTitles !== laneTitles) await ctx.db.patch(row._id, { laneTitles });
       const current = planOf(project);
-      if (plan && plan !== current)
+      const request = JSON.stringify({ planVisibility: plan });
+      const original =
+        plan && operationId
+          ? await ctx.db
+              .query('projectPolicyChanges')
+              .withIndex('by_project_and_operation', q =>
+                q.eq('projectId', projectId).eq('operationId', operationId),
+              )
+              .unique()
+          : null;
+      if (original) {
+        invariant(
+          original.actor === user.subject && original.request === request,
+          'WORK_OPERATION_CHANGED',
+          'Retry the plan change with its original values.',
+        );
+        // Already applied: report the project as it is now; a later change by someone else is not undone.
+        return { laneTitles, planVisibility: current, stars: row.stars };
+      }
+      if (plan && plan !== current) {
         await ctx.db.patch(project._id, { planVisibility: plan === 'members' ? 'members' : undefined });
+        // Item 65b6d701: recorded in the policy history as its own kind of change, in the same transaction.
+        // Repeating the same value changes nothing and records nothing, so a retry never doubles the row.
+        const policy = effectivePolicy(project);
+        await ctx.db.insert('projectPolicyChanges', {
+          projectId,
+          operationId: operationId ?? crypto.randomUUID(),
+          actor: user.subject,
+          request,
+          at: new Date().toISOString(),
+          previous: policy,
+          policy,
+          planChange: { from: current, to: plan },
+          rule: 'owner-person',
+        });
+      }
       return { laneTitles, planVisibility: plan ?? current, stars: row.stars };
     } catch (error) {
       return report(error);
