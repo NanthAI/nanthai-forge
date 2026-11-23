@@ -173,10 +173,10 @@ export async function nextTrainLandingRow(
       }
       // A bounded speculative slot opens once the tail has fixed its source and
       // receipt. All successors compose on that tail, never on competing main.
-      if (
-        !outside.some(row => row.priority === 'urgent') &&
-        (await pipelinePredecessor(ctx, queue, pending as NonNullable<(typeof pending)[number]>[]))
-      ) {
+      const train = pending as NonNullable<(typeof pending)[number]>[];
+      let full = false;
+      const batchableHeads = async () => {
+        const heads = [];
         for (const priority of ['urgent', 'normal', undefined] as const) {
           const [row] = await ctx.db
             .query('projectHostedLandingRequests')
@@ -190,7 +190,24 @@ export async function nextTrainLandingRow(
             )
             .order('asc')
             .take(1);
-          if (row) outside.push(row);
+          if (row) heads.push(row);
+        }
+        return heads;
+      };
+      if (!outside.some(row => row.priority === 'urgent')) {
+        if (await pipelinePredecessor(ctx, queue, train, undefined, { onCapacity: value => (full = value) }))
+          outside.push(...(await batchableHeads()));
+        else if (full) {
+          // Every slot is held by passed groups, and an entry older than the whole train is one
+          // they all wait for in landing order (Item 273650ab shape 2): it is dispatched without a
+          // slot and composes on main. Read only when full.
+          const oldest = Math.min(...train.map(row => row.sequence));
+          const older = (await batchableHeads()).filter(row => row.sequence < oldest);
+          if (
+            older.length &&
+            (await pipelinePredecessor(ctx, queue, train, undefined, { ahead: older[0]!.sequence }))
+          )
+            outside.push(...older);
         }
       }
       const next = orderHostedLandingRows(outside)[0] ?? null;

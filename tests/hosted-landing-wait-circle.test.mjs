@@ -32,3 +32,16 @@ test('Item 273650ab: four CI changes at long check lengths never wait on each ot
   // Entry 4 was composed on 9's predicted head: it lands with or after 9, and 9 goes ahead of 7.
   assert(r.landedAt[3] >= r.landedAt[8] && r.landedAt[8] < r.landedAt[6], JSON.stringify(r.landedAt));
 });
+
+// Shape 2 (friction 917d1dfa): in strict mode six CI changes each stacked as a one-member group on the
+// predicted-head train and passed, parked behind older plain entry 2 (sequence 2), whose own Lane pass
+// was refused when main moved. Entry 2 went back to the queue needing a train slot, but the six
+// passed groups waiting for it filled the pipeline width, so it never started its re-check.
+test('Item 273650ab: an older entry the whole train waits for re-checks with every slot held by passed groups', async t => {
+  const shape = stream(7919, 14, 30, 0.5, 'strict');
+  const r = await drive(t, { ownerApprovalPaths: ['scripts/deploy*'], ...shape });
+  assert.equal(r.landedAt.filter(at => at !== undefined).length, 14, 'every entry lands');
+  assert.equal(r.idle, 0, 'idle costs zero scheduled work');
+  // It checks on main, never stacked behind the groups that wait for it: it lands before them.
+  assert(r.landedAt[1] < Math.min(...r.landedAt.slice(2, 7)), JSON.stringify(r.landedAt));
+});

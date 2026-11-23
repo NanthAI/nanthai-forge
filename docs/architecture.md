@@ -2127,7 +2127,8 @@ legacy priority means normal. Owner reprioritisation patches one queued submissi
 without a wake or poller. Eligible hosted automatic-accept projects group by
 default (`acceptance.landing: "serial"` opts out). Up to six groups check at once
 (`checks.concurrency` overrides), each on its predecessor's pinned head and final
-receipt. Publication retains exact-source evidence and queue order; a failed or
+receipt. When every train group has passed, an entry older than all of them checks on
+main without a free slot, because the whole train waits for it (Item 273650ab). Publication retains exact-source evidence and queue order; a failed or
 changed predecessor invalidates only its dependent stack. An owner-held submission leaves
 the predicted chain immediately and releases its reservation. Its followers recompose on
 current main; a full passed check carries only when every file path, blob and mode

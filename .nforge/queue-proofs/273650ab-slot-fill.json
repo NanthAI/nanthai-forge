@@ -1,0 +1,242 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingPipeline.ts": "16301562179bfc714efba5b3f96b8273ed2799fbf99d42a67bba8e6631478a2e",
+    "convex/projectHostedLandingWake.ts": "e1e9adfa0912066f584c80b15c0f87edd4b42488137990c0218c01ff4567abe4"
+  },
+  "replay": {
+    "incident": "273650ab",
+    "test": "Item 273650ab: an older entry the whole train waits for re-checks with every slot held by passed groups",
+    "receipt": "81c90aed-6dc5-4c42-8dd9-1cd00443dbd3"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "claude-code-session:080986ed-65b6-4b52-83b8-a3550befa054",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "review-api:bddba80a-4913-490e-b51f-705188741f0e",
+    "receipt": "81c90aed-6dc5-4c42-8dd9-1cd00443dbd3"
+  },
+  "exercised": {
+    "convex/projectHostedLandingPipeline.ts": {
+      "executed": [
+        "invalidatePipeline",
+        "liveAdmission",
+        "livePipelineRow",
+        "pipelinePredecessor",
+        "predecessorStatus"
+      ],
+      "digest": "b3484c2fa603313616c19b4e5463315b1ef0ea1c9a9bfa85ccec01d5857bc26d",
+      "units": [
+        [
+          "forkLandingAttempt",
+          "d36ff5ed92e3983e8262cc9f8cf6ef7f39267b830a00aa37285281e373697a42"
+        ],
+        [
+          "hostedBatching",
+          "d2a2481d352356a9e0c7b0eccfcc5abf82d5678d75e12763562272f050d93f97"
+        ],
+        [
+          "hostedPipelineWidth",
+          "cfe73f9834365cd3ae96b7c8c7869962c280010cc0c43cbb3ecd038239e877fd"
+        ],
+        [
+          "insertLandingAttempt",
+          "e89f5ed577ce7edc9ff353d7289c40f8f39db6c79a521514c81bc3f19d76d5a3"
+        ],
+        [
+          "invalidatePipeline",
+          "1b37bf94b0804c09dca40324fa09dfb0151d00af3a997881faf39b1ef7d3d965"
+        ],
+        [
+          "landingQueue",
+          "133b8765bccbb695ac3fb29795469a9976b57700cf9bc517906aafaf600427f8"
+        ],
+        [
+          "landingRow",
+          "9b2f0188e0b4cde94aab9a444ecb94a974871df87818b7d98abd5a37b26204aa"
+        ],
+        [
+          "landingSuspect",
+          "3b8b38a5770be4c9d2358c0f18312abba43349b6f425443865a813ec63847419"
+        ],
+        [
+          "liveAdmission",
+          "802b84af0909aaab4a69795b924bc7ae23ec83ecd7bf0c36609890c37a93364b"
+        ],
+        [
+          "livePipelineRow",
+          "e86f08c664a969cef6d6fe37929398b20c801f1fe74d9568fdc68ef66d0b5801"
+        ],
+        [
+          "loadBatch",
+          "a4dbf321198ba21dfcc7d169b8c8c45b2166c6dd1fa7fce27231f4887a27fbfa"
+        ],
+        [
+          "loadLanding",
+          "ebcbbc4824870ad74803810ad5144fbbc671303f4a51f289356b20578d07ace2"
+        ],
+        [
+          "loadLandingAttempt",
+          "0e7a8090a6e014f352bec9ef0e1fccd9dbcbb8bbb583cf5e0aa3c3058790a9f7"
+        ],
+        [
+          "pipelineFull",
+          "53df6dd2d4287a5f7aae280266800530eb8347832dd62ca8a9321ced7bf7ea3e"
+        ],
+        [
+          "pipelinePredecessor",
+          "53ef281823b2804545393a80e93c8631be5088746fd967848fa879a34dbe1d8a"
+        ],
+        [
+          "predecessorStatus",
+          "2679e7781d86e4ff459796d8dc06ddc03a892ad2812946644b435749ba12db1e"
+        ],
+        [
+          "retirePipeline",
+          "4b6ce90cc6c99f30c7931305dfda3879e78e3ccab8ae963956c5bb024aa0ec17"
+        ],
+        [
+          "storedLandingStateSchema",
+          "84f2e6ac995c11ec270f1529329561cce7a49b20ebc8bf42dd09977cfa51b6a4"
+        ],
+        [
+          "writeLanding",
+          "66d679cf148e8bffa47ba33cf08bb2006907e465b1d2a27dae0b275f4082152c"
+        ]
+      ]
+    },
+    "convex/projectHostedLandingWake.ts": {
+      "executed": [
+        "nextTrainLandingRow",
+        "releaseLandingQueue",
+        "retainLandingTrain",
+        "wakeLandingCheck",
+        "wakeLandingCheckPage"
+      ],
+      "digest": "7c338abb82341491dd2ee3604ffc7f3760ebcd785e865cfc0d56f45a61ff771f",
+      "units": [
+        [
+          "HOSTED_TRAIN_HOLD_MS",
+          "8317c4661d1d8c3e31dfca1b44b6fc791d813d4de67319fe92630c76eedd8a94"
+        ],
+        [
+          "cancelPendingTask",
+          "84ed3533530e281a188a8b8c0b152ef3c5f8d15ad1bce7dbcf4834f23072f2a3"
+        ],
+        [
+          "checkWakeRow",
+          "aed8cc21dc2bbb6eccdc1daaceb7a1a4b98c617dad1d66503095baf4090a4f08"
+        ],
+        [
+          "ensureLandingQueue",
+          "906d1c67cb9b072d5db08bd2cd39c465ad4616708e79a054ee92002e84eacb60"
+        ],
+        [
+          "hostedCheckTerminal",
+          "2060b9b4bd7b5b414d657f5b485838bc825358cbae9e2e2fb33bde5704c738e7"
+        ],
+        [
+          "invalidatePipeline",
+          "ebcbd043e2a1d4a56dd457cee0c67d4edf1adff8dbfe7ea57d5254669a501c8b"
+        ],
+        [
+          "landingQueue",
+          "9026c1ea4274dd4b973e1305cfedd1d6ceb94a234de2faf476c0bf842d8d91b7"
+        ],
+        [
+          "landingRow",
+          "9b2f0188e0b4cde94aab9a444ecb94a974871df87818b7d98abd5a37b26204aa"
+        ],
+        [
+          "loadBatch",
+          "a4dbf321198ba21dfcc7d169b8c8c45b2166c6dd1fa7fce27231f4887a27fbfa"
+        ],
+        [
+          "loadHostedCheck",
+          "7d7c2fad5d560d74b72df0c0dfd719fe39b88b74c22fbcad6581a2a765e1c1fd"
+        ],
+        [
+          "nextLandingRow",
+          "353247e790ff3836c3c7abda3a450a0c129bc530164e7f0134c692e04c2597b2"
+        ],
+        [
+          "nextReadyLandingRow",
+          "d8fc55c689456f451a0078d52d648903885ff8c9aa51c4c6c3e70838773837de"
+        ],
+        [
+          "nextTrainLandingRow",
+          "73fde25fc08167bfc08ed7f361125169993fc16e40c7212d29ecba7d78ddb55d"
+        ],
+        [
+          "orderHostedLandingRows",
+          "4726c78468757970f5746d94d89dcdbd2ac969a233a8533d95160d70392330b5"
+        ],
+        [
+          "pipelinePredecessor",
+          "04a6455174f6632eb43dda98b6f3150a128a55be3a440bd8a6416ec46540aa14"
+        ],
+        [
+          "progressWakeDue",
+          "678673dcb54f94c09f4b2f0fe3de5de319bc4641336e65f56cdce52730f28546"
+        ],
+        [
+          "releaseLandingQueue",
+          "df5bc44c971f66cf4b4cb9096e2dd063d1690099e6e6a24a0d06b82b9a48286a"
+        ],
+        [
+          "rememberGuardCheck",
+          "6029c842cc3d3444f7834f6d1da5dd6da929a09a3557e2be960d95bdc8797458"
+        ],
+        [
+          "repairComposingBatch",
+          "fbabf6347bfa7bedcac11f9fcd0be79594ab61f3754f3a7de97ae11a661b2169"
+        ],
+        [
+          "retainCheckProgress",
+          "102082c8a3ecdf4cade54d5cc69c0a70a0ac67bd67d59491e21fe281e4b26c92"
+        ],
+        [
+          "retainLandingTrain",
+          "9b4f16fe0eee15c006a9c2f78c8dbab45ecd01240d48d2ddf5feea0af3ad3cf0"
+        ],
+        [
+          "scheduleCheckWake",
+          "e53aec6d78f8b2808c1c9d567e1df9c36acfce3ac1a2f17ca88ad085173d63a0"
+        ],
+        [
+          "scheduleLandingWake",
+          "984864374f8e58635a5f583002cb4afc0d6a112f6ed7202617676cc4b338dbdd"
+        ],
+        [
+          "settleLandingAdmission",
+          "a9813e1153bc87933796ec5dd73cc7e0a2498d921b69cf35a6776779477d7f86"
+        ],
+        [
+          "storedLandingStateSchema",
+          "84f2e6ac995c11ec270f1529329561cce7a49b20ebc8bf42dd09977cfa51b6a4"
+        ],
+        [
+          "wakeLandingCheck",
+          "bccbac59dd4aa29e78f2afb5225a68bb6bba05e43b630806038cfae8b480b44c"
+        ],
+        [
+          "wakeLandingCheckPage",
+          "d6a61c55a039f2188ad4df26b2ae4307d2fbfc0270647beff4d15e2727c6a86f"
+        ],
+        [
+          "wakeLandingQueue",
+          "925a304e72696ab3c42a44b00695b49c7bbf96a2352360c7ac1e5e7446090876"
+        ],
+        [
+          "withQueueStatusBatch",
+          "089e70fe6afd4ab3e77ce117a0b395dfc253f9683f0bcd81bd58bb5335e3585e"
+        ],
+        [
+          "writeLanding",
+          "66d679cf148e8bffa47ba33cf08bb2006907e465b1d2a27dae0b275f4082152c"
+        ]
+      ]
+    }
+  }
+}

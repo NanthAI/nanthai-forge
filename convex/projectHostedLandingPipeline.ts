@@ -40,6 +40,12 @@ export async function pipelinePredecessor(
     excludeIds?: string[];
     pins?: { submissionId: string; head: string; receiptId: string }[];
     requireSlot?: boolean;
+    /** Sequence of a runnable entry older than every live train entry. When every train group has
+     * passed (none holds a runner), they all wait for it in landing order, so it is dispatched
+     * without a free slot (Item 273650ab shape 2): requiring one left nothing able to move until the
+     * stall alarm. Dispatch only: batch formation still finds no slot, so it composes on main and
+     * never publishes after the groups that wait for it. */
+    ahead?: number;
     onCapacity?: (full: boolean) => void;
     onBlocked?: (row: LandingRow) => void;
   } = {},
@@ -82,9 +88,11 @@ export async function pipelinePredecessor(
   const attempt = await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: tail.attemptId });
   const groups = new Set(states.map(state => state.batchId ?? state.id));
   options.onCapacity?.(groups.size >= hostedPipelineWidth(attempt.policy));
+  const ahead = options.ahead;
+  const heads = ahead !== undefined && live.every(row => row.sequence > ahead && row.phase === 'ready');
   if (
     !hostedBatching(attempt.policy) ||
-    (options.requireSlot !== false && groups.size >= hostedPipelineWidth(attempt.policy)) ||
+    (options.requireSlot !== false && !heads && groups.size >= hostedPipelineWidth(attempt.policy)) ||
     (!attempt.check && !liveAdmission(tail)) ||
     !attempt.candidate.head
   )
