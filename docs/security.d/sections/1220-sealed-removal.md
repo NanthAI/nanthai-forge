@@ -51,7 +51,22 @@ There are three routes to that one write:
   is marked. `nforge logout` on the device itself marks nothing: the person holds
   the device and its keys stay for its next sign-in. The set's last unmarked owner
   device is never marked, because no device could act on it. "Sign out
-  everywhere" places no markers; remove a lost device by itself. A device that
+  everywhere" with devices (Account settings, by passkey or a fresh GitHub check)
+  marks each sealed device of the account the same way, in every project where
+  one of its swept sign-ins is linked, including sign-ins already ended by
+  `nforge logout`; a sign-in issued after it started is kept. It is issued from a
+  browser, which holds no sealed device, so no device is spared as the issuer.
+  The account's owner devices in a set are marked only while an owner device of
+  another account stays unmarked; its other entries, while any owner device
+  does. When the account holds every owner device of a set, none of them is
+  marked: Forge cannot tell the lost laptop from the device at hand, and keeping
+  the wrong one would leave no device able to act. The checkbox says so on hover.
+  Remove the lost device by itself: Remove in Account settings (which marks it,
+  since the device at hand stays unmarked), or `nforge secret unshare DEVICE_ID`
+  on the device at hand; either way the device at hand signs in again for the
+  owner write that removes and re-keys. Marking runs in scheduled steps, and
+  the result is the same in any order. An operator
+  suspension signs devices out and marks none: it is a reversible switch. A device that
   was marked and signs in again reads `SECRETS_ROSTER_REFUSED` saying Forge
   marked it, until an owner device removes it. After that it is shared again:
   automatically under Automatic when its account has no other device in the set,
@@ -104,7 +119,11 @@ adds one empty indexed read per set kind when it has no sealed set; with sets, i
 reads no grant or member and patches each set it marks. Ending a device sign-in
 that never wrote or joined a sealed set reads nothing more; one with links reads
 each linked project's set kinds (at most three each) and patches each set it
-marks. A sealed write or join patches its sign-in once, the first time per project
+marks. "Sign out everywhere" adds no read to its sweep pages. It covers every
+swept sign-in with links, including ones signed out earlier, and marks each
+(project, device) pair of a page once, in steps of up to 100 pairs (at most one
+step per swept sign-in); each step reads the set kinds of four projects at a
+time and patches each set it marks. A sealed write or join patches its sign-in once, the first time per project
 and device, and reads nothing more. A read tells an unlinked sign-in so from its
 credential row, already read; that device then makes one link call per project,
 once (one set read and one patch). A removal write is one read and one write, at

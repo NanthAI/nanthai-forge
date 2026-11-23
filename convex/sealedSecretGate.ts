@@ -164,21 +164,35 @@ export function markersForRemovedAccount(set: StoredSealedSet, ...accountIds: Ui
 /** Gate B2 M3: one device's sign-in ended (signed out or removed elsewhere). Marks the entries of `deviceIds` that
  * belong to `accountId` (the sign-in's own account, so a link a client claimed can never mark another person) and
  * drops their waiting join requests. The set's last unmarked owner device is never marked: no device could act on it,
- * and its own reads would refuse it for good. Null when nothing changes. */
-export function markersForEndedDevice(set: StoredSealedSet, accountId: Uint8Array, deviceIds: Uint8Array[]) {
+ * and its own reads would refuse it for good. Null when nothing changes.
+ *
+ * `everywhere` (the account's "Sign out everywhere", M3 follow-up) ends every device of the account at once, one
+ * sign-in per step. Its owner devices are marked only while an owner device of another account stays unmarked: when
+ * the account holds every owner device, keeping one by step order could keep the lost laptop and lock out the device
+ * at hand, so all stay and the person removes the lost one by itself. Its other entries are marked while any owner
+ * device stays unmarked. Both answers are the same in every step order. */
+export function markersForEndedDevice(
+  set: StoredSealedSet,
+  accountId: Uint8Array,
+  deviceIds: Uint8Array[],
+  { everywhere = false }: { everywhere?: boolean } = {},
+) {
   const ended = (id: Uint8Array) => deviceIds.some(device => equalBytes(id, device));
   const roster = (decodeSealedWire(u8(set.payload)) as Payload).roster,
     owners = roster.entries.filter(e => e.entryKind === 1 && e.role === 1),
     before = set.revoked ?? [],
     revoked = [...before];
+  const unmarked = (e: { id: Uint8Array }) => !revoked.some(id => equalBytes(u8(id), e.id));
+  type Entry = (typeof roster.entries)[number];
+  const survivor = (entry: Entry) =>
+    everywhere
+      ? entry.entryKind === 1 && entry.role === 1
+        ? owners.some(o => !equalBytes(o.accountId, accountId) && unmarked(o))
+        : owners.some(unmarked)
+      : // Counting owners already marked, so ending two owner devices one at a time keeps the second.
+        owners.some(o => !ended(o.id) && unmarked(o));
   for (const entry of roster.entries)
-    if (
-      ended(entry.id) &&
-      equalBytes(entry.accountId, accountId) &&
-      // Counting owners already marked, so ending two owner devices one at a time keeps the second.
-      owners.some(o => !ended(o.id) && !revoked.some(id => equalBytes(u8(id), o.id))) &&
-      !revoked.some(id => equalBytes(u8(id), entry.id))
-    )
+    if (ended(entry.id) && equalBytes(entry.accountId, accountId) && survivor(entry) && unmarked(entry))
       revoked.push(Uint8Array.from(entry.id).buffer);
   const waiting = set.joinRequests ?? [],
     joinRequests = waiting.filter(j => {

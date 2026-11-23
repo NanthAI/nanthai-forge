@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getFunctionAddress } from 'convex/server';
+import { getFunctionAddress, getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { fixture as accountFixture, assertion, refused, users, auth } from './auth-links-fixture.mjs';
+/** Gate B2 M3 follow-up: the sealed-device marking steps a "Sign out everywhere" scheduled. */
+const sealedMarkSteps = s =>
+  s.scheduled.filter(e => getFunctionName(e.fn) === 'sealedSecretMarkers:markSignIn').map(e => e.args);
+const SEALED_LINK = [{ projectId: 'fixture-project', deviceId: Uint8Array.of(1, 2, 3).buffer }];
 const sessionsApi = await import(moduleUrl('../convex/authSessions.ts'));
 const passkeyPages = await import(moduleUrl('../convex/components/authPasskey/accountPasskeys.ts'));
 const first = await import(moduleUrl('../convex/authFirstPasskey.ts'));
@@ -427,9 +431,15 @@ test('SI-01: ending other browsers can also end devices, preserves their setting
     deviceCode: 'dv-synthetic',
     deviceApprovedAt: now - 1000,
     settings: { source: 'write', projects: { kind: 'all' } },
+    sealed: SEALED_LINK,
   };
   s.tables.cliCredentials.set('device', device);
   s.tables.cliCredentials.set('foreign', { ...device, _id: 'foreign', owner: 'other' });
+  // Ending other browsers alone ends no device and marks none.
+  await s.call(sessionsApi.startConfirmation, {});
+  await s.call(sessionsApi.revokeOthers, { operationId: 'browsers-only', response: assertion });
+  assert.equal(s.tables.cliCredentials.get('device').revoked, false);
+  assert.deepEqual(sealedMarkSteps(s), []);
   await s.call(sessionsApi.startConfirmation, {});
   await s.call(sessionsApi.revokeOthers, {
     operationId: 'with-devices',
@@ -439,6 +449,8 @@ test('SI-01: ending other browsers can also end devices, preserves their setting
   assert.equal(s.tables.cliCredentials.get('device').revoked, true);
   assert.deepEqual(s.tables.cliCredentials.get('device').settings, device.settings);
   assert.equal(s.tables.cliCredentials.get('foreign').revoked, false);
+  // Gate B2 M3 follow-up: this account's sealed device is marked in its linked project; another account's is not.
+  assert.deepEqual(sealedMarkSteps(s), [{ owner: s.owner, links: SEALED_LINK, everywhere: true }]);
   await assert.rejects(
     s.call(sessionsApi.revokeOthers, { operationId: 'with-devices', response: assertion }),
     refused('WORK_OPERATION_CHANGED'),
@@ -514,6 +526,7 @@ test('SI-01 review: the GitHub end-all-devices route revokes only this accountâ€
     deviceCode: 'dv-synthetic',
     deviceApprovedAt: now - 1000,
     settings: { source: 'write', projects: { kind: 'all' } },
+    sealed: SEALED_LINK,
   };
   s.tables.cliCredentials.set('device', device);
   s.tables.cliCredentials.set('foreign', { ...device, _id: 'foreign', owner: 'other' });
@@ -531,4 +544,6 @@ test('SI-01 review: the GitHub end-all-devices route revokes only this accountâ€
   assert.equal(ended.deviceKey, device.deviceKey);
   assert.deepEqual(ended.settings, device.settings);
   assert.equal(s.tables.cliCredentials.get('foreign').revoked, false);
+  // Gate B2 M3 follow-up: the GitHub route marks this account's sealed devices like the passkey route.
+  assert.deepEqual(sealedMarkSteps(s), [{ owner: s.owner, links: SEALED_LINK, everywhere: true }]);
 });

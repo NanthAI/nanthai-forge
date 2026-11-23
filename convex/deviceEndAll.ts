@@ -3,6 +3,7 @@ import { v } from 'convex/values';
 import { internalMutation, type MutationCtx, type QueryCtx } from './server';
 import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
+import { scheduleAccountMarks } from './sealedSecretMarkers';
 
 /** An account with no users row cannot approve a device sign-in (deviceStore.approve needs the row), so its sweep
  * ends every device it has. */
@@ -28,30 +29,51 @@ export async function accountSignInEpoch(ctx: QueryCtx, owner: string) {
  * moves the account to its next sign-out epoch; a sign-in records the epoch its own transaction read. Pages end every
  * device recorded below that epoch, however it is used meanwhile (renewal keeps the recorded epoch), and keep every
  * sign-in issued after the start: transactions are serialized, so there is no clock tie.
+ *
+ * `markSealed` (the person's "Sign out everywhere", Gate B2 M3 follow-up): every swept sign-in linked to a sealed
+ * device marks that device in its linked projects, signed out earlier or not, so a lost laptop is removed and
+ * re-keyed on the next owner write. A page's links, each (project, device) pair once, mark in scheduled steps
+ * (sealedSecretMarkers.scheduleAccountMarks; own-account entries only; owner devices only while another account's owner
+ * device stays unmarked, see markersForEndedDevice), at most one step per row.
+ * The person issues it from a browser session (authLinkAccount), which holds no sealed device, so no device of the
+ * account is spared as the issuer. An operator suspension leaves it off: a reversible switch removes no device.
  */
 export async function endAccountDevices(
   ctx: MutationCtx,
   owner: string,
   /** The caller's account row when it has one; read here otherwise. */
   account?: Doc<'users'> | null,
+  { markSealed = false }: { markSealed?: boolean } = {},
 ) {
   const row = account === undefined ? await accountRow(ctx, owner) : account;
   const epoch = row ? signInEpoch(row) + 1 : NO_ACCOUNT;
   if (row) await ctx.db.patch(row._id, { deviceSignOutEpoch: epoch });
-  await endPage(ctx, owner, epoch, null);
+  await endPage(ctx, owner, epoch, null, markSealed);
 }
-async function endPage(ctx: MutationCtx, owner: string, epoch: number, cursor: string | null) {
+async function endPage(
+  ctx: MutationCtx,
+  owner: string,
+  epoch: number,
+  cursor: string | null,
+  markSealed: boolean,
+) {
   const page = await ctx.db
     .query('cliCredentials')
     .withIndex('by_owner', q => q.eq('owner', owner))
     .paginate({ cursor, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 64 * 1024 });
-  for (const row of page.page)
-    if (!row.revoked && (row.signOutEpoch ?? 0) < epoch) await ctx.db.patch(row._id, { revoked: true });
+  const links: NonNullable<Doc<'cliCredentials'>['sealed']> = [];
+  for (const row of page.page) {
+    if ((row.signOutEpoch ?? 0) >= epoch) continue;
+    if (!row.revoked) await ctx.db.patch(row._id, { revoked: true });
+    if (markSealed) links.push(...(row.sealed ?? []));
+  }
+  if (links.length) await scheduleAccountMarks(ctx, owner, links);
   if (!page.isDone)
     await ctx.scheduler.runAfter(0, internal.deviceEndAll.next, {
       owner,
       epoch,
       cursor: page.continueCursor,
+      ...(markSealed ? { markSealed: true as const } : {}),
     });
 }
 export const next = internalMutation({
@@ -59,10 +81,11 @@ export const next = internalMutation({
     owner: v.string(),
     epoch: v.number(),
     cursor: v.string(),
+    markSealed: v.optional(v.literal(true)),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
-    await endPage(ctx, input.owner, input.epoch, input.cursor);
+    await endPage(ctx, input.owner, input.epoch, input.cursor, input.markSealed === true);
     return null;
   },
 });

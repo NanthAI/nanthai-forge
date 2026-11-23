@@ -85,7 +85,10 @@ export function YouView({
             Check with GitHub and sign out other sessions
           </Key>
         ) : null}
-        <label className="btn">
+        <label
+          className="btn"
+          title="Sealed secrets: each device is marked for removal. Where all owner devices of a project are yours, none is marked; remove the lost one by itself."
+        >
           <input
             type="checkbox"
             className="ckb"

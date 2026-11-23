@@ -197,8 +197,14 @@ export async function linkSealedDevice(
 /** Gate B2 M3: a sign-in ended (signed out from elsewhere, or removed), so each linked project marks its sealed
  * device: a lost laptop is removed and re-keyed on the next owner write, with its rotate list. The first
  * `DEVICE_MARK_PAGE` projects mark in the ending mutation and the rest in scheduled steps; the sign-in already
- * ended, so the device cannot read a set meanwhile. A sign-in with no link reads nothing. */
-export async function markEndedSignIn(ctx: MutationCtx, owner: string, links: readonly SealedLink[]) {
+ * ended, so the device cannot read a set meanwhile. A sign-in with no link reads nothing. `everywhere`: this sign-in
+ * is one of the account's "Sign out everywhere" (convex/deviceEndAll.ts, markersForEndedDevice). */
+export async function markEndedSignIn(
+  ctx: MutationCtx,
+  owner: string,
+  links: readonly SealedLink[],
+  everywhere = false,
+) {
   const projects = [...new Set(links.map(l => l.projectId))];
   if (!projects.length) return;
   const page = projects.slice(0, DEVICE_MARK_PAGE),
@@ -208,21 +214,45 @@ export async function markEndedSignIn(ctx: MutationCtx, owner: string, links: re
     if (!project) continue;
     const deviceIds = links.filter(l => l.projectId === projectId).map(l => new Uint8Array(l.deviceId));
     await mark(ctx, await activeSets(ctx, project), [], set =>
-      markersForEndedDevice(set, accountId, deviceIds),
+      markersForEndedDevice(set, accountId, deviceIds, { everywhere }),
     );
   }
   const rest = links.filter(l => !page.includes(l.projectId));
-  if (rest.length)
-    await ctx.scheduler.runAfter(0, internal.sealedSecretMarkers.markSignIn, { owner, links: rest });
+  if (rest.length) await scheduleSignInMarks(ctx, owner, rest, everywhere);
+}
+/** One "Sign out everywhere" page's sealed links (convex/deviceEndAll.ts): the account's signed-out sign-ins often
+ * repeat one device in one project, so each (project, device) pair is marked once, in steps of `SEALED_LINKS` pairs
+ * sorted by project (at most one step per swept row). The everywhere rule is order independent, so how the pairs are
+ * split does not change what is marked. */
+export async function scheduleAccountMarks(ctx: MutationCtx, owner: string, links: readonly SealedLink[]) {
+  const unique = new Map<string, SealedLink>();
+  for (const l of links) unique.set(`${l.projectId}:${hex(new Uint8Array(l.deviceId))}`, l);
+  const sorted = [...unique.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, l]) => l);
+  for (let i = 0; i < sorted.length; i += SEALED_LINKS)
+    await scheduleSignInMarks(ctx, owner, sorted.slice(i, i + SEALED_LINKS), true);
+}
+/** The rest of one ended sign-in's marking, in its own scheduled step. */
+async function scheduleSignInMarks(
+  ctx: MutationCtx,
+  owner: string,
+  links: readonly SealedLink[],
+  everywhere: boolean,
+) {
+  await ctx.scheduler.runAfter(0, internal.sealedSecretMarkers.markSignIn, {
+    owner,
+    links: [...links],
+    ...(everywhere ? { everywhere: true as const } : {}),
+  });
 }
 export const markSignIn = internalMutation({
   args: {
     owner: v.string(),
     links: v.array(v.object({ projectId: v.string(), deviceId: v.bytes() })),
+    everywhere: v.optional(v.literal(true)),
   },
   returns: v.null(),
-  handler: async (ctx, { owner, links }) => {
-    await markEndedSignIn(ctx, owner, links);
+  handler: async (ctx, { owner, links, everywhere }) => {
+    await markEndedSignIn(ctx, owner, links, everywhere === true);
     return null;
   },
 });
