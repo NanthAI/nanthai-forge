@@ -48,6 +48,28 @@ test('hosted Lane status reports local disk usage without a new hosted query', a
   assert.match(plain.text, /Lane disk: .* bytes, scratch .* bytes/);
 });
 
+test('incident replay 5078cc76: plain status names each Fix-needed notice and its next command', async () => {
+  // Red-audit drill 2026-11-10: main stayed red ~9 min because the notice showed only on the culprit Lane's status.
+  const fix = '0b6f3c1e-58a8-4a52-9a0e-6a0d1c2b3e4f';
+  const needsFix = [
+    {
+      intentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+      state: 'needs-fix',
+      receiptId: '10aff2aa-1111-4222-8333-444455556666',
+      undo: `nforge agent ROOT start '{"intentId":"${fix}"}'`,
+    },
+    { intentId: fix, state: 'needs-fix', undo: `nforge agent ROOT start '{"intentId":"${fix}"}'` },
+  ];
+  const plain = await readHostedCliStatus('.', { dispatch: async () => ({ result: { needsFix } }) });
+  assert.match(
+    plain.text,
+    /\nFix needed \(receipt 10aff2aa\): nforge agent '\.' start '\{"intentId":"0b6f3c1e/,
+  );
+  assert.equal(plain.text.match(/Fix needed/g).length, 2);
+  const none = await readHostedCliStatus('.', { dispatch: async () => ({ result: { needsFix: [] } }) });
+  assert.doesNotMatch(none.text, /Fix needed/);
+});
+
 test('the compact finish reply carries the tightest member budget without changing landing pins', async t => {
   const s = agentFixture(t);
   const resetAt = '2026-12-01T00:00:00.000Z';

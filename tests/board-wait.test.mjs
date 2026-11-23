@@ -38,6 +38,28 @@ function peerFixture() {
   return { f, peer, laneRow };
 }
 
+test('friction 1e94d000: main wait (server) is green only on a passing audit; red, running and unaudited are said', async () => {
+  const { f } = peerFixture();
+  f.tables.projectHostedMainAudits ??= new Map();
+  const main = actor => f.invoke(peerWait.main, 'projectBoardWait:main', { projectId: 'project' }, actor);
+  assert.deepEqual((await main('writer')).main, { state: 'unreported' }, 'no audit is never green');
+  const row = { _id: 'audit', projectId: 'project', audit: { sequence: 5, status: 'failed' } };
+  f.tables.projectHostedMainAudits.set(row._id, row);
+  Object.assign(row, { red: { since: '2026-11-19T10:41:00.000Z' } });
+  assert.deepEqual((await main('writer')).main, { state: 'red', since: '2026-11-19T10:41:00.000Z' });
+  delete row.red;
+  Object.assign(row, { lastGreen: { sequence: 4 }, audit: { sequence: 5, status: 'running' } });
+  assert.deepEqual(
+    (await main('writer')).main,
+    { state: 'pending' },
+    'a running audit after red is not green yet',
+  );
+  Object.assign(row, { lastGreen: { sequence: 5 } });
+  assert.deepEqual((await main('writer')).main, { state: 'green' });
+  assert(f.invoke.reads <= 4, `main wait reads ${f.invoke.reads}`);
+  await assert.rejects(main('outsider'), code('PROJECT_UNAVAILABLE'));
+});
+
 test('peer wait (server): open, accepted, abandoned; handles only; write members only; bounded reads', async () => {
   const { f, peer, laneRow } = peerFixture();
   const open = await peer({ peer: f.lanes.B.slice(0, 8) });

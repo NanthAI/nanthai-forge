@@ -6,6 +6,7 @@ import { hostedAgentAddress } from './hosted-agent-address.js';
 import { hookHealth, hookHealthText } from './agent-hook-health.js';
 import { hostedMirrorStatusText, type HostedMirrorStatus } from './hosted-github-mirror-status.js';
 import type { laneDiskUsage } from './lane-disk-usage.js';
+import { shellQuote } from './shell-quote.js';
 
 /** Ownerless hosted checkouts have no local Work/graph status to assemble. */
 export async function readHostedCliStatus(root: string, supplied?: Pick<HostedAgentTransport, 'dispatch'>) {
@@ -45,10 +46,34 @@ export async function readHostedCliStatus(root: string, supplied?: Pick<HostedAg
   const usage = disk
     ? `\nLane disk: ${bytes(disk.bytes, disk.complete)}, scratch ${bytes(disk.scratchBytes, disk.scratchComplete)}${disk.largeScratch ? ' (large scratch, over 10% of free disk)' : ''}`
     : '';
+  // Fix-needed notices name their next step in the plain text too (friction 5078cc76: a red main with no
+  // per-file evidence showed its notice only on the culprit Lane's status). Already in the reply; no read.
+  const notices = (result.needsFix ?? []).filter(
+    (item): item is { intentId: string; state?: string; receiptId?: string; undo?: string } =>
+      typeof (item as { intentId?: unknown } | null)?.intentId === 'string',
+  );
+  // The notice's own next command (a culprit's notice names its fix Intent), on this checkout's root.
+  const command = (notice: (typeof notices)[number]) =>
+    typeof notice.undo === 'string' && notice.undo.startsWith('nforge agent ROOT ')
+      ? `nforge agent ${shellQuote(root)} ${notice.undo.slice('nforge agent ROOT '.length)}`
+      : `nforge agent ${shellQuote(root)} start ${shellQuote(JSON.stringify({ intentId: notice.intentId }))}`;
+  const fixes = notices
+    .slice(0, 3)
+    .map(
+      notice =>
+        `\n${notice.state === 'reverted' ? 'Reverted' : 'Fix needed'}${
+          notice.receiptId ? ` (receipt ${notice.receiptId.slice(0, 8)})` : ''
+        }: ${command(notice)}`,
+    )
+    .join('');
+  const moreFixes =
+    notices.length > 3
+      ? `\n${notices.length - 3} more notices: nforge agent ${shellQuote(root)} status '{}'`
+      : '';
   const budget = response.keptApplyBudget;
   const kept = budget ? `\n${budget.note}${budget.clearCommand ? `\n${budget.clearCommand}` : ''}` : '';
   return {
     value: { transport: 'hosted', ...result, hooks, ...(budget ? { keptApplyBudget: budget } : {}) },
-    text: `${text}${main}${approval}${scratch}${usage}${kept}${hookText ? `\n${hookText}` : ''}`,
+    text: `${text}${main}${fixes}${moreFixes}${approval}${scratch}${usage}${kept}${hookText ? `\n${hookText}` : ''}`,
   };
 }

@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { failureCause, failureCauseField, failureSuspects } from '../dist/check-failure-cause.js';
+import { normalizeHostedFinishResult, withFinishLandingState } from '../dist/hosted-agent-finish-result.js';
 
 const lane = { paths: ['src/adapters/fetch.ts'], tests: [] };
 const green = { result: 'passed', redSince: null };
@@ -71,7 +72,56 @@ test('687d1eda: a landing that failed on main red is told the one command that r
   // Without parking, a re-land on red main fails again: the reply must not promise that it waits.
   const fails = failureCause(evidence);
   assert.doesNotMatch(fails.next.agent, /again now/);
-  assert.match(fails.next.agent, /land --save again once main passes/);
+  // It names the command that waits for main (friction 1e94d000), then the re-land.
+  assert.match(
+    fails.next.agent,
+    /run wait \{"main":"green"\}, which returns once main passes, then land --save again/,
+  );
+});
+
+test('incident replay f27065f7: a failed receipt whose cause is main-failing gives one next step, never "fix your code"', () => {
+  // 2026-11-19 ~10:45Z, land op 8894b351: failureCause said wait for main while landingState.nextStep on the
+  // same submission said "Read the failing output, fix in the same Lane and land again."
+  const submission = {
+    phase: 'terminal-failed',
+    observation: { state: 'terminal-failed', pendingReason: null, cause: 'check-failed' },
+    error: { code: 'CHECK_FAILED', message: 'The check failed.' },
+  };
+  const cause = failureCauseField(
+    failureCause({
+      landing: { state: 'check-failed' },
+      run: failedRun([{ file: 'tests/lane-review-browser.test.mjs', firstError: '398 > 390' }]),
+      lane,
+      main: { result: 'failed', redSince: '2026-11-19T10:41:00.000Z' },
+    }),
+  );
+  assert.equal(cause.recovery, 'wait-for-main');
+  const reply = withFinishLandingState({}, { submission, failureCause: cause });
+  assert.equal(reply.landingState.state, 'check-failed');
+  assert.equal(reply.landingState.nextStep, cause.next);
+  assert.doesNotMatch(reply.landingState.nextStep, /fix in the same Lane/);
+  // Without a cause the landing state's own step stands.
+  assert.match(withFinishLandingState({}, { submission }).landingState.nextStep, /fix in the same Lane/);
+  // The normalized receipt's own command is the wait for main, not an immediate re-land into red main;
+  // the re-land stays as retryCommand for once main is green (review of this fix).
+  const selection = { laneId: '38fc52a4-4453-46b7-aaaf-984f29830118' };
+  const receipt = normalizeHostedFinishResult('/lane', selection, { submission, failureCause: cause });
+  assert.equal(receipt.command, `nforge agent '/lane' wait '{"main":"green"}'`);
+  assert.deepEqual(receipt.next, { action: 'wait', main: 'green' });
+  assert.match(receipt.retryCommand, /land --save/);
+  assert.equal(receipt.landingState.nextStep, cause.next);
+  // When a fresh land would park (both park switches), land --save now is the one command.
+  const parks = failureCauseField(
+    failureCause({
+      landing: { state: 'check-failed' },
+      run: failedRun([{ file: 'tests/lane-review-browser.test.mjs' }]),
+      lane,
+      main: { result: 'failed', redSince: 'x' },
+      parksOnMainRed: true,
+    }),
+  );
+  const parked = normalizeHostedFinishResult('/lane', selection, { submission, failureCause: parks });
+  assert.match(parked.command, /land --save/);
 });
 
 test('a landing held while main is red is main, never the change', () => {

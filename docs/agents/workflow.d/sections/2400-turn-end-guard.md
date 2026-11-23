@@ -109,7 +109,11 @@ same reading the web's Failed check screen shows. `cause` is `change`, `flaky-te
 `recovery` is `fix-in-lane`, `retry` (replay `land --save` with `"retry":true` and
 `"reason"` set to the given `retryReason`; land also takes it as `retryReason`), `wait-for-main`, `wait` or `read-log`; `suspects` judges
 the change, the test, main and your CI. Forge never guesses: an unknown cause says
-so. Other states carry no `failureCause` and read nothing extra for it.
+so. Other states carry no `failureCause` and read nothing extra for it. When a reply
+carries `failureCause`, `landingState.nextStep` is its `next`, so the reply gives one
+next step. For `wait-for-main` on a failed landing that does not wait by itself,
+`wait {"main":"green"}` holds one subscription to main's audit row and returns once
+main is green (at once when it already is); then run `land --save` again.
 
 Every JSON event/summary has a `cursor`. Reconnect with the last cursor and same
 owner/targets to suppress unchanged observations; terminal states remain in the

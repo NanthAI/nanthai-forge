@@ -12,6 +12,7 @@ import { agentCli } from '../dist/agent-cli.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 import { boardWakeTiming, peerWaitHooks } from '../dist/hosted-board-wait.js';
 import { approvalWaitHooks } from '../dist/hosted-agent-approval.js';
+import { mainWaitHooks } from '../dist/hosted-main-wait.js';
 import { hostedAgentHelp } from '../dist/hosted-agent-help.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 
@@ -39,9 +40,11 @@ function environment(t) {
     async close() {},
   });
   approvalWaitHooks.subscribe = peerWaitHooks.subscribe;
+  mainWaitHooks.subscribe = peerWaitHooks.subscribe;
   t.after(() => {
     peerWaitHooks.subscribe = undefined;
     approvalWaitHooks.subscribe = undefined;
+    mainWaitHooks.subscribe = undefined;
     process.exitCode = exitCode;
     if (previous === undefined) delete process.env.FORGE_AUTH_TOKEN;
     else process.env.FORGE_AUTH_TOKEN = previous;
@@ -217,6 +220,60 @@ test('CLI approve-link with no operationId lists the open approval requests in o
   assert.match(reply.result.next, /1 approval request waits for the project owner/);
 });
 
+test('friction 1e94d000: CLI wait {main:"green"} is one subscription with no other call; it returns once main is green', async t => {
+  // 2026-11-19: main red from 10:41Z; wait {peer} on the Lane that broke main returned at once, and nothing
+  // waited for main itself, so builders whose landings failed only on main's red checked by hand.
+  const { s, subs } = environment(t);
+  const root = join(dirname(s.root), 'clone');
+  const address = { url: s.address.url, projectId: s.address.projectId };
+  const waiting = agentCli([root, 'wait', JSON.stringify({ ...address, main: 'green' })], binary);
+  await until(() => subs.length > 0);
+  const subscription = subs.at(-1);
+  assert.equal(subscription.name, 'projectBoardWait:main');
+  assert.deepEqual(subscription.args, { projectId: s.address.projectId });
+  subscription.next(JSON.stringify({ main: { state: 'red', since: '2026-11-19T10:41:00.000Z' } }));
+  await turn();
+  let settled = false;
+  void waiting.then(() => (settled = true));
+  await turn();
+  assert.equal(settled, false, 'a red main keeps waiting');
+  subscription.next(JSON.stringify({ main: { state: 'green' } }));
+  const response = await waiting;
+  assert.equal(response.result.status, 'terminal');
+  assert.equal(response.result.reason, 'main');
+  assert.match(response.result.next, /Main is green.*land --save/);
+  assert.equal(process.exitCode, 0);
+  assert.deepEqual(s.calls, [], 'no query or mutation: only the subscription');
+});
+
+test('MCP forge_wait {main:"green"} returns at once on a green main and keeps waiting on red within its budget', async t => {
+  const { s, subs } = environment(t);
+  const server = new McpServer({ name: 'nanthai-forge', version: 'test' });
+  const close = registerHostedAgentWorkflow(server, s.transport(), () => peerWaitHooks.subscribe());
+  const client = new Client({ name: 'test', version: '1' });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await server.connect(a);
+  await client.connect(b);
+  t.after(async () => {
+    close();
+    await client.close();
+    await server.close();
+  });
+  const green = client.callTool({ name: 'forge_wait', arguments: { main: 'green' } });
+  await until(() => subs.length > 0);
+  subs.at(-1).next(JSON.stringify({ main: { state: 'green' } }));
+  const done = JSON.parse((await green).content[0].text).result;
+  assert.equal(done.status, 'terminal');
+  assert.equal(done.reason, 'main');
+  // A zero budget on a main that has not turned green returns IN_PROGRESS with the same wait to resume.
+  const pending = JSON.parse(
+    (await client.callTool({ name: 'forge_wait', arguments: { main: 'green', maxWaitMs: 0 } })).content[0]
+      .text,
+  ).result;
+  assert.equal(pending.status, 'IN_PROGRESS');
+  assert.match(pending.command, /"main":"green"/);
+});
+
 test('CLI wait takes exactly one of runId, operationIds, peer', async t => {
   const { s } = environment(t);
   const root = join(dirname(s.root), 'clone');
@@ -228,6 +285,9 @@ test('CLI wait takes exactly one of runId, operationIds, peer', async t => {
     { peer, operationIds: [randomUUID()] },
     { approval: randomUUID(), runId: randomUUID() },
     { approval: randomUUID(), peer },
+    { main: 'green', peer },
+    { main: 'green', runId: randomUUID() },
+    { main: 'red' },
     { runId: randomUUID(), operationIds: [randomUUID()] },
   ])
     await assert.rejects(
@@ -236,7 +296,10 @@ test('CLI wait takes exactly one of runId, operationIds, peer', async t => {
       JSON.stringify(Object.keys(extra)),
     );
   assert.equal(s.calls.length, 0, 'refused before any call');
-  assert.match(hostedAgentHelp('wait'), /wait takes exactly one of runId, operationIds, peer or approval/);
+  assert.match(
+    hostedAgentHelp('wait'),
+    /wait takes exactly one of runId, operationIds, peer, approval or main/,
+  );
   assert.match(hostedAgentHelp('wait'), /latest landing fails or is cancelled/);
 });
 

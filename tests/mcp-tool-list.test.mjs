@@ -81,7 +81,9 @@ test('the hosted tool list stays inside its context budget', async t => {
   // 423 -> 387 (b54a14c0): shorter summaries pay for the hand-back and question fields.
   // 387 -> 354 (7327bdff): the planning description leaves the start example to help and pays for waitingOn.
   // 354 -> 340 (6b7d5a79): forge_task says 'Start, save, land Lanes.'; start needs no model any more.
-  assert.equal(descriptionBytes, 340, 'per-session MCP description bytes');
+  // 340 -> 320 (Item 687d1eda): forge_wait drops 'under tool timeout' (its help says it), paying for the
+  // wait's new `main=green` field (friction 1e94d000).
+  assert.equal(descriptionBytes, 320, 'per-session MCP description bytes');
   assert(listBytes <= LIST_CHARS, 'tool list UTF-8 byte budget');
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);

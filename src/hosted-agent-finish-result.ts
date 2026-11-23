@@ -9,6 +9,14 @@ import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-con
 
 type Reply = Record<string, unknown>;
 
+/** A reply that explains a failed check (`failureCause`, src/check-failure-cause.ts) gives one next
+ * step: the cause's own, so a landing that failed only on main's red never also says "fix your code"
+ * (friction f27065f7). Without a cause the landing state's step stands. No reads. */
+export function causeNextStep<T extends { nextStep: string }>(landingState: T, failureCause: unknown): T {
+  const next = (failureCause as { next?: unknown } | null | undefined)?.next;
+  return typeof next === 'string' && next.trim() ? { ...landingState, nextStep: next } : landingState;
+}
+
 /** Present newer progress for the selected attempt without changing the drained landing record. */
 export function pendingLandingPresentation(
   recorded: (LandingRecord & { id: string; operationId: string }) | undefined,
@@ -157,13 +165,16 @@ export function withFinishLandingState(selection: Reply, result: Reply, reply: R
         : undefined;
   return {
     ...reply,
-    landingState: landingStateField(
-      {
-        ...submission,
-        orderWait: orderWaitOf(result.orderWait),
-        ...(typeof result.providerDelay === 'string' ? { providerDelay: result.providerDelay } : {}),
-      },
-      laneId,
+    landingState: causeNextStep(
+      landingStateField(
+        {
+          ...submission,
+          orderWait: orderWaitOf(result.orderWait),
+          ...(typeof result.providerDelay === 'string' ? { providerDelay: result.providerDelay } : {}),
+        },
+        laneId,
+      ),
+      result.failureCause,
     ),
   };
 }
@@ -241,5 +252,27 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
     return { ...clean, status: 'failed', terminal: true };
   if ((error as { code?: string } | undefined)?.code === 'LANDING_CANCELLED')
     return { ...clean, status: 'failed', terminal: true, ...finishResubmitContinuation(root, selection) };
-  return { ...clean, status: 'failed', terminal: true, ...finishRetryContinuation(root, selection) };
+  const retry = finishRetryContinuation(root, selection);
+  // Failed only on main's red, and a land now would not wait (review of friction f27065f7): the command
+  // is the wait for main; the re-land is retryCommand, for once main is green.
+  const cause = result.failureCause as { recovery?: unknown; next?: unknown } | undefined;
+  // The non-parking advice names the wait (src/check-failure-cause.ts recoveryText); matched by text so
+  // this light module does not load the cause contract.
+  if (
+    cause?.recovery === 'wait-for-main' &&
+    typeof cause.next === 'string' &&
+    cause.next.includes('wait {"main":"green"}')
+  ) {
+    const wait = `nforge agent ${shellQuote(root)} wait ${shellQuote(JSON.stringify({ main: 'green' }))}`;
+    return {
+      ...clean,
+      status: 'failed',
+      terminal: true,
+      ...retry,
+      next: { action: 'wait', main: 'green' },
+      command: wait,
+      waitCommand: wait,
+    };
+  }
+  return { ...clean, status: 'failed', terminal: true, ...retry };
 }

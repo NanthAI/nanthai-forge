@@ -91,11 +91,15 @@ export function validateHostedCliCommand(
   }
   if (requestedAction === 'wait') {
     invariant(
-      [input.runId, (input.operationIds as unknown[] | undefined)?.length, input.peer, input.approval].filter(
-        Boolean,
-      ).length === 1,
+      [
+        input.runId,
+        (input.operationIds as unknown[] | undefined)?.length,
+        input.peer,
+        input.approval,
+        input.main,
+      ].filter(Boolean).length === 1,
       'BAD_ARGUMENT',
-      'Choose exactly one of runId, operationIds, peer or approval. Run nforge agent ROOT wait --help.',
+      'Choose exactly one of runId, operationIds, peer, approval or main. Run nforge agent ROOT wait --help.',
     );
   }
 }

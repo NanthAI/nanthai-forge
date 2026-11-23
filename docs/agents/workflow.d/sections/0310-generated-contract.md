@@ -58,7 +58,7 @@
 | `landings` | `from?, to?, receiptId?, message?, submissionId?, limit?, kind?, cursor?` |
 | `lane-history` | `laneId?` |
 | `flow` | `{}` |
-| `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?, peer?, approval?` |
+| `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?, peer?, approval?, main?` |
 | `show` | `laneId?, state?, candidateId?, expected?, channel?, at?, path, force?` |
 | `board` | `id?, laneId?, all?` |
 | `board --resolve` | `id, text?` |

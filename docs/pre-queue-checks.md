@@ -495,7 +495,7 @@ landing (`newlyCoveredBy`), the `branch` recovery runs (`classifying`, `revertin
 `reverse-held` when the prepared reverse waits for a person, or `fix-forward`, which a revert
 decision replaces), and `next`, which names that branch and says a
 landing failing only on these tests waits when either park switch is on, or to land it again
-once main passes. Recovery writes one coverage event the first time a red names its coverage
+once main passes (`wait {"main":"green"}` returns then). Recovery writes one coverage event the first time a red names its coverage
 landing, so `status {"main":…}` and the Main broke view still name it after main recovers.
 Landing replies mark `culprit` only on the receipt the culprit event names, `made-tests-run`
 on the receipt a coverage event names; other receipts in the red range show `in-red-range`.

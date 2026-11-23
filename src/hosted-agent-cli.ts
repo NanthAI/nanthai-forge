@@ -16,7 +16,7 @@ import { landExitsFailed, landingStallReport, landSummary, selfReviewLine } from
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { landingStateField, type LandingRecord } from './landing-state.js';
-import { pendingLandingPresentation } from './hosted-agent-finish-result.js';
+import { causeNextStep, pendingLandingPresentation } from './hosted-agent-finish-result.js';
 import { orderWaitOf } from './hosted-wait-line.js';
 import { learnFromLanding } from './preflight-learned.js';
 import { operationLine } from './hosted-land-wait.js';
@@ -88,24 +88,26 @@ async function dispatchHostedAgentCli(
       },
       board$,
       { approvalNext, observeApproval },
+      { mainWaitResult, observeMainGreen },
     ] = await Promise.all([
       import('./hosted-agent-observe.js'),
       import('./hosted-agent-wait-local.js'),
       import('./hosted-board-wait.js'),
       import('./hosted-agent-approval.js'),
+      import('./hosted-main-wait.js'),
     ]);
     const { boardWaitOption, boardWakeEnvelope, observePeerLane, freshBoardDelivery } = board$;
     const selectedWait = hostedWaitSchema.parse(command);
-    const alone = selectedWait.peer ?? selectedWait.approval;
+    const alone = selectedWait.peer ?? selectedWait.approval ?? selectedWait.main;
     invariant(
       alone
         ? !selectedWait.runId &&
             !selectedWait.operationIds?.length &&
-            !(selectedWait.peer && selectedWait.approval)
+            [selectedWait.peer, selectedWait.approval, selectedWait.main].filter(Boolean).length === 1
         : Boolean(selectedWait.runId) !== Boolean(selectedWait.operationIds?.length),
       'BAD_ARGUMENT',
       alone
-        ? 'Wait for a peer Lane or an approval in its own command, without runId or operationIds.'
+        ? 'Wait for a peer Lane, an approval or main in its own command, without runId or operationIds.'
         : 'Choose one run or hosted landing operationIds.',
     );
     const [onlyOperation] = selectedWait.operationIds ?? [];
@@ -269,6 +271,27 @@ async function dispatchHostedAgentCli(
       const board = boardWaitOption(root, laneId);
       const { next, waitCommand, inProgress } = continuation;
       const resume = { next, command: waitCommand, waitCommand, inProgress };
+      if (selectedWait.main) {
+        const outcome = await observeMainGreen(
+          transport,
+          { timeoutSeconds: budgetSeconds },
+          controller.signal,
+        );
+        process.exitCode =
+          outcome.status === 'green' || outcome.status === 'unreported'
+            ? 0
+            : outcome.status === 'cancelled'
+              ? 130
+              : 3;
+        return {
+          schema: 1 as const,
+          transport: 'hosted' as const,
+          action: 'observe' as const,
+          operationId: null,
+          resolved: null,
+          result: mainWaitResult(outcome, budgetSeconds, resume),
+        };
+      }
       if (selectedWait.approval) {
         const laneId = selectedWait.approval;
         const outcome = await observeApproval(
@@ -415,6 +438,7 @@ async function dispatchHostedAgentCli(
           orderWait?: unknown;
           sourceFailure?: unknown;
           providerDelay?: string;
+          failureCause?: unknown;
         }[];
         status: string;
         pendingProgress?: LandingRecord;
@@ -438,7 +462,12 @@ async function dispatchHostedAgentCli(
       const hold = landingHold(presentation, laneId);
       // The same state word and next step people see (src/landing-state.ts); additive.
       const landing = presentation
-        ? { landingState: changed?.landingState ?? landingStateField(presentation, laneId) }
+        ? {
+            // The cause describes the recorded submission, never newer progress shown in its place.
+            landingState: changed
+              ? changed.landingState
+              : causeNextStep(landingStateField(presentation, laneId), selected?.failureCause),
+          }
         : {};
       // A stalled landing says so, with its source failure and replay, on every unfinished return
       // (friction c7f3afac: a wait stayed silent for 2 h on a failed compose step).

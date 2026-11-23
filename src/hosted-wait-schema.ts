@@ -20,5 +20,7 @@ export const hostedWaitSchema = z
       .string()
       .regex(/^(?:[0-9a-f-]{36}|setting:[\w:-]{1,120})$/, 'a full Lane id or a setting: request id')
       .optional(),
+    /** Wait until main is green again (friction 1e94d000); returns at once when it is. Exclusive with the others. */
+    main: z.literal('green').optional(),
   })
   .strict();

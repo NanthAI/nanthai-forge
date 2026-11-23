@@ -5,6 +5,7 @@ import { activeProject } from './projectAuthority';
 import { finishReadReader } from './projectFinishReadReader';
 import { boardWake } from './projectBoardDelivery';
 import { peerLatestLanding } from './projectBoardPeerLanding';
+import { mainEvidence } from './projectFailureCauseRead';
 import { agentActor } from '../src/agent-slug';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -120,6 +121,39 @@ export const peer = query({
         },
         ...(board ? { board } : {}),
       });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/**
+ * Wait until main is green again (`wait {"main":"green"}`, friction 1e94d000): the CLI holds this as its
+ * one live subscription. Red is the same reading a failed landing's `failureCause` uses (main-failing):
+ * main's audit row has a red episode or its newest audit failed; green is a passing newest audit. Reads per run: access (1-2 rows) and
+ * main's audit row (1). Convex re-runs it only when that row changes (an audit result or a landing's
+ * audit bookkeeping); no polling, nothing after the waiter exits.
+ */
+export const main = query({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.string(),
+  handler: async (rawCtx, input) => {
+    try {
+      const ctx = finishReadReader(rawCtx);
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to wait for main.');
+      await activeProject(ctx, input.projectId, user.subject);
+      const audit = await mainEvidence(rawCtx, input.projectId);
+      // Green only on a passing audit; a newer audit still running keeps the wait; no audit at all is
+      // said, never read as a pass (review of friction 1e94d000).
+      const main = !audit
+        ? { state: 'unreported' }
+        : audit.result === 'failed' || audit.redSince
+          ? { state: 'red', ...(audit.redSince ? { since: audit.redSince } : {}) }
+          : audit.result === 'passed'
+            ? { state: 'green' }
+            : { state: 'pending' };
+      return canonicalPayload({ main });
     } catch (error) {
       return report(error);
     }

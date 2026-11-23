@@ -301,7 +301,11 @@ async function execute(
       'Commit the selected initial State before starting its hosted Lane.',
     );
   }
-  let initialHead = payload.initialHead ?? recovery?.head ?? main.head;
+  // Only a reverted change restarts from its own head over its old base (restoreBase). A fix-forward
+  // notice's change is still on main, so its fix starts from main: reopening the culprit's head would add
+  // its files a second time and conflict with main (friction 4a0b5e35).
+  const reverted = recovery?.state === 'reverted' ? recovery : undefined;
+  let initialHead = payload.initialHead ?? reverted?.head ?? main.head;
   let ownerOnly = initialHead === main.head;
   let stack: import('../src/hosted-lane').HostedLaneSelection['stack'];
   if (payload.stackOn) {
@@ -322,7 +326,7 @@ async function execute(
     };
   }
   const restoreBase =
-    recovery && initialHead === recovery.head && !payload.stackOn ? recovery.previousHead : undefined;
+    reverted && initialHead === reverted.head && !payload.stackOn ? reverted.previousHead : undefined;
   const first = prepared.operation.firstAttempt,
     intentId = first.ids.intent!,
     laneId = first.ids.lane!;

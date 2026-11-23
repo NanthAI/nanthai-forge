@@ -105,7 +105,7 @@ export const recoveryText: Record<FailureRecovery, { label: string; agent: strin
     label: 'Keep waiting',
     // Without both park switches (Item 687d1eda) only a held landing continues by itself.
     agent:
-      "Do not change your code: a landing that fails only on main's failing tests is not at fault. A held landing continues once main passes; a failed one needs land --save again once main passes.",
+      'Do not change your code: a landing that fails only on main\'s failing tests is not at fault. A held landing continues once main passes. A failed one: run wait {"main":"green"}, which returns once main passes, then land --save again.',
   },
   wait: { label: 'Keep waiting', agent: 'Wait; Forge checks again by itself.' },
   'read-log': {

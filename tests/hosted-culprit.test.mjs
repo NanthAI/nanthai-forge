@@ -1021,6 +1021,61 @@ test('start reverted Intent opens sibling from saved head and includes full fix 
   assert.equal((await f.readIntent(original.id)).needsFix.auditRunId, nextAudit);
 });
 
+test('incident replay 4a0b5e35: a fix Lane from a fix-forward notice starts on main, not the culprit head, so it cannot re-add its files', async () => {
+  // Red-audit drill 2026-11-10: the culprit stayed on main (fix forward) and start {intentId} from the notice
+  // opened a Lane at the culprit's own head over its old base, so editing the file it added gave
+  // COMPOSITION_CONFLICT (both sides add the same path).
+  const f = await fixture(1);
+  await f.runCulprit();
+  await f.complete(f.probes()[0], true);
+  const original = await f.readIntent(f.intents[574].id);
+  const n = { ...original.needsFix, state: 'needs-fix' };
+  delete n.revertReceiptId;
+  await f.transaction(
+    'markFixForward',
+    {
+      _handler: ctx =>
+        records.writeHostedRecord(ctx, {
+          projectId: f.projectId,
+          actor: 'owner',
+          authorityEpoch: 1,
+          expectedVersion: original.version,
+          record: { ...original, version: original.version + 1, needsFix: n },
+        }),
+    },
+    {},
+  );
+  const main = JSON.parse([...f.tables.projectHostedChannels.values()][0].selection);
+  // The culprit is main's tip here, so the old code's head matched main too; its old base (restoreBase,
+  // the culprit's previous head) is what made the Lane re-add the culprit's files.
+  const started = JSON.parse(
+    await f.transaction('startFix', start.start, {
+      projectId: f.projectId,
+      operationId: randomUUID(),
+      noticeVersion: 1,
+      authorityEpoch: 1,
+      expectedMain: { head: main.head, receiptId: main.receipt.id },
+      intent: { kind: 'existing', intentId: original.id },
+    }),
+  );
+  assert.equal(started.lane.head, main.head);
+  assert.match(started.fixBrief, /synthetic failure/, 'the fix brief still rides on the start');
+  const lane = await f.transaction(
+    'readFixLane',
+    {
+      _handler: ctx =>
+        records.readHostedRecord(ctx, {
+          projectId: f.projectId,
+          actor: 'owner',
+          kind: 'lane',
+          key: started.lane.laneId,
+        }),
+    },
+    {},
+  );
+  assert.equal(JSON.parse(lane.value).restoreBase, undefined, 'no old base: the Lane diff is only the fix');
+});
+
 test('reports cap UTF-8 excerpts at 32 by 2048 bytes; incomplete/mixed evidence never proves a culprit', async () => {
   const f = await fixture(1);
   const reports = Object.fromEntries(
