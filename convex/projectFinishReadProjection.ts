@@ -45,6 +45,8 @@ export const finishReadFields = {
     // ...and why: its hold reason and footprints, the waits so far (at most 8; written once per new
     // wait, so an unchanged wait re-sends nothing; ad80e037).
     'orderWaits',
+    // A change held before its Lane check (no-carry hold, Item 1018d0f8): the observe page says so.
+    'noCarryWait',
   ],
   projectHostedFinishes: ['projectId', 'submissionId', 'value', 'composeOperationId', 'wake'],
   projectHostedLandingQueues: ['projectId', 'channel', 'status', 'lease', 'wake'],

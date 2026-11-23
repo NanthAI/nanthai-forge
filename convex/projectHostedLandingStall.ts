@@ -25,6 +25,7 @@ import { composeRow, composeStateSchema } from './projectHostedComposeStore';
 import { hostedFinishSchema } from '../src/hosted-finish';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
+import { releaseNoCarryWaiter } from './projectHostedLandingNoCarry';
 import { repairStalledCheck } from './projectHostedCheckReconcile';
 import { redriveLanding } from './projectHostedLandingRedrive';
 import { alertExhausted, exhaustLanding, exhaustedReason } from './projectHostedLandingExhaust';
@@ -153,9 +154,21 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
       : null;
   }
   // A passed entry waiting for an older submission is not stalled: the older
-  // one owns progress and its own alarm. If it no longer holds its place, re-drive.
-  if (canonical?.orderWait && canonical.phase === 'ready' && (await aheadHoldsOrder(ctx, canonical))) {
+  // one owns progress and its own alarm. If it no longer holds its place, re-drive. So is a change
+  // held before its Lane check (no-carry hold, Item 1018d0f8): its holder's exit releases it.
+  if (
+    canonical?.orderWait &&
+    (canonical.phase === 'ready' || (canonical.phase === 'queued' && canonical.noCarryWait)) &&
+    (await aheadHoldsOrder(ctx, canonical))
+  ) {
     await ctx.db.patch(row._id, { alarm: null });
+    return null;
+  }
+  // The holder left but the held change's release was lost: release it here, as the exit would
+  // (a plain redrive would leave the hold marker set and the next write would hold it again).
+  if (canonical?.noCarryWait && canonical.phase === 'queued') {
+    await ctx.db.patch(row._id, { alarm: null });
+    await releaseNoCarryWaiter(ctx, canonical, 'holder-exit');
     return null;
   }
   const token = { ...input, lastProgressAt: stall.lastProgressAt };

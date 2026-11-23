@@ -22,7 +22,7 @@ export const receipts = f =>
  * fixed in a real deployment); `withdraws(index, nth)` withdraws the entry when that check is due
  * instead of passing it. `arrives(index)` is the tick an entry is submitted (default 0; must not
  * decrease with the index). Returns landing ticks, run counts, the per-run log (`runTicks`: owner,
- * start tick, runner ticks, whether a landing used it) and receipts by entry. */
+ * start tick, runner ticks, whether a landing used it), withdraw ticks and receipts by entry. */
 export async function drive(
   t,
   {
@@ -78,7 +78,7 @@ export async function drive(
     rows().find(r => r.admission?.runId === run.id || r.runId === run.id)?.submissionId ?? runOwner(run);
   const due = new Map(),
     landedAt = new Map(),
-    withdrawn = new Set(),
+    withdrawn = new Map(),
     runsOf = new Map(ids.map(id => [id, new Set()])),
     // Every check run by id: who started it, when, and when it stopped being queued (runner time).
     runLog = new Map();
@@ -105,7 +105,7 @@ export async function drive(
       if (!due.has(run.id)) due.set(run.id, tick + duration(ids.indexOf(id), nth));
       if (due.get(run.id) > tick) continue;
       if (withdraws(ids.indexOf(id), nth)) {
-        withdrawn.add(id);
+        withdrawn.set(id, tick);
         await f.transaction('replay-withdraw', landingApi.cancel, {
           projectId: f.projectId,
           request: JSON.stringify({ operationId: randomUUID(), authorityEpoch: 1, submissionId: id }),
@@ -153,6 +153,7 @@ export async function drive(
   const result = {
     ids,
     landedAt: ids.map(id => landedAt.get(id)),
+    withdrawnAt: ids.map(id => withdrawn.get(id)),
     runs: ids.map(id => runsOf.get(id)?.size ?? 0),
     runTicks,
     orderWaits: ids.map(id => byId.get(id)?.orderWaits ?? []),

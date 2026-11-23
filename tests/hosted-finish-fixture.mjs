@@ -27,6 +27,7 @@ const precomposeApi = await import(moduleUrl('../convex/projectHostedLandingPrec
 const acceptanceApi = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
 const initiativeWork = await import(moduleUrl('../convex/projectInitiativeWorkFold.ts'));
 const batchAbandon = await import(moduleUrl('../convex/projectHostedBatchAbandon.ts'));
+const noCarry = await import(moduleUrl('../convex/projectHostedLandingNoCarry.ts'));
 const revertNoticeApi = await import(moduleUrl('../convex/projectHostedRevertNotice.ts'));
 const acceptedByNoteApi = await import(moduleUrl('../convex/projectHostedAcceptedByNote.ts'));
 const statsApi = await import(moduleUrl('../convex/projectStats.ts'));
@@ -499,6 +500,9 @@ export async function finishFixture(
         await tx('acceptedByNote', acceptedByNoteApi.accepted, input);
       } else if (task.name === 'projectHostedBatchAbandon:reselect') {
         await tx('batchAbandon', batchAbandon.reselect, input);
+      } else if (task.name === 'projectHostedLandingNoCarry:release') {
+        // No-carry hold (Item 1018d0f8): the holder left; held changes start their Lane checks.
+        await tx('noCarryRelease', noCarry.release, input);
       } else if (task.name === 'projectHostedLandingDesired:drive') {
         await desired.drive._handler(
           {

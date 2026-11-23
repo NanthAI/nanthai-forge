@@ -266,6 +266,11 @@ export async function writeLanding(
   const parked = hold !== undefined;
   const ended = state.phase === 'landed' || state.phase === 'terminal-failed';
   if (parked) runnable = false;
+  // A change held before its Lane check (no-carry hold, Item 1018d0f8) stays held through any queued
+  // write: no place in the order and no queue drive. Only its holder's exit or an urgent
+  // change releases it (releaseNoCarryWaiter); a park or any other phase ends the hold.
+  const held = Boolean(row.noCarryWait) && state.phase === 'queued' && !parked;
+  if (held) runnable = false;
   const runId = attempt.check?.runId ?? (admissionRun ? row.admission!.runId : null);
   // The check's kind, stamped once with its start (the write that binds it): ecd6e610, fa2c1383.
   const checkKind =
@@ -381,6 +386,7 @@ export async function writeLanding(
   // A submission still in its own admission (pre-queue) check is not in the queue yet,
   // nor is one held for peers still deciding their Lane proof (10b0a94b).
   const orderLive =
+    !held &&
     !admitting &&
     !cohortHeld(row, state, runnable) &&
     holdsLandingOrder(
@@ -436,6 +442,7 @@ export async function writeLanding(
   const proofMainReceiptId = runId && !ended ? attempt.main.receiptId : undefined;
   // Queued advisory conflicts keep the existing settlement event on bookkeeping writes.
   const orderWait =
+    held ||
     state.phase === 'ready' ||
     (state.phase === 'queued' && attempt.earlyResolutions?.length) ||
     (speculative && !retireAdvice)
@@ -493,9 +500,10 @@ export async function writeLanding(
     ...(releasesExactReview ? { exactReview: undefined } : {}),
     reservedUntil: reserving ? row.reservedUntil : undefined,
     orderWait,
+    noCarryWait: held ? true : undefined,
     // A handoff mark lasts only while the entry is a Ready waiter (43b51a5e case 2).
     orderWaitHanded: state.phase === 'ready' ? row.orderWaitHanded : undefined,
-    ...(state.phase === 'ready'
+    ...(state.phase === 'ready' || held
       ? {}
       : closeOrderWait(
           orderWait ? { ...row, orderHandoffs: undefined } : row,

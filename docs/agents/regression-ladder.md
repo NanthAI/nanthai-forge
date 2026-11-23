@@ -103,6 +103,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `438e9ace` | Red main: two landings pass alone but fail together; a later failed audit retains one checked pair recovery, with widening bounded at four |
 
 | `1018d0f8` | An alert refresh overwrote an unticked measurement line and reconciliation closed an unmet Issue; refreshed alerts retain the existing body and reconciliation counts bare unticked checkboxes too |
+| `1018d0f8` | Incident 0e94a117 (2026-11-22): plain changes started their Lane checks behind a spent schema re-check and were thrown away as `order-sensitive` when it landed. With `FORGE_QUEUE_NO_CARRY_HOLD` the replay holds the six late arrivals until the holder lands (lost runner ticks 1,088 to 182), a withdrawn holder starts every held check at its exit, and an unspent step, an own-risk change or an older entry still in its Lane check is never held |
 | `f5c45985` | A missing accepted-run stamp hid 3,317 discarded runner seconds; projections use the independent discard stamp and existing maintenance repairs retained null samples |
 
 | `025470bf` | A moved-main cohort records its actual hold release. The selected request and receipt agree, and old releases with no stamp stay unavailable. |

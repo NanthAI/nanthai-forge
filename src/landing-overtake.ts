@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { pathsOverlap } from './hosted-cross-head-proof.js';
-import { firstCheckRiskPaths, globalRiskBetween, sharedSequenceFolders } from './first-check-risk.js';
+import {
+  firstCheckRiskPaths,
+  globalRiskBetween,
+  orderSensitiveRisk,
+  sharedSequenceFolders,
+} from './first-check-risk.js';
 import type { AutonomyPolicy } from './autonomy-policy.js';
 import { PASS_HELD } from './landing-speed-alerts.js';
 
@@ -151,6 +156,30 @@ export function olderRiskOnly(
  * strict order again. Pure. */
 export function overtakeRiskOnly(target: OvertakeTarget & { parked: boolean }) {
   return overtakeOlder(target.phase === 'ready' && target.parked ? { ...target, phase: 'checking' } : target);
+}
+
+/** No-carry hold (Item 1018d0f8, decision c2be3da5). The older entry at the head of the order is
+ * checking with its bounded overtake step already spent (`overtakeRiskOnly` holds), and its own
+ * order-sensitive risk (database schema, CI configuration, a check entry) is the only link between
+ * the two changes (`olderRiskOnly`). The newer change must wait for it and its pass can never carry
+ * across it, so a Lane check of the newer change started now is refused as `order-sensitive` once the
+ * older one lands. True means: do not start that check yet. Never true for a change with risk of its
+ * own (holding it would cost the combined check, 10b0a94b), for a holder whose step is unspent (the
+ * newer change may still overtake it, 43b51a5e), for a Ready holder (on a stale base it is refused,
+ * not about to land) or for unknown paths. Pure. */
+export function noCarryHold(
+  mine: readonly string[] | null,
+  theirs: readonly string[] | null,
+  checkEntries: readonly string[],
+  older: OvertakeTarget & { parked: boolean },
+) {
+  return (
+    older.phase === 'checking' &&
+    older.overtaken !== undefined &&
+    overtakeRiskOnly(older) === 'hold' &&
+    olderRiskOnly(mine, theirs, checkEntries) &&
+    orderSensitiveRisk(mine ?? [], theirs ?? [], checkEntries).length > 0
+  );
 }
 
 /** The change itself touches a global-risk file: its pass never carries across a moved main and

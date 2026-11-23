@@ -35,6 +35,8 @@ import {
 } from './projectHostedLandingRunnerCosts';
 import { startLandingAdmission } from './projectHostedLandingAdmission';
 import { pipelineAdmission } from './projectHostedLandingAdmissionPipeline';
+import { noCarryHolder, noCarryHoldOn } from './projectHostedLandingNoCarry';
+import { recordOrderWait } from './projectHostedLandingOrder';
 import {
   priorLandingForReservation,
   submissionReservation,
@@ -490,16 +492,47 @@ export async function enqueueHostedLanding(
   const stacked = staleAdmission
     ? null
     : await pipelineAdmission(ctx, { project, attempt, request, paths, queue });
-  // Item 0d14c456: while an environment hold covers this check, no admission run (0 I/O when unset).
-  const admission =
-    stacked || staleAdmission || heldCommand(queue.ciDown, request)
-      ? null
-      : await startLandingAdmission(ctx, { projectId: input.projectId, attempt, request });
   // Issue 10d253c6: the same work superseded after a passed check reserves its files now.
   const reservation = intentId
     ? submissionReservation(prior, intentId, Boolean(request.finish), Date.now())
     : {};
   const sequence = queue.sequence + 1;
+  const ciHeld = heldCommand(queue.ciDown, request);
+  // Item 1018d0f8: no Lane check that the spent order-sensitive head of the order makes unusable by
+  // landing first; this change waits for it outside the order and joins the queue when it leaves.
+  // Zero reads while the switch is off. `reserved` only carries a CLI goal's identity here (a revert
+  // is a `run` check), so it does not exclude the change.
+  const noCarry =
+    !noCarryHoldOn() ||
+    stacked ||
+    staleAdmission ||
+    ciHeld ||
+    earlyReview ||
+    'reservedUntil' in reservation ||
+    // A dependency wait has its parent's own outcome event; it is never held here as well.
+    !request.finish ||
+    request.finish.after !== null ||
+    request.check?.kind !== 'request' ||
+    !attempt.deferredCheck ||
+    !attempt.candidate.head ||
+    !preQueueCheck(attempt.policy)
+      ? null
+      : await noCarryHolder(
+          ctx,
+          {
+            projectId: input.projectId,
+            channel: request.channel,
+            sequence,
+            ...landingPriority(project, actor, request.priority),
+            paths,
+          },
+          project,
+        );
+  // Item 0d14c456: while an environment hold covers this check, no admission run (0 I/O when unset).
+  const admission =
+    stacked || staleAdmission || ciHeld || noCarry
+      ? null
+      : await startLandingAdmission(ctx, { projectId: input.projectId, attempt, request });
   const inherited = reserved?.counts ? reserved : reused;
   const carried = bindSupersededCheck(
     inherited.counts,
@@ -571,7 +604,21 @@ export async function enqueueHostedLanding(
           ...(input.preflightRan === undefined ? {} : { preflightRan: input.preflightRan }),
           ...(input.preflightRuns === undefined ? {} : { preflightRuns: input.preflightRuns }),
         }),
-    ...(attempt.deferredCheck ? { batchSelection: canonicalPayload(attempt), batchable: !admission } : {}),
+    ...(attempt.deferredCheck
+      ? { batchSelection: canonicalPayload(attempt), batchable: !admission && !noCarry }
+      : {}),
+    ...(noCarry
+      ? {
+          orderWait: noCarry.row.submissionId,
+          noCarryWait: true as const,
+          orderWaits: recordOrderWait(
+            {},
+            { row: noCarry.row, held: 'no-carry', footprints: noCarry.footprints },
+            Date.now(),
+            queue.mainReceiptId,
+          ),
+        }
+      : {}),
     ...(admission
       ? {
           admission: {
@@ -589,9 +636,10 @@ export async function enqueueHostedLanding(
     priorityVersion: 0,
     sequence,
     ...(reused.selectionKey ? { selectionKey: reused.selectionKey } : {}),
-    runnable: !admission,
-    // Admission and early review run the check without holding queue order.
-    ...(admission || earlyReview ? {} : { orderLive: true as const }),
+    runnable: !admission && !noCarry,
+    // Admission and early review run the check without holding queue order; nor does a change held
+    // before its Lane check (it holds no order, run or timer).
+    ...(admission || earlyReview || noCarry ? {} : { orderLive: true as const }),
     phase: state.phase as import('./projectHostedLandingStore').LandingRow['phase'],
     runId: attempt.check?.runId ?? admission,
     // The check's kind, stamped with its start as writeLanding does for later checks (ecd6e610,
@@ -613,6 +661,8 @@ export async function enqueueHostedLanding(
           .unique()
       : null;
   if (lineCompose && request.finish) await bindLineSubmission(ctx, state, lineCompose);
+  // Its exit wakes this change (`wakeLandingOrderWaiters` schedules the no-carry release).
+  if (noCarry && !noCarry.row.orderWaited) await ctx.db.patch(noCarry.row._id, { orderWaited: true });
   await ctx.db.patch(queue._id, {
     sequence,
     ...(stacked && !queue.train?.length ? { train: [stacked] } : {}),
@@ -621,6 +671,8 @@ export async function enqueueHostedLanding(
   if (finish) await scheduleFinish(ctx, finish);
   await retainLandingProgress(ctx, state);
   await recordLandingObservation(ctx, state);
+  // A held change keeps its stall alarm: while its holder holds order the alarm only clears itself
+  // (as a Ready waiter's does); if the holder left without releasing it, the repair queues it.
   await scheduleLandingAlarm(ctx, state);
   return state;
 }

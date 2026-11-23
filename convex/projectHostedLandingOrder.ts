@@ -128,7 +128,9 @@ export type OrderHeld =
   | 'approved-check'
   | 'composing'
   // A later landing of reserved files waits for the holder (Issue 10d253c6).
-  | 'reserved';
+  | 'reserved'
+  // Before its Lane check: the spent order-sensitive head of the order lands first (Item 1018d0f8).
+  | 'no-carry';
 const generationStartedAt = (state: HostedLandingState) =>
   Math.max(
     Date.parse(state.at),
@@ -573,9 +575,20 @@ async function footprintsOf(
  * a READY entry waited 7.6 min with no reason in status). It uses the row the reader
  * already loaded: no extra document read, call or subscription dependency. */
 export function landingOrderWaitForReader(
-  row: Pick<LandingRow, 'orderWait' | 'orderWaits' | 'phase'> | null | undefined,
+  row: Pick<LandingRow, 'orderWait' | 'orderWaits' | 'phase' | 'noCarryWait'> | null | undefined,
   state: HostedLandingState,
 ) {
+  // A change held before its Lane check (Item 1018d0f8) says which submission it waits for and why.
+  if (row?.orderWait && row.noCarryWait && row.phase === 'queued' && state.phase === 'queued') {
+    const { orderWaits } = orderWaitsField(row.orderWaits);
+    return {
+      submissionId: row.orderWait,
+      reason: 'no-carry' as const,
+      held: 'no-carry',
+      ...(orderWaits ? { waits: orderWaits } : {}),
+      message: `Check not started yet: older submission ${row.orderWait} is re-checking its own order-sensitive change (database schema, CI or check configuration) and takes main first, so a check started now would be thrown away when it lands. This change's Lane check starts when that one lands, fails or is withdrawn; nothing to do. observe {"submissionId":"${row.orderWait}"} follows it.`,
+    };
+  }
   if (!row?.orderWait || row.phase !== 'ready' || state.phase !== 'ready') return null;
   if (state.observation.state !== 'pending') return null;
   const last = row.orderWaits?.at(-1);

@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingFields.ts": "9bb7bc1e6f3a314f735704489cd56db87308d457225fd22a95d32302570cd0f0",
+    "src/landing-state.ts": "f2724ba0d315b4311e29090870981f2b14454ab591865b7a14919ffdfcdea3ad"
+  },
+  "replay": {
+    "incident": "19328518",
+    "test": "replay 19328518: a parked passed landing names the older submission it waits for in every status read",
+    "receipt": "5593ee3b-5a04-4268-b9ce-1c201c7419dd"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Af840774b-ae9b-4f87-9c2e-b787fb57e7b8",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A9e5778c5-f3b0-41ba-9c47-8fd42fc11b1f%3Adelegate-task%3Aa26ba245-c025-4c15-b91d-0e64755c13db",
+    "receipt": "70194a93-414f-4e27-a301-d3993e9e3617"
+  },
+  "exercised": {
+    "convex/projectHostedLandingFields.ts": {
+      "executed": [
+        "cohortHoldEvidence"
+      ],
+      "digest": "1c3c2c408c867d7972c2336545e2556c593eff246309712f6f63fdb834955da4",
+      "units": [
+        [
+          "alarm",
+          "67f78a5aed19a4c79893f8b743c19b39e1b06ffa69c4909673eba3a2e5e99a92"
+        ],
+        [
+          "cohortHoldEvidence",
+          "fb18e66549510265c0eab7e48b10632d73882627194a13d5cd5a3bda5650aed1"
+        ],
+        [
+          "defineTable",
+          "b47c67ba5772cdb88aa4a6b681e8b5447b2dc09879b915898b6f088274e1b34b"
+        ],
+        [
+          "grant",
+          "6aea945bc2dc6100270c9909ad0564c23207063377a7ebaab5e9de3874e24424"
+        ],
+        [
+          "hostedLandingTables",
+          "94ddd2f4dd65550ea52b0789d374a5f8814511387cd6cf299175838d7501dcef"
+        ],
+        [
+          "landingCapsulePointer",
+          "b4a05c9a433c3db6366f6cf04fbbbb9c73f92c48735a867e5bc7b95d8bb6c2f6"
+        ],
+        [
+          "landingReplay",
+          "43c3709aadbd6c2f1fc489613d425ec3f5024efaae6f1d274f1a8a67558a868e"
+        ],
+        [
+          "lease",
+          "47220463e4e7e6cfab3594b7a172b75d9c4e4210278122dbfbd87d3694a3cf3b"
+        ],
+        [
+          "mainRedHoldValidator",
+          "59e715583180ec908b854f5e28662ed42f405f0e61f03bb291d815de033b5b0a"
+        ],
+        [
+          "phase",
+          "9609b8512f6d116e2ad42c512abe916aef43279d8cd6b272060f17b5914a058c"
+        ],
+        [
+          "replayCause",
+          "574b0e15d337707715f1652d3fd28e8d4163ebdcbb3403180fcb115f4992cd1e"
+        ],
+        [
+          "runnerAccounting",
+          "6068f1b11c1726df9aa47d11e312f7613e56458bc4509066d109ac16c5b0b457"
+        ],
+        [
+          "supersededCheck",
+          "89e2ae5ef1660438ade4618df43e4edc2c65bd622983fc215b192f083c02af8d"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ]
+    },
+    "src/landing-state.ts": {
+      "executed": [
+        "infraWaitSince",
+        "landingStateField",
+        "landingStateOf",
+        "pendingState",
+        "stateOf"
+      ],
+      "digest": "9b1f56062812092daab7c88e1a684eb86ab62f93b24c5d8fef7770cee4ddffa1",
+      "units": [
+        [
+          "infraWaitSince",
+          "10b509f3bfe5d1cc4dcbeecee2b68c2634a9f3b26c8320802086485c51da20eb"
+        ],
+        [
+          "landingHold",
+          "3379755b2ac68a09ce95a5b99bd7e13cc1e8b9792f241d8506e3f89d1ce80203"
+        ],
+        [
+          "landingStateField",
+          "1f4530128218261655a6c409af6a4e21d910e231f9087825f4a3970ae71fc9ac"
+        ],
+        [
+          "landingStateOf",
+          "174bf571102503a085e25b4e14047a0404d1828ea0a86b22384dc0f590f57ad7"
+        ],
+        [
+          "pendingState",
+          "79d52bc050da6396dc52442aa8ea05cd6557cb424fdc0b19d8191c76c3e6c74d"
+        ],
+        [
+          "sourceSizeDocs",
+          "b09b97f02dc7ce27d7bfcdc79e0da5edc12b137111f59a97a9a3bcc042d4e9da"
+        ],
+        [
+          "stateOf",
+          "195dbb1c4db731075d606bb1b20f3bddcba31db1de544e5b7f6567916e5cc069"
+        ],
+        [
+          "supersededOutcome",
+          "c994bf0305f710d37a1c685fae10081924fb844425bff00f355c0356deddc533"
+        ],
+        [
+          "views",
+          "771c98a582e2caa0a9721dda5f08d06ea10f50761d2c804903daa455a1e9f1fc"
+        ]
+      ]
+    }
+  }
+}

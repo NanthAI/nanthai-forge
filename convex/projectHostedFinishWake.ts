@@ -14,6 +14,7 @@ import { armLandingAlarm } from './projectHostedLandingStallWake';
 import { generationStartedAfterPass, orderProofsEnabled, overtakeOlder } from '../src/landing-overtake';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { closeOrderWait, handoffOrderWait, HOSTED_ORDER_WAITS } from './projectHostedLandingOrder';
+import { scheduleNoCarryRelease } from './projectHostedLandingNoCarry';
 import {
   HOSTED_FINISH_COMPOSE_WATCHDOG_MS,
   HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
@@ -355,6 +356,12 @@ export async function wakeLandingOrderWaiters(
   // (`reservationAhead`), and waking it back could cycle (A -> reserved R -> B -> A) at 0 ms until
   // the reservation ends. The reservation holder's own exit still wakes it.
   let after = readyOnly ? row.sequence : -1;
+  // A change held before its Lane check (no-carry hold, Item 1018d0f8) starts it only when this
+  // entry really leaves the order: never on a baton or a re-pin (it still takes main first).
+  // This transaction only re-arms their stall alarms and schedules one release that starts their
+  // checks, so their check setup can never fail this entry's exit (review a26ba245 1).
+  const exits = !speculativeOnly && !readyOnly && repinnedAt === undefined;
+  const held: Doc<'projectHostedLandingRequests'>[] = [];
   for (;;) {
     const waiters = await ctx.db
       .query('projectHostedLandingRequests')
@@ -365,6 +372,10 @@ export async function wakeLandingOrderWaiters(
       .take(32);
     for (const waiter of waiters) {
       after = waiter.sequence;
+      if (waiter.noCarryWait) {
+        if (exits) held.push(waiter);
+        continue;
+      }
       if (readyOnly && (waiter.phase !== 'ready' || heldByPaths(waiter, row))) continue;
       if (repinnedAt !== undefined && !generationStartedAfterPass(waiter.passedAt, repinnedAt)) continue;
       // A re-pin retires speculative source generations, but this predecessor
@@ -429,8 +440,9 @@ export async function wakeLandingOrderWaiters(
       if (waiter.orderLive && (drive || early)) next = waiter;
     }
     // A baton reads one page: waiters past it stay here and this entry's own exit releases them.
-    if (readyOnly || waiters.length < 32) return;
+    if (readyOnly || waiters.length < 32) break;
   }
+  if (held.length) await scheduleNoCarryRelease(ctx, row, held, landed ? 'holder-landed' : 'holder-exit');
 }
 /** Baton (incident 43b51a5e case 2): Ready followers parked on `row` wait because it takes main
  * before them. When `row` itself parks for a hold that lasts a check (its holder is not about to

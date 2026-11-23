@@ -221,6 +221,9 @@ export async function inspectQueue(f) {
     const handed = row.orderWaitHanded !== undefined && row.orderWaitHanded === row.orderWait;
     if ((row.orderWaits?.length ?? 0) < 8 && last?.submissionId !== row.orderWait && !handed)
       add('S6', row, 'stored holder absent from latest recorded wait');
+    // A change held before its Lane check (no-carry hold, Item 1018d0f8) is decided at submit, never by
+    // a claim: no claim edge to compare. L1 above still requires its chain to end at a live holder.
+    if (row.noCarryWait) continue;
     const ahead = await decide(f, row);
     if (
       (ahead?.row.submissionId !== row.orderWait || (!handed && ahead?.held !== last?.held)) &&

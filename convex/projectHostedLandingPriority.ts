@@ -7,6 +7,7 @@ import { ownedProject } from './projectAuthority';
 import { hostedWriteProject } from './projectHostedRecords';
 import { loadLanding } from './projectHostedLandingStore';
 import { landingPriorityState } from './projectHostedLandingOrder';
+import { releaseNoCarryWaiter } from './projectHostedLandingNoCarry';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -82,6 +83,9 @@ export const prioritize = mutation({
       };
       await ctx.db.patch(row._id, patch);
       await retainQueueStatus(ctx, landingPriorityState({ ...row, ...patch }, state));
+      // An urgent change waits only for urgent ones: one held before its Lane check starts it now
+      // (no-carry hold, Item 1018d0f8).
+      if (input.priority === 'urgent') await releaseNoCarryWaiter(ctx, row, 'claim');
       // priorityChange keeps only the latest change; every change is its own receipt.
       await recordMutationReceipt(ctx, {
         projectId: input.projectId,

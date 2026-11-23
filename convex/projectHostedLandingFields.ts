@@ -333,6 +333,10 @@ export const hostedLandingTables = {
     orderLive: v.optional(v.literal(true)),
     /** A passed entry waiting for this older submission to land or stop (server-only). */
     orderWait: v.optional(v.string()),
+    /** A queued change whose Lane check waits for `orderWait`, the spent order-sensitive head of the
+     * order (no-carry hold, Item 1018d0f8): it holds no order, run or timer, and that holder's exit
+     * starts its check (`projectHostedLandingNoCarry:release`). Server-only. */
+    noCarryWait: v.optional(v.literal(true)),
     /** Set on the older submission when a newer one waits for it, so only then its exit wakes waiters. */
     orderWaited: v.optional(v.literal(true)),
     /** The holder a wake handed this passed entry to (it takes main first), until the entry's own

@@ -548,6 +548,40 @@ reverts and partial runs retire as today, and today's unrelated keep reads nothi
 row records its check kind (full, scoped or batch) when the check starts. With the switch off the sweep
 is unchanged.
 
+With `FORGE_QUEUE_NO_CARRY_HOLD=1` (Item 1018d0f8, decision c2be3da5, incident 0e94a117; off by
+default), a plain change does not start its Lane check while the head of the order is a spent
+order-sensitive holder that is still checking. That is the oldest entry that holds order, checking,
+its one overtake step already spent (`overtaken`), and linked to the new change only by its own
+order-sensitive risk (database schema, CI or check configuration). Such a holder takes main first,
+and a check started behind it on the old main is thrown away as `order-sensitive` when it lands. The
+change waits in `queued` (`orderWait` names the holder, `noCarryWait` marks it, the receipt's
+`orderWaits` records `held: no-carry`), and status says which submission it waits for and why. When
+the holder leaves the order (lands, fails, is withdrawn or stops holding order), its exit wake arms
+each held change's stall alarm and schedules one release, so nothing in the release can fail the
+holder's own landing or withdraw (review a26ba245). The release runs in pages of 8 and frees each
+held change: on unchanged main it starts its Lane check on its Candidate; on a moved main it
+recomposes there, as the main-move sweep's solo retire does; otherwise (CI down, a finish step in
+flight) it joins the queue as an arrival without a Lane check. A held change's stall alarm stays
+quiet while its holder still holds order, as a Ready order waiter's does; if the release is lost,
+the alarm releases it the same way. Nothing is held when any of these is true: the step is not
+spent; the new change has its own order-sensitive risk (it keeps the combined check); an older
+entry is still in its Lane check ahead of the holder (it can land first); the change is urgent
+(making a held change urgent starts its check at once); or the change is a re-landing, stacked,
+waits for another landing (`after`) or has unknown paths. Cost: a submit with the switch on and
+known paths reads the oldest order-live row (a page of at most 16 only when that row no longer
+holds order). Only when the head holder is checking with its step spent does it add one
+admitting-index read and one Candidate read. A holder exit with held changes adds one alarm patch
+per held change and one scheduled release call per 8. Idle costs nothing. On the incident replay
+(six plain arrivals behind a spent schema re-check) lost runner ticks fall from 1,088 to 182, the
+slowest landing goes from 1,288 to 1,290 ticks and calls from 554 to 587 (six separate landings
+instead of one group landing, plus the release call). Over the 19 directed and mixed shapes, lost
+runner ticks fall from 19,140 to 16,790 and calls from 12,376 to 12,370. Known cost: when the holder
+is withdrawn, the held changes land one check time later than today (mean 498 to 555 ticks),
+because today they land on the check
+they already ran. The automatic-setting declaration is `NO_CARRY_HOLD_SETTING` in
+`convex/projectHostedLandingNoCarry.ts`. Tests: `tests/hosted-landing-no-carry.test.mjs`; shapes:
+`tests/queue-sim/doomed-check-shapes.mjs`.
+
 With `FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED=1` (Item 687d1eda, off by default), queue checks park the
 same way under the same run rule. A cohort's shared run that fails only on main's red tests, with no
 member named by its diagnosis (paths, contract tests or an earlier combined failure on other tests

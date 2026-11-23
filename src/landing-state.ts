@@ -219,7 +219,10 @@ export function landingStateOf(record: LandingRecord | null | undefined, laneId?
           (state === 'waiting-for-order' && record?.orderWait
             ? (record.orderWait.message ??
               `The check passed; older submission ${record.orderWait.submissionId} takes main first, then this one lands by itself. Nothing to do.`)
-            : view.nextStep));
+            : // A queued change held before its Lane check names its holder (Item 1018d0f8).
+              state === 'queued' && record?.orderWait?.message
+              ? record.orderWait.message
+              : view.nextStep));
   // Every platform retry says since when it waits (Item 0d8a85a3), in UTC like the server's reasons.
   // A CI-down hold (e62d834b) names its own start in its message.
   const since =
