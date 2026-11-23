@@ -263,6 +263,10 @@ test('9b9057a9: a failed end that recorded no cause still names its reason on Ne
   }));
   const [row] = (await needsRead(f)).held;
   assert.equal(row.why, 'check-failed');
+  // The error code outranks an incidental overlap flag, as a recorded cause does.
+  await run(f, 'overlap', ctx => ctx.db.patch(marks(f)[0]._id, { overlap: true }));
+  assert.equal((await needsRead(f)).held[0].why, 'check-failed');
+  await run(f, 'noOverlap', ctx => ctx.db.patch(marks(f)[0]._id, { overlap: false }));
   // A hold whose landing is gone says exactly that: unknown, which every screen words with its next step.
   await run(f, 'landingGone', async ctx => {
     const owner = [...f.tables.projectFinishReadRows.values()].find(

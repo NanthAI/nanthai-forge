@@ -30,7 +30,7 @@ export const markMemory = (): MarkMemory => ({ checking: new Set() });
 export function baseMark(feed: LineFeed | undefined, waiting?: ReadonlySet<string>): MarkState {
   if (!feed) return 'idle';
   const { lanes } = feed;
-  if (lanes.some(lane => lane.stage === 'ready')) return 'landing';
+  if (lanes.some(lane => lane.stage === 'ready' && !lane.held)) return 'landing';
   // Only a hold that waits on a person (approval or review); a Lane held on its own next step is agent work.
   if (lanes.some(lane => waitsOnYou(lane, waiting))) return 'waiting';
   if (lanes.some(lane => isConflict(lane))) return 'overlap';

@@ -328,7 +328,11 @@ export function needsSentence(view: NeedsView): { bold: string; rest: string } {
 export function heldSentence(view: NeedsView): { bold: string; rest: string } {
   const held = view.now.length + view.fyi.length;
   return {
-    bold: held ? `${plural(held, 'Lane')} ${held === 1 ? 'is' : 'are'} held now.` : 'Nothing is held now.',
+    bold: held
+      ? `${view.atLeast ? 'At least ' : ''}${plural(held, 'Lane')} ${held === 1 ? 'is' : 'are'} held now.`
+      : view.atLeast
+        ? 'Some held Lanes could not be listed.'
+        : 'Nothing is held now.',
     rest: view.now.length
       ? `${view.now.length.toLocaleString()} wait${view.now.length === 1 ? 's' : ''} on you, decided on Needs me. Below: everything Forge held, redid or refused.`
       : 'Below: everything Forge held, redid or refused.',

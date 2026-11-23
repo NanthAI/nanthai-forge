@@ -249,14 +249,22 @@ function readRows(read: FyiRead): FyiRow[] {
 }
 
 /** The FYI list as drawn: dismissed and cleared rows out, events windowed, newest first, figures for the window. */
-export function fyiView(read: FyiRead, held: readonly NowRow[], now: number): FyiView {
+export function fyiView(
+  read: FyiRead,
+  held: readonly NowRow[],
+  now: number,
+  /** The Held page lists every Lane held now, whatever the reader dismissed or cleared on Needs me. */
+  holdsAlways = false,
+): FyiView {
   const cleared = read.state.clearedAt;
   const from = cleared ?? startOfDay(now);
   const hidden = new Set(read.state.dismissed);
-  const rows = [...heldRows(held), ...readRows(read)]
-    .filter(row => !hidden.has(row.key))
-    .filter(row => (row.event ? row.at >= from : cleared === null || row.at > cleared))
-    .sort((a, b) => b.at - a.at);
+  const holds = heldRows(held);
+  const kept = (row: FyiRow) =>
+    !hidden.has(row.key) && (row.event ? row.at >= from : cleared === null || row.at > cleared);
+  const rows = [...(holdsAlways ? holds : holds.filter(kept)), ...readRows(read).filter(kept)].sort(
+    (a, b) => b.at - a.at,
+  );
   const inWindow = read.landings.filter(landing => landing.at >= from);
   const redone = inWindow.filter(landing => landing.redone);
   const oldest = read.landings[read.landings.length - 1];

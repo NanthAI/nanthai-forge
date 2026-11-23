@@ -173,3 +173,30 @@ test('9b9057a9: a hold with no landing outcome on record names its next step, on
   );
   assert.equal(laneStateModule.heldState({ state: 'unknown' }).glyph, 'Stopped');
 });
+
+test('9b9057a9 review: the Held page keeps every Lane held now after Clear all or a dismissal', () => {
+  const input = read([held('rev', 'review')]);
+  const view = model.needsView(input, NOW);
+  const cleared = { ...emptyFyi, state: { clearedAt: NOW, clearedSequence: 1, dismissed: [] } };
+  assert.equal(
+    fyi.fyiView(cleared, [...view.now, ...view.fyi], NOW).rows.length,
+    0,
+    'Needs me FYI honours Clear all',
+  );
+  assert.equal(
+    fyi.fyiView(cleared, [...view.now, ...view.fyi], NOW, true).rows.length,
+    1,
+    'the Held page does not',
+  );
+});
+
+test('9b9057a9 review: a review-held Lane that has passed its check shows the F as waiting, not landing', () => {
+  const lane = mark('ready-held', { stage: 'ready' });
+  assert.equal(baseMark({ lanes: [lane], more: 0 }, new Set(['ready-held'])), 'waiting');
+  assert.equal(baseMark({ lanes: [{ ...lane, held: false }], more: 0 }), 'landing');
+});
+
+test('9b9057a9 review: a capped read says "at least" on the Held headline', () => {
+  const view = model.needsView(read([held('a', 'check-failed')], { more: 3, moreIsLowerBound: true }), NOW);
+  assert.match(model.heldSentence(view).bold, /^At least 1 Lane is held now\.$/);
+});

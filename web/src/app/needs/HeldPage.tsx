@@ -30,7 +30,7 @@ export default function HeldPage({ route, projectId, projectName }: PlaceProps) 
   const drawnAt = useMemo(() => Date.now(), [read, fyi]);
   const view = useMemo(() => (read ? needsView(read, drawnAt) : null), [read, drawnAt]);
   const list = useMemo(
-    () => (fyi && view ? fyiView(fyi, [...view.now, ...view.fyi], drawnAt) : null),
+    () => (fyi && view ? fyiView(fyi, [...view.now, ...view.fyi], drawnAt, true) : null),
     [fyi, view, drawnAt],
   );
   const sentence = view ? heldSentence(view) : null;

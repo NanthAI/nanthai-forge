@@ -132,9 +132,9 @@ type Held = Doc<'projectLiveLineLanes'>;
 
 /** The hold a failed end names by its error code when it recorded no `cause` (older or other write paths): the one
  * reading every screen and agent reply shares (src/landing-state.ts), so Forge never says "why not reported" for an
- * end it made itself. Nothing on record: unknown. */
+ * end it made itself. Nothing named: null. */
 function endedWhy(state: ReturnType<typeof storedLandingStateSchema.parse> | null) {
-  if (!state || state.observation?.state !== 'terminal-failed') return 'unknown';
+  if (!state || state.observation?.state !== 'terminal-failed') return null;
   const named: Partial<
     Record<LandingStateName, 'conflict' | 'check-failed' | 'infra' | 'stale-head' | 'rejected'>
   > = {
@@ -144,7 +144,7 @@ function endedWhy(state: ReturnType<typeof storedLandingStateSchema.parse> | nul
     'stale-head': 'stale-head',
     rejected: 'rejected',
   };
-  return named[landingStateOf(state).state] ?? 'unknown';
+  return named[landingStateOf(state).state] ?? null;
 }
 
 /** Why one held Lane is held: the landing its mark is bound to, read once. Its recorded cause wins over an overlap mark. */
@@ -171,11 +171,12 @@ async function reason(
       : observed?.pendingReason === 'waiting-for-review'
         ? 'review'
         : (observed?.cause ??
+          endedWhy(state) ??
           (mark.overlap
             ? 'conflict'
             : observed?.pendingReason === 'waiting-for-dependency'
               ? 'dependency'
-              : endedWhy(state)));
+              : 'unknown'));
   const ended = state?.timing?.ciEndedAt ?? state?.timing?.settledAt;
   const parentLaneId = why === 'dependency' && state ? await dependencyLane(ctx, projectId, state.id) : null;
   return {
