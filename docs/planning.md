@@ -190,6 +190,34 @@ once (a key that came back empty is not asked again), and every large Intent's p
 lookups (100 keys per call), so linking k Items costs about three lookup calls, not one per Intent. Schema 16+ only: older
 reducers do not check links.
 
+### Removing one comment
+
+The Forge operator can remove one reported comment for good (the abuse review's `purge`,
+[abuse reports](security.d/sections/2160-abuse-reports.md#operator-review); `convex/projectCommentPurge.ts`). The Item,
+its other comments, replies to the comment and the thread stay. One mutation appends a `purge-planning-comment` Work
+command that lists the comment's row with the digest of its redacted facts, then rewrites the comment's copies in
+their purged form: its journal row (comment text "Deleted comment", no author label, as above), its `events` and
+`planningComments` index records and payload chunks on every record partition and their store fingerprints, its
+work-store versions (purged marker, body emptied) and head (an older head without an inline value gets the tombstone
+inline), the staged pages of a failed index build (which cannot resume), and its discussion attachments (removed, with
+R2 byte cleanup scheduled). The purge row itself goes to the event table even where planning is a primary store
+writer: it projects no record of its own. A staged index page can no longer be written once its build has stopped.
+Work-store copy and compare count a purged version as matching, since its index row is now the tombstone. Readers accept the purged row by the same one rule, so a rebuild, full load or export keeps
+"Deleted comment" in its place and never brings the text back. A retry of the comment's own operation, or a read of a
+purged version, answers `PLANNING_COMMENT_PURGED` naming the comment and its Item. A retry of the purge with the same
+operation id changes nothing; a comment an earlier purge already removed reports 0. `exportJournal` refuses a journal
+with a comment purge unless the caller sends `purgedRows: 3` (`CLI_UPGRADE_REQUIRED`); the CLI asks for 3, then 2,
+then nothing, as the server allows. Comment rows never enter journal segments, so nothing in the archive holds the
+words.
+
+It refuses, with nothing written: a decision comment (its words are also a line in the Item's Decisions, kept in every
+later version; purge the Item), a comment in the base checkpoint, a project with hosted display snapshots, and a
+project whose Work index is being built or whose record-table migration still keeps an old copy (retry after it
+finishes), and a comment too large to rewrite on every partition in one step (about 8 MiB of reads; retire old
+partitions, or purge the Item). Cost per purge with one record partition, measured
+in `tests/comment-purge.test.mjs`: 27 document reads (about 22 KB) and 9 writes (about 6 KB), the same whatever other
+comments the Item has; each further record partition adds a few point reads. Nothing runs while idle.
+
 ### Versions
 
 The Item page compares any two versions by line, marking the changed words inside a rewritten line, and restores one

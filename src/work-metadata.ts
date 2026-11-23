@@ -8,7 +8,7 @@ import { validateAnchorView } from './work-source-anchor.js';
 import { intentLifecycle } from './work-lifecycle.js';
 import type { IntentMetadataCommand } from './work-intent-types.js';
 import { applyPlanningMetadata, planningRequest, stampPlanningAuthor } from './work-planning-state.js';
-import { applyPlanningPurge } from './work-planning-purge.js';
+import { applyCommentPurge, applyPlanningPurge } from './work-planning-purge.js';
 import { digest, digestChunks } from './state/hash.js';
 import { jsonChunks } from './json-chunks.js';
 import { invariant } from './errors.js';
@@ -245,6 +245,13 @@ export function applyHostedEvent(
       'Planning identity differs from its original hosted operation.',
     );
     applyPlanningPurge(data, event.command, event);
+  } else if (event.command.action === 'purge-planning-comment') {
+    invariant(
+      event.command.operationId === event.id,
+      'INVALID_WORK_JOURNAL',
+      'Planning identity differs from its original hosted operation.',
+    );
+    applyCommentPurge(data, event.command);
   } else if (planning.action === 'put-planning-item' || planning.action === 'comment-planning-item') {
     const write = planning;
     invariant(

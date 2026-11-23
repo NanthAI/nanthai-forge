@@ -7,6 +7,7 @@ import {
   planningPutSchema,
   planningCommentCommandSchema,
   planningPurgeSchema,
+  planningCommentPurgeSchema,
 } from './work-planning-types.js';
 const id = z.string().uuid();
 const oid = z.string().regex(/^[0-9a-f]{40,64}$/);
@@ -52,7 +53,11 @@ export const metadataCommandSchema = z.union([
   planningCommentCommandSchema,
 ]);
 /** Every command a stored Work journal row may hold: client commands plus the server-only purge. */
-export const journalCommandSchema = z.union([metadataCommandSchema, planningPurgeSchema]);
+export const journalCommandSchema = z.union([
+  metadataCommandSchema,
+  planningPurgeSchema,
+  planningCommentPurgeSchema,
+]);
 export type IntentMetadataCommand = z.infer<typeof intentMetadataCommandSchema>;
 export type MetadataCommand = z.infer<typeof metadataCommandSchema>;
 

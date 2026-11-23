@@ -27,6 +27,17 @@ export function planningPurged(itemId: string, purgeOperationId?: string) {
   );
 }
 
+/** A retry or version read of one comment the operator purged (Item b6588425 line 2b): the comment is gone, its Item
+ * stays. Names the comment, its Item and the purge. */
+export function commentPurged(itemId: string, commentId: string, purgeOperationId: string) {
+  return new ForgeError(
+    'PLANNING_COMMENT_PURGED',
+    `The comment ${commentId} on Item ${itemId} was removed permanently by the Forge operator: its text is gone, and it cannot be sent again. The Item is unchanged.`,
+    undefined,
+    { itemId, commentId, purgeOperationId },
+  );
+}
+
 /** Refuse a planning write whose latest version is a tombstone. */
 export function refusePurged(item: Pick<PlanningItem, 'id' | 'purged'> | undefined) {
   if (item?.purged) throw planningPurged(item.id, item.purged.operationId);

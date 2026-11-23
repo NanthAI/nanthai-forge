@@ -9,12 +9,13 @@
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
-import { planningPurgeSchema } from '../src/work-planning-types';
+import { planningCommentPurgeSchema, planningPurgeSchema } from '../src/work-planning-types';
 import { purgedFactsDigest, purgedPlanningRowSchema, type PurgedPlanningRow } from '../src/work-intent-types';
 import { metadataRequest } from '../src/work-metadata';
 import { purgedIntentKeys } from '../src/work-planning-purge';
 
-type Purge = { revision: number; itemId: string; rows: Map<string, string> } | null;
+/** A purge command: an Item's (every row of it) or one comment's (`commentId`, that row only). */
+type Purge = { revision: number; itemId: string; commentId?: string; rows: Map<string, string> } | null;
 type PurgeCache = Map<string, Purge>;
 
 /** The redacted command a purged row keeps, or a journal refusal when it is malformed or still holds words. */
@@ -71,14 +72,24 @@ async function purgeCommand(
   } catch {
     return null;
   }
-  const command = planningPurgeSchema.safeParse(raw);
+  const command = (
+    (raw as { action?: unknown } | null)?.action === 'purge-planning-comment'
+      ? planningCommentPurgeSchema
+      : planningPurgeSchema
+  ).safeParse(raw);
   if (!command.success || command.data.operationId !== operationId) return null;
   if (metadataRequest(command.data) !== row.request) return null;
-  return { revision: row.revision, itemId: command.data.itemId, rows: new Map(command.data.rows) };
+  return {
+    revision: row.revision,
+    itemId: command.data.itemId,
+    ...('commentId' in command.data ? { commentId: command.data.commentId } : {}),
+    rows: new Map(command.data.rows),
+  };
 }
 
 /** Refuses a purged row unless its redacted command is its own operation's and the purge it names exists, is
- * whole, is later and lists the row with the digest of these facts. Returns the facts and the purged Item. */
+ * whole, is later and lists the row with the digest of these facts. Returns the facts, the purged Item and, for one
+ * comment's purge, that comment. */
 export async function verifyPurgedRow(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -98,7 +109,7 @@ export async function verifyPurgedRow(
     'INVALID_WORK_JOURNAL',
     'A purged Work row names no later purge of its Item.',
   );
-  return { facts, itemId: purge.itemId };
+  return { facts, itemId: purge.itemId, commentId: purge.commentId };
 }
 
 /** Verify every purged row of one event page (one lookup per distinct purge; none when no row is purged). */
@@ -115,17 +126,22 @@ export async function verifyPurgedEvents(
 
 /** A purged issue, comment, Intent or lifecycle version keeps its header and digest. It reads as purged only when the
  * purge it names exists and is for the Item the version belongs to (an Intent or lifecycle version: the Item's Intent or
- * a successor of it, purgedIntentKeys); otherwise it stays the integrity failure it is. Returns the purged Item's id. */
+ * a successor of it, purgedIntentKeys); a comment's purge vouches for that comment's versions only. Otherwise it stays
+ * the integrity failure it is. Returns the purged Item's id and, for a comment's purge, the comment's. */
 export async function verifiedPurgedRecord(
   ctx: QueryCtx | MutationCtx,
   row: { projectId: Id<'hostedProjects'>; kind: string; key: string; parent: string; purged: string },
-) {
+): Promise<{ itemId: string; commentId?: string } | null> {
   const purge = await purgeCommand(ctx, row.projectId, row.purged);
   if (!purge) return null;
+  if (purge.commentId !== undefined)
+    return row.kind === 'comment' && row.key === purge.commentId && row.parent === purge.itemId
+      ? { itemId: purge.itemId, commentId: purge.commentId }
+      : null;
   if (row.kind === 'intent' || row.kind === 'lifecycle')
     return purgedIntentKeys(purge.itemId).includes(row.kind === 'intent' ? row.key : row.parent)
-      ? purge.itemId
+      ? { itemId: purge.itemId }
       : null;
   const itemId = row.kind === 'comment' ? row.parent : row.key;
-  return ['issue', 'comment'].includes(row.kind) && purge.itemId === itemId ? itemId : null;
+  return ['issue', 'comment'].includes(row.kind) && purge.itemId === itemId ? { itemId } : null;
 }

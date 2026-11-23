@@ -61,9 +61,12 @@ after the content expires). Look, then act:
   chosen choice and resume prompt, a hand-back's `left`; the answer's own reason
   stays); a reported account or project loses every board note, one page now and
   the rest through the scheduler. Only the document reported is touched, never
-  another one sharing its id. One Item comment cannot be purged: its text lives in
-  every Work store, which only the whole-Item purge rewrites. Suspend the account
-  or dismiss the report.
+  another one sharing its id. A reported Item comment is removed from every Work
+  store and copy, its attachments included, and reads as "Deleted comment"; the
+  Item and the rest of its discussion stay ([removing one comment](../../planning.md#removing-one-comment)).
+  A decision comment is refused (its words are also in the Item body): purge the
+  Item, or suspend the account. The report's excerpt is kept as the operator's
+  evidence.
 - `dismiss` closes the report with no action.
 
 Each action writes a `boardAudit` row naming the report, and the report keeps

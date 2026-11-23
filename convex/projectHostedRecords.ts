@@ -11,7 +11,7 @@ import { sourceAuthority } from '../src/hosted-source-authority';
 import { hostedRecordValue, hostedRecordIndex, type HostedRecordKind } from '../src/hosted-records';
 import { indexedSaveStatus, resumeSaveHeadBackfill, saveHeadFact } from './projectMetricSaveHeads';
 import { invariant } from '../src/errors';
-import { planningPurged } from '../src/work-planning-put';
+import { commentPurged, planningPurged } from '../src/work-planning-put';
 import { verifiedPurgedRecord } from './projectWorkPurgedRows';
 import { digest } from '../src/state/hash';
 import {
@@ -96,9 +96,11 @@ export async function recordVersion(
 export async function hostedRecordBody(ctx: QueryCtx | MutationCtx, row: Doc<'projectHostedRecords'>) {
   // A purged version answers purged, never a digest failure; a marker naming no purge of its Item stays a failure.
   if (row.purged !== undefined) {
-    const itemId = await verifiedPurgedRecord(ctx, { ...row, purged: row.purged });
-    invariant(itemId, 'SOURCE_UNAVAILABLE', 'Exact canonical record bytes are unavailable.');
-    throw planningPurged(itemId, row.purged);
+    const purged = await verifiedPurgedRecord(ctx, { ...row, purged: row.purged });
+    invariant(purged, 'SOURCE_UNAVAILABLE', 'Exact canonical record bytes are unavailable.');
+    throw purged.commentId
+      ? commentPurged(purged.itemId, purged.commentId, row.purged)
+      : planningPurged(purged.itemId, row.purged);
   }
   if (row.inline !== undefined) {
     invariant(

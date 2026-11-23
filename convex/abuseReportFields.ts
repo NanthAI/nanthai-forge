@@ -43,9 +43,20 @@ export const abuseReportTables = {
     reviewedAt: v.optional(v.number()),
     /** The operator alert this report raised, if it raised one: the next alert waits REPORT_ALERT_MS after it. */
     alertedAt: v.optional(v.number()),
-    /** The last review's operation id and what its purge removed: a retry of that review returns them. */
+    /** The last review's operation id and what its purge removed (a report reviewed before `reviews` kept them). */
     reviewOperationId: v.optional(v.string()),
     removed: v.optional(v.number()),
+    /** Each review's operation id, action and what its purge removed, the last REVIEW_RECEIPTS of them: a retry of any
+     * returns its first result, even after a later review of the same report. */
+    reviews: v.optional(
+      v.array(
+        v.object({
+          operationId: v.string(),
+          action: v.union(v.literal('suspend'), v.literal('purge'), v.literal('dismiss')),
+          removed: v.optional(v.number()),
+        }),
+      ),
+    ),
   })
     .index('by_reporter_and_operation', ['reporter', 'operationId'])
     .index('by_status_and_at', ['status', 'at'])

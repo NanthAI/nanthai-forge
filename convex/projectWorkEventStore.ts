@@ -6,7 +6,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import { journalCommandSchema } from '../src/work-intent-types';
 import { metadataRequest } from '../src/work-metadata';
 import { invariant } from '../src/errors';
-import { planningPurged } from '../src/work-planning-put';
+import { commentPurged, planningPurged } from '../src/work-planning-put';
 import { purgedFacts, verifyPurgedRow } from './projectWorkPurgedRows';
 export type StoredWorkEvent = Omit<Doc<'projectWorkEvents'>, '_id'> & {
   _id: Id<'projectWorkEvents'> | Id<'projectHostedRecordBodies'>;
@@ -127,7 +127,7 @@ async function purgedReplay(
   event: StoredWorkEvent,
   replay?: { command: string } | { authority: true },
 ): Promise<StoredWorkEvent> {
-  const { itemId } = await verifyPurgedRow(ctx, projectId, { ...event, purged: event.purged! });
+  const { itemId, commentId } = await verifyPurgedRow(ctx, projectId, { ...event, purged: event.purged! });
   if (replay && 'command' in replay) {
     const command = journalCommandSchema.parse(JSON.parse(replay.command));
     invariant(
@@ -137,5 +137,5 @@ async function purgedReplay(
     );
   }
   if (replay && 'authority' in replay) return event;
-  throw planningPurged(itemId, event.purged);
+  throw commentId ? commentPurged(itemId, commentId, event.purged!) : planningPurged(itemId, event.purged);
 }

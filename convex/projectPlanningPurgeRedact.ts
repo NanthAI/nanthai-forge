@@ -78,7 +78,7 @@ export const purgeSteps = [
   'storeHeads',
 ] as const;
 export type PurgeStep = (typeof purgeSteps)[number];
-const fingerprint = (collection: string) => `_workStoreDigests:${collection}`;
+export const fingerprint = (collection: string) => `_workStoreDigests:${collection}`;
 
 /** The purge's command: its row list in journal order. */
 export async function purgeRows(ctx: Ctx, projectId: Id<'hostedProjects'>, operationId: string) {
@@ -305,7 +305,7 @@ export async function partitionsOf(ctx: Ctx, projectId: Id<'hostedProjects'>) {
 }
 
 /** A journal row in its purged form. The facts written must hash to the digest the purge listed. */
-async function journalRow(
+export async function journalRow(
   ctx: Ctx,
   write: MutationCtx['db'] | undefined,
   projectId: Id<'hostedProjects'>,
@@ -341,7 +341,7 @@ async function journalRow(
 }
 
 /** One index record (and its payload chunks) in its purged form. */
-async function indexRecord(
+export async function indexRecord(
   ctx: Ctx,
   write: MutationCtx['db'] | undefined,
   partition: Id<'projectWorkGenerations'>,
@@ -438,7 +438,7 @@ async function stalePayloads(
   return { changes, after: next };
 }
 
-async function dropFingerprint(
+export async function dropFingerprint(
   ctx: Ctx,
   write: MutationCtx['db'] | undefined,
   partition: Id<'projectWorkGenerations'>,
@@ -452,14 +452,14 @@ async function dropFingerprint(
 }
 
 /** A work-store version of the Item: marked purged (header and digest stay), its body emptied. The tombstone
- * version and the Item's other kinds are left alone. */
-async function storeRecord(
+ * version and the Item's other kinds are left alone. A comment's purge passes no version. */
+export async function storeRecord(
   ctx: Ctx,
   write: MutationCtx['db'] | undefined,
   row: Doc<'projectHostedRecords'>,
-  purge: ItemPurge,
+  purge: Pick<ItemPurge, 'operationId'> & { version?: number },
 ) {
-  if (row.kind === 'issue' && row.version === purge.version + 1) return 0;
+  if (row.kind === 'issue' && purge.version !== undefined && row.version === purge.version + 1) return 0;
   // A journal row's body is redacted by the journal step (it keeps its envelope); a plain body is emptied here, once
   // every version that shares it is purged (the last one empties it, and the check finds one left non-empty).
   const body = await ctx.db.get(row.bodyId);

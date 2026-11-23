@@ -153,6 +153,8 @@ export async function storeVersion(
 ): Promise<'copied' | 'same' | 'refreshed' | 'different'> {
   const { record, ref } = encoded;
   const old = await recordVersion(ctx, projectId, record.kind, record.id, record.version);
+  // A purged version keeps its original digest while the index holds its tombstone: the purge vouches for it.
+  if (old?.purged !== undefined) return 'same';
   if (old && (old.digest !== ref.digest || old.bytes !== ref.bytes)) return 'different';
   const head = await recordHead(ctx, projectId, record.kind, record.id);
   if (!old) {
@@ -697,6 +699,7 @@ export async function journalWorkStoreCompare(
       }
       const stored = await recordVersion(ctx, input.projectId, record.kind, record.id, record.version);
       if (!stored) note(missing, `${record.kind}:${record.id}:${record.version}`);
+      else if (stored.purged !== undefined) matched++;
       else if (stored.digest !== ref.digest || stored.bytes !== ref.bytes)
         note(different, `${record.kind}:${record.id}:${record.version}`);
       else matched++;

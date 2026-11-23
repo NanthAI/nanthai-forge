@@ -15,6 +15,7 @@ export const commutativeCommand = (command: { action: string; anchor?: unknown }
   command.action === 'comment-planning-item' ||
   command.action === 'put-planning-item' ||
   command.action === 'purge-planning-item' ||
+  command.action === 'purge-planning-comment' ||
   (command.action === 'note' && !command.anchor);
 
 export async function caller(ctx: ActionCtx) {

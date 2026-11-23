@@ -35,7 +35,7 @@ import {
 } from './projectAuthority';
 import { intentAuthority } from './projectContributors';
 import { metadataCommandSchema } from '../src/work-intent-types';
-import { planningPurgeSchema } from '../src/work-planning-types';
+import { planningCommentPurgeSchema, planningPurgeSchema } from '../src/work-planning-types';
 import { invariant } from '../src/errors';
 import { acceptancePolicyDigest } from '../src/policy-digest';
 import { indexEntry } from './projectWorkIndexFields';
@@ -271,7 +271,13 @@ export async function appendWork(
     const parsed = metadataCommandSchema.safeParse(JSON.parse(input.command));
     // A purge is never a client command: only the server's purge step appends it, with its projection, so the
     // tombstone and its live checks (Deleted, expected version) land in the same mutation (Item 4c9e961e).
-    const purge = parsed.success ? undefined : planningPurgeSchema.safeParse(JSON.parse(input.command));
+    const raw = JSON.parse(input.command);
+    const purge = parsed.success
+      ? undefined
+      : (raw?.action === 'purge-planning-comment'
+          ? planningCommentPurgeSchema
+          : planningPurgeSchema
+        ).safeParse(raw);
     if (purge?.success)
       invariant(
         project.owner === input.owner && purge.data.operationId === input.operationId && input.projection,

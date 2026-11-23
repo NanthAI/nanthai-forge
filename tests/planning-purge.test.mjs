@@ -586,21 +586,37 @@ test('the CLI asks for purged rows in its one journal read, and drops the argume
     null,
   );
   const calls = [];
-  let older = false;
+  // The highest purgedRows form the server accepts (3: comment purges, Item b6588425 line 2b; 2: purge v2; 0: none).
+  let accepts = 3;
   t.mock.method(exchange.client, 'action', async (_ref, input) => {
     calls.push(structuredClone(input));
-    if (older && input.purgedRows)
+    if ((input.purgedRows ?? 0) > accepts)
       throw Error(
         'ArgumentValidationError: Object contains extra field `purgedRows` that is not in the validator.',
       );
     return 'journal';
   });
   assert.equal(await exchange.journal(), 'journal');
-  assert.deepEqual(calls, [{ projectId: 'project', purgedRows: 2 }], 'one call on a current server');
-  older = true;
+  assert.deepEqual(calls, [{ projectId: 'project', purgedRows: 3 }], 'one call on a current server');
+  accepts = 2;
   calls.length = 0;
   assert.equal(await exchange.journal(), 'journal');
-  assert.deepEqual(calls, [{ projectId: 'project', purgedRows: 2 }, { projectId: 'project' }]);
+  assert.deepEqual(
+    calls,
+    [
+      { projectId: 'project', purgedRows: 3 },
+      { projectId: 'project', purgedRows: 2 },
+    ],
+    'a server before comment purges still gets purge v2',
+  );
+  accepts = 0;
+  calls.length = 0;
+  assert.equal(await exchange.journal(), 'journal');
+  assert.deepEqual(calls, [
+    { projectId: 'project', purgedRows: 3 },
+    { projectId: 'project', purgedRows: 2 },
+    { projectId: 'project' },
+  ]);
 });
 
 async function actionsCommand(s, command) {

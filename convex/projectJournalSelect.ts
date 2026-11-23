@@ -15,6 +15,7 @@ const wordsActions = new Set([
   'intent',
   'note',
   'purge-planning-item',
+  'purge-planning-comment',
 ]);
 /** A journal row a purge may redact or read: kept out of journal segments. A row that does not parse stays too. */
 export function wordsRow(command: string) {

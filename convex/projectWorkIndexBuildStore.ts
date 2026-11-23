@@ -261,7 +261,12 @@ export const putPage = internalMutation({
   handler: async (ctx, input) => {
     await accessibleProject(ctx, input.projectId, input.owner);
     const generation = await ctx.db.get(input.generationId);
-    invariant(generation?.projectId === input.projectId, 'WORK_STALE', 'The index build changed.');
+    // A batch delayed past its build's end must not stage words a purge has since removed.
+    invariant(
+      generation?.projectId === input.projectId && generation.status === 'building',
+      'WORK_STALE',
+      'The index build changed.',
+    );
     const old = await ctx.db
       .query('projectReturnPages')
       .withIndex('by_partition_and_key_and_position', q =>

@@ -203,6 +203,20 @@ export const planningPurgeSchema = z.object({
     .max(PURGE_ROW_LIMIT)
     .refine(rows => new Set(rows.map(([row]) => row)).size === rows.length, 'A purge lists a row once.'),
 });
+/** Permanent removal of one comment (Item b6588425 line 2b): the operator's purge of a reported comment
+ * (convex/projectCommentPurge.ts). Server-only like the Item purge, and like it a reader accepts the comment's purged
+ * row only when this command is whole, later and lists it with the digest of its redacted facts. `rows` is that one
+ * row. The Item and every other row stay as they are; the reducer replaces only the comment's words. */
+export const planningCommentPurgeSchema = z
+  .object({
+    action: z.literal('purge-planning-comment'),
+    operationId: id,
+    itemId: id,
+    commentId: id,
+    rows: z.tuple([z.tuple([id, z.string().regex(/^[0-9a-f]{64}$/)])]),
+  })
+  .refine(command => command.rows[0][0] === command.commentId, 'A comment purge lists its own comment.');
+export type PlanningCommentPurge = z.infer<typeof planningCommentPurgeSchema>;
 export const planningWriteSchema = z.discriminatedUnion('action', [
   planningPutSchema,
   planningCommentCommandSchema,

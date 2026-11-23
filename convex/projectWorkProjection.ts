@@ -12,6 +12,8 @@ export function commandKeys(command: Command, input: { operationId: string }) {
   const keys: { collection: string; key: string }[] = [],
     add = (collection: string, key: string) => keys.push({ collection, key });
   add('events', input.operationId);
+  // One comment's purge changes no index record through its projection: its executor redacts the comment's copies.
+  if (command.action === 'purge-planning-comment') return keys;
   if (command.action === 'intent') {
     add('intents', input.operationId);
     add('sourcePins', command.base);

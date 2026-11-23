@@ -448,7 +448,7 @@ test('review purge of a board note removes that note even when a coordination me
   assert.equal((await f.review({ reportId: again.reportId, action: 'purge', reason: 'gone' })).removed, 0);
 });
 
-test('review dismiss writes an audit row; a comment purge is refused with nothing written', async () => {
+test('review dismiss writes an audit row; a comment purge that cannot run is refused with nothing written', async () => {
   const f = fixture();
   const { itemId, commentId } = f.comment('writer');
   const { reportId } = await f.report({
@@ -457,9 +457,10 @@ test('review dismiss writes an audit row; a comment purge is refused with nothin
     commentId,
     reason: 'Rude',
   });
+  // This fixture keeps no Work index, so the comment purge (tests/comment-purge.test.mjs) refuses before writing.
   await assert.rejects(
     f.review({ reportId, action: 'purge', reason: 'Rude' }),
-    code('HOSTED_ACTION_UNSUPPORTED'),
+    code('PROJECT_WORK_INDEX_MISSING'),
   );
   assert.equal(f.tables.boardAudit.size, 0);
   assert.equal(f.tables.abuseReports.get(reportId).status, 'open');
@@ -469,7 +470,7 @@ test('review dismiss writes an audit row; a comment purge is refused with nothin
     [['dismiss', `report:${reportId}`]],
   );
   assert.deepEqual((await f.queue()).page, [], 'a reviewed report leaves the open queue');
-  assert.deepEqual((await f.queue({ status: 'dismissed' })).page[0].actions, ['suspend', 'dismiss']);
+  assert.deepEqual((await f.queue({ status: 'dismissed' })).page[0].actions, ['suspend', 'purge', 'dismiss']);
   assert.equal((await f.queue({ status: 'dismissed' })).page.length, 1);
   await assert.rejects(f.review({ reportId, action: 'dismiss', reason: ' ' }), code('BAD_ARGUMENT'));
 });

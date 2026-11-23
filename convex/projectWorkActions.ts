@@ -96,10 +96,11 @@ export const commandNode = internalAction({
 export const exportJournal = action({
   // purgedRows: 2 (contract feature planning-purge-v2): the caller replays purged rows, including an Intent's and
   // its notes, and purges that list their rows. Without it (or with v1's `true`) a journal that has a purge is
-  // refused with CLI_UPGRADE_REQUIRED, so an older CLI never meets a row form it cannot read.
+  // refused with CLI_UPGRADE_REQUIRED, so an older CLI never meets a row form it cannot read. purgedRows: 3
+  // (one comment's purge, Item b6588425 line 2b) also replays one comment's purge; a v2 caller is refused a journal that has one.
   args: {
     projectId: v.id('hostedProjects'),
-    purgedRows: v.optional(v.union(v.literal(true), v.literal(2))),
+    purgedRows: v.optional(v.union(v.literal(true), v.literal(2), v.literal(3))),
   },
   returns: v.string(),
   handler: async (ctx, { projectId, purgedRows }): Promise<string> => {
@@ -110,14 +111,17 @@ export const exportJournal = action({
       const purged = snapshot.events.filter(event => event.command.action === 'purged-planning-row').length;
       // A purge command alone (before its rows are redacted) is also a form an older CLI cannot replay.
       invariant(
-        purgedRows === 2 ||
+        purgedRows === 3 ||
+          (purgedRows === 2 &&
+            !snapshot.events.some(event => event.command.action === 'purge-planning-comment')) ||
           !snapshot.events.some(
             event =>
               event.command.action === 'purged-planning-row' ||
-              event.command.action === 'purge-planning-item',
+              event.command.action === 'purge-planning-item' ||
+              event.command.action === 'purge-planning-comment',
           ),
         'CLI_UPGRADE_REQUIRED',
-        'Run nforge update to restore this project: its Work journal has permanently deleted Items.',
+        'Run nforge update to restore this project: its Work journal has permanently deleted Items or comments.',
       );
       return (
         JSON.stringify(

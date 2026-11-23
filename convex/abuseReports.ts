@@ -21,11 +21,13 @@ import { record, recordPartition, selectedGeneration } from './projectWorkIndexS
 import { retainedItem } from './discussionAttachmentRead';
 import { publicWorkPlan } from './publicWorkPlan';
 import { accountOf, applySwitch, purgeMessages } from './projectBoardOperator';
+import { purgeComment } from './projectCommentPurge';
 import { report as reportError } from './errors';
 import { abuseReportInputSchema, type AbuseReportInput } from '../src/hosted-record-input';
 import { planningIssueArguments } from '../src/planning-issue-arguments';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { digest } from '../src/state/hash';
 
 /** What the reporter saw, kept for the operator. */
 const EXCERPT_CHARACTERS = 1_000;
@@ -298,7 +300,7 @@ export const queue = internalQuery({
           ...(row.targetId ? { targetId: row.targetId } : {}),
           reason: row.reason,
           excerpt: row.excerpt,
-          actions: actionsFor(row.kind),
+          actions,
         })),
       ),
       isDone: page.isDone,
@@ -307,10 +309,8 @@ export const queue = internalQuery({
   },
 });
 
-/** The review actions each kind of report supports. One planning comment cannot be purged yet: its text is kept in
- * every Work store and only the whole-Item purge rewrites them all. */
-const actionsFor = (kind: Doc<'abuseReports'>['kind']) =>
-  kind === 'comment' ? ['suspend', 'dismiss'] : ['suspend', 'purge', 'dismiss'];
+/** The review actions each kind of report supports: every kind can be suspended, purged or dismissed. */
+const actions = ['suspend', 'purge', 'dismiss'];
 
 /** Removes the one reported message document, never another under the same id. A board note is deleted (its
  * evidence row stays). A coordination message keeps its envelope with its text replaced, and every copy of that text
@@ -368,12 +368,21 @@ async function purgeMessage(ctx: MutationCtx, row: Doc<'abuseReports'>) {
   return 1;
 }
 
+/** Reviews of one report whose retry still returns its first result. */
+const REVIEW_RECEIPTS = 16;
 const statusOf = { suspend: 'suspended', purge: 'purged', dismiss: 'dismissed' } as const;
+
+/** The Work operation of a comment purge, derived from its review, so a retry of the review appends nothing new and
+ * no other Work operation can share it. */
+const commentPurgeOperation = (reportId: string, operationId: string) => {
+  const hex = digest(JSON.stringify(['abuse-comment-purge', reportId, operationId]));
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+};
 
 /** Review one report: suspend the reported account, purge the reported content, or dismiss. Each writes a boardAudit
  * row naming the report. Suspend is the account switch (every channel at once, devices and sessions signed out,
- * public projects unlisted). Purge removes the reported message, or every board note of a reported project or
- * account. A retry with the same operationId returns the first result and changes nothing; a later review of the
+ * public projects unlisted). Purge removes the reported message or comment (convex/projectCommentPurge.ts: every
+ * copy of its text, the Item kept), or every board note of a reported project or account. A retry with the same operationId returns the first result and changes nothing; a later review of the
  * same report (say, suspend after dismiss) takes a new operationId. */
 export const review = internalMutation({
   args: {
@@ -392,19 +401,16 @@ export const review = internalMutation({
     invariant(/^[0-9a-f-]{36}$/i.test(operationId), 'BAD_ARGUMENT', 'operationId: expected a UUID.');
     const row = await ctx.db.get(reportId);
     invariant(row, 'NOT_FOUND', 'No abuse report with that id.');
-    if (row.reviewOperationId === operationId) {
+    const receipt = row.reviews?.find(review => review.operationId === operationId);
+    if (receipt || row.reviewOperationId === operationId) {
       invariant(
-        row.status === statusOf[action],
+        receipt ? receipt.action === action : row.status === statusOf[action],
         'WORK_OPERATION_CHANGED',
         'Replay the original review, or use a new operationId for a new review.',
       );
-      return { reportId, status: row.status, ...(row.removed === undefined ? {} : { removed: row.removed }) };
+      const removed = receipt ? receipt.removed : row.removed;
+      return { reportId, status: statusOf[action], ...(removed === undefined ? {} : { removed }) };
     }
-    invariant(
-      actionsFor(row.kind).includes(action),
-      'HOSTED_ACTION_UNSUPPORTED',
-      'One planning comment cannot be purged yet. Suspend the account or dismiss the report.',
-    );
     const detail = JSON.stringify({ reportId, operationId });
     const now = Date.now();
     let removed: number | undefined;
@@ -430,10 +436,18 @@ export const review = internalMutation({
         })
       ).deleted;
     } else {
-      removed = await purgeMessage(ctx, row);
+      removed =
+        row.kind === 'comment'
+          ? await purgeComment(ctx, {
+              projectId: row.projectId!,
+              itemId: row.itemId!,
+              commentId: row.targetId!,
+              operationId: commentPurgeOperation(reportId, operationId),
+            })
+          : await purgeMessage(ctx, row);
       await ctx.db.insert('boardAudit', {
         action: 'purge',
-        target: `message:${row.projectId}:${row.targetId}`,
+        target: `${row.kind}:${row.projectId}:${row.targetId}`,
         reason,
         at: now,
         detail: JSON.stringify({ reportId, operationId, deleted: removed, done: true }),
@@ -445,6 +459,10 @@ export const review = internalMutation({
       reviewedAt: now,
       reviewOperationId: operationId,
       removed,
+      reviews: [
+        ...(row.reviews ?? []),
+        { operationId, action, ...(removed === undefined ? {} : { removed }) },
+      ].slice(-REVIEW_RECEIPTS),
     });
     return { reportId, status, ...(removed === undefined ? {} : { removed }) };
   },

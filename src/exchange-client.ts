@@ -566,26 +566,38 @@ export class ConvexExchange implements ExchangeTransport {
     });
   }
   async journal(): Promise<string> {
-    const read = (purgedRows?: 2) =>
+    const read = (purgedRows?: 2 | 3) =>
       this.client.action(action('projectWorkActions:exportJournal'), {
         projectId: this.projectId,
         ...(purgedRows ? { purgedRows } : {}),
       });
-    return retryExchange('Work journal read', this.operationId, async () => {
-      try {
-        // planning-purge-v2: this CLI replays purged rows, so it says so up front (one call). Only a server older
-        // than the feature refuses the argument, and then has no purged rows it may send.
-        return await read(2);
-      } catch (error) {
-        if (
-          !(error instanceof Error) ||
-          !error.message.includes('ArgumentValidationError') ||
-          !error.message.includes('purgedRows')
-        )
-          throw error;
-        return read();
-      }
-    });
+    // purgedRows 3: this CLI replays purged rows and comment purges (Item b6588425 line 2b), so it says so up front (one
+    // call). Only a server older than a form refuses the argument, and then has no such rows it may send.
+    return retryExchange('Work journal read', this.operationId, () =>
+      olderOnRefusal(
+        () => read(3),
+        () =>
+          olderOnRefusal(
+            () => read(2),
+            () => read(),
+          ),
+      ),
+    );
+  }
+}
+
+/** An older server's argument refusal of `purgedRows` runs the older form instead; anything else is thrown. */
+async function olderOnRefusal<T>(read: () => Promise<T>, older: () => Promise<T>) {
+  try {
+    return await read();
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !error.message.includes('ArgumentValidationError') ||
+      !error.message.includes('purgedRows')
+    )
+      throw error;
+    return older();
   }
 }
 

@@ -6,6 +6,7 @@ import {
   PURGED_ITEM_TITLE,
   itemChanged,
   planningModelPutKeys,
+  type PlanningCommentPurge,
   type PlanningItem,
   type PlanningPurge,
 } from './work-planning-types.js';
@@ -73,6 +74,14 @@ export function applyPlanningPurge(
   return tombstone;
 }
 
+/** One comment's purge (Item b6588425 line 2b): the comment keeps its id, Item, thread and time, and loses its words,
+ * as its purged row replays. Earlier copies (the base checkpoint) are scrubbed the same way; nothing else changes. */
+export function applyCommentPurge(data: WorkData, command: PlanningCommentPurge) {
+  for (const comment of data.planningComments)
+    if (comment.id === command.commentId)
+      Object.assign(comment, { text: 'Deleted comment', authorLabel: '' });
+}
+
 /** Replace the words of every retained version and comment of the Item in this Work, whatever wrote them (the base
  * checkpoint, a whole row of an unfinished purge, a purged row). This reaches a full replay (load, export, recovery);
  * the hosted projection and index rebuild hold only the rows a command loads, so their earlier versions are the purge
@@ -96,7 +105,8 @@ export function checkPurgedJournal(events: readonly HostedEvent[]) {
   const purges = new Map<string, { at: number; rows: Map<string, string> }>();
   const listed = new Map<string, { at: number; digest: string }>();
   events.forEach((event, at) => {
-    if (event.command.action !== 'purge-planning-item') return;
+    if (event.command.action !== 'purge-planning-item' && event.command.action !== 'purge-planning-comment')
+      return;
     const rows = new Map(event.command.rows);
     purges.set(event.id, { at, rows });
     for (const [row, digest] of rows) listed.set(row, { at, digest });

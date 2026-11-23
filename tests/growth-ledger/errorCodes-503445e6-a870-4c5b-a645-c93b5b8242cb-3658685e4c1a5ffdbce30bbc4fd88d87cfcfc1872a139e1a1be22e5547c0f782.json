@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "PLANNING_COMMENT_PURGED (Item b6588425 line 2b): a retry or version read of one operator-purged comment. It cannot merge into PLANNING_ITEM_PURGED, whose recovery says the whole Item is gone; here the Item stays and is still editable. The change removes the comment-purge HOSTED_ACTION_UNSUPPORTED refusal and abuseReports actionsFor.",
+  "date": "2026-11-23"
+}
