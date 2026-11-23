@@ -321,10 +321,13 @@ function redactSegment(segment: JournalSegment, purge: ItemPurge, operations: Re
       .filter(
         ({ row }) =>
           !row.purged &&
-          ((row.kind === 'intent' && purge.intentKeys?.includes(row.key)) ||
-            (row.kind === 'issue' && purge.ids.includes(row.key)) ||
-            ((row.kind === 'comment' || row.kind === 'lifecycle') &&
-              (purge.ids.includes(row.parent) || purge.intentKeys?.includes(row.parent)))),
+          // One comment's purge (convex/projectCommentPurgeArchive.ts) reaches that comment's versions only.
+          (purge.commentId !== undefined
+            ? row.kind === 'comment' && row.key === purge.commentId && row.parent === purge.itemId
+            : (row.kind === 'intent' && purge.intentKeys?.includes(row.key)) ||
+              (row.kind === 'issue' && purge.ids.includes(row.key)) ||
+              ((row.kind === 'comment' || row.kind === 'lifecycle') &&
+                (purge.ids.includes(row.parent) || purge.intentKeys?.includes(row.parent)))),
       )
       .map(({ row }) => row._id),
   );

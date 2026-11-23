@@ -40,7 +40,21 @@ export async function placeResolution(
     marker = markerAt(session.root);
   const ours =
     marker?.url === session.address.url && marker.selection.projectId === session.address.projectId;
-  if (ours && marker.selection.laneId === laneId) return inPlaceResolution(session, source, listed);
+  if (ours && marker.selection.laneId === laneId) {
+    // A resolution of this folder's own resolution Lane (b5e8e2d5): the server put the new draft in
+    // the same Lane, so the folder moves from the exact head the sync merged; a replay finds it placed.
+    const from = reusedFrom(source);
+    if (!from || marker.selection.head === source.lane.head)
+      return inPlaceResolution(session, source, listed);
+    const rebased = await rebaseHostedCheckout(
+      session.root,
+      session.exchange,
+      { laneId, origin: from, copies: resolutionCopies(source) },
+      selection,
+    );
+    const restored = rebased?.deletedLocally?.length ? rebased.deletedLocally : undefined;
+    return inPlaceResolution(session, source, listed, restored);
+  }
   // A folder still holding an unresolved draft keeps it: a second, explicit draft opens beside.
   const draftHere = ours && pendingConflictPaths(session.root, marker.selection.laneId).length > 0;
   // A Candidate resolution names this folder's Lane but merged an older save of it (7351b8d7): its
@@ -104,30 +118,38 @@ async function inPlaceResolution(
   const { root, exchange } = session,
     { laneId } = source.lane;
   const resolution = source.resolution;
-  const copied = copyPaths(root, laneId, 'resolution-kept');
-  if (copied && resolution?.candidateId === null && resolution.origin?.head === resolution.left)
-    await foldLateSyncEdits(root, exchange, source.lane, copied, (await listed).inputs);
-  const kept = keptCopies(root, laneId);
-  const folded = boundedCopies(copyPaths(root, laneId, 'resolution-folded'));
+  // The saved head main was merged into: this Lane's own earlier head when it took the draft in place.
+  const savedHead = reusedFrom(source)?.head ?? resolution?.origin?.head;
+  const copies = resolutionCopies(source);
+  const copied = copyPaths(root, copies, 'resolution-kept');
+  if (copied && resolution?.candidateId === null && savedHead === resolution.left)
+    await foldLateSyncEdits(root, exchange, source.lane, copied, (await listed).inputs, copies);
+  const kept = keptCopies(root, copies);
+  const folded = boundedCopies(copyPaths(root, copies, 'resolution-folded'));
   return {
     root,
     inPlace: true,
     kept,
     ...(folded ? { folded } : {}),
     ...(restored ? { restored } : {}),
-    workIn: workInLine(
-      root,
-      laneId,
-      true,
-      kept,
-      undefined,
-      resolution?.origin?.head,
-      restored,
-      undefined,
-      folded,
-    ),
+    workIn: workInLine(root, laneId, true, kept, undefined, savedHead, restored, undefined, folded),
   };
 }
+
+/** The Lane's own pins before a sync whose conflict draft the server put in that same Lane (a
+ * resolution of a resolution, b5e8e2d5); undefined when the draft is a new resolution Lane. */
+export function reusedFrom(source: Pick<SyncConflict, 'lane' | 'from'>) {
+  const from = source.from;
+  return from && from.laneId === source.lane.laneId && from.head !== source.lane.head
+    ? { laneId: from.laneId, head: from.head, sourceVersion: from.sourceVersion }
+    : undefined;
+}
+
+/** The folder name for a draft's kept and folded copies: the Lane id, and for a later draft the
+ * same Lane took in place also its head, so an earlier draft's copies (and the paths its receipt
+ * named) are never overwritten and never suppress folding into the newer draft. */
+export const resolutionCopies = (source: Pick<SyncConflict, 'lane' | 'from'>) =>
+  reusedFrom(source) ? `${source.lane.laneId}.${source.lane.head.slice(0, 12)}` : source.lane.laneId;
 
 /** Why the resolution opens in a new folder. Which side moved matters: a folder behind the Lane's
  * save (a save made elsewhere, or one whose reply this folder lost) was not "saved again"; the
@@ -185,10 +207,11 @@ export function workInLine(
     : '';
   return `WORK IN ${root} (new folder for resolution Lane ${laneId}): ${why}.${siblingSaved}${left}`;
 }
-/** Copies of unsaved edits an in-place resolution set aside for this Lane, read from the folder that
- * holds them (rebaseHostedCheckout's keptAt), at most 100 paths. Undefined when there are none. */
-export function keptCopies(root: string, laneId: string) {
-  return boundedCopies(copyPaths(root, laneId, 'resolution-kept'));
+/** Copies of unsaved edits an in-place resolution set aside for this draft (its resolutionCopies
+ * name), read from the folder that holds them (rebaseHostedCheckout's keptAt), at most 100 paths.
+ * Undefined when there are none. */
+export function keptCopies(root: string, copies: string) {
+  return boundedCopies(copyPaths(root, copies, 'resolution-kept'));
 }
 const boundedCopies = (copies: Copies | undefined) =>
   copies && { at: copies.at, paths: copies.paths.slice(0, 100) };

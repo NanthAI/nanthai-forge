@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { syncResolutionReuse } from './hosted-contract-features.js';
 import { reconcileSourceRequest } from './hosted-source-request.js';
 import { z } from 'zod';
 import {
@@ -442,6 +443,7 @@ async function syncAgentSourceOnce(
       ...(command.cleanOnly ? { cleanOnly: true } : {}),
       ...(command.stackOn ? { stackOn: command.stackOn } : {}),
       ...(command.predecessor ? { predecessor: command.predecessor } : {}),
+      ...(session.capabilities.features?.includes(syncResolutionReuse) ? { reuseResolution: true } : {}),
       operationId,
       ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
       authorityEpoch: session.capabilities.authority.epoch,

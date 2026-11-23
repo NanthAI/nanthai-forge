@@ -21,7 +21,7 @@ import { record, recordPartition, selectedGeneration } from './projectWorkIndexS
 import { retainedItem } from './discussionAttachmentRead';
 import { publicWorkPlan } from './publicWorkPlan';
 import { accountOf, applySwitch, purgeMessages } from './projectBoardOperator';
-import { purgeComment } from './projectCommentPurge';
+import { archivedComment, purgeComment } from './projectCommentPurge';
 import { report as reportError } from './errors';
 import { abuseReportInputSchema, type AbuseReportInput } from '../src/hosted-record-input';
 import { planningIssueArguments } from '../src/planning-issue-arguments';
@@ -372,6 +372,21 @@ async function purgeMessage(ctx: MutationCtx, row: Doc<'abuseReports'>) {
 const REVIEW_RECEIPTS = 16;
 const statusOf = { suspend: 'suspended', purge: 'purged', dismiss: 'dismissed' } as const;
 
+/** How long an archived comment's purge may run (its retries' backoff included) before a retry of its review starts
+ * it again. */
+const ARCHIVED_STALL_MS = 2 * 60 * 60_000;
+const archivedCommentPurge = makeFunctionReference<
+  'action',
+  {
+    projectId: Id<'hostedProjects'>;
+    itemId: string;
+    commentId: string;
+    operationId: string;
+    auditId: Id<'boardAudit'>;
+    attempt?: number;
+  }
+>('projectCommentPurgeArchive:run');
+
 /** The Work operation of a comment purge, derived from its review, so a retry of the review appends nothing new and
  * no other Work operation can share it. */
 const commentPurgeOperation = (reportId: string, operationId: string) => {
@@ -409,11 +424,24 @@ export const review = internalMutation({
         'Replay the original review, or use a new operationId for a new review.',
       );
       const removed = receipt ? receipt.removed : row.removed;
+      // An archived comment's purge that has not finished starts again once it is out of retries (`failed`) or has
+      // made no progress for ARCHIVED_STALL_MS; a run still in its retries is left alone.
+      const audit = receipt?.auditId && (await ctx.db.get(receipt.auditId));
+      const state = audit ? (JSON.parse(audit.detail ?? '{}') as { done?: boolean; failed?: string }) : {};
+      if (audit && state.done !== true && (state.failed || audit.at + ARCHIVED_STALL_MS <= Date.now()))
+        await ctx.scheduler.runAfter(0, archivedCommentPurge, {
+          projectId: row.projectId!,
+          itemId: row.itemId!,
+          commentId: row.targetId!,
+          operationId: commentPurgeOperation(reportId, operationId),
+          auditId: audit._id,
+        });
       return { reportId, status: statusOf[action], ...(removed === undefined ? {} : { removed }) };
     }
     const detail = JSON.stringify({ reportId, operationId });
     const now = Date.now();
     let removed: number | undefined;
+    let auditId: Id<'boardAudit'> | undefined;
     if (action === 'suspend')
       await applySwitch(ctx, { scope: 'account', owner: row.subject, off: true, reason, detail });
     else if (action === 'dismiss')
@@ -435,6 +463,24 @@ export const review = internalMutation({
           reportId,
         })
       ).deleted;
+    } else if (row.kind === 'comment' && (await archivedComment(ctx, row.projectId!, row.targetId!))) {
+      // A comment row archived in an R2 journal segment: the purge reads it there, then rewrites that segment
+      // (convex/projectCommentPurgeArchive.ts), and marks this audit row done when it finishes.
+      removed = 0;
+      auditId = await ctx.db.insert('boardAudit', {
+        action: 'purge',
+        target: `comment:${row.projectId}:${row.targetId}`,
+        reason,
+        at: now,
+        detail: JSON.stringify({ reportId, operationId, deleted: 0, done: false }),
+      });
+      await ctx.scheduler.runAfter(0, archivedCommentPurge, {
+        projectId: row.projectId!,
+        itemId: row.itemId!,
+        commentId: row.targetId!,
+        operationId: commentPurgeOperation(reportId, operationId),
+        auditId,
+      });
     } else {
       removed =
         row.kind === 'comment'
@@ -461,7 +507,12 @@ export const review = internalMutation({
       removed,
       reviews: [
         ...(row.reviews ?? []),
-        { operationId, action, ...(removed === undefined ? {} : { removed }) },
+        {
+          operationId,
+          action,
+          ...(removed === undefined ? {} : { removed }),
+          ...(auditId === undefined ? {} : { auditId }),
+        },
       ].slice(-REVIEW_RECEIPTS),
     });
     return { reportId, status, ...(removed === undefined ? {} : { removed }) };

@@ -209,19 +209,23 @@ export function decisionActor(label: string) {
 }
 
 const MAX_DECISION = 500;
-/** The body with one more line in its `## Decisions` section (made at the end when there is none). The line keeps the
- * date, the author label when it is a public identity, the first paragraph of the text, and the comment's short id. */
-export function bodyWithDecision(
-  body: string,
-  input: { at: string; label: string; text: string; commentId: string },
-) {
+/** The one `## Decisions` line a decision comment writes: date, public author label, first paragraph, short id. */
+export function decisionLine(input: { at: string; label: string; text: string; commentId: string }) {
   const first = input.text
     .trim()
     .split(/\n\s*\n/)[0]!
     .replace(/\s+/g, ' ');
   const said = first.length > MAX_DECISION ? `${first.slice(0, MAX_DECISION - 1)}…` : first;
   const actor = decisionActor(input.label);
-  const line = `- ${input.at.slice(0, 10)}${actor ? ` ${actor}` : ''}: ${said} (comment ${input.commentId.slice(0, 8)})`;
+  return `- ${input.at.slice(0, 10)}${actor ? ` ${actor}` : ''}: ${said} (comment ${input.commentId.slice(0, 8)})`;
+}
+/** The body with one more line in its `## Decisions` section (made at the end when there is none). The line keeps the
+ * date, the author label when it is a public identity, the first paragraph of the text, and the comment's short id. */
+export function bodyWithDecision(
+  body: string,
+  input: { at: string; label: string; text: string; commentId: string },
+) {
+  const line = decisionLine(input);
   const lines = body.replace(/\s+$/, '').split('\n');
   const heading = lines.findIndex(text => /^##\s+Decisions\s*$/i.test(text));
   if (heading < 0) return `${lines.join('\n')}${body.trim() ? '\n\n' : ''}## Decisions\n${line}\n`;

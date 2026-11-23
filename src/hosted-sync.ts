@@ -44,6 +44,9 @@ export const syncRequestSchema = z.discriminatedUnion('kind', [
        * sync-stack-on): the peer must have a live landing, which this Lane's landing then waits for. */
       stackOn: z.uuid().optional(),
       predecessor: predecessorPinSchema.optional(),
+      /** The caller places a conflict draft in this same resolution Lane (contract feature
+       * sync-resolution-reuse, b5e8e2d5); without it a conflict always drafts a sibling. */
+      reuseResolution: z.literal(true).optional(),
       target: z.discriminatedUnion('kind', [
         z
           .object({ kind: z.literal('main'), head: object.shape.sha256, receiptId: z.string().min(1) })

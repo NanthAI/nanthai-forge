@@ -23,6 +23,10 @@ export const laneUndo = 'lane-undo';
 /** Withdraw asks in the slot reserved for bare status (9bc8204c): projectHostedLanding:cancel takes and
  * records `reason`, so a withdraw by submissionId keeps its why. Without it the CLI refuses a reason there. */
 export const landingCancelReason = 'landing-cancel-reason';
+/** Sync asks in the slot reserved for bare status (b5e8e2d5): projectHostedSync:prepare takes
+ * `reuseResolution`, and a plain sync onto main that conflicts on the caller's own resolution Lane puts
+ * the new draft in that Lane. Without it the CLI sends nothing and a conflict drafts a sibling. */
+export const syncResolutionReuse = 'sync-resolution-reuse';
 /** Planning asks for versioned wait reasons in the slot reserved for bare status. */
 export const planningWaitingFeature = 'planning-waiting-on';
 /** The unfiltered Initiative count uses the planning wait feature's discovery slot. */
@@ -257,6 +261,7 @@ export const advertisedFeatures = (asked: readonly string[]) => [
   ...(asked.includes(startLaneTitle) ? [startLaneTitle] : []),
   ...(asked.includes(laneUndo) ? [laneUndo] : []),
   ...(asked.includes(landingCancelReason) ? [landingCancelReason] : []),
+  ...(asked.includes(syncResolutionReuse) ? [syncResolutionReuse] : []),
   ...(asked.includes(planningWaitingFeature) ? [planningWaitingFeature] : []),
   ...(asked.includes(planningInitiativeCountsFeature) ? [planningInitiativeCountsFeature] : []),
   ...(asked.includes(planningHistoryFeature) ? [planningHistoryFeature] : []),

@@ -157,7 +157,12 @@ import {
   type SavedChangedPaths,
 } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
-import { landingCancelReason, laneUndo, missingRequiredFeatures } from './hosted-contract-features.js';
+import {
+  landingCancelReason,
+  laneUndo,
+  missingRequiredFeatures,
+  syncResolutionReuse,
+} from './hosted-contract-features.js';
 import type { LandingHold } from './hosted-landing-hold.js';
 import {
   bareStatus,
@@ -1139,6 +1144,8 @@ export class HostedAgentTransport {
           options = { ...options, features: [...(options.features as string[]), laneUndo] };
         if (action === 'withdraw' && typeof input.submissionId === 'string')
           options = { ...options, features: [...(options.features as string[]), landingCancelReason] };
+        if (action === 'sync')
+          options = { ...options, features: [...(options.features as string[]), syncResolutionReuse] };
         // The CLI may have started this exact read alongside its release check: take it once.
         let early = takeEarlyCapabilities(this.address, { clientVersion: CUTOVER_CLI_VERSION, ...options });
         for (;;) {

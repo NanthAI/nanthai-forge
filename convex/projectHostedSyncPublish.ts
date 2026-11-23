@@ -7,7 +7,7 @@ import { syncForJob } from './projectHostedSyncStore';
 import { requireLaneSourceAuthority } from './projectLaneAuthority';
 import { requireLaneHolder } from './projectLaneHolder';
 import type { MutationCtx } from './_generated/server';
-import { loadSync, hostedSyncInput, writeSyncState } from './projectHostedSyncStore';
+import { loadSync, hostedSyncInput, writeSyncState, type SyncState } from './projectHostedSyncStore';
 import { finishHostedOperation } from './projectHostedOperations';
 import { writeHostedRecord } from './projectHostedRecords';
 import { supersedeLaneFinishes } from './projectHostedLaneFinish';
@@ -196,8 +196,36 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
       'A restack needs its stacked Lane.',
     );
     await markRestackConflict(ctx, input.projectId, lane.id, state.work.stackAfter.head);
+  } else if (
+    result.status === 'conflict' &&
+    request.kind === 'sync' &&
+    reusableResolution(request, lane, input.actor, early)
+  ) {
+    // A resolution of a resolution (b5e8e2d5): the caller's own live resolution Lane takes the new
+    // draft in place, so the chain keeps one Lane id and its first origin instead of a sibling per hop.
+    lane = reusedResolution(lane, {
+      at: first.at,
+      head: result.state.sha256,
+      stack: state.work.mode === 'sync' ? state.work.stackAfter : undefined,
+      early,
+      resolution: {
+        ...(state.work.mode === 'sync' && state.work.stackBase
+          ? { mergeBase: state.work.stackBase.object.sha256 }
+          : {}),
+        conflicts: result.conflicts,
+        left: result.left,
+        right: result.right,
+      },
+    });
+    await writeHostedRecord(ctx, {
+      ...input,
+      authorityEpoch,
+      expectedVersion: lane.version - 1,
+      ownerOnly: ownerInputs,
+      record: lane,
+    });
   } else if (result.status === 'conflict') {
-    // Preserve the conflicted Lane (if any); resolution always gets an isolated sibling.
+    // Preserve the conflicted Lane (if any); its resolution gets an isolated sibling.
     lane = {
       kind: 'lane',
       id: state.resolutionLaneId,
@@ -428,4 +456,64 @@ export async function publishSyncJob(
       result: input.result,
     }),
   );
+}
+
+type SyncLane = NonNullable<SyncState['lane']>;
+type Resolution = NonNullable<SyncLane['resolution']>;
+
+/** A plain sync onto main of the caller's own live resolution Lane takes the new draft in place
+ * (b5e8e2d5): one Lane id per chain, not a sibling per hop. Only when the request opted in (contract
+ * feature sync-resolution-reuse, so an older CLI or an in-flight request keeps the sibling), and only
+ * where the supersede below replaces the Lane's live landings at the old head. An exact predecessor
+ * keeps the sibling (its rollback restores a head, not a resolution), as do a Candidate target, a
+ * restack and another actor's Lane. */
+const reusableResolution = (
+  request: Extract<SyncState['request'], { kind: 'sync' }>,
+  lane: SyncLane | null,
+  actor: string,
+  early: unknown,
+): lane is SyncLane =>
+  request.reuseResolution === true &&
+  request.target.kind === 'main' &&
+  !request.cleanOnly &&
+  !request.predecessor &&
+  !early &&
+  !!lane?.resolution &&
+  lane.state === 'active' &&
+  lane.actor === actor;
+
+/** The same resolution Lane, one version on, holding the new conflict draft. It keeps its id,
+ * Intent, holder, authorship, pin and park, and the chain's first origin, so landing it still
+ * completes the Lane the chain started from. Stack, early pins and restore base are this sync's,
+ * exactly as a new resolution sibling would carry them. */
+function reusedResolution(
+  lane: SyncLane,
+  draft: {
+    at: string;
+    head: string;
+    stack: SyncLane['stack'];
+    early: SyncLane['earlyResolution'];
+    resolution: Pick<Resolution, 'conflicts' | 'left' | 'right' | 'mergeBase'>;
+  },
+): SyncLane {
+  const { stack, earlyResolution, restoreBase, resolution, ...kept } = lane;
+  void stack;
+  void earlyResolution;
+  void restoreBase;
+  return {
+    ...kept,
+    version: lane.version + 1,
+    sourceVersion: lane.sourceVersion + 1,
+    at: draft.at,
+    head: draft.head,
+    ...(draft.stack ? { stack: draft.stack } : {}),
+    ...(draft.early ? { earlyResolution: draft.early } : {}),
+    resolution: {
+      ...draft.resolution,
+      candidateId: null,
+      draftHead: draft.head,
+      ...(resolution?.origin ? { origin: resolution.origin } : {}),
+      status: 'pending',
+    },
+  };
 }

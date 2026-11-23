@@ -66,9 +66,12 @@ after the content expires). Look, then act:
   `artifactStorage:pendingDeletes` counts those still waiting, [removed artifact bytes](../../r2-storage-plan.md#removed-artifact-bytes)),
   and reads as "Deleted comment"; the
   Item and the rest of its discussion stay ([removing one comment](../../planning.md#removing-one-comment)).
-  A decision comment is refused (its words are also in the Item body): purge the
-  Item, or suspend the account. The report's excerpt is kept as the operator's
-  evidence.
+  A decision comment's line also leaves the current Item body, by an audited
+  edit. A comment whose Work row is in the journal archive is purged by a
+  scheduled action, and its audit row says `done: false` until that finishes. A
+  refusal before it wrote anything sets `failed` and returns the report to the
+  open queue; a retry of the same review starts a failed run again.
+  The report's excerpt is kept as the operator's evidence.
 - `dismiss` closes the report with no action.
 
 Each action writes a `boardAudit` row naming the report, and the report keeps

@@ -427,6 +427,9 @@ const projectFields = {
       v.object({
         operationId: v.string(),
         itemId: v.string(),
+        /** One comment's purge whose row is in the journal archive (convex/projectCommentPurgeArchive.ts): only the
+         * segment sweep runs, for that comment; the Item is not purged. */
+        commentId: v.optional(v.string()),
         ids: v.array(v.string()),
         intentId: v.optional(v.string()),
         intentKeys: v.optional(v.array(v.string())),

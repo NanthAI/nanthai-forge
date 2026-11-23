@@ -212,7 +212,9 @@ export async function initiativeCloseHistory(
     return { closedByDay: [], coverage: 'unavailable' as const, unresolved: 0 };
   const selectionBudget = planningHistoryBudget(initiativeWindowBytes);
   const charge = planningHistoryBudget();
-  const purgedItems = new Set(project.itemPurges?.map(({ itemId }) => itemId));
+  const purgedItems = new Set(
+    project.itemPurges?.flatMap(({ itemId, commentId }) => (commentId ? [] : [itemId])),
+  );
   const window = new Map<string, Version & { purged?: string; shelfId?: Id<'projectHostedRecords'> }>();
   const candidates: IssueRecord[] = [];
   const rows = ctx.db

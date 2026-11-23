@@ -97,7 +97,7 @@ async function project() {
     new Set((await read(laneId, { detail: true })).peerEvidence.items.flatMap(item => item.lanes));
   const overlapRow = laneId =>
     [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === laneId);
-  return { s, lane, read, noticed, overlapRow };
+  return { s, lane, read, noticed, overlapRow, write };
 }
 const resolutionOf = (origin, left = digest('moved')) => ({
   resolution: {
@@ -184,6 +184,30 @@ test('a resolve Lane gets no overlap notice about its origin Lane, whatever eith
     'the origin hears nothing about its resolutions',
   );
   assert(theirs.has(unrelated.id));
+});
+
+test('0f76b07e line 2: notices move with a resolution Lane that took a new draft in place, never back to its origin', async () => {
+  const { lane, noticed, overlapRow, write } = await project();
+  const origin = await lane('Original work');
+  const unrelated = await lane('Someone else');
+  const resolve = await lane('Resolution', resolutionOf(origin));
+  // Main moved again: the same resolution Lane takes the new conflict draft (b5e8e2d5), one version on.
+  const redrafted = {
+    ...resolve,
+    head: digest('second draft'),
+    version: resolve.version + 1,
+    sourceVersion: resolve.sourceVersion + 1,
+    resolution: { ...resolve.resolution, left: resolve.head, right: digest('main 2'), status: 'pending' },
+  };
+  await write(
+    redrafted,
+    { baseSequence: 0, intent: 'Resolution', changes: changeFor(shared, 'second draft') },
+    resolve.version,
+  );
+  assert.equal(overlapRow(resolve.id).resolutionOrigin, origin.id, 'the origin link survives the new draft');
+  assert(!(await noticed(resolve.id)).has(origin.id), 'the origin is still not its peer');
+  assert(!(await noticed(origin.id)).has(resolve.id));
+  assert((await noticed(unrelated.id)).has(resolve.id), 'peers name the live resolution Lane, by its one id');
 });
 
 test('Lanes of one stack get no overlap notices about each other; other Lanes and detached ones do', async () => {

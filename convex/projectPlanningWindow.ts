@@ -333,7 +333,9 @@ export async function readBacklogWindowAudit(
       ? (await loadVersionSnapshot(ctx, project._id, partition, oldest, charge))?.item
       : undefined;
   const recordsFrom = oldest && recordedLater(oldestItem?.at, oldest) ? oldest._creationTime : null;
-  const purgedItems = new Set(project.itemPurges?.map(({ itemId }) => itemId));
+  const purgedItems = new Set(
+    project.itemPurges?.flatMap(({ itemId, commentId }) => (commentId ? [] : [itemId])),
+  );
   const scanBefore = cur?.scanBefore;
   const upper = scanBefore?.ts ?? untilMs;
   const rows = input.initiativeId

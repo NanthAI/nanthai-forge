@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedSyncPublish.ts": "7745b634b07fc5afccd9d6b4aee3a86cdf658a3102ff305de24886f1eea34c20"
+  },
+  "replay": {
+    "incident": "b5e8e2d5",
+    "test": "b5e8e2d5 incident replay: a second conflict in the resolution folder stays in the same folder and Lane, resolves and lands once",
+    "receipt": "667432cb-d268-4372-9924-24e316789db0"
+  },
+  "authorModel": "claude-opus-5-5",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "receipt": "667432cb-d268-4372-9924-24e316789db0",
+    "session": "thread:delegated-task:command%3Amcp%3Ab420e404-6d5f-4c72-ab09-631e31bb4794%3Adelegate-task%3A05ff544f-3ce7-4e4d-aa93-401b439cbefd"
+  },
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A678156a0-1ecb-42d0-bf8c-c249c4b54b88",
+  "exercised": {
+    "convex/projectHostedSyncPublish.ts": {
+      "executed": [
+        "publishHostedSync",
+        "publishSyncJob",
+        "reusableResolution",
+        "reusedResolution"
+      ],
+      "digest": "a9b2209321ad99f342e6c34eafa2255fc42f07262e32861723ecce6fe0f1ee35",
+      "units": [
+        [
+          "ForgeError",
+          "c8934d5ec6f70ce797a0d05c3ecfb78031a48937ad3336194885e4520006a12d"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "digest",
+          "5f605f8606bb3242a28c6a44a95e70e8b39f3555b7f0838c11f4e606795a3e50"
+        ],
+        [
+          "earlyPredecessor",
+          "4df9830c15023844fa1a6cefbfc0cb435e39b4178090ae402c2e6e14910bfe13"
+        ],
+        [
+          "finishHostedOperation",
+          "241d16baeaede23d314192e7e47c686b8dc870c2eba959b1bd25a7c24a3b9048"
+        ],
+        [
+          "hostedSyncInput",
+          "ea3577d4da97ca68a10cbe295e21de6f5755c37bc1c35c7d9767a8be2fbe522a"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "loadSourceJob",
+          "1dce57657028da1eae48acfb549a41808b56cea8c709a08ea84e2ca4abcff15d"
+        ],
+        [
+          "loadSync",
+          "69299b29cfc92f4bfd05b5940841f1bcf05605d44a2b2a8a7ea364c81b99ec7c"
+        ],
+        [
+          "makeFunctionReference",
+          "90760cdb0f99f8303180da5ca3bbe536fdac31c89e78b170e62dbf914920e3e4"
+        ],
+        [
+          "markRestackConflict",
+          "40ac45cad98cea8dec0862437c7caa35175627c6f8efe5aa0651f109e96d991c"
+        ],
+        [
+          "publishHostedSync",
+          "7a42a5bb5343839e3931a8b230e4c426838939d4acf075b6acfbfbbb531af9e6"
+        ],
+        [
+          "publishSyncJob",
+          "57d50b0f59c15fda2176337919d6a82f0ab8bed4ea365f6e58f4e54d088fa4b0"
+        ],
+        [
+          "recordEarlyResolutionTiming",
+          "64ab9c2196fdabe3b9bbd042ba3ffdc7b0c13850b534595bedb72d05a53ba706"
+        ],
+        [
+          "requireLaneHolder",
+          "52b7f74673ce5d2ffadd87300291c55de591f4354d03f97de585bb464d4afa18"
+        ],
+        [
+          "requireLaneSourceAuthority",
+          "c2771f6f3c3d41fd2fb06b0e9bde5a8b9914d0cd71f425c99c6d729bd878ccfd"
+        ],
+        [
+          "reusableResolution",
+          "7411fdda6e27d1587e52cc57f6bfca36630a13aa3388ac2fecf9a56f2c8c2346"
+        ],
+        [
+          "reusedResolution",
+          "9ca9fe7b2181970a9f5fe5ff37f78dabd87d52baae27128ad8cf98b9d8e5d04c"
+        ],
+        [
+          "sameSaveLane",
+          "eae4bc08c57e16fb8a8d99ef3a5b4fa9698ca7a4f80fd6ba9e31befd35e2358c"
+        ],
+        [
+          "saveLaneRecord",
+          "403a64a40f3343a35ee8f69271ab8b0d712fbe7fa5606235e41af7f5e162130e"
+        ],
+        [
+          "saveObjects",
+          "25b3bb71dade672f46ba3feff11606121a56b67d6b95ce280898b935edc52dbc"
+        ],
+        [
+          "savePin",
+          "e5b9c59bb3ad5963b9afbcfc3a1070b9f60c113e75b09cf0bee8a0e08cb77788"
+        ],
+        [
+          "sourceServerTiming",
+          "23545f9beefa6856f51da158c38aee0187ab35719b5ab39cc3a55353651bd6ba"
+        ],
+        [
+          "supersedeLaneFinishes",
+          "7965722b02e99f146ec71035cf72e12da0abd0cd2145569a803c078787e8c599"
+        ],
+        [
+          "syncDocsUndo",
+          "c79a6be180929589f4c45f4af807cfa1cbe5bc2f5de8ef16831711e53035a556"
+        ],
+        [
+          "syncForJob",
+          "d308675607f35a3fe1a3c15525150c817eabc0b077cba082089796294f543364"
+        ],
+        [
+          "syncLaneSelection",
+          "1776e0fbf487a3416e095cea8e0f3f7b73d0e10b9b62a3834f78427437fec46d"
+        ],
+        [
+          "syncOutputSchema",
+          "ba2622e1a3c32d4a7eb3819b18e0e3bd716e25ab9c95d57eee3e3b03a6a660c7"
+        ],
+        [
+          "syncResultSchema",
+          "eb9c92afa239975a6eac912806842d83ae5c2bddc8c7623cf812112985ff427b"
+        ],
+        [
+          "writeHostedRecord",
+          "fc8651df82e1fc039dedf06d867148f410393e198d708a05ff5017b7966dfe4f"
+        ],
+        [
+          "writeSyncState",
+          "c8bc16041acadb1c0d08183e4cf41f77b4bbd744323a7462ffb352f1a6e29ccd"
+        ]
+      ]
+    }
+  }
+}

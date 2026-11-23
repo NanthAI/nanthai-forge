@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { completeConflictRecovery } from './hosted-conflict-precheck.js';
+import { completeConflictRecovery, earlierDraft } from './hosted-conflict-precheck.js';
 import { clientCacheRoot } from './root-paths.js';
 import { join } from 'node:path';
 import { readFileSync, rmSync } from 'node:fs';
@@ -101,6 +101,11 @@ export async function reconcileHostedSync(root: string, exchange: HostedAgentExc
   // that exact draft rather than trying to install it into the source Lane.
   if (source.status === 'conflict')
     return { phase: 'conflict', recovery: { ...continuation(), source: progress.terminal } };
+  // A resolve of an earlier draft of this same Lane (b5e8e2d5) is not this folder's to apply.
+  if (source.status === 'resolved' && earlierDraft(root, source)) {
+    clearSyncHandoff(root, handoff.operationId);
+    return null;
+  }
   const marker = markerAt(root);
   if (!marker) {
     const blocked = retainedLocalApplyBlocked(root, handoff.applyOperationId);

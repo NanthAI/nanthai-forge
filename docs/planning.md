@@ -208,16 +208,46 @@ Work-store copy and compare count a purged version as matching, since its index 
 purged version, answers `PLANNING_COMMENT_PURGED` naming the comment and its Item. A retry of the purge with the same
 operation id changes nothing; a comment an earlier purge already removed reports 0. `exportJournal` refuses a journal
 with a comment purge unless the caller sends `purgedRows: 3` (`CLI_UPGRADE_REQUIRED`); the CLI asks for 3, then 2,
-then nothing, as the server allows. Comment rows never enter journal segments, so nothing in the archive holds the
-words.
+then nothing, as the server allows. Hosted display snapshots lose the comment's rows (one indexed read per snapshot,
+at most 64 snapshots).
 
-It refuses, with nothing written: a decision comment (its words are also a line in the Item's Decisions, kept in every
-later version; purge the Item), a comment in the base checkpoint, a project with hosted display snapshots, and a
-project whose Work index is being built or whose record-table migration still keeps an old copy (retry after it
-finishes), and a comment too large to rewrite on every partition in one step (about 8 MiB of reads; retire old
-partitions, or purge the Item). Cost per purge with one record partition, measured
-in `tests/comment-purge.test.mjs`: 27 document reads (about 22 KB) and 9 writes (about 6 KB), the same whatever other
-comments the Item has; each further record partition adds a few point reads. Nothing runs while idle.
+A decision comment's words are also a line in the Item's Decisions. Before the purge row, an audited put as the
+project owner replaces that line in the current body with its emptied form (`- date @actor: Deleted comment (comment
+id)`), with `reason: "Removed the words of a purged decision comment"` in Versions. The line is found by its
+`(comment id)` marker, so an edit of its words since still finds it; two lines with the same short id are refused.
+The purge then rewrites the Item version the decision derived (its index records, its work-store body, inline or not,
+and its display rows), which a replay of the purged comment derives the same way. A decision whose derived version
+keeps its body only in the journal archive is refused; purge the Item instead. Body versions saved between the
+decision and the purge, and the Intent's copies of those bodies, keep the line as history; purge the Item to remove
+them too.
+
+Comment rows no longer enter journal segments, but a row archived before that keeps its command in an R2 segment. The
+abuse review then writes its audit row as running (`done: false`) and schedules `projectCommentPurgeArchive:run`.
+The action reads the command from the one events segment that holds the row's revision and runs the same purge with
+it, checked against the row's request hash. It then rewrites that segment through the Item purge's segment sweep,
+narrowed to this comment, which deletes the old objects before it is over. The last step runs the live copies'
+redaction again, for an index build that read the whole archived row meanwhile, and raises the purge revision, so a
+load or export that read it refuses to finish. It waits while an index build runs, then marks the purge entry
+finished (no sweep state kept; the last 20 finished entries stay) and the audit row done. A Work load that both
+starts and ends during the rewrite can still return the archived words, as during an Item purge's sweep; the audit
+row says the purge is done only after the rewrite. Each step is a fixed point, so a stopped run resumes. A refusal
+before anything was written (a base-checkpoint comment, say) sets `failed` on the audit row, returns the report to
+the open queue and drops that review's receipt. Any other failure retries with backoff (from a minute, doubling, six
+runs), then is kept as `failed`. A retry of the same review starts a run that failed, or one that made no progress
+for two hours. The Item purge executor never takes a comment purge's entry as its own.
+
+Rebuilding a hosted display snapshot page skips a purged comment's versions. A page that pins the rewritten
+decision version still refuses to rebuild (its digest changed).
+
+It refuses, with nothing written: a comment in the base checkpoint (line 2d of Item b6588425 scrubs it), a project
+whose Work index is being built or whose record-table migration still keeps an old copy (retry after it finishes), and
+a comment too large to rewrite on every partition in one step (about 8 MiB of reads; retire old partitions, or purge
+the Item). Cost per purge with one record partition, measured in `tests/comment-purge.test.mjs`: 28 document reads
+(about 22 KB) and 9 writes (about 6 KB), the same whatever other comments the Item has. A decision comment takes 52
+reads and 20 writes. An archived row takes 68 reads and 21 writes, plus 6 R2 requests: a GET to find the command,
+then the sweep's GET, absence check, PUT, read-back and the old object's DELETE. Each further record partition adds
+a few point reads. Without a complete archive index, the sweep pages every segment of the project, resumably, as an
+Item purge's does. Nothing runs while idle.
 
 ### Versions
 

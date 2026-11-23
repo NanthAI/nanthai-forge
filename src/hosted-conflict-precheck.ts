@@ -33,8 +33,12 @@ type ConflictContext = {
   /** The head the sync merged in (main, or the stack parent), and the resolution Lane's recorded base
    * at that time: its own change is measured from the merged head, not from that older base. */
   merged?: { head: string; base: string } | undefined;
+  /** The conflict draft this record belongs to (head, and the Lane version that holds it): a Lane that
+   * takes a new draft in place (b5e8e2d5) keeps one record, so older replays must not write it. */
+  draft?: ConflictDraft | undefined;
 };
 const sha256 = /^[a-f0-9]{64}$/;
+type ConflictDraft = { head: string; version: number };
 function context(root: string, laneId?: string): ConflictContext | undefined {
   try {
     const saved = JSON.parse(readFileSync(pathFor(root), 'utf8'));
@@ -79,6 +83,10 @@ function context(root: string, laneId?: string): ConflictContext | undefined {
         sha256.test(saved.merged?.head) && sha256.test(saved.merged?.base)
           ? { head: saved.merged.head, base: saved.merged.base }
           : undefined,
+      draft:
+        sha256.test(saved.draft?.head) && Number.isSafeInteger(saved.draft?.version)
+          ? { head: saved.draft.head, version: saved.draft.version }
+          : undefined,
     };
   } catch {
     return undefined;
@@ -92,8 +100,13 @@ export function rememberConflictPaths(
   replaceOperation = false,
   originLaneId?: string,
   merged?: { head: string; base: string },
+  /** The draft this conflict placed. `restart`: the server put it in this same Lane (b5e8e2d5), so a
+   * record of an earlier draft starts over (resolve, resolved, finish), keeping the chain; the same
+   * draft's replay keeps it. */
+  draft?: ConflictDraft & { restart: boolean },
 ) {
-  const prior = context(root, laneId);
+  const retained = context(root, laneId);
+  const prior = draft?.restart && retained && retained.draft?.head !== draft.head ? undefined : retained;
   resolveParameters = (!replaceOperation && prior?.resolveParameters) || resolveParameters;
   // This folder was already a resolution Lane and now resolves it in turn: keep the chain, so a
   // command naming any earlier Lane of it still finds this one.
@@ -101,7 +114,7 @@ export function rememberConflictPaths(
   const earlierOrigins =
     previous && previous.laneId === originLaneId && previous.originLaneId
       ? [...(previous.earlierOrigins ?? []), previous.originLaneId].slice(-8)
-      : prior?.earlierOrigins;
+      : retained?.earlierOrigins;
   durableReplace(
     pathFor(root),
     JSON.stringify({
@@ -111,9 +124,10 @@ export function rememberConflictPaths(
       resolved: prior?.resolved,
       finishOptions: prior?.finishOptions,
       finishParameters: prior?.finishParameters,
-      originLaneId: originLaneId ?? prior?.originLaneId,
+      originLaneId: originLaneId ?? retained?.originLaneId,
       ...(earlierOrigins?.length ? { earlierOrigins } : {}),
       merged: merged ?? prior?.merged,
+      draft: draft ? { head: draft.head, version: draft.version } : retained?.draft,
     }),
   );
 }
@@ -136,6 +150,36 @@ export function inPlaceResolution(root: string, originLaneId: string, chain = fa
   return saved?.originLaneId === originLaneId || (chain && saved?.earlierOrigins?.includes(originLaneId))
     ? { laneId: saved.laneId, paths: saved.paths, resolved: saved.resolved === true }
     : undefined;
+}
+/** A sync or resolve result of an earlier draft than the one this folder's record holds: a Lane that
+ * took a new draft in place (b5e8e2d5) keeps one record, so replaying an older operation never
+ * reinstalls, settles or lands that older draft. */
+export function earlierDraft(
+  root: string,
+  source: { lane: { laneId: string; version: number }; resolution: { draftHead: string } | null },
+) {
+  const draft = context(root, source.lane.laneId)?.draft;
+  return (
+    !!draft &&
+    !!source.resolution &&
+    draft.head !== source.resolution.draftHead &&
+    draft.version > source.lane.version
+  );
+}
+/** The resolve operation this folder's conflict record names, when retained. */
+export function conflictResolveParameters(root: string, laneId: string) {
+  return context(root, laneId)?.resolveParameters;
+}
+/** The folder's current conflict step, said for a reply of an earlier draft (`earlierDraft`). */
+export function currentDraftContinuation(root: string, laneId: string) {
+  const current =
+    resolvedFinishContinuation(root, laneId) ??
+    resolutionContinuation(root, laneId, pendingConflictPaths(root, laneId));
+  return {
+    ...current,
+    earlierDraft: true,
+    instruction: `This reply is of an earlier conflict draft of Lane ${laneId}; ${root} holds the newer one. ${current.instruction}`,
+  };
 }
 /** Retain the exact finish a completed resolve handed out, with its operationId. */
 export function rememberResolutionFinish(root: string, laneId: string, parameters: Record<string, unknown>) {

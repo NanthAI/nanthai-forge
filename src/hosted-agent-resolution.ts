@@ -8,6 +8,9 @@ import {
   resolutionFinishOptions,
   rememberResolutionFinish,
   resolvedFinishContinuation,
+  earlierDraft,
+  currentDraftContinuation,
+  conflictResolveParameters,
 } from './hosted-conflict-precheck.js';
 import { shareDependencies, installScriptsNotice } from './shared-dependencies.js';
 import { announceRegistryHosts } from './install-registry-hosts.js';
@@ -36,7 +39,7 @@ import { driveAgentSource, syncAgentSource } from './hosted-agent-source.js';
 import { AuthorityPinRefused, authorityPinRefusal, olderEpochRefusal } from './hosted-main-pin.js';
 import type { SaveThen } from './hosted-save.js';
 import { hostedRootLanePath } from './hosted-root-checkout.js';
-import { placeResolution } from './hosted-resolution-placement.js';
+import { placeResolution, reusedFrom } from './hosted-resolution-placement.js';
 import { applyHostedSync } from './hosted-sync-client.js';
 import { markerAt, retainedLocalApplyBlocked } from './hosted-apply-recovery-records.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
@@ -64,6 +67,11 @@ const completed = (value: unknown) => {
 /** What the sync merged the conflicted head with, and the resolution Lane's base it keeps meanwhile. */
 const mergedOnto = (source: { lane: { base: { head: string } }; resolution: { right: string } | null }) =>
   source.resolution ? { head: source.resolution.right, base: source.lane.base.head } : undefined;
+/** The draft this conflict places; `restart` when the server put it in the synced Lane itself (b5e8e2d5). */
+const draftOf = (source: z.infer<typeof syncResultSchema>) =>
+  source.resolution
+    ? { head: source.resolution.draftHead, version: source.lane.version, restart: !!reusedFrom(source) }
+    : undefined;
 /** Conflict metadata is paged; only the affected files are materialized. The
  * response caps paths and inline bytes, never the editable checkout or resolution. */
 export async function guideHostedSync(session: HostedAgentSession, value: unknown, apply = true) {
@@ -83,13 +91,28 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     join(clientCacheRoot(session.root), 'conflict-objects'),
     session.exchange,
   );
+  // A replay of an earlier draft's sync never puts that draft back over the newer one (b5e8e2d5).
+  if (earlierDraft(session.root, source))
+    return {
+      source: value,
+      conflict: { ...currentDraftContinuation(session.root, source.lane.laneId), laneId: source.lane.laneId },
+    };
   const selection = current.success ? current.data : undefined;
   if (!apply) {
     const { paths, reasons } = await conflictPages(objects, source);
     const root = hostedRootLanePath(session.root, session.address, source.lane.laneId);
     // The open step creates the folder; its client record must exist before then.
     mkdirSync(clientCacheRoot(root), { recursive: true, mode: 0o700 });
-    rememberConflictPaths(root, source.lane.laneId, paths, undefined, false, undefined, mergedOnto(source));
+    rememberConflictPaths(
+      root,
+      source.lane.laneId,
+      paths,
+      undefined,
+      false,
+      undefined,
+      mergedOnto(source),
+      draftOf(source),
+    );
     rememberConflictFinishOptions(root, source.lane.laneId, session.journal.get('resolution-finish-options'));
     const next = { laneId: source.lane.laneId };
     return {
@@ -151,7 +174,16 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     }
   });
   const command = { laneId: source.lane.laneId, operationId: await session.journal.id('next-resolve') };
-  rememberConflictPaths(root, source.lane.laneId, paths, command, false, placed.origin, mergedOnto(source));
+  rememberConflictPaths(
+    root,
+    source.lane.laneId,
+    paths,
+    command,
+    false,
+    placed.origin,
+    mergedOnto(source),
+    draftOf(source),
+  );
   rememberConflictFinishOptions(root, source.lane.laneId, session.journal.get('resolution-finish-options'));
   const shown = reasons.slice(0, 100);
   const origin = source.resolution.origin?.laneId;
@@ -314,6 +346,8 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     });
   }
   const conflictPaths = pendingConflictPaths(session.root, marker.selection.laneId);
+  // Kept so a replayed resolve of an earlier draft (b5e8e2d5) puts the current one back below.
+  const named = conflictResolveParameters(session.root, marker.selection.laneId);
   if (conflictPaths.length)
     rememberConflictPaths(
       session.root,
@@ -537,6 +571,11 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     return { ...(progress as object), ...continuation };
   const source = parsed.data,
     from = parsed.data.from;
+  // A replayed resolve of an earlier draft never settles or lands the newer one (b5e8e2d5).
+  if (earlierDraft(session.root, source)) {
+    if (named) rememberConflictPaths(session.root, source.lane.laneId, conflictPaths, named, true);
+    return { ...(progress as object), ...currentDraftContinuation(session.root, source.lane.laneId) };
+  }
   // Resolve changes only the saved State's parents/message/time. Rebuild that exact header from
   // the retained request and authenticated receipt, then let the existing delta hash check prove
   // every byte. A mismatching/legacy encoding keeps the ordinary exact-State download fallback.

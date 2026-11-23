@@ -7,6 +7,7 @@ import { activeProject } from './projectAuthority';
 import { snapshotByKey, snapshotPage } from './projectHostedSnapshots';
 import { recordVersion, hostedRecordBody } from './projectHostedRecords';
 import { invariant } from '../src/errors';
+import { verifiedPurgedRecord } from './projectWorkPurgedRows';
 
 /** Disposable snapshot-delta display rows. Readers use canonical records for all
  * decisions, and snapshot metadata for completeness; rebuilding never selects
@@ -40,6 +41,9 @@ export const rebuildPage = internalMutation({
       const selected = [];
       for (const ref of page.refs) {
         const row = await recordVersion(ctx, input.projectId, ref.kind, ref.key, ref.version);
+        // A purged version (a purged comment's, convex/projectCommentPurge.ts) has no display row; the rest rebuild.
+        if (row?.purged !== undefined && (await verifiedPurgedRecord(ctx, { ...row, purged: row.purged })))
+          continue;
         invariant(
           row && row.digest === ref.digest,
           'SOURCE_UNAVAILABLE',

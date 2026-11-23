@@ -87,7 +87,12 @@ function onDisk(root: string, path: string, file: NativeFile | undefined, text: 
 export async function rebaseHostedCheckout(
   root: string,
   exchange: Exchange,
-  onto?: { laneId: string; origin: { laneId: string; head: string; sourceVersion: number } },
+  onto?: {
+    laneId: string;
+    origin: { laneId: string; head: string; sourceVersion: number };
+    /** The copies folder name for this draft (resolutionCopies); the Lane id by default. */
+    copies?: string;
+  },
   /** A Lane read the caller just made of the same Lane; saves this function's own read. */
   selected?: HostedLaneSelection,
 ) {
@@ -123,7 +128,7 @@ export async function rebaseHostedCheckout(
     keep?: boolean;
     deleted?: boolean;
   }[] = [];
-  const keptAt = onto ? join(clientCacheRoot(root), 'resolution-kept', lane.laneId) : null;
+  const keptAt = onto ? join(clientCacheRoot(root), 'resolution-kept', onto.copies ?? lane.laneId) : null;
   const materialized = new Set(stale.materialized);
   if (lane.head !== stale.selection.head) {
     const cache = new HostedCheckoutCache(clientCacheRoot(root), transport);
@@ -251,6 +256,8 @@ export async function foldLateSyncEdits(
   lane: HostedLaneSelection,
   copied: { paths: string[]; at: string },
   inputs: ReadonlyMap<string, ConflictInputs>,
+  /** The copies folder name for this draft (resolutionCopies). */
+  copies = lane.laneId,
 ) {
   finishPendingCheckoutDelta(root);
   const draft = readHostedLaneCheckout(root);
@@ -281,7 +288,7 @@ export async function foldLateSyncEdits(
     return;
   }
   const objects = cache.objects;
-  const archived = join(cacheRoot, 'resolution-folded', lane.laneId);
+  const archived = join(cacheRoot, 'resolution-folded', copies);
   workLocked(join(cacheRoot, 'lock'), () => {
     settlePendingCheckoutDelta(root);
     const current = readHostedLaneCheckout(root);

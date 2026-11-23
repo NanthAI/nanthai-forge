@@ -44,8 +44,12 @@ for (const mode of ['implicit', 'implicit with a legacy journal', 'explicit'])
       f.move([f.c.file('a.txt', `main ${edit}\nb\nc\n`)]);
       const { conflict } = (await s.transport().dispatch('sync', { laneId: lanes.at(-1) })).result;
       assert.equal(conflict.laneId, readHostedLaneCheckout(root).selection.laneId);
-      assert(!lanes.includes(conflict.laneId));
-      lanes.push(conflict.laneId);
+      // The first conflict drafts a resolution Lane beside the original; the resolution of that
+      // resolution takes its new draft in the same Lane (0f76b07e, b5e8e2d5).
+      if (edit === 'first') {
+        assert(!lanes.includes(conflict.laneId));
+        lanes.push(conflict.laneId);
+      } else assert.equal(conflict.laneId, lanes.at(-1));
       writeFileSync(join(root, 'a.txt'), `chosen ${edit}\nb\nc\n`);
       const { action, ...resolve } = conflict.next;
       await s.transport().dispatch(action, resolve);

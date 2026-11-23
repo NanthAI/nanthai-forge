@@ -9,7 +9,7 @@
 import { v } from 'convex/values';
 import { internalAction, internalMutation, internalQuery } from './server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { invariant } from '../src/errors';
 import { PURGE_ROW_LIMIT } from '../src/work-planning-types';
@@ -62,9 +62,14 @@ const selection = v.object({
 });
 const stepName = v.union(...purgeSteps.map(step => v.literal(step)));
 
+/** This operation's Item purge entry. A comment purge's entry (`commentId`, convex/projectCommentPurge.ts) shares
+ * only the segment sweep, never these steps. */
+const itemPurge = (project: Doc<'hostedProjects'> | null, operationId: string) =>
+  project?.itemPurges?.find(item => item.operationId === operationId && item.commentId === undefined);
+
 async function entry(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, operationId: string) {
   const project = await ctx.db.get(projectId);
-  const purge = project?.itemPurges?.find(item => item.operationId === operationId);
+  const purge = itemPurge(project, operationId);
   invariant(purge, 'NOT_FOUND', 'This purge has not started.');
   return purge;
 }
@@ -74,7 +79,7 @@ export const status = internalQuery({
   returns: v.any(),
   handler: async (ctx, { projectId, operationId }) => {
     const project = await ctx.db.get(projectId);
-    const purge = project?.itemPurges?.find(item => item.operationId === operationId);
+    const purge = itemPurge(project, operationId);
     return purge && project?.journalRevision && purge.purgedAt === undefined && !purge.segmentSweep
       ? { ...purge, segmentSweep: { after: null, done: false } }
       : (purge ?? null);
@@ -96,7 +101,14 @@ export const begin = internalMutation({
   handler: async (ctx, input) => {
     const project = await ctx.db.get(input.projectId);
     invariant(project, 'PROJECT_UNAVAILABLE', 'Select an existing Forge project.');
-    if (project.itemPurges?.some(item => item.operationId === input.operationId)) return 'begun';
+    invariant(
+      !project.itemPurges?.some(
+        item => item.operationId === input.operationId && item.commentId !== undefined,
+      ),
+      'BAD_ARGUMENT',
+      'This operation id is a comment purge’s. Use a new operationId for an Item purge.',
+    );
+    if (itemPurge(project, input.operationId)) return 'begun';
     if (!(await archiveSelectionCurrent(ctx, project, input.selection.archive))) return 'appended';
     const target = await purgeTarget(ctx, input.projectId, input.itemId);
     invariant(
@@ -296,7 +308,7 @@ export const finish = internalMutation({
       planningPurgeRevision: (project.planningPurgeRevision ?? 0) + 1,
       // A finished entry keeps no working decisions or archive cursor on later project reads.
       itemPurges: project.itemPurges!.map(item => {
-        if (item.operationId !== input.operationId) return item;
+        if (item.operationId !== input.operationId || item.commentId !== undefined) return item;
         const finished = { ...item, decisions: [], purgedAt };
         delete finished.intentKeys;
         delete finished.segmentSweep;

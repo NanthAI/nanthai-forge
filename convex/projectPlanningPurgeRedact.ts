@@ -340,19 +340,13 @@ export async function journalRow(
   return 1;
 }
 
-/** One index record (and its payload chunks) in its purged form. */
-export async function indexRecord(
+/** One index record's header, its payload chunks and the whole value they encode. */
+export async function indexValue(
   ctx: Ctx,
-  write: MutationCtx['db'] | undefined,
   partition: Id<'projectWorkGenerations'>,
   collection: string,
-  key: string,
-  purgeOperationId: string,
-  decisions: ReadonlyMap<string, string>,
-  known?: Doc<'projectWorkRecords'> | Doc<'projectPlanningRecords'> | Doc<'projectWorkDataRecords'>,
+  root: { value: string },
 ) {
-  const root = known ?? (await record(ctx, partition, collection, key));
-  if (!root) return 0;
   const header = JSON.parse(root.value) as Record<string, unknown>;
   const chunks = header.payloadKey
     ? await ctx.db
@@ -365,9 +359,32 @@ export async function indexRecord(
         )
         .take(Number(header.payloadParts ?? 0) + 1)
     : [];
-  const full = chunks.length ? JSON.parse(chunks.map(chunk => chunk.value).join('')) : header;
-  const purgedFull = purgedIndexValue(collection, full, purgeOperationId, decisions);
-  const purgedHeader = purgedIndexValue(collection, header, purgeOperationId, decisions);
+  const full = (chunks.length ? JSON.parse(chunks.map(chunk => chunk.value).join('')) : header) as Record<
+    string,
+    unknown
+  >;
+  return { header, chunks, full };
+}
+
+/** One index record (and its payload chunks) in its purged form. */
+export async function indexRecord(
+  ctx: Ctx,
+  write: MutationCtx['db'] | undefined,
+  partition: Id<'projectWorkGenerations'>,
+  collection: string,
+  key: string,
+  purgeOperationId: string,
+  decisions: ReadonlyMap<string, string>,
+  known?: Doc<'projectWorkRecords'> | Doc<'projectPlanningRecords'> | Doc<'projectWorkDataRecords'>,
+  /** Another fixed-point rewrite in place of the purged form (a decision comment's derived body version). */
+  transform: (value: unknown) => unknown = value =>
+    purgedIndexValue(collection, value, purgeOperationId, decisions),
+) {
+  const root = known ?? (await record(ctx, partition, collection, key));
+  if (!root) return 0;
+  const { header, chunks, full } = await indexValue(ctx, partition, collection, root);
+  const purgedFull = transform(full);
+  const purgedHeader = transform(header);
   if (
     JSON.stringify(purgedFull) === JSON.stringify(full) &&
     JSON.stringify(purgedHeader) === JSON.stringify(header)

@@ -54,6 +54,9 @@ export const abuseReportTables = {
           operationId: v.string(),
           action: v.union(v.literal('suspend'), v.literal('purge'), v.literal('dismiss')),
           removed: v.optional(v.number()),
+          /** An archived comment's purge runs after the review (convex/projectCommentPurgeArchive.ts): its audit row,
+           * so a retry of the review can start it again until the row says done. */
+          auditId: v.optional(v.id('boardAudit')),
         }),
       ),
     ),
