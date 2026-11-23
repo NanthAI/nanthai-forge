@@ -59,6 +59,7 @@ async function surfaces(f) {
     needsHeld: attention.held.length,
     needsYou: needsCount(attention).n,
     projectListHeld: project.held.n,
+    projectListLanes: project.lanes.n,
     exit: feed.exit,
   };
 }
@@ -128,14 +129,15 @@ test('incident replay f5c4d136: a Lane held at save, then superseded, leaves no 
   assert.equal(held.lineHeld, 1, 'the conflict holds the Lane while it is live');
   assert.equal(held.needsHeld, 1, 'Needs me lists it, as the Lane holder’s to fix');
   assert.equal(held.needsYou, 0, 'a conflict is never the owner’s decision');
-  assert.equal(held.projectListHeld, 1);
-  assert.equal(held.topBarMark, 'waiting');
+  assert.equal(held.projectListHeld, 0, 'a conflict is agent work on the project list, not Needs you');
+  assert.equal(held.projectListLanes, 1);
+  assert.equal(held.topBarMark, 'overlap', 'the F does not wait for a person over an agent’s conflict');
 
   assert.equal(await supersede(f), true);
   const after = await surfaces(f);
   assert.deepEqual(
     after,
-    { ...held, lineHeld: 0, topBarMark: 'overlap', needsHeld: 0, projectListHeld: 0 },
+    { ...held, lineHeld: 0, needsHeld: 0 },
     'the supersede lifts the hold in its own transaction; the open Lane stays on the line, unheld (its saved-file conflict is still real)',
   );
   assert.equal(marks(f)[0].retried, true, 'its failed submission still counts against a first try');
@@ -180,7 +182,7 @@ test('the repair lifts a hold a supersede left before the fix, and only that hol
   await heldAtSave(f);
   await supersede(f);
   // The state dev was left in by a supersede from before the fix: the superseded Lane still held at Saved.
-  await run(f, 'staleHold', ctx => ctx.db.patch(marks(f)[0]._id, { held: true }));
+  await run(f, 'staleHold', ctx => ctx.db.patch(marks(f)[0]._id, { held: true, fix: undefined }));
   assert.equal((await surfaces(f)).projectListHeld, 1);
 
   const repairRun = dryRun =>
@@ -195,4 +197,53 @@ test('the repair lifts a hold a supersede left before the fix, and only that hol
   assert.equal(after.lineHeld + after.projectListHeld + after.needsHeld, 0);
   assert.equal(marks(f)[0].retried, true);
   assert.deepEqual((await repairRun(false)).lifted, [], 'a replay finds nothing left');
+});
+
+/** The submission's hold reason as the landing records it: a failed end or a wait for review. */
+const holdWith = (f, state, change) =>
+  run(f, 'hold', async ctx => {
+    const { row, state: before } = await landing.loadLanding(ctx, {
+      projectId: f.projectId,
+      submissionId: state.id,
+    });
+    await landing.writeLanding(
+      ctx,
+      row,
+      { ...before, ...change(before), version: before.version + 1 },
+      false,
+    );
+  });
+
+test('Needs you counts only holds that wait on a person: review on the project list and the top bar, not a failed check or a conflict', async t => {
+  const review = await finishFixture(t);
+  const queued = await review.enqueue(review.request());
+  await holdWith(review, queued, before => ({
+    observation: { ...before.observation, pendingReason: 'waiting-for-review' },
+  }));
+  const waits = await surfaces(review);
+  assert.equal(marks(review)[0].fix, undefined, 'a review hold waits on a person');
+  assert.equal(waits.projectListHeld, 1);
+  assert.equal(waits.projectListLanes, 0);
+  assert.equal(waits.topBarMark, 'waiting');
+
+  const failed = await finishFixture(t);
+  const submission = await failed.enqueue(failed.request());
+  await holdWith(failed, submission, before => ({
+    phase: 'terminal-failed',
+    observation: { ...before.observation, cause: 'check-failed', pendingReason: null },
+    error: { code: 'CHECK_FAILED', message: 'Check failed.' },
+  }));
+  const agentWork = await surfaces(failed);
+  assert.equal(marks(failed)[0].held, true, 'the hold is real: Needs me lists it as its agent’s to fix');
+  assert.equal(marks(failed)[0].fix, true);
+  assert.equal(agentWork.needsHeld, 1);
+  assert.equal(agentWork.needsYou, 0);
+  assert.equal(agentWork.projectListHeld, 0, 'a failed check is not Needs you on the project list');
+  assert.equal(agentWork.projectListLanes, 1, 'it counts as agent work');
+  assert.notEqual(agentWork.topBarMark, 'waiting', 'nor does the F wait for a person');
+
+  // A resubmitted Lane (new head, new submission) carries no stale fix mark.
+  await writeLane(failed, () => ({ head: 'ef'.repeat(32) }));
+  assert.equal(marks(failed)[0].held, false);
+  assert.equal(marks(failed)[0].fix, undefined);
 });

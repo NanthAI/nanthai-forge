@@ -30,7 +30,8 @@ export function baseMark(feed: LineFeed | undefined): MarkState {
   if (!feed) return 'idle';
   const { lanes } = feed;
   if (lanes.some(lane => lane.stage === 'ready')) return 'landing';
-  if (lanes.some(lane => lane.held)) return 'waiting';
+  // Only a hold that waits on a person (approval or review); a Lane held on its own next step is agent work.
+  if (lanes.some(lane => lane.held && !lane.fix)) return 'waiting';
   if (lanes.some(lane => lane.overlap)) return 'overlap';
   if (lanes.some(lane => lane.stage === 'checking')) return 'checks';
   const open = lanes.length + feed.more;

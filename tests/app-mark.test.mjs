@@ -36,6 +36,12 @@ test('standing priority: landing > waiting > overlap > checks > working, many > 
     'waiting',
   );
   assert.equal(baseMark(feed([lane('a', 'ready'), lane('b', 'saved', { held: true })])), 'landing');
+  // Issue f5c4d136: a hold on the Lane's own next step (failed check, conflict) is agent work, not a person's turn.
+  assert.equal(baseMark(feed([lane('a', 'saved', { held: true, fix: true })])), 'w1');
+  assert.equal(
+    baseMark(feed([lane('a', 'saved', { held: true, fix: true }), lane('b', 'saved', { held: true })])),
+    'waiting',
+  );
 });
 
 test('the first read of a project never replays its last exit', () => {

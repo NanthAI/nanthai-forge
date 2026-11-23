@@ -24,14 +24,20 @@ function selection(state: LineState) {
           ? 'queued'
           : 'saved'
   ) as 'checking' | 'ready' | 'queued' | 'saved';
+  // A landing held for a person's approval or review: the only hold that waits on someone (Issue f5c4d136). The
+  // parked holds (`main-red`, `ci-down`) and a failed end ask nobody.
+  const person = state.observation?.pendingReason === 'waiting-for-review';
+  // A landing withdrawn by its agent (or a person) waits on nobody: its Lane is back at Saved (Item 0cb9b064).
+  const held =
+    state.held === true ||
+    person ||
+    (state.phase === 'terminal-failed' && state.error?.code !== 'LANDING_CANCELLED') ||
+    state.observation?.pendingReason === 'waiting-for-dependency';
   return {
     stage,
-    // A landing withdrawn by its agent (or a person) waits on nobody: its Lane is back at Saved (Item 0cb9b064).
-    held:
-      state.held === true ||
-      (state.phase === 'terminal-failed' && state.error?.code !== 'LANDING_CANCELLED') ||
-      state.observation?.pendingReason === 'waiting-for-review' ||
-      state.observation?.pendingReason === 'waiting-for-dependency',
+    held,
+    // Held on the Lane's own next step: nobody is asked (a failed check, a conflict, a dependency, main red).
+    fix: held && !person ? (true as const) : undefined,
     // Lanes checked together (one batch, or one submission of several Lanes) share a key while checked.
     check: stage === 'checking' ? (state.batchId ?? state.id)?.slice(0, 8) : undefined,
     // Parked by the gate while main is red (projectHostedGate.ts holdMainRed): held, but no person is asked.
@@ -168,6 +174,7 @@ export async function transitionLineSubmission(
     retried ||
     prior.stage !== next.stage ||
     prior.held !== next.held ||
+    prior.fix !== next.fix ||
     prior.check !== next.check ||
     prior.mainRed !== next.mainRed;
   const step = flowStep(before, state);

@@ -30,6 +30,7 @@ export const liveLineResult = v.object({
       changedAt: v.number(),
       check: v.optional(v.string()),
       mainRed: v.optional(v.literal(true)),
+      fix: v.optional(v.literal(true)),
     }),
   ),
   more: v.number(),
@@ -129,7 +130,7 @@ export const read = finishQuery({
       const checks = includeChecks ? await lineChecks(finishReadSourceDb(ctx), project, marks) : undefined;
       return {
         ...(checks ? { checks } : {}),
-        lanes: marks.slice(0, 60).map(({ laneId, stage, held, overlap, changedAt, check, mainRed }) => ({
+        lanes: marks.slice(0, 60).map(({ laneId, stage, held, overlap, changedAt, check, mainRed, fix }) => ({
           laneId,
           stage,
           held,
@@ -137,6 +138,7 @@ export const read = finishQuery({
           changedAt,
           ...(check ? { check } : {}),
           ...(mainRed ? { mainRed } : {}),
+          ...(fix ? { fix } : {}),
         })),
         more: Math.max(0, marks.length - 60),
         moreIsLowerBound: marks.length === 101,

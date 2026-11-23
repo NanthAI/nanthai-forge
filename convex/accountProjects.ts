@@ -42,9 +42,10 @@ export const accountProject = v.object({
   starred: v.optional(v.boolean()),
   /** The hour (as ms) of the last landing on main or the project's creation: the list's order key. */
   activityAt: v.number(),
-  /** Lanes held for a person: what needs someone. */
+  /** Lanes held for a person (an approval or review): what needs someone. A Lane held on its own next step (a failed
+   * check, a conflict, a wait) counts under `lanes`, as agent work (Issue f5c4d136). */
   held: count,
-  /** Open Lanes not held: editing, saved, checking or ready. */
+  /** Open Lanes that wait on no person: editing, saved, checking, ready, or held on their own next step. */
   lanes: count,
   main: v.union(v.object({ at: v.optional(v.number()), passing: v.boolean() }), v.null()),
   /** Items by state; null until the project's plan has compact pages (or it has no plan). */
@@ -133,6 +134,8 @@ async function row(
     exit?: { at: number };
   };
   const mainAt = value.main?.at ? Date.parse(value.main.at) : NaN;
+  // A hold that waits on a person is Needs you; a Lane held on its own next step is agent work (no extra read).
+  const waiting = held.filter(mark => !mark.fix);
   const activityAt = Math.max(
     project._creationTime,
     Number.isFinite(mainAt) ? mainAt : 0,
@@ -149,8 +152,8 @@ async function row(
     visibility: project.visibility === 'public' ? 'public' : 'private',
     ...(star === undefined ? {} : { starred: star }),
     activityAt,
-    held: capped(held.length, HELD_LIMIT),
-    lanes: capped(open.length, OPEN_LIMIT),
+    held: { n: Math.min(waiting.length, HELD_LIMIT), atLeast: held.length > HELD_LIMIT },
+    lanes: capped(open.length + held.length - waiting.length, OPEN_LIMIT),
     main: value.main
       ? { ...(Number.isFinite(mainAt) ? { at: mainAt } : {}), passing: value.main.check === 'passed' }
       : null,

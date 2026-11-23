@@ -74,7 +74,7 @@ export const supersededHolds = internalMutation({
       if (!mark.held || mark.stage !== 'saved') continue;
       const row = await ctx.db.get(mark.sourceId);
       if (!row?.open || row.superseded?.laneHead !== row.head) continue;
-      if (!dryRun) await changeLineMark(ctx.db, mark, { held: false });
+      if (!dryRun) await changeLineMark(ctx.db, mark, { held: false, fix: undefined });
       lifted.push(mark.laneId);
     }
     return { checked: page.page.length, lifted, cursor: page.isDone ? null : page.continueCursor };

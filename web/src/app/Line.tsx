@@ -29,6 +29,8 @@ export type LineFeed = {
     check?: string;
     /** Held only because main is failing. */
     mainRed?: true;
+    /** Held on its own next step (a failed check, a conflict, a wait): no person is asked. */
+    fix?: true;
   }[];
   more: number;
   moreIsLowerBound: boolean;

@@ -105,19 +105,21 @@ export async function removeLineMark(db: Db, old: Mark, kind: 'landed' | 'set-as
 export async function changeLineMark(
   db: Db,
   old: Mark,
-  patch: Partial<Pick<Mark, 'stage' | 'held' | 'overlap' | 'check' | 'mainRed'>>,
+  patch: Partial<Pick<Mark, 'stage' | 'held' | 'overlap' | 'check' | 'mainRed' | 'fix'>>,
 ) {
   const stage = patch.stage ?? old.stage;
   const held = patch.held ?? old.held;
   const overlap = patch.overlap ?? old.overlap;
   const check = 'check' in patch ? patch.check : old.check;
   const mainRed = 'mainRed' in patch ? patch.mainRed : old.mainRed;
+  const fix = 'fix' in patch ? patch.fix : old.fix;
   const changed =
     stage !== old.stage ||
     held !== old.held ||
     overlap !== old.overlap ||
     check !== old.check ||
-    mainRed !== old.mainRed;
+    mainRed !== old.mainRed ||
+    fix !== old.fix;
   if (!changed) return;
   await db.patch(old._id, { ...patch, ...(stage !== old.stage ? { changedAt: Date.now() } : {}) });
 }
@@ -168,6 +170,7 @@ export async function trackLineLane(
     // A new head leaves its submission: no check key, no main-red hold.
     check: undefined,
     mainRed: undefined,
+    fix: undefined,
   };
   if (old) {
     const owner = await lineOwner(ctx.db, old.laneId);
@@ -215,7 +218,7 @@ export async function patchLineLane(
   // Saved) waits on nobody, so it lifts in the patch that leaves presence. A live submission's hold (queued, checking
   // or ready) stays its own, and the mark keeps its binding and `retried`.
   else if (patch.superseded) {
-    if (old.held && old.stage === 'saved') await changeLineMark(db, old, { held: false });
+    if (old.held && old.stage === 'saved') await changeLineMark(db, old, { held: false, fix: undefined });
   } else if ('conflicted' in patch) await changeLineMark(db, old, { overlap: Boolean(patch.conflicted) });
 }
 /** Main's small display snapshot shares the exit row; no Work revision is copied. With a scheduler (acceptance), a
