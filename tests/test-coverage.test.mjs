@@ -190,7 +190,7 @@ test('V8 decoder merges workers and children, maps built core paths, and rejects
 test('real supervisor attributes inherited child-process coverage to its test file', t => {
   const directory = mkdtempSync(join(tmpdir(), 'forge-coverage-run-'));
   t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  for (const dir of ['src', 'dist', 'tests', 'scripts', 'web', 'convex', 'netlify'])
+  for (const dir of ['src', 'dist', 'tests', 'scripts', 'web', 'convex', 'site'])
     mkdirSync(join(directory, dir));
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
   writeFileSync(join(directory, 'package-lock.json'), '{"packages":{}}');

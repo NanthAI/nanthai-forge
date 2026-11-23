@@ -7,7 +7,6 @@ const removal = await import(moduleUrl('../convex/importRemoval.ts'));
 const lifecycle = await import(moduleUrl('../convex/lifecycle.ts'));
 const imports = await import(moduleUrl('../convex/imports.ts'));
 const saved = await import(moduleUrl('../convex/savedViews.ts'));
-const remote = await import(moduleUrl('../convex/remote.ts'));
 const interests = await import(moduleUrl('../convex/interests.ts'));
 const { currentAccess } = await import(moduleUrl('../convex/access.ts'));
 const paginationOpts = { cursor: null, numItems: 50 };
@@ -94,8 +93,6 @@ test('public and private removals disappear immediately from owner, shared proje
       await imports.update._handler(s.ctx, { id: 'own', generation: 1, phase: 'ready', artifactKey: 'late' }),
       false,
     );
-    assert.equal(await imports.handoff._handler(s.ctx, { id: 'own', generation: 2 }), false);
-    assert.equal(await imports.claim._handler(s.ctx, { id: 'own', generation: 2 }), false);
   }
 });
 
@@ -166,31 +163,4 @@ test('cleanup drains every import dependency and nested zone/grant records acros
   assert.equal(s.files.has('saved'), false);
   await lifecycle.purge._handler(s.ctx, { id: 'own' });
   await removal.remove._handler(s.ctx, command);
-});
-
-test('late remote uploads are discarded after removal without deleting another import’s retained blob', async () => {
-  const s = state([
-    { ...job(), visibility: 'public', remote: true },
-    { ...job('other'), artifactKey: 'shared' },
-  ]);
-  await removal.remove._handler(s.ctx, command);
-  for (const exists of [true, false]) {
-    if (!exists) s.tables.imports.delete('own');
-    s.file('late', new Blob(['late']));
-    assert.equal(
-      await remote.update._handler(s.ctx, { id: 'own', generation: 1, phase: 'ready', artifactKey: 'late' }),
-      false,
-    );
-    assert.equal(s.files.has('late'), false);
-    assert.equal(
-      await remote.update._handler(s.ctx, {
-        id: 'own',
-        generation: 1,
-        phase: 'ready',
-        artifactKey: 'shared',
-      }),
-      false,
-    );
-    assert.ok(!s.deleted.includes('shared'));
-  }
 });

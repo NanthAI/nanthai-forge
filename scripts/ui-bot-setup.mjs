@@ -14,7 +14,7 @@ import { convexToken, launchBotBrowser } from './ui-shots/browser.mjs';
 import { openBotCredentialStore } from './ui-shots/bot-credential-store.mjs';
 import { provisionBotPasskey } from './ui-shots/passkey-enrollment.mjs';
 
-const devOrigin = 'https://nanthai-forge-dev.netlify.app';
+const devOrigin = 'https://nanthai-forge-dev.nanthai-forge.workers.dev';
 const devDeployment = 'https://benevolent-wildebeest-974.convex.cloud';
 
 function ownerClient(deployment) {

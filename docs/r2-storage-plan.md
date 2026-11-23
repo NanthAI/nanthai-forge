@@ -85,7 +85,7 @@ The exact Cloudflare API rule array is:
 [
   {
     "allowed": {
-      "origins": ["https://nanthai-forge-dev.netlify.app", "http://localhost:5173"],
+      "origins": ["https://nanthai-forge-dev.nanthai-forge.workers.dev", "http://localhost:5173"],
       "methods": ["GET", "HEAD", "PUT"],
       "headers": ["Range", "Content-Type", "If-None-Match", "x-amz-checksum-sha256"]
     },
@@ -107,7 +107,7 @@ can validate a 206 response. No wildcard origin or public bucket is required.
 With the lead's existing cf CLI profile and bucket selection, apply the rule array:
 
 ```sh
-cf r2 buckets cors update "$R2_BUCKET" --rules '[{"allowed":{"origins":["https://nanthai-forge-dev.netlify.app","http://localhost:5173"],"methods":["GET","HEAD","PUT"],"headers":["Range","Content-Type","If-None-Match","x-amz-checksum-sha256"]},"exposeHeaders":["Content-Range","Content-Length","ETag","x-amz-checksum-sha256"],"maxAgeSeconds":3600}]'
+cf r2 buckets cors update "$R2_BUCKET" --rules '[{"allowed":{"origins":["https://nanthai-forge-dev.nanthai-forge.workers.dev","http://localhost:5173"],"methods":["GET","HEAD","PUT"],"headers":["Range","Content-Type","If-None-Match","x-amz-checksum-sha256"]},"exposeHeaders":["Content-Range","Content-Length","ETag","x-amz-checksum-sha256"],"maxAgeSeconds":3600}]'
 cf r2 buckets cors get "$R2_BUCKET"
 ```
 

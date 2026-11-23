@@ -47,7 +47,7 @@ function fixture(t) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);
   };
-  for (const path of ['src/value.ts', 'web/src/value.tsx', 'convex/value.ts', 'netlify/functions/value.mts'])
+  for (const path of ['src/value.ts', 'web/src/value.tsx', 'convex/value.ts', 'site/value.ts'])
     write(path, 'export const value = 1;\n');
   return { root, write };
 }
@@ -78,7 +78,7 @@ test('Oxc selects source explicitly inside ignored native Lanes and preserves ex
   write('tests/value.test.mjs', 'export const value = 1;\n');
   const sources = [
     'convex/value.ts',
-    'netlify/functions/value.mts',
+    'site/value.ts',
     'src/value.ts',
     'tests/value.test.mjs',
     'web/src/value.tsx',

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Per-visitor limits (Item b6588425, "Per-client limits"): device sign-in start and renewal go through the site's edge
-// (netlify/functions/device-auth.mts), which forwards only a keyed hash of the platform-reported address; the backend
+// (site/device-auth.ts, in the site Worker), which forwards only a keyed hash of the platform-reported address; the backend
 // charges that visitor (convex/visitorBudget.ts) before the deployment budget. Two synthetic visitors keep separate
 // budgets, the noisy one is refused with a clear message, and no address reaches a row, a reply, a header or a log.
 // The signed-out source-read case is in public-code-access.test.mjs (it needs that file's public project fixture).
@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { getFunctionName } from 'convex/server';
-import { moduleSource, moduleUrl } from './convex-module.mjs';
+import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 import { signedDevice } from '../dist/device-key.js';
 import { clientHash, clientKey } from '../dist/client-hash.js';
@@ -22,9 +22,19 @@ const modules = {
 const stableActions = await import(moduleUrl('../convex/deviceStableActions.ts'));
 const visitorBudget = await import(moduleUrl('../convex/visitorBudget.ts'));
 const { default: http } = await import(moduleUrl('../convex/http.ts'));
-const edge = await import(
-  `data:text/javascript;base64,${Buffer.from(moduleSource('../netlify/functions/device-auth.mts')).toString('base64')}`
-);
+const { serve: siteWorker } = await import(moduleUrl('../site/worker.ts'));
+const { DEVICE_PATHS } = await import(moduleUrl('../site/device-auth.ts'));
+/** The site Worker as Cloudflare runs it: its settings are bindings, the platform sets CF-Connecting-IP. */
+const edge = (request, ip) => {
+  if (ip !== undefined) request.headers.set('cf-connecting-ip', ip);
+  const env = {
+    ASSETS: { fetch: () => assert.fail('device sign-in never serves the app') },
+    FORGE_CONVEX_SITE_URL: process.env.FORGE_CONVEX_SITE_URL,
+    FORGE_SITE_DEVICE_KEY: process.env.FORGE_SITE_DEVICE_KEY,
+    FORGE_CLIENT_HASH_KEY: process.env.FORGE_CLIENT_HASH_KEY,
+  };
+  return siteWorker(request, env);
+};
 
 const BACKEND = 'https://forge-test.convex.site';
 const SITE = 'https://forge.example';
@@ -90,9 +100,9 @@ function deployment(t, { siteKey = 'synthetic-site-device-key' } = {}) {
     };
   };
   const via = async (ip, operation, body) => {
-    const response = await edge.default(
+    const response = await edge(
       new Request(`${SITE}/auth/device/${operation}`, { method: 'POST', body: JSON.stringify(body) }),
-      { ip },
+      ip,
     );
     const reply = await response.json();
     seen.push(JSON.stringify(reply));
@@ -231,14 +241,14 @@ test('without the site key the backend keeps its direct sign-in, so an environme
 test('the edge refuses to forward when it cannot key the visitor, and never forwards an address', async t => {
   const d = deployment(t);
   for (const ip of [undefined, '', 'not-an-address']) {
-    const response = await edge.default(
+    const response = await edge(
       new Request(`${SITE}/auth/device/start-v2`, { method: 'POST', body: '{}' }),
-      { ip },
+      ip,
     );
     assert.equal(response.status, 503);
   }
   assert.equal(d.seen.length, 0, 'nothing reached the backend');
-  assert.deepEqual(edge.config.path, ['/auth/device/start-v2', '/auth/device/renew']);
+  assert.deepEqual(DEVICE_PATHS, ['/auth/device/start-v2', '/auth/device/renew']);
 });
 
 test('the visitor key is a keyed hash of the address: IPv6 by /64, mapped IPv4 as IPv4, nothing without a key', async () => {

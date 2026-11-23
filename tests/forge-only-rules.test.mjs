@@ -9,8 +9,8 @@ import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
-const folder = String.raw`(?:src|web|web\\\/src|convex|netlify|scripts|tests|dist)`;
-const listed = String.raw`'(?:src|web|web\/src|convex|netlify|scripts|tests|dist)\/?'`;
+const folder = String.raw`(?:src|web|web\\\/src|convex|site|scripts|tests|dist)`;
+const listed = String.raw`'(?:src|web|web\/src|convex|site|scripts|tests|dist)\/?'`;
 const RULES = {
   'check-entry': /scripts\/forge-check\.mjs/,
   'standard-from-args': /\.args\[0\]\s*===|\.args\.length\s*===\s*1\b|executable\s*===\s*['"]node['"]/,
@@ -147,7 +147,7 @@ test('each rule finds the literal it names and nothing else', () => {
     'standard-from-args': "const standard = check.args[0] === 'x';",
     'tests-folder': String.raw`const test = path => /^tests\/[^/]+\.test\.mjs$/.test(path);`,
     'docs-folder': "const docs = path.startsWith('docs/');",
-    'forge-folders': String.raw`const product = /^(?:src|web\/src|convex|netlify)\//;`,
+    'forge-folders': String.raw`const product = /^(?:src|web\/src|convex|site)\//;`,
     'npm-lockfile': "readFileSync('package-lock.json');",
     'node-test': "spawn(node, ['--test', file]);",
     'build-folders': "const skip = new Set(['node_modules', 'dist']);",

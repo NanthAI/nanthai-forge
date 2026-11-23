@@ -13,7 +13,8 @@ export const get = internalQuery({
   handler: async (ctx, { id }) => {
     const job = await ctx.db.get(id);
     if (!job?.task || !['queued', 'fetching', 'indexing'].includes(job.phase)) return job;
-    const task = await ctx.db.system.get(job.task);
+    // A job handed to the retired analysis worker (`remote`, Item ef6aa22a) has no callback left: it has stopped.
+    const task = job.remote ? null : await ctx.db.system.get(job.task);
     if (!task || ['failed', 'canceled'].includes(task.state.kind)) {
       return {
         ...job,
@@ -47,7 +48,9 @@ export const begin = internalMutation({
           message: 'Restore this private import before re-indexing it.',
         });
       const task = previous.task ? await ctx.db.system.get(previous.task) : null;
+      // A job handed to the retired analysis worker (`remote`) has no callback left, so it is never still running.
       if (
+        !previous.remote &&
         ['queued', 'fetching', 'indexing'].includes(previous.phase) &&
         task &&
         ['pending', 'inProgress'].includes(task.state.kind)
@@ -99,13 +102,7 @@ export const update = internalMutation({
   returns: v.boolean(),
   handler: async (ctx, { id, generation, ...changes }) => {
     const previous = await ctx.db.get(id);
-    if (
-      !previous ||
-      previous.removal ||
-      previous.generation !== generation ||
-      (previous.remote && !['queued', 'fetching', 'indexing'].includes(previous.phase))
-    )
-      return false;
+    if (!previous || previous.removal || previous.generation !== generation) return false;
     if (changes.artifactKey) {
       await trackArtifact(ctx, id, previous.artifactKey);
       await trackArtifact(ctx, id, changes.artifactKey);
@@ -113,57 +110,6 @@ export const update = internalMutation({
     const defined = Object.fromEntries(Object.entries(changes).filter(([, value]) => value !== undefined));
     await ctx.db.patch(id, defined);
     return true;
-  },
-});
-
-export const handoff = internalMutation({
-  args: { id: v.id('imports'), generation: v.number() },
-  returns: v.boolean(),
-  handler: async (ctx, { id, generation }) => {
-    const job = await ctx.db.get(id);
-    if (!job || job.removal || job.visibility !== 'public' || job.generation !== generation || job.remote)
-      return false;
-    // The watchdog matches Netlify's existing fifteen-minute provider ceiling.
-    const task = await ctx.scheduler.runAfter(900_000, internal.imports.expire, { id, generation });
-    await ctx.db.patch(id, { task, remote: true, workerClaimed: false });
-    return true;
-  },
-});
-export const claim = internalMutation({
-  args: { id: v.id('imports'), generation: v.number() },
-  returns: v.boolean(),
-  handler: async (ctx, { id, generation }) => {
-    const job = await ctx.db.get(id);
-    if (
-      !job ||
-      job.removal ||
-      job.visibility !== 'public' ||
-      !job.remote ||
-      job.workerClaimed ||
-      job.generation !== generation ||
-      !['queued', 'fetching', 'indexing'].includes(job.phase)
-    )
-      return false;
-    await ctx.db.patch(id, { workerClaimed: true });
-    return true;
-  },
-});
-export const expire = internalMutation({
-  args: { id: v.id('imports'), generation: v.number() },
-  returns: v.null(),
-  handler: async (ctx, { id, generation }) => {
-    const job = await ctx.db.get(id);
-    if (
-      job?.remote &&
-      job.generation === generation &&
-      ['queued', 'fetching', 'indexing'].includes(job.phase)
-    ) {
-      await ctx.db.patch(id, {
-        phase: 'error',
-        error: 'The import worker stopped before completing. Retry to rebuild; previous source is retained.',
-      });
-    }
-    return null;
   },
 });
 

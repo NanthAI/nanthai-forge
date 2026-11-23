@@ -26,7 +26,7 @@ test('read-only replay distinguishes literal imports, runtime paths and fail-clo
   const put = (path, value) =>
     writeFileSync(join(root, path), typeof value === 'string' ? value : JSON.stringify(value));
   mkdirSync(join(root, 'modal-source'));
-  for (const dir of ['src', 'web', 'convex', 'netlify', 'tests', 'scripts'])
+  for (const dir of ['src', 'web', 'convex', 'site', 'tests', 'scripts'])
     mkdirSync(join(root, 'modal-source', dir));
   put('modal-source/package.json', { scripts: {} });
   put('modal-source/package-lock.json', { packages: {} });

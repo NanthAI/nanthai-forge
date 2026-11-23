@@ -100,6 +100,7 @@ export const jobFields = {
   analysisVersion: v.optional(v.string()),
   generation: v.number(),
   task: v.optional(v.id('_scheduled_functions')),
+  // Left on older rows by the retired hosted analysis worker (Item ef6aa22a); a rerun clears them.
   remote: v.optional(v.boolean()),
   workerClaimed: v.optional(v.boolean()),
   syncRevision: v.optional(v.number()),

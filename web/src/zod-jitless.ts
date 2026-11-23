@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The enforced Content-Security-Policy has no 'unsafe-eval' (netlify.toml, review S-13). On its first
+// The enforced Content-Security-Policy has no 'unsafe-eval' (site/headers.ts, review S-13). On its first
 // parse Zod probes `Function('')` to decide whether to compile fast parsers, and the browser reports that
 // probe as a CSP violation on every page. Jitless mode skips the probe and the generated code; parsing is
 // unchanged. Zod reads this global config object when it loads (zod/v4/core), so setting it here keeps

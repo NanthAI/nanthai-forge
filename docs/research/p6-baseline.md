@@ -215,16 +215,16 @@ the [P6 close order](../phase6-plan.md#p6-close-order-owner-2026-11-10).
 A scripted smoke, passing functional zoo or fixture saving does not supply a
 missing real-agent result.
 
-[exit]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c9b84fc-737e-4d1e-8bca-0d0f847566e6
-[ci]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=685774ea-bea7-4bab-b469-f49798938c97
-[prep]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=c83c4451-a30a-4f0e-8b45-1ff35300a001
-[race]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=1018d0f8-7745-447b-8e83-b2b502bc25fc
-[source]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd
-[provider]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e4204b6-9373-49b3-a8fd-3eb06208a310
-[recovery]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=438e9ace-bb4f-4e0c-b374-c6dfaacc50d8
-[zoo]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=70a9bd2f-f741-4d26-8ae5-7bb11148a17c
-[storage]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981
-[imports]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=ed088358-d32e-4821-b951-1ecf21e1ff76
+[exit]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c9b84fc-737e-4d1e-8bca-0d0f847566e6
+[ci]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=685774ea-bea7-4bab-b469-f49798938c97
+[prep]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=c83c4451-a30a-4f0e-8b45-1ff35300a001
+[race]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=1018d0f8-7745-447b-8e83-b2b502bc25fc
+[source]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd
+[provider]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e4204b6-9373-49b3-a8fd-3eb06208a310
+[recovery]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=438e9ace-bb4f-4e0c-b374-c6dfaacc50d8
+[zoo]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=70a9bd2f-f741-4d26-8ae5-7bb11148a17c
+[storage]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981
+[imports]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=ed088358-d32e-4821-b951-1ecf21e1ff76
 
-[prep-gap]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=a245bcf0-b1ff-4ea5-ba8d-a2c9c9e14dff
-[sync-gap]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=6fbba986-3b78-439d-878d-afbd66510414
+[prep-gap]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=a245bcf0-b1ff-4ea5-ba8d-a2c9c9e14dff
+[sync-gap]: https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=6fbba986-3b78-439d-878d-afbd66510414

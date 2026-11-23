@@ -68,12 +68,12 @@ test('exemptions stay narrow: interceptors may replace the global but not call f
   );
 });
 
-// Issue aabe52a7: the guard covers convex/ and netlify/; web/ is decided out.
+// Issue aabe52a7: the guard covers convex/ and the site Worker (site/, which replaced netlify/); web/ is decided out.
 const fixture = name => readFileSync(new URL(`./fixtures/network-boundary/${name}`, import.meta.url), 'utf8');
-test('guard rejects the replayed bare fetches under convex/ and netlify/', () => {
+test('guard rejects the replayed bare fetches under convex/ and site/', () => {
   for (const [path, name] of [
     ['convex/r2Operations.ts', 'convex-r2-list-bare.mjs'],
-    ['netlify/functions/analyze-background.mts', 'netlify-callback-bare.mjs'],
+    ['site/public-read.ts', 'netlify-callback-bare.mjs'],
   ]) {
     const findings = networkBoundaryFindings(path, fixture(name));
     assert(
@@ -105,7 +105,7 @@ test('guard accepts convexFetch in convex/ and skips generated code and web/', (
   assert.deepEqual(networkBoundaryFindings('web/src/snapshot.ts', 'await fetch(url);'), []);
 });
 
-test('every convex/ and netlify/ module passes the guard', async () => {
+test('every convex/ and site/ module passes the guard', async () => {
   const { readdirSync } = await import('node:fs');
   const root = new URL('../', import.meta.url);
   const walk = dir =>
@@ -116,7 +116,7 @@ test('every convex/ and netlify/ module passes the guard', async () => {
           ? walk(`${dir}${entry.name}/`)
           : [`${dir}${entry.name}`],
     );
-  const files = [...walk('convex/'), ...walk('netlify/')];
+  const files = [...walk('convex/'), ...walk('site/')];
   assert(files.length > 100);
   assert.deepEqual(
     files.flatMap(path => networkBoundaryFindings(path, readFileSync(new URL(path, root), 'utf8'))),

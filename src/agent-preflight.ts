@@ -192,7 +192,7 @@ const planCeiling = (plan: PreflightPlan & { status: 'planned' }) =>
  * the next one from the speed it observed and the time left, so this is only how finely it can stop,
  * never how many tests may run. */
 const PREFLIGHT_GROUP_SECONDS = 30;
-const SOURCE_DIRS = ['src', 'web', 'convex', 'netlify', 'tests', 'scripts'];
+const SOURCE_DIRS = ['src', 'web', 'convex', 'site', 'tests', 'scripts'];
 
 const reusedFromSchema = z.object({ head: z.string(), tree: z.string(), evidence: z.string() }).strict();
 export const preflightReceiptSchema = z

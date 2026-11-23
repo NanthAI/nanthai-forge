@@ -27,7 +27,7 @@ export async function lightweightDocsRun(store: StoreAccess, run: CheckRun): Pro
         .files.filter(
           file =>
             file.path === 'package-lock.json' ||
-            /^(?:src|web|convex|netlify|tests|scripts)\/.+\.(?:[cm]?js|[cm]?tsx?|css|json|svg|html)$/.test(
+            /^(?:src|web|convex|site|tests|scripts)\/.+\.(?:[cm]?js|[cm]?tsx?|css|json|svg|html)$/.test(
               file.path,
             ),
         )

@@ -1,31 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // The switch to the root (Item b0704959): every row of the route coverage audit (comment 91a32d6c on Item 84125787),
 // and the earlier /- form of every app address, reaches its address at the root. Each request goes the way the site
-// serves it: the cached public read first when its path matches (netlify/functions/public-read.mts), else the
-// netlify.toml rules, then the app's own step before it renders (web/src/main.tsx: earlierAppPath, oldAddress).
+// serves it (Item ef6aa22a): a static file first ("/" is web/index.html), else the site Worker (site/worker.ts: the
+// cached public read when its path matches, else the app shell), then the app's own step before it renders
+// (web/src/main.tsx: earlierAppPath, oldAddress).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import { pathToFileURL, fileURLToPath } from 'node:url';
-import { moduleUrl, moduleSource } from './convex-module.mjs';
+import { readFileSync } from 'node:fs';
+import { moduleUrl } from './convex-module.mjs';
 
 const { earlierAppPath, parseAppPath } = await import(moduleUrl('../web/src/app/paths.ts'));
 const { oldAddress } = await import(moduleUrl('../web/src/app/old-address.ts'));
-const functionSource = moduleSource('../netlify/functions/public-read.mts')
-  .replace(
-    new URL('../netlify/lib/public-meta.js', import.meta.url).href,
-    moduleUrl('../netlify/lib/public-meta.ts'),
-  )
-  .replace(new URL('../web/src/app/paths.js', import.meta.url).href, moduleUrl('../web/src/app/paths.ts'));
-const { default: serve, config } = await import(
-  `data:text/javascript;base64,${Buffer.from(functionSource).toString('base64')}`
-);
-const require = createRequire(import.meta.resolve('netlify-cli/package.json'));
-const { RedirectsHandler } = await import(pathToFileURL(require.resolve('@netlify/redirects')).href);
-const root = fileURLToPath(new URL('..', import.meta.url));
-const rules = new RedirectsHandler({ projectDir: root, configPath: `${root}netlify.toml` });
-
+const { serve: worker } = await import(moduleUrl('../site/worker.ts'));
+const { isPublicReadPath } = await import(moduleUrl('../site/public-read.ts'));
 const ORIGIN = 'https://site.example';
 const APP = '<html><head><title>Forge</title></head><body></body></html>';
 const LANE = '0f8d2c1e-5b7a-4c3d-9e21-6a4b8f0c7d35';
@@ -34,19 +21,11 @@ const short = (kind, id) => `${kind}-${Buffer.from(id.replaceAll('-', ''), 'hex'
 const oldQuery =
   /[?&](project|codescape|zone|surface|tab|projectTab|collection|lane|intent|viewId|decision|review|planningItem)=/;
 
+const env = { ASSETS: { fetch: async () => new Response(APP) }, FORGE_WEB_URL: ORIGIN };
+const serve = request => worker(request, env);
 function site(t) {
-  const readFile = fs.readFile.bind(fs);
-  t.mock.method(fs, 'readFile', async (path, ...args) =>
-    String(path).replaceAll('\\', '/').endsWith('/hosted-web-dist/app.html') ? APP : readFile(path, ...args),
-  );
   t.mock.method(globalThis, 'fetch', async () => {
     throw new Error('no backend read on the way to a page');
-  });
-  const saved = process.env.FORGE_WEB_URL;
-  process.env.FORGE_WEB_URL = ORIGIN;
-  t.after(() => {
-    if (saved === undefined) delete process.env.FORGE_WEB_URL;
-    else process.env.FORGE_WEB_URL = saved;
   });
 }
 
@@ -56,31 +35,18 @@ async function arrive(start) {
   let href = start;
   for (let hops = 0; hops < 6; hops++) {
     const url = new URL(href, ORIGIN);
-    let shell = false;
-    if (config.path.some(pattern => new URLPattern({ pathname: pattern }).test(url.href))) {
-      const response = await serve(new Request(url));
-      if (response.status >= 300 && response.status < 400) {
-        href = response.headers.get('location');
-        continue;
-      }
-      assert.equal(response.status, 200, `${start}: ${url.pathname}`);
-      assert.equal(await response.text(), APP);
-      shell = true;
-    } else if (url.pathname === '/') {
+    if (url.pathname === '/') {
       if (!oldQuery.test(url.search)) return { page: '/', hops };
       href = `/projects${url.search}`;
       continue;
-    } else {
-      const rule = await rules.match(new Request(url));
-      assert(rule, `${start}: ${url.pathname} matches a rule`);
-      if (rule.redirect) {
-        href = rule.target.href;
-        continue;
-      }
-      assert.equal(rule.target.pathname, '/app.html', `${start}: served by the app`);
-      shell = true;
     }
-    assert(shell);
+    const response = await serve(new Request(url));
+    if (response.status >= 300 && response.status < 400) {
+      href = response.headers.get('location');
+      continue;
+    }
+    assert.equal(response.status, 200, `${start}: ${url.pathname}`);
+    assert.equal(await response.text(), APP);
     const earlier = earlierAppPath(url.pathname);
     if (earlier) {
       href = earlier + url.search;
@@ -184,7 +150,7 @@ for (const [from, to] of [...rows, ...earlier])
 test('b0704959: the cached public read keeps /-/public/v1/ and is never redirected', async t => {
   site(t);
   const url = `${ORIGIN}/-/public/v1/explore/active.json`;
-  assert(config.path.some(pattern => new URLPattern({ pathname: pattern }).test(url)));
+  assert(isPublicReadPath(url));
   const response = await serve(new Request(url));
   assert.equal(response.headers.get('location'), null);
   assert.notEqual(response.status, 301);
@@ -192,12 +158,6 @@ test('b0704959: the cached public read keeps /-/public/v1/ and is never redirect
 
 test('b0704959: an earlier /- address never redirects to another site', async t => {
   site(t);
-  const { readFileSync } = await import('node:fs');
-  assert.doesNotMatch(
-    readFileSync(`${root}netlify.toml`, 'utf8'),
-    /to = "\/:splat"/,
-    'no raw splat redirect',
-  );
   for (const path of [
     '/-//evil.example',
     '/-//evil.example/a/b',
@@ -209,10 +169,7 @@ test('b0704959: an earlier /- address never redirects to another site', async t 
     '/-/\\evil.example',
   ]) {
     const url = new URL(path, ORIGIN);
-    assert(
-      config.path.some(pattern => new URLPattern({ pathname: pattern }).test(url.href)),
-      `${path}: the function answers it`,
-    );
+    assert(isPublicReadPath(url.href), `${path}: the cached public read answers it`);
     const response = await serve(new Request(url));
     assert.equal(response.status, 301, path);
     assert.equal(new URL(response.headers.get('location')).origin, ORIGIN, path);
@@ -220,20 +177,21 @@ test('b0704959: an earlier /- address never redirects to another site', async t 
     const earlier = earlierAppPath(url.pathname);
     assert.equal(new URL(earlier, ORIGIN).origin, ORIGIN, `${path} -> ${earlier}`);
   }
-  // A doubled first slash misses the function: the catch-all serves the app, whose own step stays on the site.
+  // A doubled first slash misses the public read: the Worker serves the app, whose own step stays on the site.
   const doubled = new URL(`${ORIGIN}//-//evil.example`);
-  assert.equal((await rules.match(new Request(doubled))).target.pathname, '/app.html');
+  assert.equal(isPublicReadPath(doubled.href), false);
+  assert.equal(await (await serve(new Request(doubled))).text(), APP);
   assert.equal(earlierAppPath(doubled.pathname), '/evil.example');
   assert.equal(earlierAppPath('/-/\\evil.example'), '/evil.example');
   assert.equal(earlierAppPath('/-//\\/evil.example'), '/evil.example');
 });
 
-test('b0704959: the function answers its paths itself and leaves the static files alone', async () => {
-  // preferStatic let the "/*" -> /app.html rewrite serve the app shell in place of the function (receipt f1da4770).
-  assert.equal(config.preferStatic, undefined);
-  const matches = list => href => list.some(pattern => new URLPattern({ pathname: pattern }).test(href));
-  const served = matches(config.path);
-  const excluded = matches(config.excludedPath);
+test('b0704959: the Worker answers its paths itself and leaves the static files alone', () => {
+  // Static files are served before the Worker; a missing file runs it (no Worker-first route, no 404 page), and a
+  // file name without .html serves that page (scripts/build-site.mjs).
+  const build = readFileSync(new URL('../scripts/build-site.mjs', import.meta.url), 'utf8');
+  assert.match(build, /assets: \{ htmlHandling: 'auto-trailing-slash', notFoundHandling: 'none' \}/);
+  assert.doesNotMatch(build, /runWorkerFirst|run_worker_first/);
   for (const path of [
     '/-/public/v1/explore/active.json',
     '/sitemap.xml',
@@ -242,7 +200,7 @@ test('b0704959: the function answers its paths itself and leaves the static file
     '/ada',
     '/ada/atlas',
   ])
-    assert(served(`${ORIGIN}${path}`) && !excluded(`${ORIGIN}${path}`), `${path} reaches the function`);
+    assert(isPublicReadPath(`${ORIGIN}${path}`), `${path} reaches the cached public read`);
   for (const path of [
     '/',
     '/docs',
@@ -255,5 +213,5 @@ test('b0704959: the function answers its paths itself and leaves the static file
     '/robots.txt',
     '/favicon.svg',
   ])
-    assert(!served(`${ORIGIN}${path}`) || excluded(`${ORIGIN}${path}`), `${path} stays a static file`);
+    assert(!isPublicReadPath(`${ORIGIN}${path}`), `${path} stays a static file or the app`);
 });

@@ -552,9 +552,8 @@ A future `nforge host ROOT --from-github` should read the Git origin, resolve th
 commit and retained refs with hooks disabled, and send repository identity and those pins under
 the original hosting operation UUID. The hosted side must check current repository access through
 `convex/access.ts`, reuse the public/private import acquisition in `convex/imports.ts` and
-`convex/indexer.ts`, and reuse the public Netlify `analyze-background` handoff. Private imports
-continue their current authenticated Convex path; private source/tokens must not enter the public
-worker. Credentials stay in the existing hosted integration, never CLI arguments or progress.
+`convex/indexer.ts`, where public and private analysis both run in a Convex Node action. Private
+source and tokens stay on that authenticated path. Credentials stay in the existing hosted integration, never CLI arguments or progress.
 
 Those paths currently produce a selected source/analysis artifact, not a full Git history bundle
 plus Forge Work. Connecting them directly would silently omit local-only commits, refs, Work,

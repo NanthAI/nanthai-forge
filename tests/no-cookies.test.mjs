@@ -15,7 +15,7 @@ const scanned = [
   'web/index.html',
   'web/app.html',
   'web/docs.html',
-  'netlify/functions',
+  'site',
   'scripts/docs-site.tsx',
 ];
 const sets =
@@ -29,7 +29,7 @@ function* files(path) {
   }
 }
 
-test('web, docs and Netlify functions set no cookie that is not listed as essential', () => {
+test('web, docs and the site Worker set no cookie that is not listed as essential', () => {
   const found = [];
   for (const start of scanned)
     for (const file of files(join(root, start))) {

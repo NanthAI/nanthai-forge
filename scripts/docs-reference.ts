@@ -124,7 +124,7 @@ export function docsReference(root: string) {
         for (const code of errorCodes(readFileSync(join(root, path), 'utf8'))) codes.add(code);
     }
   }
-  for (const directory of ['src', 'convex', 'netlify']) scan(directory);
+  for (const directory of ['src', 'convex', 'site']) scan(directory);
   const errors =
     '# Error reference\n\nGenerated from public source error codes and the same recovery map the CLI uses. Templates keep placeholders: use the concrete next command in your own receipt. If no single next command applies, open the named help topic.\n\n| Code | Next action template | Learn |\n| --- | --- | --- |\n' +
     [...codes]

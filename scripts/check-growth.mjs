@@ -15,7 +15,7 @@
 // What is counted (each is a distinct name, so renaming one is neutral and adding one is a rise):
 //   tables         Convex tables: `name: defineTable(` in convex/*.ts (generated code excluded)
 //   errorCodes     public error codes: an UPPER_SNAKE string literal (3+ characters, not a Node errno such as
-//                  ENOTDIR) that reaches a caller as a structured error code, in src/, convex/ and netlify/:
+//                  ENOTDIR) that reaches a caller as a structured error code, in src/, convex/ and site/:
 //                  the first argument of `new ForgeError(` (both codes of a `cond ? 'A' : 'B'` one), the code argument of `invariant(cond, 'CODE', …)`,
 //                  and a `code: 'CODE'` property. Test files are excluded. It counts a few result codes that
 //                  are not thrown; the count is an upper bound, and the same rule applies to every run.
@@ -31,8 +31,8 @@
 //                  removes it or a `staysBecause` reason; `hostedPaths` is the guarded list of paths that run
 //                  hosted (moving one back onto a machine is a rise). Print the list with `--print --machines`.
 //   unreferencedExports  exported names (function, const, class, enum, type, interface) declared in src/,
-//                  web/src/, convex/ or netlify/ whose name appears nowhere else as a word in src, web/src,
-//                  convex, netlify, tests, scripts or evals (comments and strings count as a mention, and a
+//                  web/src/, convex/ or site/ whose name appears nowhere else as a word in src, web/src,
+//                  convex, site, tests, scripts or evals (comments and strings count as a mention, and a
 //                  name that is common elsewhere is never flagged, so this undercounts). Public entry points
 //                  are not counted: Convex query/mutation/action/httpAction functions (clients call them by
 //                  address) and the package entry files src/index.ts, src/query.ts and src/cli-entry.ts.
@@ -193,7 +193,7 @@ function scanFiles(dir, root, pattern) {
 
 function countUnreferencedExports(root) {
   const read = path => ({ path, text: readFileSync(resolve(root, path), 'utf8') });
-  const exporters = ['src', 'web/src', 'convex', 'netlify']
+  const exporters = ['src', 'web/src', 'convex', 'site']
     .flatMap(dir => scanFiles(dir, root, /\.(?:ts|tsx|mts)$/))
     .filter(path => !/\.test\./.test(path))
     .map(read);
@@ -254,7 +254,7 @@ export function formatMachineDependencies(list, current, baseline) {
 export function currentCounts(root = '.') {
   const read = path => readFileSync(resolve(root, path), 'utf8');
   const convex = sourceFiles('convex', root).map(read);
-  const servers = [...sourceFiles('src', root), ...sourceFiles('netlify', root)].map(read);
+  const servers = [...sourceFiles('src', root), ...sourceFiles('site', root)].map(read);
   return {
     tables: countTables(convex),
     errorCodes: countErrorCodes([...servers, ...convex]),

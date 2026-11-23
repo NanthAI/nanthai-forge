@@ -11,13 +11,13 @@ other visitor shares (Item b6588425, owner numbers 2026-11-22). A visitor is a k
 **Which paths go through the site.** Convex never sees a client address, so these requests pass the site's edge, which
 reads the address from the platform's own request context:
 
-- Signed-out code and history already go through the cached public read (`netlify/functions/public-read.mts`, then
-  `/public/v1/code/…`). On a cache miss the function, and the Cloudflare Worker behind file pages, forward the hash.
+- Signed-out code and history already go through the cached public read (`site/public-read.ts`, then
+  `/public/v1/code/…`). On a cache miss the site Worker, and the code Worker behind file pages, forward the hash.
   The members' source actions (`projectCodeBrowse:read`, the rendered `projectSourceReview:read`) now refuse signed-out
   callers with `PROJECT_UNAVAILABLE`, so a client cannot skip the limit by calling Convex directly. No signed-out page
   used them. Signed-in reads are unchanged.
 - `nforge login` and sign-in renewal post to `/auth/device/start-v2` and `/auth/device/renew` on the site
-  (`netlify/functions/device-auth.mts`), which forwards the request unchanged with the hash. The CLI still signs for the
+  (`site/device-auth.ts`), which forwards the request unchanged with the hash. The CLI still signs for the
   backend origin and tries it first; a backend that requires the site answers `421 use_site` with the site's origin, and
   the CLI sends the same signed request there once. An environment without the setting answers directly, as before.
 
@@ -39,17 +39,19 @@ their limit of 60 an hour. Sign in (nforge login) or retry in N min." An over-li
 the wait in `interval` and a sentence the CLI shows. A refusal writes nothing: an over-limit visitor spends none of the
 outer budget, and a call the outer budget refuses is not charged to the visitor.
 
-**Cost.** Cache hits run no function and no Convex call, as before; idle costs nothing. On a miss or a sign-in start the
+**Cost.** Cache hits make no Convex call, as before (each is one site Worker request on the free plan); idle costs nothing. On a miss or a sign-in start the
 charge runs inside the mutation that already serves it: one point read and one write on `deviceAttempts`, and a refusal
 only the read. A new visitor's first row also deletes up to two expired rows (`by_expiresAt`), so rotating addresses
 cannot grow the table; there is no job. No Convex call, table or CLI dependency is added. Code history, project, profile,
 explore and sitemap reads are queries with no mutation to charge, so they carry no per-visitor count: they stay bounded
-by the 30-second cache per address and the site's platform rate rule of 60 a minute per IP.
+by the 30-second cache per address and location, the project's signed-out read budget and the site's best-effort
+platform backstop of 60 a minute per IP and location ([public viewing](0800-downloads-and-public-viewing.md)).
 
-**Added latency (measured from one client on 2026-11-22).** Hashing costs about 18 µs per request. A cache hit adds
-nothing. A sign-in start or renewal adds one site round trip: the dev site's function answered in a median of 151 ms
-server time (281 ms with a new TLS connection) against 33 ms for a static file, so about 0.12 s of function start plus
-the in-region hop to Convex. Once the backend requires the site, the CLI's first direct call is the refusal round trip
+**Added latency (measured from one client in Europe on 2026-11-23, Cloudflare site).** Hashing costs about 18 µs per
+request. A cache hit adds nothing. A sign-in start or renewal adds one site round trip: the site answered in a median
+of 0.54 s to first byte on a new connection (0.49 s after TLS) against 0.09 s for a static file, so about 0.45 s for the
+Worker, which runs near the visitor, and its hop to Convex. That is about 0.3 s more than the earlier Netlify function,
+which ran next to Convex. Once the backend requires the site, the CLI's first direct call is the refusal round trip
 (dev Convex median 294 ms server, 335 ms total). Sign-ins run once per login and renewals once per 30 days.
 
 **Settings.** Site: `FORGE_CLIENT_HASH_KEY` and `FORGE_SITE_DEVICE_KEY` (with the existing `FORGE_CONVEX_SITE_URL` and

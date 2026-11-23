@@ -51,7 +51,7 @@ const pathname = normalizeAccountPathname(location.pathname);
 if (pathname !== location.pathname)
   history.replaceState(history.state, '', pathname + location.search + location.hash);
 // The app is served at the root (Item b0704959). An address from before the switch (/-/…) is redirected by
-// netlify.toml; a server that does not apply it reaches the same address here. An old address the app has a place
+// the site Worker (site/public-read.ts); a server that does not apply it reaches the same address here. An old address the app has a place
 // for goes there: a plain path with no read (old-address.ts), an id-only link through the app, which resolves it with
 // one access-checked read (OldAddress.tsx).
 const earlier = earlierAppPath(pathname);

@@ -141,7 +141,7 @@ export function loadAlternatives(node, locals, direct, homes) {
         .filter(ts.isStringLiteralLike)
         .map(arg => arg.text)
         .filter(value =>
-          ['dist', 'src', 'web/src', 'convex', 'netlify', 'scripts', '../scripts'].includes(value),
+          ['dist', 'src', 'web/src', 'convex', 'site', 'scripts', '../scripts'].includes(value),
         );
       return [{ values, homes, prefixes: dirs.length ? dirs.map(dir => `${dir}/`) : [''] }];
     }

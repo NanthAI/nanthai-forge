@@ -7,8 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { docsSite } from '../scripts/docs-site.tsx';
 import { llmDocuments, llmsFullSizeReport } from '../scripts/llm-documents.mjs';
 import { LAYER_GZIP_BUDGET, layerBundleReport, layerImportViolation } from '../scripts/ds-build-guard.mjs';
+import { servedSources } from '../scripts/site-deploy-plan.mjs';
 // Two pages: index.html is the static public page (no app code), app.html the signed-in app. On the dev and preview
-// servers every other page route serves app.html, as netlify.toml does in production.
+// servers every other page route serves app.html, as the site Worker does in production (site/worker.ts).
 type Middlewares = { middlewares: { use: (fn: AppRoute) => unknown } };
 const appRoutes = {
   name: 'forge-app-routes',
@@ -90,6 +91,20 @@ export default defineConfig({
         if (report.warn) this.warn(report.message);
         else this.info(report.message);
         for (const asset of assets) this.emitFile({ type: 'asset', ...asset });
+      },
+    },
+    {
+      // The src/ files the bundle contains, so the site deploy skips a landing that changes only other src/ files
+      // (scripts/build-site.mjs records them; scripts/site-deploy-plan.mjs reads them). Not a served file.
+      name: 'forge-served-sources',
+      apply: 'build',
+      generateBundle() {
+        const root = fileURLToPath(new URL('../', import.meta.url));
+        this.emitFile({
+          type: 'asset',
+          fileName: '.vite/served-sources.json',
+          source: JSON.stringify(servedSources(this.getModuleIds(), root)),
+        });
       },
     },
   ],

@@ -137,12 +137,7 @@ test('native compiler and fallback build project references and reject a broken 
 });
 
 test('compiler unused checks cover all projects and permit underscore parameters', t => {
-  for (const path of [
-    'tsconfig.json',
-    'web/tsconfig.json',
-    'convex/tsconfig.json',
-    'netlify/tsconfig.json',
-  ]) {
+  for (const path of ['tsconfig.json', 'web/tsconfig.json', 'convex/tsconfig.json', 'site/tsconfig.json']) {
     const config = JSON.parse(readFileSync(path, 'utf8'));
     assert.equal(config.compilerOptions.noUnusedLocals, true, path);
     assert.equal(config.compilerOptions.noUnusedParameters, true, path);

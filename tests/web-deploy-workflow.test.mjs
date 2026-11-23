@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { SITE_INPUTS, buildFiles } from '../scripts/site-deploy-plan.mjs';
 
 const workflow = readFileSync('.github/workflows/web-deploy.yml', 'utf8');
 const step = name => workflow.indexOf(name);
@@ -18,27 +19,81 @@ const namedStep = name => {
 test('dev web deploys only from main pushes inside the locked environment', () => {
   assert.match(workflow, /push:\n\s+branches: \[main\]/);
   assert.doesNotMatch(workflow, /pull_request/);
-  assert.match(workflow, /environment: netlify-dev/);
+  assert.match(workflow, /environment: cloudflare-dev/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /node-version: '24\.22\.1'/);
   assert.match(workflow, /cancel-in-progress: false/);
-  for (const path of ['web/**', 'src/**', 'package.json', 'package-lock.json'])
-    assert(workflow.includes(`      - '${path}'`), `paths filter covers ${path}`);
+  assert.match(workflow, /^permissions:\n {2}contents: read$/m);
 });
 
-test('the deploy checks and uploads the same build, with the Netlify credential scoped to upload', () => {
+test('the trigger paths cover everything the plan counts as served', () => {
+  const paths = [...workflow.matchAll(/^ {6}- '([^']+)'$/gm)].map(match => match[1]);
+  const covered = path =>
+    paths.some(glob => (glob.endsWith('/**') ? path.startsWith(glob.slice(0, -2)) : path === glob));
+  // Every whole input, every file the build imports, and every folder a bundle may contain.
+  const samples = [
+    'web/x',
+    'site/x',
+    'docs/x',
+    'skills/x',
+    'README.md',
+    'package.json',
+    'package-lock.json',
+    '.github/workflows/web-deploy.yml',
+    'scripts/package-documents/x.json',
+    'src/cli.ts',
+  ];
+  for (const input of SITE_INPUTS)
+    assert(
+      samples.some(path => input.test(path)),
+      `${input}: add a sample here`,
+    );
+  for (const path of samples) assert(covered(path), `${path}: no trigger path`);
+  for (const file of buildFiles(process.cwd())) assert(covered(file), `${file}: no trigger path`);
+  for (const folder of ['src/**', 'convex/**', 'scripts/**']) assert(paths.includes(folder), folder);
+  assert(!paths.includes('tests/**'), 'a test-only landing never starts a run');
+});
+
+test('the plan gates every later step, and only a new digest reaches the deploy', () => {
+  const steps = workflow.split(/^ {6}- /m).slice(1);
+  const plan = steps.findIndex(text => text.includes('scripts/site-deploy-plan.mjs plan'));
+  assert(plan >= 2, 'checkout and Node come first, then the plan, before any install');
+  assert.doesNotMatch(steps.slice(0, plan + 1).join(''), /npm ci/);
+  for (const text of steps.slice(plan + 1))
+    assert.match(
+      text,
+      /if: steps\.(?:plan\.outputs\.build|compare\.outputs\.deploy) == 'true'/,
+      text.slice(0, 60),
+    );
+  for (const text of steps.filter(text => /site\/deploy|cf deploy/.test(text)))
+    assert.match(text, /if: steps\.compare\.outputs\.deploy == 'true'/);
+  // No runner waits out the window: a deferred change is taken by the next landing or the scheduled run.
+  assert.doesNotMatch(workflow, /\bsleep\b/);
+  // Every run builds the current main, so a late or re-run job never deploys an older main over a newer one.
+  assert.match(workflow, /actions\/checkout@[0-9a-f]{40} # v4\n\s+with:\n(?:\s+#.*\n)*\s+ref: main\n/);
+  assert.match(
+    namedStep('Plan the deploy'),
+    /plan "\$SITE_URL" \$\{\{ github\.event_name != 'push' && '--deep' \|\| '' \}\}/,
+  );
+  assert.match(workflow, /^ {2}schedule:\n {4}- cron: '7 \*\/3 \* \* \*'$/m);
+});
+
+test('the deploy checks and uploads the same build, with the Cloudflare credential scoped to upload', () => {
   const order = [
+    'scripts/site-deploy-plan.mjs plan',
     'npm run build:web',
     'tests/web-bundle-node-free.test.mjs',
     'scripts/web-smoke-load.mjs hosted-web-dist VITE_CONVEX_URL',
-    'npx --no-install netlify deploy',
+    'scripts/build-site.mjs site-output --commit',
+    'scripts/site-deploy-plan.mjs compare',
+    'cf deploy --prebuilt --no-provision',
   ].map(step);
   assert(order.every(index => index > 0) && order.every((index, i) => i === 0 || index > order[i - 1]));
-  assert.match(workflow, /deploy --prod --no-build --dir hosted-web-dist --site "\$NETLIFY_SITE_ID"/);
   const deploy = namedStep('Deploy to the dev site');
-  assert.match(deploy, /NETLIFY_AUTH_TOKEN: \$\{\{ secrets\.NETLIFY_AUTH_TOKEN \}\}/);
-  assert.doesNotMatch(workflow.replace(deploy, ''), /\bNETLIFY_AUTH_TOKEN\b/);
-  assert.match(workflow, /NETLIFY_SITE_ID: \$\{\{ vars\.NETLIFY_SITE_ID \}\}/);
+  assert.match(deploy, /working-directory: site-output/);
+  assert.match(deploy, /CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}/);
+  assert.match(deploy, /CLOUDFLARE_ACCOUNT_ID: \$\{\{ vars\.CLOUDFLARE_ACCOUNT_ID \}\}/);
+  assert.doesNotMatch(workflow.replace(deploy, ''), /\bCLOUDFLARE_API_TOKEN\b/);
   assert.equal(workflow.match(/secrets\./g).length, 2);
   for (const name of ['VITE_CONVEX_URL', 'VITE_CONVEX_SITE_URL', 'VITE_CLERK_PUBLISHABLE_KEY']) {
     assert.equal(
@@ -50,10 +105,9 @@ test('the deploy checks and uploads the same build, with the Netlify credential 
       workflow.includes(`hosted-web-dist VITE_CONVEX_URL VITE_CONVEX_SITE_URL VITE_CLERK_PUBLISHABLE_KEY`),
     );
   }
-  assert.doesNotMatch(workflow, /echo[^\n]*(?:TOKEN|NETLIFY)|set -x|--auth/);
-  // The build step carries the demo repository that netlify.toml gives Netlify's own build.
-  const demo = readFileSync('netlify.toml', 'utf8').match(/VITE_FORGE_DEMO_REPOSITORY = "([^"]+)"/)?.[1];
-  assert(demo && workflow.includes(`VITE_FORGE_DEMO_REPOSITORY: ${demo}`));
+  assert.doesNotMatch(workflow, /echo[^\n]*(?:TOKEN|CLOUDFLARE)|set -x|--secrets-file/);
+  assert.match(workflow, /CF_SEND_TELEMETRY: 'false'/);
+  assert.equal(workflow.match(/VITE_FORGE_DEMO_REPOSITORY: \S+/g)?.length, 1);
 });
 
 test('PostHog build configuration is scoped to the dev web build', () => {
@@ -66,7 +120,6 @@ test('PostHog build configuration is scoped to the dev web build', () => {
 
   const postHogConfig = /\bVITE_FORGE_POSTHOG_(?:PROJECT_TOKEN|REGION)\b/;
   assert.doesNotMatch(workflow.replace(build, ''), postHogConfig);
-  assert.doesNotMatch(readFileSync('netlify.toml', 'utf8'), postHogConfig, 'Netlify build configuration');
   for (const name of readdirSync('.github/workflows')) {
     if (name !== 'web-deploy.yml' && /\.ya?ml$/.test(name)) {
       assert.doesNotMatch(readFileSync(`.github/workflows/${name}`, 'utf8'), postHogConfig, name);
@@ -216,9 +269,14 @@ test('workflow executables come from the lockfile rather than unlocked npx insta
     const source = readFileSync(`.github/workflows/${name}`, 'utf8');
     assert.doesNotMatch(source, /\bnpx\s+(?:--yes\b|[^\n]*?\b[\w/.-]+@[\w*.^~><=+-]+)/, name);
   }
-  const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-  const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
-  assert.match(pkg.devDependencies['netlify-cli'] ?? '', /^\d+\.\d+\.\d+$/);
-  assert.equal(lock.packages['node_modules/netlify-cli'].version, pkg.devDependencies['netlify-cli']);
-  assert.match(workflow, /npx --no-install netlify deploy/);
+  // The deploy tool has its own exact pin and lockfile, so ordinary installs never download it.
+  const pkg = JSON.parse(readFileSync('site/deploy/package.json', 'utf8'));
+  const lock = JSON.parse(readFileSync('site/deploy/package-lock.json', 'utf8'));
+  assert.match(pkg.devDependencies.cf ?? '', /^\d+\.\d+\.\d+(?:-[\w.]+)?$/);
+  assert.equal(lock.packages['node_modules/cf'].version, pkg.devDependencies.cf);
+  assert.match(lock.packages['node_modules/cf'].integrity, /^sha512-/);
+  const root = JSON.parse(readFileSync('package.json', 'utf8'));
+  assert.equal({ ...root.dependencies, ...root.devDependencies }.cf, undefined);
+  assert.match(workflow, /npm ci --ignore-scripts --prefix site\/deploy/);
+  assert.match(workflow, /\.\.\/site\/deploy\/node_modules\/\.bin\/cf deploy/);
 });

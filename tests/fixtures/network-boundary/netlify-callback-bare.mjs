@@ -2,7 +2,8 @@
 // Replay (Issue aabe52a7, 2026-11-07): the Netlify analysis worker posted its
 // Convex callback with a bare fetch and its own AbortSignal.timeout, outside the
 // shared helper's header/total deadlines and typed transport errors. The guard
-// must reject this file when it sits under netlify/.
+// must reject this file when it sits under site/, the site Worker that replaced
+// the Netlify functions (Item ef6aa22a).
 export async function post(site, operation, key, data) {
   const response = await fetch(`${site}/worker/${operation}`, {
     method: 'POST',

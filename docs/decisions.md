@@ -13,7 +13,7 @@ These rules hold the design together. Break one only with an explicit owner deci
 9. **History is kept.** No automatic age or count deletion, no quotas and no retention deadlines unless the owner asks. Collection removes only verified unreferenced objects. The owner-approved operational windows below exclude Git/source history, receipts, audit and planning.
 10. **Live signals are advisory.** Sessions and messages are never locks, never authorization and never acceptance. Declared readiness is not checked or accepted source.
 11. **No sandbox claims.** Do not describe Lanes, worktrees, MCP permissions or scoped grants as confinement.
-12. **Hosted stack is fixed for development.** Convex for records, Cloudflare R2 for every byte, Clerk identity, the Forge GitHub App and Netlify hosting. R2 is required on every deployment, self-host included (any S3-compatible bucket through `R2_ENDPOINT`). Convex file storage holds only legacy copies awaiting cleanup ([data placement](data-placement.md)). The [product analytics decision](operations/product-analytics.md) approves optional PostHog capture for development only.
+12. **Hosted stack is fixed for development.** Convex for records, Cloudflare R2 for every byte, Clerk identity, the Forge GitHub App and Cloudflare Workers hosting for the web site (free plan). R2 is required on every deployment, self-host included (any S3-compatible bucket through `R2_ENDPOINT`). Convex file storage holds only legacy copies awaiting cleanup ([data placement](data-placement.md)). The [product analytics decision](operations/product-analytics.md) approves optional PostHog capture for development only.
 13. **No new restrictions without being asked.** Do not add user-facing limits, extra steps, delays, access conditions or retention rules. A review finding does not authorize them.
 
 Constraint 7 was replaced by the owner on 2026-10-25, superseding "Native is the daily format". The [SP1 storage decision](research/sp1-storage.md) records the evidence and implementation order.
@@ -119,7 +119,7 @@ measured again then; they are costs, not gates. The lead looks at upstream at ea
 phase close and when a native app is planned, on no timer. Once stage C screens
 exist, a re-run can justify Exact for a new surface, such as a native app from
 one source. Replacing the web app again needs the control to show a gap that
-React cannot close. Source: Issue [348436e5](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=348436e5-00df-403d-bbf7-caa29b57bf73).
+React cannot close. Source: Issue [348436e5](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=348436e5-00df-403d-bbf7-caa29b57bf73).
 
 ### 2026-11-16: React Aria Components is the headless layer
 
@@ -170,7 +170,7 @@ Conditions:
 Still unrun and owned by `6ebb58ab`: VoiceOver with Safari by a person, touch on a
 real phone, Firefox and Safari engines, and reorder at the largest page of rows.
 vercel-labs/ui is looked at again after Phase 7, not during it. Source: Issue
-[f97fb89d](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=f97fb89d-bb1e-4b6c-b482-6f5e079d7bca).
+[f97fb89d](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=f97fb89d-bb1e-4b6c-b482-6f5e079d7bca).
 
 ### 2026-11-16: rules for the Phase 7 shared base
 
@@ -245,16 +245,16 @@ S3 and S7 in parallel; then S2 and S4; then S5 and conditional S6. S8a runs
 **now, in parallel with A**, independently of S0. These are agreed implementation
 Issues, not a claim that the placement changes have landed.
 
-- [S0](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=886a4694-b2eb-4e58-881f-787376038698): measure missing cost and placement data.
-- [S1](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=bea7868d-a5da-4d65-ae30-2e9fb524d9a9): terminal landing capsules.
-- [S2](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=27d4c1fd-ec6c-4a48-9a8c-bffbbc6273f2): superseded Work journal segments (existing Issue reused and moved to P6).
-- [S3](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=324f1d97-47a4-40c4-a8a5-058bad9449d9): hot rows as headers.
-- [S4](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=91df7eda-ac01-40c9-b583-32311403846c): file lists without per-file Convex projections.
-- [S5](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=e7e35328-7730-436a-b229-ba11d6362987): State-bound physical manifests.
-- [S6](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=062b48cc-3043-4fe9-9627-3f7e533ba45f): fused source jobs, only if S0 shows separate save/sync/compose actions for most landings.
-- [S7](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=b99d1ea1-3ba7-4708-8506-59800960c354): R2 request budget and batched check results.
-- [S8a](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=9e4ba8c6-be09-4ccd-bee3-2ed359f56b27): Workers source-step spike.
-- [S8b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=80f9bfe4-8f57-488d-bf7b-2a32b746eb48): optional Worker byte-plane provider after the spike and owner check.
+- [S0](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=886a4694-b2eb-4e58-881f-787376038698): measure missing cost and placement data.
+- [S1](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=bea7868d-a5da-4d65-ae30-2e9fb524d9a9): terminal landing capsules.
+- [S2](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=27d4c1fd-ec6c-4a48-9a8c-bffbbc6273f2): superseded Work journal segments (existing Issue reused and moved to P6).
+- [S3](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=324f1d97-47a4-40c4-a8a5-058bad9449d9): hot rows as headers.
+- [S4](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=91df7eda-ac01-40c9-b583-32311403846c): file lists without per-file Convex projections.
+- [S5](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=e7e35328-7730-436a-b229-ba11d6362987): State-bound physical manifests.
+- [S6](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=062b48cc-3043-4fe9-9627-3f7e533ba45f): fused source jobs, only if S0 shows separate save/sync/compose actions for most landings.
+- [S7](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=b99d1ea1-3ba7-4708-8506-59800960c354): R2 request budget and batched check results.
+- [S8a](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=9e4ba8c6-be09-4ccd-bee3-2ed359f56b27): Workers source-step spike.
+- [S8b](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=80f9bfe4-8f57-488d-bf7b-2a32b746eb48): optional Worker byte-plane provider after the spike and owner check.
 
 S8b is adopted if measurements on the smoke shape and the spike fixtures show
 no meaningful regression in time to main, check wall and notification latency:
@@ -280,7 +280,7 @@ performed (S0 comment 1eb0c8dc).
 
 The slices replace retained Convex history copies, per-file projections and
 repeated byte-plane work; this entry removes no runtime code. Source: review
-Issue [4c8dfe6a](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4c8dfe6a-3511-4d01-a36b-1158c4e42c69)
+Issue [4c8dfe6a](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4c8dfe6a-3511-4d01-a36b-1158c4e42c69)
 and the owner's decision to proceed with A and spike B alongside it.
 
 ## Decisions from 10 November
@@ -301,7 +301,7 @@ pins, accepted source/Git ancestry, planning and audit. Superseded/failed derive
 generations retire only through existing ownership/pin proofs. One-shot terminal
 wakes and bounded idempotent pages stop when complete; legacy catch-up reuses
 them. Why: payload copies outlived their execution readers and grew storage.
-Source: Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981); [windows and readers](operations/cost-to-serve.md#operational-expiry-and-storage-per-landing).
+Source: Issue [8c4f126b](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981); [windows and readers](operations/cost-to-serve.md#operational-expiry-and-storage-per-landing).
 
 ### 2026-11-10: weekly backups and manual export approval
 
@@ -309,7 +309,7 @@ Keep the existing weekly backup, Monday 03:00 UTC; manual dispatch requires the
 lead's OK. Why: each export reads the whole database; three manual exports on
 10 November consumed 3.94 GB DB I/O, about 1.31 GB each (measured total, derived
 mean). Inventory/cleanup must not launch an export as a shortcut. No workflow or
-backup contents changed. Source: Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981);
+backup contents changed. Source: Issue [8c4f126b](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981);
 [backup cadence](operations/cost-to-serve.md#backup-export-cadence).
 
 ### 2026-11-10: separate planning and data projection indexes
@@ -323,7 +323,7 @@ mirrors/fallbacks and old core planning indexes are removed. No logical collecti
 or canonical history was dropped. The owner approved a one-time fresh public
 generation at cutover: old list/search cursors get `WORK_STALE` and restart;
 record partition, Work revision, source and Issue identities stay the same.
-Source: Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981); [reader map, model and measured I/O](data-placement.md#work-projection-index-domains).
+Source: Issue [8c4f126b](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981); [reader map, model and measured I/O](data-placement.md#work-projection-index-domains).
 
 ### 2026-11-10: immutable object descriptors in catalog pages
 
@@ -335,7 +335,7 @@ cleanup/retry semantics. Why: seven descriptor indexes and per-file cold lookup
 bytes dominate; randomly rewriting dense pages for a few new objects would cost
 more. Measured dev migration verified all 38,003 moved digest/size pairs. Fixture
 cold 29k-job DB bytes fell 10,226,466 → 2,105,060 at eleven calls; no live billed
-saving is claimed. Source: Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981) and Issue [298f9675](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd);
+saving is claimed. Source: Issue [8c4f126b](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981) and Issue [298f9675](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd);
 [compaction](operations/storage-compaction.md).
 
 ### 2026-11-10: bounded State recipes
@@ -350,7 +350,7 @@ when fewer bytes are uploaded; legacy/flat reads remain. Why: sequential healthy
 29k saves upload 3.31 → 0.74 MB in fixtures without extra Convex rounds. This
 meets the one-bounded-read concern at that scale. The rejected experiment's
 190k-file flat-manifest memory failure remains unresolved; neither that scale nor
-a State identity change was approved by this slice. Source: Issue [298f9675](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd);
+a State identity change was approved by this slice. Source: Issue [298f9675](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd);
 [original experiment](#chunked-flat-states-issue-2f4e04ad) and
 [fixture tradeoffs](operations/cost-to-serve.md#landed-fixes-and-fixture-evidence).
 
@@ -365,15 +365,15 @@ the identical-overlap fixture falls from 25 discarded passed runner-minutes per
 landing to zero. Retain refusal/recheck for genuinely different overlap, changed
 tested docs, global risk, missing/corrupt proof, policy or actor ineligibility.
 Graph absence is never independence. Six existing pins suffice; no extra calls
-or idle work. Source: Issue [1018d0f8](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=1018d0f8-7745-447b-8e83-b2b502bc25fc); live post-deploy smoke/dogfood measurement
+or idle work. Source: Issue [1018d0f8](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=1018d0f8-7745-447b-8e83-b2b502bc25fc); live post-deploy smoke/dogfood measurement
 remains open.
 
 ### 2026-11-10: live GitLab publishing moves to P8
 
 GitLab stays contract-only in P6; live publishing is owned by P8 Issue
-[a697aba8](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=a697aba8-5ca4-4e95-af2c-6ce3139700db). Why: it needs owner GitLab access and matters for outside users in
+[a697aba8](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=a697aba8-5ca4-4e95-af2c-6ce3139700db). Why: it needs owner GitLab access and matters for outside users in
 P8. GitHub ci-status shipped LFS publication, mirror-lag retry, Candidate branch
 cleanup and superseded-run cancellation; its live/timing evidence is complete
-with sample limitations retained. Source: closed Flip 3 Issue [4e4204b6](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e4204b6-9373-49b3-a8fd-3eb06208a310).
-Closed one-client/parity Issue [657d63ee](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=657d63ee-249a-44ae-94e2-55549f84eea9) also includes the accepted State/hash
+with sample limitations retained. Source: closed Flip 3 Issue [4e4204b6](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e4204b6-9373-49b3-a8fd-3eb06208a310).
+Closed one-client/parity Issue [657d63ee](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=657d63ee-249a-44ae-94e2-55549f84eea9) also includes the accepted State/hash
 codemod; it is not an open P6 dependency. P7 is UX and UI only.

@@ -4,14 +4,14 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { moduleUrl } from './convex-module.mjs';
 
-/** The hosted web app's response headers live in netlify.toml (review S-13). */
-const toml = readFileSync(new URL('../netlify.toml', import.meta.url), 'utf8');
-const block = toml.split('[[headers]]')[1]?.split('[[redirects]]')[0] ?? '';
-const header = name => new RegExp(`^${name}\\s*=\\s*"([^"]*)"`, 'm').exec(block)?.[1];
+/** The web site's response headers live in site/headers.ts (review S-13): the static files' `_headers` rules and the
+ * Worker's responses both come from it (Item ef6aa22a). */
+const { SECURITY_HEADERS, headersFile } = await import(moduleUrl('../site/headers.ts'));
+const header = name => SECURITY_HEADERS[name];
 
 test('every page is sent with frame protection, nosniff, no referrer and HSTS', () => {
-  assert.match(block, /for = "\/\*"/);
   assert.equal(header('X-Frame-Options'), 'DENY');
   assert.equal(header('X-Content-Type-Options'), 'nosniff');
   assert.equal(header('Referrer-Policy'), 'no-referrer');
@@ -71,7 +71,7 @@ for (const page of ['index.html', 'app.html'])
     const hash = createHash('sha256').update(scripts[0]).digest('base64');
     assert.ok(
       (header('Content-Security-Policy') ?? '').includes(`'sha256-${hash}'`),
-      'update the sha256 in netlify.toml after editing the inline script',
+      'update the sha256 in site/headers.ts after editing the inline script',
     );
   });
 
@@ -105,18 +105,15 @@ test('the public page loads no app code and no third-party origin', () => {
   assert.ok(!/<link[^>]+href="https?:/.test(html), 'stylesheets, fonts and icons are self-hosted');
 });
 
-test('the redirects that serve the app still follow the headers block', () => {
-  assert.ok(toml.indexOf('[[headers]]') < toml.indexOf('[[redirects]]'));
-  assert.match(toml, /from = "\/\*"[\s\S]*to = "\/app.html"/);
-  // b0704959: the app is at the root, so /device is an ordinary app page; the earlier /- addresses move for good.
-  assert.doesNotMatch(toml, /from = "\/device"/);
-  // The cached public read answers them with a same-site Location (public-read.mts config.path "/-/*"); a "/:splat"
-  // rule here would send "/-//evil.example" to another site.
-  assert.doesNotMatch(toml, /to = "\/:splat"/);
-  assert.doesNotMatch(toml, /from = "\/-/);
-  assert.ok(
-    toml.lastIndexOf('[[redirects]]') === toml.indexOf('[[redirects]]\nfrom = "/*"'),
-    'the catch-all stays last',
+test('the static files get the same headers as the Worker, for every path', () => {
+  const lines = headersFile().split('\n');
+  assert.equal(lines[0], '/*', 'one rule for every static file');
+  const rules = Object.fromEntries(
+    lines
+      .slice(1)
+      .filter(Boolean)
+      .map(line => /^ {2}([A-Za-z-]+): (.*)$/.exec(line).slice(1)),
   );
-  assert.ok(!toml.includes('to = "/index.html"'), 'app routes serve app.html; "/" is the static public page');
+  assert.deepEqual(rules, SECURITY_HEADERS);
+  for (const value of Object.values(SECURITY_HEADERS)) assert.doesNotMatch(value, /[\r\n]/);
 });

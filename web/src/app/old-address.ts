@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Old addresses (Item d61f36fe): every address the old site served and a person or an agent may still hold, mapped to
 // its place in the app. Pure, and built from paths.ts (the app is at the root since Item b0704959; "/-/…" is the
-// 301 in netlify.toml). A plain path maps with no read. An address that names only ids (`?project=<id>`, `/decisions/<id>`,
+// 301 in site/public-read.ts). A plain path maps with no read. An address that names only ids (`?project=<id>`, `/decisions/<id>`,
 // `/review/<id>`) needs one access-checked read (convex/urlLegacy.ts): the page that renders it is OldAddress.tsx.
 import { longId } from '../../../src/project-routes';
 import { reservedHandles } from '../../../src/readable-urls';

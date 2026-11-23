@@ -51,7 +51,7 @@ export function replaySelection(directory, fallbackDurations = {}) {
   const files = sourceFiles(join(directory, 'modal-source'));
   const after = standardSelection({ ...comparison, files, env: { FORGE_CHECK_SCOPED: '1' } });
   const graph = testImportGraph(files);
-  const modules = comparison.paths.filter(path => /^(?:src|web\/src|convex|netlify)\//.test(path));
+  const modules = comparison.paths.filter(path => /^(?:src|web\/src|convex|site)\//.test(path));
   const ownDurations = retainedDurations(readFileSync(join(directory, 'stdout.log'), 'utf8'), before.tests);
   const durations = { ...fallbackDurations, ...ownDurations };
   const groups = plan.groups ?? [],

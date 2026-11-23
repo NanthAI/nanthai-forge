@@ -5,13 +5,13 @@ Forge has five parts. Each owns one kind of data, and no part quietly takes over
 ```text
   Coding agent / human
         |
-   nforge CLI, MCP    Hosted browser (Netlify)
+   nforge CLI, MCP    Hosted browser (Cloudflare Worker)
         |                                         |
   Clone and Lane checkouts  <-- open/save -->  Convex + R2 (hosted, canonical)
   (your machine; regenerable                 (records and journal in Convex,
   caches and retry journals)                  bytes in R2; sessions, access)
                                                        |
-  CI runners (GitHub Actions or your own)     Netlify worker (public analysis)
+  CI runners (GitHub Actions or your own)
 ```
 
 For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [concepts](concepts.md).
@@ -27,7 +27,7 @@ For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [co
 | Agent interface   | Short commands over the hosted contract                                                              | `src/hosted-agent-cli.ts`, `src/mcp-hosted-agent.ts`      |
 | Convex            | Hosted records, the Work event journal, sessions, messages, current access (bytes live in R2)        | `convex/`                                                 |
 | Web               | Hosted browser UI (the only browser UI)                                                              | `web/src/`                                                |
-| Netlify worker    | Public-repository analysis in the background                                                         | `netlify/functions/`                                      |
+| Site Worker       | Serves the web app, cached public reads and device sign-in at the edge (no records of its own)       | `site/`                                                   |
 | Git compatibility | Import, export, projections and publication                                                          | `src/native-git*.ts`, `src/work-git*.ts`                  |
 
 Forge has one client mode: hosted. Hosted main, Lanes and the landing queue are canonical; the CLI keeps regenerable caches and retry journals and cannot accept. A folder without a hosted marker is refused with `FORGE_ROOT_UNAVAILABLE` and the next step `nforge host ROOT`; "offline" means a Lane keeps working and lands once back online. The native-owner mode (local source authority, its landing driver and local Work store commands) is removed; the shared kernel below (State format, merge, durable writes) serves hosted clients and the server. Exchange push, source return and the `autoExchange` policy are retired. See [source exchange](operations/source-exchange.md).

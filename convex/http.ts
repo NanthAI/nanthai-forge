@@ -11,7 +11,6 @@ import { makeFunctionReference } from 'convex/server';
 import { httpRouter } from 'convex/server';
 import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';
-import { workerAuthorized } from '../src/worker-auth';
 import { CLIENT_HASH, CLIENT_HEADER, SITE_DEVICE_HEADER } from '../src/client-hash';
 import { sameSecret } from './siteSecret';
 import { githubWebhookAuthorized } from '../src/github-webhook';
@@ -25,22 +24,6 @@ http.route({ path: '/checks/actions', method: 'POST', handler: actionsHttp });
 // gitw/ carries the signed sessions the large-pack Worker forwards (docs/git-serving.md).
 for (const method of ['GET', 'POST'] as const)
   for (const pathPrefix of ['/git/', '/gitw/']) http.route({ pathPrefix, method, handler: gitServe });
-for (const operation of ['prepare', 'update', 'uploadTarget'] as const)
-  http.route({
-    path: `/worker/${operation}`,
-    method: 'POST',
-    handler: httpAction(async (ctx, request) => {
-      if (!(await workerAuthorized(request.headers.get('authorization'), process.env.FORGE_WORKER_KEY)))
-        return new Response('Unauthorized', { status: 401 });
-      try {
-        // The registered action validators check the untrusted body before executing.
-        const value = await ctx.runAction(internal.remote[operation], await request.json());
-        return Response.json(value, { headers: { 'Cache-Control': 'no-store' } });
-      } catch {
-        return Response.json({ error: 'Worker operation failed.' }, { status: 400 });
-      }
-    }),
-  });
 http.route({
   path: '/github/webhook',
   method: 'POST',
@@ -187,7 +170,7 @@ http.route({
     }
   }),
 });
-/** Sign-in starts and renewals come through the site's edge (netlify/functions/device-auth.mts) once
+/** Sign-in starts and renewals come through the site's edge (site/device-auth.ts) once
  * FORGE_SITE_DEVICE_KEY is set here: the edge proves itself with that key and forwards the visitor's keyed hash, which
  * carries the per-visitor limit (convex/visitorBudget.ts). A direct caller is told where to go and nothing runs. */
 async function deviceVisitor(request: Request) {

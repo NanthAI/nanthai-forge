@@ -146,7 +146,7 @@ export function scriptSelectionReason(item, roots, tests, reverse, graph) {
   );
   if (critical)
     return { full: `Check pipeline, packaging or build dependency: ${item.path} reaches ${critical}` };
-  if (scriptPath(item.path) && [...visited].some(path => /^(?:src|web\/src|convex|netlify)\//.test(path)))
+  if (scriptPath(item.path) && [...visited].some(path => /^(?:src|web\/src|convex|site)\//.test(path)))
     return { full: `Product runtime dependency: ${item.path}` };
   const consuming = tests.filter(path => readers.has(path));
   return {

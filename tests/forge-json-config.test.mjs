@@ -224,7 +224,7 @@ test("Forge's own package.json preflight config reads unchanged", () => {
   // Then the compiler steps of the project's own typecheck script (ad80e037 fix 6), and nothing else.
   assert.deepEqual(
     checks.filter(check => check.source !== 'declared').map(check => check.name),
-    ['tsconfig.json', 'web/tsconfig.json', 'convex/tsconfig.json', 'netlify/tsconfig.json'].map(
+    ['tsconfig.json', 'web/tsconfig.json', 'convex/tsconfig.json', 'site/tsconfig.json'].map(
       project => `typecheck ${project}`,
     ),
   );

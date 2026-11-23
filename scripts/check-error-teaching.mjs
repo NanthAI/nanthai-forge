@@ -57,7 +57,7 @@ export async function errorTeachingFindings(root) {
   };
   const topics = new Set(Object.keys(helpTopics));
   const codes = new Set(
-    ['src', 'netlify', 'convex'].flatMap(dir => sources(dir, root)).flatMap(path => errorCodes(read(path))),
+    ['src', 'site', 'convex'].flatMap(dir => sources(dir, root)).flatMap(path => errorCodes(read(path))),
   );
   const findings = [];
   const untaught = [...codes].filter(code => !teachingEntry(code)).sort();

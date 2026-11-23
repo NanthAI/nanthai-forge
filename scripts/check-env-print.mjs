@@ -59,7 +59,7 @@ const TRIGGER = /env|pgrep|\bps\b/;
 const SHELL_TEXT = new Set(['.sh', '.bash', '.zsh', '.yml', '.yaml']);
 const CODE_TEXT = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs']);
 // Synthetic tests may replay these patterns inside fixtures; the guard's own test needs them.
-const SCOPE = /^(?:scripts|src|convex|netlify|web\/src|\.github|docs|design|evals|models)\/|^[^/]+\.md$/;
+const SCOPE = /^(?:scripts|src|convex|site|web\/src|\.github|docs|design|evals|models)\/|^[^/]+\.md$/;
 
 /** Rule names a shell command line breaks; ignores `#` comments and stringed command lines. */
 export function shellHazards(line) {

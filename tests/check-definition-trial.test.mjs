@@ -209,7 +209,7 @@ test('the trial runs in the browser job when the plan has one, else in the stati
  * definition selects; its stub runner records the files it is asked to run. */
 function trialTree(t, { failing = false, browser = false, shard = '0' } = {}) {
   const root = temporaryDirectory(t, 'forge-definition-trial-');
-  for (const dir of ['src', 'web', 'convex', 'netlify', 'tests', 'scripts']) mkdirSync(join(root, dir));
+  for (const dir of ['src', 'web', 'convex', 'site', 'tests', 'scripts']) mkdirSync(join(root, dir));
   // The static job builds before the trial's tests; the synthetic build does nothing.
   const noop = 'node -e 0';
   writeFileSync(

@@ -127,7 +127,7 @@ export function parseImportFacts(path, text, withSymbols) {
       const prefix = node.head.text;
       const literal = prefix.match(/^((?:\.\.\/|\.\/)?[\w./-]+)[^\w./-]/)?.[1];
       const nameLoader = functionNameLoader(node, path);
-      const parts = /^(?:\.\.\/|\.\/)?(?:dist|src|web|convex|netlify|scripts)\//.test(prefix)
+      const parts = /^(?:\.\.\/|\.\/)?(?:dist|src|web|convex|site|scripts)\//.test(prefix)
         ? templateParts(node)
         : null;
       if (names || literal || nameLoader || parts)

@@ -591,7 +591,7 @@ test('forge-check dependencies and build config importers require full selection
 test('source inventory includes package commands for script selection', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-script-inventory-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  for (const dir of ['src', 'web', 'convex', 'netlify', 'tests', 'scripts']) mkdirSync(join(root, dir));
+  for (const dir of ['src', 'web', 'convex', 'site', 'tests', 'scripts']) mkdirSync(join(root, dir));
   writeFileSync(
     join(root, 'package.json'),
     JSON.stringify({ scripts: { inspect: 'node scripts/inspect.mjs' } }),
@@ -609,7 +609,7 @@ test('source inventory includes package commands for script selection', t => {
 test('paired recheck selection keeps recursive JSON readers from the runner inventory', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-json-inventory-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  for (const dir of ['src/data', 'web', 'convex', 'netlify', 'tests', 'scripts/data'])
+  for (const dir of ['src/data', 'web', 'convex', 'site', 'tests', 'scripts/data'])
     mkdirSync(join(root, dir), { recursive: true });
   const leaf = "import '../src/leaf.ts';\n";
   const fs = "import { readdirSync, readFileSync } from 'node:fs';\n";

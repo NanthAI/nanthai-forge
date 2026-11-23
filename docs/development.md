@@ -153,7 +153,7 @@ reference's generic type explicitly: native 7.0.2 otherwise infers the enclosing
 `F` and reports TS2345 where tsc 5.9.3 accepts the call. This type-only change
 preserves the reference, arguments and result without a cast or suppression.
 Native core/web/Convex commands pass `--types "*"` to preserve tsc 5's automatic
-ambient types; Netlify retains its explicit types list. Native commands also pass
+ambient types; the site Worker's config (`site/tsconfig.json`) keeps its own empty types list. Native commands also pass
 `--noUncheckedSideEffectImports false` to preserve the old side-effect import
 behavior. Convex's config explicitly includes Node ambient types and sets
 `noUncheckedSideEffectImports: false`, so direct compiler invocations have the
@@ -454,7 +454,7 @@ closures, package commands) are whole, and `eval`, `new Function`, `with` or `ex
 make a module whole. A side-effect import therefore reaches a module only when its load
 changed.
 
-A `scoped` selection names its domain (`web`, `convex`, `core`, `netlify`, `tests`,
+A `scoped` selection names its domain (`web`, `convex`, `core`, `site`, `tests`,
 `scripts`, `tooling`, or `mixed`) and prints its reason and complete file list before tests.
 Root non-Markdown files, non-Markdown `docs/` files and non-Markdown `evals/` files
 select full coverage. Every top-level folder is listed, with its rule, in `topLevelFolders`
@@ -584,7 +584,7 @@ Candidate before landing on its own main, so pushing that accepted State to the
 GitHub mirror does not start Verify Forge. Eight test shards keep one full audit
 within the org's concurrent-job allowance while preserving the full suite and
 every static stage.
-Separately, `.github/workflows/web-deploy.yml` builds the web app and deploys it to the dev Netlify site on pushes to main that touch web, source, docs or package files. The Netlify CLI is an exact development dependency pinned with its full dependency tree in `package-lock.json`; the workflow installs with `npm ci --ignore-scripts` and invokes `npx --no-install netlify`. The deploy token is present only for the deploy step.
+Separately, `.github/workflows/web-deploy.yml` deploys the [web site](#web-site) from main, only when what it serves changed and at most once per window. The deploy token is present only for the deploy step.
 
 ## Code map
 
@@ -600,7 +600,7 @@ Separately, `.github/workflows/web-deploy.yml` builds the web app and deploys it
 | `src/native-git*.ts`, `src/work-git*.ts`, `src/work-publish.ts` | Git compatibility, GitHub publication |
 | `convex/` | Hosted schema, Work events, backups, exchange, coordination, access |
 | `web/src/` | Hosted browser UI |
-| `netlify/functions/` | Background analysis worker |
+| `site/` | Web site Worker: static app, cached public reads, device sign-in |
 | `tests/`, `scripts/`, `evals/` | Tests, tooling, measurements |
 
 Keep modules narrow (about 300 lines) with one owner. Use TypeScript, pin dependencies through the lockfile, and add the SPDX header to source files. New storage formats need migration and recovery tests.
@@ -658,7 +658,7 @@ Configuration is written to the ignored `.env.local`.
 - `GITHUB_PUBLIC_TOKEN`: optional, for public GitHub API reads only.
 - `GITHUB_APP_SLUG`: optional, the Forge GitHub App's URL slug. An import refusal for an owner without an installation links `https://github.com/apps/SLUG/installations/new` when it is set.
 - `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`: required. Every deployment, self-host included, writes source and artifact bytes to R2, with no opt-in and no Convex-storage fallback; missing settings fail writes with `R2_NOT_CONFIGURED`. `R2_ENDPOINT` optionally points at another S3-compatible store (https, or http on loopback). See [data placement](data-placement.md).
-- The list above is the minimum for sign-in, import and R2; hosted checks, Actions and workers read further variables (for example `FORGE_WORKER_KEY`, `NETLIFY_WORKER_URL`, `FORGE_HOSTED_CHECK_KEY_ID`, `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`); see [GitHub App](operations/github-app.md) and [GitHub Actions checks](operations/github-actions-checks.md).
+- The list above is the minimum for sign-in, import and R2; hosted checks, Actions and workers read further variables (for example `FORGE_HOSTED_CHECK_KEY_ID`, `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`); see [GitHub App](operations/github-app.md) and [GitHub Actions checks](operations/github-actions-checks.md).
 
 Imports store gzip JSON in R2 (`r2blob:` references, see [data placement](data-placement.md)) with a 128 MiB artifact budget. Functions never execute target repository code. After setup, `npm run smoke:hosted -- https://github.com/sindresorhus/is-plain-obj` checks live anonymous import.
 
@@ -671,9 +671,8 @@ b0704959); the earlier screens (`Hosted.tsx` and its imports) were removed
 (Item 88a20e56). The app lived under `/-` before; every
 `/-` and `/-/*` address moves for good (301, kept forever: mails, CLI output, board
 text and GitHub statuses carry those links) to the same address without `/-`. The
-cached public read answers them (`netlify/functions/public-read.mts`, path `/-/*`)
-with a Location on this site; netlify.toml has no `/:splat` rule, which would send
-`/-//evil.example` to another site. `main.tsx` does the same for a server that
+site Worker answers them (`site/public-read.ts`, path `/-/*`) with an absolute
+Location on this site, so `/-//evil.example` stays on this site. `main.tsx` does the same for a server that
 does not. The cached public read
 keeps its data at `/-/public/v1/`. `scripts/ds-build-guard.mjs` keeps the
 design-system behaviour layer out of the first paint.
@@ -771,7 +770,7 @@ design-system behaviour layer out of the first paint.
   (`/auth/device/start-v2`) starts a sign-in; a CLI that still posts to
   `/auth/device/start` gets HTTP 426 telling it to run `nforge update`. With
   `FORGE_SITE_DEVICE_KEY` set, starts and renewals come through the site
-  (`netlify/functions/device-auth.mts`) for the per-visitor limit.
+  (`site/device-auth.ts`) for the per-visitor limit.
 - One Lane, `/{handle}/{project}/lanes/{laneId}` (`web/src/app/lane/`, lazy
   with its route): one bounded read, `projectLaneReview.read`, names the pinned
   saved head and every changed path with its exact blobs from the Lane's overlap
@@ -1209,13 +1208,11 @@ Now groups unacknowledged messages per Lane or Intent, shows the latest message 
 
 The project shell uses Now · Work · Code · Settings. Work switches Intents · Lanes · Candidates · Planning; Activity is under Now. The signed-in root is the project list. Retired collection, Explore, Agents and classic Work destinations normalize to these homes.
 
-Project URLs are `/<owner>/<name-slug>~<project-id>`, followed by `/intents`, `/lanes`, `/views`, `/planning`, `/activity`, `/review/<id>`, `/code/<path>` or `/settings/<section>`. The stable project-id suffix makes slugs unique without backend migration and lets old names redirect after the current project loads. Work UUIDs are losslessly encoded as `i-`, `l-` or `v-` plus 22 URL-safe characters. Source revision, line, symbol and filter state remain query parameters. `shell/location.ts` decodes presentation state for existing page controls; it never supplies authority. Netlify serves the SPA on project paths; assets and APIs retain their own routing. The shared codec in `src/project-routes.ts` still decodes older `/local/<name-slug>` links, but nothing serves them.
+Project URLs are `/<owner>/<name-slug>~<project-id>`, followed by `/intents`, `/lanes`, `/views`, `/planning`, `/activity`, `/review/<id>`, `/code/<path>` or `/settings/<section>`. The stable project-id suffix makes slugs unique without backend migration and lets old names redirect after the current project loads. Work UUIDs are losslessly encoded as `i-`, `l-` or `v-` plus 22 URL-safe characters. Source revision, line, symbol and filter state remain query parameters. `shell/location.ts` decodes presentation state for existing page controls; it never supplies authority. The site Worker serves the app shell on project paths; assets and APIs retain their own routing. The shared codec in `src/project-routes.ts` still decodes older `/local/<name-slug>` links, but nothing serves them.
 
 Application loading uses the smoothed orbiting lower arm (2200ms). Reduced motion renders a static mark. Capture seven frames with `node scripts/ui-loader-shots.mjs BASE_URL OUTPUT_DIRECTORY`.
 
-Netlify injects its badge at the edge rather than into this build. In the production project's Netlify UI, select **Project configuration → General → Powered by Netlify badge**, turn it off and save. The next request reflects the setting without redeployment ([Netlify documentation](https://docs.netlify.com/manage/projects/powered-by-netlify-badge/)).
-
-The public page at `/` is static: `web/index.html`, one stylesheet (`web/src/landing/landing.css`, which imports the design system's one token source, `web/src/ds/tokens.css`) and two small scripts. It loads no app code and makes no Convex calls; the signed-in app is `web/app.html` (home `/projects`), which Netlify serves for every other route. A browser that has been signed in, or a legacy app link such as `/?project=…`, is sent on to `/projects` by the page's one inline script (its CSP hash is in `netlify.toml`, checked by `tests/web-headers.test.mjs`). Every section reads fully without JavaScript: the race and charts are written in their end state. The pricing section shows the plans of `web/src/billing/contract.ts` (monthly only; nothing is charged before launch), and the page test fails when its figures drift from the contract. `page.ts` (about 2 KB gzip) fills the copied prompt with the site's own `/llms.txt`, copies it, reveals the statement once, types the terminal while it is on screen, plays the race once and then rests, and draws the charts once on first view. The hero, Threads, is `hero.ts` (about 5 KB gzip), imported when the browser is idle after load: main is a vertical line on the left, three Lanes flow into it on a 21.6 s scripted loop (an overlap, a held Lane, three landings), and the close runs free Lanes beside its text when there is room. Both share the page's one requestAnimationFrame loop (`frames.ts`): 30 fps, 15 fps after 60 s without input, never stopping while visible; it stops off screen, in a hidden tab and under reduced motion, which draws one still. The dot floor is drawn once per layout into its own canvas. `tests/landing-page.test.mjs` derives every figure from `docs/research/p6-exit-bench-results.md` and checks every link. `node scripts/ui-shots.mjs --pages landing --base URL --out DIR` (against `vite preview`, not the dev server) saves stills per width and theme, keyboard focus, no-JS and a hero strip, and checks the motion lifecycle, cold-load bytes, main-thread time per frame and memory. Fonts: Atkinson Hyperlegible Next and Mono, self-hosted Latin subsets (`web/src/assets/NOTICE.md`).
+The public page at `/` is static: `web/index.html`, one stylesheet (`web/src/landing/landing.css`, which imports the design system's one token source, `web/src/ds/tokens.css`) and two small scripts. It loads no app code and makes no Convex calls; the signed-in app is `web/app.html` (home `/projects`), which the site Worker serves for every other route. A browser that has been signed in, or a legacy app link such as `/?project=…`, is sent on to `/projects` by the page's one inline script (its CSP hash is in `site/headers.ts`, checked by `tests/web-headers.test.mjs`). Every section reads fully without JavaScript: the race and charts are written in their end state. The pricing section shows the plans of `web/src/billing/contract.ts` (monthly only; nothing is charged before launch), and the page test fails when its figures drift from the contract. `page.ts` (about 2 KB gzip) fills the copied prompt with the site's own `/llms.txt`, copies it, reveals the statement once, types the terminal while it is on screen, plays the race once and then rests, and draws the charts once on first view. The hero, Threads, is `hero.ts` (about 5 KB gzip), imported when the browser is idle after load: main is a vertical line on the left, three Lanes flow into it on a 21.6 s scripted loop (an overlap, a held Lane, three landings), and the close runs free Lanes beside its text when there is room. Both share the page's one requestAnimationFrame loop (`frames.ts`): 30 fps, 15 fps after 60 s without input, never stopping while visible; it stops off screen, in a hidden tab and under reduced motion, which draws one still. The dot floor is drawn once per layout into its own canvas. `tests/landing-page.test.mjs` derives every figure from `docs/research/p6-exit-bench-results.md` and checks every link. `node scripts/ui-shots.mjs --pages landing --base URL --out DIR` (against `vite preview`, not the dev server) saves stills per width and theme, keyboard focus, no-JS and a hero strip, and checks the motion lifecycle, cold-load bytes, main-thread time per frame and memory. Fonts: Atkinson Hyperlegible Next and Mono, self-hosted Latin subsets (`web/src/assets/NOTICE.md`).
 
 The design system lives in `web/src/ds/` ([DESIGN.md](../DESIGN.md#using-the-system)). With `npm run dev:hosted`, `/ds.html` is its reference surface: one screen built from the shared parts, with a theme switch. It is not a build input. The behaviour layer (`web/src/ds/behaviour/`, React Aria Components) loads after first paint; `tests/ds-layer-bundle.test.mjs` builds the app with the reference surface and checks the layer stays out of first paint, within `web-ds-layer-gzip`, with English messages only.
 
@@ -1250,12 +1247,12 @@ Landing evidence is read-only from existing native Work. `--landing-id` selects 
 
 ### Signed-in hosted UI review gate
 
-Use the real signed-in app for hosted UI review. Isolated screen fixtures remain useful, but cannot reveal broken routing, legacy wrappers, missing live data or authentication integration. Before signing off a hosted UI change, capture and inspect desktop and mobile pages on the live site, a Netlify draft URL, or local `npm run dev:hosted`. This is an on-demand review tool, **not part of `verify`**: it needs Chromium, network access and local bot credentials.
+Use the real signed-in app for hosted UI review. Isolated screen fixtures remain useful, but cannot reveal broken routing, legacy wrappers, missing live data or authentication integration. Before signing off a hosted UI change, capture and inspect desktop and mobile pages on the live site or local `npm run dev:hosted`. This is an on-demand review tool, **not part of `verify`**: it needs Chromium, network access and local bot credentials.
 
 ```sh
 npm ci --ignore-scripts
 npx playwright install chromium
-node scripts/ui-shots.mjs --base https://<your-site>.netlify.app \
+node scripts/ui-shots.mjs --base https://<your-site>.workers.dev \
   --out /absolute/private/path/ui/live --pages now,intents,settings \
   --widths 1500,390 --themes dark,light
 ```
@@ -1278,7 +1275,7 @@ From a built checkout with Chromium installed and a current owner `nforge login`
 
 ```sh
 node scripts/ui-bot-setup.mjs --passkey \
-  --base https://nanthai-forge-dev.netlify.app \
+  --base https://nanthai-forge-dev.nanthai-forge.workers.dev \
   --deployment https://benevolent-wildebeest-974.convex.cloud \
   --project mh7aafndrxmj8c2q0931zbjk2n8h4ffs --grant-reader
 ```
@@ -1302,11 +1299,63 @@ In the Clerk setup, `--grant-reader` uses the owner's existing `nforge login` cr
 
 Reader administration is currently API-based: owner action `projectReaderActions:set` accepts `{ projectId, reader, present, operationId }`; `present: false` revokes, using a new UUID. `projectReaders:list` is an owner-only paginated query. Replaying an earlier successful grant after revocation does not recreate access. The setup script keeps one grant operation id per deployment and project (`readerGrantOperationIds`), so switching `--project` requests a new grant. A bot without access makes either tool stop with `BOT_NO_READER_GRANT`. Clerk runs report the setup command. For passkey captures, use the native setup above to request reader access. Readers open projects by direct project URL; they are not listed in the contributor-only “Shared with you” collection. Browser captures need only the bot credential file.
 
-### Netlify
+### Web site
 
-The dev site is `nanthai-forge-dev` on the Free plan. `netlify.toml` builds `npm run build:hosted` into `hosted-web-dist` on Node 24. Free plans have no function-scoped environment variables, so deploy the background worker with `node --env-file=.env.local scripts/deploy-forge-preview.mjs SITE_ID`. It passes `FORGE_WORKER_KEY`, `GITHUB_PUBLIC_TOKEN` and `FORGE_CONVEX_SITE_URL` as per-deploy secret overrides, so supply them again on every deploy. Then set `NETLIFY_WORKER_URL` in Convex to the ready deploy's function URL.
+The dev site is the Cloudflare Worker `nanthai-forge-dev`
+(https://nanthai-forge-dev.nanthai-forge.workers.dev) on the Workers Free plan. Static files from
+`hosted-web-dist` are served by the platform before the Worker runs, so they cost no Worker request, and carry the
+headers of `site/headers.ts` as `_headers`. A path with no file runs the Worker (`site/worker.ts`): device
+sign-in (`site/device-auth.ts`), the cached public read and the 301 for every earlier `/-` address
+(`site/public-read.ts`), and the app shell for any other path. Every Worker response gets the same security headers.
+The Worker reads the visitor's address from `CF-Connecting-IP` and forwards only its keyed hash.
 
-A 202 from the worker means dispatched, not succeeded. Verify that a new import is claimed and published. Handler tests do not prove the deployed package: build with `functions:build`, inspect the ZIP for symlinks, and cold-import `netlify/functions/analyze-background.mjs`. Rollback: unset `NETLIFY_WORKER_URL` to return to the Convex analysis path.
+`node scripts/build-site.mjs OUT --commit SHA` writes the build (static files, the bundled Worker,
+`worker.config.json` with its bindings and secret names, and `/_forge/build.json` with the commit, the time and a
+digest of everything served). `cf deploy --prebuilt --no-provision`, run in `OUT`, uploads it. The `cf` CLI is
+pinned with its own lockfile in `site/deploy/`, so only the deploy job downloads it.
+
+**When it deploys.** `scripts/site-deploy-plan.mjs` decides; the workflow runs on pushes to main that may touch
+the site, every three hours (at 7 past) and on manual dispatch, one run at a time (a newer queued run replaces an
+older queued one; a running deploy is never interrupted). Every run checks out the current main, never its own
+commit, so a late or re-run job cannot put an older main over a newer one.
+
+1. **Plan**, with no install: read the live `/_forge/build.json`, then list the changes since its commit. If none
+   touches a served file (`web/`, `site/`, `docs/`, `skills/`, `README.md`, the package files, the
+   workflow, the build scripts, the document manifests, the files the generated CLI, MCP and error references read,
+   or any file the last web build read), and the public error codes are unchanged, the run ends here. A `src/`-only
+   or test-only landing does not deploy. The references also take schemas and help text from most of `src/` through
+   imports, so the three-hourly and manual runs (`plan --deep`) count any `src/` or `scripts/` change too and let
+   the digest decide.
+2. **Window**: if the live site was built less than 20 minutes ago (the record's time), the run ends too. No runner waits: the next
+   landing after the window, or the three-hourly run, deploys everything held back, so landings in that time share
+   one deploy.
+3. **Compare**: build, then deploy only if the digest differs from the live one, or the live record has no commit (a
+   deploy by hand), so the next plans can list changes again.
+
+Measured on the 100 landings of 2026-11-22 14:38 to 2026-11-23 04:45 UTC (85 of them changed a served file), which
+reached GitHub in 56 pushes: the old rule ran a full build and deploy on every one, **56 deploys per 100 landings**
+(42 went out; the deploy step failed on the last 14, after the shared Netlify credits ran out), 89 billed runner minutes (61 actual).
+Replayed on the same pushes, this rule makes **23 deploys per 100 landings** (62 runs; the other 39, the three-hourly
+ones included, end after the plan in about 20 seconds), about 85 billed runner minutes (about 51 actual), and a change
+reaches the site in a median of 27 minutes; the longest wait, 133 minutes, fell in a two-hour gap without pushes. A
+waiting runner was rejected: it would have spent about 280 more runner minutes per 100 landings.
+
+The Worker's settings are Worker secrets, never in the build: `FORGE_WEB_URL`, `FORGE_CONVEX_SITE_URL`,
+`FORGE_PUBLIC_READ_SECRET`, `FORGE_CLIENT_HASH_KEY` and `FORGE_SITE_DEVICE_KEY` (every declared secret must
+be set before a deploy succeeds). Set them with the signed-in `cf` CLI, piping each value. The GitHub environment
+`cloudflare-dev` (deploys from main only) holds the deploy token `CLOUDFLARE_API_TOKEN` (Workers Scripts edit on
+this account, nothing else), the variable `CLOUDFLARE_ACCOUNT_ID` and the public `VITE_` build variables.
+
+A deploy by hand uses the same steps: `npm run build:web` with the `VITE_` variables, `build-site.mjs`, then
+`cf deploy` from the output. To roll back, redeploy an earlier version from the Cloudflare dashboard
+(Workers → nanthai-forge-dev → Deployments) or dispatch the workflow on an earlier commit.
+
+Passkeys belong to their origin: a passkey made on an earlier site address does not sign in here. Register a new
+one on this site, including the UI bot's passkey for [captures](#signed-in-hosted-ui-review-gate).
+
+Public-repository analysis runs in a Convex Node action (`convex/indexer.ts`). An import makes more than 2,000
+GitHub reads, past the Workers Free plan's 50 subrequests and 10 ms CPU per request, while a Convex action may run
+for 10 minutes.
 
 ### Diff performance diagnostics
 
@@ -1492,54 +1541,31 @@ landing runner, and there is no new runtime dependency in the CLI or MCP.
 
 ### Public discovery configuration
 
-Set `FORGE_PUBLIC_READ_SECRET` to the same private service key on Convex and the site function. The key is never a
-`VITE_` variable and never reaches a browser. Set `FORGE_WEB_URL` to the canonical HTTPS web origin on both; the
-site function can also use Netlify's configured `URL`. An unset key closes the backend discovery route before DB
-I/O. An unset web origin closes share-tag generation and the sitemap API. HTML front pages still serve the
-bundled SPA shell when settings or public reads are unavailable. The function bundle includes
-`hosted-web-dist/app.html`; its response security headers are set directly in the function.
+Set `FORGE_PUBLIC_READ_SECRET` to the same private service key on Convex and the site Worker. The key is never a
+`VITE_` variable and never reaches a browser. Set `FORGE_WEB_URL` to the canonical HTTPS web origin on both. An
+unset key closes the backend discovery route before DB I/O. An unset web origin closes share-tag generation and the
+sitemap API. HTML front pages still serve the built app shell when settings or public reads are unavailable.
 
 [Per-visitor limits](security.d/sections/0810-per-visitor-limits.md) need two more private keys, never `VITE_`
 variables. Set `FORGE_CLIENT_HASH_KEY` (random, at least 32 bytes) on the site only; without it the site forwards no
-visitor hash and the functions answer device sign-ins with 503. Set `FORGE_SITE_DEVICE_KEY` on the site, then the same
-value on Convex once the site's `device-auth` function is live; on Convex it moves device sign-in to the site.
+visitor hash and answers device sign-ins with 503. Set `FORGE_SITE_DEVICE_KEY` on the site, then the same value on
+Convex once the site is live; on Convex it moves device sign-in to the site.
 
 For local browser development, set `VITE_FORGE_WEB_URL` to the deployed web origin; public reads go through that
-site's cache and budget. A bare Vite server does not host the site function. The
+site's cache and budget. A bare Vite server does not run the site Worker. The
 [public discovery security contract](security.md) states rate limits, cache freshness and partial weekly coverage.
 
-The native limiter is asynchronous. Test sustained traffic, not an exact 61st response:
-
-```sh
-node scripts/public-read-live-check.mjs HTTPS_DEV_ORIGIN self-redirect
-node scripts/public-read-live-check.mjs HTTPS_DEV_ORIGIN canonical
-# Wait at least 65 seconds without test traffic from this IP before the second shape.
-node scripts/public-read-live-check.mjs HTTPS_DEV_ORIGIN redirect
-```
-
-Each probe first requires the ordinary response (200 for explore, 308 for its uppercase alias), then sends a
-61-request burst followed by at most one request per second. It requires 429 within 25 seconds after the burst;
-the burst itself has a 45-second deadline and each request has a deadline with zero retries. No more than 86
-requests are made per probe. Responses are not followed, so a limited redirect must be observed as 429, never
-hidden behind a following request. `Retry-After` is checked when present; absence is reported, since native
-Netlify blocks currently omit it and expose no header override. The dev trace accepted 61 rapid redirects and
-returned 429 eleven seconds later, consistent with the documented roughly ten-second propagation delay. A
-passing probe establishes abuse protection for that deployment and request shape, not a strict traffic/spend cap.
-The sustained dev measurements were 9.962 seconds over 64 requests for the canonical address and 12.759 seconds
-over 63 requests for the redirecting address (3.099 and 2.204 seconds after their bursts, respectively).
-
-The `self-redirect` mode requests `/explore?__forge_page=x` without following redirects. Its Location must
-end exactly in `?=`, and following it once must return 200 with no Location.
+The site's own rate limit is Cloudflare's rate-limit binding, a best-effort backstop counted per location, not an
+exact request-61 limit; measured, it refused almost nothing from one address. Do not test it for a 429; test the
+backend's per-visitor windows instead.
 
 To verify data queries after deploy, fetch `/-/public/v1/explore/active.json?forge_probe=61` and
 `/sitemap.xml?forge_probe=61` before warming their entries, or after their 30-second expiry. Compare each
 with its bare URL immediately afterward. Both requests should return the same 200 response with no Location,
-and the repeat should be a CDN hit with zero Convex executions.
+and the repeat should be an edge hit with zero Convex executions (from the same location).
 
-Raw dot paths need `curl --path-as-is`; `fetch` and browsers normalize them before transport. Dev refused the
-raw `/./` form with an empty edge 404 and zero function operations. This is a platform boundary, not a Forge
-500 or an application 404; the function cannot supply a browser body for a request it never receives. Preserve
-the request ID and inspect function operations when distinguishing that case from a normal nonempty app 404.
+Raw dot paths need `curl --path-as-is`; `fetch` and browsers normalize them before transport. Cloudflare
+normalizes `/./` before the Worker runs, so the request reaches the normalized page.
 Populated public-project share metadata remains unverified until a public project exists on dev; follow-up
 Issue 43d2f68d tracks that verification separately. Do not create one merely for this check.
 

@@ -29,7 +29,7 @@ by this inventory. All audited indexes have readers, including generic pages and
 snapshots; no unread collection was established. Further core/planning-history
 splits model only about 0.08 / 0.11 GB and were not pursued in this slice.
 
-Evidence: storage Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981) (inventory comment `b69f2f14`, catalog
+Evidence: storage Issue [8c4f126b](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981) (inventory comment `b69f2f14`, catalog
 completion `a67d6495`, catch-up `257c5a66`, final split evidence), and cost Issue
-[298f9675](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd). The [placement review](../../phase6-plan.md#p6-close-order-owner-2026-11-10)
+[298f9675](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd). The [placement review](../../phase6-plan.md#p6-close-order-owner-2026-11-10)
 decides the next implementation slices.

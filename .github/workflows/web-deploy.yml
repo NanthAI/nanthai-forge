@@ -1,20 +1,25 @@
 name: Deploy dev web
 
+# The dev site (Cloudflare Worker nanthai-forge-dev, docs/development.md#web-site) deploys only when what it serves
+# changed, at most once per window (scripts/site-deploy-plan.mjs). A run for an unserved change, or inside the window,
+# ends after the plan; the three-hourly run deploys whatever the window held back.
 on:
   push:
     branches: [main]
     paths:
       - 'web/**'
+      - 'site/**'
       - 'src/**'
-      - 'netlify/**'
-      - 'netlify.toml'
+      - 'convex/**'
+      - 'scripts/**'
       - 'docs/**'
+      - 'skills/**'
       - 'README.md'
       - 'package.json'
       - 'package-lock.json'
-      - 'scripts/llm-documents.mjs'
-      - 'scripts/web-smoke-load.mjs'
       - '.github/workflows/web-deploy.yml'
+  schedule:
+    - cron: '7 */3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -28,18 +33,32 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # The Netlify token lives only in this environment; it deploys from main alone, so forks and PRs never see it.
-    environment: netlify-dev
+    # The Cloudflare token lives only in this environment; it deploys from main alone, so forks and PRs never see it.
+    environment: cloudflare-dev
+    env:
+      SITE_URL: https://nanthai-forge-dev.nanthai-forge.workers.dev
+      CF_SEND_TELEMETRY: 'false'
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
+          # Always the current main, never the run's own commit: a late or re-run job cannot deploy an older main
+          # over a newer one, and runs are serialized, so each builds a main at least as new as the one before.
+          ref: main
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.22.1'
-      - run: npm ci --ignore-scripts
-      - run: node scripts/prepare-convex-api.mjs
+      - name: Plan the deploy
+        id: plan
+        # Reads the live site's record; needs no dependencies, so a skipped run costs seconds.
+        # Scheduled and manual runs also count src/ and scripts/, which the generated references read through imports.
+        run: node scripts/site-deploy-plan.mjs plan "$SITE_URL" ${{ github.event_name != 'push' && '--deep' || '' }}
+      - if: steps.plan.outputs.build == 'true'
+        run: npm ci --ignore-scripts
+      - if: steps.plan.outputs.build == 'true'
+        run: node scripts/prepare-convex-api.mjs
       - name: Build the web app
+        if: steps.plan.outputs.build == 'true'
         run: npm run build:web
         env:
           # Public build-time config; the deploy below uploads this build as is.
@@ -49,19 +68,32 @@ jobs:
           VITE_GITHUB_APP_SLUG: ${{ vars.VITE_GITHUB_APP_SLUG }}
           VITE_FORGE_POSTHOG_PROJECT_TOKEN: ${{ secrets.VITE_FORGE_POSTHOG_PROJECT_TOKEN }}
           VITE_FORGE_POSTHOG_REGION: ${{ vars.VITE_FORGE_POSTHOG_REGION }}
-          # Same value as netlify.toml [build.environment].
           VITE_FORGE_DEMO_REPOSITORY: thevarsek/nanthai-edge-oss
       - name: Guard the browser bundle against Node-only code
+        if: steps.plan.outputs.build == 'true'
         run: node --test tests/web-bundle-node-free.test.mjs
       - name: Smoke-load the built Hosted chunk and check the build config is baked in
+        if: steps.plan.outputs.build == 'true'
         # Fails on a module-evaluation error, or on a build that would show "Forge backend is not configured".
         run: node scripts/web-smoke-load.mjs hosted-web-dist VITE_CONVEX_URL VITE_CONVEX_SITE_URL VITE_CLERK_PUBLISHABLE_KEY
         env:
           VITE_CONVEX_URL: ${{ vars.VITE_CONVEX_URL }}
           VITE_CONVEX_SITE_URL: ${{ vars.VITE_CONVEX_SITE_URL }}
           VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
+      - name: Build the site
+        if: steps.plan.outputs.build == 'true'
+        run: node scripts/build-site.mjs site-output --commit "$(git rev-parse HEAD)"
+      - name: Compare with the live site
+        id: compare
+        if: steps.plan.outputs.build == 'true'
+        run: node scripts/site-deploy-plan.mjs compare "$SITE_URL" site-output
+      - if: steps.compare.outputs.deploy == 'true'
+        # The Cloudflare CLI is pinned by its own lockfile, so only this job downloads it.
+        run: npm ci --ignore-scripts --prefix site/deploy
       - name: Deploy to the dev site
-        run: npx --no-install netlify deploy --prod --no-build --dir hosted-web-dist --site "$NETLIFY_SITE_ID"
+        if: steps.compare.outputs.deploy == 'true'
+        working-directory: site-output
+        run: ../site/deploy/node_modules/.bin/cf deploy --prebuilt --no-provision --message "main $(git rev-parse --short HEAD)"
         env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

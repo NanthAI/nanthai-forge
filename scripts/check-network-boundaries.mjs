@@ -20,6 +20,9 @@ const exempt = new Map([
   // build, so no dist/ helper). Two Convex calls, each with its own 20 s deadline, in a job
   // capped at 5 minutes.
   ['scripts/release-sign-ci.mjs', 'standalone'],
+  // Plans the dev site deploy before the job installs or builds anything (no dist/ helper): one GET
+  // of the live deploy record with its own 15 s deadline; any failure means "build" (Item ef6aa22a).
+  ['scripts/site-deploy-plan.mjs', 'standalone'],
   // A Cloudflare Worker deployed as one self-contained file (no repo imports): its one
   // request to the backend carries its own 5-minute deadline; the client paces the rest.
   ['src/git-byte-worker.ts', 'standalone'],
@@ -27,12 +30,12 @@ const exempt = new Map([
 
 /** Server-side code that must reach the network through the shared helper.
  * convex/ actions use convex/networkFetch.ts (convexFetch, no default retries)
- * and netlify/ functions import src/network-fetch.js; both share its deadlines
+ * and the site Worker (site/) imports src/network-fetch.js; both share its deadlines
  * (Issue aabe52a7). web/ stays out: browser requests run on the viewer's device
  * and connection, are cancelled by navigation, strand no worker or Convex call,
  * and its archive/backup transfers are sized by the user's file, so a fixed
  * server-side total deadline would only break large legitimate uploads. */
-export const networkBoundaryScopes = /^(?:src|scripts|convex|netlify)\//;
+export const networkBoundaryScopes = /^(?:src|scripts|convex|site)\//;
 /** Inspect executable syntax, so comments and type-only `typeof fetch` cannot
  * bless a bare request. One HTTP primitive and one complete-RPC constructor.
  * Scripts reach the same helper through dist/ (`npm run build:core`). */

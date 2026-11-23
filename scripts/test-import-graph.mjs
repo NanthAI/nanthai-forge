@@ -135,7 +135,7 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
     return packagePaths.some(packagePath => path.startsWith(`${packagePath}/`));
   };
   let uncertain;
-  const domains = ['src/', 'web/src/', 'convex/', 'netlify/', 'scripts/', 'tests/'];
+  const domains = ['src/', 'web/src/', 'convex/', 'site/', 'scripts/', 'tests/'];
   const paths = [...files.keys()];
   const jsonFiles = paths.filter(file => file.endsWith('.json') && domains.some(dir => file.startsWith(dir)));
   const jsonGlobs = new Map();

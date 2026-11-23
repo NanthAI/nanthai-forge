@@ -11,7 +11,7 @@ export const STATUS_LIST_ALLOWLIST = new Set([
   'src/landing-submission-state.ts',
   'convex/projectHostedLandingCheckRetry.ts',
 ]);
-const SCOPE = /^(?:src|convex|web\/src|netlify|scripts)\//;
+const SCOPE = /^(?:src|convex|web\/src|site|scripts)\//;
 const STATUS = String.raw`'runner-(?:unavailable|budget-exhausted)'`;
 const RULES = [
   ['status list .includes', new RegExp(String.raw`\[[^\]]*${STATUS}[^\]]*\]\s*\)?\s*\.includes\(`)],

@@ -10,7 +10,7 @@ const visibility = await import(moduleUrl('../convex/publicVisibility.ts'));
 const discovery = await import(moduleUrl('../convex/publicDiscovery.ts'));
 const read = await import(moduleUrl('../convex/publicRead.ts'));
 const route = await import(moduleUrl('../convex/publicHttp.ts'));
-const meta = await import(moduleUrl('../netlify/lib/public-meta.ts'));
+const meta = await import(moduleUrl('../site/public-meta.ts'));
 
 import { fixture, id, NOW } from './public-discovery-fixture.mjs';
 

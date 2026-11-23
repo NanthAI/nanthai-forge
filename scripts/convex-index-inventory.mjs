@@ -37,7 +37,7 @@ export function indexInventory(root = process.cwd()) {
       const local = relative(root, found.resolvedFileName);
       if (local.startsWith('src/'))
         return relative(root, containing).startsWith('convex/') ? found : undefined;
-      return /^(web|netlify|tests)\//.test(local) ? undefined : found;
+      return /^(web|site|tests)\//.test(local) ? undefined : found;
     });
   const scriptSources = new Map(
     files.filter(p => relative(root, p).startsWith('scripts/')).map(p => [p, readFileSync(p, 'utf8')]),

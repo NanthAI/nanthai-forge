@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Item ad80e037 fix 6: the landing check typechecks every TypeScript project (root, web, convex,
-// netlify); preflight typechecked none of them, so a TS2339 in convex/ reached the landing check.
+// site); preflight typechecked none of them, so a TS2339 in convex/ reached the landing check.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

@@ -32,7 +32,7 @@ recipe, with why and what other repositories get instead.
 | `standard-from-args` | deciding Forge's check from `check.args[0]`, `args.length === 1` or `executable === 'node'` |
 | `tests-folder` | a regular expression anchored on `^tests/`, a `startsWith('tests/')` prefix test, or a `.test.mjs` string or pattern |
 | `docs-folder` | a regular expression anchored on `^docs/` or a `startsWith('docs/')` prefix test |
-| `forge-folders` | an alternation or list of Forge's top-level folders (`src`, `web`, `convex`, `netlify`, `scripts`, `tests`, `dist`) |
+| `forge-folders` | an alternation or list of Forge's top-level folders (`src`, `web`, `convex`, `site`, `scripts`, `tests`, `dist`) |
 | `npm-lockfile` | the literal `package-lock.json` |
 | `node-test` | the argument `--test` (Node's test runner) |
 | `build-folders` | product code and shipped scripts: a folder list or alternation with `dist`, `build` or `coverage`, as used to skip or drop paths |

@@ -20,7 +20,7 @@ export function oxcFiles(root, lint) {
       else if (entry.isFile() && /\.(?:[cm]?[jt]s|[jt]sx)$/.test(path)) files.push(path);
     }
   }
-  for (const directory of lint ? ['src', 'web/src', 'convex', 'netlify/functions', 'tests'] : [''])
+  for (const directory of lint ? ['src', 'web/src', 'convex', 'site', 'tests'] : [''])
     if (existsSync(join(root, directory))) walk(directory);
   return files.sort();
 }
@@ -102,7 +102,7 @@ export function runOxc(mode) {
 }
 
 export const OXC_USAGE = `Usage: node scripts/oxc.mjs lint | format | format:check
-  lint          oxlint over src, web/src, convex, netlify/functions and tests (--deny-warnings)
+  lint          oxlint over src, web/src, convex, site and tests (--deny-warnings)
   format        rewrite every formatted source file in the tree with oxfmt (writes files)
   format:check  report files oxfmt would change; writes nothing
   --help, -h    print this help and exit 0

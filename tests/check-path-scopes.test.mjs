@@ -398,7 +398,7 @@ for (const [name, reader] of [
     );
     assert(!selected.tests.includes('tests/core.test.mjs'));
   });
-for (const folder of ['convex', 'netlify', 'web/src'])
+for (const folder of ['convex', 'site', 'web/src'])
   test(`JSON basename readers also cover ${folder} data`, () => {
     const path = `${folder}/policy.json`;
     const tree = runtimeJsonTree(`readFileSync(\`${'${root}'}/${path}\`);`);

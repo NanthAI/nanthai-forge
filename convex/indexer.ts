@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
-import { convexFetch, networkTimeout } from './networkFetch';
 import { v } from 'convex/values';
 import { blobStore } from './blobStore';
 import { artifactBlobId } from './artifactBlobFields';
@@ -32,28 +31,6 @@ export const run = internalAction({
           await ctx.runMutation(internal.imports.update, { id, generation, phase: 'ready' });
           return null;
         }
-      }
-      const remote = process.env.NETLIFY_WORKER_URL;
-      if (!access.repository.private && remote) {
-        if (!process.env.FORGE_WORKER_KEY)
-          throw new ForgeError('WORKER_SETUP_REQUIRED', 'Forge’s analysis worker is not configured yet.');
-        if (!(await ctx.runMutation(internal.imports.handoff, { id, generation }))) return null;
-        const response = await convexFetch(remote, {
-          method: 'POST',
-          redirect: 'error',
-          signal: networkTimeout(30_000),
-          headers: {
-            Authorization: `Bearer ${process.env.FORGE_WORKER_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ id, generation }),
-        });
-        if (response.status !== 202)
-          throw new ForgeError(
-            'WORKER_UNAVAILABLE',
-            'The analysis worker could not start. Retry to rebuild; previous source is retained.',
-          );
-        return null;
       }
       const artifact = await captureGithub(
         access.repository,

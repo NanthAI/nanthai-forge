@@ -5,7 +5,7 @@
 // The app is served at the site root (Item b0704959): `/<handle>/<slug>` is both the project's page and the address
 // `nforge clone` and bindings store. Its first segments never collide with a handle: every app place and static root
 // is in src/readable-urls.ts reservedHandles. The app lived under "/-" before the switch; the cached public read
-// (netlify/functions/public-read.mts) answers every "/-/*" address with a 301 to its root form forever, because mails,
+// (site/public-read.ts) answers every "/-/*" address with a 301 to its root form forever, because mails,
 // CLI output and board text carry those links. ROOT stays a name
 // so the server's links (src/project-routes.ts APP_ROOT) are pinned to it (tests/approval-links.test.mjs).
 export const ROOT = '';
@@ -117,7 +117,7 @@ export function isAppPath(pathname: string) {
 }
 
 /** An address from when the app lived under "/-" (before Item b0704959) as its address now, else null. The bare "/-"
- * was the account home; the cached public read keeps its data under /-/public/v1/ and answers the same 301 (netlify/functions/public-read.mts). */
+ * was the account home; the cached public read keeps its data under /-/public/v1/ and answers the same 301 (site/public-read.ts). */
 export function earlierAppPath(pathname: string) {
   const rest = /^\/+-(?=\/|$)(.*)$/.exec(pathname)?.[1];
   if (rest === undefined || /^\/+public\/v1\//.test(rest)) return null;

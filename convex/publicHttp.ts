@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /** The public read route, GET /public/v1/… (Items 6a60e89a, 875a4b60). It is the origin behind the site's shared
- * cache (netlify/functions/public-read.mts): a cache hit is served from the CDN's storage and never reaches Convex,
- * so a page costs at most one call here per cache period, whatever the number of visitors or crawlers. Reads only:
+ * cache (site/public-read.ts): a cache hit is served from the edge's storage and never reaches Convex,
+ * so a page costs about one call here per cache period and edge location (parallel misses may each call), whatever the number of visitors or crawlers. Reads only:
  * the one write is the explore ranking's activity note, at most once per 10 minutes per project.
  *
  *   /public/v1/project/HANDLE/SLUG.json   a public project page, or 404
@@ -28,6 +28,7 @@ const segment = /^[a-z0-9][a-z0-9._-]{0,99}$/i;
 const headers = (type: string) => ({
   'content-type': type,
   'cache-control': PUBLIC_CACHE.browser,
+  // The site's shared-cache period; the header keeps its old name so stored copies and the code worker still match.
   'netlify-cdn-cache-control': PUBLIC_CACHE.shared,
   'x-content-type-options': 'nosniff',
   // Public data only: any origin may read it, never with credentials.

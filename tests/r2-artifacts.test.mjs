@@ -9,20 +9,15 @@ import { job } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { decodeHostedArtifact } from '../dist/hosted-artifact.js';
 import { hostedQuery } from '../dist/hosted-query.js';
-import { putR2 } from '../dist/exchange-blobs.js';
 const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
 const { storeProjectArtifact } = await import(moduleUrl('../convex/projectArtifactActions.ts'));
 const { rawContent } = await import(moduleUrl('../convex/projectObjectContent.ts'));
 const indexer = await import(moduleUrl('../convex/indexer.ts'));
-const remote = await import(moduleUrl('../convex/remote.ts'));
 const { derivedArtifact, derivedBytes } = await import(moduleUrl('../convex/derivedArtifactActions.ts'));
-const { default: worker } = await import(moduleUrl('../netlify/functions/analyze-background.mts'));
 const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
 
 function github(t, files = { 'a.ts': 'export const answer = 42;\n' }, requests = []) {
-  const previous = globalThis.fetch,
-    remote = process.env.NETLIFY_WORKER_URL;
-  delete process.env.NETLIFY_WORKER_URL;
+  const previous = globalThis.fetch;
   const blobs = new Map(),
     tree = Object.entries(files).map(([path, text]) => {
       const bytes = Buffer.from(text);
@@ -54,8 +49,6 @@ function github(t, files = { 'a.ts': 'export const answer = 42;\n' }, requests =
   };
   t.after(() => {
     globalThis.fetch = previous;
-    if (remote === undefined) delete process.env.NETLIFY_WORKER_URL;
-    else process.env.NETLIFY_WORKER_URL = remote;
   });
   return files['a.ts'];
 }
@@ -283,56 +276,6 @@ test('R2 derivatives of legacy originals retry unknown storage outcomes and reje
   await assert.rejects(derivedBytes(s.ctx, record), e => e.code === 'BLOB_DIGEST_MISMATCH');
 });
 
-test('remote import uploads directly and HEAD-verifies before publication; foreign refs fail', async t => {
-  const { s, fake } = await setup(t);
-  indexed(s);
-  github(t);
-  noConvexWrites(s);
-  const job = s.tables.imports.get('indexed');
-  job.remote = true;
-  assert.equal((await remote.prepare._handler(s.ctx, { id: 'indexed', generation: 1 })).r2, true);
-  const bytes = Buffer.from('remote artifact'),
-    input = { id: 'indexed', generation: 1 };
-  const upload = await remote.uploadTarget._handler(s.ctx, { ...input, ...pinOf(bytes) });
-  await assert.rejects(
-    remote.update._handler(s.ctx, {
-      ...input,
-      phase: 'ready',
-      artifactKey: upload.ref,
-      head: 'a'.repeat(40),
-      analysisVersion: 'test',
-    }),
-    e => e.code === 'R2_OBJECT_MISSING',
-  );
-  const retryBytes = bytes;
-  const retry = await remote.uploadTarget._handler(s.ctx, { ...input, ...pinOf(retryBytes) });
-  assert.equal(retry.ref, upload.ref);
-  await putR2(retry.target, retryBytes);
-  const ready = {
-    ...input,
-    phase: 'ready',
-    artifactKey: retry.ref,
-    head: 'a'.repeat(40),
-    analysisVersion: 'test',
-  };
-  assert.equal(await remote.update._handler(s.ctx, ready), true);
-  assert.equal(await remote.update._handler(s.ctx, ready), true);
-  assert.equal(
-    Buffer.from(await (await blobStore(s.ctx).get(retry.ref)).arrayBuffer()).toString(),
-    retryBytes.toString(),
-  );
-  assert.ok(fake.requests.some(r => r.method === 'HEAD'));
-  job.generation = 2;
-  job.phase = 'fetching';
-  job.workerClaimed = true;
-  const foreign = await blobStore(s.ctx).store(new Blob(['foreign']), { r2Namespace: 'v1/i/another/g/2' });
-  await assert.rejects(
-    remote.update._handler(s.ctx, { ...ready, generation: 2, artifactKey: foreign }),
-    e => e.code === 'INVALID_ARTIFACT',
-  );
-  assert.ok(await blobStore(s.ctx).get(foreign));
-});
-
 test('explicit R2 cleanup deletes only its artifact and a late commit cannot revive it', async t => {
   const { s, fake } = await setup(t);
   noConvexWrites(s);
@@ -372,49 +315,6 @@ test('artifact commit checks size and checksum', async t => {
     e => e.code === 'R2_OBJECT_CHECKSUM_MISMATCH',
   );
   assert.equal(s.tables.artifactBlobs.get(row._id).committed, false);
-});
-
-test('the Netlify runner builds bytes locally and publishes an R2 artifact through metadata callbacks', async t => {
-  const { s, fake } = await setup(t);
-  indexed(s);
-  const text = github(t);
-  noConvexWrites(s);
-  s.tables.imports.get('indexed').remote = true;
-  const names = ['FORGE_WORKER_KEY', 'FORGE_CONVEX_SITE_URL'];
-  const saved = names.map(name => process.env[name]);
-  process.env.FORGE_WORKER_KEY = 'synthetic-worker';
-  process.env.FORGE_CONVEX_SITE_URL = 'https://callbacks.invalid';
-  const previous = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    const target = new URL(url);
-    if (target.hostname !== 'callbacks.invalid') return previous(url, init);
-    const operation = target.pathname.split('/').at(-1);
-    const result = await remote[operation]._handler(s.ctx, JSON.parse(init.body));
-    return Response.json(result);
-  };
-  t.after(() => {
-    globalThis.fetch = previous;
-    names.forEach((name, index) => {
-      if (saved[index] === undefined) delete process.env[name];
-      else process.env[name] = saved[index];
-    });
-  });
-  const response = await worker(
-    new Request('https://worker.invalid', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer synthetic-worker' },
-      body: JSON.stringify({ id: 'indexed', generation: 1 }),
-    }),
-  );
-  assert.equal(response.status, 204);
-  const job = s.tables.imports.get('indexed');
-  assert.equal(job.phase, 'ready');
-  assert.match(job.artifactKey, /^r2blob:/);
-  assert.equal(
-    (await decodeHostedArtifact(await blobStore(s.ctx).get(job.artifactKey))).content['a.ts'],
-    text,
-  );
-  assert.equal(fake.objects.size, 1);
 });
 
 test('archive parts read migrated storage IDs and artifact references through their own resolvers', async t => {

@@ -32,7 +32,7 @@ export const safePath = path =>
 
 export const selectionSourcePath = path =>
   ['package.json', 'package-lock.json'].includes(path) ||
-  /^(?:src|web|convex|netlify|tests|scripts)\/.+\.(?:[cm]?js|[cm]?tsx?|css|json|svg|html)$/.test(path);
+  /^(?:src|web|convex|site|tests|scripts)\/.+\.(?:[cm]?js|[cm]?tsx?|css|json|svg|html)$/.test(path);
 
 export function sourceFiles(root = '.') {
   const files = new Map();
@@ -43,7 +43,7 @@ export function sourceFiles(root = '.') {
       else if (selectionSourcePath(path)) files.set(path, readFileSync(join(root, path), 'utf8'));
     }
   }
-  for (const dir of ['src', 'web', 'convex', 'netlify', 'tests', 'scripts']) walk(dir);
+  for (const dir of ['src', 'web', 'convex', 'site', 'tests', 'scripts']) walk(dir);
   files.set('package.json', readFileSync(join(root, 'package.json'), 'utf8'));
   files.set('package-lock.json', readFileSync(join(root, 'package-lock.json'), 'utf8'));
   return files;
@@ -619,7 +619,7 @@ function selectWithGraph(
       if (
         users.size &&
         ![...users].some(
-          path => packageGraph.roots?.has(path) || /^(?:src|web\/src|convex|netlify)\//.test(path),
+          path => packageGraph.roots?.has(path) || /^(?:src|web\/src|convex|site)\//.test(path),
         )
       )
         continue;
@@ -709,7 +709,7 @@ const readerDetail = (reader, test) =>
     ? scanDetail({ path: reader.doc, folder: reader.scan })
     : `Reads changed document ${reader.doc}${reader.via === test ? '' : ` through ${reader.via}`}`;
 
-const productSource = path => /^(?:src|web\/src|convex|netlify)\//.test(path);
+const productSource = path => /^(?:src|web\/src|convex|site)\//.test(path);
 
 function importersOf(path, reverse) {
   const visited = new Set(),

@@ -1,0 +1,9 @@
+{
+  "name": "@nanthai/forge-site-deploy",
+  "private": true,
+  "description": "The Cloudflare CLI the dev site deploy uses (.github/workflows/web-deploy.yml); installed only by that job.",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "cf": "1.0.0-beta.17"
+  }
+}

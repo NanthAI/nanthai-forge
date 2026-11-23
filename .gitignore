@@ -3,7 +3,6 @@ dist/
 build/
 coverage/
 .next/
-.netlify/
 .turbo/
 .env
 .env.*

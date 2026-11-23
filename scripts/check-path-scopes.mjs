@@ -55,7 +55,7 @@ function scriptAsset(path, files) {
       )
     );
   });
-  if (!json && readers.some(file => /^(?:src|web|convex|netlify)\/|^package(?:-lock)?\.json$/.test(file)))
+  if (!json && readers.some(file => /^(?:src|web|convex|site)\/|^package(?:-lock)?\.json$/.test(file)))
     return null;
   return {
     domain: top === 'tests' ? 'tests' : 'scripts',
@@ -80,13 +80,13 @@ function scriptAsset(path, files) {
  * .github/ keep their own rules (2026-11-06: one bench README under evals/ forced 7
  * of 20 wave 3b impact selections to the full suite). */
 function markdownNote(path, files) {
-  if (!/^(?!(?:src|web|convex|netlify|tests|scripts|skills|docs|\.github)\/)[^/]+\/.+\.md$/.test(path))
+  if (!/^(?!(?:src|web|convex|site|tests|scripts|skills|docs|\.github)\/)[^/]+\/.+\.md$/.test(path))
     return undefined;
   const folder = path.slice(0, path.lastIndexOf('/'));
   const name = path.slice(folder.length + 1);
   const segments = folder.split('/');
   const folders = segments.map((_, i) => `${segments.slice(0, i + 1).join('/')}/`);
-  const product = /^(?:src|web|convex|netlify)\/|^package(?:-lock)?\.json$/;
+  const product = /^(?:src|web|convex|site)\/|^package(?:-lock)?\.json$/;
   // Shipping or loading a whole folder is enough to keep the full suite.
   if ([...files].some(([file, text]) => product.test(file) && folders.some(f => text.includes(f))))
     return null;
@@ -112,7 +112,7 @@ export const topLevelFolders = {
   src: 'Product source: import graph',
   web: 'Web source: import graph; build config by its rules',
   convex: 'Convex functions: import graph and by-name function references',
-  netlify: 'Netlify functions: import graph',
+  site: 'Site Worker: import graph',
   tests: 'Tests: import graph; fixtures and data by their readers',
   scripts: 'Scripts: import graph; assets and data by their readers',
   skills: 'Agent skill Markdown: the code naming it',
@@ -146,8 +146,7 @@ export function classifyCheckPath(path, files) {
     return domain('web', ['web/src/'], 'Web build configuration');
   if (path === 'convex/tsconfig.json')
     return domain('convex', ['convex/', 'web/src/'], 'Convex TypeScript configuration');
-  if (path === 'netlify/tsconfig.json')
-    return domain('netlify', ['netlify/'], 'Netlify TypeScript configuration');
+  if (path === 'site/tsconfig.json') return domain('site', ['site/'], 'Site Worker TypeScript configuration');
   // A declaration file only changes typechecking (static checks always run) and
   // the tests that load its runtime twin; no other backend file reads its text.
   const declaration = path.match(
@@ -209,7 +208,7 @@ export function classifyCheckPath(path, files) {
   // runs outside the suite, and only the tests and scripts that read it can observe it.
   const workflow = path.match(/^\.github\/workflows\/([^/]+\.ya?ml)$/)?.[1];
   if (workflow) {
-    const product = /^(?:src|convex|web\/src|netlify)\//;
+    const product = /^(?:src|convex|web\/src|site)\//;
     if ([...files].some(([file, text]) => product.test(file) && text.includes(workflow))) return null;
     return {
       domain: 'tooling',
@@ -261,7 +260,7 @@ export function classifyCheckPath(path, files) {
   if (asset !== undefined) return asset;
   // Product JSON has the same conservative named readers as script data, plus
   // the graph's import, directory and glob readers. Unobserved data stays broad.
-  if (/^(?:src|web\/src|convex|netlify)\/.+\.json$/.test(path) && files.has(path)) {
+  if (/^(?:src|web\/src|convex|site)\/.+\.json$/.test(path) && files.has(path)) {
     const readers = jsonReaders(path, files);
     if (readers === null) return null;
     return {
@@ -301,7 +300,7 @@ export function classifyCheckPath(path, files) {
     return domain('convex', ['convex/'], 'Convex schema or deployment config shares the backend namespace');
   if (/^convex\/.+\.ts$/.test(path))
     return { domain: 'convex', seeds: [path], reason: 'Convex importers and function-reference callers' };
-  if (/^netlify\/.+\.(?:m?js|ts)$/.test(path)) return { domain: 'netlify', seeds: [path] };
+  if (/^site\/.+\.(?:m?js|ts)$/.test(path)) return { domain: 'site', seeds: [path] };
   if (/^tests\/.+\.(?:mjs|tsx?|json|html)$/.test(path))
     return { domain: 'tests', seeds: [path], requireConsumer: !/^tests\/[^/]+\.test\.mjs$/.test(path) };
   return null;

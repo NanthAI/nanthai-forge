@@ -23,7 +23,7 @@
         "web/src/**/*.ts",
         "web/src/**/*.tsx",
         "convex/**/*.ts",
-        "netlify/**/*.mts"
+        "site/**/*.ts"
       ],
       "rules": {
         "no-var": "error",

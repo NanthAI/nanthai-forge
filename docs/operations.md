@@ -1242,14 +1242,13 @@ project and seed a replacement instead of migrating it. Only the lead performs t
 1. Use an up-to-date Lane of accepted `main` as the deployment directory. With Node 24.22.1+ (24.x) on PATH,
    install/build and deploy the backend and hosted browser. `DEPLOYMENT_ENV` is the private env
    file containing the **target deployment's** `CONVEX_DEPLOY_KEY`, `VITE_CONVEX_URL` and browser
-   configuration; the deploy key and URL must refer to the same backend. `SITE_ID` is the existing
-   team Netlify site. The preview script also updates that backend's worker URL.
+   configuration; the deploy key and URL must refer to the same backend. The web site deploys from
+   main through the [web site workflow](development.md#web-site); deploy it by hand only as described there.
 
    ```sh
    npm ci --ignore-scripts
    npm run build
    npx convex deploy --env-file "$DEPLOYMENT_ENV" --typecheck enable --yes
-   node --env-file="$DEPLOYMENT_ENV" scripts/deploy-forge-preview.mjs "$SITE_ID"
    ```
 
 2. In the deployed browser, open the old project → Settings → **Permanently delete project** →

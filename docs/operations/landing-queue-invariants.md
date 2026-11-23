@@ -80,8 +80,8 @@ seconds from CI end to commit. In a fixed-timeline sensitivity, removing up
 to 0.8 seconds from each affected interval saves 0.8 seconds at p90, about
 0.1% of the estimated gain from halving those waits (52.89 to 42.02 minutes).
 The receipt timings cannot separate a greater saving from the risk of
-starting speculative work. The estimate supports keeping the existing scheduler. [Ladder and cause split](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=45f49fb7-d591-44c5-b94c-319b37577835)
-[Hop trace, comment 287a6ce4](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e013cdb-5ed0-4ed7-85ea-6b9ec144738c)
+starting speculative work. The estimate supports keeping the existing scheduler. [Ladder and cause split](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=45f49fb7-d591-44c5-b94c-319b37577835)
+[Hop trace, comment 287a6ce4](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e013cdb-5ed0-4ed7-85ea-6b9ec144738c)
 
 The full round in design note `755da7b1` needs a trusted Candidate for each
 carried prefix and chained publication that preserves each member's own

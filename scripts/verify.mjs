@@ -258,7 +258,7 @@ const results = await Promise.all([
   tsc('typecheck:core', '--types', '*', '--noEmit'),
   tsc('typecheck:web', '--types', '*', '-p', 'web/tsconfig.json'),
   tsc('typecheck:convex', '--types', '*', '-p', 'convex/tsconfig.json', '--noEmit'),
-  tsc('typecheck:netlify', '-p', 'netlify/tsconfig.json'),
+  tsc('typecheck:site', '-p', 'site/tsconfig.json'),
   convexCompatibility,
   run('lint (oxlint)', process.execPath, ['scripts/oxc.mjs', 'lint']),
   build,

@@ -174,7 +174,7 @@ export function baselineTotals(baseline) {
 }
 
 export const isTestFile = path =>
-  /^(?:tests|scripts|src|web|convex|netlify|evals|models)\/(?:.*\/)?[^/]+\.test\.[cm]?[jt]sx?$/.test(path) &&
+  /^(?:tests|scripts|src|web|convex|site|evals|models)\/(?:.*\/)?[^/]+\.test\.[cm]?[jt]sx?$/.test(path) &&
   !path.includes('node_modules/');
 
 /** Test files to scan: those among `changed` (repository paths), or all of `files` when nothing is
@@ -201,7 +201,6 @@ const skip = new Set([
   'build',
   'coverage',
   '.forge',
-  '.netlify',
 ]);
 function walk(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {

@@ -264,7 +264,7 @@ failures. No new access restriction or user step is introduced. The fix's hosted
 latency and billed-usage delta are **unrun**: no deployment or extra samples beyond
 the brief's bound were authorized.
 
-The only remaining placement link is [S5 Issue e7e35328](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=e7e35328-7730-436a-b229-ba11d6362987).
+The only remaining placement link is [S5 Issue e7e35328](https://nanthai-forge-dev.nanthai-forge.workers.dev/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=e7e35328-7730-436a-b229-ba11d6362987).
 [S8a's memory verdict](workers-source-step-spike.md) closed Option B and S8b; this
 finding does not reopen them or propose a service beside R2. Moving the descriptor
 manifest alone does not remove flat-State CPU, source body PUT egress or repeated

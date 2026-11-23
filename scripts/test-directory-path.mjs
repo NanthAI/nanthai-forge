@@ -294,9 +294,7 @@ export const builtNames = path =>
 // Product code resolves a repository-relative path ('convex/schema.ts') in the workspace
 // it is given; only module-relative paths ('./worker.js', '../package.json') name its own files.
 export const pathKind = (path, value) =>
-  /^(?:src|web\/src|convex|netlify)\//.test(path) && !value.startsWith('.')
-    ? 'workspace-path'
-    : 'runtime-path';
+  /^(?:src|web\/src|convex|site)\//.test(path) && !value.startsWith('.') ? 'workspace-path' : 'runtime-path';
 
 // This package's own name resolves through its exports map (package-smoke loads it so).
 export function packageSelf(files) {

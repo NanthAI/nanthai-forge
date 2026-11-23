@@ -34,7 +34,7 @@ export function hostedProjectRoot(handle: string, projectSlug: string) {
   return `/${encodeURIComponent(handle)}/${encodeURIComponent(projectSlug)}`;
 }
 /** Where the app is served: the site root since the switch-over (Item b0704959); equal to web/src/app/paths.ts ROOT.
- * Every "/-/*" address 301s to its root form forever (netlify/functions/public-read.mts), so a link built while it
+ * Every "/-/*" address 301s to its root form forever (site/public-read.ts), so a link built while it
  * was "/-" keeps working. */
 export const APP_ROOT = '';
 /** A held settings or membership request is keyed `setting:…` in place of a Lane id: it has no Lane page. */

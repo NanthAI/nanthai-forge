@@ -76,3 +76,35 @@ test('failed or unrestored scheduler status is retryable without changing source
   assert.equal((await get._handler({ db }, { id: job._id })).phase, 'ready');
   assert.equal(await get._handler({ db: { get: async () => null } }, { id: 'missing' }), null);
 });
+
+test('ef6aa22a: a job left with the retired analysis worker reads as stopped and retries at once on the Convex path', async () => {
+  const legacy = { ...job, remote: true, workerClaimed: true };
+  let patch, scheduled;
+  const db = {
+    normalizeId: (table, id) => (table === 'imports' && id === legacy._id ? id : null),
+    get: async () => legacy,
+    system: { get: async () => ({ state: { kind: 'pending' } }) },
+    query: () => ({ withIndex: () => ({ unique: async () => legacy }) }),
+    patch: async (id, changes) => {
+      patch = changes;
+    },
+  };
+  const status = await get._handler({ db }, { id: legacy._id });
+  assert.equal(status.phase, 'error');
+  assert.match(status.error, /Retry/);
+  const scheduler = {
+    runAfter: async (delay, handler, args) => {
+      scheduled = args;
+      return 'new-task';
+    },
+  };
+  assert.deepEqual(await begin._handler({ db, scheduler }, legacy), {
+    id: legacy._id,
+    run: true,
+    generation: 3,
+  });
+  assert.deepEqual(scheduled, { id: legacy._id, generation: 3 });
+  assert.equal(patch.remote, undefined);
+  assert.equal(patch.workerClaimed, undefined);
+  assert.ok('remote' in patch && 'workerClaimed' in patch, 'the retry clears both legacy flags');
+});

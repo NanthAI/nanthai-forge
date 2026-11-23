@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-/** Page titles, descriptions and share-card tags for public pages (Item 875a4b60). Pure: the site's public function
- * (netlify/functions/public-read.mts) fills them from the cached public read, so a crawler or link preview gets them
+/** Page titles, descriptions and share-card tags for public pages (Item 875a4b60). Pure: the site's public read
+ * (site/public-read.ts) fills them from the cached public read, so a crawler or link preview gets them
  * without running the app and without a Convex call on a cache hit. Only what the public read already shows is used;
  * a private or missing project gets the plain app page, the same for both. Never loaded by the CLI or MCP. */
 
