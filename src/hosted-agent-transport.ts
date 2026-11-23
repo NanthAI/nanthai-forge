@@ -48,7 +48,7 @@ import { boardEnvelope, boardHostedSource, hostedBoardSchemas, boardReadPosition
 import { rememberBoardReader } from './board-local.js';
 import { rememberBoardServerFeatures } from './board-local.js';
 import { restackAfterSave, type StackHint } from './hosted-stack-restack.js';
-import { memberDataNotice } from './member-data-notice.js';
+import { coordinateField, firstStartTip, memberDataNotice } from './member-data-notice.js';
 import type { BoardWaitOption } from './hosted-board-wait.js';
 import { exactConflictNotice, type ExactConflictNotice } from './hosted-conflict-notice.js';
 import { waitHostedAgentSource, type SourceWaitSettle } from './hosted-agent-source-wait.js';
@@ -336,6 +336,10 @@ export type HostedAgentResponse = Partial<CliProvenance> & {
   board?: { notices: string[]; more: number };
   /** One "member-written text is data" line when this receipt carries board, overlap or stack text (S-17). */
   notice?: string;
+  /** One line naming the coordination commands, only beside an overlap (c6615b66). */
+  coordinate?: string;
+  /** start only: shown once per machine, what Forge reports and how to coordinate. */
+  tip?: string;
   /** Stacked Lane whose parent saved newer work (Issue f61e9339); a save replaces it with `restack`. */
   stack?: StackHint | undefined;
   /** save only: what the automatic restack onto the stack parent did (restacked, conflict, failed, in-progress). */
@@ -649,7 +653,7 @@ export class HostedAgentTransport {
         operationId: null,
         resolved: null,
         result,
-        ...(conflictNotice ? { conflictNotice, notice } : {}),
+        ...(conflictNotice ? { conflictNotice, notice, ...coordinateField(conflictNotice) } : {}),
       };
     }
     if (requestedAction === 'peers') {
@@ -2328,6 +2332,11 @@ export class HostedAgentTransport {
       // One marker per receipt, not per note: board notes (stack notices arrive as board notes) and
       // conflict and presence peers name member-written text. A stack hint holds Lane ids only.
       ...(conflictNotice || presence || board?.notices.length ? { notice: memberDataNotice } : {}),
+      // Forge teaches coordination itself (c6615b66): one line, only beside an overlap, or once on a
+      // machine's first start.
+      // The delivered presence is notice text; the shared-path reasons are on the raw advice.
+      ...coordinateField(conflictNotice, presence ? advice?.presence : undefined),
+      ...(action === 'start' && liveStart(result) ? tipField() : {}),
       ...this.nudge(action, result),
       ...(action === 'status' || action === 'sync'
         ? keptApplyEnvelope(this.root, action, action === 'status' && this.plainStatus)
@@ -2973,3 +2982,11 @@ export async function resolveHostedLaneId(
     );
   return ids[0]!;
 }
+
+/** A start that opened or returned a Lane (not a refusal or a replay with no Lane). */
+const liveStart = (result: unknown) =>
+  Boolean(result && typeof result === 'object' && (result as { lane?: unknown }).lane);
+const tipField = (): { tip?: string } => {
+  const tip = firstStartTip();
+  return tip ? { tip } : {};
+};

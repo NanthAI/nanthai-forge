@@ -232,10 +232,11 @@ test('Item 5b4b5918 moved main: a proof bound after main moved recomposes in its
   assert.equal(state.version + 1, 8);
   // Cost ledger for this wave: the skipped ready write, acceptance preparation and refused publish
   // were 114 transactions, 1,982 documents read and 804 document writes. Run alone it is 1,820 and
-  // 746; after the earlier tests in this file, 1,824 and 750, so those two are ceilings.
+  // 746; after the earlier tests in this file, 1,824 and 750, so those two are ceilings. Item c6615b66:
+  // 1,827 and 753, each open Lane's coordination session row is written and removed with its presence.
   const cost = budget(f);
   assert.equal(cost.transactions, 107);
-  assert(cost.documentsRead <= 1824 && cost.writes <= 750, JSON.stringify(cost));
+  assert(cost.documentsRead <= 1827 && cost.writes <= 753, JSON.stringify(cost));
   // The ledger is unchanged: the bound attempt is replaced by the main-race carry on the same run.
   const history = JSON.parse(
     await f.tx('attempt-history', attemptHistory.read, { projectId: f.projectId, submissionId: state.id }),

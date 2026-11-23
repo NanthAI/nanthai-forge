@@ -196,8 +196,9 @@ test('abandon lookup reads only the selected Lane at doubled dogfood history siz
   const meter = f.counts.slice(calls).find(c => c.name === 'abandonLanding');
   const source = observerProjectionBudget(meter);
   const accounting = cancelledUsageAllowance(meter);
+  // Writes 35 -> 36 (Item c6615b66): closing the Lane releases its coordination session row with its presence row.
   assert(
-    source.documents <= 80 + accounting.documents && source.writes <= 35 + accounting.writes,
+    source.documents <= 80 + accounting.documents && source.writes <= 36 + accounting.writes,
     JSON.stringify({ source, accounting }),
   );
   assert(meter.readBytes < 128 * 1024 && meter.writeBytes < 256 * 1024);

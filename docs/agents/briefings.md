@@ -45,6 +45,8 @@ when copied, and supplies its Issue, owned files/concepts, dependencies, scale
 budget, time box, acceptance bar, metrics that must not regress, and what it removes or
 merges (or why nothing can go).
 
+Coordination board (optional, never required): claims mark files an agent is changing (first writes and saves claim them for you), notes are short messages for the project shown once on start or save, and the inbox (`forge_inbox`) holds asks and answers addressed to you. Use them when an overlap notice names another Lane.
+
 When running unattended, edit files only with the file-edit tool inside your Lane.
 Keep temporary files, including logs, in `.forge/scratch/` inside your Lane. Create it when needed.
 Do not start local dev servers or pipe a read into a write.

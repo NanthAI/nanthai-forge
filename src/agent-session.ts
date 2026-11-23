@@ -20,6 +20,7 @@ export const AGENT_CLIENTS: readonly {
   { harness: 't3-code', executables: ['t3', 't3 code'], sessionVariable: 'T3CODE_THREAD_ID' },
   { harness: 'cursor', executables: ['cursor-agent'], sessionVariable: null },
   { harness: 'gemini', executables: ['gemini'], sessionVariable: 'GEMINI_SESSION_ID' },
+  { harness: 'antigravity', executables: ['antigravity', 'agy'], sessionVariable: null },
   { harness: 'copilot', executables: ['copilot'], sessionVariable: null },
   { harness: 'amp', executables: ['amp'], sessionVariable: null },
   { harness: 'aider', executables: ['aider'], sessionVariable: null },

@@ -387,10 +387,12 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // write bytes, with unchanged calls and reads.
   // Item ced8e98f (recheck none): the causes stamp on existing replay writes adds 1,051 read and
   // 346 write bytes, with unchanged calls.
+  // Item c6615b66 (automatic enrolment): each Lane's coordination session row is written at its presence insert and
+  // removed at close, inside those mutations: +1,339 read and +1,870 write bytes for the pair, with unchanged calls.
   const measured = canonicalReplayCost(pair);
   assert.deepEqual(
     measured,
-    { calls: 107, readBytes: 1_822_982, writeBytes: 591_892 },
+    { calls: 107, readBytes: 1_824_321, writeBytes: 593_762 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -447,10 +449,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // read and 21,001 fewer write bytes at 4,000 files.
   // Item fc1831eb: the same legacy no-Item notes gone at 4,000 files: 878 fewer write bytes.
   // Item ced8e98f (recheck none): the same 1,051 read and 346 write bytes at 4,000 files.
+  // Item c6615b66: the pair's coordination session rows, as in the small replay: +1,159 read and +1,727 write bytes.
   const measured = canonicalReplayCost(after);
   assert.deepEqual(
     measured,
-    { calls: 107, readBytes: 1_828_019, writeBytes: 594_312 },
+    { calls: 107, readBytes: 1_829_178, writeBytes: 596_039 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

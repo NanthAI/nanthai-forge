@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedSuperseded.ts": "fa1a85f151b28e61777ed8668bd54e92510e7e5963537493899840e6fe81e011"
+  },
+  "replay": {
+    "incident": "08169467",
+    "test": "incident replay 08169467: completed compose replaces a running desired wake without cancellation and lands after client exit",
+    "receipt": "586d6bf0-0109-49d4-97fe-491acb82119e"
+  },
+  "authorModel": "claude-opus-5-5",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A24a775d4-d4be-4f72-b3f2-c832791c5090",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Ae185e0f1-5131-4cfb-aac8-fe45ab5a504a%3Adelegate-task%3A05886a60-12f5-4ac3-8d14-dd4613fb2a8b",
+    "receipt": "586d6bf0-0109-49d4-97fe-491acb82119e"
+  },
+  "exercised": {
+    "convex/projectHostedSuperseded.ts": {
+      "executed": [
+        "supersedeQuietSiblings"
+      ],
+      "digest": "2fc93d1dbe4358626859302a403a7b727f87548f1352736f75ea10c2dfc3e202",
+      "units": [
+        [
+          "dropLanePark",
+          "5a29580fb75e5554d315423bc87bb9085662438891b06db5eb53fcfd8448524e"
+        ],
+        [
+          "overlapRow",
+          "72ed749472286be4d5ef87f368997370dfe4dba7f26973a023f7ac2692bb0a7d"
+        ],
+        [
+          "releaseLaneSession",
+          "b5c778fb8ab9106aadcfc3302e8817d8d0a012c143f34a9b73251fc5481c7afa"
+        ],
+        [
+          "supersede",
+          "263c94f0fa1cfddc3ef7dc83a0bd4108a74269188ccfb890b0fb6da9312bd9bd"
+        ],
+        [
+          "supersedeLane",
+          "6e7bbc355a2b77d322b845b7cb2af4cb6461d4a66ea73d4465b851632fb2849d"
+        ],
+        [
+          "supersedeQuietSiblings",
+          "a4f7761e4670a81f57f6c1c6c3ff0dec5a9944d18406db4a707193ad8657945a"
+        ]
+      ]
+    }
+  }
+}

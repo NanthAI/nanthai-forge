@@ -182,3 +182,9 @@ Bundler and Mix: `swift package resolve`, `pod install` and `gradle dependencies
 (the manifest is a program), so they run only when start passes `installScripts:true` or this
 machine's installScripts setting accepts forge.json `install.scripts`. `dart pub get` runs no package
 scripts and needs no permission.
+
+## Agent clients
+
+Agent apps are not language ecosystems: Forge supports Claude Code, Codex, Cursor, OpenCode, Pi and
+Antigravity through `nforge connect APP` ([list](../agents.md#connect-over-mcp)). The first-write hook
+covers Claude Code, Codex and Antigravity ([workflow](workflow.md#overlap-before-the-first-write)).

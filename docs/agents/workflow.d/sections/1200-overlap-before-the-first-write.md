@@ -55,8 +55,29 @@ Hook observations add no save attribution. No transcripts or prompts are read. D
 acknowledges; missing evidence never proves independence.
 See [hosted advice](#hosted-overlap-advice) for start/save/status notices.
 
+Antigravity (Issue c6615b66). Only the person-run `nforge connect antigravity` installs
+its hook (`~/.gemini/config/hooks.json`, entry `forge-first-write`); `uninstall-hooks` removes
+it. Its contract differs: a `PreToolUse` reply must carry a decision (`{}` denies, `allow`
+skips the user's permission rules), and an allow reason never reaches the model. So Forge
+never answers `PreToolUse` there. `PostToolUse` on a write tool runs the same check (reply
+`{}`) and keeps any notice in a per-conversation file under the state directory;
+`PreInvocation` injects it into the next model call once (builtins only, no network). Both
+fire under `agy -p` and `agy acp`. Antigravity's write still happens before the notice.
+
+Overlap notices teach coordination once per notice: the hook context, and the CLI or MCP
+reply's `coordinate` field, add one line under 200 bytes naming `peers`, `start {stackOn}`
+and `ask`, only when another Lane shares a path: a claim, a peer conflict or a presence Lane
+matched by saved paths (never a same-Issue or similar-goal match, or a conflict with main). The first `start` on a machine
+returns `tip` once (marker `forge/coordination-tip.json` in the state directory). Every open
+Lane is also a coordination session keyed by its Lane id, written when its presence row is
+inserted (start, or a Lane coming back into view) and removed with it (land, abandon, supersede),
+so a session never outlives its Lane and adds no call and nothing per save. Its `lastSeen` is the
+Lane's start, so it reads `stale` like any quiet session; its paths stay on presence. A session an agent announces with the Lane id
+is never overwritten and is released with the Lane when it names that Lane.
+
 Client contracts: [Claude hooks](https://code.claude.com/docs/en/hooks) and
-[Codex hooks](https://learn.chatgpt.com/docs/hooks).
+[Codex hooks](https://learn.chatgpt.com/docs/hooks); Antigravity's bundled
+`agy-customizations/docs/hooks.md`.
 
 Local source exclusions use nested `.gitignore` and `.forgeignore` files; Forge rules follow Git rules in each directory. `nforge status ROOT --ignored` reports local excluded paths and matching rules without their contents or remote calls. Ignored working files are not stored, backed up or shared; historical States remain intact. See [source exclusions](../../../operations.md#source-exclusions).
 

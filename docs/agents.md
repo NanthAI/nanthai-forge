@@ -23,11 +23,20 @@ to that local checkout and CLI installation.
 | Cursor | `nforge connect cursor` | `.cursor/mcp.json` |
 | OpenCode | `nforge connect opencode` | `opencode.json` or the existing `opencode.json(c)` |
 | Pi | `nforge connect pi` | `.pi/mcp.json` |
+| Antigravity | `nforge connect antigravity` | `~/.gemini/config/mcp_config.json` and `hooks.json` (user) |
 
 Forge previews its entry before writing and prints the private backup path and
 undo command. It also previews the first-run Claude Code and Codex hooks, backs
 up any hook file it changes, and prints the command to remove Forge hooks from
 both apps. Open a new agent session so the app loads its project configuration.
+Antigravity reads MCP servers and hooks only from the user config, so its connect
+writes there: the `forge` and `forge-coordination` server entries and one
+`forge-first-write` hook entry, with one backup and one undo. Undo touches only a file
+that connect changed and puts back the Forge entries it found. Because that config serves
+every workspace, connect refuses to repoint another project's entry. Run it yourself: Antigravity treats an agent editing its
+hooks as guardrail tampering, so automatic hook installs never touch `~/.gemini`. It
+needs the installed CLI (a Lane or dev build reports `dev-build` and writes nothing).
+`nforge status ROOT` lists Antigravity under the hooks' `covered` clients once installed.
 During setup, expand **Connect your agent app yourself** on the project's
 **Needs me** page. Refresh the page after the app's first authenticated contact
 with Forge on this account to see **Connected**.

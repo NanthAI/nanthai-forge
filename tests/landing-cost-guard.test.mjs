@@ -911,6 +911,9 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   // Stored keys in the two batch scenarios 150,180 -> 151,690 B: the touch stamps each of the 151 person rows with
   // this hour (about 10 B of key each). Fixed per person and overwritten each hour, so it does not grow with history.
   // f65d8024: commit ordering adds 20 custom index writes across ten events.
+  // Stored entries in the two batch scenarios 2,169 -> 2,173 (Item c6615b66): each open Lane keeps one
+  // coordination session row while it is open (released with its presence row at close). Fixed per open Lane,
+  // not per landing or history.
   // Each adds 357 modeled key bytes to the existing per-project and per-Lane event-time keys.
   const indexBudget = storageBudgets.tenLandingIndexes;
   const aliasWrites = ten.reduce((n, s) => n + s.metricAliasWrites, 0);

@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { shellQuote } from './shell-quote.js';
 import { cliInstallation, stableCliRunner } from './cli-installation.js';
 import { editHooksEnabled } from './agent-hook-settings.js';
+import { ANTIGRAVITY_HOOKS, antigravityHookRunner } from './agent-antigravity-install.js';
 
 const FIRST_WRITE = '--forge-first-write';
 const TURN_END = '--forge-turn-end';
@@ -58,12 +59,36 @@ export type HookHealth = {
   status: 'ok' | 'disabled' | 'attention';
   problems: HookProblem[];
   repair: string | null;
+  /** Agent apps with a working Forge first-write hook. Antigravity is optional (person-run connect). */
+  covered?: string[];
 };
+const ANTIGRAVITY_REPAIR = 'nforge connect antigravity';
+/** Antigravity counts only once connected; a broken entry needs the person-run connect again. */
+function antigravityHealth(home: string): { covered: boolean; problem?: HookProblem } {
+  const file = join(home, ANTIGRAVITY_HOOKS);
+  if (!existsSync(file)) return { covered: false };
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    return { covered: false, problem: { file, reason: 'unreadable' } };
+  }
+  const entry = antigravityHookRunner(text);
+  if ('unreadable' in entry) return { covered: false, problem: { file, reason: 'unreadable' } };
+  if (!entry.installed) return { covered: false };
+  const target = forgeHookRunner(entry.command);
+  if (!target || !existsSync(target))
+    return { covered: false, problem: { file, reason: 'missing-target', ...(target ? { target } : {}) } };
+  if (!isInstalledTarget(target))
+    return { covered: false, problem: { file, reason: 'not-installed-cli', target } };
+  return { covered: true };
+}
 /** Read-only: report a Forge hook that is absent, unreadable, missing its target, or not an
  * installed CLI. Repair is the explicit install command, run with the installed `nforge`. */
 export function hookHealth(root: string, home = homedir()): HookHealth {
   if (!editHooksEnabled(undefined, home)) return { status: 'disabled', problems: [], repair: null };
   const problems: HookProblem[] = [];
+  const covered: string[] = [];
   for (const name of HOOK_FILES) {
     const file = join(home, name);
     if (!existsSync(file)) {
@@ -85,13 +110,21 @@ export function hookHealth(root: string, home = homedir()): HookHealth {
           if (runner) targets.set(`${event}:${runner}`, runner);
         }
     if (!targets.size) problems.push({ file, reason: 'missing-hook' });
+    const before = problems.length;
     for (const target of new Set(targets.values()))
       if (!existsSync(target)) problems.push({ file, reason: 'missing-target', target });
       else if (!isInstalledTarget(target)) problems.push({ file, reason: 'not-installed-cli', target });
+    if (targets.size && problems.length === before)
+      covered.push(name.startsWith('.claude') ? 'claude-code' : 'codex');
   }
+  const antigravity = antigravityHealth(home);
+  if (antigravity.covered) covered.push('antigravity');
+  const installRepair = problems.length ? `nforge x ${shellQuote(root)} install-hooks '{}'` : null;
+  if (antigravity.problem) problems.push(antigravity.problem);
+  const repair = [installRepair, antigravity.problem ? ANTIGRAVITY_REPAIR : null].filter(Boolean).join('; ');
   return problems.length
-    ? { status: 'attention', problems, repair: `nforge x ${shellQuote(root)} install-hooks '{}'` }
-    : { status: 'ok', problems: [], repair: null };
+    ? { status: 'attention', problems, repair, covered }
+    : { status: 'ok', problems: [], repair: null, covered };
 }
 export function hookHealthText(health: HookHealth) {
   if (health.status !== 'attention') return null;

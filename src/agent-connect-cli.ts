@@ -14,6 +14,8 @@ import {
   type ConnectServer,
 } from './agent-connect-formats.js';
 import { installEditHooks } from './agent-install-hooks.js';
+import { ANTIGRAVITY_MCP } from './agent-antigravity-install.js';
+import { connectAntigravity, undoAntigravity } from './agent-connect-antigravity.js';
 import { authFile } from './auth-store.js';
 import { stableCliRunner } from './cli-installation.js';
 import { withCliRuntimeLock } from './cli-launcher.js';
@@ -29,12 +31,20 @@ const files = {
   cursor: '.cursor/mcp.json',
   opencode: 'opencode.json',
   pi: '.pi/mcp.json',
+  // Antigravity reads MCP servers only from the user config, relative to HOME.
+  antigravity: ANTIGRAVITY_MCP,
 };
 type App = keyof typeof files;
-type Backup = { app: App; path: string; before: string | null; after: string; server: ConnectServer };
+type Backup = {
+  app: App;
+  path: string;
+  before: string | null;
+  after: string;
+  server: ConnectServer;
+};
 type ConnectFixture = { home?: string; hookRunner?: string };
 const usage =
-  'Use nforge connect <claude-code|codex|cursor|opencode|pi> [--undo BACKUP_ID] from the project folder.';
+  'Use nforge connect <claude-code|codex|cursor|opencode|pi|antigravity> [--undo BACKUP_ID] from the project folder.';
 const preview = (line: string) => process.stderr.write(line + '\n');
 
 function localPath(root: string, path: string) {
@@ -113,14 +123,18 @@ function connect(root: string, directory: string, app: App, fixture: ConnectFixt
   if (app === 'cursor') server.type = 'stdio';
   server.args[0] = stableCliRunner(server.args[0]!);
   server.args.push('--client', app);
+  const id = randomUUID();
+  const backup = join(directory, id + '.json');
+  const undoCommand = `nforge connect ${app} --undo ${id}`;
+  if (app === 'antigravity') {
+    const home = realpathSync(fixture.home ?? homedir());
+    return connectAntigravity({ root, home, backup, undoCommand, server, hookRunner: fixture.hookRunner });
+  }
   const after =
     app === 'codex'
       ? addCodexServer(before, server)
       : addJsonServer(path, before, server, app === 'opencode');
   const changed = before !== after;
-  const id = randomUUID();
-  const backup = join(directory, id + '.json');
-  const undoCommand = `nforge connect ${app} --undo ${id}`;
   preview(`${path}: ${changed ? 'add' : 'keep'} the forge MCP server for this project.`);
   if (changed) {
     preview(`Run ${[server.command, ...server.args].map(shellQuote).join(' ')} over stdio.`);
@@ -214,7 +228,12 @@ export function agentConnect(args: string[], folder = process.cwd(), fixture: Co
   mkdirBelow(state, directory);
   return withCliRuntimeLock(
     directory,
-    () => (id ? undo(root, directory, app, id) : connect(root, directory, app, fixture)),
+    () =>
+      id
+        ? app === 'antigravity'
+          ? undoAntigravity(realpathSync(fixture.home ?? homedir()), join(directory, id + '.json'))
+          : undo(root, directory, app, id)
+        : connect(root, directory, app, fixture),
     1000,
   );
 }

@@ -9,6 +9,11 @@ export const AGENT_DEFAULTS = Object.freeze({
   stallAlerts: { enabled: true, notifyAfterMinutes: 15, repeatAfterMinutes: 30, email: [], webhook: 'off' },
 });
 
+/** What the coordination board is for (Issue c6615b66): one line in llms.txt, AGENTS.md and the
+ * standard builder block, and the MCP tool descriptions point at the same tools. */
+export const BOARD_LINE =
+  'Coordination board (optional, never required): claims mark files an agent is changing (first writes and saves claim them for you), notes are short messages for the project shown once on start or save, and the inbox (`forge_inbox`) holds asks and answers addressed to you. Use them when an overlap notice names another Lane.';
+
 /** One terse line per active rule; nothing for rules that are off. */
 export function agentDefaultLines(defaults, root = 'ROOT') {
   const lines = [];

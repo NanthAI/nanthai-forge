@@ -66,6 +66,7 @@ Agent replies are compact by default: conflict files report paths, kinds and hun
 - Mutations must be safe to retry: they carry an operation id, and retrying an unknown outcome with the same id reconciles instead of repeating.
 - Automatic actions must say what they did and how to undo them; nothing irreversible is automatic.
 - Never lose or overwrite accepted work. Concurrent changes merge or surface as conflicts.
+- Coordination board (optional, never required): claims mark files an agent is changing (first writes and saves claim them for you), notes are short messages for the project shown once on start or save, and the inbox (`forge_inbox`) holds asks and answers addressed to you. Use them when an overlap notice names another Lane.
 - Source bytes are the truth; graphs and analysis are derived and may be incomplete. A missing graph edge does not prove independence.
 - Use structured errors. Never silently switch source revisions, models, routes or visibility.
 

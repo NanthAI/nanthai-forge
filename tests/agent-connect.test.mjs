@@ -153,6 +153,97 @@ test('connect backs up both first-run hook files and hook uninstall leaves unrel
     assert.deepEqual(JSON.parse(readFileSync(join(home, name), 'utf8')), JSON.parse(original));
 });
 
+test('antigravity: connect adds the forge MCP server and the first-write hook to the user config, once, and undo restores both', t => {
+  const root = checkout(t);
+  const home = join(root, 'home'),
+    hookRunner = join(root, 'dist', 'agent-edit-hook.js');
+  const mcp = join(home, '.gemini/config/mcp_config.json'),
+    hooks = join(home, '.gemini/config/hooks.json');
+  mkdirSync(dirname(mcp), { recursive: true });
+  // Antigravity creates an empty mcp_config.json; another tool's named hook must survive.
+  writeFileSync(mcp, '');
+  const other =
+    '{\n  "lint": { "PostToolUse": [{ "matcher": "run_command", "hooks": [{ "command": "./lint.sh" }] }] }\n}\n';
+  writeFileSync(hooks, other);
+  const result = agentConnect(['antigravity'], root, { home, hookRunner });
+  assert.equal(result.status, 'configured');
+  assert.equal(result.file, '~/.gemini/config/mcp_config.json');
+  assert.equal(result.hooks.status, 'installed');
+  assert.equal(existsSync(join(root, '.gemini')), false, 'nothing lands in the project checkout');
+  const server = JSON.parse(readFileSync(mcp, 'utf8')).mcpServers.forge;
+  assert.equal(server.command, process.execPath);
+  assert.deepEqual(server.args.slice(1), ['mcp', root, '--agent', '--client', 'antigravity']);
+  const coordination = JSON.parse(readFileSync(mcp, 'utf8')).mcpServers['forge-coordination'];
+  assert.deepEqual(coordination, {
+    command: process.execPath,
+    args: [server.args[0], 'mcp-coordination', root],
+  });
+  const installed = JSON.parse(readFileSync(hooks, 'utf8'));
+  assert.deepEqual(installed.lint, JSON.parse(other).lint);
+  const entry = installed['forge-first-write'];
+  // Never PreToolUse: there `allow` bypasses the user's permission rules and `{}` denies the tool.
+  assert.deepEqual(Object.keys(entry).sort(), ['PostToolUse', 'PreInvocation']);
+  assert.match(entry.PostToolUse[0].matcher, /write_file\|.*edit_file/);
+  for (const command of [entry.PostToolUse[0].hooks[0].command, entry.PreInvocation[0].command]) {
+    assert.ok(command.includes(join(root, 'dist', 'agent-antigravity-hook.js')), command);
+    assert.match(command, /'--forge-first-write'$/);
+  }
+  assert.equal(agentConnect(['antigravity'], root, { home, hookRunner }).status, 'already-configured');
+  assert.equal(
+    agentConnect(['antigravity', '--undo', result.undo.split(' ').at(-1)], root, { home }).status,
+    'undone',
+  );
+  assert.equal(readFileSync(mcp, 'utf8'), '');
+  assert.equal(readFileSync(hooks, 'utf8'), other);
+  // uninstall-hooks removes Forge's Antigravity entry as well and keeps the neighbour.
+  agentConnect(['antigravity'], root, { home, hookRunner });
+  installEditHooks(root, undefined, true, home, false, { runner: hookRunner });
+  assert.deepEqual(JSON.parse(readFileSync(hooks, 'utf8')), JSON.parse(other));
+});
+
+test('antigravity undo touches only what its connect changed and puts back an earlier Forge hook', t => {
+  const root = checkout(t);
+  const home = join(root, 'home');
+  const mcp = join(home, '.gemini/config/mcp_config.json'),
+    hooks = join(home, '.gemini/config/hooks.json');
+  const runner = name => join(root, name, 'agent-edit-hook.js');
+  const undoId = result => result.undo.split(' ').at(-1);
+  mkdirSync(dirname(mcp), { recursive: true });
+  // Connect once with an older install, then uninstall only the hook: MCP stays configured.
+  agentConnect(['antigravity'], root, { home, hookRunner: runner('old') });
+  const earlier = JSON.parse(readFileSync(hooks, 'utf8'))['forge-first-write'];
+  // A hooks-only connect (MCP already there) replaces the older Forge hook.
+  const result = agentConnect(['antigravity'], root, { home, hookRunner: runner('new') });
+  assert.equal(result.status, 'configured');
+  // Later, the person adds an MCP server and a hook of their own.
+  const servers = JSON.parse(readFileSync(mcp, 'utf8'));
+  servers.mcpServers.other = { command: 'other-mcp', args: [] };
+  writeFileSync(mcp, JSON.stringify(servers, null, 2));
+  const config = JSON.parse(readFileSync(hooks, 'utf8'));
+  config.lint = { PostToolUse: [] };
+  writeFileSync(hooks, JSON.stringify(config));
+  assert.equal(agentConnect(['antigravity', '--undo', undoId(result)], root, { home }).status, 'undone');
+  // MCP was not changed by that connect: its Forge servers and the new one all stay.
+  assert.deepEqual(Object.keys(JSON.parse(readFileSync(mcp, 'utf8')).mcpServers).sort(), [
+    'forge',
+    'forge-coordination',
+    'other',
+  ]);
+  const restored = JSON.parse(readFileSync(hooks, 'utf8'));
+  assert.deepEqual(restored['forge-first-write'], earlier, 'the earlier Forge hook comes back');
+  assert.deepEqual(restored.lint, { PostToolUse: [] }, "the person's own hook stays");
+  assert.equal(
+    agentConnect(['antigravity', '--undo', undoId(result)], root, { home }).status,
+    'already-undone',
+  );
+  // The user config serves every workspace: another project's forge entry is never repointed.
+  const other = checkout(t);
+  assert.throws(
+    () => agentConnect(['antigravity'], other, { home, hookRunner: runner('new') }),
+    /already has a different forge server/,
+  );
+});
+
 test('connect from outside a hosted checkout reports the right folder without writing config', t => {
   const root = temporaryDirectory(t, 'forge-connect-unbound-');
   const result = spawnSync(process.execPath, [cli, 'connect', 'pi'], { cwd: root, encoding: 'utf8' });

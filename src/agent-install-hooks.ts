@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { shellQuote } from './shell-quote.js';
 import { mkdirBelow } from './mkdir-below.js';
-import { writeRecoveryState } from './recovery-state.js';
+import { writeRecoveryState, writeRecoveryText } from './recovery-state.js';
+import { ANTIGRAVITY_HOOKS, editAntigravityHooks } from './agent-antigravity-install.js';
 import { editHooksEnabled, setEditHooksEnabled } from './agent-hook-settings.js';
 import { editTarget, readEditMarkerIdentity } from './agent-edit-target.js';
 import { refuseRealUserState } from './test-isolation.js';
@@ -34,7 +35,8 @@ export function installEditHooks(
     beforeWrite?: (files: readonly { path: string; before: string | null }[]) => void;
   } = {},
 ) {
-  for (const name of ['.claude', '.codex']) refuseRealUserState(join(home, name), 'agent hook config');
+  for (const name of ['.claude', '.codex', '.gemini'])
+    refuseRealUserState(join(home, name), 'agent hook config');
   if (automatic && !uninstall && !editHooksEnabled(undefined, home))
     return { status: 'disabled', files: [], changed: [], undo: '' };
   const own = options.runner ?? fileURLToPath(new URL('./agent-edit-hook.js', import.meta.url));
@@ -128,6 +130,16 @@ export function installEditHooks(
       );
     writeRecoveryState(path, config);
     changed.push(path);
+  }
+  // Antigravity's entry is installed only by the person-run connect; an uninstall removes it too.
+  if (uninstall) {
+    const path = join(home, ANTIGRAVITY_HOOKS);
+    const before = existsSync(path) ? readFileSync(path, 'utf8') : null;
+    const after = before === null ? null : editAntigravityHooks(before, null);
+    if (after !== null && after !== before) {
+      writeRecoveryText(path, after);
+      changed.push(path);
+    }
   }
   return {
     status: uninstall ? 'uninstalled' : 'installed',

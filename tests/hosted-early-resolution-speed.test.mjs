@@ -63,11 +63,14 @@ for (const history of [0, 1150])
     // Reads 3150 -> 3152 (Item 0d14c456): a check or runner configuration change is the resume step of an
     // environment hold, so each of the fixture's two settings changes reads the queue row once; nothing per
     // landing or check end, no call or write. Equal in both arms.
+    // Reads 3149 -> 3156, writes 1135 -> 1142 (Item c6615b66, automatic enrolment): each presence insert, refresh
+    // or delete also reads the Lane's coordination session by its index and writes it once, inside the same
+    // mutation; no call, nothing at idle (about 2.8 KB of DB I/O per landing, +$0.0006 per 1,000). Equal in both arms.
     assert.equal(after.metricAliasWrites, before.metricAliasWrites);
     assert.equal(after.metricAliasWrites, 47);
     assert.deepEqual(
       [after.calls, after.reads, after.writes - after.metricAliasWrites, after.lateTaskMs, after.idle],
-      [161, 3149, 1135, 180000, 0],
+      [161, 3156, 1142, 180000, 0],
       '8c9b84fc: disjoint baseline must not grow',
     );
     t.diagnostic(JSON.stringify({ history, before, after }));

@@ -5,7 +5,12 @@ import type { z } from 'zod';
 import type { hostedLaneSchema } from '../src/hosted-lane';
 import { mergeOverlapChanges, advanceOverlapMain, type OverlapChange } from '../src/hosted-overlap';
 import { trackLineLane } from './projectLiveLineStore';
-import { dropLanePark, routeLanePark, trackHostedPresence } from './projectHostedPresence';
+import {
+  dropLanePark,
+  releaseLaneSession,
+  routeLanePark,
+  trackHostedPresence,
+} from './projectHostedPresence';
 import { parkedFor } from '../src/hosted-records';
 import { notifyStackDependents, trackStackDependent } from './projectHostedStackNotice';
 import { closeConflictNotices, planTrialMerge } from './projectHostedConflicts';
@@ -306,7 +311,10 @@ export async function markHostedOverlapLifecycle(
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
     .unique();
   // A staged close hides the Lane from presence now; a later record write of a still-open Lane restores it.
-  if (row?.presenceRow) await ctx.db.delete(row.presenceRow.id);
+  if (row?.presenceRow) {
+    await ctx.db.delete(row.presenceRow.id);
+    await releaseLaneSession(ctx, projectId, laneId);
+  }
   // A parked Lane (Item e1633718) leaves its holder's Needs me with its presence row.
   if (row) await dropLanePark(ctx, row);
   if (row) await ctx.db.patch(row._id, { lifecyclePlanId, presenceRow: undefined });
@@ -332,7 +340,10 @@ export async function materializeHostedOverlapLifecycle(
     .query('projectHostedOverlapLanes')
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
     .unique();
-  if (row?.presenceRow) await ctx.db.delete(row.presenceRow.id);
+  if (row?.presenceRow) {
+    await ctx.db.delete(row.presenceRow.id);
+    await releaseLaneSession(ctx, projectId, laneId);
+  }
   if (row) await dropLanePark(ctx, row);
   if (row?.passedMark) await ctx.db.delete(row.passedMark);
   if (row)

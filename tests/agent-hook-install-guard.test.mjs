@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainModule } from '../scripts/main-module.mjs';
 import { installEditHooks } from '../dist/agent-install-hooks.js';
+import { editAntigravityHooks } from '../dist/agent-antigravity-install.js';
 import { hookHealth, hookHealthText } from '../dist/agent-hook-health.js';
 import { selectCliBuild } from '../dist/cli-installation.js';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
@@ -41,7 +42,7 @@ function fixture(t) {
     mkdirSync(join(path, 'dist'), { recursive: true });
     writeFileSync(join(path, '.commit'), hash);
     writeFileSync(join(path, '.managed-cli'), '1');
-    for (const name of ['agent-edit-hook.js', 'agent-stop-hook.js'])
+    for (const name of ['agent-edit-hook.js', 'agent-stop-hook.js', 'agent-antigravity-hook.js'])
       writeFileSync(join(path, 'dist', name), '// synthetic');
     selectCliBuild(installation, path);
     return join(installation, 'current', 'dist', 'agent-edit-hook.js');
@@ -187,7 +188,12 @@ test('uninstall still works from a dev build', t => {
 test('health reports a missing target, a Lane or dev path, unreadable and absent hooks with one repair command', t => {
   const f = fixture(t);
   f.write(f.installed);
-  assert.deepEqual(hookHealth(f.directory, f.home), { status: 'ok', problems: [], repair: null });
+  assert.deepEqual(hookHealth(f.directory, f.home), {
+    status: 'ok',
+    problems: [],
+    repair: null,
+    covered: ['claude-code', 'codex'],
+  });
   assert.equal(hookHealthText(hookHealth(f.directory, f.home)), null);
 
   f.write(join(f.directory, 'gone-lane', 'dist', 'agent-edit-hook.js'));
@@ -279,4 +285,31 @@ test('isMainModule matches a symlinked start and a query-tagged import of the sa
   assert.equal(isMainModule(`${url}?shutdown-test`, file), true);
   assert.equal(isMainModule(url, join(directory, 'other.js')), false);
   assert.equal(isMainModule(url, undefined), false);
+});
+
+test('health counts Antigravity as covered once connected and names its person-run repair when broken', t => {
+  const f = fixture(t);
+  f.write(f.installed);
+  assert.deepEqual(
+    hookHealth(f.directory, f.home).covered,
+    ['claude-code', 'codex'],
+    'not connected: not counted',
+  );
+  const file = join(f.home, '.gemini', 'config', 'hooks.json');
+  mkdirSync(join(f.home, '.gemini', 'config'), { recursive: true });
+  writeFileSync(file, editAntigravityHooks(null, f.installed));
+  assert.deepEqual(hookHealth(f.directory, f.home), {
+    status: 'ok',
+    problems: [],
+    repair: null,
+    covered: ['claude-code', 'codex', 'antigravity'],
+  });
+  writeFileSync(file, editAntigravityHooks(null, join(f.directory, 'gone', 'dist', 'agent-edit-hook.js')));
+  const broken = hookHealth(f.directory, f.home);
+  assert.equal(broken.status, 'attention');
+  assert.deepEqual(
+    broken.problems.map(problem => [problem.file, problem.reason]),
+    [[file, 'missing-target']],
+  );
+  assert.equal(broken.repair, 'nforge connect antigravity');
 });

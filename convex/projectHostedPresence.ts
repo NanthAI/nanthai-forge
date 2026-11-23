@@ -12,6 +12,7 @@ import {
   type PresenceRow,
 } from '../src/hosted-presence';
 import { samePark, type LanePark } from '../src/hosted-records';
+import { syncLaneSession } from './coordinationLaneSession';
 
 type PresenceValue = {
   intentId: string;
@@ -63,7 +64,10 @@ export async function trackHostedPresence(
 ): Promise<Pointer | undefined> {
   const pointer = old?.pointer;
   if (!value) {
-    if (pointer) await ctx.db.delete(pointer.id);
+    if (pointer) {
+      await ctx.db.delete(pointer.id);
+      await syncLaneSession(ctx, projectId, laneId, null);
+    }
     return undefined;
   }
   const row = {
@@ -98,10 +102,30 @@ export async function trackHostedPresence(
       row.at - pointer.at < PRESENCE_REFRESH_MS
     )
       return pointer;
+    // A refresh or a save that changes paths leaves the session as it is: saves add no session I/O.
     await ctx.db.replace(pointer.id, row);
     return { id: pointer.id, at: row.at };
   }
-  return { id: await ctx.db.insert('projectHostedPresence', row), at: row.at };
+  const id = await ctx.db.insert('projectHostedPresence', row);
+  await syncLaneSession(ctx, projectId, laneId, laneSession(row, value));
+  return { id, at: row.at };
+}
+/** The Lane's coordination session lives exactly as long as its presence row (automatic enrolment, c6615b66):
+ * written when the row is inserted (start, or a closed-from-view Lane coming back), removed with it. */
+const laneSession = (
+  row: { actor: string; goal: string; intentId: string; at: number },
+  value: PresenceValue,
+) => ({
+  actor: row.actor,
+  ...(value.agent ? { agent: value.agent } : {}),
+  ...(value.session?.app ? { app: value.session.app } : {}),
+  goal: row.goal,
+  intentId: row.intentId,
+  at: row.at,
+});
+/** A presence row deleted without a record write (superseded, staged close) releases the Lane session too. */
+export async function releaseLaneSession(ctx: MutationCtx, projectId: Id<'hostedProjects'>, laneId: string) {
+  await syncLaneSession(ctx, projectId, laneId, null);
 }
 
 /** Keeps a Lane's projectHostedParks row (Item e1633718) in step with its park: the account whose Needs me lists it,

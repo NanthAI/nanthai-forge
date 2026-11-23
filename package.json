@@ -177,7 +177,8 @@
             "tests/hosted-precompose-ownership.test.mjs",
             "tests/hosted-batch-reselection.test.mjs",
             "tests/hosted-landing-prequeue.test.mjs",
-            "tests/hosted-acceptance-scale.test.mjs"
+            "tests/hosted-acceptance-scale.test.mjs",
+            "tests/hosted-abandon-landing.test.mjs"
           ],
           "inputs": [
             "convex/projectHosted*.ts",

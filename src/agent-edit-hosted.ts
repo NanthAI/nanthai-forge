@@ -14,7 +14,7 @@ import {
 import { queueBoardClaim, type ClaimTarget } from './board-claim-queue.js';
 import { BOARD_NOTICE_CHARS, BOARD_PATH_CHARS } from './board-text.js';
 import { actorLabel } from './agent-slug.js';
-import { memberDataNotice } from './member-data-notice.js';
+import { COORDINATE_HINT, memberDataNotice } from './member-data-notice.js';
 
 export type ClaimQueue = (target: ClaimTarget) => unknown;
 
@@ -182,7 +182,7 @@ export function hostedEditContext(result: Awaited<ReturnType<typeof preEditHoste
   const lines = [...(board?.claims ?? []), ...(board?.notices ?? [])];
   if (!lines.length) return '';
   // Board lines are already single quoted-data lines (claims and unread notes, ≤2 each); one marker
-  // for all of them (S-17).
+  // for all of them (S-17). A claim is an overlap: the coordination hint follows it (c6615b66).
   return (
     lines
       .map(line =>
@@ -190,6 +190,6 @@ export function hostedEditContext(result: Awaited<ReturnType<typeof preEditHoste
           .replace(/[\x00-\x1f\x7f]/g, ' ')
           .slice(0, BOARD_NOTICE_CHARS + BOARD_PATH_CHARS + 'Claim on : '.length),
       )
-      .join('\n') + `\n${memberDataNotice}`
+      .join('\n') + `\n${memberDataNotice}${board?.claims.length ? `\n${COORDINATE_HINT}` : ''}`
   );
 }

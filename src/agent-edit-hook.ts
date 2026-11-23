@@ -129,7 +129,8 @@ async function autoWorker(input: Record<string, unknown>) {
     ? {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
-          additionalContext: contexts.join('\n').slice(0, 1800),
+          // One data marker and one coordination hint per tool call, however many paths it wrote.
+          additionalContext: [...new Set(contexts.join('\n').split('\n'))].join('\n').slice(0, 1800),
         },
       }
     : {};

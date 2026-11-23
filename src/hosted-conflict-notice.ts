@@ -57,7 +57,7 @@ export function exactConflictNotice(laneId: string, conflicts: ExactConflicts) {
     main ? `Sync now; your saved files conflict with main: nforge agent . sync '{"laneId":"${laneId}"}'` : '',
     continuation ? `${continuation.instruction} Run: ${continuation.command}` : '',
     peers.length && !continuation
-      ? `Your saved files conflict with Lane ${peers.join(', ')}. Agree an order or split with that Lane (board note), or change your edit, then save.`
+      ? `Your saved files conflict with Lane ${peers.join(', ')}. Agree an order or split with that Lane, or change your edit, then save.`
       : '',
   ]
     .filter(Boolean)

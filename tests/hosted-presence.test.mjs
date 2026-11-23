@@ -340,3 +340,66 @@ test('cost: presence adds no read to a Lane record write and skips unchanged rew
   assert.equal(refreshed.written.filter(table => table === 'projectHostedPresence').length, 1);
   assert.equal(refreshed.readDocumentsByTable.projectHostedPresence ?? 0, 0);
 });
+
+test('enrolment (c6615b66): a Lane start announces its coordination session and closing releases it, inside the same record writes', async () => {
+  const { s, peer, write } = await project();
+  const sessions = laneId =>
+    [...s.tables.projectCoordinationSessions.values()].filter(row => row.sessionId === laneId);
+  const calls = s.counts.length;
+  const lane = await peer('Coordinate automatically', { intentId: randomUUID() });
+  assert.equal(s.counts.length, calls + 1, 'start is still one mutation');
+  const [announced] = sessions(lane.id);
+  assert.equal(announced.actor, PEER);
+  assert.equal(announced.status, 'working');
+  assert.equal(announced.environment, 'Lane');
+  assert.equal(announced.context.laneId, lane.id);
+  assert.equal(announced.context.intentId, lane.intentId);
+  // A record write that leaves presence unchanged writes no session either: idle and quiet saves cost nothing.
+  // Instants just after the helper's start write (its session time), inside the presence refresh window.
+  const after = ms => new Date(announced.lastSeen + ms).toISOString();
+  await write({ ...lane, version: 1, lifecycleVersion: 1, at: after(1000) }, undefined, 0);
+  assert.equal(s.counts.at(-1).written.includes('projectCoordinationSessions'), false);
+  await write({ ...lane, version: 2, state: 'completed', at: after(2000) }, undefined, 1);
+  assert.equal(s.counts.length, calls + 3, 'land adds no call');
+  assert.deepEqual(sessions(lane.id), [], 'the session never outlives its Lane');
+});
+
+test('enrolment never touches a session someone announced with the Lane id', async () => {
+  const { s, peer, write } = await project();
+  const laneId = randomUUID();
+  const own = s.insert('projectCoordinationSessions', {
+    projectId: s.projectId,
+    sessionId: laneId,
+    actor: PEER,
+    sequence: 1,
+    name: 'Agent',
+    environment: 'MCP',
+    status: 'working',
+    summary: 'announced by hand',
+    context: {},
+    lastSeen: 1,
+    operationId: randomUUID(),
+  });
+  const lane = await peer('Same id', { id: laneId, intentId: randomUUID() });
+  await write({ ...lane, version: 1, state: 'abandoned', at: '2099-01-01T00:00:00.000Z' }, undefined, 0);
+  assert.equal(s.tables.projectCoordinationSessions.get(own).summary, 'announced by hand');
+});
+
+test('enrolment: a session announced over the Lane session for that Lane is kept while open and released on close', async () => {
+  const { s, peer, write } = await project();
+  const lane = await peer('Announce over it', { intentId: randomUUID() });
+  const row = [...s.tables.projectCoordinationSessions.entries()].find(([, r]) => r.sessionId === lane.id);
+  // The agent announces with the Lane id: a new operation id and its own summary.
+  s.tables.projectCoordinationSessions.set(row[0], {
+    ...row[1],
+    operationId: randomUUID(),
+    summary: 'announced detail',
+  });
+  const after = ms => new Date(row[1].lastSeen + ms).toISOString();
+  // A write past the 10-minute presence refresh rewrites presence, but never the announced session.
+  await write({ ...lane, version: 1, at: after(11 * 60_000) }, undefined, 0);
+  assert.ok(s.counts.at(-1).written.includes('projectHostedPresence'), 'presence was rewritten');
+  assert.equal(s.tables.projectCoordinationSessions.get(row[0]).summary, 'announced detail');
+  await write({ ...lane, version: 2, state: 'completed', at: after(12 * 60_000) }, undefined, 1);
+  assert.equal(s.tables.projectCoordinationSessions.has(row[0]), false, 'never outlives its Lane');
+});

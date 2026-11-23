@@ -98,7 +98,7 @@ export function registerConciseCoordinationTools(
     'forge_claim',
     {
       description:
-        'Advisory claim on paths you intend to change (a path covers that file or directory). Not a lock. Returns claimId, expiresAt and overlapping active claims by others. Pass claimId to renew or replace your own claim.',
+        'Advisory claim on paths you intend to change (a path covers that file or directory). Not a lock. Returns claimId, expiresAt and overlapping active claims by others. Pass claimId to renew or replace your own claim. Optional: first writes and saves already claim files.',
       inputSchema: {
         paths: paths.min(1),
         intentId: ref.optional(),
@@ -140,7 +140,7 @@ export function registerConciseCoordinationTools(
     'forge_inbox',
     {
       description:
-        'Messages and handoffs for you. Default: recent ones you have not acknowledged (including broadcasts). all=true pages everything addressed to you, with acked flags, from a cursor.',
+        'Messages and handoffs for you. Default: recent ones you have not acknowledged (including broadcasts). all=true pages everything addressed to you, with acked flags, from a cursor. Read it after an overlap notice or an ask.',
       inputSchema: {
         all: z.boolean().default(false),
         cursor: z.string().max(4096).nullable().default(null),
