@@ -164,8 +164,11 @@ address, but only when `FORGE_INVITATION_EMAIL=1`. The invitation switch is off 
 default; configuring alerts alone does not enable invitation email. A sender
 needs a verified identity (a verified email or connected GitHub identity).
 With email off, a verified owner can still create the invitation and copy its
-link. Failed sends show the HTTP status or network failure with Resend and Copy
-link as the next steps. Email content uses the inviter's handle, the project's
+link. Every accepted send shows the same receipt, "email submitted", with Resend
+and Copy link as the next steps. A provider rejection or network failure is an
+operator log line (status only), not shown to the inviter, because a suppressed
+send can never fail and a visible failure would reveal it. A send that never
+settles shows "send interrupted" after ten minutes. Email content uses the inviter's handle, the project's
 current address and the role, with no tracking pixel or rewritten link. The
 production sender domain remains part of the Phase 8 production move.
 The switch must remain off until the email-enablement requirements on
@@ -182,15 +185,36 @@ Invitation limits are checked together before any write, including explicit rese
 | Deployment, across projects and accounts | 500 invitation emails per UTC day |
 | Recipient address, across projects and inviters | 3 invitation emails per UTC day |
 
-Over a sending limit, the operation refuses with `RATE_LIMITED` and writes and
-schedules nothing. Retry the same operation id after the relevant window. Exact
-completed retries charge nothing and send nothing again. Counters reset in place,
-inside the existing send transaction. Recipient counter keys contain a digest,
-not an extra copy of the address. Deployment, recipient and resend-email
-allowances apply to actual queued email; with email off only the inviter
-allowance is charged. Email creation no
-longer performs recipient directory lookups, so that lookup has no budget to spend.
+Over an inviter, resend or project limit, the operation refuses with
+`RATE_LIMITED` and writes and schedules nothing. Retry the same operation id after
+the relevant window. The deployment and recipient caps never refuse: the
+invitation is created (or the resend recorded) and stays pending, its row reads
+"Email not sent today (daily email limit)", no send is queued and neither cap is
+charged; copy the link, or resend after the UTC day ends. Exact completed retries
+charge nothing and send nothing again. Counters reset in place, inside the
+existing send transaction. Recipient counter keys contain a digest, not an extra
+copy of the address. Deployment, recipient and resend-email allowances apply to
+actual queued email; with email off only the inviter allowance is charged.
 Invitation targets longer than 254 characters are refused before database reads.
+
+Mail to a recipient who blocked the inviter, or who was removed after the
+invitation, is suppressed without telling the inviter. The queue and the send use
+one check (`invitationMailSuppressed`). It always makes the same reads and checks
+every verified account on the address, so an address shared by two accounts keeps
+each account's blocks and removals. A suppressed pair is never charged to the
+recipient's daily counter (a blocked inviter cannot use up someone's allowance);
+it is charged to its own per-pair counter with the same limit, so one inviter meets
+the cap at the same send either way and both paths write the same number of rows.
+The queue-time decision travels with the scheduled send: mail queued while
+suppressed stays unsent even if the block ends before delivery, so it never
+reaches the recipient without its charge. A suppressed send records what a real
+send with that sender setup records (`sent`, or `off` without a sender) and makes
+no provider request. Every send, real or suppressed, settles 10 seconds after its
+action starts; the provider request gets at most 8 seconds and never runs past
+that deadline, so the settlement time does not reveal suppression either. The
+check's result is never returned to the inviter. Two cooperating inviters can
+still compare the recipient's shared counter; that is the cost of keeping blocked
+inviters from using it up.
 
 The first four inviter/project limits above were approved by the owner. The
 500/deployment/day and 3/recipient/day caps, separate off-by-default email switch,

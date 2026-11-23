@@ -19,13 +19,8 @@ const seed = (s, owner, count, period = day) =>
 for (const [name, key, count, period] of [
   ['20 per UTC hour per inviter', 'invitation:inviter-hour:owner', 20, hour],
   ['100 per UTC day per inviter', 'invitation:inviter-day:owner', 100, day],
-  ['500 per UTC day per deployment', 'invitation:deployment-day', 500, day],
-  [
-    '3 per UTC day per recipient across projects',
-    `invitation:recipient-day:${policy.invitationEmailHash('guest@example.test')}`,
-    3,
-    day,
-  ],
+  // The deployment and recipient caps hold the mail instead of refusing (P1-03):
+  // tests/project-invitation-mail-parity.test.mjs.
 ])
   test(`email budget ${name} refuses before any write or schedule`, async t => {
     storageClock(t);

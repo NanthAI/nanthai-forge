@@ -156,13 +156,14 @@ test('the email names the inviter, the project and the role only, with the proje
   }
 });
 
-test('a send records sent, failed or off and never the address; a resend is explicit and idempotent', async () => {
+test('a send records sent or off and never the address; a resend is explicit and idempotent', async () => {
   const s = setup();
   const operationId = randomUUID();
   await invite(s, { operationId, person: 'new@example.com', email: 'new@example.com' });
+  // The send settles through a scheduled mutation after a fixed delay (P1-02); run it at once here.
   const action = {
     runQuery: (_, args) => mail.details._handler(s.ctx, args),
-    runMutation: (_, args) => mail.settle._handler(s.ctx, args),
+    scheduler: { runAfter: (_, __, args) => mail.settle._handler(s.ctx, args) },
   };
   const operation = () => rows(s, 'projectAccessOperations').find(item => item.operationId === operationId);
   const names = ['FORGE_ALERT_EMAIL_TOKEN', 'FORGE_ALERT_EMAIL_ACCOUNT_ID'];
@@ -191,13 +192,15 @@ test('a send records sent, failed or off and never the address; a resend is expl
       'no second send while one is in flight',
     );
     await mail.deliver._handler(action, { projectId: 'project', operationId, sendId: resendId });
-    assert.deepEqual([operation().mail.status, operation().mail.code], ['failed', 'HTTP 502']);
+    // A provider failure is an operator log line, not the inviter's row: a suppressed send cannot fail,
+    // so the row's receipt is uniform (P1-02, review F2).
+    assert.deepEqual([operation().mail.status, operation().mail.code], ['sent', undefined]);
     assert.equal(sent.length, 1);
     assert.equal(sent[0].body.to, 'new@example.com');
     assert.ok(!JSON.stringify(operation().mail).includes('example.com'), 'the state never holds the address');
     // A settled send is not settled again, and an ended invitation sends nothing.
-    await mail.settle._handler(s.ctx, { projectId: 'project', operationId, status: 'sent' });
-    assert.equal(operation().mail.status, 'failed');
+    await mail.settle._handler(s.ctx, { projectId: 'project', operationId, status: 'failed' });
+    assert.equal(operation().mail.status, 'sent');
     // Only the owner person resends: a device and a writer are refused.
     device(s);
     refused(

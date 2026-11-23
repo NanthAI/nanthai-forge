@@ -51,54 +51,89 @@ export const invitationByOperation = (
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
     .unique();
 
+/** Mail held by the deployment or recipient cap: the invitation stays pending and its link can be copied. */
+export const invitationMailLimit = 'daily email limit';
+/** Every send, real or suppressed, settles this long after its action starts (above the send timeout), so the
+ * inviter cannot tell a suppressed recipient from the settlement time (P1-02). */
+export const invitationSendRequestTimeout = 8_000;
+export const invitationSettleDelay = 10_000;
+
 /** Fixed-size counters in the existing rate store. All reads/refusals precede writes;
  * the returned commit runs in the same transaction that queues the send. A suspended inviter is
- * refused first (the account switch, convex/accountLimits.ts). */
+ * refused first (the account switch, convex/accountLimits.ts). Inviter and resend limits refuse.
+ * The deployment and recipient caps never refuse (P1-03): at either cap `mailLimited` is true, the
+ * invitation stays pending with its mail not sent, and neither cap is charged. A suppressed pair
+ * (recipient block or removal) is not charged to the recipient's counter, so a blocked inviter cannot
+ * use up the recipient's daily allowance. It is charged to its own pair counter with the same limit
+ * instead, so one inviter sees the cap at the same send either way (review F1); a pair row exists only
+ * for suppressed pairs. Both paths read the same rows and write the same number of rows. */
 export async function invitationBudget(
   ctx: MutationCtx,
   inviter: string,
   recipient?: string,
   resend?: string,
-  now = Date.now(),
+  { suppressed = false, now = Date.now() }: { suppressed?: boolean; now?: number } = {},
 ) {
   await assertAccountActive(ctx, inviter);
   const day = 24 * 60 * 60_000,
     hour = 60 * 60_000;
-  const scopes: [string, number, number][] = [
-    [`invitation:inviter-day:${inviter}`, day, 100],
-    [`invitation:inviter-hour:${inviter}`, hour, 20],
+  type Scope = { owner: string; windowMs: number; limit: number; refuse: boolean; charge: boolean };
+  const scopes: Scope[] = [
+    { owner: `invitation:inviter-day:${inviter}`, windowMs: day, limit: 100, refuse: true, charge: true },
+    { owner: `invitation:inviter-hour:${inviter}`, windowMs: hour, limit: 20, refuse: true, charge: true },
     ...(recipient
       ? [
-          ['invitation:deployment-day', day, 500] as [string, number, number],
-          [`invitation:recipient-day:${invitationEmailHash(recipient)}`, day, 3] as [string, number, number],
+          { owner: 'invitation:deployment-day', windowMs: day, limit: 500, refuse: false, charge: true },
+          {
+            owner: `invitation:recipient-day:${invitationEmailHash(recipient)}`,
+            windowMs: day,
+            limit: 3,
+            refuse: false,
+            charge: !suppressed,
+          },
+          {
+            owner: `invitation:suppressed-pair-day:${inviter}:${invitationEmailHash(recipient)}`,
+            windowMs: day,
+            limit: 3,
+            refuse: false,
+            charge: suppressed,
+          },
         ]
       : []),
-    ...(resend ? [[`invitation:resend-day:${resend}`, day, 3] as [string, number, number]] : []),
+    ...(resend
+      ? [{ owner: `invitation:resend-day:${resend}`, windowMs: day, limit: 3, refuse: true, charge: true }]
+      : []),
   ];
   const updates: {
     row: Doc<'deviceAttempts'> | null;
     value: { owner: string; windowAt: number; count: number };
+    scope: Scope;
   }[] = [];
-  for (const [owner, windowMs, limit] of scopes) {
+  let mailLimited = false;
+  for (const scope of scopes) {
     const row = await ctx.db
       .query('deviceAttempts')
-      .withIndex('by_owner', q => q.eq('owner', owner))
+      .withIndex('by_owner', q => q.eq('owner', scope.owner))
       .unique();
-    const windowAt = now - (now % windowMs);
+    const windowAt = now - (now % scope.windowMs);
     const count = row?.windowAt === windowAt ? row.count : 0;
-    invariant(
-      count < limit,
-      'RATE_LIMITED',
-      'Invitations have reached a limit. Try after its UTC hour or day ends.',
-    );
-    updates.push({ row, value: { owner, windowAt, count: count + 1 } });
+    if (scope.refuse)
+      invariant(
+        count < scope.limit,
+        'RATE_LIMITED',
+        'Invitations have reached a limit. Try after its UTC hour or day ends.',
+      );
+    else if (count >= scope.limit) mailLimited = true;
+    updates.push({ row, value: { owner: scope.owner, windowAt, count: count + 1 }, scope });
   }
-  return async () => {
-    for (const { row, value } of updates) {
+  const commit = async () => {
+    for (const { row, value, scope } of updates) {
+      if (!scope.charge || (!scope.refuse && mailLimited)) continue;
       if (row) await ctx.db.patch(row._id, value);
       else await ctx.db.insert('deviceAttempts', value);
     }
   };
+  return Object.assign(commit, { mailLimited });
 }
 
 export async function checkOpenEmailInvitations(

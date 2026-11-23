@@ -31,7 +31,7 @@ export type InvitationRevocations = Map<string, Promise<number>>;
 /** The recipient supplies the account. Never resolve a pending address for its inviter. */
 export async function invitationWasRevoked(
   ctx: QueryCtx | MutationCtx,
-  row: Doc<'projectInvites'>,
+  row: Pick<Doc<'projectInvites'>, 'projectId' | 'invitationEpoch'>,
   recipient: string,
   cache?: InvitationRevocations,
 ) {

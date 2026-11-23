@@ -6,6 +6,7 @@ import { findVerifiedRecipient } from './authUsers';
 import { invariant, ForgeError } from '../src/errors';
 import { isDeviceIdentity } from './cliServer';
 import { invitationEmailHash } from './projectInvitationPolicy';
+import { invitationWasRevoked } from './projectInvitationRevocation';
 
 export async function invitationPerson(ctx: QueryCtx | MutationCtx) {
   const user = await ctx.auth.getUserIdentity();
@@ -50,6 +51,43 @@ export const invitationBlock = (ctx: QueryCtx | MutationCtx, recipient: string, 
     .query('invitationBlocks')
     .withIndex('by_recipient_and_inviter', q => q.eq('recipient', recipient).eq('inviter', inviter))
     .unique();
+
+/** Accounts checked for suppression on one address. Granting needs a unique match
+ * (findVerifiedRecipient); protection holds for every verified account on the address (review F5). */
+const suppressionAccounts = 5;
+/** Whether this inviter's mail to this address is suppressed: blocked by address or account, or the
+ * recipient was removed after this invitation. Never shown to the inviter; the queue and the send use
+ * this one check so they cannot disagree. Every read runs whatever the answer, so the work does not
+ * depend on the outcome (P1-02). */
+export async function invitationMailSuppressed(
+  ctx: QueryCtx | MutationCtx,
+  person: string,
+  inviter: string,
+  invite: Pick<Doc<'projectInvites'>, 'projectId' | 'invitationEpoch'>,
+) {
+  const address = person.trim().toLowerCase();
+  const block = await ctx.db
+    .query('invitationBlocks')
+    .withIndex('by_email_and_inviter', q =>
+      q.eq('emailHash', invitationEmailHash(address)).eq('inviter', inviter).eq('blocked', true),
+    )
+    .take(1);
+  // Suppression is a protection, not a grant: an old address still finds its blocks, and an
+  // ambiguous address keeps every bound account's protections.
+  const accounts = (
+    await ctx.db
+      .query('users')
+      .withIndex('by_email', q => q.eq('email', address))
+      .take(suppressionAccounts)
+  ).filter(row => row.emailVerified && row.email === address);
+  let suppressed = block.some(value => value.blocked);
+  for (const { accountKey } of accounts) {
+    const accountBlock = await invitationBlock(ctx, accountKey, inviter);
+    const removed = await invitationWasRevoked(ctx, invite, accountKey);
+    suppressed ||= accountBlock?.blocked === true || removed;
+  }
+  return suppressed;
+}
 
 export async function setInvitationBlock(
   ctx: MutationCtx,

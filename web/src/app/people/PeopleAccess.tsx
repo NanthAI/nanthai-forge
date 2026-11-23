@@ -478,6 +478,12 @@ function MailState({ mail }: { mail: Data['invited'][number]['mail'] }) {
   if (mail.status === 'sent') return <>email submitted{mail.sends > 1 ? ` ${mail.sends} times` : ''}</>;
   if (mail.status === 'off')
     return <State word="Not run">Invitation email is off here; copy the link and send it yourself</State>;
+  if (mail.code === 'daily email limit')
+    return (
+      <State word="Not run">
+        Email not sent today (daily email limit); copy the link, or resend after the UTC day ends
+      </State>
+    );
   return (
     <State word="Check failed">
       Email not sent{mail.code ? ` (${mail.code})` : ''}; resend or copy the link

@@ -16,6 +16,7 @@ import {
   assertInvitationTarget,
 } from './projectInvitationPolicy';
 import { invitationEpoch, invitationWasRevoked } from './projectInvitationRevocation';
+import { invitationMailSuppressed } from './projectInvitationRecipient';
 
 export async function assertLegacyInvitationOpen(
   ctx: MutationCtx,
@@ -103,8 +104,11 @@ export async function createInvitation(
     .take(1);
   if (isEmail && !(old[0] && invitationStatus(old[0]) === 'pending'))
     await checkOpenEmailInvitations(ctx, projectId);
-  const charge = await invitationBudget(ctx, owner, isEmail && invitationEmailEnabled() ? person : undefined);
   const epoch = await invitationEpoch(ctx, projectId);
+  const mailed = isEmail && invitationEmailEnabled();
+  const suppressed =
+    mailed && (await invitationMailSuppressed(ctx, person, owner, { projectId, invitationEpoch: epoch }));
+  const charge = await invitationBudget(ctx, owner, mailed ? person : undefined, undefined, { suppressed });
   // All refusal paths, including all budgets, precede the first write.
   await charge();
   if (old[0] && invitationStatus(old[0]) === 'pending')
@@ -129,6 +133,9 @@ export async function createInvitation(
     role,
   });
   if (isEmail)
-    await queueInviteMail(ctx, (await ctx.db.get(operation))!, (await ctx.db.get(id))!, operationId);
+    await queueInviteMail(ctx, (await ctx.db.get(operation))!, (await ctx.db.get(id))!, operationId, {
+      limited: charge.mailLimited,
+      suppressed,
+    });
   return null;
 }

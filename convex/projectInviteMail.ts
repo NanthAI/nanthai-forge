@@ -16,27 +16,37 @@ import { activeOwnedProject } from './projectAuthority';
 import { requireOwnerPerson } from './ownerPerson';
 import { DEFAULT_ALERT_SENDER, STALL_ALERT_ENV } from '../src/stall-alerts';
 import { networkFetch, networkTimeout } from '../src/network-fetch';
-import { invariant, ForgeError } from '../src/errors';
+import { invariant } from '../src/errors';
 import { report } from './errors';
-import { findVerifiedRecipient } from './authUsers';
-import { invitationBlock } from './projectInvitationRecipient';
-import { invitationWasRevoked } from './projectInvitationRevocation';
+import { invitationMailSuppressed } from './projectInvitationRecipient';
 import {
   invitationByOperation,
   invitationStatus,
   invitationEmailEnabled,
   invitationBudget,
   invitationSendTimeout,
+  invitationMailLimit,
+  invitationSendRequestTimeout,
+  invitationSettleDelay,
   emailShape,
-  invitationEmailHash,
 } from './projectInvitationPolicy';
 
 type Operation = Doc<'projectAccessOperations'>;
 export type InviteMail = NonNullable<Operation['mail']>;
 const deliverRef = makeFunctionReference<
   'action',
-  { projectId: Id<'hostedProjects'>; operationId: string; sendId?: string }
+  { projectId: Id<'hostedProjects'>; operationId: string; sendId?: string; queuedSuppressed?: boolean }
 >('projectInviteMail:deliver');
+const settleRef = makeFunctionReference<
+  'mutation',
+  {
+    projectId: Id<'hostedProjects'>;
+    operationId: string;
+    sendId?: string;
+    status: 'sent' | 'failed' | 'off';
+    code?: string;
+  }
+>('projectInviteMail:settle');
 
 /** The sender request, or null when email is not set up on this deployment (the row then shows "off"). */
 function emailRequest(
@@ -57,6 +67,13 @@ function emailRequest(
   };
 }
 
+/** At the deployment or recipient cap a send is not queued: the row shows it was not sent and why (P1-03). */
+function heldMail(mail: InviteMail, limited: boolean): InviteMail {
+  return limited && mail.status === 'sending'
+    ? { ...mail, status: 'failed', sends: mail.sends - 1, code: invitationMailLimit }
+    : mail;
+}
+
 export function invitationRow(ctx: MutationCtx, projectId: Id<'hostedProjects'>, operationId: string) {
   return ctx.db
     .query('projectAccessOperations')
@@ -70,13 +87,17 @@ export async function queueInviteMail(
   row: Operation,
   invite: Doc<'projectInvites'>,
   operationId: string,
+  { limited = false, suppressed = false }: { limited?: boolean; suppressed?: boolean } = {},
 ) {
   if (!emailShape.test(row.person)) return;
-  const mail: InviteMail = {
-    status: invitationEmailEnabled() ? 'sending' : 'off',
-    sends: invitationEmailEnabled() ? 1 : 0,
-    at: Date.now(),
-  };
+  const mail: InviteMail = heldMail(
+    {
+      status: invitationEmailEnabled() ? 'sending' : 'off',
+      sends: invitationEmailEnabled() ? 1 : 0,
+      at: Date.now(),
+    },
+    limited,
+  );
   await ctx.db.patch(row._id, { mail });
   await ctx.db.patch(invite._id, { mail });
   if (mail.status === 'sending')
@@ -84,6 +105,7 @@ export async function queueInviteMail(
       projectId: row.projectId,
       operationId,
       sendId: operationId,
+      ...(suppressed ? { queuedSuppressed: true } : {}),
     });
 }
 
@@ -136,24 +158,7 @@ export const details = internalQuery({
       )?.handle;
     const handle = await handleOf(project.owner);
     const inviter = row.owner === project.owner ? handle : await handleOf(row.owner);
-    const block = await ctx.db
-      .query('invitationBlocks')
-      .withIndex('by_email_and_inviter', q =>
-        q.eq('emailHash', invitationEmailHash(row.person)).eq('inviter', row.owner).eq('blocked', true),
-      )
-      .take(1);
-    let recipient: string | null = null;
-    try {
-      // Suppression is a protection, not a grant: an old address still finds its blocks.
-      recipient = await findVerifiedRecipient(ctx, row.person, { anyAge: true });
-    } catch (error) {
-      if (!(error instanceof ForgeError && error.code === 'BAD_ARGUMENT')) throw error;
-    }
-    const accountBlock = recipient ? await invitationBlock(ctx, recipient, row.owner) : null;
-    const suppressed =
-      block.some(value => value.blocked) ||
-      accountBlock?.blocked === true ||
-      Boolean(recipient && (await invitationWasRevoked(ctx, invite, recipient)));
+    const suppressed = await invitationMailSuppressed(ctx, row.person, row.owner, invite);
     const web = process.env.FORGE_WEB_URL;
     const path = '/account/people';
     const url = web ? new URL(path, web).href : path;
@@ -175,11 +180,22 @@ export const details = internalQuery({
   },
 });
 
-/** One send: the sender's HTTP status is recorded, never the address, token or body. */
+/** One send. The inviter's row shows one uniform receipt for every accepted send: 'sent' (submitted), or 'off'
+ * without a sender. A suppressed send (recipient block or removal, at queue time or now) makes no provider
+ * request and records the same; a provider failure is logged for operators with its HTTP status only, never
+ * the address, token or body, and is not shown to the inviter, since a suppressed send cannot fail (P1-02,
+ * F-04, review F2). Every send settles `invitationSettleDelay` after the action starts; the provider request
+ * is bounded by that deadline, so the settlement time does not depend on the recipient either. */
 export const deliver = internalAction({
-  args: { projectId: v.id('hostedProjects'), operationId: v.string(), sendId: v.optional(v.string()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    sendId: v.optional(v.string()),
+    queuedSuppressed: v.optional(v.boolean()),
+  },
   returns: v.null(),
-  handler: async (ctx, input) => {
+  handler: async (ctx, { queuedSuppressed, ...input }) => {
+    const started = Date.now();
     const mail = await ctx.runQuery(
       makeFunctionReference<
         'query',
@@ -190,25 +206,34 @@ export const deliver = internalAction({
     );
     if (!mail) return null;
     const { suppressed, ...body } = mail;
-    const request = suppressed ? null : emailRequest(body, process.env);
-    let status: InviteMail['status'] = suppressed ? 'sent' : 'off',
-      code: string | undefined;
-    if (request) {
-      try {
-        const response = await networkFetch(request.url, { ...request.init, signal: networkTimeout(10_000) });
-        status = response.ok ? 'sent' : 'failed';
-        if (!response.ok) code = `HTTP ${response.status}`;
-      } catch {
-        status = 'failed';
-        code = 'network';
-      }
+    const request = emailRequest(body, process.env);
+    const status: InviteMail['status'] = request ? 'sent' : 'off';
+    // A send queued as suppressed stays suppressed even if the block ended since: its recipient
+    // allowance was never charged (review F3).
+    if (request && !suppressed && !queuedSuppressed) {
+      // Leave a second for the settle to be scheduled before the deadline.
+      const budget = Math.min(
+        invitationSendRequestTimeout,
+        started + invitationSettleDelay - 1_000 - Date.now(),
+      );
+      let failure: string | undefined;
+      if (budget <= 0) failure = 'deadline';
+      else
+        try {
+          const response = await networkFetch(request.url, {
+            ...request.init,
+            signal: networkTimeout(budget),
+          });
+          if (!response.ok) failure = `HTTP ${response.status}`;
+        } catch {
+          failure = 'network';
+        }
+      if (failure) console.warn(`Invitation email not accepted by the sender: ${failure}`);
     }
-    await ctx.runMutation(
-      makeFunctionReference<'mutation', typeof input & { status: string; code?: string }, null>(
-        'projectInviteMail:settle',
-      ),
-      { ...input, status, ...(code ? { code } : {}) },
-    );
+    await ctx.scheduler.runAfter(Math.max(0, started + invitationSettleDelay - Date.now()), settleRef, {
+      ...input,
+      status,
+    });
     return null;
   },
 });
@@ -282,19 +307,24 @@ export const resend = accountMutation('person')({
         'Connect a verified identity before sending email invitations.',
       );
       const sending = invitationEmailEnabled();
+      const suppressed = sending && (await invitationMailSuppressed(ctx, row.person, row.owner, invite));
       const charge = await invitationBudget(
         ctx,
         user.subject,
         sending ? row.person : undefined,
         sending ? `${input.projectId}:${input.operationId}` : undefined,
+        { suppressed },
       );
       await charge();
-      const mail: InviteMail = {
-        status: invitationEmailEnabled() ? 'sending' : 'off',
-        sends: row.mail.sends + (invitationEmailEnabled() ? 1 : 0),
-        at: Date.now(),
-        resend: input.resendId,
-      };
+      const mail: InviteMail = heldMail(
+        {
+          status: sending ? 'sending' : 'off',
+          sends: row.mail.sends + (sending ? 1 : 0),
+          at: Date.now(),
+          resend: input.resendId,
+        },
+        charge.mailLimited,
+      );
       await ctx.db.patch(row._id, { mail });
       await ctx.db.patch(invite._id, { mail });
       await ctx.db.insert('projectAccessOperations', {
@@ -308,6 +338,7 @@ export const resend = accountMutation('person')({
           projectId: input.projectId,
           operationId: input.operationId,
           sendId: input.resendId,
+          ...(suppressed ? { queuedSuppressed: true } : {}),
         });
       return null;
     } catch (error) {

@@ -4,7 +4,7 @@ import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
-import { contributors, inbox, access, refusal } from './invitation-fixture.mjs';
+import { contributors, inbox, access } from './invitation-fixture.mjs';
 const day = 86400000;
 function seed(total, distinctRecipients = false) {
   const f = lanesFixture();
@@ -100,7 +100,7 @@ test('Access settings pages invitation history with a distinct revocation record
     );
   }
 });
-test('concurrent emails cannot overspend the deployment allowance; refusal rolls back all invitation and counter writes', async t => {
+test('concurrent emails cannot overspend the deployment allowance; the held one queues no send', async t => {
   storageClock(t);
   const old = process.env.FORGE_INVITATION_EMAIL;
   process.env.FORGE_INVITATION_EMAIL = '1';
@@ -122,9 +122,17 @@ test('concurrent emails cannot overspend the deployment allowance; refusal rolls
       }),
     ),
   );
-  assert.equal(result.filter(row => row.status === 'fulfilled').length, 1);
-  assert.ok(refusal('RATE_LIMITED')(result.find(row => row.status === 'rejected').reason));
-  assert.equal(f.tables.projectInvites.size, 1);
+  // P1-03: the deployment cap holds the mail; both invitations stay pending, one email is queued.
+  assert.equal(result.filter(row => row.status === 'fulfilled').length, 2);
+  assert.equal(f.tables.projectInvites.size, 2);
+  assert.deepEqual([...f.tables.projectInvites.values()].map(row => row.mail.status).sort(), [
+    'failed',
+    'sending',
+  ]);
+  assert.equal(
+    [...f.tables.projectInvites.values()].find(row => row.mail.status === 'failed').mail.code,
+    'daily email limit',
+  );
   assert.equal(
     [...f.tables.deviceAttempts.values()].find(row => row.owner === 'invitation:deployment-day').count,
     500,
