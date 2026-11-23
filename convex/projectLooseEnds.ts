@@ -18,7 +18,7 @@ import { sourceAuthority } from '../src/hosted-source-authority';
 import { ForgeError, invariant } from '../src/errors';
 import { LOOSE_ENDS_ACTIVITY_MS, QUIET_MS, withLooseEndsHolders } from '../src/lane-quiet';
 import { report } from './errors';
-import { hostedRecordBody } from './projectHostedRecords';
+import { hostedRecordBody, recordHead } from './projectHostedRecords';
 
 import { looseEndIntentCursor } from '../src/hosted-lifecycle';
 import { readLooseEndIntents } from './projectLooseEndIntents';
@@ -98,12 +98,51 @@ function lanePosition(
 const SIBLINGS_PER_ITEM = 6;
 
 type Presence = Doc<'projectHostedPresence'>;
-const row = (presence: Presence, replacedBy: ReadonlyMap<string, string>) => {
+/** A Lane started by an id (a bare UUID or digest) has no title of its own; its Item's title stands in for it. */
+const BARE_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{12,64})$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The Item title for each listed Lane whose goal is a bare id: one Item-head point read per distinct id among such Lanes (none
+ * when every goal is a real title), the goal id first and the Lane's own Intent (an Item's first) next. */
+async function itemTitles(ctx: QueryCtx, projectId: Id<'hostedProjects'>, rows: readonly Presence[]) {
+  const titles = new Map<string, string>();
+  // One read per distinct id, however many Lanes share it. An Intent that continues an Item (a follow-up) is not the
+  // Item's key: its Lane keeps the short Lane mark the screen words, as before.
+  const looked = new Map<string, Promise<string | null>>();
+  const titleOf = (id: string) => {
+    let found = looked.get(id);
+    if (!found)
+      looked.set(
+        id,
+        (found = recordHead(ctx, projectId, 'issue', id).then(head => {
+          const title = head?.value ? (JSON.parse(head.value) as { title?: unknown }).title : null;
+          return typeof title === 'string' && title.trim() ? title : null;
+        })),
+      );
+    return found;
+  };
+  await Promise.all(
+    rows
+      .filter(presence => BARE_ID.test(presence.goal.trim()))
+      .map(async presence => {
+        const goal = presence.goal.trim();
+        for (const id of new Set([...(UUID.test(goal) ? [goal] : []), presence.intentId])) {
+          const title = await titleOf(id);
+          if (title) return void titles.set(presence.laneId, title);
+        }
+      }),
+  );
+  return titles;
+}
+const row = (
+  presence: Presence,
+  replacedBy: ReadonlyMap<string, string>,
+  titles: ReadonlyMap<string, string>,
+) => {
   const by = replacedBy.get(presence.laneId);
   return {
     laneId: presence.laneId,
     intentId: presence.intentId,
-    title: presence.goal,
+    title: titles.get(presence.laneId) ?? presence.goal,
     actor: presence.actor,
     agent: presence.agent ?? null,
     paths: presence.pathCount,
@@ -121,9 +160,14 @@ const row = (presence: Presence, replacedBy: ReadonlyMap<string, string>) => {
       : {}),
   };
 };
-const listed = (rows: Presence[], replacedBy: ReadonlyMap<string, string>, size = LOOSE_ENDS_LIMIT) => ({
+const listed = (
+  rows: Presence[],
+  replacedBy: ReadonlyMap<string, string>,
+  titles: ReadonlyMap<string, string>,
+  size = LOOSE_ENDS_LIMIT,
+) => ({
   reported: true as const,
-  rows: rows.slice(0, size).map(presence => row(presence, replacedBy)),
+  rows: rows.slice(0, size).map(presence => row(presence, replacedBy, titles)),
   more: rows.length > size,
 });
 
@@ -348,7 +392,12 @@ export const read = query({
       // Idle and stopped pages of the details session leave out a Lane Checked lists; the cursor still follows the
       // examined rows, so no row is skipped or shown twice.
       const separate = Boolean(details || position);
-      const [replacedBy, holders] = await Promise.all([
+      const [titles, replacedBy, holders] = await Promise.all([
+        itemTitles(ctx, projectId, [
+          ...(idle ?? []).slice(0, LOOSE_ENDS_LIMIT),
+          ...stopped.slice(0, LOOSE_ENDS_LIMIT),
+          ...(checked ?? []),
+        ]),
         quiet.length ? replacements(ctx, projectId, quiet, quietFrom) : new Map<string, string>(),
         currentHolders(
           ctx,
@@ -368,7 +417,7 @@ export const read = query({
         // The lookahead row is never shown: slice to the examined page first, then leave out what Checked lists.
         const examined = rows.slice(0, LOOSE_ENDS_LIMIT);
         const shown = separate ? examined.filter(row => !passedQuiet(row)) : examined;
-        const value = listed(shown, replacedBy);
+        const value = listed(shown, replacedBy, titles);
         const reason = kind === 'idle' ? 'Past the project’s dormant cutoff' : 'Quiet for 90 minutes';
         return {
           ...value,
@@ -390,7 +439,7 @@ export const read = query({
       // the markers, so a stale marker is skipped without losing the place.
       const checkedGroup = () => {
         const boundary = markers!.length > checkedSize ? markers![checkedSize - 1] : undefined;
-        const value = listed(checked!, replacedBy, checkedSize);
+        const value = listed(checked!, replacedBy, titles, checkedSize);
         return {
           ...value,
           more: markers!.length > checkedSize,
@@ -423,7 +472,7 @@ export const read = query({
                 idle: idleGroup
                   ? details
                     ? idleGroup
-                    : listed(idle!, replacedBy)
+                    : listed(idle!, replacedBy, titles)
                   : notReported('This project turned dormant Lanes off (agentDefaults.dormantAfterDays 0).'),
                 stopped: stoppedGroup,
                 checked:

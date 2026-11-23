@@ -5,7 +5,7 @@
 // approved order, each with its rows, its next page cursor, or why it is not reported, plus pages the reader asked for
 // merged once per group. `setAsideWord` says what happened to each Lane the owner set aside, `trashWord` to each
 // project moved to the trash, and `handText` is the one prompt that hands Lanes to an agent. Pure.
-import { waited, whoOf } from './model';
+import { laneTitle, waited, whoOf } from './model';
 import type { IntentPin, IntentRow } from './loose-intents';
 
 export type LooseRow = {
@@ -277,7 +277,8 @@ function laneRow(row: LooseRow, key: GroupKey | 'active', now: number, owner: bo
   return {
     ...plain,
     key: row.laneId,
-    title: row.title || 'Lane without a goal',
+    // A bare id that no Item title replaced reads as the short Lane mark, never as the id.
+    title: row.title ? laneTitle(row) : 'Lane without a goal',
     who: whoOf(row.actor, row.agent),
     mono: false,
     evidence: laneEvidence(row, key, now) + (key === 'checked' ? extra : ''),

@@ -323,6 +323,21 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
                 }),
               );
             assert.deepEqual(await stopClipping(), [], `stop words and counts fit at ${width}px in ${theme}`);
+            if (width === 1440) {
+              // The passed line hangs under the label: Checking's label sits on the baseline the other stages share.
+              const centres = await strip.locator('[data-stop]').evaluateAll(stops =>
+                stops.map(stop => {
+                  const range = document.createRange();
+                  range.selectNodeContents(stop.querySelector('.line-checking') ?? stop);
+                  const box = range.getBoundingClientRect();
+                  return Math.round(box.top + box.height / 2);
+                }),
+              );
+              assert.ok(
+                Math.max(...centres) - Math.min(...centres) <= 1,
+                `stage labels share one baseline: ${centres}`,
+              );
+            }
             if (width === 390) {
               const widerText = await page.addStyleTag({
                 content: '.line.phone .line-passed { font-size: var(--t-small); }',

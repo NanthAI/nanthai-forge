@@ -112,6 +112,33 @@ test('one read lists dormant and quiet Lanes oldest first and names the groups i
   );
 });
 
+test('a Lane named by a bare Item id is listed under its Item title', async () => {
+  const s = fixture();
+  const itemId = 'ffb6cc49-9a3f-4d2e-8b1c-0123456789ab';
+  s.tables.projectHostedRecordHeads.set(`issue-${itemId}`, {
+    _id: `issue-${itemId}`,
+    projectId: 'project',
+    kind: 'issue',
+    key: itemId,
+    status: 'open',
+    version: 1,
+    recordId: 'record',
+    value: JSON.stringify({ id: itemId, title: 'Licence: AGPL + company', status: 'open' }),
+  });
+  s.tables.projectHostedPresence.get('presence-dormant').goal = itemId;
+  // A goal that is already words is left alone, and a bare id with no Item keeps the id (the screen words it).
+  s.tables.projectHostedPresence.get('presence-quiet').goal = 'a'.repeat(40);
+  const result = await read(s, 'owner');
+  const title = id =>
+    [...result.groups.idle.rows, ...result.groups.stopped.rows].find(row => row.laneId === id).title;
+  assert.equal(title('dormant'), 'Licence: AGPL + company');
+  assert.equal(title('dormant-old'), 'Try streaming decoder');
+  assert.equal(title('quiet'), 'a'.repeat(40));
+  const screen = looseEndsScreen(result, {}, result.at);
+  const shown = screen.sections.flatMap(section => section.rows).find(row => row.laneId === 'quiet');
+  assert.equal(shown.title, 'Lane quiet', 'an unresolved bare id never shows as a title');
+});
+
 test('an agent lists dated checks and inactive projects in bounded pages without exposing revoked projects', async t => {
   const { HOSTED_WORK_INDEX_FORMAT } = await import(moduleUrl('../src/work-hosted-summary.ts'));
   const { planningSearchEntries } = await import(moduleUrl('../src/planning-search.ts'));
