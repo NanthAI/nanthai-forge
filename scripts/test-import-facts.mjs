@@ -93,7 +93,8 @@ export function parseImportFacts(path, text, withSymbols) {
             (ts.isIdentifier(parent.expression) &&
               (['moduleUrl', 'moduleSource'].includes(parent.expression.text) ||
                 (parent.expression.text === 'require' && !requireShadow)))));
-      const name = value.match(/^([A-Za-z_][\w-]*(?:\/[A-Za-z_][\w-]*)*):[A-Za-z_]\w*$/)?.[1];
+      const reference = value.match(/^([A-Za-z_][\w-]*(?:\/[A-Za-z_][\w-]*)*):([A-Za-z_]\w*)$/);
+      const name = reference?.[1];
       const glob = /[*?{[(]/.test(value);
       const json = Boolean(value) && directoryDependency(node, ast, false, jsonReaders, roots);
       const home = loaderReference(parent, loader.locals);
@@ -119,7 +120,10 @@ export function parseImportFacts(path, text, withSymbols) {
           if (glob) fact.glob = true;
           if (ts.isParameter(parent)) fact.parameter = true;
         }
-        if (name) fact.name = name;
+        if (name) {
+          fact.name = name;
+          fact.fn = reference[2];
+        }
         if (unknownName) fact.unknownName = true;
         if (home) fact.home = home;
         if (widen) fact.widen = widen;

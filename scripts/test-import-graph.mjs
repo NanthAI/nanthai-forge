@@ -30,7 +30,24 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
   const byNameEvidence = { 'function-reference': new Map(), dynamic: new Map() };
   // `byName`: a by-name loader's closure edge (every module named anywhere the test's code can reach).
   // It keeps landing coverage but is weak closeness evidence: preflight never ranks it as direct.
+  // Function names a Convex reference names, per module and importer: a Set while every edge between
+  // the pair is an exact `module:function` / `api.module.function` reference, null (whole module) once
+  // any other edge joins them. Preflight ranks by it; landing coverage ignores it.
+  const functions = new Map();
+  let exactFunction;
+  // An entry exists only for a pair whose every edge so far is an exact reference; any other edge
+  // turns an existing entry whole (null) and never creates one, so widened pairs cost nothing.
+  const noteFunction = (dependency, importer, name) => {
+    const row = functions.get(dependency),
+      known = row?.get(importer);
+    if (known === null || (!row && !name)) return;
+    if (!name) row.set(importer, null);
+    else if (known) known.add(name);
+    else if (row) row.set(importer, new Set([name]));
+    else functions.set(dependency, new Map([[importer, new Set([name])]]));
+  };
   const edge = (dependency, importer, kind = 'package-command', detail, byName = false) => {
+    if (exactFunction === undefined && functions.has(dependency)) noteFunction(dependency, importer, null);
     // A runner naming behavior tests describes coverage, not its implementation.
     // Keep test-to-test imports, but never cycle coverage back into the pipeline.
     if (/^tests\/[^/]+\.test\.mjs$/.test(dependency) && !importer.startsWith('tests/')) return;
@@ -212,18 +229,30 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
   // import, by a literal list, or by name through a by-name loader (below).
   const named = new Map(),
     nameLoaders = new Set();
-  const functionReference = (path, names, detail, kind = 'function-reference') => {
+  const functionReference = (path, names, detail, kind = 'function-reference', fns = []) => {
     let references = named.get(path);
     if (!references) {
       references = new Map();
       named.set(path, references);
     }
     const dispatches = /^(?:convex|tests)\//.test(path);
-    for (const name of names) {
+    for (const [index, name] of names.entries()) {
       const module = convexModule(name),
         evidence = { kind, detail: kind === 'dynamic' ? detail : `${detail}: ${name}` };
       if (references.get(module)?.kind !== 'function-reference') references.set(module, evidence);
-      if (dispatches) edge(module, path, evidence.kind, evidence.detail);
+      if (!dispatches) continue;
+      // Another kind of edge already joins the pair (an import, a by-name closure): whole.
+      const prior = rows.get(module)?.evidence.get(path);
+      const exact =
+        kind === 'function-reference' &&
+        fns[index] &&
+        (!prior || (prior.kind === 'function-reference' && !prior.byName))
+          ? fns[index]
+          : null;
+      exactFunction = exact;
+      edge(module, path, evidence.kind, evidence.detail);
+      noteFunction(module, path, exact);
+      exactFunction = undefined;
     }
   };
   const widenFunctions = (path, prefix, detail) => {
@@ -353,7 +382,13 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
           else {
             const length = segments.findLastIndex((_, i) => convexModule(segments.slice(0, i + 1).join('/')));
             if (length >= 0)
-              functionReference(path, [segments.slice(0, length + 1).join('/')], 'Convex API reference');
+              functionReference(
+                path,
+                [segments.slice(0, length + 1).join('/')],
+                'Convex API reference',
+                'function-reference',
+                [segments[length + 1]],
+              );
             else {
               const folder = segments.join('/');
               widenFunctions(path, folder ? `${folder}/` : '', `Unresolved Convex API reference: ${folder}`);
@@ -378,7 +413,8 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
                 for (const target of matchingJson(pattern))
                   edge(target, path, 'runtime-path', 'Matching JSON glob');
           }
-          if (name && convexModule(name)) functionReference(path, [name], 'Convex function name');
+          if (name && convexModule(name))
+            functionReference(path, [name], 'Convex function name', 'function-reference', [fact.fn]);
           else if (fact.unknownName) widenFunctions(path, '', `Unknown Convex function name: ${value}`);
           if (fact.importing || fact.runtime) {
             const from = homeOf(fact.home);
@@ -472,7 +508,7 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
   byNameDispatch(files, evidence, edge, named, nameLoaders);
   const reverse = new Map();
   for (const [dependency, importers] of evidence) reverse.set(dependency, new Set(importers.keys()));
-  return { reverse, evidence, packageGraph, workspaceUsers, symbols, sites };
+  return { reverse, evidence, packageGraph, workspaceUsers, symbols, sites, functions };
 }
 
 /** Test code that may run a tooling walk: walker -> tests/ files. The walk's base is its caller's

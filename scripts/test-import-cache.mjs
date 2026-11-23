@@ -8,7 +8,7 @@ import ts from 'typescript';
 import { parseImportFacts } from './test-import-facts.mjs';
 
 // Bump when parser, symbol, guard-scope or fact semantics change. The TS version pins AST semantics.
-const schema = `4:${ts.version}`;
+const schema = `5:${ts.version}`;
 const sha256 = bytes => createHash('sha256').update(bytes).digest();
 const validHash = hash => typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash);
 const maxBytes = 8 * 1024 * 1024;

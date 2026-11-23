@@ -327,6 +327,71 @@ export function changedExports(path, before, after) {
   const right = exportBodies(path, after);
   return [...new Set([...left.keys(), ...right.keys()])].filter(name => left.get(name) !== right.get(name));
 }
+/** A call evaluated when the module loads, to a function this module declares: it can set state other
+ * exports read (`const poll = makePoll(3)`). Bodies and callbacks run later and are skipped. */
+function loadCallsLocal(statement, locals) {
+  let found = false;
+  const visit = node => {
+    if (found || functionLike(node)) return;
+    if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+      const callee = node.expression;
+      let head = callee;
+      while (ts.isPropertyAccessExpression(head) || ts.isElementAccessExpression(head))
+        head = head.expression;
+      if (!ts.isIdentifier(head) || locals.has(head.text)) found = true;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(statement);
+  return found;
+}
+/** Export names a change can alter: every export that reaches a changed top-level statement through
+ * the module's own helpers (`moduleTaint`), and every removed export. '*' stands for the whole module:
+ * a changed or deleted statement that declares nothing (a side effect, `export {…}`), a load-time call
+ * of a local function, a module with mutable top-level state, an opaque module. Statements compare
+ * as exact text, so a changed literal or a reformat counts. An empty list means nothing differs. */
+export function alteredSurface(path, before, after) {
+  const parse = text => ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, kindOf(path));
+  const ast = parse(after),
+    old = parse(before);
+  const facts = moduleSymbols(ast),
+    oldFacts = moduleSymbols(old);
+  const present = new Map();
+  for (const [index, statement] of old.statements.entries()) {
+    const text = statement.getText(old);
+    present.set(text, [...(present.get(text) ?? []), index]);
+  }
+  const statements = new Set(),
+    changed = [];
+  for (const [index, statement] of ast.statements.entries()) {
+    const matches = present.get(statement.getText(ast));
+    if (matches?.length) matches.pop();
+    else {
+      if (!facts.statements[index]?.length) return ['*'];
+      statements.add(index);
+      changed.push(statement);
+    }
+  }
+  for (const matches of present.values())
+    for (const index of matches) if (!oldFacts.statements[index]?.length) return ['*'];
+  const names = new Set([...oldFacts.exports.keys()].filter(name => !facts.exports.has(name)));
+  if (statements.size) {
+    const declared = new Set(
+      facts.statements.flatMap((names, index) =>
+        ts.isImportDeclaration(ast.statements[index]) ? [] : names,
+      ),
+    );
+    const mutable = ast.statements.some(
+      statement =>
+        ts.isVariableStatement(statement) && !(statement.declarationList.flags & ts.NodeFlags.Const),
+    );
+    if (mutable || changed.some(statement => loadCallsLocal(statement, declared))) return ['*'];
+    const taint = moduleTaint(facts, { whole: false, statements, locals: new Set(), exports: new Set() });
+    if (taint.whole) return ['*'];
+    for (const name of taint.names) names.add(name);
+  }
+  return [...names];
+}
 /** Past this many altered exports the module was rewritten, and the whole-module reach already covers it. */
 const MOST_ALTERED_EXPORTS = 40;
 const segments = path => path.replace(/\.[^./]+$/, '').split('/');

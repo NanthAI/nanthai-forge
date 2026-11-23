@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { posix, join } from 'node:path';
 import { testImportGraph } from './test-import-graph.mjs';
-import { changedExports, moduleTaint, namedConsumers, wholeTaint } from './test-symbols.mjs';
+import { alteredSurface, changedExports, moduleTaint, namedConsumers, wholeTaint } from './test-symbols.mjs';
 import { removedNames, staleWatchers, watchRanking } from './test-name-watchers.mjs';
 
 import { closenessIndex, compareRank } from './test-closeness.mjs';
@@ -22,7 +22,7 @@ import {
 import { docsReaders } from './docs-readers.mjs';
 import { scanDetail, scanReaders } from './test-tree-scanners.mjs';
 
-export { changedExports, removedNames };
+export { alteredSurface, changedExports, removedNames };
 
 export const smokeTests = [
   'tests/files.test.mjs',
@@ -229,7 +229,9 @@ export function selectPreflightTests(input, graphCache = {}) {
   const modules = index
     ? [
         ...rankedPaths.map(path => {
-          const all = [...index.consumers(path, { maxHops: 2 })];
+          const names = input.changedExports?.get(path);
+          const altered = names && !names.includes('*') ? new Set(names) : undefined;
+          const all = [...index.consumers(path, { maxHops: 2, altered })];
           // Two modules between: ranked last (`near`), and close enough for a recent failure.
           for (const [test, value] of all) if (value[0] === 2) far.set(test, value);
           return { path, tests: all.filter(([, value]) => value[0] < 2) };

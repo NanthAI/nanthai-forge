@@ -52,6 +52,8 @@ export type PreflightTier = {
 export const preflightTierRule: string;
 /** Export names whose declaring statement differs between two texts of a module (or one side lacks). */
 export function changedExports(path: string, before: string, after: string): string[];
+/** Exports a change can alter, helpers included; '*' is the whole module. */
+export function alteredSurface(path: string, before: string, after: string): string[];
 /** Name literals of `before` that `after` no longer holds. */
 export function removedNames(path: string, before: string, after: string): string[];
 /** A test file named for a budget, cost, registration or contract guard (on its own name). */

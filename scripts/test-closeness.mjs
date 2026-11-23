@@ -50,7 +50,15 @@ export function closenessIndex(graph) {
     carried.set(carrier, found);
     return found;
   };
-  const consumers = (path, { readers = false, maxHops = 1 } = {}) => {
+  const consumers = (path, { readers = false, maxHops = 1, altered } = {}) => {
+    // The changed module's exports a change altered (never '*'): an importer that only names other
+    // Convex functions of it (`module:function`, `api.module.function`) does not run the change.
+    const apart = (module, importer) => {
+      // A module that names its own functions (`ctx.runQuery(internal.m.f)` inside `m`) is whole.
+      if (module !== path || !altered || graph.functions?.get(module)?.has(module)) return false;
+      const names = graph.functions?.get(module)?.get(importer);
+      return Boolean(names) && ![...names].some(name => altered.has(name));
+    };
     const found = new Map();
     const offer = (test, rank) => {
       const previous = found.get(test);
@@ -59,7 +67,7 @@ export function closenessIndex(graph) {
     const carriers = (module, hops) => {
       for (const importer of graph.reverse.get(module) ?? []) {
         const evidence = graph.evidence.get(module)?.get(importer);
-        if (!importer.startsWith('tests/') || weakEdge(evidence)) continue;
+        if (!importer.startsWith('tests/') || weakEdge(evidence) || apart(module, importer)) continue;
         if (readers && evidence.kind === 'import') continue;
         const tests = through(importer);
         for (const [test, depth] of tests) offer(test, [hops, tests.size, depth]);
@@ -78,6 +86,7 @@ export function closenessIndex(graph) {
           if (
             !seen.has(importer) &&
             !importer.startsWith('tests/') &&
+            !apart(module, importer) &&
             runsModule(graph.evidence.get(module)?.get(importer))
           ) {
             seen.add(importer);

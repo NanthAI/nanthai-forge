@@ -23,7 +23,7 @@ import { safeRelative } from './files.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { z } from 'zod';
 import {
-  changedExports,
+  alteredSurface,
   documentation,
   fitPreflightBudget,
   preflightTierRule,
@@ -1165,7 +1165,7 @@ function planTests(
     );
     const alteredExports = new Map(
       productSources
-        .map(([path, { before, after }]) => [path, changedExports(path, before, after)] as [string, string[]])
+        .map(([path, { before, after }]) => [path, alteredSurface(path, before, after)] as [string, string[]])
         .filter(([, names]) => names.length),
     );
     const learnedForPaths = learnedTests(root, changed.paths, undefined, test =>
