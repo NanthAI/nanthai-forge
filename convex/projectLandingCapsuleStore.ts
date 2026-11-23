@@ -6,8 +6,9 @@ import { hostedLandingAttemptSchema } from '../src/hosted-landing';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { landingCapsuleGraceMs } from './projectLandingCapsuleWake';
+import { capsuleKind, capsuleSummary } from './projectLandingCapsulePins';
 
-export const capsuleKind = 'projectLandingCapsules';
+export { capsuleKind };
 type Ctx = QueryCtx | MutationCtx;
 type Identity = { projectId: Id<'hostedProjects'>; submissionId: string };
 const pointers = new WeakMap<Ctx, Map<string, Promise<LandingCapsulePointer | null>>>();
@@ -88,8 +89,12 @@ export async function capsuleAttempt(
     .unique();
   if (!row) return null;
   const pointer = JSON.parse(row.value) as LandingCapsulePointer;
-  invariant(pointer.summary, 'SOURCE_UNAVAILABLE', 'Original capsule transaction pins are unavailable.');
-  const summary = JSON.parse(pointer.summary);
+  const summary = await capsuleSummary(
+    ctx.db,
+    { projectId: input.projectId, submissionId: row.submissionId! },
+    pointer,
+  );
+  invariant(summary, 'SOURCE_UNAVAILABLE', 'Original capsule transaction pins are unavailable.');
   let value = summary.attempt;
   if (summary.attemptPin) {
     const pin = summary.attemptPin as { parts: number; sha256: string };
@@ -134,8 +139,9 @@ export async function capsulePlan(ctx: Ctx, input: { projectId: Id<'hostedProjec
     .unique();
   if (!receipt) return null;
   const pointer = await landingCapsulePointer(ctx, receipt);
-  if (!pointer?.summary) return null;
-  const plan = JSON.parse(pointer.summary).plan as Doc<'projectHostedAcceptancePlans'> | undefined;
+  const summary = pointer ? await capsuleSummary(ctx.db, receipt, pointer) : null;
+  if (!summary) return null;
+  const plan = summary.plan as Doc<'projectHostedAcceptancePlans'> | undefined;
   invariant(!plan || plan.receiptId === input.receiptId, 'EVIDENCE_CHANGED', 'Capsule receipt pins differ.');
   return plan ?? null;
 }

@@ -18,6 +18,7 @@ import { landingNoteWindow } from './projectIntentLandingNoteArchive';
 import { cursorJson, itemLandingFromNote } from './projectItemLandingHistory';
 import { legacyVersions, planningHistoryBudget } from './projectPlanningHistory';
 import { record } from './projectWorkIndexStore';
+import { workRecordTable } from './projectWorkRecordTables';
 import { storeItem } from './projectWorkStoreReads';
 
 const AUDIT_CURSOR = 'forge-item-audit-v1:';
@@ -341,7 +342,7 @@ export async function readItemAuditHistory(
     }
   } else if (partition) {
     const [earliest] = await ctx.db
-      .query('projectPlanningRecords')
+      .query(await workRecordTable(ctx, partition, 'planningVersions'))
       .withIndex('by_generation_and_collection_and_parent_and_position', q =>
         q.eq('generationId', partition).eq('collection', 'planningVersions').eq('parent', input.itemId),
       )
@@ -410,7 +411,7 @@ export async function readItemAuditHistory(
     } else if (partition) {
       const beforePos = typeof state.c === 'number' ? state.c : undefined;
       const rows = await ctx.db
-        .query('projectPlanningRecords')
+        .query(await workRecordTable(ctx, partition, 'planningComments'))
         .withIndex('by_generation_and_collection_and_parent_and_position', q => {
           const base = q
             .eq('generationId', partition)

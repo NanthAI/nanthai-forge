@@ -644,6 +644,56 @@ test('the separate capsule pointer preserves exact server transaction pins witho
   assert.equal(await h.run(owner, 'projectHostedLanding:status', { submissionId: h.state.id }), expected);
 });
 
+test('411727ba row 5: moving capsule pins to a body row keeps replay pins identical and replays as a no-op', async t => {
+  const h = await fixture(t);
+  const pinsMove = await import(moduleUrl('../convex/projectLandingCapsulePinsMove.ts'));
+  const raw = JSON.parse(h.capsule.tables.projectHostedLandingAttempts[0]);
+  const attempt = JSON.parse(raw.value);
+  t.mock.method(Date, 'now', () => Date.parse(h.capsule.anchor.at) + 8 * 86_400_000);
+  h.relocate(true);
+  h.f.patch('projectHostedLandingRequests', h.row._id, { capsule: undefined });
+  // A pointer published before the split: attempt pins inline beside the compact evidence chain.
+  const evidence = { chain: [], lastNumber: 1, bytes: 0 };
+  const legacy = canonicalPayload({
+    ...h.encoded.pointer,
+    summary: canonicalPayload({ attempt, evidence, removalDone: true }),
+  });
+  const pointerId = h.f.insert('projectFinishReadRows', {
+    kind: capsuleStore.capsuleKind,
+    projectId: h.f.projectId,
+    sourceId: h.row._id,
+    submissionId: h.state.id,
+    attemptId: attempt.id,
+    value: legacy,
+  });
+  const pins = () =>
+    h.f.run(
+      'capsulePinsRead',
+      ctx => attemptStore.loadLandingAttempt(ctx, { projectId: h.f.projectId, attemptId: attempt.id }),
+      {},
+    );
+  assert.deepEqual(await pins(), attempt);
+  const bodies = h.f.tables.projectHostedLandingBodies.size;
+  const moved = await h.f.call('capsulePinsMove', pinsMove.page, { cursor: null });
+  assert.equal(moved.moved, 1);
+  const slim = JSON.parse(JSON.parse(h.f.tables.projectFinishReadRows.get(pointerId).value).summary);
+  assert.deepEqual(
+    Object.keys(slim).sort(),
+    ['evidence', 'pins', 'removalDone'],
+    'hot fields stay on the pointer',
+  );
+  assert.equal(h.f.tables.projectHostedLandingBodies.size, bodies + 1);
+  assert.deepEqual(await pins(), attempt, 'the moved pointer answers the same attempt pins');
+  const again = await h.f.call('capsulePinsMoveReplay', pinsMove.page, { cursor: null });
+  assert.equal(again.moved, 0, 'a replayed page finds nothing left to move');
+  assert.equal(h.f.tables.projectHostedLandingBodies.size, bodies + 1);
+  // A body owned by another landing is refused, never served as this landing's pins.
+  h.f.patch('projectHostedLandingBodies', slim.pins, {
+    value: canonicalPayload({ projectId: h.f.projectId, submissionId: randomUUID(), attempt }),
+  });
+  await assert.rejects(pins(), error => error.code === 'EVIDENCE_CHANGED');
+});
+
 test('b149b16b: objects from the earlier Node zlib writer decode through the portable codec, and portable objects decode through Node zlib', async t => {
   const h = await fixture(t);
   const text = landingCapsuleText(h.capsule);

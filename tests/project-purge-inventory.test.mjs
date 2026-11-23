@@ -641,6 +641,52 @@ test('orphan ticket purge removes both unindexed bodies, preserves foreign bodie
   assert(result.bytes > Buffer.byteLength(JSON.stringify(row)), 'cleanup meters its removed companion bytes');
 });
 
+test('411727ba row 5: orphan purge of a capsule pointer removes its pins body and preserves foreign bodies', async () => {
+  const s = state([]);
+  const pins = await import(moduleUrl('../convex/projectLandingCapsulePins.ts'));
+  const insert = async (projectId, submissionId) => {
+    const summary = await s.transaction(() =>
+      pins.splitCapsulePins(
+        s.ctx.db,
+        { projectId, submissionId },
+        { attempt: { id: 'a' }, removalDone: true },
+      ),
+    );
+    return s.ctx.db.insert('projectFinishReadRows', {
+      kind: pins.capsuleKind,
+      projectId,
+      submissionId,
+      sourceId: `${projectId}:${submissionId}`,
+      value: JSON.stringify({
+        protocol: 1,
+        sha256: 'a'.repeat(64),
+        size: 1,
+        rawSize: 1,
+        version: 1,
+        tables: '[]',
+        summary,
+      }),
+    });
+  };
+  const id = await insert('missing', 'missing-submission');
+  await insert('foreign', 'foreign-submission');
+  const row = structuredClone(s.tables.projectFinishReadRows.get(id));
+  const owned = JSON.parse(JSON.parse(row.value).summary).pins;
+  const input = {
+    table: 'projectFinishReadRows',
+    field: 'projectId',
+    ownerId: 'missing',
+    operationId: randomUUID(),
+    part: 'one',
+    pins: [{ id, sha256: createHash('sha256').update(JSON.stringify(row)).digest('hex') }],
+  };
+  const result = await s.transaction(() => storageInventory.purgeOrphans._handler(s.ctx, input));
+  assert.equal(result.deleted, 1);
+  assert(!s.tables.projectHostedLandingBodies.has(owned));
+  assert.equal(s.tables.projectHostedLandingBodies.size, 1, 'the foreign pointer keeps its body');
+  assert(result.bytes > Buffer.byteLength(JSON.stringify(row)), 'cleanup meters the removed pins body');
+});
+
 test('project purge drains non-creation-ordered suffix indexes with the same row page bound and preserves foreign rows', async () => {
   for (const reversed of [false, true]) {
     const s = state([]);

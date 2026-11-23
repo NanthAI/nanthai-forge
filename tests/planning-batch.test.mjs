@@ -283,7 +283,7 @@ async function closeBudgetFixture(t, scale, compact) {
   const s = await planFixture(t, scale);
   const items = () =>
     new Map(
-      [...s.tables.projectPlanningRecords.values()]
+      [...s.tables.projectPlanningRecords.values(), ...s.tables.projectWorkDataRecords.values()]
         .filter(row => row.generationId === s.generationId && row.collection === 'planningItems')
         .map(row => [row.key, JSON.parse(row.value)]),
     );
@@ -299,7 +299,7 @@ async function closeBudgetFixture(t, scale, compact) {
     ...[...children, settled, selectedChild].map(child => [child, parent]),
     [rest[1], keptParent],
   ]) {
-    for (const [id, row] of s.tables.projectPlanningRecords)
+    for (const [id, row] of [...s.tables.projectPlanningRecords, ...s.tables.projectWorkDataRecords])
       if (row.generationId === s.generationId && row.key === child.id)
         await s.ctx.db.patch(id, { value: JSON.stringify({ ...JSON.parse(row.value), parentId: owner.id }) });
   }

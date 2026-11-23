@@ -5,6 +5,7 @@ import type { QueryCtx } from './_generated/server';
 import { isShelved } from '../src/work-planning-types';
 import { planningStatusTransition } from '../src/work-planning-state';
 import { hostedRecordBody } from './projectHostedRecords';
+import { workRecordTable } from './projectWorkRecordTables';
 
 type Version = {
   version: number;
@@ -60,9 +61,13 @@ export function planningHistoryBudget(byteLimit = pageBytes) {
   };
 }
 
-export function legacyVersions(ctx: QueryCtx, partition: Id<'projectWorkGenerations'>, itemId: string) {
-  return ctx.db
-    .query('projectPlanningRecords')
+export async function* legacyVersions(
+  ctx: QueryCtx,
+  partition: Id<'projectWorkGenerations'>,
+  itemId: string,
+) {
+  yield* ctx.db
+    .query(await workRecordTable(ctx, partition, 'planningVersions'))
     .withIndex('by_generation_and_collection_and_parent_and_position', q =>
       q.eq('generationId', partition).eq('collection', 'planningVersions').eq('parent', itemId),
     )

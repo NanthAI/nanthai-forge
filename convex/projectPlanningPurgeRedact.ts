@@ -17,7 +17,7 @@ import { purgedIndexValue, purgedIntentKeys, purgedIntentRecord } from '../src/w
 import { hostedRecordIndex, hostedRecordValue } from '../src/hosted-records';
 import { PURGED_ITEM_TITLE } from '../src/work-planning-types';
 import { indexedRecord } from '../src/work-hosted-index';
-import { splitRecordTable } from './projectWorkRecordTables';
+import { settledRecordTable, splitRecordTable } from './projectWorkRecordTables';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { hostedRecordBody, recordHead, recordVersion } from './projectHostedRecords';
 import { fingerprintHostedIntent } from './projectWorkStoreFingerprintWrites';
@@ -241,7 +241,7 @@ async function pageOf(
     const parent = which === 'history' ? purge.itemId : purge.intentId;
     if (!parent || !partition) return { changes, after: null };
     const page = await ctx.db
-      .query(splitRecordTable(collection))
+      .query(await settledRecordTable(ctx, partition, collection))
       .withIndex('by_generation_and_collection_and_parent_and_position', q => {
         const scoped = q.eq('generationId', partition).eq('collection', collection).eq('parent', parent);
         return input.after === null ? scoped : scoped.gt('position', Number(input.after));
@@ -385,6 +385,7 @@ export async function indexRecord(
   transform: (value: unknown) => unknown = value =>
     purgedIndexValue(collection, value, purgeOperationId, decisions),
 ) {
+  await settledRecordTable(ctx, partition, collection);
   const root = known ?? (await record(ctx, partition, collection, key));
   if (!root) return 0;
   const { header, chunks, full } = await indexValue(ctx, partition, collection, root);

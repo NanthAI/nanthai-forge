@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { workRecordLookup, workRecordTable, workRecordTables } from './projectWorkRecordTables';
+import {
+  layoutRecordTable,
+  workRecordLookup,
+  workRecordTable,
+  workRecordTables,
+} from './projectWorkRecordTables';
+import { isDataRouted, partitionLayout } from './projectWorkRecordLayout';
 import { projectPurgeWriter } from './projectFinishReadWriter';
 import { stream } from 'convex-helpers/server/stream';
 import schema from './schema';
@@ -96,7 +102,7 @@ export const snapshotEntries = internalQuery({
     // A source-return page is a set of keyed entries, not an ordering contract. Drain physical
     // tables in sequence and fill the same RPC page: no empty boundary RPC or merge lookahead reads.
     const selection = input.cursor
-      ? (JSON.parse(input.cursor) as { table: number; cursor: string | null })
+      ? (JSON.parse(input.cursor) as { table: number; cursor: string | null; layout?: string })
       : { table: 0, cursor: input.cursor };
     const page: { page: Doc<(typeof workRecordTables)[number]>[]; isDone: boolean; continueCursor: string } =
       {
@@ -105,6 +111,15 @@ export const snapshotEntries = internalQuery({
         continueCursor: '',
       };
     let bytes = 0;
+    // A partition moving its history tables holds two copies of those rows: return the one it reads.
+    const layout = await partitionLayout(ctx, recordPartition(generation));
+    // A continuation spans pages, so a layout change between them could return a row twice.
+    invariant(
+      selection.layout === undefined || selection.layout === layout,
+      'WORK_STALE',
+      'Work history storage moved while this return was paging. Start the return again.',
+    );
+    selection.layout = layout;
     while (
       selection.table < workRecordTables.length &&
       page.page.length < bounds.numItems &&
@@ -121,7 +136,12 @@ export const snapshotEntries = internalQuery({
           numItems: bounds.numItems - page.page.length,
           maximumBytesRead: bounds.maximumBytesRead - bytes,
         });
-      page.page.push(...part.page);
+      const table = workRecordTables[selection.table]!;
+      page.page.push(
+        ...part.page.filter(
+          row => !isDataRouted(row.collection) || layoutRecordTable(layout, row.collection) === table,
+        ),
+      );
       bytes += part.page.reduce((n, row) => n + getDocumentSize(row), 0);
       if (!part.isDone) {
         selection.cursor = part.continueCursor;

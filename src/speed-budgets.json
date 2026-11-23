@@ -1160,11 +1160,11 @@
       "measuredBy": "planning-fixture",
       "metric": "planningPrimaryReadBytes",
       "unit": "bytes",
-      "value": 16079,
+      "value": 17008,
       "floor": 0,
-      "source": "tests/hosted-contention.test.mjs primary Work I/O fixture: projection-aware maximum 16,079 B, including compact Plan page maintenance; previous canonical-only footprint 14,934 B. The writer reuses already-read search roots. Normalized fixture bytes, not provider billing. Item b7a0dff1.",
+      "source": "tests/hosted-contention.test.mjs primary Work I/O fixture: 17,008 B with the Item 411727ba row 3 layout marker (main measured 16,734 B before it); projection-aware maximum 16,079 B, including compact Plan page maintenance; previous canonical-only footprint 14,934 B. The writer reuses already-read search roots. Normalized fixture bytes, not provider billing. Item b7a0dff1.",
       "issue": "0695ab24",
-      "reason": "Preserves primary Work provenance without retired migration comparisons, and includes the same-transaction compact Plan pages. The additional 1,145 B per largest command costs a modeled $0.000229 per 1,000 writes at $0.20/GB; the 324-root one-Plan-tab fixture saves about $0.0779 per 1,000 planning writes after all projection I/O. Calls, bodies and idle behavior are unchanged."
+      "reason": "Preserves primary Work provenance without retired migration comparisons, and includes the same-transaction compact Plan pages. The additional 1,145 B per largest command costs a modeled $0.000229 per 1,000 writes at $0.20/GB; the 324-root one-Plan-tab fixture saves about $0.0779 per 1,000 planning writes after all projection I/O. Calls, bodies and idle behavior are unchanged. Item 411727ba row 3 adds one layout marker read per transaction (+274 B, +1.6%) while partitions move their Item history to the 8-copy data table; the follow-up that deletes the layout gate after every deployment has moved returns it to static routing."
     },
     {
       "id": "planning-primary-write-bytes",

@@ -197,21 +197,38 @@ test('records mode: a head stored before heads kept their value gets the tombsto
     position: 0,
     body: `[${JSON.stringify(SECRET)}]`,
   });
-  const legacy = {
-    _id: 'legacy',
+  // A partition still moving its history (Item 411727ba row 3) keeps a second copy of the words.
+  const marker = [...s.tables.projectWorkDataRecords.values()].find(
+    row => row.collection === '_workStoreLayout' && row.generationId === generation._id,
+  ) ?? {
+    _id: 'layout',
     _creationTime: 1,
     projectId: s.projectId,
     generationId: generation._id,
+    collection: '_workStoreLayout',
+    key: 'tables',
+    parent: '',
+    position: 0,
+  };
+  const settled = marker.value ?? '{"layout":"legacy"}';
+  for (const layout of ['copying', 'cleaning']) {
+    s.tables.projectWorkDataRecords.set(marker._id, { ...marker, value: JSON.stringify({ layout }) });
+    await assert.rejects(purge(s, itemId, reported.operationId), code('WORK_STALE'));
+    assert.ok(s.tables.projectReturnPages.has('staged'), 'the refusal wrote nothing');
+  }
+  if (marker.value) s.tables.projectWorkDataRecords.set(marker._id, { ...marker, value: settled });
+  else s.tables.projectWorkDataRecords.delete(marker._id);
+  // The earlier planning split may have left an old core-table copy of the comment: still refused.
+  s.tables.projectWorkRecords.set('leftover', {
+    ...marker,
+    _id: 'leftover',
     collection: 'planningComments',
     key: reported.operationId,
-    parent: itemId,
-    position: 0,
-    value: '{}',
-  };
-  s.tables.projectWorkRecords.set('legacy', legacy);
+    value: JSON.stringify({ text: SECRET }),
+  });
   await assert.rejects(purge(s, itemId, reported.operationId), code('WORK_STALE'));
   assert.ok(s.tables.projectReturnPages.has('staged'), 'the refusal wrote nothing');
-  s.tables.projectWorkRecords.delete('legacy');
+  s.tables.projectWorkRecords.delete('leftover');
   assert.equal(await purge(s, itemId, reported.operationId), 1);
   assert.equal(s.tables.projectReturnPages.has('staged'), false, 'the failed build’s staged page is deleted');
   assert.equal(JSON.parse(head.value).text, 'Deleted comment', 'the head reads the tombstone inline');

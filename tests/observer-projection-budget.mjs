@@ -111,7 +111,12 @@ export function landingBodyCounts(count) {
     bodyReads <= 3 * ticketReads + projectionReads,
     'at most three cold bodies per ticket or one request per observer role',
   );
-  assert(bodyWrites <= 3 * ticketWrites, 'at most three cold-body writes per ticket write');
+  // A capsule pointer owns one pins body (411727ba row 5), written with the pointer row.
+  const pointerWrites = count.written.filter(table => table === 'projectFinishReadRows').length;
+  assert(
+    bodyWrites <= 3 * ticketWrites + pointerWrites,
+    'at most three cold-body writes per ticket write, or one per capsule pointer write',
+  );
   return {
     reads: bodyReads,
     writes: bodyWrites,

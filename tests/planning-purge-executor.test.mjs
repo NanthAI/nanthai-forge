@@ -287,7 +287,7 @@ test('review 2026-11-20 finding 1: a partition kept from before the purge (Inten
   );
   assert.ok(
     inKept().some(row => row.includes(':planningItems:payload:')) &&
-      [...s.tables.projectPlanningRecords.values()].some(
+      [...s.tables.projectPlanningRecords.values(), ...s.tables.projectWorkDataRecords.values()].some(
         row =>
           row.generationId === kept &&
           row.collection === 'planningItems' &&

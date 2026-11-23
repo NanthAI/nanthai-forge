@@ -1,1 +1,1 @@
-| `projectWorkRecords` | General Work projections, including activity/status readers; eight custom B-tree indexes. | Activity |
+| `projectWorkRecords` | General Work projections, including activity/status readers; seven custom B-tree indexes. Work `events` of a moved partition live in `projectWorkDataRecords` (Item 411727ba row 3). | Activity |

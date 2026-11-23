@@ -346,7 +346,8 @@ test('indexed Work writes ratchet per-kind index copies and the projection bytes
   };
   assert.equal(copies('projectPlanningRecords'), 16);
   assert.equal(copies('projectWorkDataRecords'), 8);
-  assert.equal(copies('projectWorkRecords'), 11, 'planning and search indexes cover only their own records');
+  // 411727ba row 3: the finished table-split migration's `by_generation` index is gone.
+  assert.equal(copies('projectWorkRecords'), 10, 'planning and search indexes cover only their own records');
   const groups = {
     core: { table: 'projectWorkRecords', rows: [] },
     planning: { table: 'projectPlanningRecords', rows: [] },
@@ -380,9 +381,11 @@ test('indexed Work writes ratchet per-kind index copies and the projection bytes
       outcome: 'Land one Candidate',
     }),
   ];
+  // Item history and Work events live in the 8-copy data table in a moved partition (411727ba row 3).
+  const moved = new Set(['planningItems', 'planningVersions', 'planningComments', 'events']);
   for (const row of fixtures) {
     const group =
-      row.collection === 'viewFiles' || row.collection.endsWith(':payload')
+      row.collection === 'viewFiles' || row.collection.endsWith(':payload') || moved.has(row.collection)
         ? 'data'
         : row.collection.startsWith('planning')
           ? 'planning'
@@ -398,8 +401,9 @@ test('indexed Work writes ratchet per-kind index copies and the projection bytes
   // Planning/data retirement prefixes are removed; core retains migration search-tie order (1082e2ee).
   t.diagnostic(JSON.stringify({ modeledIndexCopies: model }));
   assert(model.core <= 1859, JSON.stringify(model));
-  assert(model.planning <= 10848, JSON.stringify(model));
-  assert(model.data <= 182704, JSON.stringify(model));
+  // 411727ba row 3: the Item root moves from 16 to 8 copies (planning -4,096 B, data +2,048 B).
+  assert(model.planning <= 6752, JSON.stringify(model));
+  assert(model.data <= 184752, JSON.stringify(model));
   assert(model.data < groups.data.rows.reduce((n, row) => n + bytes(row) * 19, 0) / 2);
 });
 

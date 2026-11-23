@@ -179,7 +179,8 @@ export function purgeIndex(table: ProjectPurgeTable): { index: string; scope?: s
 // invitationBlocks is recipient-owned, has no project reference, and survives project purges.
 /** Project rows that are not keyed by `projectId`; each has its own bounded purge step. */
 export const projectPurgeSpecial = {
-  /** Unindexed cold bodies are deleted atomically with projectHostedLandingRequests.requestBodyId. */
+  /** Unindexed cold bodies are deleted atomically with their parent: a ticket's body ids, or a
+   * capsule pointer's `pins` (projectFinishReadRows, projectLandingCapsulePins.ts). */
   projectHostedLandingBodies: 'parent-ticket',
   /** Root row: purge leaves a nameless owner/key tombstone so a replayed initial upload cannot recreate it. */
   hostedProjects: 'tombstone',

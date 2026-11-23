@@ -236,10 +236,17 @@ test('review finding 5: an Item with more comments than one purge removes is ref
   const { s, itemId } = await deletedBase(t);
   const project = s.tables.hostedProjects.get(s.projectId);
   const generation = s.tables.projectWorkGenerations.get(project.work.generationId);
-  const table = s.tables.projectPlanningRecords ?? s.tables.projectWorkRecords;
-  const sample = [...table.values()].find(
-    row => row.collection === 'planningComments' && row.parent === itemId,
+  // A moved partition keeps its comments in the data table (convex/projectWorkRecordLayout.ts).
+  const table = [
+    s.tables.projectWorkDataRecords,
+    s.tables.projectPlanningRecords,
+    s.tables.projectWorkRecords,
+  ].find(
+    rows =>
+      rows && [...rows.values()].some(row => row.collection === 'planningComments' && row.parent === itemId),
   );
+  const sample =
+    table && [...table.values()].find(row => row.collection === 'planningComments' && row.parent === itemId);
   assert.ok(sample && generation, 'the Item has an indexed comment');
   for (let n = 0; n < 2001; n++) {
     const id = `imported-${n}`;

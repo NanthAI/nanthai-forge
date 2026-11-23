@@ -4,10 +4,12 @@ import { planRowsWriter } from './projectPlanRowsWriter';
 import { planCountsBirth, planCountsWriter } from './projectPlanCountsStore';
 import { requestPlanRepair } from './projectPlanPreparationStore';
 import type { Doc, Id } from './_generated/dataModel';
-import { splitRecordTable } from './projectWorkRecordTables';
+import { layoutRecordTable, splitRecordTable } from './projectWorkRecordTables';
+import { isDataRouted, layoutMarkerFields, noteLayout, partitionLayout } from './projectWorkRecordLayout';
 import { initiativeWorkPlanning } from './projectInitiativeWorkPlanning';
 
 const tag = Symbol('workRecordWriter');
+const workTables = new Set(['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords']);
 const originals = new WeakMap<object, () => MutationCtx['db']>();
 export const workRecordOriginalDb = (db: MutationCtx['db']) => originals.get(db)?.() ?? db;
 type Row = Omit<Doc<'projectWorkRecords'>, '_id' | '_creationTime'>;
@@ -23,6 +25,9 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
   const overrides = new Map<PropertyKey, unknown>();
   const roots = new Map<string, Doc<'projectPlanningRecords'>>();
   const collections = new Map<string, string>();
+  // Row identity for the history move (Item 411727ba row 3): a write to a legacy row of a copying
+  // partition is mirrored to its data-table copy, found by key.
+  const identities = new Map<string, { generationId: string; collection: string; key: string }>();
   const layouts = new Map<string, boolean>();
   const waitingRepairs = new Set<string>();
   const repairs = new Set<Id<'projectWorkGenerations'>>();
@@ -57,6 +62,12 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
     if (row && typeof row === 'object' && 'collection' in row && '_id' in row) {
       const id = String(row._id);
       collections.set(id, String(row.collection));
+      if ('generationId' in row && 'key' in row)
+        identities.set(id, {
+          generationId: String(row.generationId),
+          collection: String(row.collection),
+          key: String(row.key),
+        });
       if (row.collection === 'planningSearch')
         roots.set(id, { ...row } as unknown as Doc<'projectPlanningRecords'>);
       else roots.delete(id);
@@ -117,6 +128,28 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
     );
     return next;
   };
+  const layoutOf = (partition: string) =>
+    partitionLayout({ db: writer }, partition as Id<'projectWorkGenerations'>);
+  // Only rows of a copying partition have a mirror: a legacy row's copy in the data table, or a
+  // data-table copy's legacy row. Rows this transaction read are known; a legacy id it never read
+  // is fetched once (the planning branch below reuses that read). A data-table id of Item history
+  // is only reached through a read, so an unknown one is never fetched.
+  const mirrorOf = async (id: string, data = false) => {
+    if (!data && !identities.has(id)) remember(await db().get(id as never));
+    const identity = identities.get(id);
+    if (!identity || !isDataRouted(identity.collection)) return null;
+    if ((await layoutOf(identity.generationId)) !== 'copying') return null;
+    const copy = await db()
+      .query(data ? splitRecordTable(identity.collection) : 'projectWorkDataRecords')
+      .withIndex('by_generation_and_collection_and_key', q =>
+        q
+          .eq('generationId', identity.generationId as Id<'projectWorkGenerations'>)
+          .eq('collection', identity.collection)
+          .eq('key', identity.key),
+      )
+      .unique();
+    return copy?._id ?? null;
+  };
   const writer = new Proxy({} as MutationCtx['db'], {
     has(_target, key) {
       return overrides.has(key) || Reflect.has(db(), key);
@@ -129,7 +162,7 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
       if (method === 'query' && !Reflect.get(db(), tag))
         return (table: string) => {
           const query = db().query(table as never);
-          return table === 'projectPlanningRecords' ? observed(query) : query;
+          return workTables.has(table) ? observed(query) : query;
         };
       if (method === 'insert' && !Reflect.get(db(), tag))
         return async (table: string, input: Record<string, unknown>) => {
@@ -143,6 +176,12 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
             layouts.set(id, true);
             // Its planning counts start complete: every root of this partition passes through this writer.
             await db().insert('projectWorkDataRecords', planCountsBirth(input.projectId as never, id));
+            // Its Item history and Work events live in the 8-copy data table from birth.
+            await db().insert(
+              'projectWorkDataRecords',
+              layoutMarkerFields(input.projectId as never, id, 'moved'),
+            );
+            noteLayout(writer, id, 'moved');
             return id;
           }
           if (table === 'projectWorkGenerations') {
@@ -152,8 +191,14 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
             return db().insert('projectWorkGenerations', alias as never);
           }
           if (table === 'projectWorkRecords') table = splitRecordTable(String(input.collection));
+          if (workTables.has(table) && isDataRouted(String(input.collection))) {
+            const layout = await layoutOf(String(input.generationId));
+            table = layoutRecordTable(layout, String(input.collection));
+            if (layout === 'copying') await db().insert('projectWorkDataRecords', input as never);
+          }
           const id = await db().insert(table as never, input as never);
-          if (table === 'projectPlanningRecords') remember({ ...input, _id: id });
+          if (table === 'projectPlanningRecords' || table === 'projectWorkRecords')
+            remember({ ...input, _id: id });
           if (
             (table === 'projectWorkRecords' || table === 'projectPlanningRecords') &&
             input.collection === 'planningSearch'
@@ -196,8 +241,23 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
               await requestPlanRepair(context, id as Id<'projectWorkGenerations'>);
             return;
           }
-          if (!db().normalizeId('projectPlanningRecords', id)) return mutate();
+          const planningId = db().normalizeId('projectPlanningRecords', id);
+          const dataId = !planningId && db().normalizeId('projectWorkDataRecords', id);
+          if (!planningId && !dataId && !db().normalizeId('projectWorkRecords', id)) return mutate();
+          const copy = await mirrorOf(id, !!dataId);
+          const mirrored = async () => {
+            if (method === 'delete') identities.delete(id);
+            if (!copy) return;
+            if (method === 'delete') await db().delete(copy);
+            else if (method === 'replace') await db().replace(copy, value as never);
+            else await db().patch(copy, value as never);
+          };
+          if (!planningId) {
+            await mutate();
+            return mirrored();
+          }
           return serial(async () => {
+            await mirrored();
             if (
               collections.has(id) &&
               collections.get(id) !== 'planningSearch' &&

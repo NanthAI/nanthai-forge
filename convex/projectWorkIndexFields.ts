@@ -184,6 +184,9 @@ export const indexTables = {
       ],
     }),
   projectWorkDataRecords: defineTable({
+    // Item rows keep their close lock after moving here from projectPlanningRecords (Item 411727ba row 3).
+    planningClose: v.optional(v.string()),
+    planningRestored: v.optional(v.string()),
     projectId: v.id('hostedProjects'),
     generationId: v.id('projectWorkGenerations'),
     ...indexEntry.fields,
@@ -219,7 +222,5 @@ export const indexTables = {
       'status',
       'position',
     ])
-    .index('by_project', ['projectId'])
-    // index-order: caller: convex/projectWorkRecordMigration.ts#page; order: copy legacy rows in creation-time order so equal-score planning search ties retain newest-first order after cutover.
-    .index('by_generation', ['generationId']),
+    .index('by_project', ['projectId']),
 };

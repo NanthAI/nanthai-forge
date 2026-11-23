@@ -10,6 +10,7 @@ import {
 } from './projectLandingCapsuleRemove';
 import { capsuleIndexKind } from './projectLandingCapsuleIndex';
 import { capsuleKind } from './projectLandingCapsuleStore';
+import { splitCapsulePins } from './projectLandingCapsulePins';
 import { loadLanding } from './projectHostedLandingStore';
 import { landingAttemptRow } from './projectHostedLandingAttemptRead';
 import { acceptancePlan } from './projectHostedAcceptanceStore';
@@ -77,7 +78,13 @@ export const publish = internalMutation({
         });
       summary.attemptPin = { parts: chunks.length, sha256: digest(attempt.value) };
     }
-    const pointer = { ...input.pointer, summary: canonicalPayload(summary) };
+    // Cold pins go to an unindexed body row; the pointer keeps only what hot paths read.
+    const slim = await splitCapsulePins(
+      ctx.db,
+      { projectId: input.projectId, submissionId: state.id },
+      summary,
+    );
+    const pointer = { ...input.pointer, summary: slim };
     await ctx.db.insert('projectFinishReadRows', {
       kind: capsuleKind,
       sourceId: row._id,

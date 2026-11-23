@@ -127,7 +127,7 @@ test('legacy preparation is explicit, bounded, resumable and original-operation 
   assert.equal((await run(s, 'sync')).coverage, 'complete');
   assert.equal((await run(s, 'deepneedle')).items.length, 1);
   const preparedHeader = planningSummary(
-    JSON.parse(s.tables.projectPlanningRecords.get(legacyHeader._id).value),
+    JSON.parse(workRecordRows(s.tables).find(row => row._id === legacyHeader._id).value),
   );
   assert(preparedHeader.bodyLength > 40000);
   assert.equal(preparedHeader.hasDoneWhen, false);
@@ -316,6 +316,15 @@ test('source snapshot transport preserves indexed search fields and skips compar
   assert.deepEqual(after, before, 'compare metadata adds no source snapshot documents, bytes or pages');
   assert.deepEqual(await store.snapshotEntries._handler(s.ctx, args), snapshot);
   meter.restore();
+  // A continuation is bound to the history layout it started on (Item 411727ba row 3): a move's
+  // cutover between pages would otherwise return a row from both copies.
+  await assert.rejects(
+    store.snapshotEntries._handler(s.ctx, {
+      ...args,
+      cursor: JSON.stringify({ table: 0, cursor: null, layout: 'legacy' }),
+    }),
+    error => (error.data?.code ?? error.code) === 'WORK_STALE',
+  );
 });
 
 test('table cutover rejects outstanding cursors with WORK_STALE and retains equal-score planning order and items', async t => {
@@ -348,24 +357,36 @@ test('table cutover rejects outstanding cursors with WORK_STALE and retains equa
   };
   const listFirst = await index.records._handler(s.ctx, listInput);
   assert(!listFirst.isDone);
-  // Recreate the pre-rollout physical layout, with exactly the same logical records.
-  delete generation.recordTables;
-  for (const table of ['projectPlanningRecords', 'projectWorkDataRecords'])
-    for (const [id, row] of s.tables[table]) {
-      s.tables.projectWorkRecords.set(id, row);
-      s.tables[table].delete(id);
-    }
-  let cursor = null;
-  do {
-    const result = JSON.parse(
-      await migration.page._handler(s.ctx, {
-        generationId: generation._id,
-        operationId: randomUUID(),
-        cursor,
-      }),
-    );
-    cursor = result.nextCursor;
-  } while (cursor);
+  // Recreate the pre-move physical layout (Item 411727ba row 3), with exactly the same logical
+  // records: Item history in the planning table, Work events in the core table, no layout marker.
+  const legacyTable = { events: 'projectWorkRecords' };
+  for (const [id, row] of s.tables.projectWorkDataRecords) {
+    if (row.collection === '_workStoreLayout') s.tables.projectWorkDataRecords.delete(id);
+    if (!['planningItems', 'planningVersions', 'planningComments', 'events'].includes(row.collection))
+      continue;
+    s.tables[legacyTable[row.collection] ?? 'projectPlanningRecords'].set(id, row);
+    s.tables.projectWorkDataRecords.delete(id);
+  }
+  const moving = () =>
+    [...s.tables.projectPlanningRecords.values(), ...s.tables.projectWorkRecords.values()].filter(row =>
+      ['planningItems', 'planningVersions', 'planningComments', 'events'].includes(row.collection),
+    ).length;
+  assert(moving() > 0, 'the fixture seeds Item history and Work events');
+  const drive = async cleanup => {
+    let cursor = null;
+    do {
+      const result = JSON.parse(
+        await migration.page._handler(s.ctx, {
+          generationId: generation._id,
+          operationId: randomUUID(),
+          cursor,
+          ...(cleanup ? { cleanup: true } : {}),
+        }),
+      );
+      cursor = result.nextCursor;
+    } while (cursor);
+  };
+  await drive(false);
   assert.notEqual(project.work.generationId, generation._id);
   const published = s.tables.projectWorkGenerations.get(project.work.generationId);
   assert.equal(published.recordsGenerationId, generation._id);
@@ -402,4 +423,7 @@ test('table cutover rejects outstanding cursors with WORK_STALE and retains equa
     [...listFresh.page, ...listSecond.page].map(row => row.id).sort(),
     before.items.map(row => row.id).sort(),
   );
+  await drive(true);
+  assert.equal(moving(), 0, 'cleanup leaves no legacy copy');
+  assert.deepEqual((await run(s, 'cutover')).items, before.items);
 });

@@ -2994,10 +2994,15 @@ test('planning history leaves missing legacy predecessors unknown and preserves 
   await put(p, { itemId, expectedVersion: 1, status: 'closed' });
   const legacy = (await list(p, { id: itemId, reconcile: false })).item;
   assert.equal(legacy.closedAt, legacy.at);
-  for (const [key, row] of s.tables.projectPlanningRecords) {
-    if (row.collection === 'planningVersions' && row.parent === itemId && JSON.parse(row.value).version === 1)
-      s.tables.projectPlanningRecords.delete(key);
-  }
+  for (const table of ['projectPlanningRecords', 'projectWorkDataRecords'])
+    for (const [key, row] of s.tables[table]) {
+      if (
+        row.collection === 'planningVersions' &&
+        row.parent === itemId &&
+        JSON.parse(row.value).version === 1
+      )
+        s.tables[table].delete(key);
+    }
   const unknown = (await list(p, { id: itemId, reconcile: false })).item;
   assert.equal(unknown.closedAt, null);
   assert.equal(unknown.lastStatusChangeAt, null);

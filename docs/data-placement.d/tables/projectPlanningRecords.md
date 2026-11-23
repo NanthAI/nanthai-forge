@@ -1,1 +1,1 @@
-| `projectPlanningRecords` | Planning roots, versions, comments and search fragments; thirteen custom B-tree indexes plus search, confined to planning rows. | Planning activity |
+| `projectPlanningRecords` | Planning search roots and fragments; thirteen custom B-tree indexes plus search, confined to planning rows. Item roots, versions and comments of a moved partition live in `projectWorkDataRecords` (Item 411727ba row 3); older partitions keep them here until `projectWorkRecordMigration` moves them. | Planning activity |

@@ -1539,6 +1539,9 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
   // Item 411727ba: the stored-key purge indexes hold one ~115 B entry per object, backup, proposal and upload
   // cleanup row: stored entries 225 -> 231 fresh and 24,789 -> 28,889 dogfood before landing, plus about 8
   // per landing scenario. Index writes stay within budget. The entry lives and dies with its row.
+  // 411727ba row 5: the capsule's attempt and plan pins move from the 11-copy pointer row to a
+  // 3-copy body row: retained projectFinishReadRows -3,270 B fresh / -4,023 B dogfood,
+  // projectHostedLandingBodies +2,840 / +3,352 (about -34 KB per landing at modelled copies).
   for (const [name, scenario] of Object.entries(scenarios)) {
     const indexBudget = storageBudgets[name].indexes;
     const aliasBudget = storageBudgets[name].metricAliases;

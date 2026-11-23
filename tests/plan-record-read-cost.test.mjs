@@ -24,14 +24,16 @@ for (const collection of ['planningSearch:payload', 'planningItems'])
           ? 'Distinct payload text. '.padEnd(16000, 'x')
           : JSON.stringify({ id: 'item', version: 3, payloadKey: 'a'.repeat(64), bodyLength: 20000 }),
       };
-      const id = await s.ctx.db.insert('projectPlanningRecords', fields);
+      // Item roots of a moved partition live in the data table (Item 411727ba row 3).
+      const table = collection === 'planningItems' ? 'projectWorkDataRecords' : 'projectPlanningRecords';
+      const id = await s.ctx.db.insert(table, fields);
       const io = meterWorkIO(s.ctx, s.tables),
         writer = workRecordWriter(s.ctx);
       const cost = await io.cost(async () => {
         if (read === 'get') await writer.db.get(id);
         else {
           const query = writer.db
-            .query('projectPlanningRecords')
+            .query(table)
             .withIndex('by_generation_and_collection_and_key', q =>
               q.eq('generationId', generationId).eq('collection', collection).eq('key', 'observed'),
             );
@@ -47,7 +49,13 @@ for (const collection of ['planningSearch:payload', 'planningItems'])
         await finishWorkRecordWrites(writer);
       });
       t.diagnostic(JSON.stringify({ collection, read, cost }));
-      assert.equal(cost.readDocuments, 1, 'an already observed non-root costs exactly one document read');
+      // A write to Item history also reads its partition's ~200-byte layout marker once per
+      // transaction (Item 411727ba row 3) until the layout gate is deleted.
+      assert.equal(
+        cost.readDocuments,
+        collection === 'planningItems' ? 2 : 1,
+        'an already observed non-root costs exactly one document read',
+      );
       assert.equal(cost.writeDocuments, 1);
       if (collection.endsWith(':payload')) assert(cost.readBytes <= 17000, JSON.stringify(cost));
     });
@@ -58,7 +66,8 @@ test('replacing or changing a known planning collection updates classification a
   const fields = {
     projectId: s.projectId,
     generationId,
-    collection: 'planningItems',
+    // A planning collection that stays in the planning table (Item history moved out, 411727ba row 3).
+    collection: 'planningItems:attributes',
     key: 'changing',
     parent: '',
     position: 1,
@@ -75,7 +84,7 @@ test('replacing or changing a known planning collection updates classification a
   await finishWorkRecordWrites(writer);
   const { planView } = await import(moduleUrl('../convex/projectPlanView.ts'));
   assert(JSON.parse((await planView(s.ctx, s.projectId)).rows).some(row => row.id === 'changing'));
-  await writer.db.patch(id, { collection: 'planningItems' });
+  await writer.db.patch(id, { collection: 'planningItems:attributes' });
   await finishWorkRecordWrites(writer);
   assert(!JSON.parse((await planView(s.ctx, s.projectId)).rows).some(row => row.id === 'changing'));
 });

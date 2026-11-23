@@ -3,6 +3,7 @@ import { cancelPendingTask } from './schedulerCancel';
 import { v, getDocumentSize, type Value } from 'convex/values';
 import { internalQuery, internalMutation, type QueryCtx } from './server';
 import { deleteLandingRequestBodies } from './projectLandingRequestBody';
+import { deleteCapsulePins } from './projectLandingCapsulePins';
 import { projectPurgeWriter } from './projectFinishReadWriter';
 import { cleanupReceipt, recordCleanup } from './legacyStorageReceipts';
 import { rowReferences, valuesAt, type ProjectPurgeTable } from './projectPurgeInventory';
@@ -126,6 +127,8 @@ export const purgeOrphans = internalMutation({
         }
       if (input.table === 'projectHostedLandingRequests')
         for (const body of await deleteLandingRequestBodies(ctx.db, row)) bodyBytes += getDocumentSize(body);
+      if (input.table === 'projectFinishReadRows')
+        for (const body of await deleteCapsulePins(ctx.db, row)) bodyBytes += getDocumentSize(body);
       await ctx.db.delete(row._id as never);
       for (const path of references.files)
         for (const id of valuesAt(row, path)) await removeExclusive(ctx, id as Id<'_storage'>, row._id);

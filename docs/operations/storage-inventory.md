@@ -128,3 +128,45 @@ The `_workStorePlanCounts` row (one per partition, about 520 bytes plus at most 
 shares the same table, purge inventory and snapshot exclusion. It adds one row per partition and no per-Item storage.
 
 Plan authority and generation headers reuse `projectFinishReadRows`: one fixed row per active Work project, one companion per generation, with the existing project purge and generation deletion lifetime. Empty projects and removal tombstones retain no Plan project header. The Plan fixture caps their combined JSON storage at 4 KB for a project plus two generations. The landing storage ledger separates the fixed project header from per-landing growth and counts its nine index entries; no new table or retention period is added.
+
+## History and capsule pin moves
+
+There are two one-off operator runs for Item 411727ba. Neither has a scheduler, cron job or
+idle call. Every page is one idempotent transaction. Run them on one deployment at a time,
+after the code that writes the new layout is deployed. The placement record is
+[fewer index copies](../data-placement.d/after/1600-fewer-index-copies.md).
+
+1. **Capsule pins (row 5).**
+   - Budget: about 1,000 pointers, each 8.7 KB read and 6 KB body plus 3 KB pointer
+     written. That is about 0.02 GB; stop at 0.05 GB ($0.01).
+   - Run `npx convex run projectLandingCapsulePinsMove:run '{"cursor":null,"pages":200,"budgetBytes":50000000}'`.
+   - Resume with the returned `nextCursor` until `isDone` is true. A pointer that has
+     already moved is skipped.
+   - `budgetBytes` caps one call, not the whole run. Keep a running total of the returned
+     `readBytes + writtenBytes`, and pass only what is left of the 0.05 GB on each resume.
+2. **Item history and Work events (row 3).**
+   - Budget, on dev: about 43K rows and 120 MB of documents. The copy reads and writes about
+     0.24 GB, and cleanup reads and deletes about 0.24 GB. That is about 0.5 GB ($0.10);
+     stop at 0.6 GB ($0.12).
+   - List the partitions with `projectWorkRecordMigration:pending '{"cursor":null}'`, then
+     follow `nextCursor`.
+   - Move each partition with `projectWorkRecordMigration:run '{"generationId":"…","operationId":"<fresh uuid>","cursor":null,"budgetBytes":600000000}'`.
+     It runs copy, then cutover, then cleanup, at most 100 pages per call.
+   - To resume, pass the returned `cursor` and `cleanup` with the same `operationId`. A
+     page whose reply was lost replays its stored receipt.
+   - When the selected partition is cut over, its open list and search cursors fail
+     WORK_STALE once.
+   - Purges of a partition refuse with a retry message until its cleanup finishes.
+   - `budgetBytes` caps one call, not the run. Keep one running total of the returned
+     `readBytes + writtenBytes + deletedBytes` across every call and every partition, and pass
+     only what is left of the 0.6 GB. Stop and report when it reaches zero.
+
+Before each run and a day after it, record:
+
+- the dashboard sizes of `projectPlanningRecords`, `projectWorkRecords`,
+  `projectWorkDataRecords`, `projectFinishReadRows` and `projectHostedLandingBodies`;
+- the daily database I/O (GB read and written) and its cost at $0.20/GB;
+- the cost per 1,000 landings for the same day, set against the phase baseline.
+
+The moves are done when the sizes and the daily write I/O of those tables have dropped and the
+cost per 1,000 landings has not risen.

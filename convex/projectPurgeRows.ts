@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cancelPendingTask } from './schedulerCancel';
 import { deleteLandingRequestBodies } from './projectLandingRequestBody';
+import { deleteCapsulePins } from './projectLandingCapsulePins';
 import type { MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import {
@@ -87,6 +88,12 @@ export async function purgeProjectRowsPage(ctx: MutationCtx, project: Doc<'hoste
       // S3 bodies are exclusively owned by their ticket, including the larger batch selection.
       if (step < projectPurgeOrder.length && projectPurgeOrder[step] === 'projectHostedLandingRequests')
         for (const body of await deleteLandingRequestBodies(ctx.db, row)) {
+          rows++;
+          bytes += documentBytes(body);
+        }
+      // A capsule pointer owns its cold pins body the same way (Item 411727ba).
+      if (step < projectPurgeOrder.length && projectPurgeOrder[step] === 'projectFinishReadRows')
+        for (const body of await deleteCapsulePins(ctx.db, row)) {
           rows++;
           bytes += documentBytes(body);
         }

@@ -17,7 +17,7 @@ import { purgedDecisionRequest } from '../src/work-planning-state';
 import { baseEvent, commentRow, purgedHere } from './projectCommentPurge';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { findObject, purgeTargetRow } from './projectObjectFind';
-import { splitRecordTable } from './projectWorkRecordTables';
+import { settledRecordTable } from './projectWorkRecordTables';
 import { purgeRows } from './projectPlanningPurgeRedact';
 import { notBusy, tombstoneObject } from './projectSavePurgeStore';
 
@@ -241,13 +241,11 @@ const COMMENT_LIMIT = 2 * PURGE_ROW_LIMIT;
 async function itemComments(ctx: QueryCtx, project: Doc<'hostedProjects'>, itemId: string) {
   const generation = await selectedGeneration(ctx, project);
   invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before purging.');
+  const partition = recordPartition(generation);
   const comments = await ctx.db
-    .query(splitRecordTable('planningComments'))
+    .query(await settledRecordTable(ctx, partition, 'planningComments'))
     .withIndex('by_generation_and_collection_and_parent_and_position', q =>
-      q
-        .eq('generationId', recordPartition(generation))
-        .eq('collection', 'planningComments')
-        .eq('parent', itemId),
+      q.eq('generationId', partition).eq('collection', 'planningComments').eq('parent', itemId),
     )
     .take(COMMENT_LIMIT + 1);
   invariant(

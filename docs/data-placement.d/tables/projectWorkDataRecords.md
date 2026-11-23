@@ -1,1 +1,1 @@
-| `projectWorkDataRecords` | Source projections, `viewFiles`, non-planning `:payload` parts and `_workStore*` comparison rows; six custom B-tree indexes. | Source/Work projection size |
+| `projectWorkDataRecords` | Source projections, `viewFiles`, non-planning `:payload` parts, `_workStore*` comparison and layout rows, and (in a moved partition) Item roots, versions, comments and Work `events`; six custom B-tree indexes. | Source/Work projection size |

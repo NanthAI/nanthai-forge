@@ -11,7 +11,7 @@ import { purgeableRowTarget, purgedIntentKeys } from '../src/work-planning-purge
 import { decisionOperationId } from '../src/work-planning-put';
 import { purgedDecisionRequest } from '../src/work-planning-state';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
-import { splitRecordTable } from './projectWorkRecordTables';
+import { settledRecordTable, splitRecordTable } from './projectWorkRecordTables';
 import { recordHead } from './projectHostedRecords';
 import { metadataRequest } from '../src/work-metadata';
 import { pendingIntentArchives } from './projectJournalArchivePlan';
@@ -207,7 +207,7 @@ export const basePage = internalQuery({
       const parent = which === 'history' ? input.historyId : input.intentId;
       const page = parent
         ? await ctx.db
-            .query(splitRecordTable(collection))
+            .query(await settledRecordTable(ctx, partition, collection))
             .withIndex('by_generation_and_collection_and_parent_and_position', q => {
               const scoped = q
                 .eq('generationId', partition)
