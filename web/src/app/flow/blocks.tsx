@@ -91,7 +91,7 @@ export function Blocks({
         const label = [
           block.head ?? `Lane ${block.laneId.slice(0, 8)}`,
           station.name,
-          block.word === station.name ? null : block.word,
+          block.why ?? (block.word === station.name ? null : block.word),
           block.who,
         ]
           .filter(Boolean)

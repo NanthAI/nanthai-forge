@@ -37,6 +37,8 @@ import { progressCells, progressOf, type PlanCountsRead } from '../progress';
 import type { PlaceProps } from '../screens';
 import GettingStarted from '../start/GettingStarted';
 import { FlowRegion } from '../flow/Flow';
+import { isConflict, type ConflictNote } from '../lane-state';
+import { useConflictNotes } from '../lanes/reads';
 import { jumpToRow } from '../flow/labels';
 import { StationDrawer, type DrawerProps } from '../flow/Drawer';
 import { isDrawerStop, type DrawerStop } from '../flow/drawer-model';
@@ -123,6 +125,8 @@ function NeedsMeScreen({ route, projectId, projectName, feed, feedError, feedRea
   });
   const decide = useProjectDecide(projectId);
   const answer = useAnswer(projectId);
+  // Each Conflict Lane's notices for its hover on the picture: read only while a Lane is in conflict (Item 9b9057a9).
+  const conflicts = useConflictNotes(projectId, !!feed?.lanes.some(lane => isConflict(lane)));
   const dismissMutation = useMutation(fyiDismiss);
   const abandon = useMutation(dormantAbandon);
   return (
@@ -133,6 +137,7 @@ function NeedsMeScreen({ route, projectId, projectName, feed, feedError, feedRea
       feedError={feedError}
       feedReadAt={feedReadAt}
       drawer={props => <StationDrawer {...props} projectId={projectId} />}
+      conflicts={conflicts}
       read={read}
       fyi={fyi}
       counts={counts}
@@ -183,6 +188,7 @@ export function NeedsMeView({
   loose,
   setup,
   settingDetail,
+  conflicts,
   now,
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed' | 'feedError' | 'feedReadAt'> & {
   drawer?: (props: DrawerProps) => ReactNode;
@@ -198,6 +204,8 @@ export function NeedsMeView({
   setup?: ReactNode;
   /** A held settings change, readable (Item 16093ed1); read only while its row is open. */
   settingDetail?: (laneId: string) => ReactNode;
+  /** Each Conflict Lane's open notices, for its hover on the picture. */
+  conflicts?: ReadonlyMap<string, readonly ConflictNote[] | undefined>;
   /** The drawing time, for tests; otherwise the time the reads arrived (nothing ticks). */
   now?: number;
 }) {
@@ -304,6 +312,7 @@ export function NeedsMeView({
           needsYou={held}
           handle={handle}
           drawnAt={drawnAt}
+          conflicts={conflicts}
           hrefs={{
             stats: at({ place: 'stats' }),
             lanes: at({ place: 'lanes' }),

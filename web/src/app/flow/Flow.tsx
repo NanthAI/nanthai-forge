@@ -12,6 +12,7 @@ import { passedWaiting, type LineFeed } from '../Line';
 import { SizedPicture, type PictureFacts } from './Picture';
 import { Tag } from './labels';
 import { FlowChecks, FlowLegend } from './Checks';
+import type { ConflictNote } from '../lane-state';
 import { clock, duration, flowFigures, flowStations, mainHealth, type HeldRow, type Station } from './model';
 import './flow.css';
 
@@ -42,6 +43,7 @@ export function FlowRegion({
   handle,
   hrefs,
   drawnAt,
+  conflicts,
 }: {
   feed: LineFeed | undefined;
   error?: boolean;
@@ -58,9 +60,11 @@ export function FlowRegion({
   handle: ReactNode;
   hrefs: FlowHrefs;
   drawnAt: number;
+  /** Each Conflict Lane's open notices, for its hover (the Lane read, only while a Lane is in conflict). */
+  conflicts?: ReadonlyMap<string, readonly ConflictNote[] | undefined>;
 }) {
   const passedId = useId();
-  const stations = flowStations(feed, rows);
+  const stations = flowStations(feed, rows, conflicts);
   const day = flowFigures(feed, drawnAt);
   const tracking = !!feed && !error;
   const active = tracking && !needsYou && stations.some(s => s.n > s.held.length);

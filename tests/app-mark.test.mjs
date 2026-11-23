@@ -30,8 +30,11 @@ test('standing priority: landing > waiting > conflict > checks > working, many >
   assert.equal(baseMark(feed([lane('a', 'editing')])), 'w1');
   assert.equal(baseMark(feed([lane('a', 'editing')], null, 1)), 'wN');
   assert.equal(baseMark(feed([lane('a', 'checking'), lane('b', 'editing')])), 'checks');
-  // Item 9b9057a9: a saved file shared with another Lane is no conflict; a held Lane's exact conflict is.
-  assert.equal(baseMark(feed([lane('a', 'checking'), lane('b', 'saved', { overlap: true })])), 'checks');
+  // Item 9b9057a9: an open conflict notice on a saved Lane is the conflict mark (a shared saved file alone is none);
+  // a Lane in the queue says its stop, a held Lane's exact conflict is the mark.
+  assert.equal(baseMark(feed([lane('a', 'checking'), lane('b', 'saved', { overlap: true })])), 'overlap');
+  assert.equal(baseMark(feed([lane('a', 'checking'), lane('b', 'checking', { overlap: true })])), 'checks');
+  assert.equal(baseMark(feed([lane('a', 'checking'), lane('b', 'saved')])), 'checks');
   assert.equal(
     baseMark(feed([lane('a', 'checking'), lane('b', 'saved', { held: true, fix: true, overlap: true })])),
     'overlap',

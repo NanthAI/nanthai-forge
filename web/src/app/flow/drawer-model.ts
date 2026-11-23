@@ -76,7 +76,11 @@ export function laneDrawer(
   lanes: readonly LaneMeta[] | undefined,
   drawnAt: number,
 ): LaneDrawer {
-  const station = flowStations(feed, rows).find(s => s.stop === stop)!;
+  const station = flowStations(
+    feed,
+    rows,
+    new Map((lanes ?? []).map(lane => [lane.laneId, lane.conflicts])),
+  ).find(s => s.stop === stop)!;
   const meta = new Map((lanes ?? []).map(lane => [lane.laneId, lane]));
   const marks = new Map((feed?.lanes ?? []).map(mark => [mark.laneId, mark]));
   const row = (block: Block): RiverRow => {
@@ -138,7 +142,7 @@ export function laneDrawer(
     stop,
     name: station.name,
     here: station.n,
-    held: station.held.length,
+    held: station.held.filter(block => block.held).length,
     longest: all.length ? Math.max(...all.map(r => r.ago)) : null,
     groups,
     more: feed?.more ?? 0,

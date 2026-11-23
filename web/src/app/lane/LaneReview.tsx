@@ -47,7 +47,7 @@ import {
 import { BrowserLanding } from '../../lane/hosted-landing-client';
 import { landingBrowserIO } from '../../lane/landing-browser-io';
 import { takenOutText, useTakeOut } from '../take-out';
-import { heldWhyState, laneState } from '../lane-state';
+import { conflictNote, heldWhyState, laneState } from '../lane-state';
 import { LaneDecision, useHeldView } from '../needs/LaneDecision';
 import { holdLine, parkLine } from '../needs/model';
 import { uniqueBy } from '../../ui/unique';
@@ -435,6 +435,7 @@ function Stops({
   const said = laneState(
     { ...stop, overlap: stop.overlap || reply.conflicts.length > 0 },
     heldWhy ? { state: heldWhyState[heldWhy] } : null,
+    reply.conflicts.map(conflict => conflictNote(conflict)),
   );
   const tone = said.kind;
   const note: Partial<Record<string, string>> = {

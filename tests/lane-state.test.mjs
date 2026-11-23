@@ -482,14 +482,19 @@ test('43b51a5e: a parked passed entry reads waiting-for-order on CLI replies, th
   );
 });
 
-test('9b9057a9: a Lane that only shares saved files with another is never Conflict; a held conflict and a landing conflict are', () => {
-  // The owner saw purple Conflict on Lanes that had not landed: saved files shared, or a trial-merge flag, no landing
-  // that ended in conflict. One rule (isConflict) now decides, for Lanes, the Flow view and the top bar's F.
-  for (const stage of ['editing', 'saved', 'queued', 'checking', 'ready']) {
-    const shared = { stage, held: false, overlap: true };
-    assert.equal(state.isConflict(shared), false, stage);
-    assert.notEqual(state.laneState(shared, null).kind, 'conflict', stage);
-  }
+test("9b9057a9: Conflict is Forge's open trial-merge notice or a landing that ended in conflict, never a shared saved file alone", () => {
+  // The owner saw purple Conflict on saved Lanes (09:07Z) and the lead found it was the open notice, not a path
+  // overlap (10:40Z): one rule (isConflict) decides for Lanes, the Flow view, the top bar's F and Who is touching what.
+  // Not landed and not queued: Conflict while the notice is open (the mark's overlap flag is that notice).
+  const flagged = { stage: 'saved', held: false, overlap: true };
+  assert.equal(state.isConflict(flagged), true, 'saved: an open notice');
+  assert.equal(state.laneState(flagged, null).kind, 'conflict');
+  assert.equal(state.isConflict({ ...flagged, overlap: false }), false, 'a shared file alone');
+  assert.notEqual(state.laneState({ ...flagged, overlap: false }, null).kind, 'conflict');
+  // Queued, checking or ready: the Lane says its stop; the landing says the rest if it conflicts. Editing has no
+  // saved head, so no notice.
+  for (const stage of ['editing', 'queued', 'checking', 'ready'])
+    assert.equal(state.isConflict({ stage, held: false, overlap: true }), false, stage);
   const queued = state.laneState(mark('q2', 'queued'));
   assert.deepEqual([queued.kind, queued.why], ['waiting', 'waits for its check']);
   // A held Lane is in conflict when its landing says so; with no landing in hand, when its exact conflict is flagged.
@@ -505,6 +510,52 @@ test('9b9057a9: a Lane that only shares saved files with another is never Confli
   assert.equal(state.laneState(held, { state: 'conflict' }).kind, 'conflict');
 });
 
+test('9b9057a9: a Lane in conflict says with whom and in how many files, on its row, and a cleared notice leaves no purple', () => {
+  const notes = [
+    { with: 'f0e1d2c3-aaaa', goal: 'Fix the queue order', files: 3 },
+    { with: 'main', files: 1 },
+  ];
+  const said = state.laneState({ stage: 'saved', held: false, overlap: true }, null, notes);
+  assert.deepEqual(
+    [said.glyph, said.why],
+    ['Conflict', 'conflicts with Fix the queue order in 3 files and 1 more Lane'],
+  );
+  assert.equal(state.conflictWords([{ with: 'main', files: 1 }]), 'conflicts with main in 1 file');
+  assert.equal(
+    state.conflictWords([{ with: 'f0e1d2c3-aaaa', files: 10, atLeast: true }]),
+    'conflicts with Lane f0e1d2c3 in at least 10 files',
+  );
+  assert.equal(state.conflictWords([{ with: 'x', goal: 'g'.repeat(100), files: 2 }]).length < 90, true);
+  // The notice ended (the peer landed, or the Lane re-synced clean): the server clears the flag, so the row is quiet again.
+  const cleared = state.laneState({ stage: 'saved', held: false, overlap: false }, null, notes);
+  assert.deepEqual([cleared.kind, cleared.glyph], ['active', 'Working']);
+  // The Lane page's own notices, as the same note.
+  assert.deepEqual(
+    state.conflictNote({ with: 'main', goal: 'main', files: [{ path: 'a' }, { path: 'a' }, { path: 'b' }] }),
+    { with: 'main', goal: 'main', files: 2, path: 'a' },
+  );
+  // Who is touching what ranks by the same rule: the line's mark and the Lane's current landing.
+  const rows = [
+    { ...mark('s', 'saved', { overlap: true }), laneId: 'saved-notice' },
+    { ...mark('s', 'saved'), laneId: 'saved-shared' },
+    { ...mark('h', 'saved', { held: true, overlap: true }), laneId: 'held-failed' },
+    { ...mark('c', 'saved', { held: true }), laneId: 'held-compose' },
+  ];
+  const conflicted = state.conflictedLanes(rows, [
+    { laneId: 'held-failed', submittedAt: iso(NOW), landingState: { state: 'check-failed' } },
+    { laneId: 'held-compose', submittedAt: iso(NOW), landingState: { state: 'conflict' } },
+  ]);
+  assert.deepEqual(
+    rows.map(row => [row.laneId, conflicted(row.laneId)]),
+    [
+      ['saved-notice', true],
+      ['saved-shared', false],
+      ['held-failed', false],
+      ['held-compose', true],
+    ],
+  );
+});
+
 test("9b9057a9: only a landing held for review says Needs you; every other hold is its agent's, in its own word", () => {
   for (const [landing, word] of [
     [{ state: 'held-review' }, 'Needs you'],
@@ -517,4 +568,34 @@ test("9b9057a9: only a landing held for review says Needs you; every other hold 
     assert.equal(said.glyph, word, landing?.state ?? 'no landing');
     assert.doesNotMatch(said.why, /why not reported/);
   }
+});
+
+test('9b9057a9 review: Who is touching what marks a pair only where a notice names the other side', async () => {
+  const { crossPairs } = await import(moduleUrl('../web/src/app/lanes/cross-pairs.ts'));
+  const marks = [
+    { ...mark('a', 'saved', { overlap: true }), laneId: 'a' },
+    { ...mark('b', 'saved'), laneId: 'b' },
+    { ...mark('c', 'saved'), laneId: 'c' },
+  ];
+  const conflicted = state.conflictedLanes(
+    marks,
+    [],
+    [{ laneId: 'a', conflicts: [{ with: 'b', files: 1 }] }],
+  );
+  const side = laneId => ({ key: laneId, title: laneId });
+  const pairs = crossPairs(
+    [
+      { path: 'x', laneIds: ['a', 'b'] },
+      { path: 'y', laneIds: ['a', 'c'] },
+    ],
+    side,
+    conflicted,
+  );
+  assert.deepEqual(
+    pairs.map(pair => [pair.key, pair.conflicted]),
+    [
+      ['a\nb', ['a']],
+      ['a\nc', []],
+    ],
+  );
 });

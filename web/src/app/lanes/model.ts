@@ -9,7 +9,16 @@ import type { SaveFailure } from '../SaveFailureNotice';
 import type { LandingStateName } from '../../../../src/landing-state';
 import { QUIET_MS } from '../../../../src/lane-quiet';
 import { sameUtcDay } from '../../../../src/flow-day';
-import { currentEntries, landingOf, laneState, notLandedWhy, stopWords, waitLine } from '../lane-state';
+import {
+  currentEntries,
+  landingOf,
+  laneState,
+  notLandedWhy,
+  stopWords,
+  waitLine,
+  conflictTip,
+  type ConflictNote,
+} from '../lane-state';
 import {
   NEEDS_UNKNOWN,
   needsYouLanes,
@@ -39,6 +48,9 @@ export type LaneMeta = {
   resolves?: string;
   /** Parked (Item e1633718): who it waits on and why. */
   park?: Park;
+  /** Its open trial-merge conflict notices (Item 9b9057a9), at most three: the peer (a Lane id or 'main'), that
+   * peer's goal and how many files cross; `atLeast` when the notice cut its list. */
+  conflicts?: ConflictNote[];
 };
 /** One entry from `projectHostedQueueView:read`. `landingState` is the server's one reading of this submission
  * (src/landing-state.ts); a Lane can have older entries too, and only its newest is current (lane-state.ts). */
@@ -117,6 +129,8 @@ export type YardRow = {
   word: string;
   /** Why it is here, in a few words: the hold's reason, what it waits on, the last save. */
   why: string;
+  /** The hover on a Conflict row: with whom, in how many files, the first file (null when it is not in conflict). */
+  tip: string | null;
   /** A second line under `why`, when there is one. */
   detail: string | null;
   position: number | null;
@@ -338,7 +352,7 @@ export function buildYard(
     // A Lane of a several-Lane review has no queue entry of its own (the entry names one Lane); Needs me's read says it
     // waits on the reader, which is a landing held for review (Item 9b9057a9).
     const reviewed = mark.held && waitsOnYou.has(mark.laneId) ? { state: 'held-review' as const } : null;
-    const said = laneState(shown, entry ? landingOf(entry) : (ended ?? reviewed));
+    const said = laneState(shown, entry ? landingOf(entry) : (ended ?? reviewed), lane?.conflicts);
     const by = replaced.get(mark.laneId) ?? null;
     const base = {
       laneId: mark.laneId,
@@ -360,6 +374,7 @@ export function buildYard(
       glyph: said.glyph,
       word: mark.stage === 'ready' && !mark.held ? said.glyph : said.word,
       why: said.why,
+      tip: said.glyph === 'Conflict' ? conflictTip(lane?.conflicts) : null,
       detail: null,
       lanes: lane ? (perItem.get(lane.intentId) ?? 1) : 1,
       replacedBy: by,

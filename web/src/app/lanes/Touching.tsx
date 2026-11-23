@@ -15,20 +15,12 @@ import { hrefFor } from '../paths';
 import { Head, crumbsFor } from '../Place';
 import { useSearch } from '../router';
 import type { LanesProps } from './common';
-import { currentEntries } from '../lane-state';
+import { conflictedLanes, currentEntries } from '../lane-state';
 import { LANE_FOCUS, buildYard, filesOfLane, sharedFiles, waits, yardReady, type YardRow } from './model';
 import { WaitChains } from './WaitChains';
 import { useLaneMeta, useQueue, useSharedFiles } from './reads';
 
 const LAYOUT: DockLayout = { top: ['cross'], a: ['waits'], b: [] };
-
-/** Which Lanes Forge observed a conflict on: the yard's own state for a Lane (lane-state.ts `isConflict`: a held Lane
- * whose landing ended in conflict, by the cause the Lanes read carries). The line feed's overlap flag is only a shared
- * saved file or a trial-merge flag, never a conflict (owner 2026-11-23), so it ranks nothing here (Item 9b9057a9). */
-function conflictsOf(yard: { rows: readonly Pick<YardRow, 'laneId' | 'state'>[] } | null | undefined) {
-  const found = new Set(yard?.rows.filter(row => row.state === 'conflict').map(row => row.laneId));
-  return (laneId: string) => found.has(laneId);
-}
 
 /** Why the pair list may be short, said once: the overlap read holds every Lane's saved files only up to a limit (a
  * very long list of changed files, or more Lanes than one read holds), and says only that it is partial. */
@@ -59,7 +51,11 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
   const everyFile = hrefFor({ ...route, section: 'touching', rest: '' });
   const lanesHref = hrefFor({ ...route, section: '', rest: '' });
   const current = currentEntries(queue?.entries ?? []);
-  const conflicted = useMemo(() => conflictsOf(yard), [yard]);
+  // Which Lanes are in conflict: the one rule every screen uses (Item 9b9057a9). A shared saved file alone ranks nothing.
+  const conflicted = useMemo(
+    () => conflictedLanes(feed?.lanes ?? [], queue?.entries ?? [], lanes ?? []),
+    [feed, queue, lanes],
+  );
   // One side per Item, so an Item with three Lanes is named once; a Lane the Lane page did not list stands alone.
   // Worked out again only when a read changes.
   const cross = useMemo(() => {

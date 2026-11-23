@@ -6,7 +6,7 @@
 // Per view, at 50 open Lanes: the Lane page (one execution, about 7 indexed reads per Lane, at most 100 Lanes), the queue view (at most
 // 20 entries, about 7 reads each) and the overlap view (20 KB budget; each yard row's shared-file count comes from it); the
 // newest landings only on History (one page of 30 receipts, 3 rows each for the Lane and Item). Idle: zero.
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useConvex, useMutation } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
@@ -29,6 +29,18 @@ export function useLaneMeta(projectId: Id<'hostedProjects'>, byline?: true) {
   });
   const page = parse<{ page: LaneMeta[]; isDone: boolean }>(read.value);
   return { lanes: page?.page, complete: page?.isDone ?? false, error: read.error };
+}
+
+/** Each open Lane's conflict notices (with whom, how many files), for a hover on a Conflict Lane outside the Lanes place
+ * (the Flow picture). The same Lane read the Lanes place sends, so it shares that subscription when both are open; it
+ * is sent only while a Lane is in conflict (`enabled`), and idle costs nothing (Item 9b9057a9). */
+export function useConflictNotes(projectId: Id<'hostedProjects'>, enabled: boolean) {
+  const read = useSafeQuery(
+    api.projectHostedLiveLanes.list,
+    enabled ? { projectId, cursor: null, limit: LANE_PAGE } : 'skip',
+  );
+  const page = parse<{ page: LaneMeta[] }>(read.value);
+  return useMemo(() => new Map(page?.page.map(lane => [lane.laneId, lane.conflicts] as const)), [read.value]);
 }
 
 export function useQueue(projectId: Id<'hostedProjects'>) {

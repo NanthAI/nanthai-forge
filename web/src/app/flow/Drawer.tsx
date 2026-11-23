@@ -11,7 +11,7 @@ import { Glyph, Key, Region, Sheet, State } from '../../ds';
 import { A } from '../frames';
 import { lineStops, type LineFeed } from '../Line';
 import type { LaneMeta } from '../lanes/model';
-import type { Landed, LandedPage } from '../lanes/reads';
+import { LANE_PAGE, type Landed, type LandedPage } from '../lanes/reads';
 import { useSafeQuery } from '../../safe-query';
 import {
   FIRST_ROWS,
@@ -150,7 +150,7 @@ function Group({
                   : 'Waiting its turn'
             }
           >
-            {r.block.word}
+            {r.block.why ?? r.block.word}
           </State>
         ) : null
       }
@@ -356,7 +356,7 @@ export function StationDrawer(props: DrawerProps & { projectId: Id<'hostedProjec
   );
   const lanes = useSafeQuery(
     api.projectHostedLiveLanes.list,
-    needsNames ? { projectId: props.projectId, cursor: null, limit: 60 } : 'skip',
+    needsNames ? { projectId: props.projectId, cursor: null, limit: LANE_PAGE } : 'skip',
   );
   const landed = useSafeQuery(
     api.projectLandingReads.list,

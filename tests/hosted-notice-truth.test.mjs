@@ -141,6 +141,49 @@ test('c0584a78: a plain status in the Lane tells a superseded Lane from a live o
   assert.equal(await status(), undefined, 'saved past the superseded head: live again');
 });
 
+test('9b9057a9: a clean trial after a re-sync ends the last notice and clears both flags, so the line stops showing Conflict', async t => {
+  // The purple Conflict follows the Lane's flag (the line mark's overlap): a notice closed by a clean result left the
+  // flag set until some other write closed it, so a re-synced Lane stayed purple with no notice behind it.
+  const { s, lane, peer, transport } = await setup(t);
+  await transport(lane).dispatch('save', { operationId: randomUUID(), message: 'first' });
+  await transport(peer).dispatch('save', { operationId: randomUUID(), message: 'second' });
+  assert.equal(openNotices(s).length, 2);
+  assert.equal(overlapRow(s, lane.id).conflicted, true);
+  assert.equal(overlapRow(s, peer.id).conflicted, true);
+  const clean = await s.transaction('clean', exact.record, {
+    projectId: s.projectId,
+    laneId: peer.id,
+    head: overlapRow(s, peer.id).head,
+    peers: [{ laneId: lane.id, head: overlapRow(s, lane.id).head }],
+    conflicts: [],
+  });
+  assert.equal(clean, null);
+  assert.deepEqual(openNotices(s), [], 'both directions ended by the clean trial');
+  assert.equal(overlapRow(s, lane.id).conflicted, undefined, 'the peer side is quiet again');
+  assert.equal(overlapRow(s, peer.id).conflicted, undefined, 'the re-synced Lane is quiet again');
+});
+
+test('9b9057a9 review: a trial that ends the last notice with one peer but opens a conflict with main keeps the flag', async t => {
+  const { s, lane, peer, transport } = await setup(t);
+  await transport(lane).dispatch('save', { operationId: randomUUID(), message: 'first' });
+  await transport(peer).dispatch('save', { operationId: randomUUID(), message: 'second' });
+  assert.equal(overlapRow(s, peer.id).conflicted, true);
+  await s.transaction('mixed', exact.record, {
+    projectId: s.projectId,
+    laneId: peer.id,
+    head: overlapRow(s, peer.id).head,
+    peers: [{ laneId: lane.id, head: overlapRow(s, lane.id).head }],
+    mainHead: 'main-head',
+    conflicts: [{ peer: 'main', path: 'a.txt', mine: [[0, 1]], theirs: [[0, 1]], reason: 'same lines' }],
+  });
+  assert.equal(overlapRow(s, lane.id).conflicted, undefined, 'the clean pair is quiet');
+  assert.equal(overlapRow(s, peer.id).conflicted, true, 'the new conflict with main keeps the flag');
+  assert.deepEqual(
+    openNotices(s).map(row => [row.laneId, row.peer]),
+    [[peer.id, 'main']],
+  );
+});
+
 /** Runs the newest scheduled trial for a Lane head, as the fixture's publish does. */
 async function runTrial(s, head, since = 0) {
   const task = s.scheduled

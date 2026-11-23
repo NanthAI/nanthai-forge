@@ -6,7 +6,7 @@
 // time the page was drawn. Pure.
 import { flowToday, flowVerdict, mainFailedToday, utcDayStart } from '../../../../src/flow-day';
 import { lineStopCounts, lineStops, type LineFeed, type LineStop } from '../Line';
-import { isConflict } from '../lane-state';
+import { conflictTip, isConflict, type ConflictNote } from '../lane-state';
 import type { StateWord } from '../../ds';
 
 /** A block's colour (the state tokens) and the glyph cut into its top. */
@@ -18,8 +18,12 @@ export type Block = {
   shape: '' | 'waiting' | 'failed' | 'conflict';
   /** Waits on a person: it has a row under Needs you, which its tag links to. */
   needsYou: boolean;
+  /** The Lane is held (waits on someone or something); a Conflict block of a saved Lane is drawn but not held. */
+  held: boolean;
   /** The few words its tag and title say. */
   word: string;
+  /** A Conflict block's hover: with whom, in how many files, the first file (lane-state.ts `conflictTip`). */
+  why: string | null;
   /** Its Needs you row's head and person, when the page has them. */
   head: string | null;
   who: string | null;
@@ -57,7 +61,12 @@ const colourOf = (word: StateWord): BlockState =>
 
 /** The picture's stations, from the feed and the Needs you rows. Moving work first (oldest first), held work last, so
  * a held block stands in front. */
-export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[]): Station[] {
+export function flowStations(
+  feed: LineFeed | undefined,
+  rows: readonly HeldRow[],
+  /** Each Conflict Lane's open notices, when the page holds them (Lane page read), for its hover. */
+  notes?: ReadonlyMap<string, readonly ConflictNote[] | undefined>,
+): Station[] {
   const byLane = new Map(rows.map(row => [row.laneId, row]));
   const lanes = feed?.lanes ?? [];
   return lineStops.map(stop => {
@@ -79,19 +88,21 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
       return {
         laneId: lane.laneId,
         colour,
-        shape: lane.held && !lane.mainRed && colour !== 'active' ? colour : '',
+        shape: (lane.held || colour === 'conflict') && !lane.mainRed && colour !== 'active' ? colour : '',
         needsYou: !!row,
+        held: lane.held,
+        why: !row && !lane.mainRed && isConflict(lane) ? conflictTip(notes?.get(lane.laneId)) : null,
         word: lane.mainRed
           ? 'main is failing'
           : row
             ? row.tag
-            : lane.held
-              ? isConflict(lane)
-                ? 'Conflict'
-                : 'Held'
-              : lane.stage === 'ready'
-                ? 'Passed, waiting to land'
-                : stop.label,
+            : isConflict(lane)
+              ? 'Conflict'
+              : lane.held
+                ? 'Held'
+                : lane.stage === 'ready'
+                  ? 'Passed, waiting to land'
+                  : stop.label,
         head: row?.head ?? null,
         who: row?.who ?? null,
         check: lane.stage === 'checking' && lane.check ? lane.check : null,

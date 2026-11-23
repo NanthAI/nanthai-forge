@@ -341,7 +341,7 @@ function LaneLine({
         </State>
         <span className="why">
           {/* The word beside the dot already says it: never "Held" then "held" (owner 2026-11-23). */}
-          {why.toLowerCase() === row.word.toLowerCase() ? null : <b>{why}</b>}
+          {why.toLowerCase() === row.word.toLowerCase() ? null : <b title={row.tip ?? undefined}>{why}</b>}
           {detail ? <> {detail}</> : null}
         </span>
         <span className="sr">. {where}</span>

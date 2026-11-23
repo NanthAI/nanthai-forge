@@ -2,6 +2,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { useReadsAsleep } from '../live-reads';
 import type { LineFeed, LineStage } from './Line';
+import { isConflict } from './lane-state';
 
 type Lane = LineFeed['lanes'][number];
 type Stop = { x: number; width: number };
@@ -164,13 +165,13 @@ export function LineMarks({ feed, stages }: { feed?: LineFeed; stages: StopStage
             ? 'passed'
             : exit === 'set-aside'
               ? 'stale'
-              : lane.held
-                ? lane.overlap
-                  ? 'conflict'
-                  : 'waiting'
-                : lane.stage === 'ready'
-                  ? 'passed'
-                  : 'active';
+              : isConflict(lane)
+                ? 'conflict'
+                : lane.held
+                  ? 'waiting'
+                  : lane.stage === 'ready'
+                    ? 'passed'
+                    : 'active';
         return (
           <span
             key={lane.laneId}
@@ -178,7 +179,7 @@ export function LineMarks({ feed, stages }: { feed?: LineFeed; stages: StopStage
             data-lane={lane.laneId}
             data-stage={lane.stage}
             data-st={state}
-            data-hold={!exit && lane.held ? state : undefined}
+            data-hold={!exit && (lane.held || state === 'conflict') ? state : undefined}
             data-ov={(!exit && lane.overlap) || undefined}
             data-exit={exit}
             data-new={fresh || undefined}

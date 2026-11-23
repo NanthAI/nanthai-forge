@@ -8,6 +8,7 @@
 import type { StateKind, StateWord } from '../ds';
 import type { LandingStateName } from '../../../src/landing-state';
 import type { LineStage } from './Line';
+import { NOTICE_PATHS } from '../../../src/conflict-notice-paths';
 
 export type LaneMark = { stage: LineStage | 'main'; held: boolean; overlap?: boolean };
 /** What a reader knows of the Lane's current submission. */
@@ -20,6 +21,9 @@ export type CurrentLanding = {
   /** Protected paths a review hold names, when the hold names them. */
   protectedPaths?: number | null;
 };
+/** One open trial-merge conflict notice, in brief (convex/projectHostedLiveLanes.ts `conflicts`, the Lane page's
+ * `conflicts`): the peer ('main' or a Lane id), that peer's goal, how many files cross; `atLeast` when its list was cut. */
+export type ConflictNote = { with: string; goal?: string; files: number; path?: string; atLeast?: boolean };
 export type LaneState = {
   stage: LineStage | 'main';
   held: boolean;
@@ -43,15 +47,71 @@ export const stopWords: Record<LineStage, string> = {
   ready: 'Ready to land',
 };
 
+/** The Lane page's conflict (its files, cut at NOTICE_PATHS) as the same brief note the Lane row carries. */
+export function conflictNote(conflict: {
+  with: string;
+  goal?: string;
+  files: readonly { path: string }[];
+}): ConflictNote {
+  return {
+    with: conflict.with,
+    ...(conflict.goal ? { goal: conflict.goal } : {}),
+    files: new Set(conflict.files.map(file => file.path)).size,
+    ...(conflict.files[0] ? { path: conflict.files[0].path } : {}),
+    ...(conflict.files.length >= NOTICE_PATHS ? { atLeast: true } : {}),
+  };
+}
+
+const GOAL_CHARS = 60;
+/** "conflicts with <peer Item or Lane> in N files", then "and M more" for further peers: who and where, in one clause.
+ * `path` adds the first crossing file, for a hover: "conflicts with <peer> in N files: <first path>…". */
+export function conflictWords(notes: readonly ConflictNote[] | undefined, path = false) {
+  const first = notes?.[0];
+  if (!first) return null;
+  const goal = first.goal?.trim();
+  const who =
+    first.with === 'main'
+      ? 'main'
+      : goal
+        ? goal.length > GOAL_CHARS
+          ? `${goal.slice(0, GOAL_CHARS - 1).trimEnd()}…`
+          : goal
+        : `Lane ${first.with.slice(0, 8)}`;
+  const count = `${first.atLeast ? 'at least ' : ''}${first.files.toLocaleString()} ${first.files === 1 ? 'file' : 'files'}`;
+  const more = notes.length - 1;
+  const where = path && first.path ? `: ${first.path}${first.files > 1 ? '…' : ''}` : '';
+  return `conflicts with ${who} in ${count}${more > 0 ? ` and ${more} more ${more === 1 ? 'Lane' : 'Lanes'}` : ''}${where}`;
+}
+
+/** What Conflict means, said plainly (the Flow legend and the hover of a Conflict Lane with no notice in hand). A
+ * Lane that only shares a file with another, with no clash, is not marked: both can land. */
+export const CONFLICT_MEANING =
+  'this Lane’s changes clash with another Lane’s on the same lines; one must be redone before both can land';
+/** The hover on a Conflict Lane: with whom, in how many files and the first file; the plain meaning when no notice is in hand. */
+export function conflictTip(notes: readonly ConflictNote[] | undefined) {
+  const words = conflictWords(notes, true);
+  return words ? words[0]!.toUpperCase() + words.slice(1) : `Conflict: ${CONFLICT_MEANING}.`;
+}
+export const SHARED_FILE_MEANING =
+  'Lanes that only share a file, with no clash, are not marked: both can land.';
+
 type Held = { glyph: StateWord; why: string; note: string; word?: string };
 /** Why it is held, by the current submission's state. Only a landing held for review is "Needs you": the one hold
  * that waits on a person (needs/count.ts `waitsOnPerson`); every other hold is its agent's next step, said in its own
  * word, so a row never reads Needs you where Needs me says nothing waits (Item 9b9057a9, friction e2f436b6). Nothing
  * known: say so, never a guess at the reason or at whom it waits on. */
-function heldBy(landing: CurrentLanding | null | undefined, conflict: boolean): Held {
+function heldBy(
+  landing: CurrentLanding | null | undefined,
+  conflict: boolean,
+  notes?: readonly ConflictNote[],
+): Held {
   const state = landing?.state;
   if (conflict || state === 'conflict')
-    return { glyph: 'Conflict', why: 'its saved changes conflict with another Lane', note: 'conflict' };
+    return {
+      glyph: 'Conflict',
+      why: conflictWords(notes) ?? 'its saved changes conflict with another Lane',
+      note: 'conflict',
+    };
   switch (state) {
     case 'check-failed': {
       const failing = landing?.failing ?? [];
@@ -103,8 +163,12 @@ function heldBy(landing: CurrentLanding | null | undefined, conflict: boolean): 
 }
 
 /** A held Lane's state, wherever it stands on the line: Needs you reads held Lanes without their stop. */
-export function heldState(landing: CurrentLanding | null | undefined, conflict = false) {
-  const held = heldBy(landing, conflict);
+export function heldState(
+  landing: CurrentLanding | null | undefined,
+  conflict = false,
+  notes?: readonly ConflictNote[],
+) {
+  const held = heldBy(landing, conflict, notes);
   const kind: StateKind =
     held.glyph === 'Conflict'
       ? 'conflict'
@@ -117,18 +181,62 @@ export function heldState(landing: CurrentLanding | null | undefined, conflict =
 }
 
 /** The one rule for "Conflict" (purple, the diamond, the F), for every screen and agent read (Item 9b9057a9): a Lane
- * whose landing ended in a conflict, or, where its landing is not in hand (the line feed, the Lane page), a held Lane
- * whose exact trial merge flagged one. A Lane that has not landed yet is never "in conflict" because it shares saved
- * files with another Lane, or because a trial merge at save flagged a possible one: that stays the quiet "shares N
- * files" note and the dotted tick on the line, with no state colour. */
-export function isConflict(mark: Pick<LaneMark, 'held' | 'overlap'>, landing?: CurrentLanding | null) {
-  if (!mark.held) return false;
-  if (landing && landing.state !== 'unknown') return landing.state === 'conflict';
-  return mark.overlap === true;
+ * whose landing ended in a conflict, or whose exact trial merge flagged one that is still open (`overlap` is Forge's
+ * open conflict notice, convex/projectHostedConflicts.ts, which ends when the peer lands, the Lane or the peer saves
+ * clean, or either is set aside). A held Lane whose landing is in hand is what that landing says. A Lane that has not
+ * landed and is not in the queue (saved: a notice is only ever decided for a saved head) is in conflict while its notice is open: the early warning to
+ * settle it before it queues. A shared saved file alone is never a conflict: that stays the quiet "shares N files"
+ * note and the dotted tick on the line, with no state colour. A queued, checking or ready Lane says its stop. */
+export function isConflict(
+  mark: Pick<LaneMark, 'held' | 'overlap'> & { stage?: LaneMark['stage'] },
+  landing?: CurrentLanding | null,
+) {
+  if (mark.held)
+    return landing && landing.state !== 'unknown' ? landing.state === 'conflict' : mark.overlap === true;
+  return mark.overlap === true && mark.stage === 'saved';
+}
+
+/** The predicate Who is touching what ranks its pairs by (Item 9b9057a9): the Lanes `isConflict` says are in conflict,
+ * from the line's marks and the queue's entries. */
+export function conflictedLanes<
+  T extends Parameters<typeof landingOf>[0] & { laneId: string | null; submittedAt: string },
+>(
+  marks: readonly (LaneMark & { laneId: string })[],
+  entries: readonly T[],
+  /** The Lane reads: a Lane whose landing ended in conflict (the queue lists pending entries only) and its open
+   * notices, so a pair is marked only where a notice names its other Lane. */
+  lanes: readonly {
+    laneId: string;
+    conflicts?: readonly ConflictNote[];
+    landing?: { cause?: string } | null;
+  }[] = [],
+) {
+  const meta = new Map(lanes.map(lane => [lane.laneId, lane]));
+  const latest = currentEntries(entries);
+  const byLanding = new Set<string>();
+  const conflicted = new Set<string>();
+  for (const mark of marks) {
+    const entry = latest.get(mark.laneId);
+    const cause = meta.get(mark.laneId)?.landing?.cause;
+    const landing = entry ? landingOf(entry) : cause ? ({ state: cause } as CurrentLanding) : null;
+    if (!isConflict(mark, landing)) continue;
+    conflicted.add(mark.laneId);
+    if (landing && landing.state === 'conflict') byLanding.add(mark.laneId);
+  }
+  return (laneId: string, others?: readonly string[]) => {
+    if (!conflicted.has(laneId)) return false;
+    const named = meta.get(laneId)?.conflicts;
+    if (byLanding.has(laneId) || !named || !others) return true;
+    return named.some(note => others.includes(note.with));
+  };
 }
 
 /** The one Lane state. `landing` is the current submission only (see `currentEntries`), or nothing. */
-export function laneState(mark: LaneMark, landing?: CurrentLanding | null): LaneState {
+export function laneState(
+  mark: LaneMark,
+  landing?: CurrentLanding | null,
+  notes?: readonly ConflictNote[],
+): LaneState {
   const base = { stage: mark.stage, held: mark.held };
   if (mark.stage === 'main')
     return {
@@ -140,7 +248,9 @@ export function laneState(mark: LaneMark, landing?: CurrentLanding | null): Lane
       why: 'on main',
       note: null,
     };
-  if (mark.held) return { ...base, ...heldState(landing, isConflict(mark, landing)) };
+  if (mark.held) return { ...base, ...heldState(landing, isConflict(mark, landing), notes) };
+  // Not landed and not queued, with Forge's open conflict notice: Conflict, with whom and where (Item 9b9057a9).
+  if (isConflict(mark, landing)) return { ...base, ...heldState(null, true, notes) };
   // On the way to main: the stop is the state.
   if (mark.stage === 'checking')
     return {

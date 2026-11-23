@@ -15,7 +15,7 @@ export type CrossPair = {
   /** The pair's Lanes on each side, in first-seen order. */
   aLanes: string[];
   bLanes: string[];
-  /** The pair's Lanes the caller's predicate says Forge observed a conflict on. */
+  /** The pair's Lanes the caller's predicate says Forge observed a conflict on, with the pair's other Lane. */
   conflicted: string[];
   /** How many shared files the pair has; `pairPaths` lists them. */
   files: number;
@@ -47,7 +47,7 @@ export function byFolder(paths: readonly string[]): Folder[] {
 export function crossPairs(
   files: readonly SharedFile[],
   sideOf: (laneId: string) => CrossSide,
-  conflicted: (laneId: string) => boolean,
+  conflicted: (laneId: string, others: readonly string[]) => boolean,
 ): CrossPair[] {
   const pairs = new Map<string, CrossPair>();
   const add = (a: CrossSide, b: CrossSide | null, aLanes: string[], bLanes: string[]) => {
@@ -66,7 +66,16 @@ export function crossPairs(
     }
   }
   return [...pairs.values()]
-    .map(pair => ({ ...pair, conflicted: [...pair.aLanes, ...pair.bLanes].filter(conflicted) }))
+    .map(pair => ({
+      ...pair,
+      // A Lane counts for a pair when its conflict names the other side (the notice's peer), not for any pair it is in.
+      conflicted: [...pair.aLanes, ...pair.bLanes].filter(laneId =>
+        conflicted(
+          laneId,
+          [...pair.aLanes, ...pair.bLanes].filter(other => other !== laneId),
+        ),
+      ),
+    }))
     .sort(
       (x, y) =>
         Number(y.conflicted.length > 0) - Number(x.conflicted.length > 0) ||

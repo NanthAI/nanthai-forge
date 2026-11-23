@@ -1044,6 +1044,62 @@ test("a Lanes layout saved while it still had Landed today or Overlaps gives way
   assert.deepEqual(keptLayout(null, now), now);
 });
 
+test('9b9057a9: a saved Lane with an open conflict notice reads Conflict on its row, its Flow block and the legend, with whom and where on hover', async () => {
+  // Owner 2026-11-23 10:45Z: the purple needs plain words, with whom, and a shared file alone must read differently.
+  const flow = await import(moduleUrl('../web/src/app/flow/model.ts'));
+  const { FlowLegend } = await import(moduleUrl('../web/src/app/flow/Checks.tsx'));
+  const notes = [{ with: 'peer-lane', goal: 'Rework the queue', files: 3, path: 'src/queue.ts' }];
+  const lanes = [
+    mark('a', 'saved', { overlap: true }),
+    mark('b', 'saved'),
+    mark('c', 'checking', { overlap: true }),
+  ];
+  const yard = model.buildYard(
+    feed(lanes),
+    [
+      { ...meta('a', 'Mine'), lastSaveAt: '2026-11-23T10:00:00Z', conflicts: notes },
+      { ...meta('b', 'Shares only'), lastSaveAt: '2026-11-23T10:00:00Z' },
+    ],
+    undefined,
+    0,
+  );
+  const row = id => yard.rows.find(entry => entry.laneId === id);
+  assert.deepEqual(
+    [row('a').glyph, row('a').why, row('a').tip],
+    [
+      'Conflict',
+      'conflicts with Rework the queue in 3 files',
+      'Conflicts with Rework the queue in 3 files: src/queue.ts…',
+    ],
+  );
+  assert.deepEqual([row('b').glyph, row('b').tip], ['Working', null], 'a shared file alone is not marked');
+  assert.equal(row('c').glyph, 'Checking', 'a queued Lane says its stop');
+  const blocks = flow
+    .flowStations(feed(lanes), [], new Map([['a', notes]]))
+    .flatMap(station => station.blocks);
+  const block = id => blocks.find(entry => entry.laneId === id);
+  assert.deepEqual(
+    [block('a').colour, block('a').shape, block('a').word, block('a').why],
+    ['conflict', 'conflict', 'Conflict', 'Conflicts with Rework the queue in 3 files: src/queue.ts…'],
+  );
+  assert.equal(block('b').colour, 'active');
+  // A saved Lane in conflict is drawn on its own but is not a hold: the Saved drawer counts no held Lane.
+  const { laneDrawer } = await import(moduleUrl('../web/src/app/flow/drawer-model.ts'));
+  assert.equal(laneDrawer(feed(lanes), [], 'saved', [], 0).held, 0);
+  // Without the notice in hand the hover says what Conflict means.
+  const bare = flow
+    .flowStations(feed(lanes), [])
+    .flatMap(station => station.blocks)
+    .find(entry => entry.laneId === 'a');
+  assert.match(bare.why, /^Conflict: this Lane’s changes clash with another Lane’s on the same lines/);
+  const legend = renderToStaticMarkup(h(FlowLegend));
+  assert.match(
+    legend,
+    /clash with another Lane’s on the same lines; one must be redone before both can land/,
+  );
+  assert.match(legend, /only share a file, with no clash, are not marked: both can land/);
+});
+
 test('e1633718: a parked Lane’s yard row says who it waits on and since when, with the parker’s reason under it', () => {
   const park = {
     to: 'sample-lead',
@@ -1077,7 +1133,7 @@ test('e1633718: a parked Lane’s yard row says who it waits on and since when, 
   assert.equal(
     row('c').why,
     'parked for @sample-lead 45 min ago',
-    'a shared saved file is no conflict: the park is what it waits on (Item 9b9057a9)',
+    'an editing Lane has no saved head, so no conflict notice: the park is what it waits on (Item 9b9057a9)',
   );
   const hidden = model.buildYard(
     feed([mark('a', 'saved')]),

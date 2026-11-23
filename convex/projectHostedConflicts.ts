@@ -19,6 +19,7 @@ import { hostedMainV2Schema } from '../src/hosted-main';
 import { sameResolution, sameStack, type OverlapChange } from '../src/hosted-overlap';
 import { overlapMainSince } from './projectHostedOverlapMainLog';
 import { presenceMayShare } from '../src/hosted-presence';
+import { NOTICE_PATHS } from '../src/conflict-notice-paths';
 import type { TrialTask } from '../src/hosted-trial-merge';
 import {
   TRIAL_FILE_BYTES,
@@ -433,6 +434,9 @@ export const record = internalMutation({
         queue,
         enabled: Boolean(project && effectivePolicy(project).acceptance.earlyResolve !== 'off'),
       })));
+    // Lanes this trial decided a pair for, and those that still hold a notice from it.
+    const seen = new Set<string>(),
+      kept = new Set<string>();
     const write = async (
       owner: Row,
       peer: string,
@@ -446,6 +450,7 @@ export const record = internalMutation({
       }[],
       swap: boolean,
     ) => {
+      seen.add(owner.laneId);
       const existing = (
         await ctx.db
           .query('projectHostedConflictNotices')
@@ -463,7 +468,8 @@ export const record = internalMutation({
           });
         return;
       }
-      const paths = found.slice(0, 10).map(item => ({
+      kept.add(owner.laneId);
+      const paths = found.slice(0, NOTICE_PATHS).map(item => ({
         path: item.path,
         mine: swap ? item.theirs : item.mine,
         theirs: swap ? item.mine : item.theirs,
@@ -551,6 +557,22 @@ export const record = internalMutation({
         input.conflicts.filter(item => item.peer === MAIN),
         false,
       );
+    // A Lane's flag (the line's purple Conflict) follows its open notices once every pair is decided (Item 9b9057a9):
+    // a clean pair that ended its last notice clears it, a conflicting one decided later in this trial keeps it. Only
+    // a Lane left with no notice from this trial is checked (one point and one indexed read); a retried unchanged
+    // notice costs nothing extra.
+    for (const laneId of seen) {
+      if (kept.has(laneId)) continue;
+      const row = await lane(laneId);
+      if (!row?.conflicted) continue;
+      const [open] = await ctx.db
+        .query('projectHostedConflictNotices')
+        .withIndex('by_project_and_lane_and_open', q =>
+          q.eq('projectId', input.projectId).eq('laneId', laneId).eq('open', true),
+        )
+        .take(1);
+      if (!open) await ctx.db.patch(row._id, { conflicted: undefined });
+    }
     return null;
   },
 });

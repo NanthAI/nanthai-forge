@@ -1,23 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 import { passedWaiting, type LineFeed } from '../Line';
 import { Glyph, KindMark } from '../../ds';
+import { CONFLICT_MEANING, SHARED_FILE_MEANING } from '../lane-state';
 import { duration, type flowFigures } from './model';
 
+/** The last word is the meaning, said on hover; Conflict says it in the legend itself (owner 2026-11-23): its changes
+ * clash with another Lane's, and a Lane that only shares a file is not marked. */
 const legend = [
-  ['Working', 'active', 'dot'],
-  ['Waiting its turn', 'waiting', 'dot'],
-  ['Needs you', 'waiting', 'ring'],
-  ['Conflict', 'conflict', 'diamond'],
-  ['Check failed', 'failed', 'square'],
+  ['Working', 'active', 'dot', 'A Lane is being worked on or its check is running.'],
+  ['Waiting its turn', 'waiting', 'dot', 'A Lane is queued or waits for another to land.'],
+  ['Needs you', 'waiting', 'ring', 'A Lane waits for your approval or an answer.'],
+  [
+    'Conflict',
+    'conflict',
+    'diamond',
+    `${CONFLICT_MEANING[0]!.toUpperCase()}${CONFLICT_MEANING.slice(1)}. ${SHARED_FILE_MEANING}`,
+  ],
+  ['Check failed', 'failed', 'square', 'A Lane’s check failed; its agent fixes it.'],
 ] as const;
 
 export function FlowLegend() {
   return (
     <ul className="legend flow-legend" role="list" aria-label="Lane states">
-      {legend.map(([word, state, shape]) => (
-        <li key={word} data-st={state}>
+      {legend.map(([word, state, shape, meaning]) => (
+        <li key={word} data-st={state} title={meaning}>
           <span className={shape} aria-hidden="true" />
           {word}
+          {state === 'conflict' ? (
+            <>
+              {' '}
+              <small>· {meaning}</small>
+            </>
+          ) : null}
         </li>
       ))}
     </ul>

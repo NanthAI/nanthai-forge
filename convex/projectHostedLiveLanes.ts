@@ -22,6 +22,8 @@ import { presenceMayShare } from '../src/hosted-presence';
 import { saveFailureForViewer } from './projectHostedSaveStore';
 import type { TreeOverlap } from '../src/lanes-tree';
 import { supersededSummary } from '../src/hosted-overlap';
+import { laneConflicts } from './projectHostedConflicts';
+import { NOTICE_PATHS } from '../src/conflict-notice-paths';
 
 /** One bounded indexed page, selected metadata only; no source objects or idle work. */
 
@@ -217,6 +219,13 @@ export const list = query({
                 : {}),
             }
           : {};
+        // The Lane's open trial-merge notices, said briefly (Item 9b9057a9): with whom and in how many files, for the
+        // Lane row and the line's Conflict. Only a flagged Lane reads them; a stale one (a peer or this Lane saved
+        // again, the peer landed) is dropped by `laneConflicts`, so a stale flag names nothing and shows nothing.
+        const noticed =
+          overlapRow?.conflicted && !dormant
+            ? (await laneConflicts(ctx, projectId, lane.id, lane.head)).slice(0, 3)
+            : [];
         const intent = await readHostedIntentLabel(ctx, { projectId, actor, intentId: lane.intentId });
         const [saved] = await ctx.db
           .query('projectHostedRecords')
@@ -300,6 +309,17 @@ export const list = query({
               }
             : {}),
           ...stale,
+          ...(noticed.length
+            ? {
+                conflicts: noticed.map(notice => ({
+                  with: notice.with,
+                  ...(notice.goal ? { goal: notice.goal } : {}),
+                  files: new Set(notice.files.map(file => file.path)).size,
+                  ...(notice.files[0] ? { path: notice.files[0].path } : {}),
+                  ...(notice.files.length >= NOTICE_PATHS ? { atLeast: true as const } : {}),
+                })),
+              }
+            : {}),
           ...(tree
             ? {
                 stackOn: lane.stack && !lane.stack.detached ? lane.stack.laneId : null,

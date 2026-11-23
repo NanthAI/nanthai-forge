@@ -158,13 +158,16 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       for (const width of [1440, 390]) {
         const page = await open(t, width, 'busy');
         const legend = page.getByRole('list', { name: 'Lane states' });
-        assert.deepEqual(await legend.getByRole('listitem').allTextContents(), [
-          'Working',
-          'Waiting its turn',
-          'Needs you',
-          'Conflict',
-          'Check failed',
-        ]);
+        const words = await legend.getByRole('listitem').allTextContents();
+        // Item 9b9057a9, owner 2026-11-23: Conflict says what it means, and that a shared file alone is not marked.
+        assert.match(
+          words[3],
+          /^Conflict · This Lane’s changes clash with another Lane’s on the same lines; one must be redone before both can land\. Lanes that only share a file, with no clash, are not marked: both can land\.$/,
+        );
+        assert.deepEqual(
+          words.map((word, at) => (at === 3 ? 'Conflict' : word)),
+          ['Working', 'Waiting its turn', 'Needs you', 'Conflict', 'Check failed'],
+        );
         assert.match(await page.locator('.flow-check').nth(0).textContent(), /Check 1\s*2 Lanes\s*4 min/);
         assert.match(await page.locator('.flow-check').nth(1).textContent(), /Check 2\s*1 Lane\s*2 min/);
         assert.equal(
@@ -603,7 +606,7 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
         assert.deepEqual(await page.evaluate(() => window.drawerReads), [
           {
             name: 'projectHostedLiveLanes:list',
-            limit: 60,
+            limit: 100,
           },
         ]);
         await page.keyboard.press('Escape');

@@ -74,7 +74,7 @@ export function CrossList({
   const left = pairs.length - shown;
   return (
     <>
-      {band('Conflict reported', atRisk, 'Forge found a conflict landing a Lane in the pair')}
+      {band('Conflict reported', atRisk, 'Forge found these Lanes conflict, when one was saved or landing')}
       {band('Same files', rest, 'most shared files first')}
       {left > 0 ? (
         <div className="pf">
