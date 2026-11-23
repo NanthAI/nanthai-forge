@@ -351,7 +351,8 @@ export function sealedAcceptance() {
     Object.assign(f.reply, old);
     await refused(f, p, 'SECRETS_ROLLBACK', pub(f));
   });
-  test('T79 removal rights preserve owner devices and honor markers without invalidating pinned heads', async () => {
+  // Gate B2 M1 (Item 14314add): a write member never removes another account's entry, marked or not.
+  test('T79 removal rights preserve owner devices, a member never removes another account, and markers do not invalidate pinned heads', async () => {
     const f = fixture(),
       member = ownerAdd(f),
       p = pin(f);
@@ -375,8 +376,7 @@ export function sealedAcceptance() {
       x.bump();
       if (marker) x.reply.revoked = [target.id];
       x.transition({ removed: [target.id], epochBumped: 1 }, m);
-      if (marker) assert.equal(verifySealedReply(x.reply, before, pub(x)).pin.roster.entries.length, 2);
-      else await refused(x, before, 'SECRETS_ROSTER_REFUSED', pub(x));
+      await refused(x, before, 'SECRETS_ROSTER_REFUSED', pub(x));
     }
   });
   test('T80 every added entry binds signer, transition, keys, account, kind, role and admission method', async () => {

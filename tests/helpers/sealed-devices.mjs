@@ -20,6 +20,8 @@ export function device(h, t, account, { member = true, terminal = false, agent =
       _id: `${credentialId}-row`,
       owner: account,
       credentialId,
+      // Its own sealed links only (Gate B2 M3): the owner row's links name the owner's device.
+      sealed: undefined,
     });
   if (member && account !== h.account)
     h.s.tables.projectContributors.set(`pc-${account}`, {
@@ -48,6 +50,8 @@ export function device(h, t, account, { member = true, terminal = false, agent =
       as(() => h.s.transaction(() => server.write._handler(h.s.ctx, { projectId: h.project, ...input }))),
     join: input =>
       as(() => h.s.transaction(() => server.join._handler(h.s.ctx, { projectId: h.project, ...input }))),
+    link: input =>
+      as(() => h.s.transaction(() => server.link._handler(h.s.ctx, { projectId: h.project, ...input }))),
   };
   const notices = [];
   const make = (options = {}) =>
@@ -69,6 +73,7 @@ export function owner(h, options = {}) {
   const transport = {
     ...h.transport,
     join: input => h.s.transaction(() => server.join._handler(h.s.ctx, { projectId: h.project, ...input })),
+    link: input => h.s.transaction(() => server.link._handler(h.s.ctx, { projectId: h.project, ...input })),
   };
   const make = (more = {}) =>
     new SealedClient(

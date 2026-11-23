@@ -3,7 +3,7 @@ import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query, coordinationQuery, isDeviceIdentity, accountMutation } from './cliServer';
 // Reviewed exception: self-revocation remains retryable after revocation and only removes
-// authority. Every other export uses the guarded cliServer builders.
+// authority (and asks sealed holders to remove the device, Gate B2 M3). Every other export uses the guarded cliServer builders.
 import { mutation as revocationMutation } from './server';
 import { grantEndsAt, grantStamp, keepsDeviceSettings, maySeeDeviceName } from './accessPolicy';
 import { deviceOperation, finishDeviceOperation } from './deviceOperation';
@@ -12,6 +12,7 @@ import { accessibleProject, memberProject } from './projectAuthority';
 import { projectRole } from './projectRole';
 import { accountFor } from './urlIdentity';
 import { invariant } from '../src/errors';
+import { markEndedSignIn } from './sealedSecretMarkers';
 const item = v.object({
   id: v.id('cliCredentials'),
   credentialId: v.string(),
@@ -90,7 +91,7 @@ export const revoke = revocationMutation({
       'This device sign-in ended. Retry the original sign-out operation or sign in again.',
     );
     const keep = keepsDeviceSettings(action);
-    if (!receipt || !keyRemoved)
+    if (!receipt || !keyRemoved) {
       await ctx.db.patch(row._id, {
         revoked: true,
         ...(!keep
@@ -101,9 +102,15 @@ export const revoke = revocationMutation({
               grant: undefined,
               deviceKey: undefined,
               deviceCode: undefined,
+              sealed: undefined,
             }
           : {}),
       });
+      // Gate B2 M3: a sign-in ended from elsewhere (a lost laptop) or removed marks its sealed device in each
+      // project it wrote or joined in. `nforge logout` on the device itself keeps it: the person holds the device.
+      if (row.sealed && (!fromDevice || action === 'remove'))
+        await markEndedSignIn(ctx, row.owner, row.sealed);
+    }
     if (receipt) await finishDeviceOperation(ctx, receipt, args.operationId, credentialId, { ended: action });
     return null;
   },

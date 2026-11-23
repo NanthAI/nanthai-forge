@@ -35,6 +35,10 @@ export const credentialFields = {
   grant: v.optional(v.object({ at: v.number(), usedAt: v.number() })),
   /** The account sign-out epoch this sign-in was issued in; "sign out everywhere" ends every one below its own. */
   signOutEpoch: v.optional(v.number()),
+  /** Gate B2 M3: the sealed device ids this sign-in wrote or joined as, per project (at most 100). Ending the sign-in
+   * from elsewhere marks them there (convex/sealedSecretMarkers.ts). Absent when it never used sealed secrets. */
+  // An account-owned opaque project reference, like `settings.projects.projectId`: not project-owned data.
+  sealed: v.optional(v.array(v.object({ projectId: v.string(), deviceId: v.bytes() }))),
 };
 export const credentialDocument = v.object({
   _id: v.id('cliCredentials'),

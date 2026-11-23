@@ -6,8 +6,15 @@ import { currentCredential } from './deviceFields';
 import { sealedKind } from './sealedSecretFields';
 import { invariant } from '../src/errors';
 import { report } from './errors';
-import { equalBytes } from '../src/sealed-portable';
-import { extendsStored, nextJoinRequests, nextSealedState, sealedWriteFacts } from './sealedSecretGate';
+import { equalBytes, forgeSecretId } from '../src/sealed-portable';
+import {
+  extendsStored,
+  isOwnDeviceEntry,
+  nextJoinRequests,
+  nextSealedState,
+  sealedWriteFacts,
+} from './sealedSecretGate';
+import { linkSealedDevice } from './sealedSecretMarkers';
 
 const history = v.object({
   genesis: v.bytes(),
@@ -28,6 +35,8 @@ export const read = query({
       history: v.union(history, v.null()),
       revoked: v.optional(v.array(v.bytes())),
       joinRequests: v.optional(v.array(v.bytes())),
+      /** Gate B2 M3: this CLI sign-in has no sealed device link in this project yet (sealedSecrets:link). */
+      unlinked: v.optional(v.literal(true)),
     }),
   ),
   handler: async (ctx, args) => {
@@ -42,10 +51,15 @@ export const read = query({
         )
         .unique();
       if (!set) return null;
-      // Server-owned side records reach every reader, including a cache hit; absent when empty.
+      // Server-owned side records reach every reader, including a cache hit; absent when empty. A CLI sign-in with
+      // no sealed link here is told so from its own credential row, already read (Gate B2 M3).
+      const device = ctx.forgeDevice;
       const sides = {
         ...(set.revoked?.length ? { revoked: set.revoked } : {}),
         ...(set.joinRequests?.length ? { joinRequests: set.joinRequests.map(j => j.request) } : {}),
+        ...(device?.deviceKey && !device.sealed?.some(l => l.projectId === args.projectId)
+          ? { unlinked: true as const }
+          : {}),
       };
       if (args.headHash && same(args.headHash, set.headHash))
         return { payload: null, history: null, ...sides };
@@ -169,6 +183,8 @@ export const write = mutation({
       else await ctx.db.insert('sealedSecretSets', next);
       if (previous) await ctx.db.replace(previous._id, nextHistory);
       else await ctx.db.insert('sealedSecretHistory', nextHistory);
+      // The head's signer is this sign-in's sealed device; ending the sign-in elsewhere marks it here.
+      await linkSealedDevice(ctx, forgeDevice, args.projectId, facts.head.signerId);
       return { accepted: true, replay: false };
     } catch (error) {
       return report(error);
@@ -209,7 +225,45 @@ export const join = mutation({
       });
       if (!joinRequests) return { accepted: true, replay: true };
       await ctx.db.patch(set!._id, { joinRequests });
+      // The newest request is this device's (nextJoinRequests checked its signed binding).
+      const joining = new Uint8Array(joinRequests[joinRequests.length - 1]!.deviceId);
+      await linkSealedDevice(ctx, forgeDevice, args.projectId, joining);
       return { accepted: true, replay: false };
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+/** Gate B2 M3: a device that only reads (added with a code, or linked before links existed) records itself on its
+ * sign-in once, so ending that sign-in elsewhere marks it. The id must be a device entry of the caller's own account
+ * in the active set. One indexed set read and, the first time, one patch of the credential row. */
+export const link = mutation({
+  args: { projectId: v.id('hostedProjects'), kind: sealedKind, deviceId: v.bytes() },
+  returns: v.object({ linked: v.boolean() }),
+  handler: async (ctx, args) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'AUTH_REQUIRED', 'Sign in to use sealed secrets.');
+      const { forgeDevice } = ctx;
+      invariant(
+        forgeDevice?.deviceKey &&
+          currentCredential(forgeDevice, user.subject, user.forgeSignIn) &&
+          forgeDevice.scope === 'cli',
+        'AUTH_SCOPE_DENIED',
+        'Sealed secrets need a stable device sign-in from nforge login.',
+      );
+      await memberProject(ctx, args.projectId, user.subject);
+      const set = await ctx.db
+        .query('sealedSecretSets')
+        .withIndex('by_project_and_kind_and_active', q =>
+          q.eq('projectId', args.projectId).eq('kind', args.kind).eq('active', true),
+        )
+        .unique();
+      const deviceId = new Uint8Array(args.deviceId);
+      if (!set || !isOwnDeviceEntry(set, forgeSecretId('account', user.subject), deviceId))
+        return { linked: false };
+      await linkSealedDevice(ctx, forgeDevice, args.projectId, deviceId);
+      return { linked: true };
     } catch (error) {
       return report(error);
     }

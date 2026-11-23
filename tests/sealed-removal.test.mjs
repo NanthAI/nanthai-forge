@@ -247,7 +247,7 @@ test('review 1: a share signed before the person left stores nothing, so the rem
   assert.equal(stored.rosterVersion, 1);
 });
 
-test('review 2: holders never act on a marker of their own account or of a machine, and say so', () => {
+test('review 2 and Gate B2 M3: holders act on a marker of another device of their own account, never on themselves or a machine', () => {
   const id = n => Buffer.alloc(16, n),
     own = id(1),
     other = id(2);
@@ -263,17 +263,20 @@ test('review 2: holders never act on a marker of their own account or of a machi
   };
   const revoked = [id(11), id(12), id(13)];
   const marked = markedEntries(roster, revoked, id(10));
+  // Device 11 is another device of the holder's own account whose sign-in ended (a lost laptop).
   assert.deepEqual(
     marked.remove.map(e => e.id[0]),
-    [12],
+    [11, 12],
   );
   assert.deepEqual(
     marked.ignored.map(e => e.id[0]),
-    [11, 13],
+    [13],
   );
   const notice = markerNotice(roster, revoked, id(10));
-  assert.match(notice, /Forge asks to remove 1 Development entry/);
-  assert.match(notice, /which it never should; nothing is done about it/);
+  assert.match(notice, /Forge asks to remove 2 Development entries/);
+  assert.match(notice, /a machine, which it never should; nothing is done about it/);
+  // A marker on the holder itself is never acted on (verification refuses the holder first).
+  assert.deepEqual(markedEntries(roster, [id(10)], id(10)).remove, []);
 });
 
 test('cost: removing a reader reads no sealed set; removing a write member reads each kind once', async t => {

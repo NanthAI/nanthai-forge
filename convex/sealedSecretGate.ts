@@ -161,6 +161,39 @@ export function markersForRemovedAccount(set: StoredSealedSet, ...accountIds: Ui
     ? null
     : { revoked, joinRequests };
 }
+/** Gate B2 M3: one device's sign-in ended (signed out or removed elsewhere). Marks the entries of `deviceIds` that
+ * belong to `accountId` (the sign-in's own account, so a link a client claimed can never mark another person) and
+ * drops their waiting join requests. The set's last unmarked owner device is never marked: no device could act on it,
+ * and its own reads would refuse it for good. Null when nothing changes. */
+export function markersForEndedDevice(set: StoredSealedSet, accountId: Uint8Array, deviceIds: Uint8Array[]) {
+  const ended = (id: Uint8Array) => deviceIds.some(device => equalBytes(id, device));
+  const roster = (decodeSealedWire(u8(set.payload)) as Payload).roster,
+    owners = roster.entries.filter(e => e.entryKind === 1 && e.role === 1),
+    before = set.revoked ?? [],
+    revoked = [...before];
+  for (const entry of roster.entries)
+    if (
+      ended(entry.id) &&
+      equalBytes(entry.accountId, accountId) &&
+      // Counting owners already marked, so ending two owner devices one at a time keeps the second.
+      owners.some(o => !ended(o.id) && !revoked.some(id => equalBytes(u8(id), o.id))) &&
+      !revoked.some(id => equalBytes(u8(id), entry.id))
+    )
+      revoked.push(Uint8Array.from(entry.id).buffer);
+  const waiting = set.joinRequests ?? [],
+    joinRequests = waiting.filter(j => {
+      const account = joinAccount(j);
+      return !ended(u8(j.deviceId)) || !account || !equalBytes(account, accountId);
+    });
+  return revoked.length === before.length && joinRequests.length === waiting.length
+    ? null
+    : { revoked, joinRequests };
+}
+/** Gate B2 M3: `deviceId` is a device entry of `accountId` in this set's roster (one decode of the roster). */
+export const isOwnDeviceEntry = (set: StoredSealedSet, accountId: Uint8Array, deviceId: Uint8Array) =>
+  (decodeSealedWire(u8(set.payload)) as Payload).roster.entries.some(
+    e => e.entryKind === 1 && equalBytes(e.id, deviceId) && equalBytes(e.accountId, accountId),
+  );
 const joinAccount = (j: SealedJoinRequest) =>
   (decodeSealedWire(u8(j.request)) as Partial<JoinRequest>).accountId;
 

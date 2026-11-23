@@ -38,9 +38,34 @@ There are three routes to that one write:
   the owner's next person write removes and re-keys. Machine entries name no
   account and are never marked. Permanent deletion purges the sets and their
   history with the project's rows.
+- Ending one device's sign-in from elsewhere marks that device alone, so a lost
+  laptop is removed and re-keyed on the next owner write and its rotate list is
+  printed. Signing a device out in Account settings, or removing it there or from
+  the device, marks it in each project where that sign-in is linked to a sealed
+  device, and drops its waiting join request. The first four projects are marked
+  in the same mutation and the rest in scheduled steps of four; the sign-in has
+  already ended, so the device cannot read a set meanwhile. The server links a
+  sign-in when it writes a sealed set or asks to join one, and a device that only
+  reads links itself once per project after its first verified read, when the
+  read reply says it has no link yet. Only an entry of the sign-in's own account
+  is marked. `nforge logout` on the device itself marks nothing: the person holds
+  the device and its keys stay for its next sign-in. The set's last unmarked owner
+  device is never marked, because no device could act on it. "Sign out
+  everywhere" places no markers; remove a lost device by itself. A device that
+  was marked and signs in again reads `SECRETS_ROSTER_REFUSED` saying Forge
+  marked it, until an owner device removes it. After that it is shared again:
+  automatically under Automatic when its account has no other device in the set,
+  otherwise from that account's other device with a code. One sign-in tracks at
+  most 100 projects; at that bound links to deleted projects are dropped, and a
+  sealed write or join in a further project is refused with `SECRETS_NOT_ALLOWED`.
 - A marker that names no entry of the roster asks for nothing. A marker on the
-  holder's own account (it still has access) or on a machine is never acted on:
-  the notice names it, and only `nforge secret unshare DEVICE_ID` removes it.
+  holder itself or on a machine is never acted on: the notice names a machine,
+  and only `nforge secret unshare DEVICE_ID` removes it. A marker on another device
+  of the holder's own account is acted on like any other (a lost laptop of the
+  same person).
+- Only an owner device removes another account's entry, marked or not. A write
+  member's device removes only its own account's entries, so no roster step ever
+  depends on a marker, which the server clears with the step that acts on it.
 
 Markers are a request: the server changes no signed record itself. A removed person
 cannot read the set from Forge at all, because the read checks project write
@@ -52,8 +77,11 @@ Residual: holders act on a marker without asking. A compromised server can mark 
 member who is still in the project, and the next person write removes that member's
 entries in a signed step; adding them back needs a code (an account left with no
 device counts as new under Automatic). Every holder sees each marker on its reads and
-each removal it made. The server cannot mark the writer's own account into removal,
-and cannot stop a removal from re-keying.
+each removal it made. A compromised server can also mark another device of the
+writer's own account, which is removed the same way, and can mark the last owner
+device (the last-owner rule is the server's, which a compromised server can skip),
+leaving the set with no device that can read it. It cannot make a device remove
+itself, and cannot stop a removal from re-keying.
 
 The rotate list is derived from signed records only: each live name whose value has
 not changed since a removed device's last epoch, with that device's fingerprint.
@@ -73,5 +101,11 @@ indexed read per set kind when the project has no sealed set, and reads no team
 member. Only a project with a set reads team members, at most 100 per mutation,
 and checks write access only for the members its sets list. Trashing a project
 adds one empty indexed read per set kind when it has no sealed set; with sets, it
-reads no grant or member and patches each set it marks. A removal write is one read
-and one write, at most once per marked batch. Idle costs nothing.
+reads no grant or member and patches each set it marks. Ending a device sign-in
+that never wrote or joined a sealed set reads nothing more; one with links reads
+each linked project's set kinds (at most three each) and patches each set it
+marks. A sealed write or join patches its sign-in once, the first time per project
+and device, and reads nothing more. A read tells an unlinked sign-in so from its
+credential row, already read; that device then makes one link call per project,
+once (one set read and one patch). A removal write is one read and one write, at
+most once per marked batch. Idle costs nothing.

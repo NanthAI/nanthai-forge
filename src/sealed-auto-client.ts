@@ -105,6 +105,17 @@ export async function afterVerified(
   // GB-10: holders see every removal Forge asks for, until a person's write removes the entries (design 5.5).
   const marked = markerNotice(result.pin.roster, reply.revoked, client.keys.id);
   if (marked) lines.push(marked);
+  // Gate B2 M3: once per project, a listed device records itself on its sign-in, so ending that sign-in elsewhere
+  // (a lost laptop) marks it. The read goes on if it fails; the next read asks again.
+  if (wire?.unlinked && client.transport.link && findEntry(result.pin.roster, client.keys.id))
+    try {
+      await client.transport.link({ kind: 1, deviceId: Uint8Array.from(client.keys.id).buffer });
+    } catch (error) {
+      const refused = sealedRefusal(error);
+      lines.push(
+        `Forge could not record this device on its sign-in${refused ? ` (${refused.code})` : ''}, so signing it out elsewhere would not remove it from Development; the next read tries again.`,
+      );
+    }
   let roster: SecretPin['roster'] | null = result.pin.roster;
   if (wire?.joinRequests?.length && result.key) {
     const shared = await shareWaiting(client, reply, result, wire);

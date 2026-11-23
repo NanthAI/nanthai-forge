@@ -527,9 +527,10 @@ function verifyCore(
         'Wraps must name distinct roster recipients.',
       );
       refuse(
-        !reply.revoked.some(id => sameId(id, request.recipient!.id)) && findEntry(r, request.recipient.id),
-        'This recipient is revoked or absent.',
+        !reply.revoked.some(id => sameId(id, request.recipient!.id)),
+        'Forge marked this device for removal: its sign-in ended elsewhere or its person left. An owner device removes it and re-keys on its next write; then share this device again.',
       );
+      refuse(findEntry(r, request.recipient.id), 'This recipient is revoked or absent.');
       const wrap = reply.wraps.find(w => sameId(w.recipientId, request.recipient!.id));
       invariant(wrap, 'SECRETS_WRAP_REFUSED', 'This recipient has no set-key wrap.');
       key = unwrapSetKey(wrap, r, request.recipient, h.commit);

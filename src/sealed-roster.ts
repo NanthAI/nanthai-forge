@@ -22,12 +22,12 @@ import {
 export const sameId = (a: Uint8Array, b: Uint8Array) => equalBytes(a, b);
 export const findEntry = (roster: Roster, id: Uint8Array) =>
   roster.entries.find(entry => sameId(entry.id, id));
-/** Design 5.5: the entries Forge marked that holder `self` removes. Forge marks a person who left, so a marker
- * on self's own account (it still writes) or on a machine is server misbehaviour: `ignored`, never removed. */
+/** Design 5.5: the entries Forge marked that holder `self` removes. Forge marks every device of a person who left
+ * and a single device whose sign-in ended (Gate B2 M3), which can be another device of self's own account. A
+ * marker on self or on a machine is server misbehaviour: `ignored`, never removed. */
 export function markedEntries(roster: Roster, revoked: readonly Uint8Array[], self: Uint8Array) {
-  const own = findEntry(roster, self)?.accountId,
-    marked = roster.entries.filter(e => revoked.some(id => sameId(id, e.id))),
-    honest = (e: Entry) => e.entryKind !== 2 && !(own && sameId(e.accountId, own));
+  const marked = roster.entries.filter(e => revoked.some(id => sameId(id, e.id))),
+    honest = (e: Entry) => e.entryKind !== 2 && !sameId(e.id, self);
   return { remove: marked.filter(honest), ignored: marked.filter(e => !honest(e)) };
 }
 export const ownerDevice = (entry: Entry | undefined) => entry?.entryKind === 1 && entry.role === 1;
@@ -256,12 +256,15 @@ export function walkTransition(
     const entry = findEntry(from, id);
     refuse(entry, 'Removed recipient is absent.');
     const own = sameId(entry!.accountId, signer!.accountId);
+    // Gate B2 M1: only an owner device removes another account's entry, marker or not. A marker is cleared by the
+    // step that acts on it, so a later reader could not check a member's marker-based removal; no step depends on one.
     refuse(
       ownerDevice(signer) ||
         (from.setKind === 1 &&
           !ownerDevice(entry) &&
-          ((signer!.entryKind === 1 && signer!.role === 2 && (own || revoked.some(r => sameId(r, id)))) ||
-            (signer!.entryKind === 3 && own && entry!.entryKind === 1 && entry!.role === 2))),
+          own &&
+          ((signer!.entryKind === 1 && signer!.role === 2) ||
+            (signer!.entryKind === 3 && entry!.entryKind === 1 && entry!.role === 2))),
       'Removal exceeds signer authority.',
     );
   }

@@ -3,7 +3,8 @@
 // every value re-sealed, a wrap for each remaining recipient. A removed entry cannot open anything written from
 // then on; what it could already open is the rotate list (names only). Three routes share this one write:
 // guard 7's Undo of an automatic share (a fingerprint), any entry by its full device id, and the entries Forge
-// marked when their person left the project (the next person write, or `unshare --marked`).
+// marked when their person left the project or their device's sign-in ended (the next person write, or
+// `unshare --marked`).
 import { randomUUID } from 'node:crypto';
 import { ForgeError, invariant } from './errors.js';
 import { framedHash } from './sealed-format.js';
@@ -53,16 +54,16 @@ export function markerNotice(roster: Roster, revoked: readonly Uint8Array[], sel
     lines: string[] = [];
   if (marked.length)
     lines.push(
-      `Forge asks to remove ${marked.length} Development ${marked.length === 1 ? 'entry' : 'entries'} whose person left the project (${fps(marked)}). They cannot read from Forge now, but they keep what they already opened. ${
+      `Forge asks to remove ${marked.length} Development ${marked.length === 1 ? 'entry' : 'entries'} whose person left the project or whose device sign-in ended (${fps(marked)}). They cannot read from Forge now, but they keep what they already opened. ${
         ownerDevice(findEntry(roster, self))
           ? 'Remove and re-key now with nforge secret unshare --marked; your next nforge secret set or rm also does it.'
           : 'An owner device removes them and re-keys on its next nforge secret set or rm.'
       }`,
     );
-  // Forge never marks this account (it still has access) or a machine; such a marker is not acted on.
+  // Forge never marks a machine (it has no sign-in); such a marker is not acted on.
   if (ignored.length)
     lines.push(
-      `Forge also marked ${fps(ignored)}, of your own account or a machine, which it never should; nothing is done about it. Not yours any more? Remove it by its full device id with nforge secret unshare DEVICE_ID.`,
+      `Forge also marked ${fps(ignored)}, a machine, which it never should; nothing is done about it. Not used any more? Remove it by its full device id with nforge secret unshare DEVICE_ID.`,
     );
   return lines.length ? lines.join(' ') : null;
 }

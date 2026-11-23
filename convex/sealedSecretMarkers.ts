@@ -3,13 +3,19 @@
 // that account's entries. Holders see the marker on their next read, and a person's next write on an owner device
 // removes the entries and re-keys (design 5.5). The server opens nothing and changes no signed record. A direct
 // removal (projectActorNames.retainMembership), a team change and a project trash (below) end here, in the same
-// mutation.
+// mutation. Ending one device's sign-in elsewhere (deviceCredentials.revoke) marks that device alone (Gate B2 M3).
 import { internalMutation, type MutationCtx } from './server';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
-import { forgeSecretId, hex } from '../src/sealed-portable';
-import { markableAccountIds, markableAccounts, markersForRemovedAccount } from './sealedSecretGate';
+import { invariant } from '../src/errors';
+import { equalBytes, forgeSecretId, hex } from '../src/sealed-portable';
+import {
+  markableAccountIds,
+  markableAccounts,
+  markersForEndedDevice,
+  markersForRemovedAccount,
+} from './sealedSecretGate';
 import { hasWriteRole } from './projectRole';
 
 /** The project's active sets: one indexed read per set kind (at most three rows). */
@@ -27,9 +33,14 @@ async function activeSets(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
   return sets;
 }
 
-async function mark(ctx: MutationCtx, sets: Doc<'sealedSecretSets'>[], accountIds: Uint8Array[]) {
+async function mark(
+  ctx: MutationCtx,
+  sets: Doc<'sealedSecretSets'>[],
+  accountIds: Uint8Array[],
+  markers = (set: Doc<'sealedSecretSets'>) => markersForRemovedAccount(set, ...accountIds),
+) {
   for (const set of sets) {
-    const next = markersForRemovedAccount(set, ...accountIds);
+    const next = markers(set);
     if (next)
       await ctx.db.patch(set._id, {
         revoked: next.revoked.length ? next.revoked : undefined,
@@ -144,3 +155,74 @@ export async function markLeftTeam(ctx: MutationCtx, team: Doc<'teams'>, member:
     if (project?.owner === team.owner) await markLost(ctx, project, sets, [member]);
   }
 }
+
+/** Gate B2 M3: the sealed devices a CLI sign-in acted as, per project, kept on its credential row (`sealed`). */
+type SealedLink = NonNullable<Doc<'cliCredentials'>['sealed']>[number];
+/** One sign-in acts as one sealed device; a new key store adds a second id. Bounds the credential row (read on every
+ * call) at about 6 KB. */
+export const SEALED_LINKS = 100;
+/** Projects one end-of-sign-in step marks: three bounded set reads each (512 KiB at most per set). */
+export const DEVICE_MARK_PAGE = 4;
+
+/** Records that `device` (the caller's credential row, already read by the guard) acts as sealed device `deviceId`
+ * in `projectId`, so ending that sign-in marks it there. Called from a sealed write (the head's signer) and a join
+ * request (the joining device). No read; one patch of the credential row the first time per project and device. */
+export async function linkSealedDevice(
+  ctx: MutationCtx,
+  device: Doc<'cliCredentials'>,
+  projectId: Id<'hostedProjects'>,
+  deviceId: Uint8Array,
+) {
+  let links = device.sealed ?? [];
+  if (links.some(l => l.projectId === projectId && equalBytes(new Uint8Array(l.deviceId), deviceId))) return;
+  // At the bound only, links to purged projects go first: one read per linked project, at most once per refusal.
+  if (links.length >= SEALED_LINKS) {
+    const live = new Set<string>();
+    for (const id of new Set(links.map(l => l.projectId))) {
+      const project = ctx.db.normalizeId('hostedProjects', id);
+      if (project && (await ctx.db.get(project))) live.add(id);
+    }
+    links = links.filter(l => live.has(l.projectId));
+  }
+  invariant(
+    links.length < SEALED_LINKS,
+    'SECRETS_NOT_ALLOWED',
+    `This device sign-in already holds sealed secrets in ${SEALED_LINKS} projects, the most one sign-in tracks for device removal.`,
+  );
+  const sealed = [...links, { projectId, deviceId: Uint8Array.from(deviceId).buffer }];
+  await ctx.db.patch(device._id, { sealed });
+  device.sealed = sealed;
+}
+
+/** Gate B2 M3: a sign-in ended (signed out from elsewhere, or removed), so each linked project marks its sealed
+ * device: a lost laptop is removed and re-keyed on the next owner write, with its rotate list. The first
+ * `DEVICE_MARK_PAGE` projects mark in the ending mutation and the rest in scheduled steps; the sign-in already
+ * ended, so the device cannot read a set meanwhile. A sign-in with no link reads nothing. */
+export async function markEndedSignIn(ctx: MutationCtx, owner: string, links: readonly SealedLink[]) {
+  const projects = [...new Set(links.map(l => l.projectId))];
+  if (!projects.length) return;
+  const page = projects.slice(0, DEVICE_MARK_PAGE),
+    accountId = forgeSecretId('account', owner);
+  for (const projectId of page) {
+    const project = ctx.db.normalizeId('hostedProjects', projectId);
+    if (!project) continue;
+    const deviceIds = links.filter(l => l.projectId === projectId).map(l => new Uint8Array(l.deviceId));
+    await mark(ctx, await activeSets(ctx, project), [], set =>
+      markersForEndedDevice(set, accountId, deviceIds),
+    );
+  }
+  const rest = links.filter(l => !page.includes(l.projectId));
+  if (rest.length)
+    await ctx.scheduler.runAfter(0, internal.sealedSecretMarkers.markSignIn, { owner, links: rest });
+}
+export const markSignIn = internalMutation({
+  args: {
+    owner: v.string(),
+    links: v.array(v.object({ projectId: v.string(), deviceId: v.bytes() })),
+  },
+  returns: v.null(),
+  handler: async (ctx, { owner, links }) => {
+    await markEndedSignIn(ctx, owner, links);
+    return null;
+  },
+});

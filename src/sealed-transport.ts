@@ -45,6 +45,8 @@ export type SealedReadWire = {
   revoked?: ArrayBuffer[];
   /** Server-owned join requests; absent when there are none. */
   joinRequests?: ArrayBuffer[];
+  /** Gate B2 M3: this sign-in has no sealed device link in the project yet; absent from older deployments. */
+  unlinked?: true;
 };
 export interface SealedTransport {
   read(input: {
@@ -55,6 +57,8 @@ export interface SealedTransport {
   write(input: SealedWriteArgs & { kind: 1 | 2 | 3 }): Promise<{ accepted: boolean; replay: boolean }>;
   /** Design 5.1: post this device's own join request (sealedSecrets:join). */
   join?(input: { kind: 1 | 2 | 3; request: ArrayBuffer }): Promise<{ accepted: boolean; replay: boolean }>;
+  /** Gate B2 M3: record this device on its sign-in, so ending the sign-in elsewhere marks it (sealedSecrets:link). */
+  link?(input: { kind: 1 | 2 | 3; deviceId: ArrayBuffer }): Promise<{ linked: boolean }>;
 }
 const refusals = new Set([
   'AUTH_REQUIRED',
@@ -165,5 +169,7 @@ export function hostedSealedTransport(deployment: string, projectId: string, tok
       client.mutation(makeFunctionReference<'mutation'>('sealedSecrets:write'), { projectId, ...input }),
     join: input =>
       client.mutation(makeFunctionReference<'mutation'>('sealedSecrets:join'), { projectId, ...input }),
+    link: input =>
+      client.mutation(makeFunctionReference<'mutation'>('sealedSecrets:link'), { projectId, ...input }),
   };
 }
