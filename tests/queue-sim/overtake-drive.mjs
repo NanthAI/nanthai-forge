@@ -20,7 +20,9 @@ export const receipts = f =>
 /** Drive a wave of pre-queue-checked landings to the end. `duration(index, nth)` is the ticks the
  * nth check of entry `index` takes; `pick` chooses which due task runs next (scheduling order is not
  * fixed in a real deployment); `withdraws(index, nth)` withdraws the entry when that check is due
- * instead of passing it. Returns landing ticks, run counts and receipts by entry. */
+ * instead of passing it. `arrives(index)` is the tick an entry is submitted (default 0; must not
+ * decrease with the index). Returns landing ticks, run counts, the per-run log (`runTicks`: owner,
+ * start tick, runner ticks, whether a landing used it) and receipts by entry. */
 export async function drive(
   t,
   {
@@ -30,6 +32,7 @@ export async function drive(
     duration,
     pick = tasks => tasks[0],
     withdraws = () => false,
+    arrives = () => 0,
     unknownAdmissionRisk = false,
     ownerApprovalPaths,
     fixture = {},
@@ -56,9 +59,10 @@ export async function drive(
       autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, ownerApprovalPaths } },
     });
   }
-  for (let i = 0; i < memberPaths.length; i++) {
+  let arrived = 0;
+  for (; arrived < memberPaths.length && arrives(arrived) <= 0; arrived++) {
     if (unknownAdmissionRisk) f.patch('hostedProjects', f.projectId, { checkEntries: undefined });
-    await f.add(i);
+    await f.add(arrived);
   }
   if (unknownAdmissionRisk) f.patch('hostedProjects', f.projectId, { checkEntries: entries });
   f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
@@ -75,11 +79,26 @@ export async function drive(
   const due = new Map(),
     landedAt = new Map(),
     withdrawn = new Set(),
-    runsOf = new Map(ids.map(id => [id, new Set()]));
-  for (let tick = 0; states(f).some(s => s.phase !== 'landed' && s.phase !== 'terminal-failed'); tick++) {
+    runsOf = new Map(ids.map(id => [id, new Set()])),
+    // Every check run by id: who started it, when, and when it stopped being queued (runner time).
+    runLog = new Map();
+  const open = () =>
+    arrived < memberPaths.length ||
+    states(f).some(s => s.phase !== 'landed' && s.phase !== 'terminal-failed');
+  for (let tick = 0; open(); tick++) {
     assert(tick < 20000, JSON.stringify(states(f).map(s => [s.sequence, s.phase])));
+    for (; arrived < memberPaths.length && arrives(arrived) <= tick; arrived++) {
+      assert(arrives(arrived) >= arrives(arrived - 1), 'arrivals keep index order');
+      const id = (await f.add(arrived)).id;
+      ids.push(id);
+      runsOf.set(id, new Set());
+    }
+    for (const [id, entry] of runLog)
+      if (entry.ended === undefined && f.runs().find(run => run.id === id)?.status !== 'queued')
+        entry.ended = tick;
     for (const run of f.runs().filter(run => run.status === 'queued' && run.gate?.mode !== 'audit')) {
       const id = owner(run);
+      if (!runLog.has(run.id)) runLog.set(run.id, { owner: ids.indexOf(id), started: tick });
       if (withdrawn.has(id)) continue;
       runsOf.get(id)?.add(run.id);
       const nth = runsOf.get(id)?.size ?? 1;
@@ -96,6 +115,7 @@ export async function drive(
     const tasks = f.pending().filter(t => !/MainAudit:start|LandingStall/.test(t.name));
     if (!tasks.length) {
       if (f.runs().some(run => run.status === 'queued' && run.gate?.mode !== 'audit')) continue;
+      if (arrived < memberPaths.length) continue;
       break;
     }
     const before = new Set(
@@ -117,10 +137,24 @@ export async function drive(
     await f.execute(task);
   }
   const byId = new Map(receipts(f).map(r => [r.submissionId, r]));
+  // A run is used when a landed entry's final attempt is bound to it; every other run was discarded.
+  const usedRuns = new Set(
+    rows()
+      .filter(row => row.phase === 'landed')
+      .map(row => row.runId)
+      .filter(Boolean),
+  );
+  const runTicks = [...runLog].map(([id, entry]) => ({
+    ...entry,
+    ticks: (entry.ended ?? entry.started) - entry.started,
+    used: usedRuns.has(id),
+    status: f.runs().find(run => run.id === id)?.status,
+  }));
   const result = {
     ids,
     landedAt: ids.map(id => landedAt.get(id)),
     runs: ids.map(id => runsOf.get(id)?.size ?? 0),
+    runTicks,
     orderWaits: ids.map(id => byId.get(id)?.orderWaits ?? []),
     calls: f.counts.length,
     readBytes: f.counts.reduce((n, c) => n + c.readBytes, 0),

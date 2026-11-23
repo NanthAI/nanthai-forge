@@ -34,14 +34,23 @@ export async function simulate(t, { seed, profile, count = 12, maxSteps = 4000, 
   const rng = random(seed),
     cluster = ['overlap', 'hot-head', 'slow-old', 'mixed'].includes(profile);
   const base = Array.from({ length: count }, (_, i) => `export const v${i} = 0;`).join('\n') + '\n';
+  // `risk-mix` (Item 1018d0f8): every fourth change is order-sensitive (one schema change, CI actions).
   const paths = Array.from({ length: count }, (_, i) =>
-    cluster && i < count / 2 ? 'src/shared.ts' : `src/member-${i}.ts`,
+    profile === 'risk-mix' && i % 4 === 1
+      ? i === 1
+        ? 'convex/schema.ts'
+        : `.github/actions/a${i}/action.yml`
+      : cluster && i < count / 2
+        ? 'src/shared.ts'
+        : `src/member-${i}.ts`,
   );
   const f = await batchesFixture(t, {
     count: 0,
     fileCount: 2,
-    batching: profile === 'batch-fail',
-    requestCheck: profile !== 'batch-fail',
+    batching: profile === 'batch-fail' || profile === 'risk-mix',
+    requestCheck: profile !== 'batch-fail' && profile !== 'risk-mix',
+    // The dogfood settings: a full Lane check before the queue, fast landing mode.
+    ...(profile === 'risk-mix' ? { admissionCheck: 'full', landingMode: 'fast', batchMaxSize: null } : {}),
     memberPaths: paths,
     baselineFiles: [['src/shared.ts', base]],
     memberContents: paths.map((path, i) =>
@@ -49,6 +58,16 @@ export async function simulate(t, { seed, profile, count = 12, maxSteps = 4000, 
     ),
   });
   f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
+  if (profile === 'risk-mix') {
+    // CI and schema changes land without an owner review here: the profile is about queue order.
+    const policy = f.tables.hostedProjects.get(f.projectId).autonomyPolicy;
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: {
+        ...policy,
+        acceptance: { ...policy.acceptance, ownerApprovalPaths: ['scripts/deploy*'] },
+      },
+    });
+  }
   const history = queueHistory(f),
     events = [],
     violations = new Map(),
@@ -76,7 +95,13 @@ export async function simulate(t, { seed, profile, count = 12, maxSteps = 4000, 
           const id = owner(f, run),
             index = f.entries.findIndex(entry => entry.state.id === id);
           const slow = ['hot-head', 'slow-old'].includes(profile) && index === 0;
-          checks.set(run.id, { due: Date.now() + (slow ? 180_000 : 1000 + Math.floor(rng() * 4000)), index });
+          // risk-mix: the schema change's checks are slow, so newer passes overtake it once and later
+          // arrivals meet a holder whose overtake step is spent (the Item 1018d0f8 shape).
+          const slowRisk = profile === 'risk-mix' && index === 1;
+          checks.set(run.id, {
+            due: Date.now() + (slow ? 180_000 : slowRisk ? 40_000 : 1000 + Math.floor(rng() * 4000)),
+            index,
+          });
         }
       }
       const due = active.filter(run => checks.get(run.id).due <= Date.now());
