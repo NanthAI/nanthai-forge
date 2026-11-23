@@ -26,16 +26,23 @@ after the diff, smallest first), `--max-call-usd`, `--max-day-usd` (replaces bot
 
 The reviewer's model family differs from the builder's, so a Claude is never checked by itself:
 
-| Builder | First reviewer | When its daily cap is spent |
-| --- | --- | --- |
-| Claude, or unknown (no `--builder-model`) | OpenAI `gpt-6.2-sol` | Claude: Sonnet 5.5, or Opus 5.5 for a core Lane |
-| GPT or Gemini | Claude: Sonnet 5.5, or Opus 5.5 for a core Lane | OpenAI `gpt-6.2-sol` |
+| Builder                                   | First reviewer                                  | When its daily cap is spent                     |
+| ----------------------------------------- | ----------------------------------------------- | ----------------------------------------------- |
+| Claude, or unknown (no `--builder-model`) | OpenAI `gpt-6.2-sol`                            | Claude: Sonnet 5.5, or Opus 5.5 for a core Lane |
+| GPT or Gemini                             | Claude: Sonnet 5.5, or Opus 5.5 for a core Lane | OpenAI `gpt-6.2-sol`                            |
 
 Opus is for core-path, queue, auth/security and root-cause Lanes. The brief names such a Lane with
 `--tier core`, or the Item carries a line `review-tier: core` (the script reads it from the Item text and
 comments; the flag wins). A core Lane gets the double review below instead of one reviewer. After both
 providers are spent for the day the script refuses and says so: the builder tells the lead on the Item and
 uses a subscription reviewer.
+
+## Findings need a realistic failure path
+
+A finding names input or state that can happen in normal use (an ordinary retry, timeout, concurrent call, user
+or agent action) and what goes wrong. Contrived or near-impossible cases go in a separate `corner_cases` list
+(at most five, one sentence each; `--json` returns it too). Corner cases are never blockers: the builder fixes
+the findings and may skip the corner cases. Merged double reviews keep the split (same file:line shown once).
 
 ## Core Lanes: both providers, one merged list
 
@@ -96,7 +103,15 @@ change them per machine, without touching code, in `~/.forge-review/config.json`
 or `FORGE_REVIEW_CONFIG`):
 
 ```json
-{ "daysPerMonth": 30, "providers": { "openai": { "monthlyCreditUsd": 220, "models": { "standard": "gpt-6.2-sol", "core": "gpt-6.2-sol" } } } }
+{
+  "daysPerMonth": 30,
+  "providers": {
+    "openai": {
+      "monthlyCreditUsd": 220,
+      "models": { "standard": "gpt-6.2-sol", "core": "gpt-6.2-sol" }
+    }
+  }
+}
 ```
 
 A review that would break either cap for its first provider goes to the other one (the output says
@@ -120,11 +135,11 @@ Calibrated on three landed Lanes whose subscription reviews are recorded on thei
 4f1f7984, 1e116492 of d4289a6a, da69bc78 of c30c06ae); ground truth is thin (two of the three recorded
 reviews are plain GO), so treat this as a start and re-run on new Lanes before changing a default.
 
-| Model | $ per review (Lane 1 / 2 / 3) | Average | Prompt tokens, Lane 1 |
-| --- | --- | --- | --- |
-| `gpt-6.2-sol` ($2 in, $0.10 cached, $10 out) | 0.120 / 0.048 / 0.109 | $0.092 | 43.8k |
-| `claude-sonnet-5-5` ($2 / $10) | 0.174 / 0.067 / 0.156 | $0.132 | 63.2k |
-| `claude-opus-5-5` ($4 / $20) | 0.370 / 0.146 / 0.325 | $0.280 | 63.2k |
+| Model                                        | $ per review (Lane 1 / 2 / 3) | Average | Prompt tokens, Lane 1 |
+| -------------------------------------------- | ----------------------------- | ------- | --------------------- |
+| `gpt-6.2-sol` ($2 in, $0.10 cached, $10 out) | 0.120 / 0.048 / 0.109         | $0.092  | 43.8k                 |
+| `claude-sonnet-5-5` ($2 / $10)               | 0.174 / 0.067 / 0.156         | $0.132  | 63.2k                 |
+| `claude-opus-5-5` ($4 / $20)                 | 0.370 / 0.146 / 0.325         | $0.280  | 63.2k                 |
 
 GPT-6.2 Sol is the cheapest: its tokenizer counts about 30% fewer tokens for the same prompt. Findings, with
 the recorded outcome as reference:
@@ -148,18 +163,27 @@ fixing every one. n=3, so no claim beyond "good enough to be the default reviewe
 
 Two landed UI Lanes with a mock and screenshots, and the Lane of the core calibration above:
 
-| Run | Result | $ |
-| --- | --- | --- |
-| UI Lane d59d99cd (Item df1f2d46): mock + dark and light screenshots, Sonnet | 5 mismatches (1 medium, 3 low, 1 nit): header caption, band sub-text, Lane count wrapping, dominant-Item line styling. The caption was confirmed in the built source. It did not report the mock's own-Lane pair row the lead's sign-off removed, because the Item comment says so. The Item records the lead's design sign-off only, no look at the build, so there is nothing to score it against. | 0.047 |
-| UI Lane of Item e317b6ea (lead check on receipt 0c2313e3): mock vs built Lanes overview at 1440 light, Sonnet; the lead's mock check (a)-(i) is on the Item | Found every difference the lead recorded as absent or decision-cited: the progress strip (a), Review for Decide and no Retry (d), the CLI chip (f), the overlap connector (g), the shard bar (h), the explainer banner (i; the screenshot is the first-run state). It also reported 13 more, some on points the lead marked matched ((b) stage headers, (c) row form, (e) the Held group); those are the mock's sketch against the build and need the lead's look. | 0.073 |
-| UI Lane 2171944c (Item fc1831eb): empty-state mock against the populated build | No useful comparison: it said so, and listed 11 chrome differences plus what could not be checked. The pairing was wrong, not the check. | 0.062 |
-| Same Lane, populated mock `picked-demo` against `loose-demo` | Found all six differences the lead's mock check (a)-(f) on the Item lists (headline copy, row identities, row details, leftover project rows, group tick boxes and Hand to an agent, the proposed tag) plus the missing trash row and the page chrome. The screenshots in the Lane's scratch may predate the fix the lead asked for. | 0.066 |
-| Core Lane 92e68572 (Item 4f1f7984), Opus + Sol | Merged list of 4: the cascade orphan at `projectHostedLifecycleCascade.ts:133` came from both providers (one entry); the abandon/reopen hold loss was Opus-only; the missing inbox read and the grant-for-an-older-save text were Sol-only. | 0.318 + 0.111 |
+| Run                                                                                                                                                         | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                             | $             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- |
+| UI Lane d59d99cd (Item df1f2d46): mock + dark and light screenshots, Sonnet                                                                                 | 5 mismatches (1 medium, 3 low, 1 nit): header caption, band sub-text, Lane count wrapping, dominant-Item line styling. The caption was confirmed in the built source. It did not report the mock's own-Lane pair row the lead's sign-off removed, because the Item comment says so. The Item records the lead's design sign-off only, no look at the build, so there is nothing to score it against.                                                               | 0.047         |
+| UI Lane of Item e317b6ea (lead check on receipt 0c2313e3): mock vs built Lanes overview at 1440 light, Sonnet; the lead's mock check (a)-(i) is on the Item | Found every difference the lead recorded as absent or decision-cited: the progress strip (a), Review for Decide and no Retry (d), the CLI chip (f), the overlap connector (g), the shard bar (h), the explainer banner (i; the screenshot is the first-run state). It also reported 13 more, some on points the lead marked matched ((b) stage headers, (c) row form, (e) the Held group); those are the mock's sketch against the build and need the lead's look. | 0.073         |
+| UI Lane 2171944c (Item fc1831eb): empty-state mock against the populated build                                                                              | No useful comparison: it said so, and listed 11 chrome differences plus what could not be checked. The pairing was wrong, not the check.                                                                                                                                                                                                                                                                                                                           | 0.062         |
+| Same Lane, populated mock `picked-demo` against `loose-demo`                                                                                                | Found all six differences the lead's mock check (a)-(f) on the Item lists (headline copy, row identities, row details, leftover project rows, group tick boxes and Hand to an agent, the proposed tag) plus the missing trash row and the page chrome. The screenshots in the Lane's scratch may predate the fix the lead asked for.                                                                                                                               | 0.066         |
+| Core Lane 92e68572 (Item 4f1f7984), Opus + Sol                                                                                                              | Merged list of 4: the cascade orphan at `projectHostedLifecycleCascade.ts:133` came from both providers (one entry); the abandon/reopen hold loss was Opus-only; the missing inbox read and the grant-for-an-older-save text were Sol-only.                                                                                                                                                                                                                        | 0.318 + 0.111 |
 
 So the second provider added three findings the first would not have, and the mock check costs 5 to 7 cents.
 The mock check finds the differences a lead records, plus more; the extras are read against the Item's decisions,
 so the builder lists which it fixes and which it leaves. Total calibration spend about $0.70 on a test log,
 outside the real one.
+
+### Re-run with the realistic-failure-path prompt (2026-11-23)
+
+Lane 92e68572 again (the only one of the three still on this machine; 1e116492 and da69bc78 are gone, so they
+were not re-run), `--tier core`, $0.46: 6 findings (2 high, 2 medium, 2 low) and 3 corner cases. Before, the
+Sol/Opus pair gave the same real set: the cascade orphan, the missing bounded read, the old-head grant and
+the abandon/reopen hold are all still findings. The corner cases moved out were the contrived ones (a reopen
+between cascade apply and a delayed page, a retry on an ended fork row); one of them repeats the old-head
+grant that Sol keeps as a finding, so the split is a judgement, not a filter. Nothing real was dropped.
 
 ## Keys
 

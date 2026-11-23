@@ -13,7 +13,10 @@ const realFetch = globalThis.fetch;
 before(() => (globalThis.fetch = () => assert.fail('a test reached the real network')));
 after(() => (globalThis.fetch = realFetch));
 
-const gpt = { summary: 'GPT view.', findings: [finding('medium', 10, 'Retry repeats the write on timeout')] };
+const gpt = {
+  summary: 'GPT view.',
+  findings: [finding('medium', 10, 'Retry repeats the write on timeout')],
+};
 const claude = {
   summary: 'Claude view.',
   findings: [
@@ -22,7 +25,10 @@ const claude = {
   ],
 };
 const both = (overrides = {}) =>
-  harness({ replies: { openai: openaiOf(gpt), anthropic: anthropicOf(claude) }, ...overrides });
+  harness({
+    replies: { openai: openaiOf(gpt), anthropic: anthropicOf(claude) },
+    ...overrides,
+  });
 
 test('a core Lane sends the same prompt to both providers and merges: the duplicate keeps the higher severity and both sources', async () => {
   const h = both();
@@ -92,7 +98,9 @@ test('if one provider is capped, missing its key or failing, the other alone run
     /Only anthropic reviewed this core Lane: openai did not \(Spent .* daily cap/,
   );
 
-  const nokey = both({ deps: { readKey: s => (s.includes('anthropic') ? '' : SECRET) } });
+  const nokey = both({
+    deps: { readKey: s => (s.includes('anthropic') ? '' : SECRET) },
+  });
   await review(['--lane', nokey.dir, '--tier', 'core', '--json'], nokey.deps);
   const result = JSON.parse(nokey.out[0]);
   assert.match(result.notes[0], /Only openai reviewed.*anthropic did not \(no key\)/);
@@ -121,7 +129,13 @@ test('when neither provider can review, the builder is told to use a subscriptio
   assert.equal(none.sent.length, 0);
   const spent = both();
   mkdirSync(join(spent.dir, 'log'));
-  const row = provider => ({ kind: 'call', id: provider, time: '2026-11-23T01:00:00Z', usd: 9.9, provider });
+  const row = provider => ({
+    kind: 'call',
+    id: provider,
+    time: '2026-11-23T01:00:00Z',
+    usd: 9.9,
+    provider,
+  });
   writeFileSync(
     spent.deps.spendLog,
     `${JSON.stringify(row('openai'))}\n${JSON.stringify(row('anthropic'))}\n`,
@@ -143,7 +157,10 @@ test('a dry run prices both providers and sends nothing', async () => {
 });
 
 test('merging: same file and nearby line with shared words is one finding; other files, far lines or other words are not', () => {
-  const run = (provider, findings) => ({ provider, parsed: { summary: provider, findings } });
+  const run = (provider, findings) => ({
+    provider,
+    parsed: { summary: provider, findings },
+  });
   const base = finding('medium', 20, 'Stale cursor skips the last page');
   const merged = mergeFindings([
     run('openai', [base, finding('low', 5, 'Unrelated naming thing', { file: 'src/b.ts' })]),
@@ -164,7 +181,11 @@ test('merging: same file and nearby line with shared words is one finding; other
 
 test('a provider that cannot be priced is unavailable; the other still reviews and its findings print', async () => {
   const h = both({
-    deps: { localConfig: () => ({ providers: { anthropic: { models: { core: 'claude-new-9' } } } }) },
+    deps: {
+      localConfig: () => ({
+        providers: { anthropic: { models: { core: 'claude-new-9' } } },
+      }),
+    },
   });
   await review(['--lane', h.dir, '--tier', 'core'], h.deps);
   assert.deepEqual(
@@ -194,10 +215,87 @@ test("a merge keeps the other reviewer's account, so a wrong merge never hides a
       }),
     ],
   };
-  const h = harness({ replies: { openai: openaiOf(gptOnly), anthropic: anthropicOf(claudeOnly) } });
+  const h = harness({
+    replies: { openai: openaiOf(gptOnly), anthropic: anthropicOf(claudeOnly) },
+  });
   await review(['--lane', h.dir, '--tier', 'core'], h.deps);
   const text = h.out.join('\n');
   // Whether or not the two are judged the same, the second account is in the report.
   assert.match(text, /priority reset to zero/);
   assert.match(text, /queue entry written twice/);
+});
+
+test('corner cases stay a separate never-blocking list, shown once when both providers say the same note, capped at five', () => {
+  const c = (file, line, note) => ({ file, line, note });
+  const merged = mergeFindings([
+    {
+      provider: 'openai',
+      parsed: {
+        summary: 'a',
+        findings: [],
+        corner_cases: [c('a.ts', 3, 'odd clock')],
+      },
+    },
+    {
+      provider: 'anthropic',
+      parsed: {
+        summary: 'b',
+        findings: [finding('low', 5, 'x')],
+        corner_cases: [c('a.ts', 3, 'odd clock'), c('a.ts', 3, 'clock again'), c('b.ts', 0, 'huge name')],
+      },
+    },
+  ]);
+  assert.equal(merged.findings.length, 1);
+  assert.deepEqual(
+    merged.corner_cases.map(x => x.note),
+    ['odd clock', 'clock again', 'huge name'],
+  );
+});
+
+test('a reply without corner_cases still parses and the report prints the block only when present', async () => {
+  const { parseFindings, formatReport } = await import('../scripts/review-api-lib.mjs');
+  const p = parseFindings(JSON.stringify({ summary: 's', findings: [] }));
+  assert.deepEqual(p.corner_cases, []);
+  const meta = {
+    usage: { input: 1, cacheRead: 0, cacheWrite: 0, output: 1 },
+    provider: 'p',
+    model: 'm',
+    usd: 0,
+    spentTodayUsd: 0,
+  };
+  assert.ok(!formatReport(p, meta).includes('Corner cases'));
+  const q = parseFindings(
+    JSON.stringify({
+      summary: 's',
+      findings: [],
+      corner_cases: [{ file: 'a', line: 2, note: 'n' }],
+    }),
+  );
+  assert.match(formatReport(q, meta), /Corner cases \(not blockers[^\n]*\n {2}- a:2: n/);
+});
+
+test('the merged text report and --json carry corner cases end to end', async () => {
+  const cc = [{ file: 'a.ts', line: 2, note: 'odd clock' }];
+  const h = harness({
+    replies: {
+      openai: openaiOf({ ...gpt, corner_cases: cc }),
+      anthropic: anthropicOf({
+        ...claude,
+        corner_cases: [{ file: 'b.ts', line: 0, note: 'huge name' }],
+      }),
+    },
+  });
+  await review(['--lane', h.dir, '--item', 'x', '--json'], h.deps);
+  assert.deepEqual(
+    JSON.parse(h.out[0]).corner_cases.map(c => c.note),
+    ['odd clock', 'huge name'],
+  );
+  const h2 = harness({
+    replies: {
+      openai: openaiOf({ ...gpt, corner_cases: cc }),
+      anthropic: anthropicOf(claude),
+    },
+  });
+  await review(['--lane', h2.dir, '--tier', 'core'], h2.deps);
+  assert.match(h2.out[0], /Corner cases \(not blockers[^\n]*\n {2}- a\.ts:2: odd clock/);
 });

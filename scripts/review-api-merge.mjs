@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Double review for core Lanes (Item 3bd3eb0f): the findings of two providers, merged. Pure; no I/O.
-import { SEVERITY_ORDER as SEVERITIES } from './review-api-lib.mjs';
+import { SEVERITY_ORDER as SEVERITIES, formatCornerCases } from './review-api-lib.mjs';
 
 const words = f =>
   new Set(
@@ -54,11 +54,22 @@ export function mergeFindings(runs) {
     }
   merged.sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity));
   const summary = runs.map(run => `${run.provider}: ${run.parsed.summary}`).join(' ');
-  return { summary, findings: merged };
+  // Corner cases stay a separate, never-blocking list, at most five; an identical note shows once and a
+  // different note at the same spot stays.
+  const seen = new Set();
+  const corner_cases = [];
+  for (const run of runs)
+    for (const c of run.parsed.corner_cases ?? []) {
+      const key = `${c.file}:${c.line}:${c.note.trim().toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      corner_cases.push({ ...c, source: run.provider });
+    }
+  return { summary, findings: merged, corner_cases: corner_cases.slice(0, 5) };
 }
 
 /** The merged report: findings with who found each, then one line per provider (answered or failed). */
-export function formatMerged({ summary, findings }, runs, notes) {
+export function formatMerged({ summary, findings, corner_cases }, runs, notes) {
   const lines = [summary, ''];
   if (!findings.length) lines.push('No findings.');
   for (const f of findings)
@@ -69,6 +80,7 @@ export function formatMerged({ summary, findings }, runs, notes) {
       ...(f.also ?? []).map(o => `    ${o.provider} said (${o.severity}): ${o.title}. ${o.failure_scenario}`),
       '',
     );
+  lines.push(...formatCornerCases(corner_cases));
   for (const run of runs) {
     if (run.error) {
       lines.push(`${run.provider}/${run.model}: did not review (${run.error}).`);
