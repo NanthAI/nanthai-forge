@@ -117,6 +117,10 @@ export const contractGuardTest = test =>
   CONTRACT_GUARD_NAME.test(test.slice(test.lastIndexOf('/') + 1).split('.')[0]);
 const REGISTRATION_PIN = /(?:^|[-_.])(?:registrations?|inventory)(?:[-_.]|$)/i;
 const COST_PIN = /(?:^|[-_.])(?:costs?|dbio|budgets?)(?:[-_.]|$)/i;
+/** 2 for a registration or inventory pin, 1 for a cost or budget pin, else 0: the order a backend
+ * change's pins start in, here and in the landing check's pins-first step (src/landing-pins-first.ts). */
+export const contractPinWeight = test =>
+  REGISTRATION_PIN.test(moduleName(test)) ? 2 : COST_PIN.test(moduleName(test)) ? 1 : 0;
 /** Seconds of contract pins one plan promotes into the protected tier (Item 13ea93bf, friction baaec084). */
 export const CONTRACT_PIN_SECONDS = 20;
 const testFile = path => /^tests\/[^/]+\.test\.mjs$/.test(path);
@@ -402,8 +406,7 @@ export function selectPreflightTests(input, graphCache = {}) {
     // breaking an import: those pins go first (registrations, then cost and budget pins), then the
     // tests most about the changed modules (a recent failure, name affinity, mentions), then a stable hash.
     const backend = behavioural.some(path => path.startsWith('convex/'));
-    const weight = test =>
-      !backend ? 0 : REGISTRATION_PIN.test(moduleName(test)) ? 2 : COST_PIN.test(moduleName(test)) ? 1 : 0;
+    const weight = test => (backend ? contractPinWeight(test) : 0);
     const pinnable = later
       .flatMap(item => item.tests)
       .filter(contractGuardTest)

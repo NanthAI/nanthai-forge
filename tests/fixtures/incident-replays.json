@@ -13834,6 +13834,22 @@
         "src/landing-submission-state.ts"
       ],
       "test": "incident 5e3c3a3c: a stalled head alerts once with its queue; the follower behind it stays quiet"
+    },
+    {
+      "incident": "92396235",
+      "what": "A Lane green on its own base failed the landing check on the composed Candidate in table-registrations and project-purge-inventory (a peer added the cliCredentials table), found only after every shard ran (9.8 min, 89.4 runner-minutes)",
+      "file": "tests/hosted-actions-job.test.mjs",
+      "paths": [
+        "src/first-check-risk.ts",
+        "src/hosted-actions-job-client.ts",
+        "src/hosted-actions-job-plan.ts",
+        "src/hosted-check.ts",
+        "src/landing-pins-first.ts",
+        "src/package-placement-pin.ts",
+        "src/package-placement.ts",
+        "src/scoped-recheck-policy.ts"
+      ],
+      "test": "incident 92396235: a composition failure in the registration pins ends the landing check in the planning job; every job reports, the carrier names the pins, the rest run nothing"
     }
   ]
 }

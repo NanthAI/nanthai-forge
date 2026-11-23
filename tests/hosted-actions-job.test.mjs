@@ -39,7 +39,12 @@ import {
 import { prepareActionsJob, actionsGateSelection } from '../dist/hosted-actions-job-plan.js';
 import { browserSelection } from '../scripts/browser-test-policy.mjs';
 import { REGISTRY } from '../scripts/core-queue-paths.mjs';
-import { executeActionsJob, isolateCandidates, useBrowserInstaller } from '../dist/hosted-actions-job-run.js';
+import {
+  executeActionsJob,
+  isolateCandidates,
+  runPinsFirst,
+  useBrowserInstaller,
+} from '../dist/hosted-actions-job-run.js';
 import { directRequestSchema } from '../dist/hosted-actions-direct.js';
 import { savePin } from '../dist/hosted-save.js';
 import { digest } from '../dist/hash.js';
@@ -4759,4 +4764,219 @@ test('Issue 5d689e6e: legacy large-binary recipes overlap bounded leaf reads wit
   assert([...fetched.values()].every(count => count === 1));
   assert.equal(bytes, 70 * 256 * 1024);
   assert(peak >= 16 && peak <= 48, `large recipes must overlap leaf reads; peak was ${peak}`);
+});
+
+// Item 13ea93bf (lead 2026-11-23 19:20Z, option b): the planning job runs the check's cheap contract
+// pins on the composed Candidate first. Passing pins cost no Forge call; a failing pin reports every
+// planned job (the carrier with the pin's report, the rest not run, no setup, no project code).
+async function pinsFirstJob(
+  t,
+  durations = {
+    'tests/table-registrations.test.mjs': 900,
+    'tests/landing-cost-guard.test.mjs': 6_000,
+    'tests/slow-registrations.test.mjs': 30_000,
+    'tests/plain.test.mjs': 4_000,
+  },
+) {
+  const files = Object.fromEntries(
+    Object.entries(durations).map(([file, durationMs]) => [file, { durationMs, updatedAt: '2026-01-01' }]),
+  );
+  const s = fixture(t, { timingHistory: { version: 1, files, runs: [] } });
+  s.run.request.expectedHead = s.state([
+    s.entry('package-lock.json', '{}'),
+    ...Object.keys(durations).map(file => s.entry(file, '// synthetic')),
+  ]).sha256;
+  const candidate = join(s.directory, 'candidate');
+  const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  const path = join(s.directory, 'plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  // The synthetic pins' report markers must not reach this file's own runner as its reports.
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (chunk, ...rest) =>
+    String(chunk).includes('__FORGE_TESTS__') ? true : write(chunk, ...rest),
+  );
+  return { s, candidate, prepared, path };
+}
+const pinMarker = (file, passed) =>
+  `console.log('__FORGE_TESTS__'+${JSON.stringify(
+    JSON.stringify({
+      file,
+      complete: true,
+      durationMs: 5,
+      ...(passed
+        ? {}
+        : {
+            failed: true,
+            firstError: 'Add these project-owned tables to convex/projectPurgeInventory.ts: cliCredentials',
+          }),
+      results: [{ name: 'registrations', passed }],
+    }),
+  )});`;
+
+test('Item 13ea93bf: the plan picks cheap contract pins by recorded runner time; passing pins make no Forge call', async t => {
+  const { s, candidate, prepared, path } = await pinsFirstJob(t);
+  // Registration pin first, then the cost pin; the 30 s registration pin and the plain test never join.
+  assert.deepEqual(prepared.pinsFirst.files, [
+    'tests/table-registrations.test.mjs',
+    'tests/landing-cost-guard.test.mjs',
+  ]);
+  assert.equal(prepared.pinsFirst.plannedMs, 6_900);
+  assert.equal(
+    prepared.recipe.groups[prepared.pinsFirst.carrier].includes(prepared.pinsFirst.files[0]),
+    true,
+  );
+  const before = s.calls.length;
+  const program =
+    `if (process.env.FORGE_ACTIONS_POOL_PART !== 'pins') process.exit(9);` +
+    `const pins = JSON.parse(process.env.FORGE_ACTIONS_PINS);` +
+    `if (pins.join() !== ${JSON.stringify(prepared.pinsFirst.files.join())}) process.exit(8);` +
+    pinMarker('tests/table-registrations.test.mjs', true);
+  const code = await executeActionsJob(
+    s.client,
+    candidate,
+    path,
+    String(prepared.pinsFirst.carrier),
+    [process.execPath, '--eval', program],
+    { pins: prepared.pinsFirst.files },
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(s.calls.slice(before), [], 'passing pins: no preflight, no result, no Convex call');
+});
+
+test('Item 13ea93bf: an install or build failure before any pin verdict is not a pin failure; the shards run as usual', async t => {
+  const { s, candidate, prepared, path } = await pinsFirstJob(t);
+  const before = s.calls.length;
+  const code = await runPinsFirst(
+    s.client,
+    candidate,
+    path,
+    { ...prepared.pinsFirst, matrix: prepared.matrix },
+    (client, directory, plan, shard, _command, options) =>
+      executeActionsJob(
+        client,
+        directory,
+        plan,
+        shard,
+        [process.execPath, '--eval', `console.error('npm ERR! network'); process.exitCode = 1;`],
+        options,
+      ),
+  );
+  assert.equal(code, 0, 'the planning job passes, so GitHub starts the shards');
+  assert.deepEqual(s.calls.slice(before), [], 'no result is reported for the pins');
+});
+
+test('Item 13ea93bf: a pin that reports failed stops the check even when the runner exits 0; a pins-step error fails open', async t => {
+  const { s, candidate, prepared, path } = await pinsFirstJob(t);
+  const pins = { ...prepared.pinsFirst, matrix: prepared.matrix };
+  const code = await runPinsFirst(
+    s.client,
+    candidate,
+    path,
+    pins,
+    (client, directory, plan, shard, _command, options) =>
+      executeActionsJob(
+        client,
+        directory,
+        plan,
+        shard,
+        [
+          process.execPath,
+          '--eval',
+          options.pins ? pinMarker('tests/table-registrations.test.mjs', false) : '',
+        ],
+        options,
+      ),
+  );
+  assert.equal(code, 1, 'the planning job fails, so no shard starts');
+  const results = s.calls.filter(call => call.kind === 'result').map(call => call.result);
+  assert.equal(results.length, prepared.matrix.length);
+  assert(results.every(result => result.exitCode === 1));
+  const thrown = await runPinsFirst(s.client, candidate, path, pins, async () => {
+    throw Object.assign(new Error('delivery'), { code: 'R2_VERIFY_FAILED' });
+  });
+  assert.equal(thrown, 0, 'an error in the pins step lets the shards run and report');
+});
+
+// Incident 92396235 (submission 92396235, 2026-11-23, 100-landing window of comment 9bdd01f0): a peer
+// landed the cliCredentials table; this Lane, green on its own base, failed the landing check on
+// the composed Candidate in table-registrations and project-purge-inventory after every shard ran
+// (9.8 min, 89.4 runner-minutes). Recorded runner times below are that check's own.
+test('incident 92396235: a composition failure in the registration pins ends the landing check in the planning job; every job reports, the carrier names the pins, the rest run nothing', async t => {
+  const { s, candidate, prepared, path } = await pinsFirstJob(t, {
+    'tests/table-registrations.test.mjs': 1_251,
+    'tests/project-purge-inventory.test.mjs': 2_793,
+    'tests/landing-cost-guard.test.mjs': 22_319,
+    'tests/secrets-hostile-server.test.mjs': 2_182,
+    'tests/hosted-agent-help.test.mjs': 705,
+  });
+  // Both failing pins are picked; the 22 s cost guard is over the 10 s bar and waits for its shard.
+  assert.deepEqual(prepared.pinsFirst.files, [
+    'tests/table-registrations.test.mjs',
+    'tests/project-purge-inventory.test.mjs',
+  ]);
+  assert.equal(prepared.pinsFirst.plannedMs, 4_044);
+  const carrier = String(prepared.pinsFirst.carrier);
+  const marker = join(s.directory, 'project-code-ran');
+  const sourceBefore = s.calls.filter(call => call.kind === 'source').length;
+  const started = performance.now();
+  // The real supervisor under runPinsFirst; only the project command is synthetic: the pins fail,
+  // and any stopped job that ran project code would leave the marker.
+  const code = await runPinsFirst(
+    s.client,
+    candidate,
+    path,
+    { ...prepared.pinsFirst, matrix: prepared.matrix },
+    (client, directory, plan, shard, _command, options) =>
+      executeActionsJob(
+        client,
+        directory,
+        plan,
+        shard,
+        options.pins
+          ? [
+              process.execPath,
+              '--eval',
+              `${pinMarker('tests/table-registrations.test.mjs', false)} ${pinMarker('tests/project-purge-inventory.test.mjs', false)} process.exitCode = 1;`,
+            ]
+          : [process.execPath, '--eval', `require('node:fs').writeFileSync(${JSON.stringify(marker)}, '1')`],
+        options,
+      ),
+  );
+  assert.equal(code, 1);
+  const elapsedMs = performance.now() - started;
+  assert.equal(existsSync(marker), false, 'a stopped job runs no project code');
+  assert.equal(s.calls.filter(call => call.kind === 'source').length, sourceBefore, 'and no source setup');
+  const results = s.calls.filter(call => call.kind === 'result').map(call => call.result);
+  assert.deepEqual(
+    results
+      .map(result => String(result.index === prepared.recipe.groups.length ? 'static' : result.index))
+      .sort(),
+    [...prepared.matrix].sort(),
+    'one result per planned job, so the check settles failed from results without waiting for shards',
+  );
+  assert(results.every(result => result.exitCode === 1));
+  const [carried] = results;
+  assert.equal(carried.contractReports['tests/table-registrations.test.mjs'].failed, true);
+  assert.equal(carried.contractReports['tests/project-purge-inventory.test.mjs'].failed, true);
+  assert.deepEqual(
+    carried.testFiles.failed.map(item => item.file).sort(),
+    ['tests/project-purge-inventory.test.mjs', 'tests/table-registrations.test.mjs'],
+    'the same failing-file cause the full check reported',
+  );
+  assert.match(
+    carried.log.failureSummary,
+    /Pins first: 2 contract pins failed on the composed Candidate, so this check stops here and the rest of the suite did not run on it/,
+  );
+  for (const result of results.slice(1)) {
+    assert.deepEqual(Object.keys(result.contractReports ?? {}), [], 'a stopped job reports no test file');
+    // A stopped job ran nothing: its window starts when it reports, not at the pins step's start.
+    assert(Date.parse(result.execution.startedAt) >= Date.parse(carried.execution.endedAt) - 1);
+    assert.match(
+      result.log.failureSummary,
+      /Not run: the contract pins failed first on the composed Candidate \(their report is on shard \d+\)/,
+    );
+  }
+  // One preflight before the carrier reports and one per stopped job: what the shards spend today.
+  assert.equal(s.calls.filter(call => call.kind === 'preflight').length, prepared.matrix.length);
+  t.diagnostic(JSON.stringify({ jobs: prepared.matrix.length, elapsedMs: Math.round(elapsedMs) }));
 });

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // A Forge check job runs the Candidate's own code in one step: the check step (`forge-check.mjs`,
-// or the hosted supervisor's `hosted-actions-job.mjs run`). Everything the job attests or caches
+// or the hosted supervisor's `hosted-actions-job.mjs run`, and its pins-first `pins`). Everything the job attests or caches
 // must come from steps that ran no Candidate code (Issue 432164bf), so in such a job:
 // - the check step is the job's last step and has no `id` (no later step reads what it wrote);
 // - the check step's env names no secret and no workflow token;
@@ -11,7 +11,7 @@
 // - in a check workflow, every cache restore treats a stalled download as a miss (SEGMENT_DOWNLOAD_TIMEOUT_MINS) and
 //   every `npm ci` has a timeout, so a slow cache or registry fails fast (friction d99fcf3a);
 // - no step plans and runs in one step (the removed fold).
-const checkStep = /\brun:\s*node\s+(?:\S*\/)?(?:forge-check\.mjs|hosted-actions-job\.mjs\s+run)\b/;
+const checkStep = /\brun:\s*node\s+(?:\S*\/)?(?:forge-check\.mjs|hosted-actions-job\.mjs\s+(?:run|pins))\b/;
 const defaultBranch = "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)";
 
 /** Jobs of a workflow text as `{ name, line, steps: [{ line, text }] }` (indentation-based). */

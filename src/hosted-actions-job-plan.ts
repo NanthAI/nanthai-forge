@@ -31,6 +31,7 @@ import {
   actionsToolchainsCapability,
 } from './hosted-actions-capabilities.js';
 import { planPool, poolUnits } from '../scripts/shard-pool.mjs';
+import { landingPinsFirst } from './landing-pins-first.js';
 import { poolClaimsSchema, type PoolClaim } from './hosted-actions-pool.js';
 import { invariant } from './errors.js';
 import { materializeActionsSource } from './hosted-actions-job-source.js';
@@ -357,6 +358,13 @@ export async function prepareActionsJob(
   }
   if (standard && groups.length >= 2)
     console.log(pool ? `Shard pool: on; ${poolUnits(groups, pool).length} units` : 'Shard pool: off');
+  // Pins first (src/landing-pins-first.ts): Forge's own suite runs its cheap contract pins in this
+  // job before any shard starts. A plan refusal already fails every job, so it has none.
+  const pinsFirst = standard && !planError ? landingPinsFirst(groups, client.timings) : null;
+  if (pinsFirst)
+    console.log(
+      `Pins first: ${pinsFirst.files.length} contract pin${pinsFirst.files.length === 1 ? '' : 's'}, ${(pinsFirst.plannedMs / 1000).toFixed(1)} s recorded; the shards start after they pass`,
+    );
   const declaration = actionsDeclaration(run.check);
   // A server that cannot pin the declaration would plan the check without its toolchains.
   invariant(
@@ -454,6 +462,7 @@ export async function prepareActionsJob(
       os: process.env.RUNNER_OS,
       arch: process.env.RUNNER_ARCH,
     }),
+    pinsFirst,
     browserShard: browser?.shard ?? '',
     browser: browser ?? {},
     matrix: groups.length === 0 ? [] : [...groups.map((_, index) => String(index)), 'static'],

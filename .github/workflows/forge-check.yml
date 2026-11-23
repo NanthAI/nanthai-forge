@@ -210,8 +210,9 @@ jobs:
           path: |
             ${{ runner.temp }}/candidate.tar
             ${{ runner.temp }}/control-dist.tar
-      # Forge's own suite installs from the npm download cache in the full control entry.
-      - if: steps.plan.outputs.single_shard != '' && steps.plan.outputs.npm_cache == 'true' && steps.deps.outcome != 'success'
+      # Forge's own suite installs from the npm download cache in the full control entry (the
+      # single-shard check and the pins-first step below).
+      - if: (steps.plan.outputs.single_shard != '' || steps.plan.outputs.pins_first == 'true') && steps.plan.outputs.npm_cache == 'true' && steps.deps.outcome != 'success'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
@@ -321,6 +322,18 @@ jobs:
           FORGE_RUN_ID: ${{ inputs.runId }}
           FORGE_CANDIDATE: ${{ runner.temp }}/candidate
           FORGE_ACTIONS_SHARD: ${{ steps.plan.outputs.single_shard }}
+      # Pins first (src/landing-pins-first.ts): the check's cheap contract pins on the composed
+      # Candidate before any shard starts. A failing pin reports every planned job and fails this
+      # job, so the shards never start; passing pins make no Forge call. Runs Candidate code, so it
+      # is a check step: last in the job, after the artifact upload (scripts/check-candidate-steps.mjs).
+      - if: steps.plan.outputs.pins_first == 'true'
+        timeout-minutes: 15
+        run: node control/scripts/hosted-actions-job.mjs pins
+        env:
+          FORGE_CONVEX_SITE: ${{ inputs.deployment }}
+          FORGE_PROJECT_ID: ${{ inputs.projectId }}
+          FORGE_RUN_ID: ${{ inputs.runId }}
+          FORGE_CANDIDATE: ${{ runner.temp }}/candidate
   hosted-check:
     if: ${{ needs.hosted-plan.outputs.matrix != '[]' }}
     needs: hosted-plan

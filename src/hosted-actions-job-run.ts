@@ -48,6 +48,26 @@ import {
   runDefinitionTrial,
 } from './check-definition-trial.js';
 import { STANDARD_CHECK_ENTRY } from './standard-check.js';
+import { LANDING_PINS_ENV, pinsFirstNotRun } from './landing-pins-first.js';
+/** The pins-first gate (src/landing-pins-first.ts) and the shards it stopped. */
+export type PinsFirstOptions = {
+  /** Run only these pinned contract pins, report nothing when they pass. */
+  pins?: string[];
+  /** Report this shard failed with this line; no setup, no project code. */
+  notRun?: string;
+};
+/** The run the planning step just received: the gate starts no session and no preflight query. */
+function pinsGateRun(client: ActionsJobClient) {
+  const run = client.run;
+  invariant(run, 'RUNNER_UNAVAILABLE', 'Pins first needs the planned run.');
+  invariant(
+    !run.cancelRequested && run.status !== 'cancelled',
+    'CHECK_CANCELLED',
+    'The check was cancelled.',
+  );
+  client.holdRunnerTokens();
+  return run;
+}
 /** A failing command that names the pinned plan refusal's code and message. */
 export function planErrorCommand(executable: string, error: { code: string; message: string }) {
   return [
@@ -138,9 +158,14 @@ async function executeActiveActionsJob(
   planPath: string,
   shard: string,
   commandOverride?: string[],
+  options: PinsFirstOptions = {},
 ) {
+  const gate = options.pins;
   // Runner clock from supervisor process start; earlier workflow steps are not included.
-  const startedAt = new Date(Date.now() - process.uptime() * 1000).toISOString();
+  // A job the failed pins stopped shares the pins step's process but ran nothing: its window starts now.
+  const startedAt = new Date(
+    options.notRun ? Date.now() : Date.now() - process.uptime() * 1000,
+  ).toISOString();
   // Fixed-cost phases around the command (Issue ca8a2ca4), printed once at the end: durations only.
   const phases: Record<string, number> = {};
   let mark = performance.now();
@@ -149,8 +174,10 @@ async function executeActiveActionsJob(
     phases[phase] = Math.round(now - mark);
     mark = now;
   };
-  // The plan artifact is a source pin, never a live execution permission.
-  const run = await client.preflight();
+  // The plan artifact is a source pin, never a live execution permission. The pins-first gate runs
+  // in the planning job right after the plan call, so it reuses that run and makes no Forge call
+  // unless a pin fails; it rechecks authority before it reports (below).
+  const run = gate ? pinsGateRun(client) : await client.preflight();
   // Nothing after this point reads the runner's job tokens from the environment (Issue 3b67363d).
   client.holdRunnerTokens();
   lap('preflightMs');
@@ -178,10 +205,13 @@ async function executeActiveActionsJob(
     packages: ReturnType<typeof writeCheckPackages> = null;
   // A plan refusal the Candidate decided fails every job at once with its code; no setup or project code runs.
   const planError = recipe.selection?.planError as { code: string; message: string } | undefined;
+  // A shard the failed pins stopped: like a plan refusal, no setup and no project code.
+  const notRun = options.notRun;
   // No Candidate user and no owner opt-in: the check fails here, before any source or project code.
   const refused = requested ? sharedIsolationRefusal(isolation, run.configuration) : undefined;
   try {
-    sourceCache = planError || refused ? undefined : await setupActionsJob(run, directory, planPath);
+    sourceCache =
+      planError || refused || notRun ? undefined : await setupActionsJob(run, directory, planPath);
     invariant(
       savePin(JSON.parse(readFileSync(planPath, 'utf8'))).sha256 === run.plan.manifest.sha256,
       'EVIDENCE_CHANGED',
@@ -208,7 +238,7 @@ async function executeActiveActionsJob(
       }
     // A configured command's Intent contract union runs once: in its static job, beside its shards,
     // with the project's own test runner, read from the verified workspace.
-    if (!recipe.standard && !commandOverride && shard === 'static') {
+    if (!recipe.standard && !commandOverride && !notRun && shard === 'static') {
       const unionTests = semanticTests(run.semanticPlan);
       command = semanticCheckCommand(
         command,
@@ -229,8 +259,12 @@ async function executeActiveActionsJob(
     ];
   }
   // A check-definition change's trial job reads the verified Candidate's entry as data, before its code runs.
-  const trialJob = definitionTrialShard(recipe) === index;
+  const trialJob = !gate && definitionTrialShard(recipe) === index;
   const trialDeclared = trialJob && !setupFailed && declaresDefinitionTrial(directory);
+  if (notRun) {
+    setupFailed = true;
+    command = [process.execPath, '--eval', `console.error(${JSON.stringify(notRun)}); process.exitCode = 1;`];
+  }
   // A secret the plan step found fails the static job before project code runs.
   const secretScan = recipe.selection?.secretScan as
     | Pick<SecretScanResult, 'findings' | 'more' | 'selfAllowed'>
@@ -329,6 +363,7 @@ async function executeActiveActionsJob(
       FORGE_ACTIONS_PLAN: planPath,
       FORGE_ACTIONS_SHARD: shard,
       ...(part ? { FORGE_ACTIONS_POOL_PART: part } : {}),
+      ...(part === 'pins' && gate ? { [LANDING_PINS_ENV]: JSON.stringify(gate) } : {}),
       ...(packages ? { FORGE_CHECK_PACKAGES: packages.path } : {}),
       ...(packages?.run ? { FORGE_CHECK_PACKAGES_RUN: packages.run } : {}),
       ...(trial ? { [DEFINITION_TRIAL_ENV]: '1' } : { [junitDirEnv]: junit.directory }),
@@ -363,7 +398,7 @@ async function executeActiveActionsJob(
   };
   // Shard pool (scripts/shard-pool.mjs): run the kept front, then claim units from the pool.
   const units =
-    recipe.pool && recipe.standard && shard !== 'static' && !setupFailed
+    recipe.pool && recipe.standard && shard !== 'static' && !setupFailed && !gate
       ? poolUnits(recipe.groups, recipe.pool)
       : null;
   const note = (line: string) => {
@@ -377,14 +412,19 @@ async function executeActiveActionsJob(
   // Browser setup (Item 687d1eda): the workflow restores or installs the pinned Chromium before this
   // job. If it is still missing here, the cause is setup, not the Candidate: install it once.
   const browserShard = Boolean(
-    !planError && recipe.standard && recipe.selection?.browser && recipe.groups[index]?.some(isBrowserTest),
+    !planError &&
+    !gate &&
+    !notRun &&
+    recipe.standard &&
+    recipe.selection?.browser &&
+    recipe.groups[index]?.some(isBrowserTest),
   );
   const browserCache = process.env.PLAYWRIGHT_BROWSERS_PATH;
   const setupRetry =
     browserShard && !setupFailed ? await retryBrowserSetup(directory, browserCache, note) : null;
   lap('setupMs');
   try {
-    exitCode = await spawnPart(units ? 'kept' : undefined);
+    exitCode = await spawnPart(units ? 'kept' : gate ? 'pins' : undefined);
     if (units) {
       // Kept files that never started (install or build failed) mean no unit can run here either.
       if (exitCode !== 0 && !Object.keys(reports.reports).length)
@@ -449,6 +489,26 @@ async function executeActiveActionsJob(
     packages?.remove();
   }
   lap('commandMs');
+  if (gate) {
+    // Passing pins report nothing: the shards run them again as part of their groups. Only a pin's
+    // own failed report stops the check; an install, build or runner failure before any pin verdict
+    // is not the pins' cause, so the shards run as usual and report their own.
+    const failedPins = gate.filter(file => reports.reports[file]?.failed);
+    if (!failedPins.length) {
+      console.log(
+        exitCode
+          ? `Pins first: no pin failed (exit ${exitCode} before a pin verdict); the shards run as usual.`
+          : `Pins first: passed; phases ${JSON.stringify(phases)}`,
+      );
+      return 0;
+    }
+    // A failed pin fails the carrier even if the runner exited 0, so the check stops here.
+    exitCode ||= 1;
+    note(
+      `Pins first: ${failedPins.length} contract pin${failedPins.length === 1 ? '' : 's'} failed on the composed Candidate, so this check stops here and the rest of the suite did not run on it; other files may fail too (Item 13ea93bf).`,
+    );
+    await client.preflight();
+  }
   tail = Buffer.concat([tail, redactor.write(Buffer.alloc(0), true)]).subarray(-directLogBytes);
   const log = tail.length
     ? {
@@ -629,6 +689,35 @@ async function executeActiveActionsJob(
   lap('reportMs');
   console.log(`run: phases ${JSON.stringify(phases)}`);
   return exitCode;
+}
+
+/** The planning job's pins step (scripts/hosted-actions-job.mjs pins). Passing pins return 0 with no
+ * Forge call. A failing pin has reported its carrier shard; every other planned job then reports
+ * not run, so the check settles failed from results at once, and the non-zero exit fails the
+ * planning job so GitHub starts no shard. */
+export async function runPinsFirst(
+  client: ActionsJobClient,
+  directory: string,
+  planPath: string,
+  pins: { files: string[]; carrier: number; matrix: string[] },
+  execute: typeof executeActionsJob = executeActionsJob,
+) {
+  const carrier = String(pins.carrier);
+  let code: number;
+  try {
+    code = await execute(client, directory, planPath, carrier, undefined, { pins: pins.files });
+  } catch (error) {
+    // Fail open: a pins-step error before or while reporting the carrier must not remove the check's
+    // verdict; the shards run and report as usual (a carrier already sent is one more failed result).
+    console.log(
+      `Pins first: the step failed (${(error as { code?: string })?.code ?? 'error'}); the shards run as usual.`,
+    );
+    return 0;
+  }
+  if (!code) return 0;
+  for (const shard of pins.matrix.filter(shard => shard !== carrier))
+    await execute(client, directory, planPath, shard, undefined, { notRun: pinsFirstNotRun(pins.carrier) });
+  return code;
 }
 
 export async function executeActionsJob(...args: Parameters<typeof executeActiveActionsJob>) {

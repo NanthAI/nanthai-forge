@@ -1171,6 +1171,46 @@ runner's tail. The static LPT groups stay the plan of record; the pool only deci
   +1.3 (-0.3 to +2.4) per check ([perf claims](../agents/perf-claims.md)). The pool is the one path;
   the A/B switch is deleted.
 
+### Pins first
+
+About a quarter of failed landing checks were compositions: a Lane that passed preflight on its own
+base broke a contract pin (a table registration, a purge inventory, a reply contract) once composed
+with what landed before it, and the check found it only after every shard ran (incident 92396235:
+9.8 min, 89.4 runner-minutes). Forge's own suite now runs its cheap contract pins on the composed
+Candidate first (Item 13ea93bf, `src/landing-pins-first.ts`).
+
+- **Which files.** Planned test files named for a budget, cost, registration, inventory, tool-list or
+  contract guard (the preflight contract-pin rule, `contractGuardTest`), not browser tests, whose
+  recorded runner time is at most 10 s. A file with no recorded time never joins. Registration and
+  inventory pins first, then cost and budget pins, then the rest, cheapest first, while their recorded
+  seconds fit 20 s. The plan logs `Pins first: N contract pins, S s recorded`.
+- **Where.** The last step of `hosted-plan`, after the Candidate artifact upload and before any shard:
+  `hosted-actions-job.mjs pins`. It is a check step (it runs Candidate code), so nothing follows it in
+  the job ([workflow rules](#what-actions-evidence-attests), `scripts/check-candidate-steps.mjs`). The executor's `pins` part installs, builds and
+  runs only those files, and accepts only files of the pinned plan.
+- **Passing pins** make no Forge call and report nothing; the shards start as before and run the pins
+  again as part of their groups. Added wall time per check, from the measured phase lines: cached
+  install (about 3 s) and build (about 6 s) plus the pins' recorded seconds (at most 20 s; the two
+  registration pins of incident 92396235 are 4 s). The gate reuses the run the plan step just received
+  instead of a live preflight query, so a check cancelled during the artifact upload can still run its
+  pins (at most the step above) before its shards stop at their own preflight.
+- **A failing pin** (a pin file's own failed report) ends the check: the supervisor rechecks the run
+  (one preflight query), reports the carrier shard (the group of the first pin) with the pins' reports,
+  and reports every other planned job not run (no setup, no project code, an execution window that
+  starts when it reports; the line names the carrier). The check settles failed from those results
+  with the same failing-file cause as a full run, and the step fails `hosted-plan`, so GitHub starts no
+  shard. The carrier's line says the rest of the suite did not run, so other files may still fail.
+  Runner time of such a check: the planning job (p50 30 s) plus the pins step. Convex calls on that
+  path are what the shards spend today (one preflight and one result per job); none on a passing check.
+- **An install, build or runner failure** before any pin verdict is not the pins' cause: the step
+  passes, reports nothing, and the shards run and report their own cause.
+- **Bounds.** Each pin has a 60 s per-file timeout (a hung pin reports as a failed file) inside the
+  step's 15 minutes. Any error in the pins step fails open: the step passes and the shards run as usual.
+  A pin that reports failed fails the carrier even if the runner exited 0. A check the pins stopped
+  skips the optional `hosted-pack` refresh and `hosted-proof`; the next check refreshes the pack.
+- **Other checks.** A configured command runs its own entry, which cannot run single files, so it has
+  no pins step.
+
 When the pinned recipe has exactly one execution job (no test groups plus the
 static execution), that execution runs in `hosted-plan` after planning. This includes
 opaque configured commands and standard docs-only checks. It uses the same persisted

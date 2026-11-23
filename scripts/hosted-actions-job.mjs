@@ -4,6 +4,7 @@ import { writeFileSync, appendFileSync, readFileSync, existsSync } from 'node:fs
 import { resolve } from 'node:path';
 import { writeActionsRunBundle, readActionsRunBundle } from '../dist/hosted-actions-job-bundle.js';
 import { actionsCapacityFile, parseActionsCapacity } from '../dist/hosted-actions-capacity.js';
+import { landingPinsFile } from '../dist/landing-pins-first.js';
 const capacityPath = resolve(process.env.RUNNER_TEMP ?? '.', actionsCapacityFile);
 /** The runner queue read: the one step that holds the GitHub token, so no step that plans or
  * runs project code ever does. GitHub-hosted only; anything else observes nothing. */
@@ -73,12 +74,33 @@ try {
         `npm_cache=${npmCache}\n` +
         `browser=${JSON.stringify(result.browser)}\n` +
         `browser_shard=${result.browserShard}\n` +
+        `pins_first=${Boolean(result.pinsFirst)}\n` +
         (result.proof ? 'proof=true\n' : ''),
     );
+    // Pins first (src/landing-pins-first.ts): the pins step reads this, never the Candidate.
+    if (result.pinsFirst)
+      writeFileSync(
+        resolve(process.env.RUNNER_TEMP, landingPinsFile),
+        JSON.stringify({ ...result.pinsFirst, matrix: result.matrix }),
+      );
     // Keep source refresh out of the plan/artifact dependency path.
     writeFileSync(
       resolve(process.env.RUNNER_TEMP, 'forge-pack-refresh.json'),
       JSON.stringify(result.packRefresh),
+    );
+  } else if (process.argv[2] === 'pins') {
+    // Pins first (src/landing-pins-first.ts): in the planning job, after the artifact upload and
+    // before any shard. Passing pins make no Forge call; failing pins report every planned job
+    // (the carrier with the pins' reports, the rest not run) and fail this job, so no shard starts.
+    restoreRun();
+    const { runPinsFirst, isolateCandidates } = await import('../dist/hosted-actions-job-run.js');
+    const pins = JSON.parse(readFileSync(resolve(process.env.RUNNER_TEMP, landingPinsFile), 'utf8'));
+    isolateCandidates();
+    process.exitCode = await runPinsFirst(
+      client,
+      directory,
+      resolve(process.env.RUNNER_TEMP, 'forge-actions-plan.json'),
+      pins,
     );
   } else if (process.argv[2] === 'proof') {
     restoreRun();

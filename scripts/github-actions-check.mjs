@@ -34,7 +34,8 @@ export function runActionsCheck(
   const shard = process.env.FORGE_ACTIONS_SHARD;
   // Shard pool part, set only by the fixed supervisor (src/hosted-actions-job-run.ts): `kept` runs
   // the front of this shard's group; a unit number runs that pool unit's files, tests only, after
-  // the kept part has installed and built. Unset runs the whole group (the static plan).
+  // the kept part has installed and built. `pins` installs, builds and runs only the contract pins
+  // the planning job runs first (src/landing-pins-first.ts). Unset runs the whole group (the static plan).
   const part = process.env.FORGE_ACTIONS_POOL_PART;
   const env = {
     ...childEnv({
@@ -88,7 +89,7 @@ export function runActionsCheck(
   // A project's own check command owns its setup (pnpm, Vite+, ...); only Forge's
   // recipe and npm-locked projects get the npm install.
   const npmLocked = existsSync('package-lock.json') || existsSync('npm-shrinkwrap.json');
-  const unitPart = part !== undefined && part !== 'kept';
+  const unitPart = part !== undefined && part !== 'kept' && part !== 'pins';
   try {
     // A docs-only change to an opaque command (its check's docsPaths) runs nothing, so no install either.
     const skipsCommand = !plan.standard && plan.selection?.scope === 'docs';
@@ -131,7 +132,7 @@ export function runActionsCheck(
         phases.time('browser', () =>
           run(process.execPath, [fileURLToPath(new URL('./check-browser-runtime.mjs', import.meta.url))]),
         );
-      if (part !== undefined && part !== 'kept') {
+      if (unitPart) {
         // A unit runs after this job's kept part: dependencies and build are already in place.
         coverageHead(env, plan, coverage);
         env.FORGE_TEST_RETRY_FILES = JSON.stringify(plan.retryFiles ?? []);
@@ -150,6 +151,9 @@ export function runActionsCheck(
       }
       coverageHead(env, plan, coverage);
       env.FORGE_TEST_RETRY_FILES = JSON.stringify(plan.retryFiles ?? []);
+      // Pins are files recorded at 10 s or less: a hung pin times out in a minute and reports as a
+      // failed file, inside the pins step's own timeout, instead of removing the check's verdict.
+      if (part === 'pins') env.FORGE_TEST_FILE_TIMEOUT_MS = String(PINS_FILE_TIMEOUT_MS);
       phases.time('tests', () => run('node', ['scripts/test-files.mjs', ...files]));
     }
   } finally {
@@ -164,9 +168,32 @@ function coverageHead(env, plan, coverage) {
   else delete env.FORGE_TEST_COVERAGE_HEAD;
 }
 
+/** Per-file timeout of the pins part (scripts/test-files.mjs FORGE_TEST_FILE_TIMEOUT_MS). */
+export const PINS_FILE_TIMEOUT_MS = 60_000;
+
+/** The pins-first files: named by the fixed supervisor, accepted only when every one is a planned
+ * test file of this check, so the caller can narrow the plan but never add to it. */
+export function pinsPart(plan, value) {
+  let files;
+  try {
+    files = JSON.parse(value ?? '');
+  } catch {
+    files = undefined;
+  }
+  const planned = new Set(plan.groups.flat());
+  if (
+    !Array.isArray(files) ||
+    !files.length ||
+    !files.every(file => typeof file === 'string' && planned.has(file))
+  )
+    throw new Error('Pins first: the pin list is missing or names a file outside the pinned plan.');
+  return [...new Set(files)];
+}
+
 /** Files of one shard pool part, always taken from the pinned plan (never from the caller). */
 function poolPart(plan, index, part) {
   if (part === undefined) return plan.groups[index];
+  if (part === 'pins') return pinsPart(plan, process.env.FORGE_ACTIONS_PINS);
   if (!validPool(plan.groups, plan.pool))
     throw new Error('Shard pool part requested without a valid pinned pool.');
   if (part === 'kept') return keptFiles(plan.groups, plan.pool, index);

@@ -58,6 +58,7 @@ export function alteredSurface(path: string, before: string, after: string): str
 export function removedNames(path: string, before: string, after: string): string[];
 /** A test file named for a budget, cost, registration or contract guard (on its own name). */
 export function contractGuardTest(test: string): boolean;
+export function contractPinWeight(test: string): 0 | 1 | 2;
 /** Seconds of contract pins one plan promotes into the protected tier. */
 export const CONTRACT_PIN_SECONDS: number;
 /** Tiers the time budget never trims from the plan; the run starts them first. */
