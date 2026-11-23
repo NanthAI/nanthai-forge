@@ -147,7 +147,7 @@ test('plan-only preflight on a sync head derives paths, starts no build or test 
   );
 });
 
-test('preflight "retry":true plans exactly the files the last run stopped for time', async t => {
+test('preflight "retry":true plans exactly the files the last run stopped for time, else the files it failed', async t => {
   const f = agentFixture(t);
   const put = bytes => {
     const id = digest(bytes);
@@ -183,7 +183,10 @@ test('preflight "retry":true plans exactly the files the last run stopped for ti
   const laneId = f.lane.laneId;
   await assert.rejects(
     transport.dispatch('preflight', { laneId, retry: true, run: false }),
-    error => error.code === 'BAD_ARGUMENT' && /stopped no file for time/.test(error.message),
+    error =>
+      error.code === 'BAD_ARGUMENT' &&
+      /stopped no file for time/.test(error.message) &&
+      error.message.includes(`preflight '{"laneId":"${f.lane.laneId}"}'`),
   );
   const receipt = {
     schema: 1,
@@ -204,6 +207,30 @@ test('preflight "retry":true plans exactly the files the last run stopped for ti
   const response = await transport.dispatch('preflight', { laneId, retry: true, run: false });
   assert.deepEqual(response.result.plan.tests, ['tests/b.test.mjs']);
   assert.ok(response.result.plan.deferredTests.includes('tests/a.test.mjs'));
+  // Item 29b2d1ca: after a failed run that stopped nothing, retry reruns exactly the failed files.
+  const failed = { ...receipt, tests: 2, exitCode: 1, passed: false, outcome: 'failed', failed: 1 };
+  delete failed.stoppedForTime;
+  delete failed.stopped;
+  writeFileSync(
+    path,
+    JSON.stringify({ ...failed, failure: { files: ['tests/a.test.mjs'], excerpt: 'flake' } }),
+  );
+  const rerun = await transport.dispatch('preflight', { laneId, retry: true, run: false });
+  assert.deepEqual(rerun.result.plan.tests, ['tests/a.test.mjs']);
+  // Not rerun alone, the reply naming the full run instead: a failure naming fewer files than failed,
+  // a run that stopped other files at its first failure, or a receipt of another saved head.
+  const named = { files: ['tests/a.test.mjs'], excerpt: 'x' };
+  for (const partial of [
+    { ...failed, failed: 2, failure: named },
+    { ...failed, stoppedForFailure: 1, failure: named },
+    { ...failed, head: 'f'.repeat(64), failure: named },
+  ]) {
+    writeFileSync(path, JSON.stringify(partial));
+    await assert.rejects(
+      transport.dispatch('preflight', { laneId, retry: true, run: false }),
+      error => error.code === 'BAD_ARGUMENT' && error.message.includes(`preflight '{"laneId":"${laneId}"}'`),
+    );
+  }
 });
 
 test('593fc2d7: a resolution Lane made by sync preflights against the head the sync merged in, not its older base', async t => {

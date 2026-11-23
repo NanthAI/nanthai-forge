@@ -701,7 +701,7 @@ test('an over-budget land runs its top-ranked tests within the stated quick budg
   assert.equal(readPreflightReceipt(other, lane.laneId), null);
 });
 
-test('a failing top-ranked test refuses the over-budget land with the file, on the run and on its replay', t => {
+test('a failing top-ranked test refuses the over-budget land with the file, on the run and when run again', t => {
   const root = repo(t, {
     'tests/b.test.mjs':
       "import test from 'node:test';\ntest('b', () => { throw new Error('the change broke b'); });\n",
@@ -714,9 +714,11 @@ test('a failing top-ranked test refuses the over-budget land with the file, on t
     return true;
   };
   assert.throws(() => finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true), refused);
-  const at = readPreflightReceipt(root, lane.laneId).at;
+  const first = readPreflightReceipt(root, lane.laneId);
   assert.throws(() => finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true), refused);
-  assert.equal(readPreflightReceipt(root, lane.laneId).at, at, 'the replay judges the same run');
+  const again = readPreflightReceipt(root, lane.laneId);
+  assert.notEqual(again.at, first.at, 'the next land runs the failed tests again');
+  assert.equal(again.outcome, 'failed', 'a real failure fails again');
 
   // The project switched to advise: the cached quick failure refuses nothing.
   const advised = finishGates(
@@ -728,6 +730,26 @@ test('a failing top-ranked test refuses the over-budget land with the file, on t
   );
   assert.equal(advised.preflight.status, 'advised');
   assert.equal(advised.preflight.quick, undefined);
+});
+
+// Item 29b2d1ca (frictions 35f82b00, 062a852e): a flaky test failed land's quick run once, and every
+// later land --save, even with a fresh operationId, returned that stored failure. Land reruns it now.
+test('a stored quick-run failure that passes on rerun does not block the next land', t => {
+  const root = repo(t, {
+    'tests/b.test.mjs':
+      "import test from 'node:test';\nimport { existsSync, writeFileSync } from 'node:fs';\n" +
+      "const mark = new URL('./ran-once', import.meta.url);\n" +
+      "test('b', () => { if (!existsSync(mark)) { writeFileSync(mark, ''); throw new Error('flake'); } });\n",
+  });
+  assert.throws(
+    () => finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true),
+    code('PREFLIGHT_REQUIRED'),
+  );
+  assert.equal(readPreflightReceipt(root, lane.laneId).outcome, 'failed');
+  const next = finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true);
+  assert.equal(next.preflight.status, 'advised');
+  assert.equal(next.preflight.quick.outcome, 'passed');
+  assert.equal(readPreflightReceipt(root, lane.laneId).outcome, 'passed');
 });
 
 test('the quick run is a hard cap: a test still running at its budget is stopped and left, never failed', t => {

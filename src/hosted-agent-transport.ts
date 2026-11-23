@@ -2480,11 +2480,29 @@ export class HostedAgentTransport {
       );
     await this.protectedNotice(marker);
     const { preflightPlan, readPreflightReceipt, runPreflight } = await import('./agent-preflight.js');
-    const stopped = command.retry ? readPreflightReceipt(root, laneId)?.stopped : undefined;
+    // retry reruns what the last run left: the files it stopped for time, else the test files it
+    // failed when it names every one and started every planned file (its passes are reused), so a
+    // flake reruns alone (Item 29b2d1ca). Only a receipt of the saved source here: another save's
+    // selection could name files this head no longer has and record a pass with no test run.
+    const previous = command.retry ? readPreflightReceipt(root, laneId) : null;
+    const last =
+      previous &&
+      (previous.tree && marker.tree ? previous.tree === marker.tree : previous.head === marker.selection.head)
+        ? previous
+        : null;
+    const failedFiles =
+      last?.outcome === 'failed' &&
+      !last.staticOnly &&
+      !last.stoppedForFailure &&
+      last.failure?.files.length &&
+      (last.failed ?? Infinity) <= last.failure.files.length
+        ? last.failure.files
+        : undefined;
+    const stopped = last?.stopped?.length ? last.stopped : failedFiles;
     invariant(
       !command.retry || stopped?.length,
       'BAD_ARGUMENT',
-      'The last preflight of this Lane stopped no file for time; run preflight without "retry".',
+      `The last preflight of this saved head stopped no file for time and left no failed test files to rerun alone; run preflight without "retry": ${hostedRecoveryCommand(root, 'preflight', { laneId })}.`,
     );
     const advice = await readHostedOverlapAdvice(this, laneId, true);
     // A resolution Lane a sync made is measured from the head the sync merged in (593fc2d7).

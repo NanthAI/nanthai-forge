@@ -488,7 +488,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   so the gate would run no test, `land --save` runs the top of the same run order (fast repo-wide
   guards, declared and learned guards, the change's own tests, then the tests that load a changed
   module) for 90 s of test time after the static checks pass, once per saved head (a replay reuses
-  it; a head whose full preflight already ran keeps that result instead). The budget is a hard cap: unlike a full run, declared guards that do not fit are left too, and the run is kept out of the preflight-time median. The reply's `defaults.preflight.quick` states the budget, the files it ran and the files it
+  a run that did not fail; a failed one runs again on every land, so a test that passes on rerun
+  does not block; a head whose full preflight already ran keeps that result instead). The budget is a hard cap: unlike a full run, declared guards that do not fit are left too, and the run is kept out of the preflight-time median. The reply's `defaults.preflight.quick` states the budget, the files it ran and the files it
   left. A failure refuses the land with the file and its error; otherwise, including a group stopped
   at the cap, the gate stays `advised` and the land submits,
   and the run never counts as a pass. On 11-18 to 11-20, 60 of 264 lands ran no test this way and
@@ -787,7 +788,10 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   rest closest first; smoke and explicit coverage (document readers, slower scans, path rules) last.
   The order never adds or drops a file. Files it did not start are `stopped` in the receipt (`stoppedForTime` counts them)
   and join the deferred set; `stoppedRerun` is `preflight '{"laneId":"…","retry":true}'`, which
-  plans exactly those files (passes are reused, no filler). When a stopped file is must-run
+  plans exactly those files (passes are reused, no filler). After a failed run that stopped nothing,
+  the same `retry` plans exactly the test files it failed when the receipt is this saved head's, names
+  every failed file and started every planned one; otherwise
+  it refuses and names the plain `preflight` command. When a stopped file is must-run
   (changed, learned or direct), the run is **NOT COMPLETE**: not passed (`passed: false`) and not
   failed (`exitCode: 0`). An environment result (a program missing here, a wedged tool) reads
   `ENVIRONMENT (not a failed run)` in the summary and `status: "environment"` in the land

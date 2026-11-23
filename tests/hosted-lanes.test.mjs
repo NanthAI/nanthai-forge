@@ -163,14 +163,43 @@ test('concurrent duplicate operation UUID commits exactly one Intent and Lane un
   assert(s.counts.some(c => c.retries === 1));
 });
 
-test('unrelated concurrent starts write distinct resources and need no global revision retry', async () => {
+// Issue 29b2d1ca: each start charges one of 4 random shards of the account's daily start counter
+// (convex/accountLimits.ts), so two concurrent starts shared a counter row 1 time in 4 and retried.
+// Pin the shard pick: distinct shards prove start's own resources are disjoint (no retry at all);
+// one shard proves the only clash is that counter row, retried once, with both starts counted.
+const limiterShards = s =>
+  [...s.tables.deviceAttempts.values()].filter(row => row.owner.startsWith('limit:start:'));
+test('unrelated concurrent starts write distinct resources and need no global revision retry', async t => {
+  const draws = [0, 0.5];
+  const random = t.mock.method(Math, 'random', () => draws[random.mock.callCount() % 2]);
   const s = await setup();
   const [a, b] = await Promise.all([s.begin(), s.begin()]);
   assert.notEqual(a.intentId, b.intentId);
   assert.notEqual(a.lane.laneId, b.lane.laneId);
   assert.equal(s.tables.projectHostedRecords.size, 4);
   assert.equal(s.tables.projectHostedOperations.size, 3);
+  assert.equal(random.mock.callCount(), 2, 'one shard pick per start, no other randomness');
+  assert.deepEqual(
+    limiterShards(s).map(row => row.count),
+    [1, 1],
+  );
   assert(s.counts.every(c => c.retries === 0));
+});
+
+test('concurrent starts on one start-limiter shard retry only on that counter row', async t => {
+  t.mock.method(Math, 'random', () => 0);
+  const s = await setup();
+  const [a, b] = await Promise.all([s.begin(), s.begin()]);
+  assert.notEqual(a.lane.laneId, b.lane.laneId);
+  assert.equal(s.tables.projectHostedRecords.size, 4);
+  assert.deepEqual(
+    limiterShards(s).map(row => row.count),
+    [2],
+  );
+  const clashed = s.counts.filter(c => c.conflicts);
+  assert.equal(clashed.length, 1);
+  assert.deepEqual(clashed[0].conflicts, ['deviceAttempts']);
+  assert.equal(Math.max(...s.counts.map(c => c.retries)), 1);
 });
 
 test('Intent-only creation and concurrent sibling starts preserve the Intent version', async () => {

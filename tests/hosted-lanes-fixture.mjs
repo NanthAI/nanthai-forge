@@ -156,7 +156,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
           }
         }
         const original = encoded(current === baseline[table] ? rows : select(baseline[table]));
-        reads.push(() => encoded(select(tables[table])) === original);
+        reads.push(Object.assign(() => encoded(select(tables[table])) === original, { table }));
         meter.ranges++;
         meter.readRangesByTable[table] = (meter.readRangesByTable[table] ?? 0) + 1;
         meter.returnedDocuments += rows.filter(Boolean).length;
@@ -538,6 +538,9 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         counts.push(meter);
         throw error;
       }
+      // Name the tables whose reads a concurrent commit changed, so a test can tell a designed
+      // shared row (a sharded counter) from a clash on its own resources.
+      meter.conflicts = [...new Set(reads.filter(same => !same()).map(same => same.table))];
       counts.push(meter);
       assert(++retries < 5, 'bounded fake OCC retries');
     }

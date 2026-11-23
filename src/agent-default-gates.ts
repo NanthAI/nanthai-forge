@@ -139,7 +139,15 @@ export function finishGates(
       // A replay may price the same head differently. Honor the quick receipt that already
       // exhausted its budget on this operation, even if the new estimate would require a full run
       // (operations an older CLI refused with PREFLIGHT_BUDGET_EXCEEDED at the quick cap).
-      let quick = sameSource && receipt?.quick && defaults.preflight === 'require' ? receipt : null;
+      // A failed quick run is never reused: each land runs it again, as an under-budget land reruns
+      // its failed plan, so a test that passes on rerun (a flake) does not block it (Item 29b2d1ca).
+      let quick =
+        sameSource &&
+        receipt?.quick &&
+        defaults.preflight === 'require' &&
+        preflightOutcome(receipt) !== 'failed'
+          ? receipt
+          : null;
       const replayQuick = replayBudgetRefusal && Boolean(quick);
       let quickCapped = false;
       // Tests run in the Lane folder: one that rewrites a tracked file must not let this land submit
@@ -229,7 +237,7 @@ export function finishGates(
         if (preflightOutcome(quick) === 'failed')
           throw new ForgeError(
             'PREFLIGHT_REQUIRED',
-            `Inline preflight failed for saved head ${lane.head.slice(0, 12)}: the plan is over ${defaults.preflightMaxMinutes} min, so land ran its top-ranked tests for ${quick.budgetSeconds ?? LAND_QUICK_SECONDS} s, and ${quick.failure?.files.length ? quick.failure.files.join(', ') : 'one'} failed.${quick.failure ? ` ${quick.failure.excerpt}` : ''} Fix it, save, then run land --save with the same options and a fresh operationId.`,
+            `Inline preflight failed for saved head ${lane.head.slice(0, 12)}: the plan is over ${defaults.preflightMaxMinutes} min, so land ran its top-ranked tests for ${quick.budgetSeconds ?? LAND_QUICK_SECONDS} s, and ${quick.failure?.files.length ? quick.failure.files.join(', ') : 'one'} failed.${quick.failure ? ` ${quick.failure.excerpt}` : ''} Fix it, save, then run land --save with the same options and a fresh operationId. Each land runs these tests again, so one that passes on rerun does not block it.`,
             undefined,
             {
               command: run,
