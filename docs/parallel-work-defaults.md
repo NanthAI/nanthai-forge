@@ -489,7 +489,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   guards, declared and learned guards, the change's own tests, then the tests that load a changed
   module) for 90 s of test time after the static checks pass, once per saved head (a replay reuses
   it; a head whose full preflight already ran keeps that result instead). The budget is a hard cap: unlike a full run, declared guards that do not fit are left too, and the run is kept out of the preflight-time median. The reply's `defaults.preflight.quick` states the budget, the files it ran and the files it
-  left. A failure refuses the land with the file and its error; otherwise the gate stays `advised`,
+  left. A failure refuses the land with the file and its error; otherwise, including a group stopped
+  at the cap, the gate stays `advised` and the land submits,
   and the run never counts as a pass. On 11-18 to 11-20, 60 of 264 lands ran no test this way and
   10 then failed the landing check on a named file.
 - **Test runner, per project.** Preflight, the `tests` read, Intent contract tests and semantic
@@ -847,7 +848,7 @@ with nothing to answer ([exact conflicts at save](agents/workflow.md#exact-confl
 
 ### Server enforcement of preflight
 
-The CLI checks `preflight: require` before it composes. From the Lane checkout, `land --save` runs an unsatisfied required preflight inline with its local budget and operation ID. `PREFLIGHT_REQUIRED` names a failure and its recovery. `PREFLIGHT_BUDGET_EXCEEDED` names the continuation and includes the exact original landing replay. When a running group hits the quick-run cap, replay uses the saved preflight receipt and leaves the remaining tests to the hosted check. The server checks preflight again when it accepts
+The CLI checks `preflight: require` before it composes. From the Lane checkout, `land --save` runs an unsatisfied required preflight inline with its local budget and operation ID. `PREFLIGHT_REQUIRED` names a failure and its recovery. `PREFLIGHT_BUDGET_EXCEEDED` names the continuation and includes the exact original landing replay. A test group still running at the quick-run cap is stopped and, like the files the cap never started, left to the hosted check: the same land goes on and submits. The server checks preflight again when it accepts
 a new agent landing (`projectHostedLanding:enqueue` or `projectHostedLandingDesired:submit`). A
 landing from an older or hand-written client that skips the CLI check is refused with the same
 code (`PREFLIGHT_REQUIRED`) and next step.

@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 4,
+  "reason": "Measurement fix (99b4062c): the counter now counts both codes of new ForgeError(cond ? 'A' : 'B'); it finds 4 codes already thrown that way (PREFLIGHT_BUDGET_EXCEEDED, BACKFILL_*, WORK_GIT_*), no new code",
+  "date": "2026-11-23"
+}

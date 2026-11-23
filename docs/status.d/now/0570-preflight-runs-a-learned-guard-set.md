@@ -8,9 +8,9 @@ Files main's own red audit fails are never learned as a Lane's, even when a
 check pinned to the last red head ends after recovery. When a plan is over `preflightMaxMinutes`, `land --save` still runs the top of the run order
 for 90 s and refuses on a failure.
 
-An inline budget overrun returns `PREFLIGHT_BUDGET_EXCEEDED` with its continuation
-and the exact replay. If a running quick group hits the cap, replay reuses its
-receipt and leaves the remaining tests to the hosted check.
+An inline budget overrun of a required full run returns `PREFLIGHT_BUDGET_EXCEEDED`
+with its continuation and the exact replay. A quick group still running at the cap is
+stopped and left to the hosted check, and the same land submits.
 Preflight previews hosted secret scanner and queue proof findings from saved
 files against observed main. For the standard Forge check, `land --save` can
 refuse a confirmed missing or stale queue proof before composition. Compact landing replies retain

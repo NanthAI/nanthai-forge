@@ -53,6 +53,12 @@ test('errorCodes: ForgeError, invariant and code: properties count; errno names 
   );
 });
 
+test('Item 99b4062c: both codes of a conditional ForgeError code count, so removing one throw of a code still thrown elsewhere reads as no removal', () => {
+  const source =
+    "throw new ForgeError(\n  failed ? 'PREFLIGHT_REQUIRED' : 'PREFLIGHT_BUDGET_EXCEEDED',\n  'x',\n);";
+  assert.deepEqual(errorCodes(source).sort(), ['PREFLIGHT_BUDGET_EXCEEDED', 'PREFLIGHT_REQUIRED']);
+});
+
 test('agentActions: verbs, mode-flag actions, board modes, named reads and operator actions, once each', () => {
   const source = `
 export const lifecycleVerbs = ['start', 'save', 'land'] as const;

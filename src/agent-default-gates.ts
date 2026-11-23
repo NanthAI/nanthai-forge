@@ -137,9 +137,17 @@ export function finishGates(
             )
           : Infinity;
       // A replay may price the same head differently. Honor the quick receipt that already
-      // exhausted its budget on this operation, even if the new estimate would require a full run.
+      // exhausted its budget on this operation, even if the new estimate would require a full run
+      // (operations an older CLI refused with PREFLIGHT_BUDGET_EXCEEDED at the quick cap).
       let quick = sameSource && receipt?.quick && defaults.preflight === 'require' ? receipt : null;
       const replayQuick = replayBudgetRefusal && Boolean(quick);
+      let quickCapped = false;
+      // Tests run in the Lane folder: one that rewrites a tracked file must not let this land submit
+      // the saved head as checked (a local scan, no server call). Its own failure is reported first.
+      const stillSaved = () => {
+        if (typeof runRequired === 'function') runRequired();
+      };
+      let quickRan = false;
       const requireTests =
         plan.status === 'planned' &&
         plan.tests.length > 0 &&
@@ -192,11 +200,11 @@ export function finishGates(
           { ...heavyOptions, quick: true, ...(staticDone ? { staticDone } : {}) },
         );
         receipt = quick = result;
-        if (result.quickTimedOut)
-          throw new ForgeError(
-            'PREFLIGHT_BUDGET_EXCEEDED',
-            `Inline quick preflight reached its ${result.budgetSeconds ?? LAND_QUICK_SECONDS} s budget for saved head ${lane.head.slice(0, 12)}. Its result is recorded. Replay to submit the original landing with the remaining tests left to the hosted check.`,
-          );
+        // A group still running at the cap is stopped and left to the landing check, exactly like the
+        // files the cap never started: the land goes on. Refusing here only made the agent replay into
+        // the same advisory (99b4062c: 33 of 67 quick runs, 2026-11-21..23).
+        quickCapped = Boolean(result.quickTimedOut);
+        quickRan = true;
       } else if (
         runRequired &&
         !requireTests &&
@@ -228,6 +236,7 @@ export function finishGates(
               quick: quickSummary(quick, plan.status === 'planned' ? plan.tests.length : quick.tests),
             },
           );
+        if (quickRan) stillSaved();
       }
       if (plan.status === 'unavailable')
         advisories.preflight = { status: 'unavailable', reason: plan.reason };
@@ -295,6 +304,7 @@ export function finishGates(
                 undefined,
                 { command: next },
               );
+            stillSaved();
             return finishGates(root, defaults, lane, advice);
           }
           throw new ForgeError(
@@ -309,7 +319,7 @@ export function finishGates(
           ...(quick ? { quick: quickSummary(quick, plan.tests.length) } : {}),
           ...(plan.advisory
             ? { reason: plan.advisory }
-            : replayQuick
+            : replayQuick || quickCapped
               ? { reason: 'inline quick preflight reached its local budget' }
               : defaults.preflight === 'require'
                 ? { reason: `over ${defaults.preflightMaxMinutes} min` }

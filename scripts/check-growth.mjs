@@ -16,7 +16,7 @@
 //   tables         Convex tables: `name: defineTable(` in convex/*.ts (generated code excluded)
 //   errorCodes     public error codes: an UPPER_SNAKE string literal (3+ characters, not a Node errno such as
 //                  ENOTDIR) that reaches a caller as a structured error code, in src/, convex/ and netlify/:
-//                  the first argument of `new ForgeError(`, the code argument of `invariant(cond, 'CODE', …)`,
+//                  the first argument of `new ForgeError(` (both codes of a `cond ? 'A' : 'B'` one), the code argument of `invariant(cond, 'CODE', …)`,
 //                  and a `code: 'CODE'` property. Test files are excluded. It counts a few result codes that
 //                  are not thrown; the count is an upper bound, and the same rule applies to every run.
 //   agentActions   agent action names in src/agent-verbs.ts: the lifecycle verbs, every mode flag's action,
@@ -89,6 +89,15 @@ export function errorCodes(source) {
   const text = strip(source);
   const found = [
     ...names(text, new RegExp(String.raw`new ForgeError\(\s*['"\`]${CODE}['"\`]`, 'g')),
+    // Both codes of a conditional first argument: `new ForgeError(failed ? 'A' : 'B', …)`.
+    ...[
+      ...text.matchAll(
+        new RegExp(
+          String.raw`new ForgeError\(\s*[^,'"\`()]{1,80}\?\s*['"\`]${CODE}['"\`]\s*:\s*['"\`]${CODE}['"\`]`,
+          'g',
+        ),
+      ),
+    ].flatMap(match => [match[1], match[2]]),
     ...names(text, new RegExp(String.raw`\binvariant\([^;]*?,\s*['"\`]${CODE}['"\`]`, 'g')),
     ...names(text, new RegExp(String.raw`\bcode:\s*['"\`]${CODE}['"\`]`, 'g')),
   ];

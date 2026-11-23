@@ -311,7 +311,9 @@ const staticProject = (bad, readers = 'throw') => ({
   ),
 });
 
-test('incident a1a8505b: a timed-out first quick group stops new groups and replays the original landing', async t => {
+// A guard group of 15 synthetic readers whose first group blocks until the quick cap kills it. `before`
+// runs in that runner first (for example, an edit to a tracked file).
+async function quickCapFixture(t, before = '') {
   const files = staticProject(false, 'pass');
   files['forge.json'] = JSON.stringify({
     preflight: {
@@ -333,6 +335,7 @@ test('incident a1a8505b: a timed-out first quick group stops new groups and repl
     const line = JSON.stringify(process.argv.slice(2)) + '\\n';
     // The test's clock jumps when the log appears: it must appear with its line, never empty (the timeout
     // would kill this runner between the file's creation and its first write).
+    ${before}
     if (first) { writeFileSync(log + '.tmp', line); renameSync(log + '.tmp', log); }
     else appendFileSync(log, line);
     if (first) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0); // test-signal: allow this synthetic runner blocks until the quick timeout kills it under the injected clock
@@ -342,22 +345,18 @@ test('incident a1a8505b: a timed-out first quick group stops new groups and repl
   const log = join(s.root, '.forge', 'quick-starts');
   const fixed = Date.parse('2026-01-01T00:00:00.000Z');
   const jump = t.mock.method(Date, 'now', () => fixed + (existsSync(log) ? 101_000 : 0));
-  const command = { operationId: randomUUID(), message: 'Replay quick preflight', priority: 'normal' };
-  let replay;
+  return { s, log, restore: () => jump.mock.restore() };
+}
+
+test('incidents a1a8505b and 99b4062c: a timed-out first quick group stops new groups and the same land submits, with no replay', async t => {
+  const { s, log, restore } = await quickCapFixture(t);
+  const command = { operationId: randomUUID(), message: 'Quick cap lands', priority: 'normal' };
+  let result;
   try {
-    await assert.rejects(submitHostedLand(s.root, command, s.address, s.transport()), error => {
-      assert.equal(error.code, 'PREFLIGHT_BUDGET_EXCEEDED');
-      assert.match(error.message, /90 s budget.*Replay to submit the original landing/);
-      assert.match(error.recovery.replayCommand, /land --save/);
-      assert.equal(error.recovery.command, error.recovery.replayCommand);
-      replay = error.recovery.replay.parameters;
-      for (const [key, value] of Object.entries(command)) assert.equal(replay[key], value);
-      return true;
-    });
+    result = await submitHostedLand(s.root, command, s.address, s.transport());
   } finally {
-    jump.mock.restore();
+    restore();
   }
-  assert(!s.calls.some(c => /Compose|Landing/.test(c.name)), 'the first attempt has not submitted');
   const groups = readFileSync(log, 'utf8')
     .trim()
     .split('\n')
@@ -366,14 +365,57 @@ test('incident a1a8505b: a timed-out first quick group stops new groups and repl
   const receipt = readPreflightReceipt(s.root, s.lane.laneId);
   assert.equal(receipt.tests, 0);
   assert(receipt.stoppedForTime > groups[0].length, 'the rest of the queue is recorded as stopped');
-  // Replay must use the quick receipt even if today's gate would require the full run.
-  s.caps.agentDefaults = effectiveAgentDefaults({ preflight: 'require', preflightMaxMinutes: 10 });
-  const result = await submitHostedLand(s.root, replay, s.address, s.transport());
+  // The capped group is the landing check's, like every file the cap never started: one land submits.
   assert.equal(result.result.submission.operationId, command.operationId);
   assert.equal(result.result.submission.phase, 'landed');
+  assert.equal(result.result.defaults.preflight.status, 'advised');
   assert.equal(result.result.defaults.preflight.quick.ran, 0);
+  assert.equal(result.result.defaults.preflight.reason, 'inline quick preflight reached its local budget');
+  const enqueues = s.calls.filter(c => c.name === 'projectHostedLanding:enqueue');
+  assert.equal(enqueues.length, 1);
+  // The server is told advised for this head, never passed: it is what the old replay sent.
+  const gate = JSON.parse(enqueues[0].args.gates).lanes[0];
+  assert.equal(gate.head, s.lane.head);
+  assert.equal(gate.preflight, 'advised');
+  // An operation an older CLI refused at the cap still replays on its quick receipt, even when
+  // today's gate would require the full run: no test starts and the receipt is unchanged.
+  const advice = { changedPaths: { paths: ['README.md'], complete: true } };
+  const replayed = finishGates(
+    s.root,
+    effectiveAgentDefaults({ preflight: 'require', preflightMaxMinutes: 10 }),
+    { laneId: s.lane.laneId, head: s.lane.head },
+    advice,
+    true,
+    true,
+  );
+  assert.equal(replayed.preflight.status, 'advised');
+  assert.equal(replayed.preflight.reason, 'inline quick preflight reached its local budget');
+  assert.equal(readFileSync(log, 'utf8').trim().split('\n').length, 1, 'the replay starts no test');
   assert.deepEqual(readPreflightReceipt(s.root, s.lane.laneId), receipt);
-  assert.equal(s.calls.filter(c => c.name === 'projectHostedLanding:enqueue').length, 1);
+});
+
+test('Item 99b4062c: a quick group that edits a saved file before the cap stops the land as LANE_DIRTY, not submitted', async t => {
+  const { s, restore } = await quickCapFixture(
+    t,
+    "if (first) appendFileSync('README.md', 'edited by a test\\n');",
+  );
+  try {
+    await assert.rejects(
+      submitHostedLand(
+        s.root,
+        { operationId: randomUUID(), message: 'Dirty quick cap' },
+        s.address,
+        s.transport(),
+      ),
+      error => error.code === 'LANE_DIRTY',
+    );
+  } finally {
+    restore();
+  }
+  assert(
+    !s.calls.some(c => c.name === 'projectHostedLanding:enqueue'),
+    'the edited checkout submits nothing',
+  );
 });
 
 test('preflight and land scan a saved resolution against the main it merged in and honor only main allowances', async t => {
