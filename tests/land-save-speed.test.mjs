@@ -27,6 +27,7 @@ import {
   landTiming,
   landTimingLine,
   markLandStep,
+  noteLandCompose,
   startLandTiming,
   saveTimingMs,
 } from '../dist/land-timing.js';
@@ -291,4 +292,69 @@ test('land --save receipt splits the time before submission and prints one line'
   assert(response.landTiming.totalMs >= 2_000, 'includes time before the submitter started');
   assert.equal(typeof response.landTiming.stepsMs.submit, 'number');
   assert.match(lines.join(''), /land: submitted in \d+\.\d s \(spawn /);
+});
+
+test('land --save timing splits a slow compose into its server phases from the reply it already has (friction c5e80d46)', () => {
+  const origin = performance.timeOrigin;
+  startLandTiming(origin);
+  markLandStep('gated', origin + 1_000);
+  // The compose reply (source-run-publish) carries the state's phase summary; nothing is fetched.
+  noteLandCompose({
+    terminal: { outcome: { status: 'completed' } },
+    state: {
+      sourceTiming: {
+        startupMs: 2_600,
+        readMs: 140_000,
+        computeMs: 9_000,
+        writeMs: 6_000,
+        convexMs: 2_400,
+        gets: 21,
+        puts: 5,
+        heads: 3,
+      },
+    },
+  });
+  markLandStep('composed', origin + 420_000);
+  markLandStep('submitted', origin + 421_000);
+  const timing = landTiming();
+  assert.equal(timing.stepsMs.compose, 419_000);
+  assert.deepEqual(timing.compose, {
+    phasesMs: { startup: 2_600, read: 140_000, compute: 9_000, write: 6_000, convex: 2_400 },
+    slowest: 'read',
+    outsideMs: 259_000,
+  });
+  assert.match(
+    landTimingLine(timing),
+    /compose 419\.0, submit 1\.0\); compose on the server: startup 2\.6, read 140\.0, compute 9\.0, write 6\.0, convex 2\.4 \(slowest read\), at least 259\.0 outside it$/,
+  );
+  // A reply without the summary (older server, or still running) adds nothing; a new land starts clean.
+  startLandTiming(origin);
+  noteLandCompose({ status: 'submitted' });
+  markLandStep('composed', origin + 5_000);
+  assert.equal(landTiming().compose, undefined);
+});
+
+test('a second compose in one land keeps the first compose phases with its duration (review of c5e80d46)', () => {
+  const origin = performance.timeOrigin;
+  const phases = ms => ({
+    startupMs: ms,
+    readMs: ms,
+    computeMs: ms,
+    writeMs: ms,
+    convexMs: ms,
+    gets: 0,
+    puts: 0,
+    heads: 0,
+  });
+  startLandTiming(origin);
+  markLandStep('gated', origin + 1_000);
+  noteLandCompose({ state: { sourceTiming: phases(1_000) } });
+  markLandStep('composed', origin + 11_000);
+  // After a sync the land composes again; its marks and phases do not replace the first.
+  noteLandCompose({ state: { sourceTiming: phases(9_000) } });
+  markLandStep('composed', origin + 90_000);
+  const timing = landTiming();
+  assert.equal(timing.stepsMs.compose, 10_000);
+  assert.equal(timing.compose.phasesMs.read, 1_000);
+  assert.equal(timing.compose.outsideMs, 5_000);
 });

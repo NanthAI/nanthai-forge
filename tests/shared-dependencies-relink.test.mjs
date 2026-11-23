@@ -249,3 +249,31 @@ for (const [name, manager] of Object.entries(managers))
     assert.equal(calls.length, 2);
     assert.deepEqual(await run({ refresh: true }), { status: 'present' });
   });
+
+test('a relink queued behind another process install of the same lockfile says so once (friction a1f01239)', async t => {
+  const { acquireHeavySlot } = await import('../dist/heavy-slots.js');
+  const directory = scratch(t),
+    calls = [],
+    root = lane(directory, 'waits', { lock: lockOf(['new-dep']) });
+  const entry = join(directory, 'cache', `npm-${dependencyKey(root)}`);
+  mkdirSync(join(directory, 'cache'), { recursive: true });
+  // Another Lane holds this lockfile's install (in the incident: queued for a heavy slot under load).
+  const held = await acquireHeavySlot(`${entry}.lock`, 1);
+  const lines = [];
+  const shared = await shareDependencies(
+    root,
+    options(directory, calls, {
+      onWait: line => {
+        lines.push(line);
+        rmSync(held, { recursive: true, force: true });
+      },
+    }),
+  );
+  assert.equal(shared.status, 'installed');
+  assert.equal(lines.length, 1, 'one line per wait, not one per queue change');
+  assert.match(
+    lines[0],
+    /^dependencies: waiting for another process to finish installing or relinking npm-[0-9a-f]{24}/,
+  );
+  assert.equal(sees(root, 'new-dep'), true);
+});

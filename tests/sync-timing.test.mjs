@@ -42,3 +42,43 @@ test('a save split adds up a step marked twice and resolve nests its save (frict
     save: { totalMs: 100, stepsMs: { capture: 40, prepare: 20, submit: 40 } },
   });
 });
+
+test('the dependency refresh after a sync joins its split and the reply states its wall time (friction a1f01239)', async () => {
+  const { withDependencyTiming } = await import('../dist/sync-timing.js');
+  const at = Date.parse('2026-11-19T10:54:05Z');
+  // The incident: a 15.6 s split while the command took over 600 s, most of it relinking node_modules.
+  const reply = { source: {}, timing: { totalMs: 15_560, stepsMs: { settle: 60, hostedWait: 15_500 } } };
+  const timed = withDependencyTiming(reply, 590_000, at - 606_000, at);
+  assert.equal(timed.timing.totalMs, 605_560);
+  assert.equal(timed.timing.stepsMs.dependencies, 590_000);
+  assert.equal(timed.timing.wallMs, 606_000, 'wall time since dispatch');
+  assert.equal(reply.timing.totalMs, 15_560, 'the input reply is not mutated');
+  // No refresh time: the split is unchanged apart from its wall time.
+  const quick = withDependencyTiming(reply, 0, at, at);
+  assert.deepEqual(quick.timing.stepsMs, reply.timing.stepsMs);
+  assert.equal(quick.timing.wallMs, 15_560, 'never below the split');
+  // A reply without a split names only a refresh of a second or more.
+  assert.deepEqual(withDependencyTiming({ status: 'up-to-date' }, 400, at, at), { status: 'up-to-date' });
+  assert.deepEqual(withDependencyTiming({ status: 'up-to-date' }, 4_000, at, at), {
+    status: 'up-to-date',
+    dependenciesMs: 4_000,
+  });
+  assert.equal(withDependencyTiming(null, 4_000, at, at), null);
+});
+
+test('the reply wall time is re-stamped at assembly, after reads that follow the operation (review of a1f01239)', async () => {
+  const { stampWallMs, withDependencyTiming } = await import('../dist/sync-timing.js');
+  const reply = withDependencyTiming(
+    { timing: { totalMs: 15_560, stepsMs: { hostedWait: 15_560 } } },
+    0,
+    0,
+    16_000,
+  );
+  assert.equal(reply.timing.wallMs, 16_000);
+  // A 20 s overlap read before the reply is assembled stays inside the wall time.
+  assert.equal(stampWallMs(reply, 0, 36_000).timing.wallMs, 36_000);
+  // Only a split that already carries a wall time is stamped.
+  const plain = { timing: { totalMs: 5, stepsMs: {} } };
+  assert.equal(stampWallMs(plain, 0, 36_000), plain);
+  assert.equal(stampWallMs(null, 0, 1), null);
+});

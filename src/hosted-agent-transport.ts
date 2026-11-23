@@ -176,6 +176,7 @@ import {
   settleBackgroundSave,
 } from './hosted-save-client.js';
 import { markLandStep, type LandTiming } from './land-timing.js';
+import { stampWallMs, withDependencyTiming } from './sync-timing.js';
 import {
   callerReceipts,
   clearCallerReceipts,
@@ -406,6 +407,8 @@ export class HostedAgentTransport {
     relinked?: true;
     /** This preflight began its local run: a later failure is never replayed inside the command. */
     localRun?: true;
+    /** performance.now() at dispatch: a reply's `timing.wallMs` runs from here to its assembly (a1f01239). */
+    wallFrom?: number;
   }>();
   private get sourceNotice() {
     return this.operationContext.getStore()?.sourceNotice;
@@ -980,6 +983,9 @@ export class HostedAgentTransport {
           prefix => resolvePlanningId(this, prefix),
         );
       const dispatchedAt = Date.now();
+      const wallFrom = performance.now();
+      const dispatchContext = this.operationContext.getStore();
+      if (dispatchContext) dispatchContext.wallFrom = wallFrom;
       const observation = action === 'status' || action === 'observe';
       const { operationId, ...parameters } = input;
       // Client-only start placement: where to open the Lane, or open:false for pins only.
@@ -1783,10 +1789,23 @@ export class HostedAgentTransport {
         if (action === 'finish') markLandStep('ready');
         result = await executeHostedAgent(session, action, command.data);
         // A source operation rewrote files: follow a changed lockfile before the next build.
-        if (['sync', 'resolve', 'revert', 'compose'].includes(action)) await this.refreshDependencies(root);
+        // Its time joins the reply's timing, with the command's wall time (friction a1f01239).
+        if (['sync', 'resolve', 'revert', 'compose'].includes(action))
+          result = withDependencyTiming(
+            result,
+            await this.refreshDependencies(root),
+            wallFrom,
+            performance.now(),
+          );
         if (action === 'undo') {
           const applied = (result as { applied?: { root: string } }).applied;
-          if (applied) await this.refreshDependencies(applied.root);
+          if (applied)
+            result = withDependencyTiming(
+              result,
+              await this.refreshDependencies(applied.root),
+              wallFrom,
+              performance.now(),
+            );
         }
         const askedItemId =
           action === 'start' && (command.data as { planningItemId?: string }).planningItemId;
@@ -2123,12 +2142,16 @@ export class HostedAgentTransport {
     };
   }
   /** After files changed in a Lane: one key compare; a Forge link to an older lockfile's install is
-   * relinked (or installed once into the shared cache). Silent when nothing changed; never fails the action. */
-  private async refreshDependencies(path: string) {
+   * relinked (or installed once into the shared cache). Silent when nothing changed; never fails the action.
+   * Returns its elapsed milliseconds; a queued wait (another process's install of the same lockfile,
+   * or a heavy slot for this one) says what it waits on while it waits (friction a1f01239). */
+  private async refreshDependencies(path: string): Promise<number> {
+    const started = performance.now();
     try {
       const shared = await shareDependencies(path, {
         refresh: true,
         announce: announceRegistryHosts,
+        onWait: message => process.stderr.write(`${message}\n`),
       });
       const context = this.operationContext.getStore();
       if ('relinked' in shared && shared.relinked && context) context.relinked = true;
@@ -2147,6 +2170,7 @@ export class HostedAgentTransport {
     } catch {
       /* Dependencies are a convenience the agent can still install itself. */
     }
+    return Math.max(0, Math.round(performance.now() - started));
   }
   /** Never fails the action: dependencies are a convenience the agent can still install itself. */
   private async shareDependencies(path: string, runScripts?: boolean) {
@@ -2154,6 +2178,7 @@ export class HostedAgentTransport {
       const shared = await shareDependencies(path, {
         runScripts,
         announce: announceRegistryHosts,
+        onWait: message => process.stderr.write(`${message}\n`),
       });
       const notice = installScriptsNotice(shared);
       if (notice) process.stderr.write(`${notice}\n`);
@@ -2292,6 +2317,9 @@ export class HostedAgentTransport {
       action === 'status' || action === 'observe'
         ? enrichHostedQueueAhead(this, terminalConflict(result) ? await this.readRecovery(result) : result)
         : await hostedConflictAdvice(this, enrichHostedQueueAhead(this, result));
+    // The wall time covers the overlap and conflict reads above too (review of a1f01239).
+    const wallFrom = this.operationContext.getStore()?.wallFrom;
+    if (wallFrom !== undefined) result = stampWallMs(result, wallFrom, performance.now());
     if (result && typeof result === 'object')
       result = hostedObservationContinuation(this.root, result as Record<string, unknown>);
     const missing = this.serverFeatures ? missingRequiredFeatures(this.serverFeatures) : [];

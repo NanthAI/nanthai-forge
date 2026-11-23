@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { readInstallScriptAllowlist, type InstallScriptAllowlist } from './install-script-allowlist.js';
 import { linkInstall } from './dependency-link.js';
 import { removeInstall, sealInstall } from './dependency-seal.js';
@@ -33,7 +33,14 @@ import {
   type ManagerRunner,
   type SkippedScriptsHint,
 } from './package-manager-install.js';
-import { acquireHeavySlot, heavySlotDirectory, measuredHeavyAdmission, tryHeavySlot } from './heavy-slots.js';
+import {
+  acquireHeavySlot,
+  heavySlotDirectory,
+  measuredHeavyAdmission,
+  tryHeavySlot,
+  waitingMessage,
+  type HeavyWait,
+} from './heavy-slots.js';
 import { heavySlots, readClientSettings } from './client-settings.js';
 import { installRegistryHosts, type RegistryHosts } from './install-registry-hosts.js';
 import { dependencyProject, sharesDownloads } from './install-download-cache.js';
@@ -267,6 +274,23 @@ function writeStage(root: string, stage: string, pm: PackageManager, folders: st
  * replaced (one key compare; an install only when the new key is not cached yet), so a sync that
  * brings a package never leaves the Lane on the old one. `refresh` never creates a first link.
  * Concurrent opens of the same lockfile install once. */
+/** The first queued report of one wait, as one line; later position changes say nothing more. */
+function onceWait(onWait: ((message: string) => void) | undefined, line: (wait: HeavyWait) => string) {
+  if (!onWait) return undefined;
+  let said = false;
+  return (wait: HeavyWait) => {
+    if (said) return;
+    said = true;
+    onWait(line(wait));
+  };
+}
+/** Another process holds this entry's lock: it is installing or relinking the same lockfile's install. */
+const entryWait = (onWait: ((message: string) => void) | undefined, entry: string) =>
+  onceWait(
+    onWait,
+    () =>
+      `dependencies: waiting for another process to finish installing or relinking ${basename(entry)} (this lockfile's shared install); node_modules links it when that ends.`,
+  );
 export async function shareDependencies(
   root: string,
   options: {
@@ -286,6 +310,9 @@ export async function shareDependencies(
     resolve?: (pm: PackageManager) => Promise<ManagerRunner | { reason: string }>;
     /** Called with the non-public hosts the install will fetch from, before it runs. */
     announce?: (hosts: RegistryHosts) => void;
+    /** Called once per queued wait with one line naming what this step waits on: another process's
+     * install of the same entry, or a machine heavy slot for its own install (friction a1f01239). */
+    onWait?: (message: string) => void;
   } = {},
 ): Promise<SharedDependencies> {
   if (!(options.enabled ?? readClientSettings().shareDependencies)) return { status: 'off' };
@@ -302,7 +329,7 @@ export async function shareDependencies(
     if (!link || canonicalRoot(dirname(link.entry)) !== canonicalRoot(cache)) return { status: 'present' };
     if (lstatSync(link.entry, { throwIfNoEntry: false })?.isSymbolicLink()) return { status: 'present' };
     const maintenance = await cacheMaintenance();
-    const lock = await acquireHeavySlot(`${link.entry}.lock`, 1);
+    const lock = await acquireHeavySlot(`${link.entry}.lock`, 1, entryWait(options.onWait, link.entry));
     const missing = !exists(join(link.entry, 'node_modules'));
     if (missing || link.fingerprint !== current) {
       // Retain rollback bytes without holding one exclusive install lock while acquiring another.
@@ -362,7 +389,7 @@ export async function shareDependencies(
   const { installIfCacheBusy } = options;
   const lock = installIfCacheBusy
     ? tryHeavySlot(`${entry}.lock`, 1)
-    : await acquireHeavySlot(`${entry}.lock`, 1);
+    : await acquireHeavySlot(`${entry}.lock`, 1, entryWait(options.onWait, entry));
   if (!lock) {
     await installIfCacheBusy!(root);
     return { status: 'installed', key, path: join(root, 'node_modules'), ...hosts };
@@ -390,9 +417,16 @@ export async function shareDependencies(
       const settings = readClientSettings(),
         slots = options.heavy === false ? 0 : heavySlots(settings.localHeavySlots);
       const slot = slots
-        ? await acquireHeavySlot(heavySlotDirectory(), slots, undefined, {
-            admission: await measuredHeavyAdmission(),
-          })
+        ? await acquireHeavySlot(
+            heavySlotDirectory(),
+            slots,
+            onceWait(
+              options.onWait,
+              wait =>
+                `dependencies: the ${basename(entry)} install is queued. ${waitingMessage(slots, heavySlotDirectory(), wait).trimEnd()}`,
+            ),
+            { admission: await measuredHeavyAdmission() },
+          )
         : null;
       let downloads: ReturnType<typeof import('./dependency-cache.js').retainDownloadCache> = null;
       try {

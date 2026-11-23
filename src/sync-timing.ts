@@ -9,7 +9,9 @@
  * `prepare` (object preparation, the save preparation and the changed-file uploads beside it),
  * `upload` (the save's metadata pages and the one object commit), `submit` (last page and job
  * submission), `hostedWait` and `apply` (the checkout marker). A step marked twice (a save repaired
- * once after WORK_STALE) adds up. */
+ * once after WORK_STALE) adds up. After a sync, resolve, revert, compose or undo returns, the CLI
+ * follows a changed lockfile: that refresh is `dependencies` (friction a1f01239: a relink waited
+ * minutes on another process's install outside a 15.6 s split). */
 export type SyncTiming = {
   totalMs: number;
   stepsMs: Record<string, number>;
@@ -17,6 +19,9 @@ export type SyncTiming = {
   server?: ServerSyncTiming;
   /** Resolve: its save's own split. */
   save?: SyncTiming;
+  /** The whole command in this process, from dispatch to reply (friction a1f01239): with `totalMs`
+   * it shows any time no step accounts for. Set on replies that carry a split. */
+  wallMs?: number;
 };
 /** Numbers, plus `phase` (`from>to`) and `stop` (why the step ended) from current servers. */
 type ServerStep = Record<string, number | string>;
@@ -100,5 +105,42 @@ export function syncTiming(now: () => number = () => performance.now()) {
         ...(nested ? { save: nested } : {}),
       };
     },
+  };
+}
+
+/** A source reply with the CLI's dependency refresh after it (`dependencies`, included in `totalMs`)
+ * and the command's wall time since `dispatchedAt` (the same clock as `now`). A reply without a split names only a
+ * refresh of a second or more, as `dependenciesMs`. Clock reads only. */
+export function withDependencyTiming<T>(
+  result: T,
+  dependenciesMs: number,
+  dispatchedAt: number,
+  now: number,
+): T {
+  if (!result || typeof result !== 'object') return result;
+  const timing = (result as { timing?: Partial<SyncTiming> }).timing;
+  const ms = Math.max(0, Math.round(dependenciesMs));
+  if (timing && typeof timing.totalMs === 'number' && timing.stepsMs && typeof timing.stepsMs === 'object') {
+    const totalMs = timing.totalMs + ms;
+    return {
+      ...result,
+      timing: {
+        ...timing,
+        totalMs,
+        stepsMs: ms ? { ...timing.stepsMs, dependencies: ms } : timing.stepsMs,
+        wallMs: Math.max(totalMs, Math.round(now - dispatchedAt)),
+      },
+    };
+  }
+  return ms >= 1000 ? { ...result, dependenciesMs: ms } : result;
+}
+/** Re-stamp a reply's `timing.wallMs` (only where a split already carries one) at its final
+ * assembly, so reads after the operation (overlap and conflict advice) are inside it too. */
+export function stampWallMs<T>(result: T, from: number, now: number): T {
+  const timing = (result as { timing?: Partial<SyncTiming> } | null)?.timing;
+  if (!timing || typeof timing.wallMs !== 'number' || typeof timing.totalMs !== 'number') return result;
+  return {
+    ...result,
+    timing: { ...timing, wallMs: Math.max(timing.wallMs, timing.totalMs, Math.round(now - from)) },
   };
 }

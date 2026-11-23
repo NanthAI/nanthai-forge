@@ -81,6 +81,8 @@ export async function driveAgentSource(
   authorityPinned = false,
   /** A server resolve chain may have submitted between the last observation and prepare. */
   observeSubmitted = false,
+  /** Sees each progress a reconcile wait delivers (land timing reads its phase summary). */
+  observe?: (progress: unknown) => void,
 ) {
   const features = session.capabilities.features ?? [],
     // prepare-upload-targets: a sync prepare also returns its input's upload target, asked only
@@ -110,7 +112,11 @@ export async function driveAgentSource(
       throw new AuthorityPinRefused(error);
     throw error;
   }
-  if (prepared.terminal) return prepared.terminal;
+  if (prepared.terminal) {
+    // A replayed prepare of a finished operation: its reply's state still carries the phase summary.
+    observe?.(prepared);
+    return prepared.terminal;
+  }
   // N3, began half: this replay's operation began at an older epoch and can never finish, even when
   // its job was already submitted (every later write and job callback is refused). Stop before any
   // stage, upload or submit, so a wait on it ends. No call: both epochs are in hand.
@@ -135,7 +141,10 @@ export async function driveAgentSource(
     !pages.length && prepared.input
       ? prepared
       : await session.query<SourceProgress>(`projectHosted${kind}:progress`, { operationId });
-  if (progress.terminal) return progress.terminal;
+  if (progress.terminal) {
+    observe?.(progress);
+    return progress.terminal;
+  }
   invariant(progress.input, 'SOURCE_UNAVAILABLE', 'The prepared source input is unavailable.');
   const input = Buffer.from(saveBytes(progress.input));
   if (features.includes('source-submit-run') && session.exchange.uploadLazyBatch) {
@@ -164,6 +173,7 @@ export async function driveAgentSource(
           { status: 'submitted' },
           kind,
           Math.max(0, (session.waitUntil - Date.now()) / 1000),
+          observe,
         ),
     );
   }
@@ -177,6 +187,7 @@ export async function driveAgentSource(
         { status: 'submitted' },
         kind,
         Math.max(0, (session.waitUntil - Date.now()) / 1000),
+        observe,
       ),
   );
 }
@@ -198,6 +209,8 @@ export async function composeAgentSource(
   operationId: string,
   continuation: SourceContinuation = { action: 'compose', parameters: command },
   beforePrepare?: (mainHead: string) => Promise<void>,
+  /** Sees each progress a reconcile wait delivers (land timing reads its phase summary). */
+  observe?: (progress: unknown) => void,
 ) {
   const build = async () => {
     const main = await session.main();
@@ -274,6 +287,8 @@ export async function composeAgentSource(
           false,
           true,
           true,
+          false,
+          observe,
         ),
       true,
       { epoch: session.capabilities.authority.epoch, of: prepared => prepared.request.authorityEpoch },

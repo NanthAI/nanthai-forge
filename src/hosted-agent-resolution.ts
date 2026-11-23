@@ -121,6 +121,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
   });
   const dependencies = await shareDependencies(root, {
     announce: announceRegistryHosts,
+    onWait: message => process.stderr.write(`${message}\n`),
   }).catch((error: unknown) => ({
     status: 'failed' as const,
     message: error instanceof Error ? error.message : String(error),

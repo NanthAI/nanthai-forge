@@ -23,11 +23,16 @@ const steps = [
 export type LandStep = (typeof steps)[number][0];
 
 let marks: Map<LandStep, number> | null = null;
+/** The compose's server phases, from the reply or progress it already returned (no call). */
+let composePhases: ComposePhases | null = null;
+const phaseNames = ['startup', 'read', 'compute', 'write', 'convex'] as const;
+type ComposePhases = Record<(typeof phaseNames)[number], number>;
 
 /** Begin timing in the submitter; `invokedAt` is the epoch ms the user's command started. */
 export function startLandTiming(invokedAt?: number) {
   const invoked = Number.isFinite(invokedAt) ? invokedAt! : performance.timeOrigin;
   marks = new Map([['invoked', invoked]]);
+  composePhases = null;
   markLandStep('started', Math.max(performance.timeOrigin, invoked));
 }
 
@@ -36,13 +41,42 @@ export function markLandStep(step: LandStep, at = Date.now()) {
   if (marks && !marks.has(step)) marks.set(step, at);
 }
 
+/** Where the `compose` step went on the server (friction c5e80d46: a 419 s compose had no split). */
+export type LandComposeTiming = {
+  /** The compose's source phases summed over its steps (startup includes runtime start). */
+  phasesMs: ComposePhases;
+  slowest: (typeof phaseNames)[number];
+  /** At least this much of the step ran outside the server's phases (upload, submit, dispatch,
+   * queue): the step minus the phases' sum, which overlap, so a lower bound. */
+  outsideMs: number;
+};
 export type LandTiming = {
   invokedAt: string;
   submittedAt: string | null;
   totalMs: number | null;
   heldMs?: number;
   stepsMs: Record<string, number>;
+  compose?: LandComposeTiming;
 };
+
+/** Keep the compose's server phases from a value it returned or a progress it observed: the
+ * source phase summary on its `state` (`sourceTiming`). Fields only; no-op unless timing a land.
+ * The first compose's phases win, like its step marks, so a later attempt (a land that syncs and
+ * lands again) never pairs its phases with the first compose's duration. */
+export function noteLandCompose(value: unknown) {
+  if (!marks || composePhases || !value || typeof value !== 'object') return;
+  const timing = (value as { state?: { sourceTiming?: unknown } }).state?.sourceTiming as
+    | Record<string, unknown>
+    | undefined;
+  if (!timing || typeof timing !== 'object') return;
+  const phases = {} as ComposePhases;
+  for (const name of phaseNames) {
+    const ms = timing[`${name}Ms`];
+    if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return;
+    phases[name] = Math.round(ms);
+  }
+  composePhases = phases;
+}
 
 export function landTiming(): LandTiming | null {
   if (!marks) return null;
@@ -56,12 +90,21 @@ export function landTiming(): LandTiming | null {
     previous = at;
   }
   const submitted = marks.get('submitted');
+  const compose = composeTiming(stepsMs.compose);
   return {
     invokedAt: new Date(invoked).toISOString(),
     submittedAt: submitted === undefined ? null : new Date(submitted).toISOString(),
     totalMs: submitted === undefined ? null : Math.round(submitted - invoked),
     stepsMs,
+    ...(compose ? { compose } : {}),
   };
+}
+function composeTiming(stepMs: number | undefined): LandComposeTiming | undefined {
+  if (!composePhases || stepMs === undefined) return undefined;
+  const phases = composePhases;
+  const slowest = phaseNames.reduce((a, b) => (phases[b] > phases[a] ? b : a));
+  const sum = phaseNames.reduce((total, name) => total + phases[name], 0);
+  return { phasesMs: { ...phases }, slowest, outsideMs: Math.max(0, stepMs - sum) };
 }
 
 /** Local save work up to the final submit; the server adds submit-to-publication on its clock. */
@@ -73,6 +116,10 @@ export function saveTimingMs(at = Date.now()): number | undefined {
 /** One stderr line once this process submitted: "land: submitted in 12.3 s (spawn 0.4, ...)". */
 export function landTimingLine(timing: LandTiming | null | undefined) {
   if (!timing || timing.totalMs === null) return null;
-  const parts = Object.entries(timing.stepsMs).map(([label, ms]) => `${label} ${(ms / 1000).toFixed(1)}`);
-  return `land: submitted in ${(timing.totalMs / 1000).toFixed(1)} s (${parts.join(', ')})`;
+  const s = (ms: number) => (ms / 1000).toFixed(1);
+  const parts = Object.entries(timing.stepsMs).map(([label, ms]) => `${label} ${s(ms)}`);
+  const compose = timing.compose
+    ? `; compose on the server: ${phaseNames.map(name => `${name} ${s(timing.compose!.phasesMs[name])}`).join(', ')} (slowest ${timing.compose.slowest}), at least ${s(timing.compose.outsideMs)} outside it`
+    : '';
+  return `land: submitted in ${s(timing.totalMs)} s (${parts.join(', ')})${compose}`;
 }

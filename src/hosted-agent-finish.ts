@@ -48,7 +48,7 @@ import {
 } from './hosted-agent-finish-identity.js';
 import { landWaitCommand } from './hosted-land-wait.js';
 import type { QueueProofDetail } from '../scripts/test-queue-proof.mjs';
-import { LAND_HELD_MS_ENV, markLandStep } from './land-timing.js';
+import { LAND_HELD_MS_ENV, markLandStep, noteLandCompose } from './land-timing.js';
 import {
   changedPathsAgainstBase,
   finishChangedPathsKey,
@@ -931,6 +931,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         composeOperationId,
         false,
         checkProof,
+        noteLandCompose,
       );
     } catch (error) {
       if (!(error instanceof BeganAtOlderEpoch)) throw error;
@@ -945,6 +946,9 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       forgetFinishSource(session, 'finish-request');
       throw new AuthorityPinRefused(error);
     }
+    // The server's phase split rides the reply's state (source-run-publish), read before a
+    // check-only settle unwraps it, or a reconcile wait's progress: no call (friction c5e80d46).
+    noteLandCompose(progress);
     if (command.accept === false)
       progress = await settleCheckOnlyCompose(session, composeOperationId, progress);
     markLandStep('composed');
