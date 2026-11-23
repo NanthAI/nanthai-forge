@@ -225,7 +225,9 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
       await page.goBack();
       await fromLanes.waitFor();
       await page.getByRole('link', { name: 'Who is touching what', exact: true }).click();
-      await page.locator('.lanes-files').getByRole('link', { name: title, exact: true }).click();
+      // Df1f2d46: a pair names its Items in its fold; opened, it links each of its Lanes by its mark.
+      await page.locator('.cx-pair', { hasText: title }).first().click();
+      await page.locator('.cx-open').getByRole('link', { name: '7a2b4c6d', exact: true }).first().click();
       await page.getByRole('link', { name: `Item: ${itemLabel}`, exact: true }).waitFor();
       assert.equal(await page.evaluate(() => location.pathname), openedFromLanes);
       assert.equal(await heading.textContent(), headingFromLanes);

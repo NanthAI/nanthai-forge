@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Who is touching what (Item eb0bbb94): files saved in more than one Lane, who waits on whom and why (traced to the
-// front of the queue, Item 9e748e41), the landing
+// Who is touching what (Item eb0bbb94): the pairs of Items whose Lanes saved the same files (Item df1f2d46,
+// Crossing.tsx), who waits on whom and why (traced to the front of the queue, Item 9e748e41), the landing
 // queue in order with held Lanes apart, and who has what. Built only from the existing queue, hold and overlap
 // records the Lanes place already reads; saved work only, so no row here ever proves two Lanes independent. A yard row's
-// "shares N files with M Lanes" opens this with `?lane=` (Item f787005c): Where Lanes cross then lists that Lane's
-// shared files first-hand, with a link back to every shared file; the address alone carries it.
+// "shares N files with M Lanes" opens this with `?lane=` (Item f787005c): Where Lanes cross then lists the pairs that
+// Lane is in, over its shared files only, with a link back to every pair; the address alone carries it.
 import { useMemo, type ReactNode } from 'react';
 import { Avatar, Dock, Key, Region, State, useDockLayout, type DockLayout } from '../../ds';
+import { CrossList } from './Crossing';
+import { crossPairs, mostlyOne, type CrossSide } from './cross-pairs';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { Head, crumbsFor } from '../Place';
@@ -21,6 +23,7 @@ import {
   waits,
   yardReady,
   type QueueEntry,
+  type QueueView,
   type Wait,
   type YardRow,
 } from './model';
@@ -28,6 +31,15 @@ import { useLaneMeta, useQueue, useSharedFiles } from './reads';
 
 const LAYOUT: DockLayout = { top: ['cross'], a: ['waits', 'queue'], b: ['has'] };
 const CAP = 8;
+
+/** Which Lanes Forge observed a conflict on: the Lane's current submission did not compose. The line feed's overlap
+ * flag is only a shared saved file, never a conflict (owner 2026-11-23), so it ranks nothing here. Item 9b9057a9 wires
+ * its observed-conflict signal into this one predicate; until then the queue lists no ended submission and it finds
+ * none, so the Conflict band stays hidden. */
+function conflictsOf(queue: QueueView | undefined) {
+  const latest = currentEntries(queue?.entries ?? []);
+  return (laneId: string) => latest.get(laneId)?.landingState?.state === 'conflict';
+}
 
 const age = (from: string, now: number) => {
   const minutes = Math.max(0, Math.round((now - Date.parse(from)) / 60_000));
@@ -54,14 +66,38 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
   const rowOf = new Map<string, YardRow>(yard?.rows.map(row => [row.laneId, row]));
   const titleOf = (laneId: string) => rowOf.get(laneId)?.title ?? `Lane ${laneId.slice(0, 8)}`;
   const laneHref = (laneId: string) => hrefFor({ ...route, section: '', rest: laneId });
-  const all = sharedFiles(shared.view);
+  const all = useMemo(() => sharedFiles(shared.view), [shared.view]);
   const focus = useSearch().get(LANE_FOCUS);
-  const files = { ...all, files: filesOfLane(all.files, focus) };
+  const files = useMemo(() => ({ ...all, files: filesOfLane(all.files, focus) }), [all, focus]);
   const everyFile = hrefFor({ ...route, section: 'touching', rest: '' });
+  const markOf = new Map(feed?.lanes.map(mark => [mark.laneId, mark]));
+  const current = currentEntries(queue?.entries ?? []);
+  const conflicted = useMemo(() => conflictsOf(queue), [queue]);
+  // One side per Item, so an Item with three Lanes is named once; a Lane the Lane page did not list stands alone.
+  // Worked out again only when a read changes.
+  const cross = useMemo(() => {
+    const titles = new Map(yard?.rows.map(row => [row.laneId, row.title]));
+    const intentOf = new Map(lanes?.map(lane => [lane.laneId, lane.intentId]));
+    const sideOf = (laneId: string): CrossSide => ({
+      key: intentOf.get(laneId) ?? laneId,
+      title: titles.get(laneId) ?? `Lane ${laneId.slice(0, 8)}`,
+    });
+    const everyPair = crossPairs(all.files, sideOf, conflicted);
+    const crossed = focus
+      ? crossPairs(files.files, sideOf, conflicted).filter(
+          pair => pair.aLanes.includes(focus) || pair.bLanes.includes(focus),
+        )
+      : everyPair;
+    return {
+      between: everyPair.filter(pair => pair.b).length,
+      pairs: crossed.filter(pair => pair.b),
+      own: crossed.filter(pair => !pair.b),
+      mostly: focus ? null : mostlyOne(all.files, sideOf),
+    };
+  }, [all, files, focus, lanes, conflicted, yard]);
   const ordered = (queue?.entries ?? []).filter(entry => entry.position !== null);
   // Out of the order: held for a person, a dependency or main, and ended checks; only each Lane's current submission
   // (an earlier one is history).
-  const current = currentEntries(queue?.entries ?? []);
   const held = (queue?.entries ?? []).filter(
     entry => entry.position === null && (!entry.laneId || current.get(entry.laneId) === entry),
   );
@@ -70,7 +106,6 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
     titleOf,
   );
   const onPerson = pairs.filter(pair => pair.person).length;
-  const markOf = new Map(feed?.lanes.map(mark => [mark.laneId, mark]));
   const row = (entry: QueueEntry) => (
     <QueueRow
       key={entry.submissionId ?? entry.laneId ?? entry.submittedAt}
@@ -84,7 +119,11 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
   const lead = !shared.view
     ? 'Loading the Lanes…'
     : all.files.length
-      ? `${all.files.length.toLocaleString()} ${all.files.length === 1 ? 'file is' : 'files are'} saved in more than one Lane.`
+      ? `${all.files.length.toLocaleString()} ${all.files.length === 1 ? 'file is' : 'files are'} saved in more than one Lane${
+          cross.between
+            ? `; ${cross.between.toLocaleString()} ${cross.between === 1 ? 'pair' : 'pairs'} of Items cross`
+            : ''
+        }.`
       : 'No two open Lanes have saved the same file.';
   const rest = queue
     ? `${onPerson ? `${onPerson.toLocaleString()} ${onPerson === 1 ? 'Lane waits' : 'Lanes wait'} on a person, ` : ''}${(pairs.length - onPerson).toLocaleString()} on another Lane or on main.`
@@ -110,54 +149,52 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
           title="Where Lanes cross"
           handle={handle}
           weight="watch"
-          count={shared.view ? files.files.length : undefined}
-          hint="saved work only: unsaved edits are not seen"
+          count={
+            shared.view && (lanes || laneError) && (queue || queueError) ? cross.pairs.length : undefined
+          }
+          hint="pairs of Items, a conflict first, then most shared files · saved work only"
         >
           {focus && yard ? (
             <p className="quietline">
-              The files{' '}
+              The pairs{' '}
               <A className="lk lanes-inline" href={laneHref(focus)} dir="auto">
                 {titleOf(focus)}
               </A>{' '}
-              shares with other open Lanes.{' '}
+              is in, over its own shared files.{' '}
               <A className="lk" href={everyFile}>
-                Every shared file
+                Every pair
               </A>
             </p>
           ) : null}
           {shared.error ? (
             <p className="quietline">The overlaps could not be read.</p>
-          ) : !shared.view || (focus && !yard) ? (
-            // With a Lane picked, its files wait for its title too, so the line above never pushes them down.
+          ) : !shared.view || (!lanes && !laneError) || (!queue && !queueError) || (focus && !yard) ? (
+            // The pairs wait for the Lane page (which Item each Lane is for) and the queue (which Lane did not compose),
+            // so they never regroup once drawn; with a
+            // Lane picked they wait for its title too, so the line above never pushes them down.
             <div className="sk-rows" aria-busy="true" aria-label="Loading the overlaps">
               <div className="sk" />
             </div>
-          ) : files.files.length ? (
-            <ul className="lanes-files">
-              {files.files.slice(0, CAP).map(file => (
-                <li key={file.path} className="row">
-                  <span className="lanes-path">
-                    <State word="Set aside" state="stale">
-                      Same file
-                    </State>
-                    <span className="mono any" translate="no" dir="ltr">
-                      {file.path}
-                    </span>
-                  </span>
-                  <span className="meta t2">
-                    {file.laneIds.map((id, index) => (
-                      <span key={id}>
-                        {index ? (index === file.laneIds.length - 1 ? ' and ' : ', ') : ''}
-                        <A className="lk" href={laneHref(id)} dir="auto">
-                          {titleOf(id)}
-                        </A>
-                        {rowOf.get(id)?.overlap ? ' (conflict)' : ''}
-                      </span>
-                    ))}
-                  </span>
-                </li>
-              ))}
-            </ul>
+          ) : cross.pairs.length || cross.own.length ? (
+            <>
+              {cross.mostly ? (
+                <p className="quietline">
+                  Most of it is one Item:{' '}
+                  <span className="cx-title" dir="auto">
+                    {cross.mostly.side.title}
+                  </span>{' '}
+                  is in {cross.mostly.files.toLocaleString()} of the {all.files.length.toLocaleString()}{' '}
+                  files.
+                </p>
+              ) : null}
+              <CrossList
+                pairs={cross.pairs}
+                own={cross.own}
+                shared={files.files}
+                laneHref={laneHref}
+                conflicted={conflicted}
+              />
+            </>
           ) : (
             <p className="quietline">
               {focus
@@ -165,7 +202,6 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
                 : 'No two open Lanes have saved changes to the same file.'}
             </p>
           )}
-          {more(files.files.length - CAP, 'more shared files')}
           {shared.view && !files.complete ? (
             <div className="pf">Some Lanes were not compared, so this list may be short.</div>
           ) : null}
