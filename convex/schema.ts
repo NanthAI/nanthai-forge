@@ -360,6 +360,12 @@ export const projectPurge = v.object({
   completedAt: v.optional(v.number()),
 });
 const projectFields = {
+  /** How many `projectTeams` links this project has (Item b6588425, docs/access.md#teams). Kept with each link
+   * change in the same transaction, so a project without teams resolves roles with no team read. */
+  teamLinks: v.optional(v.number()),
+  /** Bumped by every team-link change; `projectTeamAccess.set` compares it so a retried or stale edit cannot
+   * re-grant access the owner removed since. */
+  teamRevision: v.optional(v.number()),
   /** One durable, project-scoped physical seed; source jobs own its pages and retries. */
   physicalSeed: v.optional(
     v.object({
@@ -1021,9 +1027,22 @@ export default defineSchema({
     /** The member's handle, kept current by convex/accountTeams.ts (Item a841a76d) so the account's team page reads
      * handles with its rows; null for an account with no handle. Absent only until the one-time backfill. */
     handle: v.optional(v.union(v.string(), v.null())),
+    /** Daily work counters of a member who writes through a team grant (no contributor row to carry them). */
+    workBudget: v.optional(
+      v.object({ day: v.number(), checks: v.number(), composes: v.number(), submissions: v.number() }),
+    ),
   })
     .index('by_teamId_and_member', ['teamId', 'member'])
     .index('by_member_and_teamId', ['member', 'teamId']),
+  /** A team's role on one project (Item b6588425, docs/access.md#teams): its current members get that role.
+   * A separate row, so one team serves many projects and an organization can own teams later. */
+  projectTeams: defineTable({
+    projectId: v.id('hostedProjects'),
+    teamId: v.id('teams'),
+    role: v.union(v.literal('read'), v.literal('write')),
+  })
+    .index('by_projectId_and_teamId', ['projectId', 'teamId'])
+    .index('by_teamId_and_projectId', ['teamId', 'projectId']),
   teamImports: defineTable({ teamId: v.id('teams'), importId: v.id('imports') })
     .index('by_teamId_and_importId', ['teamId', 'importId'])
     .index('by_importId_and_teamId', ['importId', 'teamId']),

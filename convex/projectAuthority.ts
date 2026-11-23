@@ -18,6 +18,8 @@ import { invariant } from '../src/errors';
 import { projectExecution } from './projectExecution';
 import { checkedProjectRole, hasWriteRole, projectRole, shareQueryRoles } from './projectRole';
 import type { ProjectRole } from './projectAccessContract';
+import { audienceOf, coordinationAccess } from './projectAudience';
+export { coordinationAccess };
 const readProjects = new WeakMap<
   object,
   Map<string, import('./_generated/dataModel').Doc<'hostedProjects'>>
@@ -267,13 +269,12 @@ export async function activeProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedP
 
 /** Agent coordination is team-only on every project (Item b6588425): the owner and write members always, and the
  * readers of a private project. A public project's visibility opens its source and public Items, never coordination.
- * Call only after `accessibleProject`, which has already required a role on a private project: a public project
- * costs one indexed membership read (the owner none), a private one none. */
+ * The rule itself is `audienceOf` (convex/projectAudience.ts), shared with the board and Lane holders. */
 export const readsCoordination = (project: Doc<'hostedProjects'>, role: ProjectRole | null) =>
-  role !== null && (role !== 'read' || project.visibility !== 'public');
-export async function coordinationAccess(ctx: QueryCtx, project: Doc<'hostedProjects'>, actor: string) {
-  return project.visibility !== 'public' || (await hasWriteRole(ctx, project, actor));
-}
+  audienceOf(project, role).follows;
+/** A board or coordination write checks the device's project and write scope like any Work write. */
+export const requireDeviceWrite = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
+  deviceProject(ctx, projectId, true);
 /** The one gate for coordination reads. A refused outsider gets the same answer as a private project without a
  * role. Query-only: the query reuses the role it checked here (one snapshot), so a later conversation check reads
  * no second membership row. */

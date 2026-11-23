@@ -20,6 +20,7 @@ export const purgeSettleMs = (putExpiry + 300) * 1000;
 export const revokedTables = [
   'projectReaders',
   'projectContributors',
+  'projectTeams',
   'projectInvites',
   'projectHostedDecisionMaintainers',
   'projectCheckRunners',
@@ -49,6 +50,8 @@ async function revokePage(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
     for (const row of rows) await ctx.db.delete(row._id as never);
     if (rows.length === revokePageRows) done = false;
   }
+  // Team links went with their rows; the count must agree so restore starts with none.
+  if (done) await ctx.db.patch(projectId, { teamLinks: undefined });
   return done;
 }
 /** Tombstone bookkeeping for a just-deleted project: revoke access now, schedule the one

@@ -4,7 +4,7 @@ import { sourceAuthorship } from '../src/work-actor-types';
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
-import { projectRole } from './projectRole';
+import { laneHolderFor } from './projectAudience';
 import { accessibleProject } from './projectAuthority';
 import { hostedRecordPage, hostedRecordBody, readHostedRecord, recordHead } from './projectHostedRecords';
 import { effectiveLifecycleRecord } from './projectHostedLifecycleOverlay';
@@ -40,6 +40,7 @@ async function laneRecord(
   return {
     lane: hostedLaneSchema.parse(JSON.parse(row.value)),
     project,
+    viewer: actor,
     saveFailure: row.saveFailure && saveFailureSummary(row.saveFailure.value),
   };
 }
@@ -97,12 +98,7 @@ export const head = query({
     try {
       const { lane, project, saveFailure } = await laneRecord(ctx, input);
       const viewer = (await ctx.auth.getUserIdentity())!.subject;
-      const holderVisible =
-        input.includeHolder &&
-        lane.holder &&
-        (project.visibility !== 'public' ||
-          project.owner === viewer ||
-          Boolean(await projectRole(ctx, project, viewer)));
+      const holder = input.includeHolder ? await laneHolderFor(ctx, project, viewer, lane.holder) : undefined;
       // Same query, one indexed read: the overlap row carries the landing stamp.
       const landed = (
         await ctx.db
@@ -119,14 +115,14 @@ export const head = query({
           : null;
       return {
         ...(input.includeState ? { state: lane.state } : {}),
-        ...(lane.holder && holderVisible
+        ...(holder
           ? {
               holder: {
-                ...(lane.holder.sessionId ? { sessionId: lane.holder.sessionId } : {}),
-                name: lane.holder.agent ?? null,
-                since: lane.holder.since,
-                lastSeen: lane.holder.lastSeen,
-                mine: lane.holder.actor === viewer,
+                ...(holder.sessionId ? { sessionId: holder.sessionId } : {}),
+                name: holder.agent ?? null,
+                since: holder.since,
+                lastSeen: holder.lastSeen,
+                mine: holder.actor === viewer,
               },
             }
           : {}),
@@ -300,7 +296,8 @@ export const select = query({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const { lane, project } = await laneRecord(ctx, input);
+      const { lane, project, viewer } = await laneRecord(ctx, input);
+      const holder = await laneHolderFor(ctx, project, viewer, lane.holder);
       invariant(
         !input.expected ||
           (input.expected.head === lane.head &&
@@ -321,7 +318,7 @@ export const select = query({
           sourceVersion: lane.sourceVersion,
           lifecycleVersion: lane.lifecycleVersion,
           state: lane.state,
-          ...(lane.holder ? { holder: lane.holder } : {}),
+          ...(holder ? { holder } : {}),
           ...(lane.stack ? { stack: lane.stack } : {}),
           ...(lane.earlyResolution ? { earlyResolution: lane.earlyResolution } : {}),
           base: lane.base,
@@ -405,8 +402,14 @@ export async function journalLaneRead(
   input: { projectId: Id<'hostedProjects'>; laneId: string; version?: number },
 ) {
   try {
-    const { lane, saveFailure } = await laneRecord(ctx, input);
-    return JSON.stringify({ ...lane, ...(saveFailure ? { saveFailure } : {}) });
+    const { lane, project, viewer, saveFailure } = await laneRecord(ctx, input);
+    const { holder: stored, ...rest } = lane;
+    const holder = await laneHolderFor(ctx, project, viewer, stored);
+    return JSON.stringify({
+      ...rest,
+      ...(holder ? { holder } : {}),
+      ...(saveFailure ? { saveFailure } : {}),
+    });
   } catch (error) {
     if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
     return report(error);

@@ -7,7 +7,8 @@ import type { Doc } from './_generated/dataModel';
 /** Fields affecting the finite observer. In particular: no Work revision,
  * controller fences, wake identity, check progress, batch selection or restore bases. */
 export const finishReadFields = {
-  hostedProjects: ['owner', 'visibility', 'removal', 'sourceAuthority', 'name', 'key'],
+  // teamLinks: role checks on this header must see linked teams (Item b6588425).
+  hostedProjects: ['owner', 'visibility', 'removal', 'sourceAuthority', 'name', 'key', 'teamLinks'],
   projectWorkGenerations: [
     'projectId',
     'backupId',

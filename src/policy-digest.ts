@@ -2,7 +2,7 @@
 import { digest } from './state/hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { protectedPathMatcher, type AutonomyPolicy } from './autonomy-policy.js';
-import { effectiveAgentDefaults } from './agent-parallel-defaults.js';
+import { boardAudience, effectiveAgentDefaults } from './agent-parallel-defaults.js';
 
 /** The part of the policy that decides what a landing may accept: gate, mode, protected paths, auto
  * actors, checks, lifecycle and enforced trust. The preset is only a label (any edit turns it into
@@ -139,6 +139,13 @@ export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
   'agentDefaults.autoClaim': { exempt: 'board notes about touched paths' },
   'agentDefaults.dormantAfterDays': { exempt: 'marks idle Lanes in listings; nothing is removed' },
   'agentDefaults.stacking': { exempt: `where a Lane is based before its check; ${notLanding}` },
+  // Letting readers message the team widens who reaches it; narrowing back to the team is free.
+  'agentDefaults.boardAudience': {
+    relax: 'opening the board to contributors is held',
+    held: (previous, policy) =>
+      boardAudience(previous.agentDefaults) === 'team' &&
+      boardAudience(policy.agentDefaults) === 'team-and-contributors',
+  },
   // Turning alerts off removes owner oversight, like relaxing the landing mode; turning them on is free.
   'agentDefaults.stallAlerts.enabled': {
     relax: 'turning alerts off is held',

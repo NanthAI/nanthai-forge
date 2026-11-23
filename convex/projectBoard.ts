@@ -2,7 +2,8 @@
 import { v } from 'convex/values';
 import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
-import { recordCaller } from './projectHostedFrictionStore';
+import { boardCaller } from './projectAudience';
+import { hasWriteRole } from './projectRole';
 import { boardInbox, boardMessageView } from './projectBoardDelivery';
 import { laneConflicts } from './projectHostedConflicts';
 import {
@@ -56,6 +57,25 @@ async function laneRow(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProject
   return rows[0]!;
 }
 
+/** A contributor sees only their own notes: anyone else's answers exactly like a missing note. */
+const missingNote = (ref: string) =>
+  `No board message ${boardIdPrefix(ref)} in this project (notes expire after 14 days).`;
+async function readableMessage(
+  ctx: QueryCtx | MutationCtx,
+  caller: { projectId: Id<'hostedProjects'>; actor: string; team: boolean },
+  ref: string,
+) {
+  // A prefix is matched across every note, so its ambiguity would reveal notes a contributor cannot read.
+  invariant(
+    caller.team || prefixRange(boardIdPrefix(ref)).full,
+    'BAD_ARGUMENT',
+    'Contributors name their notes by the full id the post returned.',
+  );
+  const row = await messageRow(ctx, caller.projectId, ref);
+  invariant(caller.team || row.author === caller.actor, 'NOT_FOUND', missingNote(ref));
+  return row;
+}
+
 async function messageRow(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, ref: string) {
   const id = boardIdPrefix(ref);
   const { full, upper } = prefixRange(id);
@@ -70,14 +90,13 @@ async function messageRow(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProj
   invariant(
     rows.length === 1,
     rows.length ? 'BAD_ARGUMENT' : 'NOT_FOUND',
-    rows.length
-      ? `Message prefix ${id} is ambiguous; use more characters.`
-      : `No board message ${id} in this project (notes expire after 14 days).`,
+    rows.length ? `Message prefix ${id} is ambiguous; use more characters.` : missingNote(id),
   );
   return rows[0]!;
 }
 
-/** One mutation per post. Reads: ~20 point/range rows (access, replay, 3 switches, Lane, target,
+/** One mutation per post. Reads: ~20 point/range rows (access, replay, 3 switches, Lane, target and, for a Lane
+ * note or reply, its holder's role: none for the owner or the caller, one indexed read for a member;
  * dedupe, 2 rate windows, account, cleanup ≤20, project, inbox), ~6 KB. Writes: message, evidence,
  * inbox, project count, 2 windows, account (7 rows, ~2.5 KB) plus ≤20 expired-row deletes. */
 export const post = mutation({
@@ -95,7 +114,7 @@ export const post = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const { actor, project } = await recordCaller(ctx, input.projectId, true);
+      const { actor, project, team } = await boardCaller(ctx, input.projectId);
       const projectId = input.projectId;
       invariant(uuid.test(input.operationId), 'BAD_ARGUMENT', 'operationId must be a lowercase UUID.');
       const old = await ctx.db
@@ -136,10 +155,28 @@ export const post = mutation({
       let recipientActor: string | undefined;
       if (input.replyTo) {
         // A reply goes to the Lane that wrote the original, else to the original's target.
-        const original = await messageRow(ctx, projectId, input.replyTo);
+        // A contributor answers only in their own threads; the team answers anyone it can read.
+        const original = await readableMessage(ctx, { projectId, actor, team }, input.replyTo);
         replyTo = original.id;
-        targetKey = original.fromLaneId ? `lane:${original.fromLaneId}` : original.targetKey;
+        const laneId =
+          original.fromLaneId ??
+          (original.targetKey.startsWith('lane:') ? original.targetKey.slice(5) : undefined);
+        targetKey = laneId ? `lane:${laneId}` : original.targetKey;
         recipients = original.fromLaneId ? 1 : null;
+        if (laneId) {
+          const lane = await ctx.db
+            .query('projectHostedOverlapLanes')
+            .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
+            .unique();
+          const holder = lane ? (lane.holderActor ?? lane.actor) : original.fromLaneId && original.author;
+          // A Lane answers only while whoever holds it is on the team; otherwise the reply stays in the team inbox.
+          if (holder && (holder === actor || (await hasWriteRole(ctx, project, holder))))
+            recipientActor = holder;
+          else {
+            targetKey = 'project';
+            recipients = null;
+          }
+        }
       } else {
         const target = parseBoardTarget(input.to!);
         if (target.kind === 'lane') {
@@ -147,6 +184,12 @@ export const post = mutation({
           invariant(lane.open, 'LANE_NOT_ACTIVE', `Lane ${lane.laneId.slice(0, 8)} is no longer open.`);
           targetKey = `lane:${lane.laneId}`;
           recipientActor = lane.holderActor ?? lane.actor;
+          // Notes go to the team only: a Lane held by someone no longer on it cannot be messaged.
+          invariant(
+            recipientActor === actor || (await hasWriteRole(ctx, project, recipientActor)),
+            'BAD_ARGUMENT',
+            `Lane ${lane.laneId.slice(0, 8)} is held by someone outside this project's team; board notes reach the team only.`,
+          );
           recipients = 1;
         } else if (target.kind === 'issue') {
           targetKey = `issue:${target.id}`;
@@ -286,7 +329,7 @@ export const resolve = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const { actor } = await recordCaller(ctx, input.projectId, true);
+      const { actor, team } = await boardCaller(ctx, input.projectId);
       assertBoardOpen(await boardStopped(ctx, input.projectId, actor));
       if (input.text !== undefined) assertBoardText(input.text);
       invariant(
@@ -294,7 +337,7 @@ export const resolve = mutation({
         'BAD_ARGUMENT',
         'agent must be a Forge agent slug (two words from the fixed list).',
       );
-      const note = await messageRow(ctx, input.projectId, input.id);
+      const note = await readableMessage(ctx, { projectId: input.projectId, actor, team }, input.id);
       if (note.resolvedAt)
         return canonicalPayload({ status: 'already-resolved', id: note.id, at: note.resolvedAt });
       const at = Date.now();
@@ -312,7 +355,8 @@ export const resolve = mutation({
 });
 
 /** One bounded query. Inbox: 3 inbox point reads + ≤3×11 message rows (~10 KB at most).
- * One message: 1 range read + ≤21 replies. Members with write access only. */
+ * One message: 1 range read + ≤21 replies. The team reads everything; a contributor (board audience
+ * `team-and-contributors`) reads only their own notes by id (docs/access.md#audience). */
 export const read = query({
   args: {
     projectId: v.id('hostedProjects'),
@@ -328,12 +372,18 @@ export const read = query({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      await recordCaller(ctx, input.projectId, true);
+      const { actor, team } = await boardCaller(ctx, input.projectId);
       const projectId = input.projectId;
+      // A contributor reads one of their own notes and its replies by id, never the team's inboxes.
+      invariant(
+        team || input.id,
+        'BAD_ARGUMENT',
+        'Contributors read their own notes by id: board {"id":"NOTE_ID"} shows a note you posted and its replies.',
+      );
       const off = await boardStopped(ctx, projectId);
       if (off && input.id) return canonicalPayload({ status: 'off', messages: [], more: 0 });
       if (input.id) {
-        const message = await messageRow(ctx, projectId, input.id);
+        const message = await readableMessage(ctx, { projectId, actor, team }, input.id);
         const replies = await ctx.db
           .query('projectBoardMessages')
           .withIndex('by_project_and_reply', q => q.eq('projectId', projectId).eq('replyTo', message.id))

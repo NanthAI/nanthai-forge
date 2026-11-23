@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "projectTeams links a team to a project (b6588425). Nothing can go: the lead requires a separate row per link so one team serves many projects and an organization can own teams later (1e474c35); a field on the project or the team cannot hold that. No other table is added: the audience is a policy field and team work budgets ride the existing teamMembers row.",
+  "date": "2026-11-22"
+}

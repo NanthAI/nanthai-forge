@@ -40,6 +40,7 @@ export const autonomyPolicy = v.object({
       autoClaim: v.optional(v.boolean()),
       dormantAfterDays: v.optional(v.number()),
       stacking: v.optional(v.union(v.literal('offer'), v.literal('auto'))),
+      boardAudience: v.optional(v.union(v.literal('team'), v.literal('team-and-contributors'))),
       stallAlerts: v.optional(
         v.object({
           enabled: v.optional(v.boolean()),

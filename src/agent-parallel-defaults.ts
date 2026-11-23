@@ -23,6 +23,11 @@ export const stallAlertsSchema = z
       value.repeatAfterMinutes === undefined || value.repeatAfterMinutes > (value.notifyAfterMinutes ?? 15),
     'stallAlerts.repeatAfterMinutes must be later than notifyAfterMinutes.',
   );
+/** There is no `everyone`: the board is never open to all readers of a public project. */
+export const boardAudienceSchema = z.enum(['team', 'team-and-contributors']);
+export type BoardAudience = z.infer<typeof boardAudienceSchema>;
+export const boardAudience = (stored: AgentDefaults | undefined): BoardAudience =>
+  stored?.boardAudience ?? 'team';
 export const agentDefaultsSchema = z
   .object({
     preflight: z.enum(['off', 'advise', 'require']).optional(),
@@ -40,6 +45,9 @@ export const agentDefaultsSchema = z
      * one stack command; `auto` stacks at the Lane's next sync. Stored-only, read by the server's
      * overlap read alone, like dormantAfterDays. */
     stacking: z.enum(['offer', 'auto']).optional(),
+    /** Who may use the board (Item b6588425, docs/access.md#board-audience): `team` (default) or
+     * `team-and-contributors`, whose readers may also message the team directly. Never everyone. Stored-only. */
+    boardAudience: boardAudienceSchema.optional(),
     stallAlerts: stallAlertsSchema.optional(),
   })
   .strict();

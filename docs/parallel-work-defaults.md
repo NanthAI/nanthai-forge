@@ -402,7 +402,7 @@ acceptance-policy pins exclude these settings.
 Capabilities and the policy read carry a frozen key set (`preflight`, `preflightMaxMinutes`,
 `urgentRoles`, `overlapGate`, `checkpointNudgeMinutes`, `stallAlerts`) because CLIs before
 2026-11-06 parse that object strictly. `overlapGate` was retired (Issue 853fcde3): the server always
-sends `"off"` so those CLIs still parse, and no current CLI reads it. `autoClaim`, `dormantAfterDays` and `stacking` are stored-only: the server
+sends `"off"` so those CLIs still parse, and no current CLI reads it. `autoClaim`, `dormantAfterDays`, `stacking` and `boardAudience` are stored-only: the server
 reads them itself, the policy read shows them only when set, and capabilities never carry them. A
 later key that agents must read goes to capabilities only for CLIs that ask for contract feature
 `agent-defaults-extended`; current CLIs drop keys they do not know. Adding `autoClaim` to the
@@ -417,6 +417,7 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
 | `checkpointNudgeMinutes` | `30` | A builder that stops unexpectedly loses everything unsaved. Saves take under a minute. | Any number of minutes; `0` turns the nudge off. |
 | `dormantAfterDays` | `2` | Lanes nobody saved, started or landed for days stayed active (60 on the dogfood project, 52 idle) and kept raising presence entries and board signals for work long on main. | Any whole number of days; `0` never marks a Lane dormant. |
 | `stacking` | `offer` | Two Lanes on one file both built on main, and the second repaired a conflict after the first landed (rework at 3, 5 and 10 parallel Lanes). When a peer touching your files is admitted, building on its pending head avoids that repair. `offer` prints the exact `sync {stackOn}` command; agents choose. | `auto`: the next plain `sync` stacks on the offered peer by itself. |
+| `boardAudience` | `team` | The board and coordination are the team's working space; the owner asked that a public project keep them private to its team (Item b6588425). There is no `everyone`. | `team-and-contributors`: the project's readers may also post notes to the team and read their own threads ([audience](access.md#audience)). An agent's switch to it is held for the owner. |
 | `stallAlerts` | on, 15 and 30 min | A check outage (2026-10-30, every result upload refused from 18:35 to 21:05) stalled landings for hours before anyone looked. | `{"stallAlerts":{"enabled":false}}`, thresholds, recipients and webhook preset below. |
 
 ### preflight

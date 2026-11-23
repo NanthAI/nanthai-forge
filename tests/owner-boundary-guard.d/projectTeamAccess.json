@@ -1,0 +1,6 @@
+{
+  "actions": [
+    "list"
+  ],
+  "reason": "Read-only: the owner's team links, their names and the revision `set` compares (Item b6588425). Changing a link (`set`) is owner-person only."
+}

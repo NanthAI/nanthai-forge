@@ -15,7 +15,7 @@ Status: the roles, verbs and resolver below describe what runs today. The parts 
 
 There is no maintainer or triage role. A guidance-maintainer assignment authorizes agent guidance and project metrics only ([security](security.md)).
 
-The role is resolved in one place, `projectRole` in `convex/projectRole.ts`, from current grants only: the owner costs no database read, a write member one indexed read, a reader at most two. There is no cached membership, so removing a person or lowering write to read takes effect on their next call, and on every call of their agents. The same resolver answers the access checks in `convex/projectAuthority.ts`, the public identity rule (`convex/publicPeople.ts`) and member labels (`convex/projectActorNames.ts`).
+The role is resolved in one place, `projectRole` in `convex/projectRole.ts`, from current grants only: the owner costs no database read, a write member one indexed read, a reader at most two. A grant can also come from a [linked team](#teams); the effective role is the highest of the direct grant and every linked team. There is no cached membership, so removing a person, lowering write to read, or removing them from a linked team takes effect on their next call, and on every call of their agents. The same resolver answers the access checks in `convex/projectAuthority.ts`, the public identity rule (`convex/publicPeople.ts`) and member labels (`convex/projectActorNames.ts`).
 
 ## What each role may do
 
@@ -37,7 +37,7 @@ The table is `projectVerbs` in `convex/projectAccessContract.ts`; `projectMay` g
 | Approve a protected path (`approveProtected`) | no | no | no | yes | never | `projectHostedApprovals`, `projectHostedAcceptance` |
 | Secret values, permanent delete, runner keys, public or private (`ownerPersonOnly`) | no | no | no | yes | never | `requireOwnerPerson`; visibility: `projectVisibility.setVisibility` |
 
-Agent coordination (sessions, messages, handoffs, claims, activity counts and the feed) is team-only on every project: the owner and write members, plus readers of a private project; a public project's outsider gets the same "unavailable" answer as a private project without a role (`coordinationProject` in `convex/projectAuthority.ts`, `b6588425`).
+Agent coordination (sessions, messages, handoffs, claims, activity counts and the feed), the board and the agent session holding a Lane follow one [audience rule](#audience): they belong to the project's team.
 
 Sealed secret writes are authorised by the owner device key in the signed roster.
 The storage endpoint accepts only the project owner account on an unrestricted
@@ -211,18 +211,51 @@ on (20 per UTC hour and 100 per UTC day for an inviter). The team path uses
 Home for delivery and is independent of the project invitation mail switch.
 Leave the team writer off until the owner approves applying the shared counters.
 
-## Teams and organizations (proposed, `1e474c35`, `517523cf`)
+## Teams
 
-Teams exist today as owner-managed groups used for the landing-without-check choice and for read sharing of analysis imports. The proposal, GitHub's model:
+Decision (`b6588425`, owner 2026-11-07: a shared team object, as GitHub organizations have; lead 2026-11-22: a separate link row per project). Teams are owner-managed groups (**People and teams**). They already choose who may land without a check and who reads analysis imports. A team can also hold a role on a project:
+
+- The owner links one of their own teams to a project with **read** or **write** (`projectTeamAccess.set`, owner person in a browser only; devices are refused, as for adding people). A project can link up to 50 teams, each with its own role. Room is left for a later maintain or admin role; this slice adds no land-approval policy per role.
+- Every current member of a linked team gets that role on the project. The effective role is the highest of the person's direct grant and every linked team: a direct reader in a write team writes.
+- The link is its own row (`projectTeams`), never a field on the project or the team, so one team serves many projects and an organization can own teams later (`1e474c35`). The project keeps only a count of its links, written with each link change, so a project without teams resolves roles with no team read.
+- Each change bumps the project's team-access revision; `set` names the revision the owner read, so a stale screen or a retry sent after a newer change (an unlink, say) is refused instead of granting again. A retry of the change that already applied returns.
+- Removing a person from the team, unlinking the team or deleting it removes the access on the next call. A team being deleted grants nothing while its rows are purged; its links go with it. Trashing a project revokes its team links with the direct grants, so a restore starts with none; purging it deletes any left.
+- A member writing through a team has no contributor row, so the daily member work budget (checks, composes, submissions) is kept on their team row, shared by that team's projects.
+- People and access lists direct grants only; it does not show team links yet. The owner reads them with `projectTeamAccess.list`: the revision, and the team's name and role per link.
+
+Cost: an owner and a direct member read nothing more than before. When the direct grants miss on a project with links, the check reads the project's links (one bounded indexed read), the person's team rows (one indexed read, at most 51 rows; a member of more teams reads one row per linked team instead) and the matching team (one point read). No call is added, nothing polls, and idle costs nothing.
+
+### Organizations (proposed, `1e474c35`, `517523cf`)
+
+The rest of GitHub's model is still a proposal:
 
 - A project is owned by a person or an organization. Existing projects stay person-owned with no change in behaviour.
 - Organization roles: owner, member, billing manager (invoices, plan, card and limit, nothing else). Outside collaborators are added per project only.
-- A team can be granted read or write on many projects; its people inherit that access, shown with its source ("write, from team core"). Leaving a team or the organization removes the access on the next call.
 - A team can be a configured protected-path approver, under the existing exact-change binding rules.
 - Base permission for organization members on organization projects: none, read or write; read by default.
 - One landing pool per account owner (person or organization), unlimited people; no per-seat billing.
 
-Membership lookups stay indexed: one more read per access check at most. Every public function's access test gains organization owner, member, outsider and removed-member cases.
+Every public function's access test gains organization owner, member, outsider and removed-member cases.
+
+## Audience
+
+Decision (`b6588425`): one rule, `audienceOf` in `convex/projectAudience.ts`, decides who reads and writes the board, agent coordination and Lane holders. Its input is the current role from `projectRole`, direct or through a team, and the project row the call already loaded; it reads nothing itself.
+
+| Who | Board | Coordination | Lane holder |
+| --- | --- | --- | --- |
+| **Team**: owner and write members, direct or through a team | read and post; messages go to team members only | read and publish; messages go to team members only | shown |
+| Reader of a private project, direct or through a team | no | read | hidden |
+| Reader of a public project | no; with `team-and-contributors`, post to the team and read only their own notes and the replies to them | no | hidden |
+| Anyone else, including source Zone readers and people who left | no | no | hidden |
+
+- **Board audience** is a project setting, `agentDefaults.boardAudience`: `team` (default) or `team-and-contributors`. There is no `everyone`: the schema refuses it, and the board is never open to all readers of a public project. An agent's switch to `team-and-contributors` is held for the owner; switching back is not.
+- **Contributors** are the project's readers, named by the owner. Outside proposal authors join them when outside proposals ship. A contributor posts a note to the team (`project`, a team member's Lane or an Issue); the note reaches only the team. They read a note of theirs with `board {"id":…}`, with its replies, and reply or withdraw only there. They have no inbox, see no other contributor's notes, and cannot publish coordination messages, which reach every coordination reader. Under `team`, a contributor's earlier threads close too.
+- **No messages to outsiders.** A board note to a Lane, and a coordination message or hand-off to a session or person, needs a recipient on the team now; a Lane or session left by someone off the team refuses with `BAD_ARGUMENT`.
+- **Refusals.** Someone without access gets the private project's `PROJECT_UNAVAILABLE`; a contributor asking for a note that is not theirs gets the missing note's `NOT_FOUND`. Actor names (`projectActorNames.authorize`) count sessions and messages only for a coordination reader, so an outsider cannot learn whether a member ran a session or sent a message.
+- **Lane holder.** The session holding a Lane names a person, so it follows the public identity rule (`convex/publicPeople.ts`): only the team sees it, on the Lane list, detail, head and history reads (`laneHolderFor`) and at the response boundary (`publicPeople`).
+- **Paths.** Every board and coordination reader can read all of the project's source, so their paths need no masking. Source Zones scope paths of an analysis import and grant no project role, so a Zone reader sees nothing here.
+
+`tests/board-audience.test.mjs` covers the rule: team links and revocation, the effective role, outsiders, messages to people off the team, contributors and the cross-surface refusal. `tests/coordination-team-only.test.mjs` names every coordination query.
 
 ## Owner questions
 

@@ -2,6 +2,7 @@
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { ForgeError } from '../src/errors';
+import { teamGrant } from './teamGrant';
 import { canonicalPayload } from '../src/hosted-source-operation';
 
 const minute = 60_000,
@@ -221,7 +222,7 @@ export function nextMemberWorkBudget(
  * existing mutation. Owner work adds no calls, reads or writes. No rows or timers accrue. */
 export async function chargeMemberWork(
   ctx: MutationCtx,
-  project: Pick<Doc<'hostedProjects'>, '_id' | 'owner'>,
+  project: Pick<Doc<'hostedProjects'>, '_id' | 'owner' | 'teamLinks'>,
   actor: string,
   kind: MemberWorkKind,
 ) {
@@ -231,7 +232,14 @@ export async function chargeMemberWork(
     .query('projectContributors')
     .withIndex('by_project_and_contributor', q => q.eq('projectId', project._id).eq('contributor', actor))
     .unique();
-  if (!member) throw new ForgeError('PROJECT_UNAVAILABLE', 'Current contributor membership is required.');
+  if (!member) {
+    // Write through a team grant: the member's team row carries the counters, shared by the team's projects.
+    const team = await teamGrant(ctx, project, actor);
+    if (team?.role !== 'write')
+      throw new ForgeError('PROJECT_UNAVAILABLE', 'Current contributor membership is required.');
+    await ctx.db.patch(team.member._id, { workBudget: nextMemberWorkBudget(team.member.workBudget, kind) });
+    return;
+  }
   const workBudget = nextMemberWorkBudget(member.workBudget, kind);
   await ctx.db.patch(member._id, { workBudget });
   rememberMemberWorkBudget(ctx, member, workBudget);

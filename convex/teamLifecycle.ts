@@ -77,6 +77,18 @@ export const purge = internalMutation({
           .query('projectInvites')
           .withIndex('by_teamId_and_state', q => q.eq('teamId', id))
           .take(50),
+      async () => {
+        const links = await ctx.db
+          .query('projectTeams')
+          .withIndex('by_teamId_and_projectId', q => q.eq('teamId', id))
+          .take(50);
+        // Each link also lowers its project's link count (the role check's no-teams fast path).
+        for (const link of links) {
+          const project = await ctx.db.get(link.projectId);
+          if (project?.teamLinks) await ctx.db.patch(project._id, { teamLinks: project.teamLinks - 1 });
+        }
+        return links;
+      },
     ];
     for (const page of pages) {
       const rows = await page();

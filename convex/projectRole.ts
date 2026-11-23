@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // The one place a project role is resolved (Item b987e608; docs/access.md). Every access check reads membership here:
-// the owner costs no read, write one indexed read, read at most two. Membership is current-state only: a removed
-// person's next call reads no row and is refused, with no cache to expire.
+// the owner costs no read, write one indexed read, read at most two. A project with team grants (Item b6588425) adds
+// one indexed read of the actor's team rows, and one point read of a matching team, only after the direct grants miss.
+// Membership is current-state only: a removed person's next call reads no row and is refused, with no cache to expire.
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { ProjectRole } from './projectAccessContract';
 import { rememberMemberWorkBudget } from './abuseLimits';
+import { teamGrant } from './teamGrant';
 
-type Project = Pick<Doc<'hostedProjects'>, '_id' | 'owner'>;
+type Project = Pick<Doc<'hostedProjects'>, '_id' | 'owner' | 'teamLinks'>;
 // Roles a transaction checked. Authorization reads current membership; one query reuses its own check (one snapshot).
 const checkedRoles = new WeakMap<object, Map<string, ProjectRole | null>>();
 const roleKey = (project: Project, actor: string) => `${project._id}:${actor}`;
@@ -38,10 +40,14 @@ export async function hasWriteRole(ctx: QueryCtx | MutationCtx, project: Project
   const known = checkedInQuery(ctx, project, actor);
   if (known !== undefined) return known === 'write';
   const member = await contributorRow(ctx, project._id, actor);
-  if (!member) return false;
-  rememberMemberWorkBudget(ctx, member);
-  checked(ctx, project, actor, 'write');
-  return true;
+  if (member) {
+    rememberMemberWorkBudget(ctx, member);
+    checked(ctx, project, actor, 'write');
+    return true;
+  }
+  const team = await teamGrant(ctx, project, actor);
+  if (team) checked(ctx, project, actor, team.role);
+  return team?.role === 'write';
 }
 
 /** The actor's current role on the project, or null for no grant (public visibility is not a role). */
@@ -54,6 +60,8 @@ export async function projectRole(
   const known = checkedInQuery(ctx, project, actor);
   if (known !== undefined) return known;
   if (await contributorRow(ctx, project._id, actor)) return checked(ctx, project, actor, 'write');
+  const team = await teamGrant(ctx, project, actor);
+  if (team) return checked(ctx, project, actor, team.role);
   const reader = await ctx.db
     .query('projectReaders')
     .withIndex('by_project_and_reader', q => q.eq('projectId', project._id).eq('reader', actor))

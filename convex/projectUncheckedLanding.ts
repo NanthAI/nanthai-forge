@@ -7,13 +7,11 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import type { AcceptanceActor, AutonomyPolicy } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
-type Ctx = Pick<QueryCtx | MutationCtx, 'db'>;
+import { hasWriteRole } from './projectRole';
+type Ctx = QueryCtx | MutationCtx;
 type Selection = NonNullable<AutonomyPolicy['acceptance']['withoutCheck']>;
-const writer = (ctx: Ctx, project: Doc<'hostedProjects'>, account: string) =>
-  ctx.db
-    .query('projectContributors')
-    .withIndex('by_project_and_contributor', q => q.eq('projectId', project._id).eq('contributor', account))
-    .unique();
+/** Current write access, direct or through a linked team (`projectRole`). */
+const writer = hasWriteRole;
 
 /** The single unchecked-landing authority, called only without passing check evidence.
  * Current membership is read in the final publication transaction, never cached from a picker. */

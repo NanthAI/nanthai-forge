@@ -66,13 +66,18 @@ export const claimById = (ctx: Ctx, projectId: Id<'hostedProjects'>, claimId: st
     .withIndex('by_project_and_claim', q => q.eq('projectId', projectId).eq('claimId', claimId))
     .unique();
 
-/** A recipient is a session in this project or a current participant (owner or contributor). */
+/** A recipient is on the project's team now (owner or write member, direct or through a team), named directly or by
+ * one of their sessions. A session left behind by someone no longer on the team is not a recipient: coordination
+ * never messages outsiders (Item b6588425). One membership read, none for the owner. */
 export async function resolveRecipient(ctx: Ctx, project: Doc<'hostedProjects'>, to: string) {
   const target = await session(ctx, project._id, to);
-  if (target) return { recipientActor: target.actor, recipientSession: target.sessionId };
-  const participant = await hasWriteRole(ctx, project, to);
-  invariant(participant, 'BAD_ARGUMENT', 'Select a session or participant in this project.');
-  return { recipientActor: to, recipientSession: undefined };
+  const recipientActor = target?.actor ?? to;
+  invariant(
+    await hasWriteRole(ctx, project, recipientActor),
+    'BAD_ARGUMENT',
+    "Select a session or participant on this project's team.",
+  );
+  return { recipientActor, recipientSession: target?.sessionId };
 }
 function canReceiveReceipt(message: Doc<'projectCoordinationEvents'>) {
   return (
@@ -175,7 +180,8 @@ export async function applyCommand(
       ...(message.planningItemId ? { planningItemId: message.planningItemId } : {}),
       ...(message.conversation ? { conversation: true as const } : {}),
     };
-    if (parsed.choice === undefined) return context;
+    // An answer is addressed to the asker only while they are on the team; otherwise it is recorded, not delivered.
+    if (parsed.choice === undefined || !(await hasWriteRole(ctx, project, message.actor))) return context;
     return {
       recipientActor: message.actor,
       ...('sessionId' in message.command && message.command.sessionId

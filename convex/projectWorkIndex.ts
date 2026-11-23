@@ -178,12 +178,8 @@ export const detail = query({
         intentPin: string | null = null;
       if (input.collection === 'intents') {
         const event = await findWorkEvent(ctx, project._id, input.id, { authority: true });
-        const membership = await ctx.db
-          .query('projectContributors')
-          .withIndex('by_project_and_contributor', q =>
-            q.eq('projectId', input.projectId).eq('contributor', user.subject),
-          )
-          .unique();
+        // Write access, direct or through a linked team: the same check the Intent edit mutation makes.
+        const membership = await hasWriteRole(ctx, project, user.subject);
         const intent = row ? JSON.parse(row.value) : null;
         const authority = await record(
           ctx,

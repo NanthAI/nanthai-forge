@@ -4,7 +4,8 @@ import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
 import { query, type QueryCtx } from './cliServer';
 import { readHostedRecord } from './projectHostedRecords';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, authorizedReadProject } from './projectAuthority';
+import { laneHolderFor } from './projectAudience';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { isPlanningPrefix, planningIdMaxCandidates } from '../src/planning-id';
 import { hostedLaneSchema } from '../src/hosted-lane';
@@ -68,6 +69,9 @@ export async function journalLaneHistoryRead(
     const current = await readHostedRecord(ctx, key);
     invariant(current, 'NOT_FOUND', 'Hosted Lane not found on this project.');
     const lane = hostedLaneSchema.parse(JSON.parse(current.value));
+    // readHostedRecord authorized this exact project row; the holder follows the coordination audience.
+    const project = authorizedReadProject(ctx, input.projectId);
+    const holder = project ? await laneHolderFor(ctx, project, user.subject, lane.holder) : undefined;
     const landed = (
       await ctx.db
         .query('projectHostedOverlapLanes')
@@ -91,7 +95,7 @@ export async function journalLaneHistoryRead(
       head: lane.head,
       version: lane.version,
       lastActivityAt: lane.at,
-      holder: lane.holder ?? null,
+      holder: holder ?? null,
       // Present once an accepted receipt carried one of this Lane's saved heads; null otherwise
       // (never landed, or landed before the landing stamp existed).
       landing: landed

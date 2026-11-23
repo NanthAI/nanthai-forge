@@ -6,6 +6,7 @@ import { internalQuery, type QueryCtx, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { selectedGeneration, recordPartition } from './projectWorkIndexStore';
 import { accessibleProject } from './projectAuthority';
+import { coordinationAccess } from './projectAudience';
 import { invariant } from '../src/errors';
 import { projectRole } from './projectRole';
 import { endInvitationEpoch } from './projectInvitationRevocation';
@@ -14,6 +15,7 @@ async function known(
   project: Doc<'hostedProjects'>,
   actor: string,
   reader: string,
+  readsCoordination: () => Promise<boolean>,
 ) {
   if (actor === project.owner || actor === reader) return true;
   // Retained membership provides project provenance.
@@ -31,22 +33,27 @@ async function known(
     .withIndex('by_project_and_contributor', q => q.eq('projectId', project._id).eq('contributor', actor))
     .unique();
   if (reader === project.owner && participant) return true; // The owner can already read the roster.
+  // Sessions and messages are coordination: they name an actor only for a reader of coordination, so an outsider
+  // cannot learn from this answer whether a member ran a session or sent or received a message (Item b6588425).
+  const coordination = await readsCoordination();
   if (
-    (
+    coordination &&
+    ((
       await ctx.db
         .query('projectCoordinationSessions')
         .withIndex('by_project_and_actor', q => q.eq('projectId', project._id).eq('actor', actor))
         .take(1)
     ).length ||
-    (
-      await ctx.db
-        .query('projectCoordinationEvents')
-        .withIndex('by_project_and_actor', q => q.eq('projectId', project._id).eq('actor', actor))
-        .take(1)
-    ).length
+      (
+        await ctx.db
+          .query('projectCoordinationEvents')
+          .withIndex('by_project_and_actor', q => q.eq('projectId', project._id).eq('actor', actor))
+          .take(1)
+      ).length)
   )
     return true;
   if (
+    coordination &&
     (
       await ctx.db
         .query('projectCoordinationEvents')
@@ -83,9 +90,13 @@ export const authorize = internalQuery({
   handler: async (ctx, input) => {
     const project = await accessibleProject(ctx, input.projectId, input.reader);
     const result: string[] = [];
+    // The viewer's audience is read once per call, and only when a target needs it.
+    let coordination: Promise<boolean> | undefined;
+    const readsCoordination = () => (coordination ??= coordinationAccess(ctx, project, input.reader));
     for (const actor of new Set(input.actors)) {
       invariant(
-        (await membership(ctx, project._id, actor)) && (await known(ctx, project, actor, input.reader)),
+        (await membership(ctx, project._id, actor)) &&
+          (await known(ctx, project, actor, input.reader, readsCoordination)),
         'PROJECT_UNAVAILABLE',
         'Select an actor already visible in this project.',
       );

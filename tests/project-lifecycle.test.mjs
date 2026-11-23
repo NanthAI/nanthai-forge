@@ -534,6 +534,20 @@ test('lifecycle ownership/CAS/reused request denials do not reveal or mutate ano
     e => e.data.code === 'WORK_OPERATION_CHANGED',
   );
 });
+test('Trash revokes team links with the direct grants, so a restore starts with none (b6588425)', async () => {
+  const s = fixture();
+  (s.tables.projectTeams ??= new Map()).set('link', {
+    _id: 'link',
+    projectId: 'project',
+    teamId: 'team',
+    role: 'write',
+  });
+  s.tables.hostedProjects.get('project').teamLinks = 1;
+  s.caller('owner');
+  await modules.projectLifecycle.trash._handler(s.ctx, s.operation());
+  assert.equal(s.tables.projectTeams.size, 0);
+  assert.equal(s.tables.hostedProjects.get('project').teamLinks, undefined);
+});
 test('Trash during a contributor byte transfer rejects the final response without disturbing retained owner source', async t => {
   const s = fixture(),
     fetch = globalThis.fetch;

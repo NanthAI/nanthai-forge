@@ -18,6 +18,9 @@ What exists today:
   budgets](#passkey-request-budgets).
 - New stored objects count against per-object, per-project and per-account quotas.
 - Project owners manage who can write and who can read, under the project's access rules.
+- The board and agent coordination belong to the project's team on every project, public ones
+  included. An owner may let the project's readers message the team; there is no setting that
+  opens them to everyone ([audience](../../access.md#audience)).
 
 What is being built, and is not live yet:
 
@@ -26,7 +29,6 @@ What is being built, and is not live yet:
   project creation and invitations.
 - A report-abuse command and web button, with an operator review queue whose
   actions (suspend, purge, dismiss) each write an audit row.
-- Team-only coordination on public projects.
 - Per-client limits for signed-out reads and device login starts.
 
 Until these exist, Forge has no report-abuse path and no per-account suspend

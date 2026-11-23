@@ -1139,6 +1139,8 @@ test('each policy field is held, exempt or relax-only for an agent edit, one cas
     'acceptance.standaloneNestedPackages': [false, true],
     'agentDefaults.stallAlerts.enabled': [true, false],
     'agentDefaults.stallAlerts.webhook': ['ntfy', 'off'],
+    // Opening the board to contributors widens who reaches the team (Item b6588425).
+    'agentDefaults.boardAudience': ['team', 'team-and-contributors'],
   };
   // Fields the gate reads through the effective agent defaults take values of their own type.
   const typed = {
