@@ -91,8 +91,11 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
    YOUR_MODEL`, fix its findings, land, no second round. The reviewer's model family differs from yours:
    a Claude builder is reviewed by GPT-6.2 Sol, a GPT or Gemini builder by Claude (Sonnet, or Opus for a
    core, queue, security or root-cause Lane that the brief or the Item marks `review-tier: core`; pass
-   `--tier core` if the brief says so). When one provider's daily cap is spent the script moves to the other
-   by itself and says so. If it refuses (no key, both caps spent), tell the lead on the Item and use the
+   `--tier core` if the brief says so). A core Lane gets the double review: GPT and Claude both, one merged
+   list, still one round. When one provider's daily cap is spent the script moves to the other by itself and
+   says so. A UI Lane with a design mock adds `--mock MOCK.png --shot SHOT.png` (repeatable) to the same
+   command: the mock check runs after the code review on the Item it already read, you paste its result on
+   the Item and fix the mismatches or say why one stays; the lead's mock look then starts from that list. If it refuses (no key, both caps spent), tell the lead on the Item and use the
    reviewer the brief names, or a subscription reviewer; never raise a cap yourself. `--spend` prints
    today's and the month's spend per provider. A core queue change still takes the fresh-context session
    review recorded in its [queue proof](#attaching-queue-proof); the script does not qualify for that.

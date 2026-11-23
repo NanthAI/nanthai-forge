@@ -27,7 +27,7 @@ const exempt = new Map([
   // A builder runs this from a Lane with plain Node (no install or build, so no dist/ helper): one
   // POST to a model API with its own 5-minute deadline and no retry, because a retried POST bills twice
   // (Item f082efd6).
-  ['scripts/review-api.mjs', 'standalone'],
+  ['scripts/review-api-deps.mjs', 'standalone'],
   // A Cloudflare Worker deployed as one self-contained file (no repo imports): its one
   // request to the backend carries its own 5-minute deadline; the client paces the rest.
   ['src/git-byte-worker.ts', 'standalone'],

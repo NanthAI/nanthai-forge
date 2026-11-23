@@ -64,6 +64,10 @@ export async function callProvider({
   user,
   maxOutputTokens,
   roomToRetry,
+  schema,
+  schemaName,
+  parse = parseFindings,
+  purpose,
 }) {
   const { provider, model } = route;
   const request = buildRequest(provider, {
@@ -72,6 +76,8 @@ export async function callProvider({
     user,
     maxOutputTokens,
     effort: args.effort ?? 'high',
+    schema,
+    schemaName,
   });
   const key = deps.readKey(KEYCHAIN[provider]);
   if (!key)
@@ -96,6 +102,7 @@ export async function callProvider({
           provider,
           model,
           tier,
+          ...(purpose ? { purpose } : {}),
           ...row,
         })}\n`,
       );
@@ -155,7 +162,7 @@ export async function callProvider({
       const result = await attempt();
       usd += result.usd; // billed even when the text then fails to parse
       // The model's text can echo the key; findings and parse diagnostics never carry it.
-      return { usage: result.usage, usd, parsed: parseFindings(redact(result.text, [key])) };
+      return { usage: result.usage, usd, parsed: parse(redact(result.text, [key])) };
     } catch (error) {
       if (error instanceof Error) error.message = redact(error.message, [key]);
       if (retried) error.retried = true;

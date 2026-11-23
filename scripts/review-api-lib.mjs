@@ -48,7 +48,7 @@ export const KEYCHAIN = {
   anthropic: 'forge-review-anthropic',
   openai: 'forge-review-openai',
 };
-const SEVERITY_ORDER = ['high', 'medium', 'low', 'nit'];
+export const SEVERITY_ORDER = ['high', 'medium', 'low', 'nit'];
 
 export class ReviewError extends Error {
   /** `usage` is set when the provider already billed the call (refusal, truncation). */
@@ -312,9 +312,12 @@ export function userPrompt({ item, diff, files, contextBytes, notes = [] }) {
 }
 
 /** Provider request. Anthropic: structured output through output_config (forced tool_choice is a 400
- * on current models); thinking is left on its default and effort is set. OpenAI: Responses API with a
- * strict json_schema. */
-export function buildRequest(provider, { model, system, user, maxOutputTokens, effort }) {
+ * on current models); thinking is left on its default and effort is set; `user` is text or content
+ * blocks (the mock check sends images). OpenAI: Responses API with a strict json_schema. */
+export function buildRequest(
+  provider,
+  { model, system, user, maxOutputTokens, effort, schema = FINDINGS_SCHEMA, schemaName = 'review_findings' },
+) {
   if (provider === 'anthropic')
     return {
       url: 'https://api.anthropic.com/v1/messages',
@@ -325,7 +328,7 @@ export function buildRequest(provider, { model, system, user, maxOutputTokens, e
         max_tokens: maxOutputTokens,
         system,
         messages: [{ role: 'user', content: user }],
-        output_config: { effort, format: { type: 'json_schema', schema: FINDINGS_SCHEMA } },
+        output_config: { effort, format: { type: 'json_schema', schema } },
       },
     };
   if (provider === 'openai')
@@ -342,7 +345,7 @@ export function buildRequest(provider, { model, system, user, maxOutputTokens, e
         reasoning: { effort },
         store: false,
         text: {
-          format: { type: 'json_schema', name: 'review_findings', strict: true, schema: FINDINGS_SCHEMA },
+          format: { type: 'json_schema', name: schemaName, strict: true, schema },
         },
       },
     };

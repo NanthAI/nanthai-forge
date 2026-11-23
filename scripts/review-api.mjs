@@ -8,38 +8,33 @@
 //     [--provider anthropic|openai] [--model M] [--effort low|medium|high] [--context-bytes N]
 //     [--max-call-usd N] [--max-day-usd N] [--price-in N --price-out N] [--spend-log FILE] [--config FILE]
 //     [--dry-run] [--json]
+//     [--mock MOCK.png ... --shot SHOT.png ...]   UI Lane with a design mock: add the mock check (review-mock.mjs)
 //   node scripts/review-api.mjs --spend     today's and this month's spend per provider against the credit
 //   Calibration on a landed Lane: add --lane-id LANE_ID --files-root DIR (files are read from DIR, e.g. main).
 //
 // Keys come from the macOS keychain (docs/agents/review-api.md); no key value is printed, logged or
-// sent anywhere but its provider. Forge cost: reads only (`diff`, `planning`), one page each.
-import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, sep } from 'node:path';
+// sent anywhere but its provider. Forge cost: reads only (`diff`, `planning`), one page each; the mock check
+// reuses the Item read.
+import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
-import { SPILL_CODES, callProvider, failureReason } from './review-api-call.mjs';
+import { realDeps } from './review-api-deps.mjs';
+import { readItem } from './review-api-item.mjs';
+import { reviewMockWith } from './review-mock.mjs';
+import { runDouble, runRoutes } from './review-api-route.mjs';
 import {
   DEFAULTS,
   ReviewError,
   changedPaths,
-  checkCaps,
-  dailyCapUsd,
-  estimateUsd,
-  formatReport,
   formatSpend,
   mergeConfig,
   planRoute,
-  priceFor,
   spendReport,
-  spentOn,
   systemPrompt,
   tierFromText,
   userPrompt,
 } from './review-api-lib.mjs';
 
-const run = promisify(execFile);
+export { realDeps };
 const VALUE_FLAGS = new Set([
   'lane',
   'item',
@@ -59,6 +54,7 @@ const VALUE_FLAGS = new Set([
   'builder-model',
   'tier',
   'config',
+  'image-bytes',
 ]);
 
 export function parseArgs(argv) {
@@ -66,7 +62,8 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const name = argv[i].replace(/^--/, '');
     if (!argv[i].startsWith('--')) throw new ReviewError('REVIEW_ARGS', `Unexpected argument ${argv[i]}.`);
-    if (VALUE_FLAGS.has(name)) args[name] = argv[++i];
+    if (name === 'mock' || name === 'shot') (args[name] ??= []).push(argv[++i]);
+    else if (VALUE_FLAGS.has(name)) args[name] = argv[++i];
     else if (['dry-run', 'json', 'spend'].includes(name)) args[name] = true;
     else throw new ReviewError('REVIEW_ARGS', `Unknown flag --${name}.`);
   }
@@ -78,65 +75,6 @@ const number = (value, fallback, flag) => {
   const parsed = Number(value);
   if (!(parsed >= 0)) throw new ReviewError('REVIEW_ARGS', `--${flag} must be a number.`);
   return parsed;
-};
-
-/** The real nforge/keychain/network edges; tests pass fakes for each. */
-export const realDeps = {
-  async nforge(lane, action, json) {
-    const { stdout } = await run('nforge', ['agent', lane, action, JSON.stringify(json)], {
-      maxBuffer: 32 << 20,
-    });
-    const line = stdout
-      .split('\n')
-      .reverse()
-      .find(l => l.startsWith('{'));
-    if (!line) throw new ReviewError('REVIEW_NFORGE', `nforge ${action} printed no JSON.`);
-    const parsed = JSON.parse(line);
-    if (parsed.error)
-      throw new ReviewError('REVIEW_NFORGE', `nforge ${action}: ${parsed.error.code ?? 'error'}.`);
-    return parsed;
-  },
-  readKey(service) {
-    try {
-      return execFileSync('security', ['find-generic-password', '-s', service, '-a', 'forge', '-w'], {
-        stdio: ['ignore', 'pipe', 'ignore'],
-      })
-        .toString()
-        .trim();
-    } catch {
-      return '';
-    }
-  },
-  // Plain Node with no dist/ helper (builders run this from a Lane): one POST per attempt, deadline set
-  // by the caller. A retry is only for 429/5xx or unusable GPT text, under the caps. Exempt as
-  // 'standalone' in check-network-boundaries.
-  request: (url, init) => globalThis.fetch(url, { ...init, signal: AbortSignal.timeout(DEFAULTS.timeoutMs) }),
-  /** Pause before the one retry of a 429/5xx. */
-  backoff: ms => new Promise(resolve => setTimeout(resolve, ms)),
-  /** A regular file that really lives under `root` (no symlink, no `..`), as UTF-8 text; else null. */
-  readText(root, rel) {
-    try {
-      const path = join(root, rel);
-      const inside = realpathSync(path).startsWith(`${realpathSync(root)}${sep}`);
-      if (!inside || !lstatSync(path).isFile()) return null;
-      const text = readFileSync(path, 'utf8');
-      return text.includes('\0') ? null : text;
-    } catch {
-      return null;
-    }
-  },
-  /** Local routing/credit overrides (see CONFIG in review-api-lib.mjs); {} when the file is absent. */
-  localConfig(file = process.env.FORGE_REVIEW_CONFIG ?? join(homedir(), '.forge-review', 'config.json')) {
-    try {
-      return JSON.parse(readFileSync(file, 'utf8'));
-    } catch (error) {
-      if (error?.code === 'ENOENT') return {};
-      throw new ReviewError('REVIEW_CONFIG', `Cannot read review config ${file}: ${error?.name ?? 'error'}.`);
-    }
-  },
-  spendLog: process.env.FORGE_REVIEW_SPEND_LOG ?? join(homedir(), '.forge-review', 'spend.jsonl'),
-  now: () => new Date(),
-  out: text => process.stdout.write(`${text}\n`),
 };
 
 async function gatherInput(args, deps, contextBytes) {
@@ -162,15 +100,9 @@ async function gatherInput(args, deps, contextBytes) {
   const diff = pages.join('');
   let item = '';
   if (args.item) {
-    const read = await deps.nforge(args.lane, 'planning', { planningItemId: args.item });
-    const it = read.result?.item;
-    const list = read.result?.comments ?? [];
-    const comments = list
-      .map(c => `- ${c.body ?? c.text ?? ''}`)
-      .join('\n')
-      .slice(0, 8_000);
-    if (list.length >= 50) notes.push('The Item has 50 or more comments; older ones may be missing.');
-    item = `${it?.title ?? ''}\n${(it?.body ?? '').slice(0, 16_000)}${comments ? `\n\nComments (can amend Done-when):\n${comments}` : ''}`;
+    const read = await readItem(deps, args.lane, args.item);
+    item = read.text;
+    notes.push(...read.notes);
   }
   const files = changedPaths(diff).map(path => ({
     path,
@@ -214,7 +146,6 @@ export async function review(argv, defaults = realDeps) {
     );
   const system = systemPrompt(input.safety);
   const user = userPrompt({ ...input });
-  const promptBytes = Buffer.byteLength(system) + Buffer.byteLength(user);
   const tier = args.tier ?? tierFromText(input.item) ?? 'standard';
   const routes = planRoute({
     builderModel: args['builder-model'],
@@ -223,90 +154,35 @@ export async function review(argv, defaults = realDeps) {
     model: args.model,
     config,
   });
-
-  // Routes are tried in order. A provider with no room under its caps, no key, or one that keeps failing
-  // (429/5xx after one retry, a timeout or network error, an unusable reply) hands over to the next; a
-  // per-call cap breach is about this prompt, not the provider, and stops the review. When every route
-  // fails the builder falls back to a subscription reviewer. A pinned provider never spills.
-  const day = deps.now().toISOString().slice(0, 10);
-  const maxCallUsd = number(args['max-call-usd'], DEFAULTS.maxCallUsd, 'max-call-usd');
-  const routeNotes = [];
-  const failures = [];
-  const capsFor = (provider, estimate) => {
-    const log = readLog();
-    checkCaps({
-      estimate,
-      spentTodayUsd: spentOn(day, log, provider),
-      maxCallUsd,
-      maxDayUsd: dailyCapUsd(config, provider, dayCapFlag),
-      spentMonthUsd: spentOn(day.slice(0, 7), log, provider),
-      monthlyCreditUsd: config.providers[provider].monthlyCreditUsd,
-    });
-  };
-  let lastError;
-  let onlyCaps = true;
-  for (const route of routes) {
-    const { provider, model } = route;
-    const price = priceFor(provider, model, {
+  const ctx = {
+    args,
+    deps,
+    config,
+    input,
+    system,
+    user,
+    tier,
+    routes,
+    promptBytes: Buffer.byteLength(system) + Buffer.byteLength(user),
+    maxOutputTokens,
+    maxCallUsd: number(args['max-call-usd'], DEFAULTS.maxCallUsd, 'max-call-usd'),
+    dayCapFlag,
+    priceOverride: {
       input: number(args['price-in'], undefined, 'price-in'),
       output: number(args['price-out'], undefined, 'price-out'),
+    },
+    day: deps.now().toISOString().slice(0, 10),
+    readLog,
+  };
+  // A core Lane (queue, landing, ledger, auth, deletion) asks both providers at once; any other review, or a
+  // pinned provider, goes to one reviewer with the other as the fallback (review-api-route.mjs).
+  await (tier === 'core' && routes.every(route => !route.pinned) ? runDouble(ctx) : runRoutes(ctx));
+  // A UI Lane with a design mock: the mock check follows in the same round, from the Item text read above.
+  if (args.mock || args.shot)
+    await reviewMockWith({ ...args, model: undefined, provider: undefined }, deps, {
+      text: input.item,
+      notes: [],
     });
-    const estimate = estimateUsd(price, promptBytes, maxOutputTokens);
-    try {
-      capsFor(provider, estimate);
-    } catch (error) {
-      if (error.code !== 'REVIEW_DAY_CAP' && error.code !== 'REVIEW_MONTH_CAP') throw error;
-      routeNotes.push(`${provider} is at its ${error.code === 'REVIEW_DAY_CAP' ? 'daily' : 'monthly'} cap`);
-      failures.push(`${provider}: ${error.message}`);
-      lastError = error;
-      continue;
-    }
-    const routeNote = routeNotes.length
-      ? `Routed to ${provider}/${model} because ${routeNotes.join('; ')}.`
-      : undefined;
-    if (args['dry-run'])
-      return deps.out(
-        `Dry run: ${promptBytes} prompt bytes, worst case $${estimate.toFixed(3)} on ${provider}/${model} (tier ${tier}); nothing sent.${routeNote ? ` ${routeNote}` : ''}`,
-      );
-    try {
-      const done = await callProvider({
-        deps,
-        args,
-        input,
-        route,
-        tier,
-        price,
-        estimate,
-        system,
-        user,
-        maxOutputTokens,
-        roomToRetry: () => capsFor(provider, estimate),
-      });
-      const meta = {
-        provider,
-        model,
-        tier,
-        usage: done.usage,
-        usd: done.usd,
-        spentTodayUsd: spentOn(day, readLog(), provider), // settled log: failed attempts count as the cap sees them
-        route: routeNote,
-      };
-      return deps.out(
-        args.json ? JSON.stringify({ ...done.parsed, ...meta }) : formatReport(done.parsed, meta),
-      );
-    } catch (error) {
-      if (!SPILL_CODES.has(error.code)) throw error;
-      onlyCaps = false;
-      routeNotes.push(`${provider} failed (${failureReason(error)})`);
-      failures.push(`${provider}: ${error.message}`);
-      lastError = error;
-    }
-  }
-  if (routes.length === 1) throw lastError; // pinned: the original error, no spill
-  throw new ReviewError(
-    onlyCaps ? lastError.code : 'REVIEW_NO_REVIEWER',
-    `${failures.join(' ')} No API reviewer has room or answered on either provider; use a subscription reviewer.`,
-  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)

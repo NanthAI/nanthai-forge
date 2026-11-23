@@ -366,15 +366,19 @@ test('the reviewer family differs from the builder: unknown or Claude builders g
   assert.equal((await run(['--builder-model', 'claude-opus-5-5'])).model, 'gpt-6.2-sol');
   assert.equal((await run(['--builder-model', 'gpt-6.2-sol'])).model, 'claude-sonnet-5-5');
   assert.equal((await run(['--builder-model', 'gemini-4-neon'])).model, 'claude-sonnet-5-5');
-  // Claude models: Sonnet by default, Opus for a core Lane named by flag or by the Item.
-  assert.equal((await run(['--builder-model', 'gpt-6.2-sol', '--tier', 'core'])).model, 'claude-opus-5-5');
+  // Claude models: Sonnet by default, Opus for a core Lane (pinned here; unpinned core asks both providers).
+  const pinned = ['--builder-model', 'gpt-6.2-sol', '--tier', 'core', '--provider', 'anthropic'];
+  assert.equal((await run(pinned)).model, 'claude-opus-5-5');
   const h = harness({});
   h.deps.request = byUrl(h);
   h.deps.nforge = async (_lane, action) =>
     action === 'diff'
       ? { sourceContext: { laneId: 'lane-1' }, result: { diff: DIFF, nextCursor: null } }
       : { result: { item: { title: 'T', body: 'review-tier: core' } } };
-  await review(['--lane', h.dir, '--item', 'x', '--builder-model', 'gemini-4-neon'], h.deps);
+  await review(
+    ['--lane', h.dir, '--item', 'x', '--builder-model', 'gemini-4-neon', '--provider', 'anthropic'],
+    h.deps,
+  );
   assert.equal(bodyOf(h).model, 'claude-opus-5-5');
   await assert.rejects(review(['--lane', h.dir, '--tier', 'big'], h.deps), { code: 'REVIEW_ARGS' });
 });

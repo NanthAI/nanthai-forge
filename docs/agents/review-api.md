@@ -33,8 +33,62 @@ The reviewer's model family differs from the builder's, so a Claude is never che
 
 Opus is for core-path, queue, auth/security and root-cause Lanes. The brief names such a Lane with
 `--tier core`, or the Item carries a line `review-tier: core` (the script reads it from the Item text and
-comments; the flag wins). After both providers are spent for the day the script refuses and says so: the
-builder tells the lead on the Item and uses a subscription reviewer.
+comments; the flag wins). A core Lane gets the double review below instead of one reviewer. After both
+providers are spent for the day the script refuses and says so: the builder tells the lead on the Item and
+uses a subscription reviewer.
+
+## Core Lanes: both providers, one merged list
+
+With `--tier core` (or `review-tier: core` on the Item) and no `--provider` or `--model`, the one review
+round sends the same prompt to GPT-6.2 Sol and Claude Opus at the same time and prints one merged list. It
+is still one round: the builder fixes the merged list and lands. Each finding says who made it: `both:
+openai + anthropic` for a duplicate (same file, lines within 3, enough shared words; it keeps the higher
+severity), otherwise `openai only` or `anthropic only`. A merge can be wrong, so the other reviewer's
+account (severity, title, failure) stays under the finding and a different defect is never dropped. Each provider stays under its own per-call, daily and
+monthly caps and has its own spend row. If one provider has no room, no key, or fails after its retry, the
+other alone runs and the output ends with `Only X reviewed this core Lane: Y did not (reason)`; when neither
+answers the script refuses with `REVIEW_NO_REVIEWER` (or the cap code) and the builder uses a subscription
+reviewer. `--json` returns `findings` (each with `sources`), `notes` and one entry per provider under `runs`.
+`--dry-run` prices both. A pinned reviewer (`--provider` or `--model`) keeps the single-reviewer route.
+
+Cost is the sum of both calls, about $0.43 on a 55k-token prompt (Opus $0.32, Sol $0.11).
+
+## UI Lanes with a mock: the mock check
+
+A UI Lane whose Item has a design mock runs the mock check in its one review round, instead of opening the
+mock and screenshots in a subscription session (images are costly context there). The check is a visual
+comparison against a fixed picture, so it goes to Claude on purpose; the other-family rule is for code
+reviews. It runs next to the code review, not instead of it.
+
+```sh
+# the code review and the mock check in one round, on the one Item read:
+node scripts/review-api.mjs --lane LANE_PATH --item ISSUE_ID --builder-model YOUR_MODEL \
+  --mock MOCK.png [--mock …] --shot SHOT.png [--shot …]
+# the mock check alone (one `planning` read for --item; --dry-run prices it and sends nothing):
+node scripts/review-mock.mjs --mock MOCK.png --shot SHOT.png --lane LANE_PATH --item ISSUE_ID
+```
+
+With `--mock` and `--shot` on `review-api.mjs`, the code review runs first and prints its report, then the mock
+check prints its own (with `--json`, one JSON object per line). A failing mock check does not undo the code
+review.
+
+It sends the mock images, then the Lane's screenshots (each named), then the Item (title, body and comments,
+which carry the lead's sign-off changes, so a deliberate difference is not reported). The reply lists each
+mismatch (`where`, what the mock shows, what the build shows, both file names, severity), and a
+`Not verifiable from the screenshots` list: a state with no screenshot or mock is named, never guessed.
+Sonnet 5.5 by default, Opus 5.5 with `--tier core`, `--model`, `--effort`, the same caps, key and spend log
+(rows carry `purpose: mock`). Anthropic only, and no spill: a cap breach or an error refuses, and the builder
+asks the lead for the mock look. Forge cost: none beyond the review's own two reads; alone, one `planning` read for `--item`.
+
+Images are PNG or JPEG only, regular files (no symlinks), checked by their header bytes, not the extension.
+One whose longest edge is over 1568 px or whose size is over 3.5 MB is downscaled first with macOS `sips`
+(PNG, then JPEG quality 80 if still large); all images together stay within 12 MB (`--image-bytes`) and at
+most 20. Over the budget the script refuses and names it; it never drops an image silently. Image tokens are
+about width x height / 750 and are counted in the worst-case estimate.
+
+Pair what the build shows with what the mock shows: a state with a mock but no matching screenshot comes
+back under `Not verifiable`. A full-page mock taller than 1568 px is shrunk to that height, so small text
+can be lost; send tall mocks as separate crops.
 
 Each provider has a daily cap of its monthly credit / 30 (UTC day) and a monthly cap of the credit. Defaults
 are in `CONFIG` in `scripts/review-api-lib.mjs` (Anthropic $180, OpenAI $220, so about $6 and $7.33 a day);
@@ -89,6 +143,23 @@ the recorded outcome as reference:
 So Sol catches the Done-when miss and most of the real behaviour findings at a third of Opus's price, but
 labels some arguable edge cases `high` or `medium`; builders weigh a finding against the Item rather than
 fixing every one. n=3, so no claim beyond "good enough to be the default reviewer and the cheapest".
+
+### Calibration of the double review and the mock check
+
+Two landed UI Lanes with a mock and screenshots, and the Lane of the core calibration above:
+
+| Run | Result | $ |
+| --- | --- | --- |
+| UI Lane d59d99cd (Item df1f2d46): mock + dark and light screenshots, Sonnet | 5 mismatches (1 medium, 3 low, 1 nit): header caption, band sub-text, Lane count wrapping, dominant-Item line styling. The caption was confirmed in the built source. It did not report the mock's own-Lane pair row the lead's sign-off removed, because the Item comment says so. The Item records the lead's design sign-off only, no look at the build, so there is nothing to score it against. | 0.047 |
+| UI Lane of Item e317b6ea (lead check on receipt 0c2313e3): mock vs built Lanes overview at 1440 light, Sonnet; the lead's mock check (a)-(i) is on the Item | Found every difference the lead recorded as absent or decision-cited: the progress strip (a), Review for Decide and no Retry (d), the CLI chip (f), the overlap connector (g), the shard bar (h), the explainer banner (i; the screenshot is the first-run state). It also reported 13 more, some on points the lead marked matched ((b) stage headers, (c) row form, (e) the Held group); those are the mock's sketch against the build and need the lead's look. | 0.073 |
+| UI Lane 2171944c (Item fc1831eb): empty-state mock against the populated build | No useful comparison: it said so, and listed 11 chrome differences plus what could not be checked. The pairing was wrong, not the check. | 0.062 |
+| Same Lane, populated mock `picked-demo` against `loose-demo` | Found all six differences the lead's mock check (a)-(f) on the Item lists (headline copy, row identities, row details, leftover project rows, group tick boxes and Hand to an agent, the proposed tag) plus the missing trash row and the page chrome. The screenshots in the Lane's scratch may predate the fix the lead asked for. | 0.066 |
+| Core Lane 92e68572 (Item 4f1f7984), Opus + Sol | Merged list of 4: the cascade orphan at `projectHostedLifecycleCascade.ts:133` came from both providers (one entry); the abandon/reopen hold loss was Opus-only; the missing inbox read and the grant-for-an-older-save text were Sol-only. | 0.318 + 0.111 |
+
+So the second provider added three findings the first would not have, and the mock check costs 5 to 7 cents.
+The mock check finds the differences a lead records, plus more; the extras are read against the Item's decisions,
+so the builder lists which it fixes and which it leaves. Total calibration spend about $0.70 on a test log,
+outside the real one.
 
 ## Keys
 
