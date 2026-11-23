@@ -89,6 +89,9 @@
   /* Move the tools to their own line when their full row and a readable sentence will not fit together. */
   .head { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-5); align-items: end; padding: 14px var(--gut-head); background: var(--surface); border-bottom: var(--rule) solid var(--line); }
   .head > :not(.sit, .tools) { flex-basis: 100%; }
+  /* A head with no sentence is one row: the trail, then its tools at the right. */
+  .head:not(:has(> .sit)) > :not(.tools) { flex: 1 1 auto; }
+  .head .tools select.inp { width: auto; min-width: 0; height: 28px; padding-block: 0; font-size: var(--t-meta); }
   .head h1, .head .crumb { font-size: 13px; font-weight: var(--w-strong); color: var(--text-2); display: flex; gap: var(--s-2); align-items: center; min-width: 0; }
   .head .sit { flex: 1 1 20rem; font: var(--w-medium) var(--t-sit)/var(--lh-head) var(--font-sans); letter-spacing: var(--head-track); color: var(--text-2); max-width: var(--m-sit); text-wrap: pretty; overflow-wrap: anywhere; min-width: 0; }
   .head .sit b { color: var(--text); font-weight: var(--w-bold); }

@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 // Who waits on whom drawn as chains (Item 8f94e5c3): the longest wait first, a long queue shortened to its two ends, a
 // shared stretch drawn once, a loop marked, a person at the end with Decide; a lone Region in a Dock draws no header
-// bar (owner 2026-11-23, solo-region.ts); the Lanes headline never splices an Item title into its sentence; a held row
+// bar (owner 2026-11-23, solo-region.ts); a held row
 // never reads "Held held".
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -183,44 +183,6 @@ const meta = (laneId, intent) => ({
   actor: 'mara',
   lastSaveAt: null,
   landing: null,
-});
-
-test('the Lanes headline never splices an Item title into the sentence; the next Lane is a link target with a time', () => {
-  const title = 'Public pages: share cards, sitemap and page titles and a very long rest of the title';
-  const lane = { ...mark('c', 'checking'), held: false };
-  const entries = [
-    {
-      position: 1,
-      laneId: 'c',
-      phase: 'checking',
-      landingState: { state: 'checking' },
-      submittedAt: at(5),
-      lastProgressAt: at(1),
-      checkStartedAt: at(2),
-    },
-  ];
-  const yard = model.buildYard(
-    feed([lane]),
-    [meta('c', title)],
-    { total: 1, listed: 1, more: false, entries },
-    Date.UTC(2026, 10, 23, 10, 0),
-  );
-  assert.ok(yard.next, 'the first in the queue is next');
-  const said = model.situation(yard, Date.UTC(2026, 10, 23, 10, 0));
-  assert.doesNotMatch(`${said.lead} ${said.rest}`, /Public pages/);
-  assert.equal(said.next.laneId, 'c');
-  assert.equal(said.next.title, title);
-  assert.match(said.next.words, /^(is next to land|lands in about \d+ min)$/);
-  const withTime = {
-    ...yard,
-    next: { ...yard.next, check: { startedAt: 0, usualMs: 600_000, slowMs: null, note: null } },
-  };
-  assert.equal(model.situation(withTime, 120_000).next.words, 'lands in about 8 min');
-  assert.equal(
-    model.situation(withTime, 590_000).next.words,
-    'is next to land',
-    'under 90 seconds left is just next',
-  );
 });
 
 test('a held Lane row says Held once: the reason is not drawn again when it is the state word', () => {

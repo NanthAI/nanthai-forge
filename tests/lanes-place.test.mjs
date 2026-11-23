@@ -134,11 +134,6 @@ test('48049998: Needs you holds the held Lanes this reader decides, Held the res
   );
   assert.equal(yard.rows[1].why, 't1 and 1 more');
   assert.equal(yard.next.laneId, 'c', 'next is the queue position 1, never a held Lane');
-  assert.deepEqual(model.situation(yard), {
-    lead: '1 Lane needs you.',
-    rest: '1 more is held.',
-    next: { laneId: 'c', title: 'Check me', words: 'is next to land' },
-  });
   // The yard's stop counts are the top bar's (Line.tsx lineStopCounts): Editing, Saved, In queue, Checking, where a
   // failed check is not counted and a passed one is said apart.
   assert.deepEqual(yard.stops, [
@@ -157,11 +152,6 @@ test('48049998: Needs you holds the held Lanes this reader decides, Held the res
     model.needsYouLanes({ ...needsRead, canDecide: false }, 0),
   );
   assert.deepEqual([viewer.counts.needs, viewer.counts.held], [0, 2]);
-  assert.deepEqual(model.situation(viewer), {
-    lead: 'No Lane needs you.',
-    rest: '2 Lanes are held.',
-    next: { laneId: 'c', title: 'Check me', words: 'is next to land' },
-  });
   // Needs me's read is capped (more held than it lists): never "No Lane needs you", and the count is a floor.
   const capped = model.buildYard(
     feed(lanes),
@@ -171,7 +161,6 @@ test('48049998: Needs you holds the held Lanes this reader decides, Held the res
     model.needsYouLanes({ ...needsRead, more: 3 }, 0),
   );
   assert.equal(capped.needsKnown, 'partial');
-  assert.equal(model.situation(capped).lead, '1 or more Lanes need you.');
   const cappedNone = model.buildYard(
     feed(lanes),
     [meta('c', 'Check me')],
@@ -179,11 +168,10 @@ test('48049998: Needs you holds the held Lanes this reader decides, Held the res
     0,
     model.needsYouLanes({ ...needsRead, held: [], more: 2 }, 0),
   );
-  assert.equal(model.situation(cappedNone).lead, 'Not every held Lane was checked for you.');
+  assert.equal(cappedNone.needsKnown, 'partial');
   // Needs me's read failed: the yard still shows, every held Lane is Held, and it says it could not tell.
   const failed = model.buildYard(feed(lanes), [meta('c', 'Check me')], queue, 0, model.NEEDS_UNKNOWN);
   assert.deepEqual([failed.needsKnown, failed.counts.needs, failed.counts.held], ['unknown', 0, 2]);
-  assert.equal(model.situation(failed).lead, 'Which held Lanes need you could not be read.');
   // The feed lists fewer Lanes than are open: each stop is a floor.
   const more = model.buildYard({ ...feed(lanes), more: 4 }, [], queue, 0, needsYou);
   assert.ok(more.stops.every(stop => stop.atLeast));
@@ -312,7 +300,7 @@ test('the yard says when the line feed holds more open Lanes than it lists', () 
     0,
   );
   assert.equal(yard.open, 42);
-  assert.match(model.situation(yard).rest, /41 or more more not shown/);
+  assert.deepEqual([yard.beyond, yard.beyondIsLowerBound], [41, true]);
   assert.equal(
     yard.rows[0].untitled,
     true,
@@ -328,15 +316,37 @@ test('filters and a stop picked on the top bar narrow the yard by address alone'
     0,
     { lanes: new Set(['b']), known: 'all' },
   );
-  assert.deepEqual(
-    model.filterRows(yard.rows, 'needs').map(row => row.laneId),
-    ['b'],
+  const by = (status, mine = false, viewer = 'mara') =>
+    model.filterRows(yard.rows, { status, mine }, viewer).map(row => row.laneId);
+  assert.deepEqual(by('needs'), ['b']);
+  assert.deepEqual(by('all', true), ['a']);
+  assert.deepEqual(model.filterRows(yard.rows, { status: 'all', mine: true }, undefined), []);
+  // One status filter and a Mine toggle, together; a stop is a status.
+  assert.deepEqual(by('saved'), ['b']);
+  assert.deepEqual(by('editing'), ['a']);
+  assert.deepEqual(by('editing', true), ['a']);
+  assert.deepEqual(by('saved', true), []);
+  assert.deepEqual(by('held'), [], 'a Lane that needs the reader is not also Held');
+  // Checking lists what the Checking count counts: a held or failed Lane at that stop is not one of them.
+  const checking = model.buildYard(
+    feed([mark('r', 'checking'), mark('f', 'checking', { held: true }), mark('p', 'ready')]),
+    [meta('r', 'R'), meta('f', 'F'), meta('p', 'P')],
+    undefined,
+    0,
   );
   assert.deepEqual(
-    model.filterRows(yard.rows, 'mine', 'mara').map(row => row.laneId),
-    ['a'],
+    model
+      .filterRows(checking.rows, { status: 'checking', mine: false }, undefined)
+      .map(row => row.laneId)
+      .sort(),
+    ['p', 'r'],
   );
-  assert.deepEqual(model.filterRows(yard.rows, 'mine', undefined), []);
+  // The address: ?show= a status, ?mine=1 the toggle; an old show=mine and the top bar's ?stop= still read.
+  const of = query => model.filterOf(new URLSearchParams(query));
+  assert.deepEqual(of('show=checking&mine=1'), { status: 'checking', mine: true });
+  assert.deepEqual(of('show=mine'), { status: 'all', mine: true });
+  assert.deepEqual(of('stop=queued'), { status: 'queued', mine: false });
+  assert.deepEqual(of('show=nonsense'), { status: 'all', mine: false });
   assert.deepEqual(
     model.atStop(yard.rows, 'saved').map(row => row.laneId),
     ['b'],

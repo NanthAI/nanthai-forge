@@ -52,7 +52,7 @@ export function Head({
   children,
 }: {
   trail: Crumb[];
-  sentence: ReactNode;
+  sentence?: ReactNode;
   children?: ReactNode;
 }) {
   const project = useProjectPages();
@@ -90,7 +90,7 @@ export function Head({
           ))
         )}
       </h1>
-      <p className="sit">{sentence}</p>
+      {sentence === undefined ? null : <p className="sit">{sentence}</p>}
       {children ? <div className="tools">{children}</div> : null}
     </div>
   );

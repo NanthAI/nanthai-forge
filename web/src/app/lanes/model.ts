@@ -504,60 +504,37 @@ function byItem(rows: readonly YardRow[]) {
     );
 }
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+/** The one status filter of Lanes > Open: every Lane, those that need the reader, the held ones, or one stop of the line.
+ * It and the Mine toggle live in the address (`?show=` and `?mine=1`; the top bar's `?stop=` still reads as a status). */
+export const statuses = [
+  { id: 'all', label: 'All' },
+  { id: 'needs', label: 'Needs you' },
+  { id: 'held', label: 'Held' },
+  { id: 'queued', label: 'In queue' },
+  { id: 'checking', label: 'Checking' },
+  { id: 'editing', label: 'Editing' },
+  { id: 'saved', label: 'Saved' },
+] as const;
+export type Status = (typeof statuses)[number]['id'];
+export type Filter = { status: Status; mine: boolean };
 
-/** The head's sentence: what needs the reader, what else is held, what is not listed, and what lands next. Counts per
- * stop are the shell strip's alone: a second grouping of the same Lanes here read as a disagreement (owner dogfood
- * 2026-11-17), so the sentence never counts the queue or the work bands. What lands next is never named in the
- * sentence (a full Item title spliced into it read as broken, owner 2026-11-23): `next` carries the Lane for a link and
- * the words after it, "is next to land" or, while its check runs with a usual time, "lands in about N min". */
-export function situation(
-  yard: Yard,
-  now = Date.now(),
-): { lead: string; rest: string; next: { laneId: string; title: string; words: string } | null } {
-  const needs = yard.counts.needs;
-  const known = yard.needsKnown === 'all';
-  const held = yard.counts.held;
-  // A capped or failed Needs me read never says nobody needs the reader (rule 15: not known is said, never guessed).
-  const lead = !yard.open
-    ? 'No Lanes are open.'
-    : needs
-      ? `${needs.toLocaleString()}${known ? '' : ' or more'} ${needs === 1 && known ? 'Lane needs' : 'Lanes need'} you.`
-      : known || !held
-        ? 'No Lane needs you.'
-        : yard.needsKnown === 'partial'
-          ? 'Not every held Lane was checked for you.'
-          : 'Which held Lanes need you could not be read.';
-  const parts = [
-    held &&
-      `${needs ? `${held.toLocaleString()} more` : plural(held, 'Lane')} ${held === 1 ? 'is' : 'are'} held`,
-    yard.beyond &&
-      `${yard.beyond.toLocaleString()}${yard.beyondIsLowerBound ? ' or more' : ''} more not shown`,
-  ].filter(Boolean) as string[];
-  const rest = parts.length ? `${parts.join(', ').replace(/^./, c => c.toUpperCase())}.` : '';
-  const check = yard.next?.check;
-  const left = check && check.usualMs !== null && !check.note ? check.startedAt + check.usualMs - now : null;
+/** The filter an address says: `?show=` a status (an old `show=mine` is the toggle), `?stop=` a stop, `?mine=1`. */
+export function filterOf(search: URLSearchParams): Filter {
+  const named = (id: string | null) => statuses.find(status => status.id === id)?.id;
+  const show = search.get('show');
   return {
-    lead,
-    rest,
-    next: yard.next
-      ? {
-          laneId: yard.next.laneId,
-          title: yard.next.title,
-          words:
-            left !== null && left >= 90_000
-              ? `lands in about ${Math.round(left / 60_000)} min`
-              : 'is next to land',
-        }
-      : null,
+    status: named(show) ?? named(search.get('stop')) ?? 'all',
+    mine: show === 'mine' || search.get('mine') === '1',
   };
 }
 
-export type Filter = 'all' | 'needs' | 'mine';
 export function filterRows(rows: readonly YardRow[], filter: Filter, viewer: string | undefined) {
-  if (filter === 'needs') return rows.filter(row => row.band === 'needs');
-  if (filter === 'mine') return rows.filter(row => row.mine ?? (!!viewer && row.actor === viewer));
-  return rows;
+  const mine = filter.mine ? rows.filter(row => row.mine ?? (!!viewer && row.actor === viewer)) : rows;
+  if (filter.status === 'needs') return mine.filter(row => row.band === 'needs');
+  if (filter.status === 'held') return mine.filter(row => row.band === 'held');
+  // A held or failed Lane keeps its Checking stage but is not counted there (the top bar's rule, `rowStops`).
+  const at = atStop(mine, filter.status);
+  return filter.status === 'checking' ? at.filter(row => row.band !== 'needs' && row.band !== 'held') : at;
 }
 
 /** ", at In queue" for a stop picked on the top bar; nothing for none. */

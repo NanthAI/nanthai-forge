@@ -6,41 +6,36 @@
 // the Overlaps block that sat below the yard.
 // Regions move with the dock. Filters live in the address, so a link, a reload and browser Back show the same view.
 // Every link here goes to the one screen that owns it (route.ts in each folder): a row to its Lane (saved changes), a
-// failed row to its check, the head to Sessions (where each session links who holds its Lane), and shared files to
-// Who is touching what. They are built from the reads above, so following one adds no read here.
+// failed row to its check and shared files to Who is touching what. They are built from the reads above, so following one adds no read here.
 // What waits on the reader (Needs you) is Needs me's own rule over Needs me's own read, the one the top bar's count
-// already subscribes to (App.tsx), so the head, the filter, the band and the top bar agree and the page adds no read.
-// Under the head, where the project stands: Items done, in progress and left, from projectPlanCounts:read (Item
-// 3fa3187d), the one stored counter Needs me and Plan show, in the same DS strip (lead mock check 2026-11-22, Item
-// d3357f40). What this page knows, the open Lanes and those that need you, stands beside In progress. With no counts
-// (the read failed or gave none) the strip is not drawn, never "not reported" three times.
+// already subscribes to (App.tsx), so the band, the filter and the top bar agree and the page adds no read. There is no
+// headline sentence and no backlog bar here: the top bar and the section headers say it, and the backlog is Plan's
+// (owner 2026-11-23). One status filter and a Mine toggle sit in the head's row, kept in the address.
 // The command chip shows what an agent gets from `nforge agent . queue`, drawn from the queue read already here.
 import { useMemo, useState, type ReactNode } from 'react';
-import { api } from '../../../../convex/_generated/api';
-import { Dock, Key, Region, Standing, useDockLayout, type DockLayout } from '../../ds';
-import { progressCells, progressOf } from '../progress';
+import { Dock, Key, Region, useDockLayout, type DockLayout } from '../../ds';
 import { useSafeQuery } from '../../safe-query';
 import { needsRead } from '../needs/count';
 import { queueEntryState } from '../lane-state';
-import type { LineFeed } from '../Line';
+import { lineStops, type LineFeed } from '../Line';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { navigate, useSearch } from '../router';
 import { Head, crumbsFor } from '../Place';
 import { SaveFailureNotice } from '../SaveFailureNotice';
 import {
-  atStop,
   buildYard,
+  filterOf,
   filterRows,
   laneFocusHref,
   NEEDS_UNKNOWN,
   needsYouLanes,
   sharedFiles,
   sharesByLane,
-  situation,
+  statuses,
   stopLabel,
   yardReady,
-  type Filter,
+  type Status,
   type QueueView,
   type LaneMeta,
 } from './model';
@@ -51,23 +46,16 @@ import { FirstRun, type LanesProps } from './common';
 // History (Item c613e6bc) replaced Landed today and the rows replaced Overlaps (f787005c); a layout saved with either
 // falls back to this one (useDockLayout).
 const LAYOUT: DockLayout = { top: ['yard'], a: [], b: [] };
-const filters: readonly { id: Filter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'needs', label: 'Needs you' },
-  { id: 'mine', label: 'Mine' },
-];
-
 export function Overview({ route, projectId, projectName, feed, viewerHandle }: LanesProps) {
   const search = useSearch();
-  const filter = (filters.find(f => f.id === search.get('show'))?.id ?? 'all') as Filter;
-  const stop = search.get('stop');
+  const filter = filterOf(search);
+  const stop = lineStops.find(entry => entry.stage === filter.status)?.stage ?? null;
   const { lanes, error: laneError } = useLaneMeta(projectId, true);
   const { queue, error: queueError } = useQueue(projectId);
   const shared = useSharedFiles(projectId);
   // The frame's own subscription (same query, same args): no second read. If it fails, the yard still shows and
   // says it could not tell which held Lanes need the reader.
   const { value: needs, error: needsError } = useSafeQuery(needsRead, { projectId });
-  const counts = useSafeQuery(api.projectPlanCounts.read, { projectId });
   const [cli, setCli] = useState(false);
   const [layout, setLayout, resetLayout, moved] = useDockLayout('lanes', LAYOUT);
   // Ages ("saved 4 min ago") are worked out when the data changes, never on a timer. Rows wait for all three reads, so
@@ -88,19 +76,46 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
   );
   const laneHref = (laneId: string) => hrefFor({ ...route, section: '', rest: laneId });
   const checkHref = (laneId: string) => hrefFor({ ...route, section: '', rest: `${laneId}/check` });
-  const setFilter = (id: Filter) => {
+  const setFilter = (change: { status?: Status; mine?: boolean }) => {
     const next = new URLSearchParams(location.search);
-    if (id === 'all') next.delete('show');
-    else next.set('show', id);
+    const status = change.status ?? filter.status;
+    const mine = change.mine ?? filter.mine;
+    next.delete('stop');
+    if (status === 'all') next.delete('show');
+    else next.set('show', status);
+    if (mine) next.set('mine', '1');
+    else next.delete('mine');
     const query = next.toString();
     navigate(`${location.pathname}${query ? `?${query}` : ''}`);
   };
-  const said = yard ? situation(yard) : null;
-  const shown = yard ? atStop(filterRows(yard.rows, filter, viewerHandle), stop) : [];
+  const shown = yard ? filterRows(yard.rows, filter, viewerHandle) : [];
   const files = sharedFiles(shared.view);
   const shares = sharesByLane(files.files);
   const touching = hrefFor({ ...route, section: 'touching', rest: '' });
   const touchingFor = (laneId: string) => laneFocusHref(touching, laneId);
+
+  // What was not covered says so whatever the filter shows, an empty result included.
+  const coverage = yard ? (
+    <>
+      {filter.status === 'needs' && yard.needsKnown !== 'all' ? (
+        <div className="pf">Not every held Lane was checked for you, so this list may be incomplete.</div>
+      ) : null}
+      {yard.beyond || laneError ? (
+        <div className="pf">
+          {yard.beyond
+            ? `${yard.beyond.toLocaleString()}${yard.beyondIsLowerBound ? ' or more' : ''} more open Lanes are not shown here. `
+            : null}
+          {laneError ? 'Lane titles could not be read; ids are shown instead. ' : null}
+          <a
+            className="lk lanes-inline"
+            href={`/${encodeURIComponent(route.handle)}/${encodeURIComponent(route.project)}/lanes`}
+          >
+            Every open Lane
+          </a>
+        </div>
+      ) : null}
+    </>
+  ) : null;
 
   const regions = [
     {
@@ -146,10 +161,12 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
               <Yard
                 project={route}
                 rows={shown}
-                checking={filter === 'all' && (!stop || stop === 'checking') ? yard.checking : undefined}
+                checking={
+                  !filter.mine && (filter.status === 'all' || stop === 'checking') ? yard.checking : undefined
+                }
                 hrefOf={laneHref}
                 checkHrefOf={checkHref}
-                stops={filter === 'all' && !stop ? yard.stops : undefined}
+                stops={!filter.mine && filter.status === 'all' ? yard.stops : undefined}
                 needsKnown={yard.needsKnown}
                 dense={shown.length > 12}
                 sharesOf={laneId => shares.get(laneId)}
@@ -173,31 +190,18 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
                   </A>
                 </div>
               ) : null}
-              {yard.beyond || laneError ? (
-                <div className="pf">
-                  {yard.beyond
-                    ? `${yard.beyond.toLocaleString()}${yard.beyondIsLowerBound ? ' or more' : ''} more open Lanes are not shown here. `
-                    : null}
-                  {laneError ? 'Lane titles could not be read; ids are shown instead. ' : null}
-                  <a
-                    className="lk lanes-inline"
-                    href={`/${encodeURIComponent(route.handle)}/${encodeURIComponent(route.project)}/lanes`}
-                  >
-                    Every open Lane
-                  </a>
-                </div>
-              ) : null}
             </>
           ) : (
             <div className="empty">
-              <h3>{filter === 'mine' ? 'None of these are yours' : 'Nothing here'}</h3>
+              <h3>{filter.mine ? 'None of these are yours' : 'Nothing here'}</h3>
               <p>
-                {yard.rows.length.toLocaleString()} {yard.rows.length === 1 ? 'Lane is' : 'Lanes are'} open in{' '}
-                {projectName}.
+                {yard.rows.length.toLocaleString()} listed {yard.rows.length === 1 ? 'Lane is' : 'Lanes are'}{' '}
+                open in {projectName}.
               </p>
-              <Key onClick={() => (stop ? navigate(location.pathname) : setFilter('all'))}>Show all</Key>
+              <Key onClick={() => setFilter({ status: 'all', mine: false })}>Show all</Key>
             </div>
           )}
+          {yard?.open ? coverage : null}
         </Region>
       ),
     },
@@ -205,41 +209,34 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
 
   return (
     <>
-      <Head
-        trail={crumbsFor(route, projectName)}
-        sentence={
-          said ? (
-            <>
-              <b>{said.lead}</b> {said.rest}
-              {said.next ? (
-                <>
-                  {' '}
-                  <A className="lk lanes-inline" href={laneHref(said.next.laneId)} title={said.next.title}>
-                    The next Lane
-                  </A>{' '}
-                  {said.next.words}.
-                </>
-              ) : null}
-            </>
-          ) : (
-            'Loading the Lanes…'
-          )
-        }
-      >
+      <Head trail={crumbsFor(route, projectName)}>
         <Key kind="ghost" size="sm" disabled={!moved} onClick={resetLayout} hidden={!moved}>
           Reset layout
         </Key>
-        <A className="btn" href={hrefFor({ ...route, section: 'sessions', rest: '' })}>
-          Sessions
-        </A>
         {yard?.open ? (
-          <div className="seg" role="group" aria-label="Show">
-            {filters.map(f => (
-              <button key={f.id} type="button" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
-                {f.label}
+          <>
+            <select
+              className="inp"
+              aria-label="Show"
+              value={filter.status}
+              onChange={event => setFilter({ status: event.target.value as Status })}
+            >
+              {statuses.map(status => (
+                <option key={status.id} value={status.id}>
+                  {status.label}
+                </option>
+              ))}
+            </select>
+            <div className="seg" role="group" aria-label="Mine">
+              <button
+                type="button"
+                aria-pressed={filter.mine}
+                onClick={() => setFilter({ mine: !filter.mine })}
+              >
+                Mine
               </button>
-            ))}
-          </div>
+            </div>
+          </>
         ) : null}
         <button
           type="button"
@@ -255,24 +252,6 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
       <pre className="cli-out mono" id="lanes-cli" hidden={!cli}>
         {cli ? queueReply(queue, queueError, lanes, feed) : null}
       </pre>
-      {counts.error || counts.value === null ? null : (
-        <Standing
-          of="app"
-          {...progressCells(progressOf(counts.value), {
-            inProgress: yard
-              ? `${yard.open.toLocaleString()} ${yard.open === 1 ? 'Lane' : 'Lanes'} open${
-                  yard.counts.needs
-                    ? `, ${yard.counts.needs.toLocaleString()} need${yard.counts.needs === 1 ? 's' : ''} you`
-                    : ''
-                }`
-              : undefined,
-            hrefs: {
-              done: hrefFor({ ...route, place: 'code', section: '', rest: '' }),
-              left: hrefFor({ ...route, place: 'plan', section: '', rest: '' }),
-            },
-          })}
-        />
-      )}
       {lanes?.map(({ laneId, intent, saveFailure }) => {
         if (!saveFailure) return null;
         const short = laneId.slice(0, 8);

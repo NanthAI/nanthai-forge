@@ -89,7 +89,18 @@ function yardEnter(event: KeyboardEvent, yard: HTMLElement | null) {
 /** A stop as the top bar says it: the count, "+" when the feed lists fewer Lanes than are open, passed at Checking. */
 function stopCount(stop: YardModel['stops'][number]) {
   const n = `${stop.count.toLocaleString()}${stop.atLeast ? '+' : ''}`;
-  return stop.passed ? `${n} · ${stop.passed.toLocaleString()} passed` : n;
+  return (
+    <>
+      {n}
+      {stop.passed ? (
+        <i className="zp">
+          {' · '}
+          {stop.passed.toLocaleString()}
+          <i className="zw"> passed</i>
+        </i>
+      ) : null}
+    </>
+  );
 }
 /** The shown rows at each stop, by the top bar's rule: a held Lane at Checking is not counted, a passed one is apart. */
 function rowStops(rows: readonly YardRow[]): YardModel['stops'] {

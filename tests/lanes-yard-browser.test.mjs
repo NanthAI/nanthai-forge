@@ -412,7 +412,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
     const LANES = '/sample-owner/sample-project/lanes';
     const FAILED = 'f41ed0a2-3b6c-4d1e-9a7f-2c8e5b0d4f19';
     await t.test(
-      'e317b6ea: the overview links Sessions, each Lane and a failed check to their own screens; Back returns',
+      'e317b6ea: the overview links each Lane and a failed check to their own screens; Back returns',
       async t => {
         for (const viewport of [PHONE, DESK]) {
           const page = await open(t, viewport, '', LANES);
@@ -420,8 +420,8 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
           assert.equal(await screen(), 'lanes#0', 'the overview is the Lanes place itself');
           assert.equal(
             await page.evaluate(() => window.forgeReads.adds),
-            5,
-            "the frame's Needs me read, then Lanes, queue, shared files and the project's Item counts: one read each, none per row or per link",
+            4,
+            "the frame's Needs me read, then Lanes, queue and shared files: one read each, none per row or per link (the backlog bar and its Item counts left with the sentence, 9e748e41)",
           );
           assert.equal(
             await page.evaluate(() => window.forgeLive('projectNeedsMe:read')),
@@ -431,7 +431,6 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
           const failed = page.locator('.yard .ln').filter({ hasText: 'Stream parser' });
           assert.equal(await failed.locator('.actn .st').textContent(), 'Check failed');
           const routes = [
-            [page.getByRole('link', { name: 'Sessions', exact: true }), `${LANES}/sessions`, 'sessions#0'],
             [
               failed.getByRole('link', {
                 name: /^Stream parser: handle split UTF-8, Lane f41ed0a2, open its check$/,
@@ -467,10 +466,78 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
           const held = page.getByRole('list', { name: 'Held' });
           assert.equal(await needs.locator('[role="listitem"]').count(), 1);
           assert.equal(await held.locator('[role="listitem"]').count(), 1);
-          assert.match(
-            await page.locator('.head .sit').textContent(),
-            /^1 Lane needs you\. 1 more is held\./,
+          // Owner 2026-11-23 15:15Z: no headline sentence, no backlog bar, no Sessions button on Lanes > Open.
+          assert.equal(await page.locator('.head .sit').count(), 0);
+          assert.equal(await page.locator('.pstate').count(), 0);
+          assert.equal(await page.locator('.head').getByText('Sessions', { exact: true }).count(), 0);
+        }
+      },
+    );
+
+    await t.test(
+      '9e748e41: one status filter and a Mine toggle, kept in the address, and the passed count never runs into main',
+      async t => {
+        for (const viewport of [DESK, { width: 1280, height: 900 }, PHONE]) {
+          const page = await open(t, viewport, '', LANES);
+          const status = page.getByRole('combobox', { name: 'Show' });
+          assert.deepEqual(await status.locator('option').allTextContents(), [
+            'All',
+            'Needs you',
+            'Held',
+            'In queue',
+            'Checking',
+            'Editing',
+            'Saved',
+          ]);
+          const all = await rows(page);
+          await status.selectOption('held');
+          await page.waitForURL(/[?&]show=held/);
+          assert.ok(
+            (await rows(page)).every(row => row.word !== 'Needs you'),
+            'Held leaves out what needs you',
           );
+          assert.ok((await rows(page)).length < all.length);
+          const mine = page.getByRole('button', { name: 'Mine', exact: true });
+          assert.equal(await mine.getAttribute('aria-pressed'), 'false');
+          await mine.click();
+          await page.waitForURL(/[?&]mine=1/);
+          assert.equal(await mine.getAttribute('aria-pressed'), 'true');
+          // A reload shows the same view: both choices are in the address.
+          await page.reload();
+          await page.locator('.head .tools').waitFor();
+          assert.equal(await page.getByRole('combobox', { name: 'Show' }).inputValue(), 'held');
+          assert.equal(
+            await page.getByRole('button', { name: 'Mine', exact: true }).getAttribute('aria-pressed'),
+            'true',
+          );
+          const search = new URL(page.url()).searchParams;
+          assert.deepEqual([search.get('show'), search.get('mine')], ['held', '1']);
+        }
+        for (const width of [1440, 1280]) {
+          const page = await open(t, { width, height: 1000 }, '?stall', LANES);
+          const cells = await page.locator('.yard .zones .zs > span, .yard .zones .zs b').evaluateAll(spans =>
+            spans.map(span => {
+              const box = span.getBoundingClientRect();
+              return {
+                text: span.textContent.replace(/\s+/g, ' ').trim(),
+                left: box.left,
+                right: box.right,
+                clipped: span.scrollWidth > span.clientWidth,
+                count: span.tagName === 'B',
+              };
+            }),
+          );
+          assert.deepEqual(
+            cells.filter(cell => cell.clipped).map(cell => cell.text),
+            [],
+            `no stop heading is cut off at ${width}`,
+          );
+          const heads = cells.filter(cell => !cell.count);
+          for (let i = 1; i < heads.length; i++)
+            assert.ok(
+              heads[i].left >= heads[i - 1].right - 0.5,
+              `${heads[i].text} keeps its own space at ${width}`,
+            );
         }
       },
     );
@@ -530,19 +597,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
             reply,
             /\nheld  Public pages: share cards, sitemap and page… Needs you, waiting for approval\n/,
           );
-          // Where the project stands: the project's Item counts (projectPlanCounts:read, as Needs me and Plan), with
-          // the open Lanes and those that need the reader beside In progress (lead mock check 2026-11-22, d3357f40).
-          const stands = page.getByRole('navigation', { name: 'Where the project stands' });
-          const said = (await stands.textContent()).replace(/\s+/g, ' ');
-          assert.match(said, /Done31ItemsIn progress/);
-          assert.match(said, /In progress4Items· 11 Lanes open, 1 needs you/);
-          assert.match(said, /Left11Items$/);
-          assert.doesNotMatch(said, /not reported/);
-          assert.equal(
-            await page.evaluate(() => window.forgeReads.adds),
-            reads,
-            'the chip and the strip add no read',
-          );
+          assert.equal(await page.evaluate(() => window.forgeReads.adds), reads, 'the chip adds no read');
         }
       },
     );
