@@ -32,7 +32,8 @@ export function WaitChains({ waits, ...rest }: Props) {
       </ul>
       {more ? (
         <div className="pf">
-          {more.toLocaleString()} more {more === 1 ? 'chain' : 'chains'} wait less long than these.
+          {more.toLocaleString()} more {more === 1 ? 'chain' : 'chains'} wait less long than these, none of
+          them a loop.
         </div>
       ) : null}
     </>
@@ -50,7 +51,7 @@ function ChainRow({ chain, laneOf, laneHref, decideHref, now }: Omit<Props, 'wai
       <div
         className="wc-path"
         role="group"
-        aria-label={`Waits, longest ${tail.since ? age(tail.since, now) : ''}: ${names.join(', then ')}`}
+        aria-label={`Waits${chain.since ? `, the oldest ${age(chain.since, now)}` : ''}: ${names.join(', then ')}`}
       >
         {chain.steps.map((step, index) => (
           <Place

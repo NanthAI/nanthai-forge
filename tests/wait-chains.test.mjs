@@ -85,6 +85,31 @@ test('only the longest chains are listed, and the rest are counted', () => {
   assert.equal(more, 3);
 });
 
+test('a loop is never cut by the cap or by shortening: the Lane it returns to and the way round stay drawn (review round)', () => {
+  const waits = [
+    ...Array.from({ length: MAX_CHAINS }, (_, i) =>
+      wait(`old${i}`, null, 500 + i, { on: 'a person', person: true }),
+    ),
+    wait('t1', 't2', 40),
+    wait('t2', 't3', 40),
+    wait('t3', 't4', 40),
+    wait('t4', 'x', 40),
+    wait('x', 'y', 5),
+    wait('y', 'z', 5),
+    wait('z', 'x', 5),
+  ];
+  const { chains, more } = waitChains(waits);
+  const loop = chains.find(chain => chain.loop);
+  assert.ok(loop, 'eight older chains do not push the newer loop out');
+  assert.equal(more, 0);
+  assert.deepEqual(
+    loop.steps.filter(step => step.kind === 'lane').map(step => step.laneId),
+    ['t1', 'x', 'y', 'z', 'x'],
+    'the return point and the cycle are kept; the Lanes before it are the ones skipped',
+  );
+  assert.equal(loop.steps.find(step => step.kind === 'skip').lanes, 3);
+});
+
 const laneOf = laneId => ({
   title: `Title of ${laneId}`,
   state: laneId === 'b' ? 'conflict' : 'active',

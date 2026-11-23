@@ -33,10 +33,7 @@ function conflictsOf(yard: { rows: readonly Pick<YardRow, 'laneId' | 'state'>[] 
 /** Why the pair list may be short, said once: the overlap read holds every Lane's saved files only up to a limit (a
  * very long list of changed files, or more Lanes than one read holds), and says only that it is partial. */
 function notCompared(compared: number, open: number | undefined) {
-  const of =
-    open !== undefined && compared < open
-      ? `${compared.toLocaleString()} of ${open.toLocaleString()} open Lanes were compared. `
-      : '';
+  const of = `${compared.toLocaleString()}${open !== undefined && open >= compared ? ` of ${open.toLocaleString()}` : ''} open Lanes were compared. `;
   return `${of}For some Lanes Forge holds only part of the saved files (a very long list of changed files, or more Lanes than one read holds), so a pair may be missing.`;
 }
 
@@ -103,7 +100,9 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
             ? `; ${cross.between.toLocaleString()} ${cross.between === 1 ? 'pair' : 'pairs'} of Items cross`
             : ''
         }.`
-      : 'No two open Lanes have saved the same file.';
+      : shared.view.complete
+        ? 'No two open Lanes have saved the same file.'
+        : 'No two compared Lanes have saved the same file.';
   const rest = queue
     ? `${onPerson ? `${onPerson.toLocaleString()} ${onPerson === 1 ? 'Lane waits' : 'Lanes wait'} on a person, ` : ''}${(pairs.length - onPerson).toLocaleString()} on another Lane or on main.`
     : '';

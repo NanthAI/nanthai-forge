@@ -29,15 +29,23 @@ export type Chain = {
 
 const earlier = (a: string | null, b: string | null) => ((b ?? '~') < (a ?? '~') ? b : a);
 
-/** Compress a long path: its first two steps, a skip, its last three. */
-function shorten(steps: Step[]): Step[] {
+/** Compress a long path: its first two steps, a skip, its last three. A loop keeps the Lane it returns to and
+ * everything after it, so the point where it closes is always drawn. */
+function shorten(steps: Step[], loop: boolean): Step[] {
   if (steps.length <= MAX_STEPS) return steps;
-  const keepEnd = 3;
-  const hidden = steps.slice(2, steps.length - keepEnd);
+  const last = steps.at(-1);
+  const back =
+    loop && last?.kind === 'lane'
+      ? steps.findIndex(step => step.kind === 'lane' && step.laneId === last.laneId)
+      : -1;
+  const keepFrom = back > 0 ? back : steps.length - 3;
+  const head = back > 0 ? 1 : 2;
+  const hidden = steps.slice(head, keepFrom);
+  if (!hidden.length) return steps;
   return [
-    ...steps.slice(0, 2),
+    ...steps.slice(0, head),
     { kind: 'skip', lanes: hidden.filter(step => step.kind === 'lane').length },
-    ...steps.slice(-keepEnd),
+    ...steps.slice(keepFrom),
   ];
 }
 
@@ -70,7 +78,7 @@ export function waitChains(waits: readonly Wait[]): { chains: Chain[]; more: num
       drawn.add(wait.onLane);
       wait = byLane.get(wait.onLane);
     }
-    chains.push({ steps: shorten(steps), loop, tail: start, since });
+    chains.push({ steps: shorten(steps, loop), loop, tail: start, since });
   };
   // Longest chains first so a shared stretch is drawn once, in the chain that gives it most context.
   const lengthFrom = (start: Wait) => {
@@ -87,8 +95,12 @@ export function waitChains(waits: readonly Wait[]): { chains: Chain[]; more: num
   tails.forEach(walk);
   // Whatever is left has Lanes waiting behind it all the way round: a loop with nothing behind it.
   waits.filter(wait => !drawn.has(wait.laneId)).forEach(wait => !drawn.has(wait.laneId) && walk(wait));
+  // Longest wait first, but a loop is never left out by the cap: the Lanes that block each other are the point.
   chains.sort((a, b) => (a.since ?? '~').localeCompare(b.since ?? '~'));
-  return { chains: chains.slice(0, MAX_CHAINS), more: Math.max(0, chains.length - MAX_CHAINS) };
+  const kept = chains.filter(
+    (chain, at) => chain.loop || at - chains.slice(0, at).filter(c => c.loop).length < MAX_CHAINS,
+  );
+  return { chains: kept, more: chains.length - kept.length };
 }
 
 /** "4 min", "3 h", "2 d": how long a wait has lasted. */
