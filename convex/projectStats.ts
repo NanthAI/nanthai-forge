@@ -468,8 +468,17 @@ export const closeDay = internalMutation({
     // Today so far, or a re-close of a day still provisional: rebuilt figures, still provisional, so the day's real
     // close (person days, day budgets, late-correction lists) still runs.
     const soFar = provisional ? now : reclose ? keptSoFar : undefined;
+    // Which cap stopped the landings: the day's own cap (more receipts than the close takes), else the transaction's room.
+    const landingStop =
+      landingsRead < Math.min(receipts.length, STATS_CLOSE_LANDINGS) ? 'landings:meter' : 'landings:cap';
     const value = canonicalPayload({
-      ...(receipts.length > landingsRead ? { ...closed, partial: true } : closed),
+      ...(receipts.length > landingsRead
+        ? {
+            ...closed,
+            partial: true,
+            stoppedBy: [...(closed.stoppedBy ?? []), landingStop].sort(),
+          }
+        : closed),
       ...(planningPartial ? { planningPartial: true as const } : {}),
       ...(peoplePartial ? { peoplePartial: true as const } : {}),
       ...(soFar !== undefined ? { provisional: soFar } : {}),

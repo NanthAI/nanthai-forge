@@ -622,6 +622,8 @@ test('a day with more run bytes than one close may read is partial, inside one t
   const close = f.counts.slice(before).find(c => c.name === 'statsClose');
   const closed = JSON.parse([...f.tables.projectStatsDays.values()].find(r => r.day === day).value);
   assert.equal(closed.ci.partial, true, 'the runs past the budget are not guessed');
+  // Once the room is gone every later reader stops on it too, so the row lists each reader that stopped and why.
+  assert.deepEqual(closed.stoppedBy, ['attempts:meter', 'runs:meter', 'unprojected:meter']);
   assert.equal(closed.landings, 4, 'every landing is still counted');
   assert(closed.ci.all.runs > 1_000 && closed.ci.all.runs < 1_700, `runs read: ${closed.ci.all.runs}`);
   assert(
@@ -886,6 +888,11 @@ test('run rows not projected yet, each at a shard pool’s 4,096 paths, stay ins
   const close = await closeAtLimits(f, day);
   const closed = JSON.parse([...f.tables.projectStatsDays.values()].find(r => r.day === day).value);
   assert.equal(closed.ci.partial, true, 'the rows past the room kept are not guessed');
+  assert.deepEqual(
+    closed.stoppedBy,
+    ['attempts:meter', 'unprojected:meter'],
+    'full run rows stop on the room',
+  );
   assert(closed.ci.all.runs > 20 && closed.ci.all.runs < 50, `runs read: ${closed.ci.all.runs}`);
   assert(
     close.readBytes < 16 * 1024 * 1024 - 1024 * 1024,
@@ -904,6 +911,11 @@ test('the runs, attempts and landing lookups at their caps stay inside one trans
   assert(docs.projectHostedLandingRequests >= 300, `lookups: ${JSON.stringify(docs)}`);
   const closed = JSON.parse([...f.tables.projectStatsDays.values()].find(r => r.day === day).value);
   assert.equal(closed.ci.partial, true, 'attempts past the room left are not guessed');
+  assert.deepEqual(
+    closed.stoppedBy,
+    ['runs:cap', 'unprojected:cap'],
+    'the row caps are what stopped these readers',
+  );
   assert.equal(closed.landings, 4);
 });
 

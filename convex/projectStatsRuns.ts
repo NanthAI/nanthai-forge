@@ -5,7 +5,7 @@ import type { Id } from './_generated/dataModel';
 import { metricRunRow } from '../src/self-metrics-run';
 import type { HostedCheckRun } from '../src/hosted-check';
 import type { HostedLandingAttempt } from '../src/hosted-landing';
-import { classifyRuns, type StatsAttempt, type StatsRun } from '../src/stats-runs';
+import { classifyRuns, type StatsAttempt, type StatsRun, type StatsStopCause } from '../src/stats-runs';
 import { metricRunKind } from './projectMetricReadProjection';
 import { capsuleIndexKind } from './projectLandingCapsuleIndex';
 import { landingRequestOriginalDb } from './projectLandingRequestBody';
@@ -73,9 +73,12 @@ export async function statsRoom(ctx: Pick<MutationCtx, 'meta'>, keep: StatsKeep)
 const ATTEMPTS_LEAD_MS = 6 * 3_600_000;
 const ATTEMPTS_TRAIL_MS = 2 * 86_400_000;
 
+/** Why a reader stopped short (src/stats-runs.ts#STATS_STOP_CAUSES): its own row cap, the transaction's read room, or a
+ * full page at one shared instant. */
+type Stop = 'cap' | 'meter' | 'instant';
 /** Rows of one time range, oldest first, a page of `size` rows at a time until `cap` rows or no room: `page(from,
  * after)` reads up to `size` rows at or after `from` (strictly after it once `after`, for a time no two rows share,
- * such as `_creationTime`). Rows at one shared instant past a full page are not read (partial). */
+ * such as `_creationTime`). Rows at one shared instant past a full page are not read (partial); `stop` says which. */
 async function pages<T extends { _id: string }>(
   ctx: Pick<MutationCtx, 'meta'>,
   page: (from: number, after: boolean) => Promise<T[]>,
@@ -89,18 +92,19 @@ async function pages<T extends { _id: string }>(
   const seen = new Set<string>();
   let from = start,
     after = false;
+  const stopped = (stop: Stop) => ({ rows, partial: true as const, stop });
   for (;;) {
-    if (!(await statsRoom(ctx, STATS_RUNS_KEEP))) return { rows, partial: true };
+    if (!(await statsRoom(ctx, STATS_RUNS_KEEP))) return stopped('meter');
     const chunk = await page(from, after);
     for (const row of chunk) {
       if (seen.has(row._id)) continue;
-      if (rows.length >= cap) return { rows, partial: true };
+      if (rows.length >= cap) return stopped('cap');
       seen.add(row._id);
       rows.push(row);
     }
-    if (chunk.length < size) return { rows, partial: false };
+    if (chunk.length < size) return { rows, partial: false as const, stop: null };
     const last = time(chunk.at(-1)!);
-    if (!unique && last === from) return { rows, partial: true };
+    if (!unique && last === from) return stopped('instant');
     from = last;
     after = unique;
   }
@@ -171,7 +175,13 @@ async function dayRuns(ctx: MutationCtx, projectId: Id<'hostedProjects'>, from: 
     const value = metricRunRow(JSON.parse(row.value) as HostedCheckRun, row.reportFlakes);
     rows.set(value.id, value);
   }
-  return { runs: [...rows.values()].map(statsRun), partial: compact.partial || unprojected.partial };
+  const stops: StatsStopCause[] = [
+    ...(compact.stop ? [`runs:${compact.stop}` as const] : []),
+    ...(unprojected.stop && unprojected.stop !== 'instant'
+      ? [`unprojected:${unprojected.stop}` as const]
+      : []),
+  ];
+  return { runs: [...rows.values()].map(statsRun), partial: compact.partial || unprojected.partial, stops };
 }
 
 async function dayAttempts(ctx: MutationCtx, projectId: Id<'hostedProjects'>, from: number, to: number) {
@@ -209,7 +219,7 @@ async function dayAttempts(ctx: MutationCtx, projectId: Id<'hostedProjects'>, fr
         mainRace: typeof metric[4] === 'string',
       };
     });
-    return { attempts, partial: read.partial };
+    return { attempts, partial: read.partial, stops: read.stop ? [`attempts:${read.stop}` as const] : [] };
   }
   // The compact attempt index is not built yet (convex/projectLandingCapsuleIndex.ts): the attempt rows themselves,
   // about three times the bytes, so the read meter stops them sooner.
@@ -237,7 +247,7 @@ async function dayAttempts(ctx: MutationCtx, projectId: Id<'hostedProjects'>, fr
       mainRace: a.recheckReason !== undefined,
     };
   });
-  return { attempts, partial: read.partial };
+  return { attempts, partial: read.partial, stops: read.stop ? [`attempts:${read.stop}` as const] : [] };
 }
 
 /** A submission's phase and current attempt, from its compact landing row (or the landing row before compact rows). */
@@ -275,6 +285,7 @@ export async function statsDayRuns(
   const accepted = new Set(landedAttemptIds);
   const pending = new Set<string>();
   const unread = new Set<string>();
+  const lookupStops = new Set<StatsStopCause>();
   const byRun = new Map<string, StatsAttempt[]>();
   for (const a of attempts) if (a.runId) byRun.set(a.runId, [...(byRun.get(a.runId) ?? []), a]);
   const parents = new Set(attempts.flatMap(a => (a.parentAttemptId ? [a.parentAttemptId] : [])));
@@ -285,8 +296,10 @@ export async function statsDayRuns(
     if (mine.some(a => accepted.has(a.id) || parents.has(a.id))) continue;
     for (const submissionId of new Set(mine.map(a => a.submissionId))) {
       if (looked.has(submissionId) || unread.has(submissionId)) continue;
-      if (looked.size >= STATS_CLOSE_LOOKUPS || !(await statsRoom(ctx, STATS_RUNS_KEEP))) {
+      const capped = looked.size >= STATS_CLOSE_LOOKUPS;
+      if (capped || !(await statsRoom(ctx, STATS_RUNS_KEEP))) {
         unread.add(submissionId);
+        lookupStops.add(capped ? 'lookups:cap' : 'lookups:meter');
         continue;
       }
       looked.add(submissionId);
@@ -303,5 +316,6 @@ export async function statsDayRuns(
     pendingSubmissionIds: pending,
     unreadSubmissionIds: unread,
     partial: read.partial || window.partial || unread.size > 0,
+    stops: [...read.stops, ...window.stops, ...lookupStops],
   });
 }

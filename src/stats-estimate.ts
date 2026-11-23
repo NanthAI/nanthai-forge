@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import {
   DISCARD_CAUSES,
+  STATS_STOP_CAUSES,
   classifyRuns,
   mergeQueueReplay,
   type DiscardCause,
@@ -176,6 +177,9 @@ const statsDayV2Schema = statsDayV1Schema
       })
       .strict()
       .optional(),
+    /** Which readers of this day's close stopped short, and why (src/stats-runs.ts#STATS_STOP_CAUSES). Absent when
+     * the day was read in full, and on rows closed before it was recorded. */
+    stoppedBy: z.array(z.enum(STATS_STOP_CAUSES)).min(1).optional(),
     /** The close stopped writing people's days before it had written them all (the transaction's meter): some people's
      * work of this close's window is not on their profile. */
     peoplePartial: z.literal(true).optional(),
@@ -327,6 +331,7 @@ export function statsDay(
       land: sortedInts(landings.map(l => span(l.checkEndedAt, l.landedAt))),
     },
     ci,
+    ...(runs?.stops?.length ? { stoppedBy: runs.stops } : {}),
     solo,
     replay: {
       wallSeconds,

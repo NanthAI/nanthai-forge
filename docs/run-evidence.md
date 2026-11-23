@@ -96,9 +96,12 @@ adjustment failed. A day whose runs
 could not be read (closed before every run was recorded) leaves the CI figures and is counted: a
 window of such days shows "not recorded" and why, never "landings to go". A day the close read only in
 part (past a cap) is marked `partial`, and the page says so once, on hover over the headline's "Some days read in part" marker (never as
-repeated sentences). Which cap stops a day is not recorded on the row: candidates are the run, attempt and lookup caps
-and the transaction read meter shared with the landings and person days (`convex/projectStatsRuns.ts` `pages`,
-`statsDayRuns`; `convex/projectStats.ts` landings loop). Check runs left unread make
+repeated sentences). Which reader stopped a day, and why, is recorded on the row (`stoppedBy`, from
+`src/stats-runs.ts#STATS_STOP_CAUSES`: `landings`, `runs`, `unprojected`, `attempts` or `lookups`, each by its own
+row `cap` or by the transaction read `meter` shared with the person days, and `instant` for a full page of rows at one
+shared time). Once the meter is spent every later reader stops on it too, so the first reader in the close's order
+that names the meter is the one that used the room (`convex/projectStatsRuns.ts` `pages`, `statsDayRuns`;
+`convex/projectStats.ts` landings loop). Check runs left unread make
 runs and CI minutes a lower bound; landings left unread make landings a lower bound, CI minutes per landing an upper
 bound (every run, over fewer landings), and leave first-try rate and times covering only the landings read. The
 minutes saved are an upper bound when check runs went unread (Forge's minutes are short), a lower bound when landings

@@ -33,6 +33,26 @@ export type StatsAttempt = {
   mainRace: boolean;
 };
 
+/** Which reader of a day's close stopped short, and why (Item 3678767e): `cap` is the reader's own row cap, `meter`
+ * the transaction's read room (convex/projectStatsRuns.ts#statsRoom), `instant` a full page of rows at one shared
+ * instant (the page cursor cannot move past it). Recorded on the day row (`stoppedBy`), so a partial day names its
+ * cause instead of leaving candidates. */
+export const STATS_STOP_CAUSES = [
+  'landings:cap',
+  'landings:meter',
+  'runs:cap',
+  'runs:meter',
+  'runs:instant',
+  'unprojected:cap',
+  'unprojected:meter',
+  'attempts:cap',
+  'attempts:meter',
+  'attempts:instant',
+  'lookups:cap',
+  'lookups:meter',
+] as const;
+export type StatsStopCause = (typeof STATS_STOP_CAUSES)[number];
+
 export const DISCARD_CAUSES = ['mainMoved', 'failed', 'cancelled', 'superseded'] as const;
 export type DiscardCause = (typeof DISCARD_CAUSES)[number];
 export type RunTally = { runs: number; seconds: number; unknown: number };
@@ -68,6 +88,8 @@ export function classifyRuns(input: {
   unreadSubmissionIds?: ReadonlySet<string>;
   /** The close read fewer runs or attempts than the day held. */
   partial?: boolean;
+  /** Which readers stopped short, and why. */
+  stops?: readonly StatsStopCause[];
 }) {
   const byRun = new Map<string, StatsAttempt[]>();
   for (const a of input.attempts) if (a.runId) byRun.set(a.runId, [...(byRun.get(a.runId) ?? []), a]);
@@ -165,6 +187,7 @@ export function classifyRuns(input: {
     queueFailures: [...queueFailures].sort((a, b) => a.at - b.at),
     unknownRuns,
     partial: input.partial === true,
+    stops: [...new Set(input.stops ?? [])].sort(),
   };
 }
 
