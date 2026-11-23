@@ -170,12 +170,18 @@ export function carryCloneEdits(
         mode = stat.mode & 0o777;
       }
       if (kind === 'extra') {
-        if (laneBlob.has(path) || existsSync(to)) throw new Error('the Lane already has this path');
+        if (laneBlob.has(path))
+          throw new Error('main added this path since the clone was last pulled (the clone is behind main)');
+        if (existsSync(to)) throw new Error('the Lane already has a file at this path');
         moves.push({ path, kind, from, to, bytes, mode, baseline: null, baselineMode: 0 });
         continue;
       }
       if (!cloneBlob.has(path) || cloneBlob.get(path) !== laneBlob.get(path))
-        throw new Error('the Lane starts from a different version of this file');
+        throw new Error(
+          !laneBlob.has(path)
+            ? 'main removed this file since the clone was last pulled (the clone is behind main)'
+            : 'main changed this file since the clone was last pulled (the clone is behind main)',
+        );
       const stat = regular(to);
       if (!stat) throw new Error('the Lane does not hold this file as a regular file');
       const baseline = readFileSync(to);
@@ -244,10 +250,17 @@ export function noteCloneEdits(
   laneId: string,
   result: unknown,
   carry: boolean,
-  registry: Pick<LaneRegistry, 'record'>,
+  registry: Pick<LaneRegistry, 'record'> & Partial<Pick<LaneRegistry, 'read'>>,
+  /** The Lane ROOT is, when the start came from a Lane: the new Lane inherits that Lane's clone. */
+  sourceLaneId?: string,
 ): unknown {
   try {
-    if (!isMainClone(root)) return result;
+    if (!isMainClone(root)) {
+      // Started from another Lane: its clone's edits matter to this Lane's saves too (no start notice).
+      const inherited = sourceLaneId && registry.read ? registry.read(sourceLaneId)?.cloneRoot : undefined;
+      if (inherited) registry.record({ laneId, cloneRoot: inherited });
+      return result;
+    }
     registry.record({ laneId, cloneRoot: resolve(root) });
     const edits = cloneLocalEdits(root);
     if (!edits?.count) return result;
@@ -310,7 +323,9 @@ export function cloneEditsHeadsUp(
     if (entry.editsNoticed && now - entry.editsNoticed.at < 60_000) return null;
     const edits = cloneLocalEdits(entry.cloneRoot);
     const signature = edits?.count ? signatureOf(edits) : '';
-    if (!edits?.count || edits.newestMs === null || edits.newestMs <= entry.openedAt) {
+    // A deletion has no time: it counts as newer than the start (said once per set).
+    const deletions = edits?.changes.some(change => change.kind === 'deleted') ?? false;
+    if (!edits?.count || (!deletions && (edits.newestMs === null || edits.newestMs <= entry.openedAt))) {
       if (entry.editsNoticed) registry.record({ laneId, editsNoticed: { at: now, signature } });
       return null;
     }
@@ -321,7 +336,7 @@ export function cloneEditsHeadsUp(
       .slice(0, 5)
       .map(file => JSON.stringify(file.path))
       .join(', ');
-    return `${edits.count} edit${edits.count === 1 ? '' : 's'} in the shared clone ${JSON.stringify(entry.cloneRoot)} are newer than this Lane's start (${names}${edits.count > 5 ? ', …' : ''}). ${WHY_EDITS_BELONG_IN_A_LANE} They may be yours: carry them with nforge agent ${shellQuote(entry.cloneRoot)} start '{"outcome":"Keep local edits","carryEdits":true}'.`;
+    return `${edits.count} edit${edits.count === 1 ? '' : 's'} in the shared clone ${JSON.stringify(entry.cloneRoot)} are newer than this Lane's start, or deletions of unknown time (${names}${edits.count > 5 ? ', …' : ''}). ${WHY_EDITS_BELONG_IN_A_LANE} They may be yours: carry them with nforge agent ${shellQuote(entry.cloneRoot)} start '{"outcome":"Keep local edits","carryEdits":true}'.`;
   } catch {
     return null;
   }

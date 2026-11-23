@@ -1930,7 +1930,8 @@ export class HostedAgentTransport {
               started.lane.laneId,
               result,
               placement.carryEdits === true,
-              { record: recordLane },
+              { record: recordLane, read: readLaneEntry },
+              markerIdentity(root)?.laneId,
             );
           } else if (started.lane && placement.open !== false)
             // Pins only because ROOT has no default placement: say how to materialize this same Lane.
@@ -1944,6 +1945,16 @@ export class HostedAgentTransport {
                 'no-placement',
               ),
             };
+          // Pins only (open:false, or no placement): the clone's edits are still worth naming.
+          if (started.lane && !into)
+            result = (await import('./clone-local-edits.js')).noteCloneEdits(
+              root,
+              started.lane.laneId,
+              result,
+              false,
+              { record: recordLane, read: readLaneEntry },
+              markerIdentity(root)?.laneId,
+            );
           // An open resolution Lane beside the Lane it resolves: name both and the abandon command (d9e1ac62).
           const replaced = replacedOpenLanes(started.openLanes);
           if (replaced.length) result = { ...(result as object), replaced };

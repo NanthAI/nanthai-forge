@@ -174,3 +174,95 @@ test('a save from a Lane mentions newer clone edits once, not on every call', t 
   fs.writeFileSync(join(f.root, 'src/2.txt'), 'edited too\n');
   assert.match(cloneEditsHeadsUp(laneId, registry, mark + 360_000), /2 edits/);
 });
+
+function withState(t) {
+  const state = fs.mkdtempSync(
+    join(fs.realpathSync(fs.mkdtempSync(join(process.env.TMPDIR ?? '/tmp', 'x-'))), 'state-'),
+  );
+  const previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = state;
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    fs.rmSync(state, { recursive: true, force: true });
+  });
+}
+const record = (laneId, f, opened) =>
+  recordLane(
+    {
+      laneId,
+      root: join(f.directory, 'lane'),
+      url: 'https://fixture.invalid',
+      projectId: 'p',
+      cloneRoot: f.root,
+    },
+    opened,
+  );
+
+test('deletion-only edits count: the save notice names them', t => {
+  withState(t);
+  const f = pullFixture(t);
+  const laneId = randomUUID();
+  const opened = Date.parse('2030-01-01T00:00:00Z'); // later than any file time: only a deletion can trigger it
+  record(laneId, f, opened);
+  fs.rmSync(join(f.root, 'src/1.txt'));
+  assert.match(cloneEditsHeadsUp(laneId, registry, opened + 1000), /1 edit in the shared clone.*src\/1\.txt/);
+});
+
+test("a Lane started from another Lane inherits that Lane's clone for the save notice", t => {
+  withState(t);
+  const f = pullFixture(t);
+  const source = randomUUID(),
+    child = randomUUID();
+  record(source, f);
+  const lane = join(f.directory, 'lane2');
+  fs.mkdirSync(join(lane, '.forge'), { recursive: true });
+  fs.writeFileSync(join(lane, '.forge', 'hosted-lane.json'), '{}');
+  recordLane({
+    laneId: child,
+    root: join(f.directory, 'lane3'),
+    url: 'https://fixture.invalid',
+    projectId: 'p',
+  });
+  const plain = { path: 'x' };
+  assert.equal(noteCloneEdits(lane, child, plain, false, registry, source), plain);
+  assert.equal(readLaneEntry(child).cloneRoot, f.root);
+});
+
+test('carry on a clone behind main says exactly why a changed path stays', t => {
+  const f = pullFixture(t);
+  const { lane, files } = laneFor(f);
+  files.find(file => file.path === 'src/0.txt').blob = 'f'.repeat(64); // main changed 0 after the pull
+  fs.writeFileSync(join(f.root, 'src/0.txt'), 'edited 0\n');
+  fs.writeFileSync(join(f.root, 'src/2.txt'), 'edited 2\n');
+  const result = carryCloneEdits(f.root, lane, cloneLocalEdits(f.root), files);
+  assert.deepEqual(result.carried, []);
+  assert.match(result.skipped[0].reason, /main changed this file since the clone was last pulled/);
+  assert.equal(fs.readFileSync(join(f.root, 'src/2.txt'), 'utf8'), 'edited 2\n', 'all or nothing');
+  // Edits to files main did not touch carry once the conflicting one is back at baseline.
+  fs.writeFileSync(join(f.root, 'src/0.txt'), 'source 0\n');
+  const rest = carryCloneEdits(f.root, lane, cloneLocalEdits(f.root), files);
+  assert.deepEqual(rest.carried, ['src/2.txt']);
+});
+
+test('start from a dirty clone: warning with a registered clone, not-ready carry loses nothing', t => {
+  withState(t);
+  const f = pullFixture(t);
+  const { lane } = laneFor(f);
+  stray(f);
+  const laneId = randomUUID();
+  recordLane({ laneId, root: lane, url: 'https://fixture.invalid', projectId: 'p' }); // start records first
+  const warn = noteCloneEdits(f.root, laneId, { path: lane }, false, registry);
+  assert.equal(warn.localEdits.count, 4);
+  assert.equal(readLaneEntry(laneId).cloneRoot, f.root);
+  const reply = noteCloneEdits(
+    f.root,
+    laneId,
+    { path: lane, checkout: { status: 'incomplete' } },
+    true,
+    registry,
+  );
+  assert.equal(reply.carriedEdits.carried, 0);
+  assert.match(reply.carriedEdits.note, /not ready/);
+  assert.equal(cloneLocalEdits(f.root).count, 4);
+});
