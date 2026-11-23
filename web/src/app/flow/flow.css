@@ -77,7 +77,7 @@
   .flow-figs > a > b .st { font-size: inherit; font-weight: inherit; }
   .flow-figs > a > b .nr { color: var(--text-3); font-size: var(--t-small); font-weight: var(--w-regular); }
   .flow-figs .s { grid-column: 1 / -1; color: var(--text-3); font-size: var(--t-meta); min-width: 0; overflow-wrap: anywhere; }
-  .flow-figs .s b { font-family: var(--font-mono); font-size: calc(1em * var(--mono-scale)); font-weight: var(--w-medium); color: var(--text-2); }
+  .flow-figs .s b { white-space: nowrap; font-family: var(--font-mono); font-size: calc(1em * var(--mono-scale)); font-weight: var(--w-medium); color: var(--text-2); }
   .flow-spark { display: none; align-items: flex-end; gap: 2px; height: 20px; align-self: end; }
   .flow-spark i { width: 4px; background: var(--text-3); border-radius: var(--r-bar) var(--r-bar) 0 0; min-height: 1px; }
   .flow-spark i.now { background: var(--text); }
@@ -108,20 +108,22 @@
   .flow-legend li > svg { flex: none; }
 
   .flow-chk { border-top: var(--rule) solid var(--line); background: var(--surface); }
-  .flow-check-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--s-3); width: 100%; min-height: var(--row-h); padding: var(--s-2) var(--gut); border: 0; background: transparent; text-align: start; color: var(--text-2); font-size: var(--t-meta); }
-  .flow-check-title > b, .flow-check > b { color: var(--text); font-size: var(--t-small); font-weight: var(--w-strong); }
-  .flow-checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 136px), 1fr)); }
-  .flow-check { display: grid; align-content: start; gap: 5px; min-width: 0; padding: var(--s-3) var(--gut); box-shadow: inset var(--rule) 0 var(--line), inset 0 var(--rule) var(--line); color: var(--text-2); font-size: var(--t-meta); overflow-wrap: anywhere; }
-  .flow-check > b { display: inline-flex; align-items: center; gap: var(--s-2); }
-  .flow-check strong { color: var(--text); font-family: var(--font-mono); font-size: calc(1em * var(--mono-scale)); }
+  .flow-check-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--s-3); width: 100%; min-height: var(--row-h); padding: var(--s-2) var(--gut); border: 0; background: transparent; text-align: start; color: var(--text-2); font-size: var(--t-meta); }
+  .flow-check-title > b { color: var(--text); font-size: var(--t-small); font-weight: var(--w-strong); }
+  /* running checks as the Standing line's roll: one segment each, filled by progress, free room as empty segments */
+  .flow-bar { padding: 0 var(--gut) var(--s-3); }
+  .flow-bar .roll { width: 100%; }
+  /* CI minutes keeps its place under the bar, the full row wide, each value on one line */
+  .flow-ci { display: grid; gap: 5px; padding: var(--s-3) var(--gut); border-top: var(--rule) solid var(--line); color: var(--text-2); font-size: var(--t-meta); }
+  .flow-ci > b { color: var(--text); font-size: var(--t-small); font-weight: var(--w-strong); }
+  .flow-ci strong { color: var(--text); font-family: var(--font-mono); font-size: calc(1em * var(--mono-scale)); }
   /* Landed minutes in the passed colour, minutes on checks that did not land in the waiting colour (DESIGN.md rule 12). */
   .flow-ci-split { display: flex; gap: 2px; height: 9px; }
   .flow-ci-split i.l, .flow-ci-key i.l { background: var(--passed); }
   .flow-ci-split i.x, .flow-ci-key i.x { background: var(--waiting); }
-  .flow-ci-key { display: flex; flex-wrap: wrap; gap: 2px var(--s-3); }
+  .flow-ci-key { display: flex; flex-wrap: wrap; gap: 2px var(--s-5); }
+  .flow-ci-key > span { white-space: nowrap; }
   .flow-ci-key i { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -2px; }
-  @container (max-width: 650px) { .flow-ci { grid-column: 1 / -1; } }
-  @media (max-width: 860px) { .flow-check.flow-free { display: none; } }
 
   /* below desk width the stops are flat rows (the phone's picture) */
   .flow-rows { display: none; margin: 0; padding: 0; list-style: none; }

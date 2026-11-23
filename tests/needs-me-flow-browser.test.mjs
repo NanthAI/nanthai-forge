@@ -181,14 +181,37 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
           await legend.getByRole('listitem').nth(4).getAttribute('title'),
           /^This Lane’s changes clash with another Lane’s on the same lines/,
         );
-        assert.match(await page.locator('.flow-check').nth(0).textContent(), /Check 1\s*2 Lanes\s*4 min/);
-        assert.match(await page.locator('.flow-check').nth(1).textContent(), /Check 2\s*1 Lane\s*2 min/);
-        assert.equal(
-          await page.locator('.flow-free').isVisible(),
-          width === 1440,
-          'the phone keeps only the running checks and CI minutes',
+        // Owner 2026-11-23 14:20Z: running checks are the Standing line's roll, one segment each, filled by elapsed time
+        // against the day's middle landing time (9 min here), passed Lanes in the waiting colour, free room empty.
+        const roll = page.locator('.flow-bar .roll i');
+        assert.deepEqual(await roll.evaluateAll(parts => parts.map(part => part.className)), [
+          'run',
+          'run',
+          'wait',
+          'wait',
+          '',
+          '',
+        ]);
+        assert.deepEqual(
+          await roll.evaluateAll(parts => parts.map(part => part.querySelector('span')?.style.width ?? null)),
+          ['47%', '23%', '100%', '100%', null, null],
         );
-        assert.match(await page.locator('.flow-free').textContent(), /2 slots in the check queue/);
+        assert.match(
+          await roll.nth(0).getAttribute('title'),
+          /^Running check: 2 Lanes together · running 4 min · landings usually take 9 min/,
+        );
+        assert.equal(
+          await roll.nth(1).getAttribute('title'),
+          'Running check: 1 Lane · running 2 min · landings usually take 9 min',
+        );
+        assert.match(
+          await page.locator('.flow-chk .flow-check-title').textContent(),
+          /^Checks2 running · 2 passed, waiting to land · 2 more checks can start now$/,
+        );
+        assert.doesNotMatch(
+          await page.locator('.flow-chk').textContent(),
+          /Shards|Free slots|Since requested|slots/,
+        );
         assert.match(
           await page.locator('.flow-ci').textContent(),
           /CI minutes today.*Landed [\d,]+ min\s*Did not land 20 min/,
@@ -547,6 +570,45 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
         await page.locator('.fv-hint').waitFor();
         await page.keyboard.press('Enter');
         assert.equal(new URL(page.url()).pathname, `${HOME}/lanes/${id}`);
+      },
+    );
+
+    await t.test(
+      'the checks bar and CI minutes keep their place whatever runs, and no figure wraps mid-value (9e748e41)',
+      async t => {
+        for (const width of [1440, 390]) {
+          for (const data of ['busy', 'stall', 'calm']) {
+            const page = await open(t, width, data, { reducedMotion: 'reduce' });
+            const at = await page.evaluate(() => {
+              const rect = selector => document.querySelector(selector)?.getBoundingClientRect();
+              const chk = rect('.flow-chk');
+              const ci = rect('.flow-ci');
+              const bar = rect('.flow-bar');
+              const single = el => {
+                const style = getComputedStyle(el);
+                const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.6;
+                return el.getBoundingClientRect().height <= line * 1.5;
+              };
+              return {
+                left: Math.round(ci.left - chk.left),
+                width: Math.round(ci.width),
+                full: Math.abs(ci.width - chk.width) < 1.5,
+                below: !bar || ci.top >= bar.bottom - 0.5,
+                wrapped: [...document.querySelectorAll('.flow-ci-key > span, .flow-figs b')]
+                  .filter(el => !single(el))
+                  .map(el => `${el.className} ${el.textContent} ${el.getBoundingClientRect().height}`),
+              };
+            });
+            assert.equal(at.full, true, `CI minutes spans the row at ${width} ${data}`);
+            assert.equal(at.below, true, `CI minutes sits under the checks bar at ${width} ${data}`);
+            assert.deepEqual(at.wrapped, [], `no value wraps at ${width} ${data}`);
+            assert.equal(
+              at.left,
+              0,
+              `CI minutes starts at the panel's edge with ${data} checks running at ${width}`,
+            );
+          }
+        }
       },
     );
 

@@ -415,8 +415,13 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       );
       const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
       assert.ok(![...needs, ...fyi].some(text => uuid.test(text)), 'no raw id as a title, anywhere');
-      const tiles = await region(page, 'FYI').locator('.nums > div').allTextContents();
-      assert.deepEqual(tiles, ['4landed', '0broke main', '1check redone', '4 minCI time thrown away']);
+      // Owner 2026-11-23 14:16Z: the FYI tile row is gone (its figures duplicated the Now tiles in a different, capped window).
+      assert.equal(await region(page, 'FYI').locator('.nums').count(), 0);
+      assert.doesNotMatch(
+        await region(page, 'FYI').innerText(),
+        /\b\d[\d,]*\+(?!\w)/,
+        'no lower-bound "N+" count in FYI',
+      );
       assert.equal(await page.locator('section.region[aria-label="Moving without you"]').count(), 0);
       assert.equal(await page.locator('section.region[aria-label="Also here"]').count(), 0);
       assert.equal(await page.evaluate(() => window.intervals), 0, 'no repeating timer: idle costs nothing');

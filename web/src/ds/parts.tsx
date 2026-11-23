@@ -383,6 +383,45 @@ const UNITS = {
   },
 } as const;
 
+export type RollSegment = {
+  /** ok: passed, run: active, wait: waiting, fail: failed; none: empty. */
+  state?: 'ok' | 'run' | 'wait' | 'fail' | undefined;
+  /** How far along, 0 to 1: the segment fills from the start in its state's colour. */
+  fill?: number;
+  /** Progress is not known: drawn as an outline in the state's colour, never as a full or empty segment. */
+  unknown?: true;
+  /** The segment's hover. */
+  title?: string;
+};
+
+/** One segment per thing, coloured by state and filled by progress: the roll of the Standing line (Done, In progress,
+ * Left) and of Now's running checks. `wide` is for a few segments that need room for a hover. */
+export function Roll({
+  segments,
+  label,
+  wide,
+}: {
+  segments: readonly RollSegment[];
+  label: string;
+  wide?: boolean;
+}) {
+  return (
+    <span className={wide ? 'roll wide' : 'roll'} role="img" aria-label={label}>
+      {segments.map((segment, i) => (
+        <i
+          key={i}
+          className={segment.unknown ? `${segment.state ?? ''} unknown` : segment.state}
+          title={segment.title}
+        >
+          {segment.fill === undefined ? null : (
+            <span style={{ width: `${Math.round(Math.min(1, Math.max(0, segment.fill)) * 100)}%` }} />
+          )}
+        </i>
+      ))}
+    </span>
+  );
+}
+
 /** Where the project stands: Done, In progress, Left. Every main screen answers this (DESIGN.md rule 44). */
 export function Standing({ of, done, inProgress, left }: StandingProps) {
   const units = UNITS[of];
@@ -423,18 +462,12 @@ export function Standing({ of, done, inProgress, left }: StandingProps) {
   return (
     <nav className="pstate" aria-label="Where the project stands">
       {of === 'app' && ticks ? (
-        <span
-          className="roll"
-          role="img"
-          aria-label={`Items in this project: ${amount(done.n, done.atLeast)} of ${total.toLocaleString()} done, ${amount(inProgress.n, inProgress.atLeast)} in progress, ${amount(left.n, left.atLeast)} left`}
-        >
-          {Array.from({ length: ticks }, (_, i) => (
-            <i
-              key={i}
-              className={i * step < done.n ? 'ok' : i * step < done.n + inProgress.n ? 'run' : undefined}
-            />
-          ))}
-        </span>
+        <Roll
+          label={`Items in this project: ${amount(done.n, done.atLeast)} of ${total.toLocaleString()} done, ${amount(inProgress.n, inProgress.atLeast)} in progress, ${amount(left.n, left.atLeast)} left`}
+          segments={Array.from({ length: ticks }, (_, i) => ({
+            state: i * step < done.n ? 'ok' : i * step < done.n + inProgress.n ? 'run' : undefined,
+          }))}
+        />
       ) : null}
       {cell('Done', 'passed', 'passed', done, units.done)}
       {cell('In progress', 'active', 'active', inProgress, units.inProgress)}

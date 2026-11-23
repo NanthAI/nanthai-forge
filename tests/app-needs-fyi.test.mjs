@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
 const { needsView } = await import(moduleUrl('../web/src/app/needs/model.ts'));
-const { fyiView, tileText, sinceText, startOfDay } = await import(moduleUrl('../web/src/app/needs/fyi.ts'));
+const { fyiView, sinceText, startOfDay } = await import(moduleUrl('../web/src/app/needs/fyi.ts'));
 const { hrefFor, parseAppPath } = await import(moduleUrl('../web/src/app/paths.ts'));
 
 const NOW = new Date(2026, 10, 17, 15, 0).getTime();
@@ -118,15 +118,12 @@ test('Clear all hides what came before it and the figures count from the clear l
     view.rows.map(row => row.key.split('@')[0]),
     ['landing:newer', 'held:fresh', 'landing:new'],
   );
-  assert.deepEqual(view.tiles, { landed: 2, broke: 0, redone: 2, thrown: 300, atLeast: false });
-  assert.deepEqual(
-    tileText(view.tiles).map(tile => `${tile.n} ${tile.label}`),
-    ['2 landed', '0 broke main', '2 checks redone', '5 min CI time thrown away'],
-  );
+  // Owner 2026-11-23 14:16Z: no tile row; its figures were a second, capped window of the tiles above.
+  assert.equal('tiles' in view, false);
   assert.match(sinceText(view.since, NOW), /^since you cleared at /);
 });
 
-test('never cleared: the window is today, and the figures say "or more" past the read', () => {
+test('never cleared: the window is today', () => {
   const view = fyiView(
     fyiRead({
       landings: [landing('a', minutesAgo(2), { redone: true, thrown: null }), landing('b', minutesAgo(3))],
@@ -137,10 +134,6 @@ test('never cleared: the window is today, and the figures say "or more" past the
   );
   assert.equal(view.since.at, startOfDay(NOW));
   assert.equal(sinceText(view.since, NOW), 'today');
-  assert.deepEqual(
-    tileText(view.tiles).map(tile => tile.n),
-    ['2+', '0', '1+', 'not reported'],
-  );
 });
 
 test('a plan-visibility change shows who, what and old to new in the settings rows (Item 65b6d701)', () => {

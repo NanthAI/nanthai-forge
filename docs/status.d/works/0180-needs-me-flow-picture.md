@@ -5,10 +5,11 @@
   each count with its stop name and stacks the single-count stops on phones. A `+` marks figures from
   the capped feed. Passed Lanes waiting to land are amber. The picture shows five figures
   (landed this hour, land to main, needs fix, reverted, main green or red), a state legend (one small block per look the picture draws, one word each, the meaning on hover) and a
-  strip for running checks. The green hover dates the latest full pass when the existing FYI audit
-  page reports its finish time. The strip
-  shows the Lanes in each recorded run, its elapsed time, speculative queue room where recorded and
-  today’s accounted CI minutes. It replaced "Moving without you",
+  bar for running checks: the Standing line's roll with one segment per running check, filled by its elapsed time
+  against the day's middle landing time, a segment per Lane that passed and waits to land, and empty segments
+  for room to start more checks, with the Lane count and time in each segment's hover. The green hover dates the
+  latest full pass when the existing FYI audit page reports its finish time. CI minutes sit full width under
+  the bar, as the day's accounted minutes. FYI has no tile row. It replaced "Moving without you",
   shares the top bar's line read and the page's Needs you and FYI reads, stands
   left of Needs you with FYI and Loose ends below, gives Needs you width while it holds anything, and a
   held block's tag goes to its row. On phones, flat rows follow Needs you in reading and keyboard order.

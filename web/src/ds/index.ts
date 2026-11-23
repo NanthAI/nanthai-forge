@@ -31,11 +31,12 @@ export {
   Prose,
   Region,
   Row,
+  Roll,
   Standing,
   Table,
   useFold,
 } from './parts';
-export type { Column, KeyProps, RegionProps, StandingCell, StandingProps } from './parts';
+export type { Column, KeyProps, RegionProps, RollSegment, StandingCell, StandingProps } from './parts';
 export { Dock, DockPerson, Menu, Palette, ReorderList, Sheet, useDockLayout } from './interactive';
 export type {
   DockLayout,

@@ -6,7 +6,7 @@ import { useState, type ReactNode } from 'react';
 import { Key, Region, Row, Segment, State, Who } from '../../ds';
 import { A } from '../frames';
 import { Capped } from './Capped';
-import { fyiSum, sinceText, tileText, type Area, type FyiRow, type FyiState, type fyiView } from './fyi';
+import { fyiSum, sinceText, type Area, type FyiRow, type FyiState, type fyiView } from './fyi';
 import type { Dismiss } from './NeedsMe';
 
 /** FYI rows shown before "Show more". */
@@ -101,14 +101,6 @@ export function Fyi({
         </div>
       ) : (
         <>
-          <div className="nums" aria-label={`Counted ${sinceText(view.since, drawnAt)}`} role="group">
-            {tileText(view.tiles).map(tile => (
-              <div key={tile.label}>
-                <b className={tile.n === 'not reported' ? 'nr' : undefined}>{tile.n}</b>
-                <span>{tile.label}</span>
-              </div>
-            ))}
-          </div>
           {undo ? (
             <div className="pf needs-fold">
               <span>Cleared.</span>

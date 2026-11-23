@@ -74,18 +74,8 @@ export type FyiRow = {
   fact: string;
   links: Link[];
 };
-export type Tiles = {
-  landed: number;
-  broke: number;
-  redone: number;
-  /** Runner seconds thrown away; null when some redone check did not report it. */
-  thrown: number | null;
-  /** True when the window reaches past the newest landings the read holds: the figures are lower bounds. */
-  atLeast: boolean;
-};
 export type FyiView = {
   rows: FyiRow[];
-  tiles: Tiles;
   /** Where the window starts and why: the reader's clear line, or the start of today. */
   since: { at: number; cleared: boolean };
   /** How many rows each filter shows. */
@@ -265,20 +255,8 @@ export function fyiView(
   const rows = [...(holdsAlways ? holds : holds.filter(kept)), ...readRows(read).filter(kept)].sort(
     (a, b) => b.at - a.at,
   );
-  const inWindow = read.landings.filter(landing => landing.at >= from);
-  const redone = inWindow.filter(landing => landing.redone);
-  const oldest = read.landings[read.landings.length - 1];
   return {
     rows,
-    tiles: {
-      landed: inWindow.length,
-      broke: read.broke.filter(red => red.at >= from && !red.drill).length,
-      redone: redone.length,
-      thrown: redone.some(landing => landing.thrown === null)
-        ? null
-        : redone.reduce((sum, landing) => sum + (landing.thrown ?? 0), 0),
-      atLeast: read.landingsMore && oldest !== undefined && oldest.at >= from,
-    },
     since: { at: from, cleared: cleared !== null },
     counts: {
       all: rows.length,
@@ -286,23 +264,6 @@ export function fyiView(
       outside: rows.filter(row => row.area === 'outside').length,
     },
   };
-}
-
-/** The tiles' words: each figure with its own noun (rule 2), "or more" when the read stopped short. */
-export function tileText(tiles: Tiles) {
-  const more = tiles.atLeast ? '+' : '';
-  return [
-    { n: `${tiles.landed.toLocaleString('en')}${more}`, label: 'landed' },
-    { n: tiles.broke.toLocaleString('en'), label: 'broke main' },
-    {
-      n: `${tiles.redone.toLocaleString('en')}${more}`,
-      label: tiles.redone === 1 ? 'check redone' : 'checks redone',
-    },
-    {
-      n: tiles.thrown === null ? 'not reported' : minutes(tiles.thrown),
-      label: 'CI time thrown away',
-    },
-  ];
 }
 
 /** "since you cleared at 14:02" or "today": the header says which window the figures count. */
@@ -317,7 +278,5 @@ export function sinceText(since: FyiView['since'], now: number) {
 
 /** The summary when folded or on a phone: the answer in one line. */
 export function fyiSum(view: FyiView) {
-  return view.rows.length
-    ? `${plural(view.tiles.landed, 'landing')}, ${plural(view.rows.length, 'row')}`
-    : 'nothing new';
+  return view.rows.length ? plural(view.rows.length, 'row') : 'nothing new';
 }
