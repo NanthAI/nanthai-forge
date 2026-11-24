@@ -14084,6 +14084,20 @@
         "src/scoped-recheck-policy.ts"
       ],
       "test": "incident 92396235: a composition failure in the registration pins ends the landing check in the planning job; every job reports, the carrier names the pins, the rest run nothing"
+    },
+    {
+      "incident": "573ae136",
+      "what": "Touching a file refused the landing on a credential-shaped line main already held (frictions 7a05167d, b70dccdf, 0ed89858)",
+      "file": "tests/hosted-actions-job.test.mjs",
+      "paths": [
+        "src/hosted-actions-job-client.ts",
+        "src/hosted-actions-job-plan.ts",
+        "src/hosted-check.ts",
+        "src/package-placement-pin.ts",
+        "src/package-placement.ts",
+        "src/scoped-recheck-policy.ts"
+      ],
+      "test": "incident 573ae136: an edit beside an unchanged credential line on main passes the hosted plan scan; a moved literal fails"
     }
   ]
 }

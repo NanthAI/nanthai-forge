@@ -47,7 +47,7 @@ import { checkRunEntryPaths } from './first-check-risk.js';
 import { declaredTestedDocs, docsOnlyChange } from './docs-paths.js';
 import { selectionFallback } from './fallback-reasons.js';
 import { resolveTestRunner } from './project-test-runner.js';
-import { scanSecretPaths, SECRET_SCAN_ALLOW_FILE } from './secret-scan.js';
+import { scanSecretPathsAgainstBase, SECRET_SCAN_ALLOW_FILE } from './secret-scan.js';
 import { isStandardForgeCheck } from './standard-check.js';
 import { commandSelection, commandShardCount, commandShardGroups } from './check-command-scope.js';
 import { lockfileDigest } from './project-lockfile.js';
@@ -206,13 +206,31 @@ export async function prepareActionsJob(
   // Allow entries come from the composition base (main), never from the Candidate (R-01).
   const scanStarted = performance.now();
   const baseAllow = await baseAllowBytes(source, cache);
-  const secrets = scanSecretPaths(
+  // Lines main's file already holds are not this Candidate's findings (Item 573ae136): main's bytes
+  // only for files with findings, one batched object read.
+  const mainFiles = new Map(source.base.files.map(file => [file.path, file]));
+  const readMain = (path: string) => {
+    const file = mainFiles.get(path);
+    return file && file.mode !== 'symlink' ? readFileSync(join(cache, file.blob)) : undefined;
+  };
+  const secrets = await scanSecretPathsAgainstBase(
     paths,
     path => {
       const file = inventory.get(path);
       return file && file.mode !== 'symlink' ? readFileSync(join(cache, file.blob)) : undefined;
     },
     { baseAllow },
+    async wanted => {
+      await fetchBaseObjects(
+        source,
+        cache,
+        wanted.flatMap(path => {
+          const file = mainFiles.get(path);
+          return file && file.mode !== 'symlink' ? [file.blob] : [];
+        }),
+      );
+      return readMain;
+    },
   );
   console.log(
     `secret scan: ${secrets.scannedFiles} changed files in ${Math.round(performance.now() - scanStarted)} ms; ${secrets.findings.length + secrets.more} found, ${secrets.allowed} allowed from main` +

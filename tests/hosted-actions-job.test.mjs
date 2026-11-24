@@ -4216,6 +4216,46 @@ test('secret scan: a token already on the composition base is not rescanned and 
   );
 });
 
+// Item 573ae136 (frictions 7a05167d, b70dccdf, 0ed89858): touching a file must not refuse a landing
+// on a line main already holds; the same literal moved into a new file is still the change's.
+test('incident 573ae136: an edit beside an unchanged credential line on main passes the hosted plan scan; a moved literal fails', async t => {
+  const s = fixture(t);
+  const old = `GITHUB_TOKEN=${fakeGithubToken}\n`;
+  const main = [s.entry('README.md', 'synthetic before'), s.entry('config/app.env', old)];
+  s.run.candidate.base.head = s.state(main).sha256;
+  s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
+  // 7a05167d: a key name assigned a property access in code is a reference, not a literal.
+  const reference = `export const env = { ${['R2_ACCESS', 'KEY_ID'].join('_')}: fakeR2Config.accessKeyId };\n`;
+  const touched = [
+    s.entry('README.md', 'synthetic before'),
+    s.entry('config/app.env', `NAME=forge\n${old}`),
+    s.entry('scripts/drill.mjs', reference),
+  ];
+  s.run.request.expectedHead = s.state(touched).sha256;
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+  );
+  assert.equal(prepared.recipe.selection.secretScan, undefined, 'unchanged line on main is not a finding');
+  const planPath = join(s.directory, 'plan.json');
+  writeFileSync(planPath, JSON.stringify(prepared.recipe));
+  assert.equal(
+    await executeActionsJob(s.client, join(s.directory, 'candidate'), planPath, prepared.singleShard),
+    0,
+  );
+  s.run.request.expectedHead = s.state([...touched, s.entry('config/moved.env', old)]).sha256;
+  const moved = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'moved'),
+    join(s.directory, 'cache-moved'),
+  );
+  assert.deepEqual(
+    moved.recipe.selection.secretScan.findings.map(item => [item.path, item.line, item.kind]),
+    [['config/moved.env', 1, 'github-token']],
+  );
+});
+
 // Issue 93e14bb0, R-01: allow entries come from the composition base (main), never the Candidate.
 const { secretFingerprint } = await import('../dist/secret-scan.js');
 const allowFor = (path, reason = 'Synthetic fixture.') =>

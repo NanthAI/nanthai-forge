@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   scanSecretPaths,
+  scanSecretPathsAgainstBase,
   scanSecretText,
   secretScanNotice,
   secretFingerprint,
@@ -517,6 +518,11 @@ test('573ae136: a reference on the right of a secret-named assignment is not a s
     1,
   );
   assert.equal(scanSecretText('scripts/drill.mjs', `client_secret = "${fake.random}"`).length, 1);
+  // In config and data files a dotted value is literal text, not a property access.
+  const dotted = `${name}=Zq7xK9mPqR2vL8wN4tY6.Bc3Hj5Fd1Gs0Ak7`;
+  assert.equal(scanSecretText('scripts/drill.mjs', dotted).length, 0);
+  assert.equal(scanSecretText('deploy/.env', dotted).length, 1);
+  assert.equal(scanSecretText('config/app.yaml', dotted.replace('=', ': ')).length, 1);
 });
 
 test('573ae136: findings on lines the base file already holds are not the change; moved literals are', () => {
@@ -533,4 +539,31 @@ test('573ae136: findings on lines the base file already holds are not the change
     'new literal caught',
   );
   assert.equal(run({ 'b.mjs': text }, base).findings.length, 1, 'moved into a new file: caught');
+  assert.equal(
+    run({ 'a.mjs': `${text}${old}` }, base).findings.length,
+    1,
+    'a second copy in the same file: caught',
+  );
+});
+
+test('573ae136: executors that fetch base bytes load only files with findings and fail closed when the load fails', async () => {
+  const old = `client_secret = "${fake.random}"\n`;
+  const entries = { 'a.mjs': `${old}const added = 1;\n`, 'clean.mjs': 'const x = 1;\n' };
+  const asked = [];
+  const scan = load =>
+    scanSecretPathsAgainstBase(Object.keys(entries), files(entries), { baseAllow: undefined }, load);
+  const ok = await scan(async paths => {
+    asked.push(...paths);
+    return files({ 'a.mjs': old });
+  });
+  assert.deepEqual(asked, ['a.mjs'], 'clean files never pay for a base read');
+  assert.equal(ok.findings.length, 0);
+  const failed = await scan(async () => {
+    throw new Error('base unreadable');
+  });
+  assert.equal(failed.findings.length, 1, 'an unreadable base keeps the whole-file finding');
+  const unreadable = await scan(async () => () => {
+    throw new Error('blob unreadable after fetch');
+  });
+  assert.equal(unreadable.findings.length, 1, 'a base read that throws keeps the whole-file finding');
 });

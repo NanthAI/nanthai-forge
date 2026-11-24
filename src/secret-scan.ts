@@ -9,6 +9,7 @@ import {
   type SecretAllowChange,
   type SecretAllowEvidence,
 } from './secret-allow.js';
+import { codeExtensionPattern } from './ecosystems.js';
 
 /** Landing secret scan (Issue 31f8b580). Runs inside Forge's own check executors on
  * the changed paths of the composed Candidate only. A finding names its path, line,
@@ -80,10 +81,12 @@ const patterns: { kind: string; pattern: RegExp }[] = [
 // A secret-named assignment whose value looks random: `API_KEY=…`, `token: "…"`.
 const assignment =
   /(?:secret|token|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|credential)[A-Za-z0-9_-]{0,64}['"]?[ \t]{0,64}[:=][ \t]{0,64}(['"`]?)([A-Za-z0-9+/_=.:|-]{24,})/iy;
-// A property access (`fakeR2Config.accessKeyId`, `process.env.X`) on the right of `=`/`:` is a
-// reference, not a literal. Quoted values, bare words and JWTs (`eyJ…` segments look like
-// identifiers) stay candidates.
+// In source code, a property access (`fakeR2Config.accessKeyId`, `process.env.X`) on the right of
+// `=`/`:` is a reference, not a literal. Quoted values, bare words and JWTs (`eyJ…` segments look like
+// identifiers) stay candidates, and so does any dotted value in config or data files (`.env`, YAML),
+// where it is literal text.
 const reference = /^(?!eyJ)[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)+$/;
+const sourceCode = codeExtensionPattern();
 
 /** Shannon entropy in bits per character. */
 export function entropy(text: string) {
@@ -169,6 +172,7 @@ export function scanSecretText(path: string, text: string, work?: { assignmentCh
     found.push({ path, line: 0, kind, fingerprint: secretFingerprint(path, kind, value), index });
   };
   const known = new Set<number>();
+  const code = sourceCode.test(path);
   for (const { kind, pattern } of patterns)
     for (const match of text.matchAll(pattern)) {
       if (placeholder(kind === 'private-key' ? match[0].slice(-40) : match[0])) continue;
@@ -205,7 +209,7 @@ export function scanSecretText(path: string, text: string, work?: { assignmentCh
           index = from + match[0].length - value.length;
         while (knownIndex < knownStarts.length && knownStarts[knownIndex]! < from) knownIndex++;
         if (
-          (!quote && reference.test(value)) ||
+          (!quote && code && reference.test(value)) ||
           !randomLooking(value) ||
           placeholder(value) ||
           (knownStarts[knownIndex] !== undefined && knownStarts[knownIndex]! <= index + value.length)
@@ -264,8 +268,15 @@ export function scanSecretPaths(
       // Only a file with findings pays for the base read and scan.
       const old = options.readBase(path);
       if (old && old.length <= SECRET_SCAN_MAX_FILE_BYTES) {
-        const had = new Set(scanSecretText(path, old.toString('utf8')).map(f => f.fingerprint));
-        found0 = found0.filter(f => !had.has(f.fingerprint));
+        // Each base occurrence excuses one finding: a second copy the change adds is still caught.
+        const had = new Map<string, number>();
+        for (const f of scanSecretText(path, old.toString('utf8')))
+          had.set(f.fingerprint, (had.get(f.fingerprint) ?? 0) + 1);
+        found0 = found0.filter(f => {
+          const left = had.get(f.fingerprint) ?? 0;
+          if (left) had.set(f.fingerprint, left - 1);
+          return !left;
+        });
       }
     }
     for (const finding of found0) {
@@ -290,6 +301,39 @@ export function scanSecretPaths(
   };
   if (allowFileChanged) result.allowChanges = allowChanges(baseEntries, changeEntries, found);
   return result;
+}
+
+/** `scanSecretPaths` for executors whose base bytes need a fetch (hosted Actions plan, Mac runner;
+ * Item 573ae136). Lines the base file already holds are not the change's findings, so only the files
+ * with findings (rare) pay for one batched base load, then a rescan. If the load fails, the
+ * whole-file findings stand: the scan never passes on an unreadable base. */
+export async function scanSecretPathsAgainstBase(
+  paths: readonly string[],
+  read: (path: string) => Buffer | undefined,
+  options: Omit<SecretScanOptions, 'readBase'>,
+  loadBase: (paths: readonly string[]) => Promise<(path: string) => Buffer | undefined>,
+): Promise<SecretScanResult> {
+  const wanted: string[] = [];
+  const whole = scanSecretPaths(paths, read, {
+    ...options,
+    readBase: path => void wanted.push(path),
+  });
+  if (!wanted.length) return whole;
+  let load: (path: string) => Buffer | undefined;
+  try {
+    load = await loadBase(wanted);
+  } catch {
+    return whole;
+  }
+  // A base file that still cannot be read keeps its whole-file findings.
+  const readBase = (path: string) => {
+    try {
+      return load(path);
+    } catch {
+      return undefined;
+    }
+  };
+  return scanSecretPaths(paths, read, { ...options, readBase });
 }
 
 /** Entries of the change's allow file that the base lacks, or holds with another reason. */

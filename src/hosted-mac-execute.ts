@@ -47,7 +47,7 @@ import { lockfileDigest } from './project-lockfile.js';
 import { declaredTestedDocs } from './docs-paths.js';
 import {
   changedStatePaths,
-  scanSecretPaths,
+  scanSecretPathsAgainstBase,
   secretScanFailureCommand,
   SECRET_SCAN_ALLOW_FILE,
 } from './secret-scan.js';
@@ -104,30 +104,22 @@ export async function machineSecretScan(
     const file = inventory.get(path);
     return file && file.mode !== 'symlink' ? readFileSync(join(cache.objects, file.blob)) : undefined;
   };
-  let scan = scanSecretPaths(changed, readNew, scanOptions);
-  if (scan.findings.length && before) {
-    // Lines the change did not touch are not its findings: fetch the base bytes of the files
-    // that have findings (rare) and drop findings the base file already holds.
-    const baseFiles = new Map(before.map(file => [file.path, file]));
-    const bases = [...new Set(scan.findings.map(finding => finding.path))].flatMap(path => {
-      const file = baseFiles.get(path);
-      return file && file.mode !== 'symlink' ? [file.blob] : [];
-    });
-    try {
-      await cache.ensure(bases);
-      signal.throwIfAborted();
-      scan = scanSecretPaths(changed, readNew, {
-        ...scanOptions,
-        readBase: path => {
-          const file = baseFiles.get(path);
-          return file && file.mode !== 'symlink' ? readFileSync(join(cache.objects, file.blob)) : undefined;
-        },
-      });
-    } catch (error) {
-      if (signal.aborted) throw error;
-      /* Base bytes unreadable: the whole-file findings stand. */
-    }
-  }
+  // Lines the change did not touch are not its findings (shared rule, src/secret-scan.ts).
+  const baseFiles = new Map((before ?? []).map(file => [file.path, file]));
+  const readBase = (path: string) => {
+    const file = baseFiles.get(path);
+    return file && file.mode !== 'symlink' ? readFileSync(join(cache.objects, file.blob)) : undefined;
+  };
+  const scan = await scanSecretPathsAgainstBase(changed, readNew, scanOptions, async paths => {
+    await cache.ensure(
+      paths.flatMap(path => {
+        const file = baseFiles.get(path);
+        return file && file.mode !== 'symlink' ? [file.blob] : [];
+      }),
+    );
+    return readBase;
+  });
+  signal.throwIfAborted();
   // The scan needs new bytes only. Queue proof also covers paths absent from this State.
   let queueProof;
   if (pinQueueProof && before) {
