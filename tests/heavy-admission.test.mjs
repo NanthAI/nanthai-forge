@@ -11,7 +11,15 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { admitHeavy, cachedSample, heavyAdmission, heavyBurstLimit } from '../dist/heavy-admission.js';
+import {
+  MACOS_PRESSURE_WARN,
+  SLOT_MEMORY_BYTES,
+  admitHeavy,
+  cachedSample,
+  heavyAdmission,
+  heavyBurstLimit,
+  parseProcessMemory,
+} from '../dist/heavy-admission.js';
 import { acquireHeavySlot, tryHeavyAdmission, tryHeavySlot } from '../dist/heavy-slots.js';
 import { holdSummary } from '../dist/heavy-hold.js';
 
@@ -24,12 +32,21 @@ const isolated = t => {
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   return directory;
 };
-/** A fake machine: `cpu` maps pid to cores now. */
-const machine = ({ load = 4.8, freeRatio = 0.6, swapUsedRatio = null, cpu = {} } = {}) => ({
+/** A fake machine: `cpu` maps pid to cores now; optional `pressure` and `memoryUse` model host RAM. */
+const machine = ({
+  load = 4.8,
+  freeRatio = 0.6,
+  swapUsedRatio = null,
+  pressure = null,
+  cpu = {},
+  memoryUse,
+} = {}) => ({
   load,
   freeRatio,
   swapUsedRatio,
+  pressure,
   cpu: pid => cpu[pid] ?? null,
+  ...(memoryUse ? { memoryUse } : {}),
 });
 // The friction: a one-core model check 50 min in, two test runs, on 10 cores with 3 base slots.
 const tla = { pid: 101, elapsedMs: 50 * MIN, declared: 1 };
@@ -440,4 +457,106 @@ test('ff33e9a6: --status reports queue wait p50/p90 from the holds that recorded
   holds.push({ at: now - 100, ms: 10, lane: null, kind: 'build', cpu: null, load: null });
   assert.deepEqual(holdSummary(holds, now).wait, { holds: 5, p50Seconds: 3, p90Seconds: 60 });
   assert.equal(holdSummary([], now).wait, null);
+});
+
+const GIB = 2 ** 30;
+const MIB = 2 ** 20;
+
+test('friction 2475b276: parseProcessMemory splits heavy holder trees from outside tsc, node shards and Chrome RSS', () => {
+  // Columns match `ps -A -o pid=,ppid=,pcpu=,rss=` (rss in KiB).
+  const ps = [
+    '  1    0   0.1   10240', // launchd (outside)
+    ' 50    1   5.0  563200', // outside tsc (~550 MiB)
+    ' 51    1  12.0 1572864', // outside Playwright Chrome (~1.5 GiB)
+    '101    1   1.0  204800', // heavy holder 101 (~200 MiB)
+    '102  101  80.0  409600', // child of holder 101 (~400 MiB)
+    '103  102  10.0  102400', // grandchild of holder 101 (~100 MiB)
+    '200    1   2.0  307200', // outside node test shard (~300 MiB)
+  ].join('\n');
+  // Pid 0/1 must never be treated as a holder tree (pid 1 owns every process).
+  const parsed = parseProcessMemory(ps, [0, 1, 101, 999], 16 * GIB);
+  assert.equal(parsed.totalBytes, 16 * GIB);
+  assert.equal(parsed.holders[101], 700 * MIB);
+  assert.equal(parsed.holders[999], null);
+  assert.equal(parsed.holders[1], undefined);
+  assert.equal(parsed.outsideBytes, (10 + 550 + 1536 + 300) * MIB);
+});
+
+test('friction 2475b276: admission scales down base and burst slots when outside-slot memory or macOS pressure leaves no headroom', () => {
+  const mem =
+    (outsideGiB, holders = {}) =>
+    () => ({
+      totalBytes: 16 * GIB,
+      outsideBytes: outsideGiB * GIB,
+      holders: Object.fromEntries(Object.entries(holders).map(([pid, gib]) => [pid, gib * GIB])),
+    });
+  assert.equal(SLOT_MEMORY_BYTES, 2 * GIB);
+
+  // Calm 16 GiB Mac (~6.5 GiB outside): slots 2 and 3 fit under the 90% base ceiling, and burst
+  // slot 4 fits under 75% once holders are settled with modest RSS.
+  assert.equal(decide([testA], machine({ freeRatio: 0.6, memoryUse: mem(6.5, { 102: 0.8 }) })).admit, true);
+  assert.equal(
+    decide([testA, testB], machine({ freeRatio: 0.55, memoryUse: mem(6.5, { 102: 0.8, 103: 0.8 }) })).admit,
+    true,
+  );
+  assert.equal(
+    decide(
+      [tla, testA, testB],
+      machine({
+        load: 4.8,
+        freeRatio: 0.45,
+        cpu: measured,
+        memoryUse: mem(6.5, { 101: 0.5, 102: 0.8, 103: 0.8 }),
+      }),
+    ).admit,
+    true,
+  );
+
+  // Busy 16 GiB Mac (10 GiB outside + 1 young holder 2 GiB + next 2 GiB = 14 GiB = 87.5% <= 90%):
+  // slot 2 fits, but slot 3 (10 + 4 + 2 = 16 GiB = 100% > 90%) is held.
+  const youngA = { pid: 102, elapsedMs: 5000, declared: null };
+  const youngB = { pid: 103, elapsedMs: 5000, declared: null };
+  assert.equal(decide([youngA], machine({ freeRatio: 0.35, memoryUse: mem(10, { 102: 0.4 }) })).admit, true);
+  const thirdHeld = decide(
+    [youngA, youngB],
+    machine({ freeRatio: 0.35, memoryUse: mem(10, { 102: 0.4, 103: 0.4 }) }),
+  );
+  assert.equal(thirdHeld.admit, false);
+  assert.match(
+    thirdHeld.reason,
+    /memory outside heavy 63% plus 2 holder\(s\) and next would need 100% of RAM/,
+  );
+
+  // Friction 2475b276 overloaded 16 GiB Mac: 10 builders + untracked tsc + Playwright Chrome = 11.5 GiB
+  // outside heavy, with freeRatio 25% (above the old 10% freeze floor). Slot 2 is refused.
+  const overloaded = decide([youngA], machine({ freeRatio: 0.25, memoryUse: mem(11.5, { 102: 0.5 }) }));
+  assert.equal(overloaded.admit, false);
+  assert.match(
+    overloaded.reason,
+    /memory outside heavy 72% plus 1 holder\(s\) and next would need 97% of RAM \(limit 90%\)/,
+  );
+
+  // Compressed/swapped outside pages drop out of ps RSS (7 GiB) while kernel freeRatio drops to 16%:
+  // kernel-used (84%) minus holder RSS (5%) still counts 79% outside and refuses slot 2.
+  const compressed = decide([testA], machine({ freeRatio: 0.16, memoryUse: mem(7, { 102: 0.8 }) }));
+  assert.equal(compressed.admit, false);
+  assert.match(compressed.reason, /memory outside heavy 79%.*would need 96% of RAM/);
+
+  // Burst slot held past the 75% extra-slot ceiling even when freeRatio is 30% and CPU is low.
+  const burstHeld = decide(
+    [tla, testA, testB],
+    machine({ load: 2, freeRatio: 0.3, cpu: measured, memoryUse: mem(8, { 101: 1, 102: 1, 103: 1 }) }),
+  );
+  assert.equal(burstHeld.admit, false);
+  assert.match(burstHeld.reason, /limit 75% for an extra slot/);
+
+  // macOS kernel memory pressure warning (2) and critical (4) hold immediately while anyone holds a slot;
+  // normal pressure (1) admits.
+  assert.equal(decide([testA], machine({ pressure: 1 })).admit, true);
+  const warn = decide([testA], machine({ pressure: MACOS_PRESSURE_WARN }));
+  assert.equal(warn.admit, false);
+  assert.match(warn.reason, /kernel memory pressure is warning \(level 2\)/);
+  const critical = decide([testA], machine({ pressure: 4 }));
+  assert.equal(critical.admit, false);
+  assert.match(critical.reason, /kernel memory pressure is critical \(level 4\)/);
 });

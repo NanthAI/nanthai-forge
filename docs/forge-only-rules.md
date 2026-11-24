@@ -125,9 +125,8 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/preflight-weakened-tests.ts` | `js-extension` | 2 | the weakened-test check parses JS/TS test files only (any project's, not only Forge's layout) | the same for their JS/TS tests; tests in other languages are not judged and get no flag |
 | `src/package-graph-dotnet-js.ts` | `js-extension` | 1 | JS/TS test file names: a JS package with tests but no `test` script makes the package graph's selection full | each ecosystem's own test sources (Gradle `src/test`) |
 | `src/project-test-runner.ts` | `node-test` | 2 | recognises `node --test` in any project's test script | the same inference for vitest and jest |
-| `src/heavy-slots.ts` | `node-test` | 1 | `nforge heavy` refuses an unscoped `node --test` | the same guard for any project |
 | `src/heavy-hold.ts` | `node-test` | 1 | the slot-cap preload restarts an uncapped `node --test` with the slot's `--test-concurrency` (7008ff18) | Go tools get `GOMAXPROCS`, rayon tools `RAYON_NUM_THREADS`; other test runners' own worker settings are not set yet |
-| `src/heavy-test-preloads.ts` | `node-test` | 1 | finds the preloads a project's test script passes to `node --test` | the same notice for any project whose test script runs `node --test` |
+| `src/heavy-test-preloads.ts` | `node-test` | 1 | checks preloads, empty paths and build needs for `node --test` commands (direct, shell `-c` and package scripts) | the same guard for any project whose test script runs `node --test` |
 | `src/work-docs-admission.ts` | `forge-folders` | 1 | docs admission of a native standard-check run | declared `docsPaths` |
 | `src/work-docs-admission.ts` | `npm-lockfile` | 1 | docs admission of a native standard-check run | declared `docsPaths` |
 | `src/integration-preview-checks.ts` | `npm-lockfile` | 2 | integration previews install with `npm ci` only for npm-locked projects | their check sets up its own dependencies |

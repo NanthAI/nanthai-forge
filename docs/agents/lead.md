@@ -73,7 +73,9 @@ Follow-ups found during a slice join its Item's Done-when list and are done befo
 
 Run independent ready slices in parallel within the authorized delegation scope.
 Serialize real dependencies and name them. Before launch, check shared model
-usage, memory pressure, swap and disk; all projects share these resources. Pace
+usage, memory pressure, swap and disk; all projects share these resources (see
+[localHeavySlots](../parallel-work-defaults.md#localheavyslots) for outside-slot memory accounting
+and 16 GiB RAM concurrency limits, since heavy cannot gate agents or browsers started outside it). Pace
 usage to avoid exhausting a short window in one burst. Use the owner's chosen
 models and approved fallback policy; retry transient capacity failures on the
 same provider up to three times before an authorized fallback. Never silently

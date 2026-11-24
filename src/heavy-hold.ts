@@ -31,6 +31,18 @@ const HEAVY_PRELOAD_OPTION =
 const PRELOAD = `'use strict';
 const n = process.env.FORGE_HEAVY_TEST_CONCURRENCY, a = process.execArgv, isTest = a.includes('--test');
 const [major, minor] = process.versions.node.split('.').map(Number);
+const refuseEmpty = process.env.FORGE_HEAVY_REFUSE_EMPTY_TEST;
+if (!process.env.NODE_TEST_CONTEXT && isTest && (refuseEmpty === '1' || refuseEmpty === 'strict')) {
+  if (refuseEmpty === '1' && process.env.npm_lifecycle_event === 'test') {
+    // Explicit npm test (also when wrapped in sh -c, env or a package-script chain) runs on purpose.
+  } else if (!process.argv.slice(1).some(x => x.trim())) {
+    process.stderr.write(
+      'heavy: node --test received no test file paths, so Node would run the whole suite. Pass the selected files as separate arguments (zsh does not word-split a plain $VAR: use an array with "\${files[@]}" or \${=VAR}), or run nforge heavy npm test for the full suite on purpose.\\n'
+    );
+    process.exit(1);
+  }
+  delete process.env.FORGE_HEAVY_REFUSE_EMPTY_TEST;
+}
 if (/^[1-9][0-9]*$/.test(n || '') && !process.env.NODE_TEST_CONTEXT && isTest &&
   (major > 20 || (major === 20 && minor >= 10)) &&
   !a.some(x => x === '--test-concurrency' || x.startsWith('--test-concurrency='))) {

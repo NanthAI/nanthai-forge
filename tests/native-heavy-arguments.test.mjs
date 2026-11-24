@@ -157,6 +157,182 @@ test('heavy refuses node --test with an empty file list and still runs a named f
   assert.match(named.stdout, /pass 1/);
 });
 
+test('friction 8e386100: nodeTestWithoutPaths flags wrapped sh -c, zsh -c and non-test package scripts with no paths', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-heavy-wrapped-empty-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(
+    join(directory, 'package.json'),
+    JSON.stringify({
+      scripts: {
+        test: 'node --test',
+        'test:unit': 'node --import ./setup.mjs --test',
+        'test:build-and-run': 'npm run build:core && node --test',
+        'test:nested': "sh -c 'node --test'",
+        'test:named': 'node --test ok.test.mjs',
+        'build:core': 'echo built',
+      },
+    }),
+  );
+  for (const args of [
+    ['sh', '-c', 'node --test'],
+    ['bash', '-ec', 'npm run build:core && node --import ./setup.mjs --test'],
+    ['zsh', '-c', 'FOO="a b" env -u BAR node --test --test-concurrency=1'],
+    ['sh', '-c', 'node --test ""'],
+    ['sh', '-c', 'node --test --'],
+    ['sh', '-c', 'node --test 2>&1'],
+    ['sh', '-c', 'node --test > out.log'],
+    ['npm', 'run', 'test:unit'],
+    ['npm', 'run', '-s', 'test:unit', '--'],
+    ['npm', 'run', 'test:unit', '--', ''],
+    ['npm', 'run', 'test:unit', '--', '--test-concurrency=1'],
+    ['npm', 'run', 'test:build-and-run'],
+    ['npm', 'run', 'test:nested'],
+    ['sh', '-c', 'npm run test:unit'],
+    ['pnpm', 'run', 'test:unit'],
+    ['yarn', 'test:unit'],
+  ])
+    assert.equal(nodeTestWithoutPaths(args, directory), true, args.join(' '));
+
+  for (const args of [
+    ['sh', '-c', 'node --test ok.test.mjs'],
+    ['sh', '-c', "echo 'ok; node --test'"],
+    ['sh', '-c', 'node -e "--test"'],
+    ['npm', 'test'],
+    ['npm', 'run', 'test'],
+    ['pnpm', 'test'],
+    ['yarn', 'test'],
+    ['bun', 'test'],
+    ['npm', 'run', 'test:named'],
+    ['npm', 'run', 'test:unit', '--', 'ok.test.mjs'],
+    ['npm', 'run', 'test:build-and-run', '--', 'ok.test.mjs'],
+    ['npm', 'run', 'build:core'],
+  ])
+    assert.equal(nodeTestWithoutPaths(args, directory), false, args.join(' '));
+});
+
+test('friction 8e386100: heavy refuses wrapped sh -c, empty globs/vars, shell scripts and npm scripts that expand to node --test with no paths while allowing explicit npm test', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-heavy-wrapped-live-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(
+    join(directory, 'trap.test.mjs'),
+    "import test from 'node:test'; test('trap', () => { throw new Error('ran'); });\n",
+  );
+  writeFileSync(join(directory, 'ok.test.mjs'), "import test from 'node:test'; test('ok', () => {});\n");
+  writeFileSync(
+    join(directory, 'package.json'),
+    JSON.stringify({
+      scripts: {
+        'build:marker': `node -e "require('node:fs').writeFileSync('built','1')"`,
+        'test:empty': `${JSON.stringify(process.execPath)} --test`,
+        'test:expand-empty': `FILES=""; ${JSON.stringify(process.execPath)} --test $FILES`,
+      },
+    }),
+  );
+  writeFileSync(
+    join(directory, 'run-empty.sh'),
+    `FILES=""\n${JSON.stringify(process.execPath)} --test $FILES\n`,
+  );
+  const slots = join(directory, 'slots');
+  const settings = join(directory, 'client.json');
+  writeFileSync(settings, JSON.stringify({ localHeavySlots: 1 }));
+  const env = {
+    ...process.env,
+    FORGE_HEAVY_DIR: slots,
+    FORGE_CLIENT_SETTINGS: settings,
+    FORGE_HEAVY_PARENT: '',
+  };
+  delete env.NODE_TEST_CONTEXT;
+  const run = (cwd, ...args) =>
+    spawnSync(process.execPath, [resolve('dist/cli-entry.js'), 'heavy', '--no-build', ...args], {
+      cwd,
+      encoding: 'utf8',
+      env,
+    });
+
+  // Statically empty sh -c refuses before taking a slot or running earlier segments.
+  const staticWrapped = run(
+    directory,
+    'sh',
+    '-c',
+    `npm run build:marker && ${JSON.stringify(process.execPath)} --test`,
+  );
+  assert.notEqual(staticWrapped.status, 0);
+  assert.match(staticWrapped.stderr, /no test file paths/);
+  assert.equal(existsSync(join(directory, 'built')), false, 'earlier command never ran');
+  assert.equal(existsSync(slots), false, 'no slot was taken');
+
+  // Statically empty npm script refuses before taking a slot.
+  const staticNpm = run(directory, 'npm', 'run', 'test:empty');
+  assert.notEqual(staticNpm.status, 0);
+  assert.match(staticNpm.stderr, /no test file paths/);
+  assert.equal(existsSync(slots), false, 'no slot was taken');
+
+  // Dynamically empty shell variable, shell script, and npm script are refused by heavy's preload
+  // before Node discovers trap.test.mjs.
+  for (const [label, args] of [
+    ['sh -c empty var', ['sh', '-c', `FILES=""; ${JSON.stringify(process.execPath)} --test $FILES`]],
+    ['sh -c quoted empty var', ['sh', '-c', `FILES=""; ${JSON.stringify(process.execPath)} --test "$FILES"`]],
+    ['sh script expanding empty var', ['sh', 'run-empty.sh']],
+    ['npm script expanding empty var', ['npm', 'run', 'test:expand-empty']],
+  ]) {
+    const result = run(directory, ...args);
+    assert.notEqual(result.status, 0, `${label}: must fail`);
+    assert.match(result.stderr, /no test file paths/, label);
+    assert.doesNotMatch(result.stdout + result.stderr, /trap|# tests/, label);
+  }
+
+  // Exact friction 8e386100 reproducer when zsh is present: nullglob with no match.
+  if (spawnSync('zsh', ['-c', 'true']).status === 0) {
+    const zshGlob = run(
+      directory,
+      'zsh',
+      '-c',
+      `setopt nullglob; ${JSON.stringify(process.execPath)} --test no-such-file-*.test.mjs`,
+    );
+    assert.notEqual(zshGlob.status, 0);
+    assert.match(zshGlob.stderr, /no test file paths/);
+    assert.doesNotMatch(zshGlob.stdout + zshGlob.stderr, /trap|# tests/);
+  }
+
+  // Named file through sh -c still runs, and explicit `npm test` (with no trap) is still allowed.
+  const named = run(directory, 'sh', '-c', `${JSON.stringify(process.execPath)} --test ok.test.mjs`);
+  assert.equal(named.status, 0, named.stderr);
+  assert.match(named.stdout, /pass 1/);
+
+  const fullSuiteDir = mkdtempSync(join(tmpdir(), 'forge-heavy-full-suite-'));
+  t.after(() => rmSync(fullSuiteDir, { recursive: true, force: true }));
+  writeFileSync(join(fullSuiteDir, 'ok.test.mjs'), "import test from 'node:test'; test('ok', () => {});\n");
+  writeFileSync(
+    join(fullSuiteDir, 'package.json'),
+    JSON.stringify({
+      scripts: {
+        test: `${JSON.stringify(process.execPath)} --test`,
+        ci: 'npm test',
+      },
+    }),
+  );
+  // Explicit full-suite `npm test` stays allowed directly, via `env`, `sh -c`, or a script chain.
+  for (const [label, args] of [
+    ['direct npm test', ['npm', 'test']],
+    ['env CI=1 npm test', ['env', 'CI=1', 'npm', 'test']],
+    ['sh -c npm test', ['sh', '-c', 'true && npm test']],
+    ['npm run ci -> npm test', ['npm', 'run', 'ci']],
+  ]) {
+    const allowed = run(fullSuiteDir, ...args);
+    assert.equal(allowed.status, 0, `${label}: ${allowed.stderr}`);
+    assert.match(allowed.stdout, /pass 1/, label);
+  }
+  // A trailing empty `node --test` after `npm test` in the same shell command is still refused.
+  const mixed = run(
+    fullSuiteDir,
+    'sh',
+    '-c',
+    `npm test && FILES=""; ${JSON.stringify(process.execPath)} --test $FILES`,
+  );
+  assert.notEqual(mixed.status, 0);
+  assert.match(mixed.stderr, /no test file paths/);
+});
+
 test('scripts/test-files.mjs with no files runs nothing and never discovers a default suite', () => {
   const result = spawnSync(process.execPath, ['scripts/test-files.mjs'], { encoding: 'utf8' });
   assert.equal(result.status, 0, 'the static shard calls it with an empty list');

@@ -20,7 +20,14 @@ import { heavySlots, readClientSettings } from './client-settings.js';
 import { watchLocal, type LocalWatcher } from './local-watcher.js';
 import { invariant } from './errors.js';
 import { ensureCoreBuild } from './heavy-build.js';
-import { preloadRefusal } from './heavy-test-preloads.js';
+import {
+  isExplicitFullTestScript,
+  needsCoreBuild,
+  nodeTestPathCount,
+  nodeTestWithoutPaths,
+  preloadRefusal,
+} from './heavy-test-preloads.js';
+export { needsCoreBuild, nodeTestPathCount, nodeTestWithoutPaths };
 import { processAlive } from './local-process.js';
 import {
   estimateWaitMs,
@@ -404,7 +411,8 @@ Nested commands reuse their live parent slot.
 Callers wait first come, first served; a waiting caller prints its queue position and an estimate.
 Past the localHeavySlots base, extra slots (up to twice the base, at most the cores) open one at a time
 while measured load plus the holders' CPU leaves room for the next command and a quarter of memory is
-free. While anyone holds a slot, no command starts under 10% free memory.
+free. Admission also counts resident memory outside heavy's own slots and macOS kernel memory pressure,
+holding new slots when total projected RAM passes the floor (90% base, 75% extra) or under 10% free memory.
 --cores N declares and caps a command's cores (test concurrency, GOMAXPROCS); it counts N, not a slot's
 share. --max-minutes M sets its own bound; a bound past localHeavyMaxMinutes needs --cores below the
 slot share (long one-core work such as a model check).
@@ -414,7 +422,7 @@ A command still running after localHeavyMaxMinutes (nforge settings; default 60,
 stopped (exit 124) and frees its slot; a signal to heavy reaches the command, which is killed if it
 has not exited 10 s later. When the command ends, anything it started that is still running stops too. A holder that never stopped itself is freed 5 min past its bound, unsignalled.
 Run long-lived servers (Vite/dev servers) directly, outside heavy.
-node --test with no test file path is refused (Node would run the whole suite); name the files.
+node --test with no test file path is refused (including inside sh -c, npm scripts or empty globs); name the files, or run nforge heavy npm test on purpose.
 `;
 /** Metadata contains only the executable basename, never arguments or environment. */
 export function heavySlotHolders(
@@ -517,107 +525,6 @@ export const waitingMessage = (slots: number, directory: string, wait: HeavyWait
   );
 };
 
-/** Node options whose value is the next argument (a bare value is not a test file). */
-const NODE_VALUE_OPTIONS = new Set([
-  '--import',
-  '--require',
-  '-r',
-  '--loader',
-  '--experimental-loader',
-  '--conditions',
-  '-C',
-  '--env-file',
-  '--test-reporter',
-  '--test-reporter-destination',
-  '--test-name-pattern',
-  '--test-skip-pattern',
-  '--test-concurrency',
-  '--test-timeout',
-  '--test-shard',
-]);
-/**
- * True when the command is `node ... --test` with no test path: Node would then discover and run the
- * whole suite. An empty or fully filtered list (an unquoted zsh variable never word-splits) must stop
- * here instead of silently falling through to that default glob (friction e4ce373a).
- */
-export function nodeTestWithoutPaths(args: string[]) {
-  const paths = nodeTestPathCount(args);
-  return paths === 0;
-}
-/** Number of test paths of a `node ... --test` command, or null when the command is not one. */
-export function nodeTestPathCount(args: string[]): number | null {
-  const name = basename(args[0] ?? '').replace(/\.exe$/i, '');
-  if (name !== 'node' && args[0] !== process.execPath) return null;
-  let testing = false;
-  let paths = 0;
-  for (let index = 1; index < args.length; index++) {
-    const arg = args[index]!;
-    if (arg === '--') {
-      paths += args.slice(index + 1).filter(path => path.trim()).length;
-      break;
-    }
-    if (arg.startsWith('-')) {
-      if (arg === '--test') testing = true;
-      else if (NODE_VALUE_OPTIONS.has(arg)) index++;
-    } else if (arg.trim()) paths++;
-  }
-  return testing ? paths : null;
-}
-
-const SHELL = /^(?:sh|bash|zsh)(?:\.exe)?$/i;
-const SHELL_KEYWORD = /^(?:do|then|else|elif|while|until|\{|[A-Za-z_]\w*=.*)$/;
-const SHELL_WORD = /(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|[^\s'"\\])+/g;
-const ENV_BIN = /^(?:\/usr\/bin\/)?env$/;
-const NODE_BIN = /(?:^|[\/\\])node(?:\.exe)?$/i;
-
-function shellRunsNodeTest(command: string): boolean {
-  for (const segment of command.split(/&&|\|\||[;|\n()]/)) {
-    const tokens: string[] = segment.match(SHELL_WORD) ?? [];
-    // Prefixes before the program: keywords, VAR=value words (quoted values stay one word) and
-    // `env [-i|-u NAME|VAR=value]...`.
-    for (;;) {
-      const first = tokens[0];
-      if (first === undefined) break;
-      if (SHELL_KEYWORD.test(first)) tokens.shift();
-      else if (ENV_BIN.test(first)) {
-        tokens.shift();
-        while (tokens[0] !== undefined && /^-/.test(tokens[0])) {
-          if (tokens.shift() === '-u') tokens.shift();
-        }
-      } else break;
-    }
-    if (!tokens.length) continue;
-    const head = tokens[0]!.replace(/^(['"])(.*)\1$/, '$2');
-    if (head !== process.execPath && !NODE_BIN.test(head)) continue;
-    const end = tokens.indexOf('--');
-    const flags = end < 0 ? tokens.slice(1) : tokens.slice(1, end);
-    if (flags.some(token => /^(['"]?)--test\1$/.test(token))) return true;
-  }
-  return false;
-}
-
-/**
- * True when a heavy command runs tests directly (`node ... --test FILES`) or through a shell
- * (`sh <script>`, or `sh -c` with `node ... --test`), so a missing or stale `dist/` must be
- * built or checked before it runs (frictions aa71d3ed, bfb98e08).
- */
-export function needsCoreBuild(args: string[]): boolean {
-  if (nodeTestPathCount(args)) return true;
-  if (!SHELL.test(basename(args[0] ?? ''))) return false;
-  for (let index = 1; index < args.length; index++) {
-    const arg = args[index]!;
-    if (arg === '--') return Boolean(args[index + 1]?.trim());
-    if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg)) return shellRunsNodeTest(args[index + 1] ?? '');
-    if (/^[+-][a-zA-Z]*o$/.test(arg)) {
-      index++;
-      continue;
-    }
-    if (/^[+-]/.test(arg)) continue;
-    return Boolean(arg.trim());
-  }
-  return false;
-}
-
 /** An inherited holder is a scheduling lease, never source or user authority. */
 export function inheritedHeavySlot(directory: string): string | null {
   try {
@@ -705,7 +612,7 @@ export async function heavyCli(
     'heavy --status takes no command. Run nforge heavy --status.',
   );
   invariant(
-    !nodeTestWithoutPaths(args),
+    !nodeTestWithoutPaths(args, process.cwd()),
     'BAD_ARGUMENT',
     'heavy: node --test received no test file paths, so Node would run the whole suite. Pass the selected files as separate arguments (zsh does not word-split a plain $VAR: use an array with "${files[@]}" or ${=VAR}), or run nforge heavy npm test for the full suite on purpose.',
   );
@@ -827,6 +734,15 @@ export async function heavyCli(
         detached: group,
         env: {
           ...process.env,
+          // Refuse wrapped `node --test` invocations that expand to zero paths (empty globs, vars,
+          // npm scripts; friction 8e386100), while allowing explicit full-suite `npm test` (direct
+          // or entered inside the command). If heavy itself was invoked from an outer `npm test`,
+          // use 'strict' so an inherited npm_lifecycle_event='test' cannot bypass the guard.
+          FORGE_HEAVY_REFUSE_EMPTY_TEST: isExplicitFullTestScript(args)
+            ? ''
+            : process.env.npm_lifecycle_event === 'test'
+              ? 'strict'
+              : '1',
           ...(moduleCache ? { FORGE_TEST_MODULE_DIRECTORY: moduleCache } : {}),
           FORGE_HEAVY_PARENT: held
             ? JSON.stringify({

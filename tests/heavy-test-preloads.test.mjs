@@ -52,7 +52,7 @@ test('a direct node --test is refused with the missing preloads and the correcte
 
 test('a node --test segment inside sh -c or bash -c is refused, other segments are left alone', t => {
   const root = project(t, script('node --import ./tests/check-runtime.mjs --test tests/*.test.mjs'));
-  for (const shell of ['sh', 'bash', '/bin/sh']) {
+  for (const shell of ['sh', 'bash', '/bin/sh', 'zsh']) {
     const refusal = preloadRefusal(
       [shell, '-c', 'npm run build:core && node --test tests/x.test.mjs || echo failed'],
       root,
@@ -65,6 +65,11 @@ test('a node --test segment inside sh -c or bash -c is refused, other segments a
       refusal,
     );
   }
+  const prefixed = preloadRefusal(['sh', '-ec', 'FOO=node node --test tests/x.test.mjs'], root);
+  assert.ok(
+    prefixed?.endsWith(`sh -ec 'FOO=node node --import ./tests/check-runtime.mjs --test tests/x.test.mjs'`),
+    prefixed,
+  );
   assert.equal(
     preloadRefusal(
       ['sh', '-c', 'npm run build:core && node --import ./tests/check-runtime.mjs --test tests/x.test.mjs'],

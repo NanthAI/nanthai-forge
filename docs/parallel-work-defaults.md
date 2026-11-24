@@ -161,11 +161,23 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
     reports; swap there grows on demand, so its used share is no signal), or Linux's
     MemAvailable with swap under half used.
   - when two burst claims race past the limit, the one in the higher slot backs off.
-- Freeze guard: while anyone holds a slot, no command starts, base slot or not, with under 10%
-  memory free. Load gates only the extra slots: a shared CI runner sits past 2 x cores through
-  a whole suite, and holding its base slots there only stalled its own tests. A machine with no
-  holder admits at once and reads nothing. Each decision reads load, memory once and `ps` at most once, and reuses that
-  reading for 2 s. A waiting caller at the front prints why it is held.
+- Freeze guard and outside-slot memory: while anyone holds a slot, no command starts, base slot or
+  not, with under 10% memory free or while macOS reports warning/critical kernel memory pressure
+  (`kern.memorystatus_vm_pressure_level >= 2`). Admission also reads resident memory (`rss`) from
+  the same `ps` call (pids, CPU and RSS only, never arguments or environment) to separate heavy's
+  own slot trees from everything else on the host (untracked `tsc`, `node` test shards, Playwright
+  browsers, concurrent agents), taking the larger of `ps` outside RSS and kernel-used memory minus
+  heavy's holders so compressed/swapped pages still count. Each young holder and newcomer reserves
+  2 GiB (capped at 25% of RAM); settled holders count their measured RSS. Base slots hold when
+  projected RAM exceeds 90% (10% headroom) and extra slots hold past 75% (25% headroom), so heavy
+  scales down from `localHeavySlots` toward 1 when outside work consumes RAM. Heavy cannot gate
+  processes started outside its slots: on a 16 GiB laptop, 10 builders plus reviewer children and
+  UI browser tests hit macOS's out-of-application-memory limit with 4.8 of 6 GB swap (friction
+  2475b276); cap concurrent builders on 16 GiB to about 4–6 without browser tests (fewer when
+  Playwright browsers run). Load gates only the extra slots: a shared CI runner sits past 2 x cores
+  through a whole suite, and holding its base slots there only stalled its own tests. A machine
+  with no holder admits at once and reads nothing. Each decision reads load, memory once and `ps`
+  at most once, and reuses that reading for 2 s. A waiting caller at the front prints why it is held.
 - `nforge heavy --cores N [--max-minutes M] -- CMD` declares and caps a command's cores (test
   concurrency, `GOMAXPROCS`, `RAYON_NUM_THREADS`). It counts N instead of a slot's share.
   `--max-minutes` sets its own bound. A bound past `localHeavyMaxMinutes` needs N below the
@@ -198,11 +210,17 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
     see a `NODE_OPTIONS` preload the landing check's tests do not). Preflight's built-in Node runner
     uses `--test-concurrency=1`; a test command declared as static uses the slot's cap.
   - The full `npm test` is the landing check's.
+- A `node --test` with no test file path is refused instead of falling back to Node's default full
+  suite (frictions e4ce373a, 8e386100): direct `node --test`, `sh`/`bash`/`zsh -c` segments, and
+  non-`test` npm/pnpm/yarn/bun scripts are refused before taking a slot or building; wrapped
+  commands whose shell globs, variables or scripts expand to zero paths at runtime are refused by
+  heavy's preload before any test runs. Explicit `nforge heavy npm test` (and `pnpm`/`yarn`/`bun
+  test`) stays allowed for a deliberate full run.
 - A `node --test` that leaves out a preload the project's own `test` script passes (`--import`,
   `--require`, `-r`) is refused before heavy takes a slot, builds or runs anything. This covers a
-  direct `node --test` and a node segment inside one `sh -c`/`bash -c` string (a `&&`, `||`, `;` or
-  `|` separated command list). The message names the missing flags and the corrected command; heavy
-  never rewrites the command. Only the project's package.json `test` script is read.
+  direct `node --test` and a node segment inside one `sh -c`/`bash -c`/`zsh -c` string (a `&&`,
+  `||`, `;` or `|` separated command list). The message names the missing flags and the corrected
+  command; heavy never rewrites the command. Only the project's package.json `test` script is read.
 - Heavy gives its command one compiled-test-module cache (`FORGE_TEST_MODULE_DIRECTORY`, under the
   OS temp folder) unless one is already set, and removes it when the command ends: every test file
   the command runs reuses modules earlier files compiled. Preflight does the same for all its
