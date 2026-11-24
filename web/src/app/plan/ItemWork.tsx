@@ -7,8 +7,14 @@ import { A } from '../frames';
 import type { ProjectRoute } from '../screen-route';
 import { whoLinks, type WhoProject } from '../who-links';
 
+type ItemWorkSection = 'lanes' | 'landings' | 'related';
 type ReadPage = (itemId: string, cursor: string | null, limit: number) => Promise<string>;
-export type ReadItemWork = ReadPage;
+export type ReadItemWork = (
+  itemId: string,
+  cursor: string | null,
+  limit: number,
+  only?: ItemWorkSection,
+) => Promise<string>;
 export type ReadItemHistory = ReadPage;
 
 const VISIBLE_ROWS = 3;
@@ -29,6 +35,7 @@ type Landing = {
   check: 'passed' | 'not-checked' | null;
   files: number | null;
   sequence?: number;
+  detailsPending?: true;
 };
 type Lane = {
   laneId: string;
@@ -363,7 +370,7 @@ export function ItemWork({
   const [work, setWork] = useState<Work | 'failed' | null>(null);
   const [full, setFull] = useState(false);
   const [paging, setPaging] = useState(false);
-  const [pageFailed, setPageFailed] = useState<'lanes' | 'work' | null>(null);
+  const [pageFailed, setPageFailed] = useState<'lanes' | 'landings' | 'work' | null>(null);
   const [stale, setStale] = useState(false);
   const [revealed, reveal] = useState({ lanes: 0, landings: 0 });
   const [attempt, retry] = useState(0);
@@ -414,16 +421,60 @@ export function ItemWork({
 
   // total counts heads, not readable Lanes. A missing body within the first window is not another page.
   const expandLanes = !full && work.total > VISIBLE_ROWS && work.nextCursor !== null;
+  const expandLandings = (work.landings ?? []).some(landing => landing.detailsPending);
   const continueWork =
     work.nextCursor !== null && (full || work.total > WORK_PAGE || work.moreLandings || work.moreRelated);
-  const loadWork = async (part: 'lanes' | 'work') => {
-    if (paging || !work.nextCursor) return false;
+  const loadWork = async (part: 'lanes' | 'landings' | 'work') => {
+    if (paging || (part !== 'landings' && !work.nextCursor)) return false;
     setPaging(true);
     setPageFailed(null);
     const source = epoch.current;
     try {
-      const fromStart = part === 'lanes' || stale;
-      const next = JSON.parse(await read(itemId, fromStart ? null : work.nextCursor, WORK_PAGE)) as Work;
+      if (part === 'landings') {
+        const next = JSON.parse(await read(itemId, null, WORK_PAGE, 'landings')) as Work;
+        if (source !== epoch.current) return false;
+        if (!next.role) {
+          setWork(next);
+          return false;
+        }
+        const merged = new Map(
+          [...(work.landings ?? []), ...(next.landings ?? [])].map(landing => [landing.receiptId, landing]),
+        );
+        setWork({
+          ...work,
+          landings: [...merged.values()],
+          moreLandings: Boolean(next.moreLandings ?? work.moreLandings),
+        });
+        return true;
+      }
+      if (part === 'lanes' && !stale) {
+        const next = JSON.parse(
+          await read(itemId, work.nextCursor, WORK_PAGE - VISIBLE_ROWS, 'lanes'),
+        ) as Work;
+        if (source !== epoch.current) return false;
+        setFull(true);
+        if (!next.role) {
+          setWork(next);
+          return false;
+        }
+        const lanes = new Map([...work.lanes, ...next.lanes].map(lane => [lane.laneId, lane]));
+        reveal(before => ({ ...before, lanes: before.lanes + Number(lanes.size > work.lanes.length) }));
+        setWork({
+          ...work,
+          lanes: [...lanes.values()],
+          total: next.total ?? work.total,
+          atLeast: next.atLeast ?? work.atLeast,
+          nextCursor: next.nextCursor,
+        });
+        return true;
+      }
+      const fromStart = stale;
+      const [rawNext, rawHydrated] = await Promise.all([
+        read(itemId, fromStart ? null : work.nextCursor, WORK_PAGE),
+        !fromStart && expandLandings ? read(itemId, null, WORK_PAGE, 'landings') : Promise.resolve(null),
+      ]);
+      const next = JSON.parse(rawNext) as Work;
+      const hydrated = rawHydrated ? (JSON.parse(rawHydrated) as Work) : null;
       if (source !== epoch.current) return false;
       setStale(false);
       setFull(true);
@@ -433,7 +484,11 @@ export function ItemWork({
       }
       const lanes = new Map([...work.lanes, ...next.lanes].map(lane => [lane.laneId, lane]));
       const landings = new Map(
-        [...(work.landings ?? []), ...(next.landings ?? [])].map(landing => [landing.receiptId, landing]),
+        [
+          ...(work.landings ?? []),
+          ...(hydrated && hydrated.role ? (hydrated.landings ?? []) : []),
+          ...(next.landings ?? []),
+        ].map(landing => [landing.receiptId, landing]),
       );
       const related = new Map(
         [...(work.related ?? []), ...(next.related ?? [])].map(link => [linkKey(link), link]),
@@ -443,10 +498,12 @@ export function ItemWork({
         landings: before.landings + Number(landings.size > (work.landings?.length ?? 0)),
       }));
       setWork({
+        ...work,
         ...next,
         lanes: [...lanes.values()],
         landings: [...landings.values()],
         moreLandings: Boolean(next.moreLandings ?? work.moreLandings),
+        moreRelated: Boolean(next.moreRelated ?? work.moreRelated),
         total: next.total ?? work.total,
         atLeast: next.atLeast ?? work.atLeast,
         related: [...related.values()],
@@ -541,6 +598,20 @@ export function ItemWork({
           rows={landings}
           reveal={revealed.landings}
           empty="No landings shown."
+          error={
+            pageFailed === 'landings' ? 'More landing details could not be loaded. Try again.' : undefined
+          }
+          more={
+            expandLandings
+              ? {
+                  label: paging
+                    ? 'Loading landing details…'
+                    : `Show ${(landings.length - VISIBLE_ROWS).toLocaleString()} more`,
+                  busy: paging,
+                  load: () => loadWork('landings'),
+                }
+              : undefined
+          }
           draw={landing => (
             <Row key={landing.receiptId} cols="minmax(0, 1fr) auto">
               <div>

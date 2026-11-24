@@ -103,16 +103,24 @@ export const read = query({
     limit: v.optional(v.number()),
     cursor: v.optional(v.union(v.string(), v.null())),
     details: v.optional(v.boolean()),
+    /** Limit a detailed read to one section and pass the other cursor positions through unchanged. */
+    only: v.optional(v.union(v.literal('lanes'), v.literal('landings'), v.literal('related'))),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, itemId, limit, cursor, details }) => {
+  handler: async (ctx, { projectId, itemId, limit, cursor, details, only }) => {
     try {
       invariant(isPlanningUuid(itemId), 'BAD_ARGUMENT', 'itemId: expected the full Item UUID.');
       // Signed out: nothing to read (the page says to sign in). Signed in: the Lanes list's own access rule.
       if (!(await ctx.auth.getUserIdentity())) return canonicalPayload({ role: false });
       const { actor, project } = await recordCaller(ctx, projectId);
       const detailed = details && Boolean(await readProjectRole(ctx, project, actor));
-      const visible = detailed ? await visibleItemWork(ctx, project, itemId, actor === project.owner) : null;
+      const readLanes = !detailed || !only || only === 'lanes';
+      const readLandings = detailed && (!only || only === 'landings');
+      const readRelated = detailed && (!only || only === 'related');
+      const visible =
+        readLandings || readRelated
+          ? await visibleItemWork(ctx, project, itemId, actor === project.owner)
+          : null;
       const work = workPage(cursor ?? null, Boolean(detailed));
       const shown = detailed
         ? Math.min(Math.max(Math.trunc(limit ?? 10), 1), 10)
@@ -124,7 +132,7 @@ export const read = query({
       let atLeast = false;
       const heads: Doc<'projectHostedRecordHeads'>[] = [];
       const completeHeads = new Map<string, Doc<'projectHostedRecordHeads'>[]>();
-      for (const intentId of work.lane === null ? [] : intents) {
+      for (const intentId of !readLanes || work.lane === null ? [] : intents) {
         const rows = await ctx.db
           .query('projectHostedRecordHeads')
           .withIndex('by_project_and_kind_and_parent', q =>
@@ -141,7 +149,7 @@ export const read = query({
         (a, b) =>
           Number(b.status === 'active') - Number(a.status === 'active') || b._creationTime - a._creationTime,
       );
-      const page = work.lane === null ? [] : heads.slice(work.lane, work.lane + shown);
+      const page = !readLanes || work.lane === null ? [] : heads.slice(work.lane, work.lane + shown);
       const lanes: LaneRecord[] = [];
       for (const head of page) {
         const row = await readHostedRecord(ctx, { projectId, actor, kind: 'lane', key: head.key });
@@ -215,19 +223,37 @@ export const read = query({
       const identity = { projectId, actor };
       const [laneDetails, history, related] = detailed
         ? await Promise.all([
-            itemWorkLaneDetails(ctx, identity, lanes),
-            !visible || work.history === null
+            lanes.length ? itemWorkLaneDetails(ctx, identity, lanes) : undefined,
+            !readLandings || !visible || work.history === null
               ? undefined
               : itemLandingHistory(ctx, projectId, intents, work.history ?? {}, undefined, {
                   heads: completeHeads,
                   stamps,
                 }),
-            !visible || work.related === null
+            !readRelated || !visible || work.related === null
               ? undefined
               : itemWorkRelated(ctx, visible, work.related ?? null),
           ])
         : [];
-      const landings = history ? await itemWorkLandingDetails(ctx, projectId, history.rows) : undefined;
+      const orderedLandings = history
+        ? [...history.rows].sort((a, b) => b.at.localeCompare(a.at) || (b.sequence ?? 0) - (a.sequence ?? 0))
+        : undefined;
+      // On initial open (limit < page size, no cursor or section filter), hydrate check and file count
+      // only for the visible landings; hidden rows keep their receipt line and hydrate on expand.
+      const hydrateCount =
+        orderedLandings && !only && (cursor ?? null) === null
+          ? Math.min(orderedLandings.length, shown)
+          : (orderedLandings?.length ?? 0);
+      const landings = orderedLandings
+        ? [
+            ...(await itemWorkLandingDetails(ctx, projectId, orderedLandings.slice(0, hydrateCount))).map(
+              ({ paths, ...row }) => ({ ...row, files: paths?.length ?? null }),
+            ),
+            ...orderedLandings
+              .slice(hydrateCount)
+              .map(row => ({ ...row, check: null, files: null, detailsPending: true as const })),
+          ]
+        : undefined;
       const rows = lanes.map(lane => {
         const run = [lane.agentRun, lane.holder?.agent].find(isAgentSlug);
         const agent = Boolean(run) || lane.authorship?.kind === 'agent';
@@ -258,8 +284,15 @@ export const read = query({
         };
       });
       const next = work.lane === null ? null : work.lane + shown;
-      const lane = next !== null && next < heads.length ? next : null;
-      const continuation = { lane, history: history ? history.next : null, related: related?.next ?? null };
+      const lane = !readLanes ? work.lane : next !== null && next < heads.length ? next : null;
+      const nextHistory = !readLandings ? work.history : history ? history.next : null;
+      const nextRelated = !readRelated ? work.related : (related?.next ?? null);
+      const continuation = {
+        lane,
+        ...(nextHistory === undefined ? {} : { history: nextHistory }),
+        ...(nextRelated === undefined ? {} : { related: nextRelated }),
+      };
+      const hasContinuation = lane !== null || nextHistory !== null || nextRelated !== null;
       return canonicalPayload({
         role: true,
         intent: state,
@@ -267,14 +300,14 @@ export const read = query({
         lanes: rows,
         ...(landings
           ? {
-              landings: landings.map(({ paths, ...row }) => ({ ...row, files: paths?.length ?? null })),
+              landings,
               moreLandings: history?.next !== null,
             }
           : {}),
         ...(related ? { related: related.links, moreRelated: related.next !== null } : {}),
-        ...(work.lane !== null ? { total, atLeast } : {}),
+        ...(readLanes && work.lane !== null ? { total, atLeast } : {}),
         nextCursor: detailed
-          ? Object.values(continuation).some(value => value !== null)
+          ? hasContinuation
             ? WEB_CURSOR + JSON.stringify(continuation)
             : null
           : lane === null

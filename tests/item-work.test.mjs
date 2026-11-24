@@ -517,3 +517,126 @@ test('a reader loses access to detailed landing history when the selected Item i
   s.as('owner');
   assert.equal((await s.read({ details: true })).landings.length, 10);
 });
+
+test('411727ba cursor: Lanes expand reads no landing or Related document and equals from-start limit 10', async () => {
+  const s = await fixture({ details: true, extra: 8 });
+  const receipts = [];
+  for (let i = 0; i < 12; i++) {
+    const receiptId = randomUUID();
+    const candidateId = randomUUID();
+    const commit = `${(i + 1).toString(16).padStart(2, '0')}`.repeat(32);
+    const root = { sha256: 'a'.repeat(64), size: 0 };
+    await s.put({
+      kind: 'candidate',
+      id: candidateId,
+      intentId: s.itemId,
+      version: 0,
+      at,
+      base: { head: 'a'.repeat(64), receiptId: randomUUID() },
+      inputs: root,
+      dependencies: root,
+      algorithm: 'fixture',
+      result: { status: 'clean', head: commit },
+      governance: { version: 1, paths: [`src/f${i}.ts`, `tests/f${i}.test.mjs`], ownerInputs: true },
+    });
+    await s.addLandingNote(50 + i, { receiptId, commit });
+    await s.ctx.db.insert('projectHostedAcceptances', {
+      projectId: s.auth.projectId,
+      receiptId,
+      submissionId: randomUUID(),
+      attemptId: randomUUID(),
+      sequence: 50 + i,
+      value: JSON.stringify({
+        at,
+        snapshot: { revision: 50 + i },
+        candidate: { id: candidateId, head: commit },
+        check: { runId: randomUUID() },
+      }),
+    });
+    receipts.push(receiptId);
+  }
+  for (let i = 0; i < 60; i++) await s.planning(randomUUID(), { title: `Board item ${i}` });
+
+  const fromStart = await s.read({ details: true, limit: 10 }, 'from-start');
+  const open = await s.read({ details: true, limit: 3 }, 'open');
+  assert.equal(open.lanes.length, 3);
+  assert.equal(open.landings.length, 10, 'count label stays 10 on open');
+  assert.equal(open.moreLandings, true);
+  assert.equal(open.moreRelated, true);
+  // Only the 3 visible landings are hydrated on open; the 7 hidden rows keep their receipt lines.
+  for (const row of open.landings.slice(0, 3)) {
+    assert.equal(row.check, 'passed');
+    assert.equal(row.files, 2);
+    assert.equal(row.detailsPending, undefined);
+  }
+  for (const row of open.landings.slice(3)) {
+    assert.equal(row.check, null);
+    assert.equal(row.files, null);
+    assert.equal(row.detailsPending, true);
+  }
+
+  // Track tables read during `only: 'lanes'`.
+  const tablesTouched = new Set();
+  const origQuery = s.ctx.db.query.bind(s.ctx.db);
+  s.ctx.db.query = table => {
+    tablesTouched.add(table);
+    return origQuery(table);
+  };
+  let expandLanes;
+  try {
+    expandLanes = await s.read(
+      { details: true, cursor: open.nextCursor, limit: 7, only: 'lanes' },
+      'expand-lanes',
+    );
+  } finally {
+    s.ctx.db.query = origQuery;
+  }
+  assert.equal(expandLanes.lanes.length, 7);
+  assert.equal(expandLanes.landings, undefined);
+  assert.equal(expandLanes.related, undefined);
+  assert.equal(tablesTouched.has('projectHostedAcceptances'), false, 'no landing receipt reads');
+  assert.equal(tablesTouched.has('projectPlanningRecords'), false, 'no Related or planningSearch reads');
+  assert.equal(tablesTouched.has('projectWorkDataRecords'), false, 'no Related data reads');
+  const mergedLanes = [...open.lanes, ...expandLanes.lanes];
+  assert.deepEqual(mergedLanes, fromStart.lanes, '3 + 7 Lanes equals from-start limit 10');
+  // Other two cursor positions pass through unchanged.
+  const openCursor = JSON.parse(open.nextCursor.slice('forge-item-work-v2:'.length));
+  const expandCursor = JSON.parse(expandLanes.nextCursor.slice('forge-item-work-v2:'.length));
+  assert.equal(expandCursor.lane, 10);
+  assert.deepEqual(expandCursor.history, openCursor.history);
+  assert.deepEqual(expandCursor.related, openCursor.related);
+
+  // Landings expand via `only: 'landings'` hydrates all 10 landings without reading Lanes or Related.
+  const landingTables = new Set();
+  s.ctx.db.query = table => {
+    landingTables.add(table);
+    return origQuery(table);
+  };
+  let expandLandings;
+  try {
+    expandLandings = await s.read(
+      { details: true, cursor: null, limit: 10, only: 'landings' },
+      'expand-landings',
+    );
+  } finally {
+    s.ctx.db.query = origQuery;
+  }
+  assert.deepEqual(expandLandings.lanes, []);
+  assert.equal(expandLandings.related, undefined);
+  assert.equal(expandLandings.total, undefined);
+  assert.deepEqual(expandLandings.landings, fromStart.landings, 'hydrated landings equal from-start');
+  assert.equal(landingTables.has('projectHostedOverlapLanes'), false);
+
+  // Related-only preserves lane and history cursors.
+  const onlyRelated = await s.read(
+    { details: true, cursor: expandLanes.nextCursor, limit: 10, only: 'related' },
+    'only-related',
+  );
+  assert.deepEqual(onlyRelated.lanes, []);
+  assert.equal(onlyRelated.landings, undefined);
+  assert.ok(Array.isArray(onlyRelated.related));
+  const afterRelated = JSON.parse(onlyRelated.nextCursor.slice('forge-item-work-v2:'.length));
+  assert.equal(afterRelated.lane, 10);
+  assert.deepEqual(afterRelated.history, openCursor.history);
+  assert.notEqual(afterRelated.related, openCursor.related);
+});

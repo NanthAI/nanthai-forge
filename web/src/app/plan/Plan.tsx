@@ -215,8 +215,15 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle, needsRe
     [client, projectId],
   );
   const readItemWork = useCallback<ReadItemWork>(
-    (itemId, cursor, limit) =>
-      client.query(api.projectItemWork.read, { projectId, itemId, limit, cursor, details: true }),
+    (itemId, cursor, limit, only) =>
+      client.query(api.projectItemWork.read, {
+        projectId,
+        itemId,
+        limit,
+        cursor,
+        details: true,
+        ...(only ? { only } : {}),
+      }),
     [client, projectId],
   );
   const readItemHistory = useCallback<ReadItemHistory>(

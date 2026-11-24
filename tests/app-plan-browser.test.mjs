@@ -1564,6 +1564,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
               cursor: args.cursor,
               limit: args.limit,
               details: args.details,
+              ...(args.only ? { only: args.only } : {}),
             });
             const { name, ...cost } = workFixture.counts.at(-1);
             costs.push({ ...cost, responseBytes: Buffer.byteLength(reply) });
@@ -1601,7 +1602,9 @@ test('plan views and bulk bar: real components keep the view in the address and 
           if (expandedFirst) {
             await work.getByRole('button', { name: 'Show more Lanes' }).click();
             await lanes.nth(9).waitFor();
-            assert.equal(calls.at(-1).cursor, null);
+            assert(calls.at(-1).cursor?.startsWith('forge-item-work-v2:'));
+            assert.equal(calls.at(-1).only, 'lanes');
+            assert.equal(calls.at(-1).limit, 7);
           } else {
             await more.click();
             await lanes.nth(11).waitFor();
@@ -1780,11 +1783,16 @@ test('plan views and bulk bar: real components keep the view in the address and 
       const short = await itemWorkFixture({ itemId, initiativeId: launchId, extra: 1, details: true });
       let failExpansion = true;
       const { page, context, errors } = await open(390, 'dark', `/${itemId}`, false, true, args => {
-        if (args.limit === 10 && failExpansion) {
+        if (args.only === 'lanes' && failExpansion) {
           failExpansion = false;
           throw Error('Lane details unavailable');
         }
-        return short.readRaw({ limit: args.limit, cursor: args.cursor, details: args.details });
+        return short.readRaw({
+          limit: args.limit,
+          cursor: args.cursor,
+          details: args.details,
+          ...(args.only ? { only: args.only } : {}),
+        });
       });
       try {
         const work = page.getByRole('region', { name: 'Work', exact: true });
@@ -1824,7 +1832,12 @@ test('plan views and bulk bar: real components keep the view in the address and 
       });
       for (let i = 0; i < 50; i++) await short.planning(randomUUID(), { title: `Unrelated root ${i}` });
       const { page, context, errors } = await open(1440, 'dark', `/${itemId}`, false, true, args =>
-        short.readRaw({ limit: args.limit, cursor: args.cursor, details: args.details }),
+        short.readRaw({
+          limit: args.limit,
+          cursor: args.cursor,
+          details: args.details,
+          ...(args.only ? { only: args.only } : {}),
+        }),
       );
       try {
         const work = page.getByRole('region', { name: 'Work', exact: true });
@@ -1840,6 +1853,76 @@ test('plan views and bulk bar: real components keep the view in the address and 
         await older.waitFor();
         assert.equal(await work.locator('a.ttl[href*="/lanes/"]').count(), 2);
         assert.equal(await more.count(), 0);
+        assert.deepEqual(errors, []);
+      } finally {
+        await context.close();
+      }
+    },
+  );
+  await t.test(
+    '411727ba: Landings count stays full on open and hidden landings hydrate through only:landings on expand',
+    async () => {
+      const short = await itemWorkFixture({ itemId, initiativeId: launchId, details: true });
+      const root = { sha256: 'a'.repeat(64), size: 0 };
+      for (let i = 0; i < 4; i++) {
+        const receiptId = randomUUID();
+        const candidateId = randomUUID();
+        const commit = `${(i + 10).toString(16).padStart(2, '0')}`.repeat(32);
+        await short.put({
+          kind: 'candidate',
+          id: candidateId,
+          intentId: itemId,
+          version: 0,
+          at: '2026-01-01T00:00:00.000Z',
+          base: { head: 'a'.repeat(64), receiptId: randomUUID() },
+          inputs: root,
+          dependencies: root,
+          algorithm: 'fixture',
+          result: { status: 'clean', head: commit },
+          governance: { version: 1, paths: [`src/l${i}.ts`, `tests/l${i}.test.mjs`], ownerInputs: true },
+        });
+        await short.addLandingNote(60 + i, { receiptId, commit });
+        await short.ctx.db.insert('projectHostedAcceptances', {
+          projectId: short.auth.projectId,
+          receiptId,
+          submissionId: randomUUID(),
+          attemptId: randomUUID(),
+          sequence: 60 + i,
+          value: JSON.stringify({
+            at: '2026-01-01T00:00:00.000Z',
+            snapshot: { revision: 60 + i },
+            candidate: { id: candidateId, head: commit },
+            check: { runId: randomUUID() },
+          }),
+        });
+      }
+      const calls = [];
+      const { page, context, errors } = await open(1440, 'dark', `/${itemId}`, false, true, args => {
+        calls.push(args);
+        return short.readRaw({
+          limit: args.limit,
+          cursor: args.cursor,
+          details: args.details,
+          ...(args.only ? { only: args.only } : {}),
+        });
+      });
+      try {
+        const work = page.getByRole('region', { name: 'Work', exact: true });
+        const part = work.getByRole('button', { name: 'Landings', exact: true }).locator('xpath=../..');
+        const show = part.getByRole('button', { name: 'Show 3 more' });
+        await show.waitFor();
+        assert.equal(await part.locator('.plan-gh').textContent(), 'Landings6');
+        assert.equal(await part.getByText('2 files changed', { exact: true }).count(), 3);
+        await show.click();
+        await part.getByRole('button', { name: 'Show fewer' }).waitFor();
+        assert.equal(calls.at(-1).only, 'landings');
+        assert.equal(calls.at(-1).cursor, null);
+        assert.equal(await part.getByText('2 files changed', { exact: true }).count(), 5);
+        assert.equal(await part.getByText('Passed', { exact: true }).count(), 5);
+        const countAfterExpand = calls.length;
+        await part.getByRole('button', { name: 'Show fewer' }).click();
+        await part.getByRole('button', { name: 'Show 3 more' }).click();
+        assert.equal(calls.length, countAfterExpand, 'folding and reopening Landings makes no extra request');
         assert.deepEqual(errors, []);
       } finally {
         await context.close();
