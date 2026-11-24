@@ -2,9 +2,10 @@
 // Copyright 2026 Ferdinando Valsecchi
 // Approve and land / Decline for one held landing (Item 48049998): the same two keys on Needs me and the Lane page,
 // through decide.ts. The announcement says what happened, or the server's own words when it refused.
-import { useId, useState } from 'react';
-import { Key } from '../../ds';
+import { useId, useRef, useState } from 'react';
+import { Key, Sheet } from '../../ds';
 import type { Decide, DecideTarget } from './decide';
+import type { HeldLane } from './count';
 import { githubContinue } from '../../review/github-continue';
 
 /** The most a decline reason can say; the server trims to the same (projectHostedOwnerReview:decline). */
@@ -144,33 +145,79 @@ export function AheadKeys({
   );
 }
 
-/** No "No check ran" fact line here (Item e6f1290b): the Needs me and Lane-page row (projectNeedsMe:read) carries no
- * check data, and saying nothing is better than guessing or adding a read. The Review page and a held landing's own
- * page say it from their own landing read (lane/landing-model.ts NO_CHECK_FACT). */
+/** Both browser entry points confirm approval of the same exact attempt when no check run is recorded. */
 export function DecisionKeys({
   laneId,
   target,
+  reviewCheck,
   decide,
   announce,
 }: {
   laneId: string | null;
   target: DecideTarget;
+  reviewCheck: HeldLane['reviewCheck'];
   decide: Decide;
   announce: (text: string) => void;
 }) {
   const { run, busy } = useDecideRun(decide, announce);
+  const [confirmation, setConfirmation] = useState<string | null>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const cancel = () => {
+    setConfirmation(null);
+    // The sheet makes the background inert. Return focus after its close is committed.
+    const button = trigger.current;
+    requestAnimationFrame(() => button?.focus({ preventScroll: true }));
+  };
+  const attempt = 'landing' in target ? target.landing.attemptId : null;
+  const beforeCheck = reviewCheck === 'pending';
+  const confirmLabel = beforeCheck
+    ? 'Approve before the check finishes'
+    : reviewCheck === 'none'
+      ? 'Approve without a check'
+      : 'Approve now';
+  const approve = () => {
+    setConfirmation(null);
+    return run(laneId, target, 'grant', 'Approved. The landing is no longer waiting for you.');
+  };
   return (
     <>
       <Key
         kind="rec"
         keys="a"
         disabled={busy !== null}
-        onClick={() =>
-          run(laneId, target, 'grant', 'Approved. It lands now; main is checked again on top of it.')
-        }
+        onClick={event => {
+          if (!attempt || reviewCheck === 'ran') return void approve();
+          trigger.current = event.currentTarget;
+          setConfirmation(attempt);
+        }}
       >
-        Approve and land
+        {beforeCheck ? confirmLabel : 'Approve and land'}
       </Key>
+      {attempt && confirmation === attempt ? (
+        <Sheet
+          open
+          title={`${confirmLabel}?`}
+          onOpenChange={open => {
+            if (!open) cancel();
+          }}
+          footer={
+            <>
+              <Key kind="rec" autoFocus onClick={cancel}>
+                Not now
+              </Key>
+              <Key onClick={approve}>{confirmLabel}</Key>
+            </>
+          }
+        >
+          <p>
+            {beforeCheck
+              ? 'The check still runs after you approve. Approving does not skip it.'
+              : reviewCheck === 'ran'
+                ? 'The check has run. Approving lets the landing proceed.'
+                : 'Forge has no recorded check run for this Candidate. Approving lets the landing proceed.'}
+          </p>
+        </Sheet>
+      ) : null}
       <DeclineKey
         disabled={busy !== null}
         onDecline={reason =>

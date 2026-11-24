@@ -18,7 +18,7 @@ The Candidate review puts **Your decision** above its check record and conversat
 **Accept into main** submits the exact reviewed Candidate to the hosted landing
 queue as a person. It does not contact an owner machine. The page subscribes to
 that Candidate's submission and shows Queued, Checking, Landing, Landed or the
-retained failure. Where the page's own read shows that no check ran on the Candidate (or on a landing held for review), one plain line beside **Approve and land** says so ("No check ran yet; it will be checked before landing."). It is a fact, not a confirm step: Approve acts at once, and a person keeps the ability to approve an unchecked Candidate. Needs me and the Lane page carry no check data in their read, so they do not show the line. Reading progress starts no work and uses no polling timer.
+retained failure. From Needs me or the Lane page, approving asks once when Forge has no recorded check run on the held Candidate. **Approve before the check finishes** does not skip a pending check. The confirmation says **Approve without a check** only when no check is planned for that Candidate. **Not now** or Escape closes the confirmation without approving. If a check has run, approval needs no extra confirmation. Reading progress starts no work and uses no polling timer.
 A main race recomposes the immutable reviewed input/dependency roots through the
 ordinary hosted finish driver; later Lane saves are not substituted. An existing
 exact passing check is selected when available. Unchecked acceptance follows **Who can land without a check** in

@@ -58,7 +58,11 @@ export function nativeReachable(
       state = parseNativeState(bytes);
     } catch (error) {
       if (error instanceof ForgeError) throw error;
-      invariant(false, 'INVALID_NATIVE_SOURCE', 'A retained source pin is not a valid native State.');
+      invariant(
+        false,
+        'INVALID_NATIVE_SOURCE',
+        'A retained source pin does not identify a valid source version.',
+      );
     }
     onObject?.(id, bytes, true);
     states.add(id);

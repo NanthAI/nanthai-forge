@@ -730,7 +730,13 @@ function Held({
       ) : null}
       <div className="btns">
         {target && canDecide ? (
-          <DecisionKeys laneId={row.laneId} target={target} decide={decide} announce={announce} />
+          <DecisionKeys
+            laneId={row.laneId}
+            target={target}
+            reviewCheck={row.reviewCheck}
+            decide={decide}
+            announce={announce}
+          />
         ) : null}
         {row.url ? (
           <A className="btn ghost sm" href={row.url}>

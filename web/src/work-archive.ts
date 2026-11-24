@@ -53,7 +53,7 @@ export async function previewWorkArchive(file: File): Promise<WorkArchivePreview
     (work.nativeHead !== manifest.head ||
       !manifest.files.some(file => file.path === `objects/${manifest.head}` && file.sha256 === manifest.head))
   )
-    throw new Error('Native bootstrap State differs from its archive pins.');
+    throw new Error('The starting source version does not match the one declared in the archive.');
   const channels = archiveChannels(manifest, work);
   return {
     manifestDigest: await hash(manifestBytes),

@@ -186,7 +186,7 @@ export async function importNativeGit(input: string, commit: string, target: str
   }
 }
 export async function exportNativeGit(input: string, head: string, target: string, reuse?: string) {
-  invariant(/^[0-9a-f]{64}$/.test(head), 'BAD_ARGUMENT', 'Select an exact retained native State.');
+  invariant(/^[0-9a-f]{64}$/.test(head), 'BAD_ARGUMENT', 'Select an exact retained source version.');
   const store = WorkStore.open<'root' | 'native'>(input);
   invariant(store.native, 'BAD_ARGUMENT', 'Select a native Forge owner or Lane.');
   const source = new NativeSource(store.root),
@@ -289,7 +289,7 @@ export async function exportNativeGit(input: string, head: string, target: strin
         invariant(
           (await git(repo, ['--no-lazy-fetch', 'rev-parse', `${state.git.commit}^{tree}`])).trim() === tree,
           'INVALID_NATIVE_GIT',
-          'Original imported tree differs from its native State.',
+          'The original imported tree differs from its Forge source version.',
         );
         commit = state.git.commit;
       } else {
@@ -401,7 +401,7 @@ export function validateNativeProjection(
       Array.isArray(pins.states) &&
       pins.states.some(item => item?.state === head && item.commit === projection.head),
     'INVALID_NATIVE_GIT',
-    'The retained Git projection differs from its original native State.',
+    'The retained Git projection differs from its original Forge source version.',
   );
   source.object(projection.bundle);
   return projection;

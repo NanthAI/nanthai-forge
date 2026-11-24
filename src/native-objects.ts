@@ -112,7 +112,7 @@ export function nativeObjects(store: StoreAccess, input: unknown) {
               removed,
               preserved,
               coverage:
-                'Retained native State ancestry, source, Git provenance/projections, observations, historical Work archives and unexpired closed-Lane or latest open-Lane auto-snapshots. Workspaces, check evidence, backup files, temporary files and unknown entries are not collected.',
+                'Retained source version ancestry, source, Git provenance/projections, observations, historical Work archives and unexpired closed-Lane or latest open-Lane auto-snapshots. Workspaces, check evidence, backup files, temporary files and unknown entries are not collected.',
               compatibility:
                 command.action === 'collect-native-objects'
                   ? `This native owner requires Work format ${data.schema} readers. Each retry recomputes reachability; completed deletions are not rolled back.`

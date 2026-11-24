@@ -108,7 +108,7 @@ export function BackupsView({
               <details className="prov">
                 <summary>Source provenance</summary>
                 <p>
-                  {backup.preview.format === 'native' ? 'Native State' : 'Git source'}{' '}
+                  {backup.preview.format === 'native' ? 'Source version' : 'Git source'}{' '}
                   <code translate="no">{backup.preview.head}</code>
                 </p>
                 <p>
@@ -120,11 +120,15 @@ export function BackupsView({
                     Object manifest SHA-256 <code translate="no">{backup.objectManifest.digest}</code>
                   </p>
                 ) : null}
-                {backup.preview.channels.map(pin => (
-                  <p key={pin.name}>
-                    Declared Channel {pin.name}: <code translate="no">{pin.head}</code>
-                  </p>
-                ))}
+                {backup.preview.channels.map(pin => {
+                  const multiple = backup.preview.channels.length > 1;
+                  return multiple || pin.head !== backup.preview.head ? (
+                    <p key={pin.name}>
+                      Declared {multiple ? 'Channel ' : ''}
+                      {pin.name}: <code translate="no">{pin.head}</code>
+                    </p>
+                  ) : null;
+                })}
               </details>
             </span>
             <span className="btns">
@@ -200,7 +204,7 @@ export function BackupsView({
                   {describe(selected.preview)} · {mib(selected.file.size)}
                 </p>
                 <p>
-                  {selected.preview.format === 'native' ? 'Native State' : 'Git source'}{' '}
+                  {selected.preview.format === 'native' ? 'Source version' : 'Git source'}{' '}
                   <code translate="no">{selected.preview.head}</code>
                 </p>
                 <p>

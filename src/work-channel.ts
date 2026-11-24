@@ -421,7 +421,7 @@ export async function releaseWork(store: StoreAccess, command: ReleaseCommand, r
           ...(await exportNativeSource(store, data.revision, release.acceptance.head)).result.archive!,
           kind: 'forge-native-work-backup' as const,
           coverage:
-            'Selected native State and ancestry/source, including intact original imported Git bundles and their refs. Original Work, discussion, run logs and unrelated native States are excluded; an empty native restore owner is included.',
+            'Selected source version and ancestry/source, including intact original imported Git bundles and their refs. Original Work, discussion, run logs and unrelated source versions are excluded; an empty native restore owner is included.',
         }
       : { ...(await exportChannelBundle(store, release.acceptance.id)).result, kind: 'git-bundle' as const };
     invariant(

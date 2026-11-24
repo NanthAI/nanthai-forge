@@ -175,7 +175,7 @@ test('native retained Views expose shared paths and compose non-overlapping text
   assert.equal(compared.status, 'observed');
   assert.equal(compared.commonPathCount, 1);
   assert.equal(compared.sharedPaths[0].display, 'file.txt');
-  assert.match(compared.provenance, /native State/);
+  assert.match(compared.provenance, /source version/);
   writeFileSync(join(w.store.path(a.id), '.env'), 'DO_NOT_COPY=private');
   mkdirSync(join(w.store.path(a.id), 'secret'));
   writeFileSync(join(w.store.path(a.id), 'secret', 'credentials.json'), 'private');

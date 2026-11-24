@@ -278,6 +278,8 @@ test('incident 9497ec68: early approval carries if main moves while the first ch
   await f.drain();
   const first = await approvalReadback(f, state);
   assert.equal(first.wait.phase, 'checking');
+  const pending = await f.tx('needsReadBeforeCheck', needsMe.read, { projectId: f.projectId });
+  assert.equal(needsView(pending).now[0].reviewCheck, 'pending', 'a reserved run is not execution evidence');
   const approved = JSON.parse(await f.tx('approveDuringFirstCheck', acceptance.approve, first.selection));
   assert.equal(approved.status, 'pending');
   assert.equal((await approvalReadback(f, state)).wait.reviewState, 'approved');
@@ -331,6 +333,8 @@ test('a protected finish with a retained run starts one exact replacement after 
   await f.passChecks();
   await f.drain();
   const original = await approvalReadback(f, state);
+  const checked = await f.tx('needsReadWithRetainedCheck', needsMe.read, { projectId: f.projectId });
+  assert.equal(needsView(checked).now[0].reviewCheck, 'ran', 'a retained passing check counts');
   f.moveMain();
   await f.tx('approveRetainedRun', acceptance.approve, original.selection);
   await f.drain();
@@ -468,6 +472,7 @@ test('48049998 replay: a protected-path policy hold has no Lane request, yet Nee
   const [row] = needsView(read).now;
   assert.equal(row.why, 'review');
   assert.equal(row.approval, null);
+  assert.equal(row.reviewCheck, 'ran', 'the held review already has a recorded check run');
   const held = await select();
   assert.deepEqual(row.landing, { submissionId: held.submissionId, attemptId: held.attemptId });
   const target = decideTarget(row);

@@ -148,6 +148,49 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
   }
   const region = (page, name) => page.locator(`section.region[aria-label="${name}"]`);
   try {
+    await t.test(
+      'Needs me does not skip a pending check; Not now grants nothing and double-click approves once',
+      async t => {
+        const label = 'Approve before the check finishes';
+        for (const viewport of [DESK, PHONE]) {
+          for (const theme of ['light', 'dark']) {
+            const page = await open(t, viewport, 'review', theme, { query: { 'pending-check': '1' } });
+            const approve = page.getByRole('button', { name: label, exact: true });
+            await approve.click();
+            const sheet = page.getByRole('dialog', { name: `${label}?` });
+            await sheet.waitFor();
+            assert.match(await sheet.innerText(), /The check still runs after you approve/);
+            assert.equal(
+              await page
+                .locator('#root')
+                .evaluate(root => Boolean(root.closest('[inert], [aria-hidden="true"]'))),
+              true,
+              'the background is inert',
+            );
+            await page.addScriptTag({ path: axePath });
+            assert.deepEqual(
+              await page.evaluate(async () => (await window.axe.run()).violations.map(v => v.id)),
+              [],
+            );
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+            if (shots)
+              await page.screenshot({ path: join(shots, `needs-approve-${viewport.width}-${theme}.png`) });
+            await sheet.getByRole('button', { name: 'Not now' }).click();
+            await sheet.waitFor({ state: 'hidden' });
+            await page.locator('button:focus').filter({ hasText: label }).waitFor({ timeout: 3_000 });
+            assert.deepEqual(await page.evaluate(() => window.writes), []);
+            await approve.click();
+            await sheet.getByRole('button', { name: label, exact: true }).dblclick();
+            await sheet.waitFor({ state: 'hidden' });
+            const writes = await page.evaluate(() => window.writes);
+            assert.equal(writes.length, 1);
+            assert.equal(writes[0][0], 'decide');
+            assert.equal(writes[0][1].decision, 'grant');
+            assert.match(writes[0][1].landing.attemptId, /0502$/);
+          }
+        }
+      },
+    );
     for (const { name, query, count, unit } of [
       { name: 'exact', query: {}, count: ['1,207', '1', '5'], unit: 'Item' },
       {

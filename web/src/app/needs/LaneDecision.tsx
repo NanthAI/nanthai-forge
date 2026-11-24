@@ -72,7 +72,13 @@ export function LaneDecision({
           </p>
         ) : null}
         <div className="btns">
-          <DecisionKeys laneId={laneId} target={target} decide={decide} announce={announce} />
+          <DecisionKeys
+            laneId={laneId}
+            target={target}
+            reviewCheck={row.reviewCheck}
+            decide={decide}
+            announce={announce}
+          />
         </div>
         {said}
       </section>

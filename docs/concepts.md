@@ -14,7 +14,7 @@ An agent needs three nouns. Everything else is an internal record that receipts 
 
 Internals you may see in receipts and the web app:
 
-- *State* — an immutable snapshot of every file (paths, content hashes, modes) plus its parent States (Git: commit). A save records a Lane's files as a new State.
+- *Version* — an immutable snapshot of every file (paths, content hashes and modes), linked to earlier versions (Git: commit). A save records a new version of the Lane's files. Agent commands and receipts call it a *State*. A release tag names a version; most versions have no release tag.
 - *Intent* — the execution record behind an Item, with a status (`active`, `ready`, `completed`, `abandoned`); hosted Intents use the Item's id.
 - *Candidate* — the exact, pinned combination of one or more Lane heads on a base that a landing checks and accepts (Git: merge preview).
 - *Check* — a command definition; a *run* records the exact Candidate, definition, environment and result (CI job).

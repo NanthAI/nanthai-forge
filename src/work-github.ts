@@ -119,7 +119,7 @@ export async function withGithubTransport<T>(
         workGit(path, ['rev-parse', `${projection.head}^{tree}`]).trim() ===
           treeForGit(path, source.state(projection.state).files, source),
         'INVALID_NATIVE_GIT',
-        'The projected Git tree differs from its exact native State.',
+        'The projected Git tree differs from its exact Forge source version.',
       );
     } else
       writeFileSync(join(path, 'objects/info/alternates'), `${JSON.stringify(objects)}\n`, { mode: 0o600 });

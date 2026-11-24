@@ -490,6 +490,62 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         const [sent] = await page.evaluate(() => window.__decide);
         assert.equal(sent.submissionId, 'a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d');
         assert.equal(sent.attemptId, 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e');
+        assert.equal(await page.getByRole('dialog', { name: 'Approve without a check?' }).count(), 0);
+      },
+    );
+
+    await t.test(
+      'an unchecked Lane approval asks once and Escape restores focus without approving',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          for (const theme of ['light', 'dark']) {
+            const page = await open(
+              t,
+              viewport,
+              `s=linked&unchecked&theme=${theme}&submission=a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d`,
+            );
+            const decision = page.getByRole('region', { name: 'Your decision' });
+            const approve = decision.getByRole('button', { name: 'Approve and land' });
+            await approve.focus();
+            await page.keyboard.press('Enter');
+            const sheet = page.getByRole('dialog', { name: 'Approve without a check?' });
+            await sheet.waitFor();
+            await sheet.locator('button:focus').filter({ hasText: 'Not now' }).waitFor({ timeout: 3_000 });
+            assert.equal(
+              await page
+                .locator('#root')
+                .evaluate(root => Boolean(root.closest('[inert], [aria-hidden="true"]'))),
+              true,
+              'the background is inert',
+            );
+            await page.addScriptTag({ path: axePath });
+            assert.deepEqual(
+              await page.evaluate(async () => (await window.axe.run()).violations.map(v => v.id)),
+              [],
+            );
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+            await shot(page, `approve-without-check-${viewport.width}-${theme}`);
+            for (const key of ['Tab', 'Tab', 'Tab', 'Shift+Tab']) {
+              await page.keyboard.press(key);
+              assert.equal(await sheet.evaluate(node => node.contains(document.activeElement)), true);
+            }
+            await page.keyboard.press('Escape');
+            await sheet.waitFor({ state: 'hidden' });
+            await decision
+              .locator('button:focus')
+              .filter({ hasText: 'Approve and land' })
+              .waitFor({ timeout: 3_000 });
+            assert.deepEqual(await page.evaluate(() => window.__decide ?? []), []);
+            await page.keyboard.press('Enter');
+            await sheet.locator('button:focus').filter({ hasText: 'Not now' }).waitFor({ timeout: 3_000 });
+            await page.keyboard.press('Tab');
+            await page.keyboard.press('Enter');
+            await sheet.waitFor({ state: 'hidden' });
+            const sent = await page.evaluate(() => window.__decide);
+            assert.equal(sent.length, 1);
+            assert.equal(sent[0].attemptId, 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e');
+          }
+        }
       },
     );
 

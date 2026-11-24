@@ -35,6 +35,7 @@ export type HeldLane = {
   submissionId: string | null;
   /** The held attempt of a landing held for review (the owner decides that exact attempt). */
   attemptId?: string;
+  reviewCheck?: 'ran' | 'pending' | 'none';
   /** A review of several Lanes: every Lane of its one submission (they all wait on the reader). */
   laneIds?: readonly string[];
   url?: string | null;

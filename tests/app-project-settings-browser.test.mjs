@@ -26,7 +26,7 @@ const owner = q.get('who') !== 'member';
 const worst = q.get('data') === 'worst';
 window.calls = [];
 const facts = { name: worst ? 'A very long project name that keeps going well past any sensible width for a settings row' : 'Docs site', slug: worst ? 'a-very-long-project-name-that-keeps-going-well-past-any-sensible-width-for-a-settings-row' : 'docs-site', handle: 'sample-owner', visibility: q.get('vis') === 'private' ? 'private' : 'public', planVisibility: q.get('plan') === 'members' ? 'members' : 'public', createdAt: now - 400 * 86400000, revision: 5, removal: undefined };
-const preview = (revision, format = 'native') => ({ format, head: 'b'.repeat(40), revision, intents: 12, lanes: 3, views: 4, runs: 20, files: 310, unavailable: 0, channels: [{ name: 'main', head: 'c'.repeat(40) }] });
+const preview = (revision, format = 'native') => ({ format, head: 'b'.repeat(40), revision, intents: 12, lanes: 3, views: 4, runs: 20, files: 310, unavailable: 0, channels: [{ name: 'main', head: 'c'.repeat(40) }, ...(q.has('multiple') && revision === 41 ? [{ name: 'preview', head: 'a'.repeat(40) }] : [])] });
 const backups = [
   { id: 'b1', operationId: 'op1', projectId: 'p', name: 'Docs site', status: 'stored', digest: 'd'.repeat(64), size: 5 * 1024 * 1024, preview: preview(41), previous: 'b2', current: true, at: now - 3600000, transport: 'objects', objectManifest: { digest: 'e'.repeat(64), size: 900000 } },
   { id: 'b2', operationId: 'op2', projectId: 'p', name: 'Docs site', status: 'stored', digest: 'f'.repeat(64), size: 4 * 1024 * 1024, preview: preview(30), previous: null, current: false, at: now - 9 * 86400000 },
@@ -60,6 +60,43 @@ function Settings() {
 }
 createRoot(document.getElementById('root')).render(<Settings />);
 `;
+
+test('backup provenance shows a source version and names Channels only when more than one is declared', async t => {
+  const executablePath = testBrowser(t);
+  if (!executablePath) return;
+  const browser = await chromium.launch({ executablePath });
+  const { open, check } = await viewFixture(t, fixture, 'Project settings', browser);
+  if (shots) mkdirSync(shots, { recursive: true });
+  for (const width of [1440, 390]) {
+    for (const theme of ['light', 'dark']) {
+      for (const multiple of [false, true]) {
+        const { page, context, errors } = await open(
+          width,
+          theme,
+          multiple ? 'multiple=1' : '',
+          '/sample-owner/docs-site/settings/project',
+        );
+        const provenance = page.locator('details.prov').first();
+        await provenance.getByText('Source provenance', { exact: true }).click();
+        assert.match(await provenance.innerText(), /Source version b+/);
+        assert.doesNotMatch(await provenance.innerText(), /Native State/);
+        if (multiple) {
+          assert.match(await provenance.innerText(), /Declared Channel main: c+/);
+          assert.match(await provenance.innerText(), /Declared Channel preview: a+/);
+        } else {
+          assert.match(await provenance.innerText(), /Declared main: c+/);
+          assert.doesNotMatch(await provenance.innerText(), /Channel/);
+        }
+        await check(page, `backup provenance ${width} ${theme} ${multiple ? 'multiple' : 'main'}`);
+        if (shots)
+          await provenance.screenshot({ path: join(shots, `backup-${width}-${theme}-${multiple}.png`) });
+        assert.deepEqual(errors, []);
+        await context.close();
+      }
+    }
+  }
+  await browser.close();
+});
 
 test('settings project: facts, rename keeps one operation across a failed save, trash sheet, backups, imports, member sees no controls, axe', async t => {
   const executablePath = testBrowser(t);

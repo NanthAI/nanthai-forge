@@ -78,6 +78,7 @@ const baseRead: NeedsRead = first
             ? {
                 submissionId: uuid(501),
                 attemptId: uuid(502),
+                reviewCheck: params.has('pending-check') ? 'pending' : 'none',
                 url: `/approve?project=synthetic&submission=${uuid(501)}`,
                 note: 'needs owner approval: protected paths .github/workflows/ci.yml',
               }

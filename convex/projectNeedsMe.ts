@@ -21,7 +21,7 @@ import { landingRow } from './projectHostedLandingStore';
 import { finishRow } from './projectHostedFinishWake';
 import { openApprovalRequests } from './projectHostedApprovals';
 import { messagesTo } from './projectNeedsFyi';
-import { openLandingReviews, reviewSubmitter } from './projectHostedReviewInbox';
+import { openLandingReviews, reviewCheckEvidence, reviewSubmitter } from './projectHostedReviewInbox';
 import { approvalLinks, type ApprovalLink } from './projectHostedApprovalStore';
 import { storedLandingStateSchema } from '../src/hosted-landing';
 import { landingStateOf, type LandingStateName } from '../src/landing-state';
@@ -76,6 +76,7 @@ export const needsMeResult = v.object({
        * here with the calls the /approve page makes (projectHostedAcceptance:approve, projectHostedOwnerReview:decline).
        * A landing-policy hold (protected paths, supervised) has no Lane approval request to decide instead. */
       attemptId: v.optional(v.string()),
+      reviewCheck: v.optional(v.union(v.literal('ran'), v.literal('pending'), v.literal('none'))),
       /** A review of several Lanes (one submission): every Lane of it, so each shows as waiting on the reader. */
       laneIds: v.optional(v.array(v.string())),
       /** The owner's page for this decision: the Lane page (Item 0a99ab23), when the deployment has a web address. */
@@ -217,9 +218,10 @@ async function reason(
     why,
     note: state?.error?.message ? state.error.message.replace(/\s+/g, ' ').slice(0, NOTE_CHARS) : null,
     submissionId: state?.id ?? null,
-    ...(why === 'review' && state
+    ...(why === 'review' && state && row
       ? {
           attemptId: state.attemptId,
+          ...reviewCheckEvidence(row, state),
           url: await link(mark.laneId, state.id),
         }
       : {}),

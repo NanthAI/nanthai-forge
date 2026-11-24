@@ -114,9 +114,11 @@ approved, approval carried to the updated attempt, or changed reviewed source or
 requires another approval. The held landing has no queue position. See
 [held landings](../agents/workflow.md).
 
-A signed-in owner approves or declines a held landing in one step: **Approve and land**
-or **Decline** on its review page, or on `/approve?project=…&submission=…`. The agent
-gets that link from `nforge agent ROOT approve-link {"operationId":"…"}` (one query; the
+A signed-in owner approves or declines a held landing in Needs me or on the Lane page.
+If no check has run on the Candidate, approval asks once for confirmation. **Approve before
+the check finishes** leaves a pending check in place; **Approve without a check** is shown
+in the confirmation only when none is planned for that Candidate. **Not now** leaves the hold unchanged.
+An older `/approve?project=…&submission=…` link opens the same decision. The agent gets that link from `nforge agent ROOT approve-link {"operationId":"…"}` (one query; the
 link carries no attempt id, the page reads the current attempt). Both call
 `projectHostedAcceptance:approve` or `projectHostedOwnerReview:decline` with the exact
 `projectId`, `submissionId` and `attemptId`. They are explicit person acceptance:

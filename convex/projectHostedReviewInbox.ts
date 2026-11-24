@@ -10,6 +10,13 @@ import type { ApprovalLink } from './projectHostedApprovalStore';
 import { queueComposeLanes, queueIntentLanes, queueViewKeys } from './projectHostedQueueEntries';
 import type { HostedLandingState } from '../src/hosted-landing';
 
+/** Use observed execution, not a reservation. Both held-review paths already have the landing row. */
+export function reviewCheckEvidence(row: LandingRow, state: HostedLandingState) {
+  if (row.runId && (state.timing?.ciObservedAt || state.timing?.ciEndedAt))
+    return { reviewCheck: 'ran' as const };
+  return { reviewCheck: state.request.check ? ('pending' as const) : ('none' as const) };
+}
+
 export function reviewSubmitter(row: LandingRow, state: HostedLandingState) {
   const agentAuthored = state.request.authorship
     ? state.request.authorship.kind === 'agent'
@@ -44,6 +51,7 @@ export async function openLandingReviews(ctx: QueryCtx, projectId: Id<'hostedPro
         intentId,
         submissionId: state.id,
         attemptId: state.attemptId,
+        ...reviewCheckEvidence(row, state),
         url: await link(exact, state.id),
         note: state.error?.message ?? null,
         since: Date.parse(state.timing?.ciEndedAt ?? state.timing?.selectedAt ?? state.at),

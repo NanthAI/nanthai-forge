@@ -266,7 +266,7 @@ export async function publishWork(store: StoreAccess, input: unknown, expectedRe
             head: branch(publication.id),
             base: publication.base,
             draft: publication.draft,
-            body: `Forge publication ${publication.id}\n\nView: ${publication.viewId}\n${publication.projection ? 'Native State' : 'Commit'}: ${publication.head}\nGit commit: ${candidate}\n\nPublished explicitly from a pinned local composition. Integration remains a GitHub decision.`,
+            body: `Forge publication ${publication.id}\n\nView: ${publication.viewId}\n${publication.projection ? 'Source version' : 'Commit'}: ${publication.head}\nGit commit: ${candidate}\n\nPublished explicitly from a pinned local composition. Integration remains a GitHub decision.`,
           });
         } catch {
           pull = await findPull(store, publication); // Lost create replies and concurrent retries reconcile by the pinned branch.

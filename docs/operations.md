@@ -729,6 +729,8 @@ upload.
 
 ### Hosted backup recovery
 
+In Settings → Project → Backups, **Source provenance** shows the backup's source version. A backup that declares only `main` does not need a Channel label; one with multiple declared names identifies each Channel. A version identifies the saved source, not a release tag.
+
 Hosted source and Work recover from verified deployment snapshots and retained R2
 objects. [Hosted durability](operations/hosted-durability.md) describes Route A,
 manifest validation and snapshot retention. Forge runs hosted projects only: there is no local owner to recover or reconnect.
