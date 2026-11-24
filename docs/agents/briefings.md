@@ -227,9 +227,10 @@ queue path. After fixes or a sync, refresh a replay proof offline instead of has
 `nforge heavy npm run build:core && nforge heavy node scripts/refresh-queue-proof.mjs PROOF.json`.
 It re-runs only that proof's registered replay, rewrites the digests and records in `exercised`
 the top-level units the replay ran. With that scope, the proof still holds when main changes
-only functions the replay neither ran nor referenced. A change to a unit it ran, a referenced
-function's signature, the import order or anything that runs at load, a removed unit, or a Lane
-edit after the proof still refuses before any test job, with this command.
+only functions the replay neither ran nor referenced. When a peer's landing changed a unit the
+replay ran, the proof still holds while your Lane keeps the proven bytes, and the landing check
+re-runs that replay on the Candidate: no local refresh. A removed unit, or a Lane edit after the
+proof, still refuses before any test job, with this command.
 
 For an **incident replay**, identify the incident and exact test title in
 [`incident-replays.json`](../../tests/fixtures/incident-replays.json). From the Lane, run

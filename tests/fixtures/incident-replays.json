@@ -14098,6 +14098,22 @@
         "src/scoped-recheck-policy.ts"
       ],
       "test": "incident 573ae136: an edit beside an unchanged credential line on main passes the hosted plan scan; a moved literal fails"
+    },
+    {
+      "incident": "1cb3caa2",
+      "what": "A queue proof a peer landing made stale in a unit its replay ran: the planner keeps it while the Lane kept its proven bytes, and the landing check re-runs the replay",
+      "file": "tests/hosted-actions-job.test.mjs",
+      "paths": [
+        "src/first-check-risk.ts",
+        "src/hosted-actions-job-client.ts",
+        "src/hosted-actions-job-plan.ts",
+        "src/hosted-check.ts",
+        "src/landing-pins-first.ts",
+        "src/package-placement-pin.ts",
+        "src/package-placement.ts",
+        "src/scoped-recheck-policy.ts"
+      ],
+      "test": "incident replay friction 1cb3caa2: a proof a peer made stale in a ran unit is kept and its replay joins a scoped check"
     }
   ]
 }

@@ -143,6 +143,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `37016080` | The licence Lane (Item ffb6cc49, 2026-11-23): approved submission 37016080 failed its check; the fixes 1b489c1f and c750f126 and the resolution Lane's c49fae56 each asked the owner again for the same protected change. A held submission of the same Intent now reuses that approval for its protected paths only (Item fe2b0a86 part B, `tests/protected-approval-across-submissions.test.mjs`) |
 | `92396235` | A Lane green on its own base failed the landing check on the composed Candidate in table-registrations and project-purge-inventory (a peer had added the cliCredentials table), found only after every shard ran (9.8 min, 89.4 runner-minutes). The planning job now runs the cheap contract pins first and a failing pin ends the check there with the same cause (Item 13ea93bf, `tests/hosted-actions-job.test.mjs`) |
 | `573ae136` | Frictions 7a05167d, b70dccdf, 0ed89858: touching a file refused a save or landing on a credential-shaped line main already held, or on a key name assigned a property access in code. The hosted Actions plan now drops findings main's copy of the file holds (one per occurrence), while a literal moved into a new file still fails |
+| `1cb3caa2` | A queue proof a peer landing made stale in a unit its replay ran: the planner keeps it while the Lane kept its proven bytes, and the landing check re-runs the replay |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

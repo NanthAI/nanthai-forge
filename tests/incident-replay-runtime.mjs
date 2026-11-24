@@ -14,6 +14,15 @@ import {
 } from '../scripts/incident-replay-coverage.mjs';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
 
+/** The registered replays of `testFile` to watch: with an `output`, the one titled `title`; a replay
+ * being added (`incident-replay-coverage.mjs --add`) is not registered yet, so its title is watched
+ * as named, or its first run writes no coverage (friction 213fefab). */
+export function replayEntries(replays, testFile, output, title) {
+  const entries = replays.filter(
+    entry => entry.file === testFile && (output ? entry.test === title : entry.paths?.length),
+  );
+  return output && title && !entries.length ? [{ file: testFile, test: title }] : entries;
+}
 export function watchIncidentReplays(entries, output, confirmInIsolation = false) {
   const replays = entries.map(entry => ({ entry, title: replayTitle(entry.test), reached: new Set() }));
   // A queue proof refresh also records which functions ran (Item ec229a55).

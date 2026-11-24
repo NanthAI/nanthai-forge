@@ -39,5 +39,5 @@ export function planQueueProof(
   reads: Omit<QueueProofReads, 'scoped'> & {
     mainTexts: (paths: string[]) => Promise<Map<string, string | null>>;
   },
-): Promise<{ error?: string; scoped?: Record<string, string> }>;
+): Promise<{ error?: string; scoped?: Record<string, string>; rerun?: Record<string, string> }>;
 export function validExercisedScope(scope: unknown): boolean;

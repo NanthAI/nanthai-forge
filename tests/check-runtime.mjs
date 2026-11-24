@@ -61,14 +61,10 @@ if (
 ) {
   const source = readFileSync(new URL(REGISTRY, projectRoot), 'utf8');
   const output = process.env.FORGE_REPLAY_COVERAGE_OUTPUT;
-  if (source.includes(JSON.stringify(testFile))) {
-    const { replays } = JSON.parse(source);
-    const entries = replays.filter(
-      entry =>
-        entry.file === testFile &&
-        (output ? entry.test === process.env.FORGE_REPLAY_COVERAGE_TEST : entry.paths?.length),
-    );
-    const { watchIncidentReplays } = await import('./incident-replay-runtime.mjs');
+  const title = process.env.FORGE_REPLAY_COVERAGE_TEST;
+  if ((output && title) || source.includes(JSON.stringify(testFile))) {
+    const { replayEntries, watchIncidentReplays } = await import('./incident-replay-runtime.mjs');
+    const entries = replayEntries(JSON.parse(source).replays, testFile, output, title);
     if (entries.length) watchIncidentReplays(entries, output, !output);
   }
 }

@@ -910,8 +910,13 @@ named proofs' registered replays. The hosted planner verifies proof on the compo
 before any test job starts. A refusal there fails every planned job at once, without running
 tests. A refreshed proof records the top-level units its replay ran. It still holds after main
 changes only functions the replay neither ran nor referenced; import order, load-time code, referenced
-signatures and removed units stay bound. The planner pins that result for the static job.
-That path reads main's bytes of those files once. Otherwise it reads nothing extra.
+signatures and removed units stay bound. When main changed a unit the replay ran, the proof still
+holds if the Candidate's file is the proven bytes plus main's own changes: every unit is the proof's
+or main's, no proven unit is gone, and imports and load statements are the proof's or main's. That
+route adds the proof's registered replay test file to the check's selection, so the replay re-runs
+on the Candidate. A Lane edit after its proof matches neither side and still needs a refresh. The
+planner pins either result for the static job. That path reads main's bytes of those files once.
+Otherwise it reads nothing extra.
 When static verification is the reported
 cause, the compact landing receipt retains the first safe coded diagnostic line.
 

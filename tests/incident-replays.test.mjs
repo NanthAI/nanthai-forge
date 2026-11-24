@@ -116,6 +116,19 @@ test('Guard 4 (6abdde40): a core queue change runs every registered replay, the 
   assert.deepEqual(coreQueueTests(files), [...new Set([...fixed, ...listed])].sort());
 });
 
+test('friction 213fefab: a replay being added is watched by its title before it is registered', async () => {
+  const { replayEntries } = await import('./incident-replay-runtime.mjs');
+  const file = 'tests/x.test.mjs';
+  const registered = [{ incident: 'a', file, test: 'old replay', paths: ['convex/x.ts'] }];
+  // `--add` runs a title the registry does not name yet: without this its run wrote no coverage.
+  assert.deepEqual(replayEntries(registered, file, '/tmp/out.json', 'new replay'), [
+    { file, test: 'new replay' },
+  ]);
+  assert.deepEqual(replayEntries(registered, file, '/tmp/out.json', 'old replay'), registered);
+  // The normal suite still watches only registered replays with paths.
+  assert.deepEqual(replayEntries(registered, file, undefined, undefined), registered);
+  assert.deepEqual(replayEntries(registered, 'tests/y.test.mjs', undefined, undefined), []);
+});
 test('friction 213fefab: adding one replay registers only that entry and names the ladder row before the landing check', async () => {
   const { withReplayEntry, withLadderRow, declaredReplay } =
     await import('../scripts/incident-replay-coverage.mjs');

@@ -180,6 +180,10 @@ function scopeDigest(module, executed) {
   return sha(JSON.stringify([module.imports, module.load.map(statement => statement.text), units]));
 }
 
+/** Import order and top-level statements that declare no unit: the part of a module no unit holds. */
+const shellDigest = module =>
+  sha(JSON.stringify([module.imports, module.load.map(statement => statement.text)]));
+
 /** The `exercised[path]` record a refreshed proof keeps, or null when the module is not modelled. */
 export function buildExercisedScope(path, text, executed) {
   const module = moduleUnits(path, text);
@@ -189,7 +193,7 @@ export function buildExercisedScope(path, text, executed) {
   const units = [...module.units]
     .map(([name, unit]) => [name, sha(unit.text)])
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return { executed: [...new Set(executed)].sort(), digest, units };
+  return { executed: [...new Set(executed)].sort(), digest, units, shell: shellDigest(module) };
 }
 
 /** True when `composedText` keeps the proof's exercised scope byte for byte and every other unit is
@@ -200,7 +204,11 @@ export function composedScopeHolds(scope, path, composedText, mainText) {
   const composed = moduleUnits(path, composedText);
   const main = mainText == null ? null : moduleUnits(path, mainText);
   if (!composed || (mainText != null && !main)) return false;
-  if (scopeDigest(composed, scope.executed) !== scope.digest) return false;
+  return scopeDigest(composed, scope.executed) === scope.digest && proofOrMainUnits(scope, composed, main);
+}
+
+/** Every composed unit is the proof's own or main's (`main` null: no such file on main). */
+function proofOrMainUnits(scope, composed, main) {
   const proven = new Map(scope.units);
   for (const [name, unit] of composed.units) {
     const digest = sha(unit.text);
@@ -212,6 +220,22 @@ export function composedScopeHolds(scope, path, composedText, mainText) {
   // its proof look the same here without the base bytes, so both need a refresh.
   for (const name of proven.keys()) if (!composed.units.has(name)) return false;
   return true;
+}
+
+/** True when `composedText` is the proof's file plus main's own changes and nothing else: every unit
+ * is the proof's or main's, no proven unit is gone, and the shell (imports and load statements) is
+ * the proof's (`scope.shell`, recorded since friction 1cb3caa2) or main's. Main may have changed what
+ * the replay ran, so this holds only with that replay re-run on the Candidate; the caller schedules
+ * it. A Lane edit after its proof matches neither side and still needs a refresh. Without the
+ * Lane's own head (not on the hosted run) a Lane that reverted a proven unit to main's text looks
+ * like main's change: the Candidate is still only proven and accepted units, judged by the re-run. */
+export function laneScopeHolds(scope, path, composedText, mainText) {
+  if (!validExercisedScope(scope) || mainText == null) return false;
+  const composed = moduleUnits(path, composedText);
+  const main = moduleUnits(path, mainText);
+  if (!composed || !main) return false;
+  const shell = shellDigest(composed);
+  return (shell === scope.shell || shell === shellDigest(main)) && proofOrMainUnits(scope, composed, main);
 }
 
 /** Map V8 function coverage on the executed module text to the source module's unit names.

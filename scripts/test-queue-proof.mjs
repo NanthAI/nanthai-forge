@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { queueProofPaths, REGISTRY, registeredQueueReplays } from './core-queue-paths.mjs';
+import { coreQueueTests, queueProofPaths, REGISTRY, registeredQueueReplays } from './core-queue-paths.mjs';
 import { queueBenchPaths } from './bench-t3code/path-evidence.mjs';
 
 const uuid = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i;
@@ -167,7 +167,7 @@ export function queueProofMessage({ missing, stale }) {
   if (stale.size) {
     const proofs = [...new Set([...stale.values()].flat())].sort();
     parts.push(
-      `The Candidate's bytes of ${shown([...stale.keys()].sort())} differ from those ${shown(proofs)} prove: an edit after the proof, or main's change to what its replay ran. If main changed them, sync this Lane onto main first. Then run \`${REFRESH_QUEUE_PROOF} ${proofs.map(path => shellWord(printable(path))).join(' ')}\` (a bench proof needs a new on-path cell), save and land again.`,
+      `The Candidate's bytes of ${shown([...stale.keys()].sort())} differ from those ${shown(proofs)} prove: an edit after the proof, or a change by main to the same function, imports or load code. While the Lane keeps the proven bytes the planner keeps the proof and re-runs its replay, so do not sync only for this. Otherwise run \`${REFRESH_QUEUE_PROOF} ${proofs.map(path => shellWord(printable(path))).join(' ')}\` (a bench proof needs a new on-path cell), save and land again.`,
     );
   }
   return `QUEUE_PROOF_REQUIRED: ${parts.join(' ')} See “Attaching queue proof” in the agent briefings.`;
@@ -237,22 +237,47 @@ export function assertQueueProof(changes, reads) {
 
 /** The hosted planner's pass, before any test job (Item ec229a55). Exact bytes first; only a
  * stale file whose proof records a replay scope reads main's bytes (`mainTexts`: path -> text or
- * null), once. `error` is the refusal; `scoped` the files a scope covered, for the static job. */
+ * null), once. `error` is the refusal; `scoped` the files a scope covered, for the static job.
+ * A file whose proven scope main changed still holds when it is the proof's bytes plus main's own
+ * units (the Lane made no edit after its proof): `rerun` names its registered replay test file,
+ * which the landing check must run on the Candidate (friction 1cb3caa2). */
 export async function planQueueProof(changes, { readText, digest, mainTexts }) {
   // The parser loads only on this path, never on an agent's land.
   let gaps = queueProofGaps(changes, { readText, digest });
+  const rerun = {};
   if (!gaps.missing.length && gaps.stale.size && gaps.scopable.length === gaps.stale.size) {
-    const { composedScopeHolds } = await import('./queue-proof-scope.mjs');
+    const { composedScopeHolds, laneScopeHolds } = await import('./queue-proof-scope.mjs');
     const main = await mainTexts(gaps.scopable);
+    const replays = registeredQueueReplays(readText(REGISTRY));
     gaps = queueProofGaps(changes, {
       readText,
       digest,
-      scoped: (file, proof) =>
-        main.has(file) && composedScopeHolds(proof.exercised[file], file, readText(file), main.get(file)),
+      scoped: (file, proof) => {
+        if (!main.has(file)) return false;
+        const scope = proof.exercised[file];
+        if (composedScopeHolds(scope, file, readText(file), main.get(file))) return true;
+        const test = replayTestFile(proof, replays, readText, digest);
+        if (!test || !laneScopeHolds(scope, file, readText(file), main.get(file))) return false;
+        rerun[file] = test;
+        return true;
+      },
     });
   }
   if (gaps.missing.length || gaps.stale.size) return { error: queueProofMessage(gaps) };
-  return { scoped: gaps.scoped };
+  return { scoped: gaps.scoped, ...(Object.keys(rerun).length ? { rerun } : {}) };
+}
+
+/** The proof's registered replay test file when the check can run it on this Candidate, else null:
+ * one of the guard set every core queue change runs, present here (`digest` reads the inventory). */
+function replayTestFile(proof, replays, readText, digest) {
+  const entry = replays.find(
+    item => item?.incident === proof.replay?.incident && item?.test === proof.replay?.test,
+  );
+  const present = {
+    get: path => (path === REGISTRY ? readText(REGISTRY) : ''),
+    has: path => digest(path) !== null,
+  };
+  return typeof entry?.file === 'string' && coreQueueTests(present).includes(entry.file) ? entry.file : null;
 }
 
 /** Hosted static check and the standard machine check already have these pinned inputs. */

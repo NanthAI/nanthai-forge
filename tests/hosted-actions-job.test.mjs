@@ -1382,6 +1382,58 @@ test('incident 9cd6c0ec: a proof main made stale refuses in the plan before any 
   // Main's bytes cost at most one object read, only on this path.
   assert.ok(plans.scoped.downloads - plans.unscoped.downloads <= 1, JSON.stringify(plans));
 });
+test('incident replay friction 1cb3caa2: a proof a peer made stale in a ran unit is kept and its replay joins a scoped check', async t => {
+  const file = 'convex/projectHostedLandings.ts';
+  const proofPath = '.nforge/queue-proofs/mirror.json';
+  const replay = { incident: '65e2d743', test: 'landings read the mirror receipt' };
+  const lane = [
+    "import { query } from './cliServer';",
+    'function evidence(rows) {\n  return rows.length;\n}',
+    'async function oneLanding(rows) {\n  return { landings: [evidence(rows)], mirror: true };\n}',
+    'export const read = query({ handler: async (_ctx, input) => oneLanding([input]) });',
+  ].join('\n');
+  // A peer's landing changed `evidence`, which the replay runs; the Lane kept its proven bytes.
+  const peer = text => text.replace('return rows.length;', 'return rows.length + 1;');
+  const plan = async (label, candidateText) => {
+    const s = fixture(t, {
+      composed: {
+        base: {
+          [file]: peer(lane.replace('mirror: true', 'mirror: false')),
+          [REGISTRY]: JSON.stringify({
+            schema: 1,
+            replays: [{ ...replay, file: 'tests/demo.test.mjs', paths: [file] }],
+          }),
+          'tests/demo.test.mjs': `import "../${file}";`,
+        },
+        candidate: {
+          [file]: candidateText,
+          [proofPath]: JSON.stringify({
+            version: 1,
+            kind: 'replay',
+            changes: { [file]: digest(Buffer.from(lane)) },
+            exercised: { [file]: buildExercisedScope(file, lane, ['evidence', 'oneLanding', 'read']) },
+            replay: { ...replay, receipt: randomUUID() },
+            authorModel: 'claude-opus-5-5',
+            authorSession: randomUUID(),
+            review: { model: 'gpt-6.2-sol', session: randomUUID(), receipt: randomUUID() },
+          }),
+        },
+      },
+    });
+    // A contract gate whose own tests leave the replay out.
+    s.run.gate = { mode: 'contract', tests: [], contractVersion: 1, reason: 'Synthetic contract' };
+    return (await prepareActionsJob(s.client, join(s.directory, label), join(s.directory, label + '-cache')))
+      .recipe.selection;
+  };
+  const kept = await plan('kept', peer(lane));
+  assert.equal(kept.planError, undefined);
+  assert.deepEqual(kept.queueProof.scoped, { [file]: proofPath });
+  assert.deepEqual(kept.queueProof.rerun, { [file]: 'tests/demo.test.mjs' });
+  assert.ok(kept.tests.includes('tests/demo.test.mjs'), JSON.stringify(kept.tests));
+  // The Lane edited the file after its proof: refused before any test job.
+  const edited = await plan('edited', peer(lane).replace('mirror: true', 'mirror: 1'));
+  assert.equal(edited.planError.code, 'QUEUE_PROOF_REQUIRED');
+});
 test('Item ffb6cc49: the hosted plan asks no queue proof for a header-only licence edit of a core path, only for the code edit', async t => {
   const code = 'export const wake = true;\n';
   const apache = `// SPDX-License-Identifier: Apache-2.0\n${code}`;

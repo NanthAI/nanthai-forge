@@ -261,8 +261,9 @@ export async function prepareActionsJob(
   // Guard 1 before any test job runs (Item ec229a55): a refusal fails every planned job at once, and a
   // proof that holds only by its recorded replay scope is pinned for the static job.
   let proofRefusal: string | undefined;
-  let queueProof: (NonNullable<typeof changedProof> & { scoped?: Record<string, string> }) | undefined =
-    changedProof;
+  let queueProof:
+    | (NonNullable<typeof changedProof> & { scoped?: Record<string, string>; rerun?: Record<string, string> })
+    | undefined = changedProof;
   if (changedProof)
     try {
       const verdict = await planQueueProof(changedProof, {
@@ -277,17 +278,26 @@ export async function prepareActionsJob(
       });
       proofRefusal = verdict.error;
       if (verdict.scoped && Object.keys(verdict.scoped).length)
-        queueProof = { ...changedProof, scoped: verdict.scoped };
+        queueProof = {
+          ...changedProof,
+          scoped: verdict.scoped,
+          ...(verdict.rerun ? { rerun: verdict.rerun } : {}),
+        };
     } catch (error) {
       // The static job still judges the exact bytes.
       console.log(
         `queue proof: plan pass unavailable (${error instanceof Error ? error.message : 'error'}); the static job decides`,
       );
     }
+  // A proof main made stale in what its replay ran holds only with that replay run on this Candidate
+  // (friction 1cb3caa2): its test file joins every selection that lacks it.
+  const rerunTests = Object.values(queueProof?.rerun ?? {}).filter(test => !selected.tests.includes(test));
+  if (rerunTests.length)
+    console.log(`queue proof: re-running ${[...new Set(rerunTests)].join(', ')} on the Candidate`);
   const selection = {
     scope: selected.scope,
     reason: selected.reason,
-    tests: selected.tests,
+    tests: rerunTests.length ? [...new Set([...selected.tests, ...rerunTests])].sort() : selected.tests,
     ...(standard ? { browser: Boolean('browser' in selected && selected.browser) } : {}),
     ...('fallback' in selected && selected.fallback ? { fallback: selected.fallback } : {}),
     // A check-definition change's trial: the browser job (else static) also runs its own definition.

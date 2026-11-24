@@ -4,13 +4,18 @@
 // changed only units its replay never ran, and still refuses when the exercised code changed.
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { REGISTRY } from '../scripts/core-queue-paths.mjs';
-import { buildExercisedScope, composedScopeHolds, executedUnits } from '../scripts/queue-proof-scope.mjs';
+import {
+  buildExercisedScope,
+  composedScopeHolds,
+  executedUnits,
+  laneScopeHolds,
+} from '../scripts/queue-proof-scope.mjs';
 import { refreshQueueProofs } from '../scripts/refresh-queue-proof.mjs';
 import { planQueueProof, REFRESH_QUEUE_PROOF, verifyQueueProof } from '../scripts/test-queue-proof.mjs';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
@@ -87,6 +92,50 @@ test('safety: a Lane edit after its proof refuses even in a unit the replay neve
   const proved = `${lane}function extra() {\n  return 1;\n}\n`;
   const recorded = buildExercisedScope(file, proved, ['evidence', 'oneLanding', 'read']);
   assert.equal(composedScopeHolds(recorded, file, outside(lane), outside(base)), false);
+});
+
+// Friction 1cb3caa2: a peer's landing changed a function the replay ran. The Lane made no edit after
+// its proof, so the proof holds with its replay re-run on the Candidate.
+const ranEdit = text => main(text, 'return rows.length * ROW_BYTES;', 'return rows.length * ROW_BYTES + 1;');
+test('friction 1cb3caa2: main changing a function the replay ran holds for a re-run while the Lane kept its proven bytes', () => {
+  assert.equal(composedScopeHolds(scope(), file, ranEdit(lane), ranEdit(base)), false);
+  assert.equal(laneScopeHolds(scope(), file, ranEdit(lane), ranEdit(base)), true);
+  // Main's own import and helper changes on top still hold: every other part is main's.
+  const both = text => outside(ranEdit(text));
+  assert.equal(laneScopeHolds(scope(), file, both(lane), both(base)), true);
+  // An import the Lane added before its proof is in the recorded shell.
+  const withImport = main(
+    lane,
+    "import { query } from './cliServer';",
+    "import { query } from './cliServer';\nimport { z } from 'zod';",
+  );
+  const proved = buildExercisedScope(file, withImport, ['evidence', 'oneLanding', 'read']);
+  assert.equal(laneScopeHolds(proved, file, ranEdit(withImport), ranEdit(base)), true);
+  // A proof refreshed before the shell was recorded holds only where the shell is main's.
+  const { shell: _shell, ...older } = proved;
+  assert.equal(laneScopeHolds(older, file, ranEdit(withImport), ranEdit(base)), false);
+  assert.equal(laneScopeHolds({ ...scope(), shell: undefined }, file, ranEdit(lane), ranEdit(base)), true);
+});
+
+test('safety (friction 1cb3caa2): a Lane edit after its proof never takes the re-run route', () => {
+  // In a unit the replay ran, and in one it never ran.
+  const ranByLane = main(lane, 'mirror: true', 'mirror: 1');
+  assert.equal(laneScopeHolds(scope(), file, ranEdit(ranByLane), ranEdit(base)), false);
+  const helperByLane = main(lane, 'return near.length * 160;', 'return near.length * 161;');
+  assert.equal(laneScopeHolds(scope(), file, ranEdit(helperByLane), ranEdit(base)), false);
+  // An import or load statement added after the proof is neither the proven shell nor main's.
+  const importByLane = main(
+    lane,
+    "import { query } from './cliServer';",
+    "import { query } from './cliServer';\nimport { z } from 'zod';",
+  );
+  assert.equal(laneScopeHolds(scope(), file, ranEdit(importByLane), ranEdit(base)), false);
+  assert.equal(laneScopeHolds(scope(), file, ranEdit(`${lane}console.log(1);\n`), ranEdit(base)), false);
+  // A proven unit gone, main without the file, and an unparsable Candidate.
+  const removed = lane.replace(/function pageBytes[^}]+}\n/, '');
+  assert.equal(laneScopeHolds(scope(), file, ranEdit(removed), ranEdit(base)), false);
+  assert.equal(laneScopeHolds(scope(), file, ranEdit(lane), null), false);
+  assert.equal(laneScopeHolds(scope(), file, `${ranEdit(lane)}function (`, ranEdit(base)), false);
 });
 
 test('safety: a named initializer main changed runs at load, so it refuses unreferenced', () => {
@@ -173,7 +222,7 @@ function checkout(t) {
 function planReads(root, composed, onMain, asked) {
   return {
     readText: path => (path === file ? composed : readFileSync(join(root, path), 'utf8')),
-    digest: path => (path === file ? sha(composed) : null),
+    digest: path => (path === file ? sha(composed) : existsSync(join(root, path)) ? 'present' : null),
     mainTexts: async paths => {
       asked.push(...paths);
       return new Map(paths.map(path => [path, onMain]));
@@ -215,6 +264,33 @@ test('incident 9cd6c0ec: a proof with no recorded scope refuses in the planner, 
   assert.ok(error.includes(`\`${REFRESH_QUEUE_PROOF} ${proofPath}\``), error);
   // Nothing to scope: main's bytes are never read.
   assert.deepEqual(asked, []);
+});
+
+test('incident replay friction 1cb3caa2: the planner keeps a proof a peer made stale in a ran unit and names its replay to re-run', async t => {
+  const { root, write, proof } = checkout(t);
+  write(proofPath, proof(scope()));
+  const changes = { source: [file], receipts: [proofPath] };
+  // The registered replay test is absent from the Candidate: the check could not re-run it.
+  let verdict = await planQueueProof(changes, planReads(root, ranEdit(lane), ranEdit(base), []));
+  assert.match(
+    verdict.error,
+    /^QUEUE_PROOF_REQUIRED: The Candidate's bytes of convex\/projectHostedLandings\.ts differ/,
+  );
+  write('tests/hosted-landings.test.mjs', `import '../${file}';`);
+  const asked = [];
+  verdict = await planQueueProof(changes, planReads(root, ranEdit(lane), ranEdit(base), asked));
+  assert.deepEqual(verdict, {
+    scoped: { [file]: proofPath },
+    rerun: { [file]: 'tests/hosted-landings.test.mjs' },
+  });
+  assert.deepEqual(asked, [file]);
+  write(file, ranEdit(lane));
+  write('plan.json', { standard: true, selection: { queueProof: { ...changes, scoped: verdict.scoped } } });
+  await verifyQueueProof({ FORGE_ACTIONS_PLAN: join(root, 'plan.json') }, root);
+  // A Lane edit after the proof still refuses, with the refresh command.
+  const edited = main(lane, 'mirror: true', 'mirror: 1');
+  verdict = await planQueueProof(changes, planReads(root, ranEdit(edited), ranEdit(base), []));
+  assert.ok(verdict.error.includes(`\`${REFRESH_QUEUE_PROOF} ${proofPath}\``), verdict.error);
 });
 
 test('the offline refresh runs each named replay once and records the units it ran', async t => {
