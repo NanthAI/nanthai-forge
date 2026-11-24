@@ -275,6 +275,11 @@ export async function trackHostedOverlapLane(
     baseSequence: metadata?.baseSequence ?? (sameBase ? (old?.baseSequence ?? null) : null),
     recordVersion: lane.version,
     open,
+    ...(planning?.reopened
+      ? { reopenedAt: Date.parse(lane.at) }
+      : old?.reopenedAt !== undefined
+        ? { reopenedAt: old.reopenedAt }
+        : {}),
     ...(planningItemId ? { planningItemId } : {}),
     ...(planLaneMark
       ? {

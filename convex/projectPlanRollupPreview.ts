@@ -5,7 +5,7 @@ import { internalQuery } from './server';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { workRecordTable } from './projectWorkRecordTables';
 import { generationHead } from './projectWorkHead';
-import { rollupChecklist, rollupWorkReader, rollupWorkStamp } from './projectPlanRollupFacts';
+import { rollupChecklist, rollupWorkReader } from './projectPlanRollupFacts';
 import { invariant } from '../src/errors';
 import { isShelved, planningItemSchema, type PlanningItem } from '../src/work-planning-types';
 
@@ -104,7 +104,9 @@ export const page = internalQuery({
         if (isShelved(item.status) || item.purged) return null;
         // A compact payload may omit both the pin and links. Never interpret that as unpinned or unlinked.
         const fragmented = Boolean(item.payload || item.payloadKey || typeof item.body !== 'string');
-        const { work, heads } = fragmented ? { work: 'unknown' as const, heads: [] } : await read.read(item);
+        const { work, workStamp } = fragmented
+          ? { work: 'unknown' as const, workStamp: '' }
+          : await read.read(item);
         return {
           id: item.id,
           kind: item.kind,
@@ -116,7 +118,7 @@ export const page = internalQuery({
           ...(work === 'unknown' ? { incomplete: true as const } : {}),
           ...(fragmented ? { checked: 0, unchecked: 1 } : rollupChecklist(item.body)),
           work,
-          workStamp: rollupWorkStamp(heads),
+          workStamp,
         };
       }),
     );

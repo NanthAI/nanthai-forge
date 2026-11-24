@@ -11,7 +11,13 @@ export const rollupWake = makeFunctionReference<'mutation'>('projectPlanRollup:a
 /** Acceptance keeps its own batched fold; an explicit lifecycle operation checks just its linked Item. */
 export async function wakePlanLifecycle(
   ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; cause: string; itemId?: string; reopenedLaneId?: string },
+  input: {
+    projectId: Id<'hostedProjects'>;
+    cause: string;
+    itemId?: string;
+    branchOnly?: true;
+    reopen?: { kind: 'lane' | 'intent'; id: string; version: number; at: string };
+  },
 ) {
   if (!input.itemId) return;
   await ctx.scheduler.runAfter(0, rollupWake, { ...input, source: 'lifecycle' });

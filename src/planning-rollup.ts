@@ -9,6 +9,12 @@ export type RollupCounts = {
   progress: number;
   started: number;
   done: number;
+  /** Verified running evidence; unlike started, never inferred from a completed Intent. */
+  running: number;
+};
+export type RollupBranch = Pick<RollupCounts, 'unsettled' | 'progress' | 'started'> & {
+  running?: number;
+  lane?: true;
 };
 export type RollupWork = 'none' | 'active' | 'completed' | 'abandoned' | 'unknown';
 export const rollupReasons = {
@@ -25,10 +31,10 @@ export const rollupReasons = {
 export function rollupContribution(
   status: PlanningItem['status'],
   /** Only a parent scope inherits branch facts. An Initiative counts each stored member once. */
-  branch?: Pick<RollupCounts, 'unsettled' | 'progress' | 'started'>,
+  branch?: RollupBranch,
 ): RollupCounts {
   if (status === 'archived' || status === 'deleted')
-    return { total: 0, unsettled: 0, progress: 0, started: 0, done: 0 };
+    return { total: 0, unsettled: 0, progress: 0, started: 0, done: 0, running: 0 };
   const done = status === 'closed';
   const progress = status === 'in-progress';
   return {
@@ -37,15 +43,18 @@ export function rollupContribution(
     progress: Number(progress || !!branch?.progress),
     started: Number(done || progress || !!branch?.started),
     done: Number(done),
+    running: Number(progress || !!branch?.running),
   };
 }
 
 /** A status pin owns the display, not evidence that work exists below the next parent. */
-export function rollupBranch(scope: RollupCounts, work: RollupWork) {
+export function rollupBranch(scope: RollupCounts, work: RollupWork): RollupBranch {
   return {
     unsettled: Number(scope.unsettled > 0 || work === 'active'),
     progress: Number(scope.progress > 0 || work === 'active'),
     started: Number(scope.started > 0 || work === 'active' || work === 'completed'),
+    ...(scope.running || work === 'active' ? { running: 1 } : {}),
+    ...(work === 'active' ? { lane: true } : {}),
   };
 }
 
@@ -61,22 +70,13 @@ type Subject = Pick<PlanningItem, 'status' | 'kind' | 'statusPin'> & {
  * An absent or incomplete counter is not an empty counter; its caller must prove coverage first. */
 export function rollupDecision(subject: Subject, scope: RollupCounts, enabled: boolean) {
   const { kind, status, statusPin, work, unchecked, checked } = subject;
-  if (subject.pinned || statusPin || status === 'proposed' || status === 'archived' || status === 'deleted')
-    return null;
+  if (subject.pinned || statusPin || (status !== 'open' && status !== 'in-progress')) return null;
   const move = (next: Subject['status'], rule: keyof typeof rollupReasons) =>
     next === status ? null : { status: next, rule, reason: rollupReasons[rule] };
   if (kind === 'initiative' && !enabled) return null;
-  const settled = status === 'closed' || status === 'abandoned';
-  if (settled && enabled && scope.unsettled)
-    return move(
-      scope.started || work === 'active' || work === 'completed' ? 'in-progress' : 'open',
-      'workReopened',
-    );
-  if (settled && kind === 'issue') return null;
   if (status === 'open' && kind === 'issue' && work === 'active') return move('in-progress', 'laneStarted');
-  if (status === 'open' && enabled && scope.unsettled && scope.started)
-    return move('in-progress', 'childStarted');
-  if (enabled && scope.unsettled) return null;
+  if (status === 'open' && enabled && scope.running) return move('in-progress', 'childStarted');
+  if (enabled && (scope.unsettled || scope.running)) return null;
   if (kind === 'initiative') {
     if (!scope.total || unchecked) return null;
     return scope.done ? move('closed', 'lastItemSettled') : move('abandoned', 'allAbandoned');

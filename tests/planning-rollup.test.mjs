@@ -2,13 +2,17 @@
 // Copyright 2026 Ferdinando Valsecchi
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { rollupContribution, rollupDecision } from '../dist/planning-rollup.js';
-import { rollupMembershipChanges } from '../dist/planning-rollup-membership.js';
+import { rollupBranch, rollupContribution, rollupDecision } from '../dist/planning-rollup.js';
+import {
+  emptyRollupCounts,
+  initiativeContribution,
+  rollupMembershipChanges,
+} from '../dist/planning-rollup-membership.js';
 import { purgedIndexValue } from '../dist/work-planning-purge.js';
 import { resolvePlanningPut } from '../dist/work-planning-put.js';
 import { planningItemSchema } from '../dist/work-planning-types.js';
 
-const empty = { total: 0, unsettled: 0, progress: 0, started: 0, done: 0 };
+const empty = emptyRollupCounts();
 const pin = { by: '@mara/bright-otter', at: '2026-11-24T10:00:00Z' };
 const item = (changes = {}) => ({
   status: 'open',
@@ -36,10 +40,18 @@ test('a start moves Planned ancestors, even through an overridden intermediate I
   assert.equal(decide(initiative(), child).status, 'in-progress');
 });
 
-test('an unstarted Initiative with some completed work is In progress even when no Lane is running', () => {
-  const scope = totals(rollupContribution('closed'), rollupContribution('open'));
-  assert.equal(decide(initiative(), scope).status, 'in-progress');
-  assert.equal(decide(item(), scope).status, 'in-progress');
+test('only direct In progress members or open Lanes start a Planned Initiative', () => {
+  const completed = initiativeContribution('open', rollupBranch(empty, 'completed'));
+  const closed = initiativeContribution('closed');
+  const descendantRunning = rollupContribution('in-progress');
+  const descendantOnly = initiativeContribution('open', rollupBranch(descendantRunning, 'none'));
+  assert.equal(decide(initiative(), totals(completed, closed, descendantOnly)), null);
+  assert.equal(
+    decide(initiative(), initiativeContribution('open', rollupBranch(empty, 'active')))?.rule,
+    'childStarted',
+  );
+  assert.equal(decide(initiative(), initiativeContribution('in-progress'))?.rule, 'childStarted');
+  assert.equal(decide(item(), totals(completed, closed)), null);
 });
 
 test('the final linked-work completion closes ancestors and the Initiative, with distinct rule reasons', () => {
@@ -75,13 +87,17 @@ test('an Initiative with all Items abandoned becomes Abandoned, not Done, and an
   assert.equal(decide(initiative(), rollupContribution('deleted')), null);
 });
 
-test('an open child reopens a settled parent to Planned before work has started or In progress otherwise', () => {
-  const open = rollupContribution('open');
-  assert.equal(decide(item({ status: 'closed' }), open).status, 'open');
-  const started = totals(open, rollupContribution('closed'));
-  assert.equal(decide(initiative({ status: 'abandoned' }), started).status, 'in-progress');
-  assert.equal(decide(initiative({ status: 'proposed' }), started), null);
-  assert.equal(decide(initiative({ status: 'closed', statusPin: pin }), started), null);
+test('terminal records keep deliberate closes despite an owner-look line, proposed children, or settled members', () => {
+  const proposed = rollupContribution('proposed');
+  const running = rollupContribution('in-progress');
+  const settled = totals(rollupContribution('closed'), rollupContribution('abandoned'));
+  for (const kind of ['issue', 'initiative']) {
+    for (const status of ['closed', 'abandoned']) {
+      const subject = item({ kind, status, unchecked: 1, work: 'completed' });
+      assert.equal(decide(subject, totals(proposed, running)), null);
+      assert.equal(decide({ ...subject, unchecked: 0 }, settled), null);
+    }
+  }
 });
 
 test('turning roll-up off leaves parents and Initiatives alone while own Lane start and finish still work', () => {

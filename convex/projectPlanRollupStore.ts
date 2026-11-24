@@ -8,12 +8,11 @@ import {
   rollupMembershipChanges,
   type RollupScope,
 } from '../src/planning-rollup-membership';
-import type { RollupCounts } from '../src/planning-rollup';
+import type { RollupBranch, RollupCounts } from '../src/planning-rollup';
 
 const COLLECTION = '_workStorePlanRollup';
 type Scope = { projectId: Id<'hostedProjects'>; partition: Id<'projectWorkGenerations'> };
-type Branch = Pick<RollupCounts, 'unsettled' | 'progress' | 'started'>;
-type State = { counts: RollupCounts; effective?: RollupCounts; forwarded?: Branch };
+type State = { counts: RollupCounts; effective?: RollupCounts; forwarded?: RollupBranch };
 
 const find = (db: QueryCtx['db'], partition: Scope['partition'], key: string) =>
   db
@@ -26,6 +25,10 @@ const find = (db: QueryCtx['db'], partition: Scope['partition'], key: string) =>
 async function rollupScope(db: QueryCtx['db'], partition: Scope['partition'], key: RollupScope) {
   const row = await find(db, partition, key);
   const state: State = row ? JSON.parse(row.value) : { counts: emptyRollupCounts() };
+  // Older direct progress counts only In progress statuses. Older inherited progress could be an
+  // orphaned Intent, so it is not running evidence until a worker verifies and republishes the branch.
+  state.counts.running ??= state.counts.progress;
+  if (state.effective) state.effective.running ??= state.counts.running;
   return { row, ...state };
 }
 
@@ -120,14 +123,16 @@ export async function publishRollupBranches(
   updates: readonly {
     item: NonNullable<Parameters<typeof rollupMembershipChanges>[0]> & { id: string };
     previous: Awaited<ReturnType<typeof readRollupBranch>>;
-    next: Branch;
+    next: RollupBranch;
   }[],
 ) {
   const changed = updates.filter(
     ({ previous: { forwarded: before }, next }) =>
       next.unsettled !== (before?.unsettled ?? 0) ||
       next.progress !== (before?.progress ?? 0) ||
-      next.started !== (before?.started ?? 0),
+      next.started !== (before?.started ?? 0) ||
+      next.running !== before?.running ||
+      next.lane !== before?.lane,
   );
   const combined = new Map<RollupScope, RollupCounts>();
   for (const { item, previous, next } of changed) {

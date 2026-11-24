@@ -225,10 +225,31 @@ export async function applyLifecycleRecord(
       projectId: plan.projectId,
       cause: plan.operationId,
       itemId,
-      ...(before.kind === 'lane' ? { reopenedLaneId: before.id } : {}),
+      reopen: { kind: before.kind, id: before.id, version: before.version + 1, at: plan.at },
     });
   }
   if (request.action === 'abandon') {
+    const intentId = before.kind === 'lane' ? before.intentId : before.id;
+    const intentHead = await recordHead(ctx, plan.projectId, 'intent', intentId);
+    if (before.kind === 'lane')
+      await completeIntentWhenLanesDone(
+        ctx,
+        {
+          projectId: plan.projectId,
+          actor: plan.actor,
+          authorityEpoch: plan.authorityEpoch,
+          intentId,
+          at: plan.at,
+          abandon: true,
+        },
+        intentHead,
+      );
+    await wakePlanLifecycle(ctx, {
+      projectId: plan.projectId,
+      cause: plan.operationId,
+      itemId: intentHead?.planningItemId,
+      branchOnly: true,
+    });
     // Freeze the queue at application, after any save or cascade staging.
     // Enqueue writes this same row, so concurrent admissions serialize here.
     const landingSequence =

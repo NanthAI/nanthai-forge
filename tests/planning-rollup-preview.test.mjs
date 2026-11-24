@@ -105,7 +105,7 @@ async function fixture() {
       recordId: 'synthetic-work-pointer',
     });
   const read = (extra = {}) => s.call('preview', page, { projectId, after: '', ...extra });
-  return { ...s, read, put, intent, headId };
+  return { ...s, projectId, read, put, intent, headId };
 }
 
 test('dry-run pages are read only, fence the Work head, and omit bodies and pin identities', async t => {
@@ -128,7 +128,17 @@ test('dry-run pages are read only, fence the Work head, and omit bodies and pin 
   await s.put('b', { kind: 'initiative', body: '## Done when\n- [ ] initiative gate' });
   await s.put('c', { payload: true, body: '' });
   await s.intent('a', 'completed');
-  const successor = await s.intent(successorIntentId('a'), 'active');
+  const successorId = successorIntentId('a');
+  const successor = await s.intent(successorId, 'active');
+  await s.ctx.db.insert('projectHostedRecordHeads', {
+    projectId: s.projectId,
+    kind: 'lane',
+    key: 'successor-lane',
+    parent: successorId,
+    status: 'active',
+    version: 1,
+    recordId: 'synthetic-lane-pointer',
+  });
   for (let i = 100; i < 152; i++) await s.put(`item-${i}`, {});
   const first = await s.read();
   assert.equal(first.rootsRead, 50);

@@ -10,7 +10,7 @@ import { planCounter, type PlanCounts } from './projectPlanCountsStore';
 import { publishRollupBranches, readRollupBranch, readRollupScope } from './projectPlanRollupStore';
 import { rollupChecklist, rollupWorkReader } from './projectPlanRollupFacts';
 import { executeCommand } from './projectWorkCommand';
-import { rollupBranch, rollupDecision } from '../src/planning-rollup';
+import { rollupBranch, rollupDecision, rollupReasons } from '../src/planning-rollup';
 import { emptyRollupCounts } from '../src/planning-rollup-membership';
 import { isShelved, type PlanningItem } from '../src/work-planning-types';
 import { digest } from '../src/state/hash';
@@ -76,7 +76,17 @@ export const advance = internalMutation({
     path: v.optional(v.array(v.string())),
     remaining: v.optional(v.number()),
     affected: v.optional(v.array(v.string())),
+    // Keep accepting old queued wakes during deploy; an unversioned signal cannot reopen anything.
     reopenedLaneId: v.optional(v.string()),
+    branchOnly: v.optional(v.literal(true)),
+    reopen: v.optional(
+      v.object({
+        kind: v.union(v.literal('lane'), v.literal('intent')),
+        id: v.string(),
+        version: v.number(),
+        at: v.string(),
+      }),
+    ),
   },
   returns: result,
   handler: async (ctx, args) => {
@@ -125,13 +135,26 @@ export const advance = internalMutation({
     if (item.payload || item.payloadKey || typeof item.body !== 'string') return 'blocked' as const;
     if ('planningClose' in row && row.planningClose) return 'blocked' as const;
     if (!enabled && (path.length || item.kind === 'initiative')) return 'unchanged' as const;
-    const facts = await rollupWorkReader(ctx, args.projectId, 32).read(item);
-    if (facts.work === 'unknown') return 'blocked' as const;
-    // A Lane reopen does not rewrite its Intent. Honor the reopened Lane only while its exact current head is active.
-    const reopened = args.reopenedLaneId
-      ? await recordHead(ctx, args.projectId, 'lane', args.reopenedLaneId)
-      : null;
-    const work = reopened?.status === 'active' && reopened.planningItemId === item.id ? 'active' : facts.work;
+    const { work } = await rollupWorkReader(ctx, args.projectId, 32).read(item);
+    if (work === 'unknown') return 'blocked' as const;
+    // This is a versioned lifecycle event, not a fact that live roll-up or recompute can infer.
+    const event = args.source === 'lifecycle' && args.reopen;
+    const reopen =
+      !!event &&
+      item.kind === 'issue' &&
+      !item.statusPin &&
+      (item.status === 'closed' || item.status === 'abandoned') &&
+      item.at <= event.at &&
+      (await recordHead(ctx, args.projectId, event.kind, event.id).then(
+        head =>
+          head?.status === 'active' &&
+          head.version === event.version &&
+          (head.planningItemId === item.id ||
+            (head.planningItemId === undefined &&
+              [item.id, ...(item.intentIds ?? [])].includes(
+                event.kind === 'lane' ? (head.parent ?? '') : head.key,
+              ))),
+      ));
     if (args.source === 'landing' && work !== 'completed') return 'unchanged' as const;
     const header = enabled ? await planCounter(ctx.db, partition) : null;
     const counts: PlanCounts | null = header ? JSON.parse(header.value) : null;
@@ -145,7 +168,15 @@ export const advance = internalMutation({
       (enabled && item.kind === 'initiative'
         ? (await readRollupScope(ctx.db, partition, `initiative:${item.id}`, true, true))!
         : emptyRollupCounts());
-    const move = rollupDecision({ ...item, ...rollupChecklist(item.body), work }, scope, enabled);
+    const move = args.branchOnly
+      ? null
+      : reopen
+        ? {
+            status: work === 'active' ? ('in-progress' as const) : ('open' as const),
+            rule: 'workReopened' as const,
+            reason: rollupReasons.workReopened,
+          }
+        : rollupDecision({ ...item, ...rollupChecklist(item.body), work }, scope, enabled);
     let forwarded = false;
     if (
       branch &&

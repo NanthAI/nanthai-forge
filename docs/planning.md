@@ -163,13 +163,15 @@ body retains every annotation, including dates that have been checked off.
 
 New Plan partitions maintain exact direct Item membership counts for parents and Initiatives. Counts include hidden Items and exclude Archived and Deleted Items; a move updates the old and new scopes together. Older partitions report unknown child coverage until an explicit bounded preparation finishes. Partial counts never authorize automatic status changes.
 
-- **Start.** A Lane start moves its unpinned Item to In progress. An In progress descendant moves every unpinned
-  Planned ancestor Item and the applicable Planned Initiatives to In progress. Completed work is also evidence
-  of starting when there is still open work in the scope. Proposed Items still require planning; a Proposed or
-  pinned ancestor does not stop the start signal from reaching the next level.
+- **Start.** An open Lane moves its unpinned Planned Item to In progress. An In progress descendant or open
+  Lane can start a Planned ancestor Item. A Planned Initiative starts only when one of its own member Items
+  is In progress or has an open Lane. An active Intent without an open Lane is not a start, and neither is
+  completed work on a still-Planned Item. Proposed Items still require planning; a Proposed or pinned
+  ancestor does not stop running evidence from reaching the next parent.
 - **Done.** An Item closes when its own Done-when lines are met and its children are settled (Done or Abandoned).
   An Item with linked work still needs that work to finish. Completing the last Lane outside a landing also
-  checks the Item. Abandoning a Lane never abandons its Item or prevents another start. A parent without
+  checks the Item. Abandoning a Lane never changes its Item status or prevents another start. Abandoning
+  the last open Lane retires the active execution Intent unless it is awaiting a recovery. A parent without
   its own Lane can close after its last child settles. An unstarted leaf without a checklist does not close merely because it has nothing to tick.
   After the last child settles, a parent with unchecked lines stays open and the Item shows the remaining lines.
   An Initiative closes when it has at least one Item, every Item in it is settled and its own Done-when lines are
@@ -177,9 +179,11 @@ New Plan partitions maintain exact direct Item membership counts for parents and
   rule that moved it. Archived and Deleted rows are outside the live Plan, so they neither block closure nor count
   as completed work. Initiative membership is the Item's stored `initiativeId`, counted once even when that Item
   is nested.
-- **Reopen.** New or reopened work under a settled parent or Initiative reopens it. It becomes In progress if
-  work in its scope has started, or Planned if none has. A Lane start or recorded completed work is evidence of
-  starting; abandoning an unstarted Item is not. A reopen does not reopen any settled children or recreate Lanes.
+- **Reopen.** Roll-up and recompute change only Planned and In progress rows. They never undo a Done or
+  Abandoned status, even when a child is Proposed or an owner-look line is unchecked. A person can reopen
+  a settled row explicitly. An explicit linked Lane or Intent reopen can also reopen its unpinned Item, but
+  not its settled parents, Initiatives, or children. Completing the work again only checks the linked Item
+  for closure; it does not undo a terminal status.
 - **Override.** An explicit manual status change pins that Item or Initiative. Its status shows who pinned it
   and when, from the retained version. Editing the title or checklist does not pin it. Automation, including
   start and completion, leaves the pinned status alone, but still forwards facts about the children and updates
@@ -188,7 +192,7 @@ New Plan partitions maintain exact direct Item membership counts for parents and
   Close and bulk status changes pin each changed row. On the web choose **Follow work** in the status menu;
   in CLI or MCP use `put-planning-item` with the current `expectedVersion` and `fields: {"statusPin": null}`.
   The member Item or Initiative reply shows `statusPin` with who and when; clearing starts the same evaluation
-  as a new work change, so an open child can reopen the row or a settled scope can close it. If no rule applies,
+  as a new work change. Clearing a pin is not a reopen. If no rule applies,
   the status stays where it is. To undo an automatic change, set the previous status, which pins it. Batch Undo
   restores the previous pin with the previous status; Archive and Restore from the shelf keep the pin state.
 - **Project setting.** **Roll up planning status** defaults to on; the owner can turn it off in Settings → Project →
@@ -242,8 +246,17 @@ existing reads, is `2 + 2(H + I)` point reads for decisions and at most `1 + H +
 is the number of affected ancestors and `I` the number of distinct affected Initiatives (at most `H + 1`). There
 are at most two maintained counter updates per changed Item and one wake per nonempty page needing a successor.
 For one parent and one Initiative this means at most six decision reads, four counter updates and three version
-appends, instead of two record selections and one version append. A landing with no due status work adds no
-ancestor reads or writes. A cohort batches by page and deduplicates shared targets before these counts apply.
+appends, instead of two record selections and one version append. Those counts exclude open-Lane verification:
+one indexed query per distinct hosted Intent, at most nine active Lane heads and at most eight overlap lookups
+for retained landed placeholders (one marker lookup only for a staged cascade). The worker caps distinct Intent
+lookups at 32, and recompute at 150 per page; unknown evidence does not authorize a change. An abandonment of
+linked work refreshes its contribution in one worker step without writing an Item status. A landing with no due
+status work adds no ancestor reads or writes. A cohort batches by page before these counts apply.
+
+Historical active Intent heads that no longer have running work can be checked with the internal Intent repair
+preview. It takes up to 16 explicitly selected Intent IDs and checks at most 100 sibling Lane heads per Intent.
+The separate apply requires the previewed versions and results and does not change any Plan item. A fresh
+reopen, active Lane, reverted landing, missing evidence or outstanding recovery refuses repair.
 
 Version appends include their existing audit, index and projection work; they are not single database document
 writes. Measure whole-document and billed I/O separately from scheduling on a small fixture and a Plan with

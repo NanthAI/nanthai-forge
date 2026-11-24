@@ -52,6 +52,8 @@ export const hostedOverlapTables = {
     lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),
     recordVersion: v.number(),
     open: v.boolean(),
+    /** An explicit reopen at an unchanged saved head supersedes older landing evidence for running work. */
+    reopenedAt: v.optional(v.number()),
     /** The hosted Item link, and the count row this Lane contributes to while its work is open. */
     planningItemId: v.optional(v.string()),
     planLaneMark: v.optional(v.id('projectFinishReadRows')),

@@ -6,18 +6,10 @@ import { readHostedRecord, recordHead, writeHostedRecord } from './projectHosted
 import { hostedIntentSchema } from '../src/hosted-lane';
 import { supersedeQuietSiblings } from './projectHostedSuperseded';
 import { wakePlanLifecycle } from './projectPlanRollupWake';
+import { runningLaneHead } from './projectHostedOpenLaneEvidence';
 
 /** One page of sibling Lane heads; an Intent with more Lanes than this stays open. */
 const SIBLINGS = 100;
-/** True when the Lane's current saved head is the head an accepted landing carried (its overlap row's landing
- * stamp). A later save moves the row head and the Lane counts as running again. */
-async function landedAtHead(ctx: MutationCtx, projectId: Id<'hostedProjects'>, laneId: string) {
-  const row = await ctx.db
-    .query('projectHostedOverlapLanes')
-    .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
-    .unique();
-  return !!row?.landed && row.landed.laneHead === row.head;
-}
 /** Completes an active Intent once none of its Lanes is still open. Runs in the transaction that just
  * completed a Lane (acceptance completion tick, explicit complete, operator sweep), so it adds no call:
  * one head read, one indexed page of sibling heads and one record write. Outside acceptance, the
@@ -32,6 +24,8 @@ export async function completeIntentWhenLanesDone(
     intentId: string;
     at: string;
     planningCause?: string;
+    /** Losing the final Lane cancels this execution, not its planning Item or pending recovery. */
+    abandon?: true;
     /** Lanes of a landing that stay active (keepOpen, completeOnAccept off): they declared this Intent and do
      * not keep it open. A pinned Lane always does. */
     landed?: ReadonlySet<string>;
@@ -62,11 +56,7 @@ export async function completeIntentWhenLanesDone(
   if (siblings.length > SIBLINGS) return false;
   for (const row of siblings) {
     if (row.status !== 'active' || (!row.pinned && input.landed?.has(row.key))) continue;
-    // A sibling that stayed open after its own landing (completeOnAccept off, keepOpen) and has not been saved
-    // since is landed work, not running work: it must not keep the Intent open forever (0b12fcfe line 1). Its
-    // landing stamp rides on the overlap row, one indexed read, only when a sibling would otherwise block.
-    if (!row.pinned && (await landedAtHead(ctx, input.projectId, row.key))) continue;
-    return false;
+    if (await runningLaneHead(ctx, row)) return false;
   }
   const current = await readHostedRecord(ctx, {
     projectId: input.projectId,
@@ -76,13 +66,18 @@ export async function completeIntentWhenLanesDone(
   });
   if (!current) return false;
   const intent = hostedIntentSchema.parse(JSON.parse(current.value));
-  if (intent.status !== 'active') return false;
+  if (intent.status !== 'active' || (input.abandon && intent.needsFix)) return false;
   await writeHostedRecord(ctx, {
     projectId: input.projectId,
     actor: input.actor,
     authorityEpoch: input.authorityEpoch,
     expectedVersion: intent.version,
-    record: { ...intent, version: intent.version + 1, status: 'completed', at: input.at },
+    record: {
+      ...intent,
+      version: intent.version + 1,
+      status: input.abandon ? 'abandoned' : 'completed',
+      at: input.at,
+    },
   });
   if (input.planningCause)
     await wakePlanLifecycle(ctx, {

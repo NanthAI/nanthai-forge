@@ -5,9 +5,10 @@ import { recordHead } from './projectHostedRecords';
 import type { Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 
-/** A finished Intent whose Issue continued reports the latest Intent's state. No bodies or sibling lanes. */
-export async function currentPlanningIntentHead(ctx: QueryCtx, projectId: Id<'hostedProjects'>, id: string) {
+/** The latest Intent owns completion evidence. Earlier links can still own an explicitly reopened Lane. */
+export async function planningIntentHeads(ctx: QueryCtx, projectId: Id<'hostedProjects'>, id: string) {
   let head = await recordHead(ctx, projectId, 'intent', id);
+  const heads = head ? [head] : [];
   let at = id;
   for (
     let hop = 0;
@@ -18,7 +19,8 @@ export async function currentPlanningIntentHead(ctx: QueryCtx, projectId: Id<'ho
     const next = await recordHead(ctx, projectId, 'intent', nextId);
     if (!next) break;
     head = next;
+    heads.push(next);
     at = nextId;
   }
-  return head;
+  return heads;
 }

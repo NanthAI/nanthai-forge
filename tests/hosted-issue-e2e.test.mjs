@@ -114,12 +114,17 @@ async function world(t, { ticks = ['x', 'x'], completeOnAccept = false } = {}) {
   };
   const bridged = new Set();
   const bridge = async name => {
-    // The fixtures split Work index setup from the landing controller. Bridge the canonical Intent head
-    // and run the actual scheduled steps in its corresponding Plan, once per scheduled function.
-    const head = [...f.tables.projectHostedRecordHeads.values()].find(
-      row => row.kind === 'intent' && row.key === issue,
-    );
-    s.tables.projectHostedRecordHeads.set(head._id, { ...head, projectId: s.projectId });
+    // Bridge the canonical Intent + Lane heads and the landed-Lane evidence into the Plan fixture.
+    // The actual scheduled handlers decide status, once per scheduled function.
+    for (const head of f.tables.projectHostedRecordHeads.values()) {
+      if (!(head.kind === 'intent' && head.key === issue) && !(head.kind === 'lane' && head.parent === issue))
+        continue;
+      s.tables.projectHostedRecordHeads.set(head._id, { ...head, projectId: s.projectId });
+    }
+    for (const overlap of f.tables.projectHostedOverlapLanes.values()) {
+      if (overlap.intentId !== issue) continue;
+      s.tables.projectHostedOverlapLanes.set(overlap._id, { ...overlap, projectId: s.projectId });
+    }
     for (const task of f.tables._scheduled_functions.values()) {
       if (task.name !== name || bridged.has(task._id)) continue;
       bridged.add(task._id);

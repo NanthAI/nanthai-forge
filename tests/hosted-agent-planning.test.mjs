@@ -71,7 +71,7 @@ const workerFeatures = [
   planningInitiativeCountsFeature,
   planningStatusWorkerFeature,
 ];
-async function publishPlanWork(s, itemId, status) {
+async function publishPlanWork(s, itemId, status, source = 'plan') {
   if (status) {
     const old = [...s.tables.projectHostedRecordHeads.values()].find(
       row => row.kind === 'intent' && row.key === itemId,
@@ -87,12 +87,26 @@ async function publishPlanWork(s, itemId, status) {
         parent: '',
         recordId: randomUUID(),
       });
+    const lane = [...s.tables.projectHostedRecordHeads.values()].find(
+      row => row.kind === 'lane' && row.parent === itemId,
+    );
+    if (lane) await s.ctx.db.patch(lane._id, { status, version: lane.version + 1 });
+    else if (status === 'active')
+      await s.ctx.db.insert('projectHostedRecordHeads', {
+        projectId: s.projectId,
+        key: randomUUID(),
+        kind: 'lane',
+        status,
+        version: 1,
+        parent: itemId,
+        recordId: randomUUID(),
+      });
   }
   return advancePlanStatus._handler(s.ctx, {
     projectId: s.projectId,
     partition: s.tables.hostedProjects.get(s.projectId).work.generationId,
     cause: randomUUID(),
-    source: 'plan',
+    source,
     itemId,
   });
 }
@@ -1309,24 +1323,7 @@ test('a worker-owned start keeps the owner claim when status moves before the fi
   p.mutation = async (name, args) => {
     if (race) {
       race = false;
-      await s.ctx.db.insert('projectHostedRecordHeads', {
-        projectId: s.projectId,
-        kind: 'intent',
-        key: itemId,
-        status: 'active',
-        version: 1,
-        parent: '',
-        recordId: randomUUID(),
-      });
-      assert.equal(
-        await advancePlanStatus._handler(s.ctx, {
-          projectId: s.projectId,
-          itemId,
-          cause: randomUUID(),
-          source: 'start',
-        }),
-        'moved',
-      );
+      assert.equal(await publishPlanWork(s, itemId, 'active', 'start'), 'moved');
     }
     return mutation(name, args);
   };

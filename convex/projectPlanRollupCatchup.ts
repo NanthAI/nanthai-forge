@@ -7,7 +7,7 @@ import { generationHead } from './projectWorkHead';
 import { planningWriteContext } from './projectWorkCommandContext';
 import { planCounter, type PlanCounts } from './projectPlanCountsStore';
 import { publishRollupBranches, readRollupBranch, readRollupScope } from './projectPlanRollupStore';
-import { rollupChecklist, rollupWorkReader, rollupWorkStamp } from './projectPlanRollupFacts';
+import { rollupChecklist, rollupWorkReader } from './projectPlanRollupFacts';
 import { approvedDevRollup } from './projectPlanRollupPreview';
 import { writeRollupMove } from './projectPlanRollup';
 import { workRecordTable } from './projectWorkRecordTables';
@@ -134,7 +134,7 @@ export const page = internalMutation({
         branch?.effective ??
         branch?.counts ??
         (await readRollupScope(ctx.db, partition, `initiative:${item.id}`, true, true))!;
-      const { work, heads } = await read.read(item);
+      const { work, workStamp } = await read.read(item);
       if (work === 'unknown') return stop('work-incomplete');
       const move = rollupDecision({ ...item, ...rollupChecklist(item.body), work }, scope, true);
       if (pending) {
@@ -147,7 +147,7 @@ export const page = internalMutation({
             approved.from !== item.status ||
             approved.status !== move.status ||
             approved.rule !== move.rule ||
-            approved.workStamp !== rollupWorkStamp(heads)
+            approved.workStamp !== workStamp
           )
             return stop('approved-move-changed');
           pending.delete(item.id);

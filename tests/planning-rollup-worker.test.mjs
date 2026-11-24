@@ -16,6 +16,7 @@ const catchup = await import(moduleUrl('../convex/projectPlanRollupCatchup.ts'))
 const preview = await import(moduleUrl('../convex/projectPlanRollupPreview.ts'));
 const { workspace } = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const { transition } = await import(moduleUrl('../convex/projectHostedLifecycle.ts'));
+const intentRepair = await import(moduleUrl('../convex/projectHostedIntentRepair.ts'));
 const { writeHostedRecord } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const { set: setPolicy } = await import(moduleUrl('../convex/projectAutonomy.ts'));
 
@@ -54,8 +55,8 @@ async function plan(t) {
   const read = async id => (await s.read()).data.planningItems.findLast(item => item.id === id);
   const set = (itemId, fields) =>
     s.send({ action: 'put-planning-item', itemId, expectedVersion: 1, operationId: randomUUID(), ...fields });
-  const work = (itemId, status) =>
-    s.ctx.db.insert('projectHostedRecordHeads', {
+  const work = async (itemId, status, laneStatus = status === 'active' ? 'active' : null) => {
+    const intent = await s.ctx.db.insert('projectHostedRecordHeads', {
       projectId: s.projectId,
       kind: 'intent',
       key: itemId,
@@ -64,6 +65,19 @@ async function plan(t) {
       parent: '',
       recordId: 'synthetic-work-pointer',
     });
+    const lane =
+      laneStatus &&
+      (await s.ctx.db.insert('projectHostedRecordHeads', {
+        projectId: s.projectId,
+        kind: 'lane',
+        key: randomUUID(),
+        status: laneStatus,
+        version: 1,
+        parent: itemId,
+        recordId: 'synthetic-lane-pointer',
+      }));
+    return { intent, lane };
+  };
   const toggle = (rollUpPlanningStatus, operationId = randomUUID()) =>
     setPolicy._handler(s.ctx, {
       projectId: s.projectId,
@@ -360,13 +374,13 @@ test('approved dev apply stops on a changed Plan revision even inside the same p
   assert.deepEqual(await s.read(itemId), pinned);
 });
 
-test('dev apply refuses a changed linked Work stamp even if the approved decision would be unchanged', async t => {
+test('dev apply refuses a changed open Lane version even if the approved decision would be unchanged', async t => {
   const s = await plan(t);
   const itemId = await s.add({ status: 'open' });
-  const workId = await s.work(itemId, 'active');
+  const { lane } = await s.work(itemId, 'active');
   const { report, step } = await devApproval(t, s);
   assert.equal(report.wouldChange, 1);
-  await s.ctx.db.patch(workId, { version: 2 });
+  await s.ctx.db.patch(lane, { version: 2 });
   await step(0);
   await step(1);
   assert.equal((await s.progress()).reason, 'approved-move-changed');
@@ -374,10 +388,24 @@ test('dev apply refuses a changed linked Work stamp even if the approved decisio
   assert.equal(s.pages.length, 0);
 });
 
-test('a Lane left open by landing closes its Item when explicitly completed, and reopening wakes its parent', async t => {
+test('a stale active Intent with only a terminal Lane cannot start the Item or its Initiative', async t => {
   const s = await plan(t);
-  const parentId = await s.add({ status: 'in-progress' });
-  const itemId = await s.add({ status: 'in-progress', parentId });
+  const initiativeId = await s.add({ kind: 'initiative', status: 'open' });
+  for (const lane of ['completed', 'abandoned']) {
+    const itemId = await s.add({
+      status: 'open',
+      initiativeId,
+      body: '## Done when\n- [x] Past effort recorded',
+    });
+    await s.work(itemId, 'active', lane);
+    assert.equal(await s.execute(itemId, { source: 'plan' }), 'unchanged');
+    await s.drain();
+    assert.equal((await s.read(itemId)).status, 'open');
+  }
+  assert.equal((await s.read(initiativeId)).status, 'open');
+});
+
+async function lifecycleFixture(s, itemId) {
   const authorityEpoch = 1;
   const project = s.tables.hostedProjects.get(s.projectId);
   Object.assign(project, { sourceAuthority: { mode: 'server', epoch: authorityEpoch } });
@@ -424,14 +452,15 @@ test('a Lane left open by landing closes its Item when explicitly completed, and
     },
   });
   const overlap = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === laneId);
-  await s.ctx.db.patch(overlap._id, {
-    landed: { receiptId: randomUUID(), commit: base.head, laneHead: base.head, at },
-  });
+  const stampLanded = () =>
+    s.ctx.db.patch(overlap._id, {
+      landed: { receiptId: randomUUID(), commit: base.head, laneHead: base.head, at },
+    });
   const changeLane = async (action, version) => {
     const request = JSON.stringify({
       operationId: randomUUID(),
       action,
-      reason: '',
+      reason: action === 'abandon' ? 'Discarded synthetic work' : '',
       authorityEpoch,
       target: {
         kind: 'lane',
@@ -446,10 +475,74 @@ test('a Lane left open by landing closes its Item when explicitly completed, and
     assert.equal(s.tasks.length, 1);
     await s.drain();
   };
+  return { stampLanded, changeLane, laneId };
+}
+
+test('only the linked Item reopens on an explicit Lane reopen, not its settled parent', async t => {
+  const s = await plan(t);
+  const parentId = await s.add({ status: 'in-progress' });
+  const itemId = await s.add({ status: 'in-progress', parentId });
+  const { stampLanded, changeLane } = await lifecycleFixture(s, itemId);
+  await stampLanded();
   await changeLane('complete', 0);
   assert.deepEqual([(await s.read(itemId)).status, (await s.read(parentId)).status], ['closed', 'closed']);
   await changeLane('reopen', 1);
-  assert.equal((await s.read(parentId)).status, 'in-progress');
+  assert.deepEqual(
+    [(await s.read(itemId)).status, (await s.read(parentId)).status],
+    ['in-progress', 'closed'],
+  );
+});
+
+test('abandoning the last open Lane retires the Intent and leaves its Item In progress', async t => {
+  const s = await plan(t);
+  const itemId = await s.add({ status: 'in-progress' });
+  const { changeLane } = await lifecycleFixture(s, itemId);
+  await changeLane('abandon', 0);
+  const intent = [...s.tables.projectHostedRecordHeads.values()].find(
+    row => row.kind === 'intent' && row.key === itemId,
+  );
+  assert.equal(intent.status, 'abandoned');
+  assert.equal((await s.read(itemId)).status, 'in-progress');
+});
+
+test('the version-fenced stale Intent repair updates canonical Work, not Plan, and refuses a reopened Lane', async t => {
+  const s = await plan(t);
+  const settled = await s.add({ status: 'open' });
+  const moved = await lifecycleFixture(s, settled);
+  await moved.stampLanded();
+  const inputs = { projectId: s.projectId, intentIds: [settled] };
+  const expected = await intentRepair.preview._handler(s.ctx, inputs);
+  assert.deepEqual(
+    expected.map(({ id, version, status }) => ({ id, version, status })),
+    [{ id: settled, version: 0, status: 'completed' }],
+  );
+  assert.equal((await s.read(settled)).status, 'open');
+  const approved = { projectId: s.projectId, expected };
+  await intentRepair.apply._handler(s.ctx, approved);
+  await intentRepair.apply._handler(s.ctx, approved);
+  assert.deepEqual(await intentRepair.preview._handler(s.ctx, inputs), []);
+  const head = id =>
+    [...s.tables.projectHostedRecordHeads.values()].find(row => row.kind === 'intent' && row.key === id);
+  assert.equal(head(settled).version, 1);
+  assert.equal(head(settled).status, 'completed');
+  assert.equal((await s.read(settled)).status, 'open');
+
+  const changing = await s.add({ status: 'open' });
+  const changed = await lifecycleFixture(s, changing);
+  await changed.stampLanded();
+  const pending = { ...inputs, intentIds: [changing] };
+  const stale = await intentRepair.preview._handler(s.ctx, pending);
+  assert.equal(stale.length, 1);
+  await changed.stampLanded();
+  await assert.rejects(intentRepair.apply._handler(s.ctx, { ...approved, expected: stale }), {
+    code: 'WORK_STALE',
+  });
+  const fresh = await intentRepair.preview._handler(s.ctx, pending);
+  await changed.changeLane('reopen', 0);
+  await assert.rejects(intentRepair.apply._handler(s.ctx, { ...approved, expected: fresh }), {
+    code: 'WORK_STALE',
+  });
+  assert.equal(head(changing).status, 'active');
 });
 
 test('abandoned linked work does not abandon an Item when a later Plan write checks it', async t => {
