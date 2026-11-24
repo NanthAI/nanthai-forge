@@ -87,7 +87,7 @@ test('filters keep the rows the agent read keeps, and other sorts never renumber
   );
   const read = { rows: JSON.stringify([initiative, a, b, c]), more: false, settled: [], canEdit: true };
   const query = readQuery(new URLSearchParams('owner=sample'));
-  const view = planView(read, '', new Map(), r => keeps(r, query));
+  const view = planView(read, '', r => keeps(r, query));
   const lines = view.groups[0].lines;
   assert.deepEqual(
     lines.map(line => line.row.id),
@@ -106,15 +106,15 @@ test('filters keep the rows the agent read keeps, and other sorts never renumber
     [a.id, b.id],
   );
   assert.deepEqual(
-    planView(read, '', new Map(), r =>
+    planView(read, '', r =>
       keeps(r, readQuery(new URLSearchParams('relation=depends-on'))),
     ).groups[0].lines.map(line => line.row.id),
     [c.id],
   );
   assert.deepEqual(
-    planView(read, '', new Map(), r =>
-      keeps(r, readQuery(new URLSearchParams('owner=none'))),
-    ).groups[0].lines.map(line => line.row.id),
+    planView(read, '', r => keeps(r, readQuery(new URLSearchParams('owner=none')))).groups[0].lines.map(
+      line => line.row.id,
+    ),
     [c.id],
   );
 });

@@ -30,6 +30,7 @@ const { encodePlanPage, planParent, planPageKey, PLAN_ROWS } = await import(
   moduleUrl('../convex/projectPlanRows.ts')
 );
 const { effectiveRank, legacyRank } = await import(moduleUrl('../src/planning-model.ts'));
+const { planDropTargets, dropWrites } = await import(moduleUrl('../web/src/app/plan/plan-drop.ts'));
 
 // Find matches a row's title and the first 8 characters of its id: a fixed digit-free prefix keeps a
 // random id from also matching a numeric search such as 'item 003' (about 0.4% of runs).
@@ -48,6 +49,75 @@ const item = (fields, i) => ({
   body: 'Done when:\n- [x] one\n- [ ] two\n',
   intentIds: [],
   ...fields,
+});
+
+test('a drop ranks only among its destination siblings, and branches follow cross-Initiative seams', () => {
+  const [release, next, parent, sibling, firstChild, secondChild, other] = [
+    { id: 'r', title: 'Release', kind: 'initiative', order: 'a' },
+    { id: 'n', title: 'Next', kind: 'initiative', order: 'b' },
+    { id: 'p', initiativeId: 'r', order: 'a' },
+    { id: 's', initiativeId: 'r', order: 'b' },
+    { id: 'c1', initiativeId: 'r', parentId: 'p', order: 'x' },
+    { id: 'c2', initiativeId: 'r', parentId: 'p', order: 'y' },
+    { id: 'o', initiativeId: 'n', order: 'b' },
+  ].map((fields, position) => item({ position, ...fields }, position));
+  const read = {
+    rows: JSON.stringify([release, next, parent, sibling, firstChild, secondChild, other]),
+    settled: [],
+    more: false,
+    canEdit: true,
+  };
+  const view = planView(read);
+  const place = planDropTargets(view);
+  const onParent = place(sibling, { id: parent.id, position: 'on' });
+  assert.equal(onParent.label, 'Put under · becomes 1.3');
+  assert.ok(onParent.order > secondChild.order);
+  assert.deepEqual(dropWrites(view, sibling, onParent), [
+    {
+      action: 'put-planning-item',
+      itemId: sibling.id,
+      expectedVersion: 1,
+      parentId: parent.id,
+      order: onParent.order,
+    },
+  ]);
+  const amongChildren = place(secondChild, { id: firstChild.id, position: 'before' });
+  assert.equal(amongChildren.label, 'Under 1 · becomes 1.1');
+  assert.deepEqual(dropWrites(view, secondChild, amongChildren), [
+    { action: 'put-planning-item', itemId: secondChild.id, expectedVersion: 1, order: amongChildren.order },
+  ]);
+  const topSeam = place(firstChild, { id: sibling.id, position: 'before' });
+  assert.equal(topSeam.label, 'Top level · 2nd');
+  assert.ok(parent.order < topSeam.order && topSeam.order < sibling.order);
+  assert.equal(dropWrites(view, firstChild, topSeam)[0].parentId, null);
+  const across = place(parent, { initiativeId: next.id, position: 'group' });
+  assert.equal(across.label, 'Moves to Next · Top level · 1st');
+  const writes = dropWrites(view, parent, across);
+  assert.deepEqual(
+    writes
+      .slice(0, 3)
+      .map(({ itemId, initiativeId, expectedVersion }) => [itemId, initiativeId, expectedVersion]),
+    [parent, firstChild, secondChild].map(row => [row.id, next.id, 1]),
+  );
+  assert.deepEqual(
+    writes.slice(3).map(({ action, itemId }) => [action, itemId]),
+    [
+      ['comment-planning-item', release.id],
+      ['comment-planning-item', next.id],
+    ],
+  );
+  for (const [source, target, words] of [
+    [firstChild, firstChild, /This Item/],
+    [sibling, firstChild, /is a sub-item/],
+    [parent, sibling, /has sub-items/],
+  ]) {
+    const notice = place(source, { id: target.id, position: 'on' });
+    assert.equal(notice.refused, true);
+    assert.match(notice.label, words);
+  }
+  const writer = planDropTargets(planView({ ...read, canEdit: false }));
+  assert.equal(writer(sibling, { id: other.id, position: 'before' }).refused, true);
+  assert.equal(writer(sibling, { id: other.id, position: 'on' }).initiativeId, next.id);
 });
 
 test('the plan read lists live work and counts settled Items of live Initiatives only, from root rows', async t => {

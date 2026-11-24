@@ -208,6 +208,9 @@ const run = async (writes, options) => {
     return { results: [], undo: [], kept: 0 };
   }
   window.calls.push(writes);
+  if (boardFlags.has('drag-stale') && writes[0]?.order !== undefined) return {
+    results: [{ index: 0, itemId: writes[0].itemId, outcome: 'refused', code: 'ITEM_CHANGED', currentVersion: 3 }], undo: [], kept: 0,
+  };
   if (deferred) {
     const [write] = writes;
     if (write.expectedVersion === 8) return { results: [{ index: 0, itemId: write.itemId, outcome: 'refused', code: 'ITEM_CHANGED', currentVersion: 9 }], undo: [], kept: 0 };
@@ -220,6 +223,7 @@ const run = async (writes, options) => {
     : { index, itemId: write.itemId, action: write.action, outcome: 'applied', version: (write.expectedVersion || 0) + 1, before: {
       owner: null, status: 'open', type: null, initiativeId: null,
       order: JSON.parse(read.rows).find(row => row.id === write.itemId)?.order ?? null,
+      parentId: JSON.parse(read.rows).find(row => row.id === write.itemId)?.parentId ?? null,
     } });
   return { results, ...batchUndo(writes, results) };
 };
@@ -1045,6 +1049,115 @@ test('plan views and bulk bar: real components keep the view in the address and 
           await context.close();
         },
       );
+
+  for (const theme of ['light', 'dark']) {
+    await t.test(
+      `1440 ${theme}: pointer middle nests, and a top-level seam un-parents or reorders`,
+      async () => {
+        const { page, context, errors } = await open(1440, theme, '?view=tree');
+        const row = n => page.locator(`[data-reorder-id$="${String(n).padStart(12, '0')}"]`);
+        const drop = async (from, to, fraction, hint, refused = false) => {
+          const source = row(from).locator('.ds-drag');
+          const target = row(to);
+          await source.scrollIntoViewIfNeeded();
+          const start = await source.boundingBox();
+          const end = await target.boundingBox();
+          await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+          await page.mouse.down();
+          await page.mouse.move(end.x + end.width / 2, end.y + end.height * fraction, { steps: 12 });
+          await page.mouse.move(end.x + end.width / 2 + 1, end.y + end.height * fraction);
+          const label = target.locator('.plan-drop-hint');
+          await label.waitFor();
+          assert.match(await label.textContent(), hint);
+          assert.equal(
+            await target.getAttribute('data-reorder-onto'),
+            fraction === 0.5 && !refused ? 'true' : null,
+          );
+          await page.mouse.up();
+        };
+        await drop(13, 12, 0.5, /is a sub-item/, true);
+        assert.equal(await page.evaluate(() => window.calls.length), 0);
+        await drop(13, 10, 0.5, /Put under · becomes 1\.2/);
+        await page.getByRole('button', { name: 'Undo', exact: true }).click();
+        await page.waitForFunction(() => window.calls.length === 2);
+        const [[nest], [undo]] = await page.evaluate(() => window.calls);
+        assert.equal(nest.parentId.slice(-3), '010');
+        assert.equal(nest.expectedVersion, 2);
+        assert.equal(undo.parentId, null);
+        assert.equal(undo.expectedVersion, 3);
+        await drop(12, 11, 0.1, /Top level · 2nd/);
+        await page.waitForFunction(() => window.calls.length === 3);
+        const [[unnest]] = await page.evaluate(() => window.calls.slice(2));
+        assert.equal(unnest.parentId, null);
+        assert.ok(unnest.order > 'a' && unnest.order < 'b');
+        await drop(13, 11, 0.1, /Top level · 2nd/);
+        await page.waitForFunction(() => window.calls.length === 4);
+        const [[reorder]] = await page.evaluate(() => window.calls.slice(3));
+        assert.ok(!('parentId' in reorder) && reorder.order > 'a' && reorder.order < 'b');
+        assert.deepEqual(errors, []);
+        await context.close();
+      },
+    );
+    await t.test(`390 ${theme}: the handle menu can un-parent, pick a parent, and undo`, async () => {
+      const { page, context, errors } = await open(390, theme, '?view=tree');
+      await page
+        .getByRole('button', { name: 'Move Bench the parser against the old reader', exact: true })
+        .click();
+      await page.getByRole('menuitem', { name: /Out of 1/ }).click();
+      await page.waitForFunction(() => window.calls.length === 1);
+      await page.getByRole('button', { name: 'Undo', exact: true }).click();
+      await page.waitForFunction(() => window.calls.length === 2);
+      const [[out], [undo]] = await page.evaluate(() => window.calls);
+      assert.equal(out.parentId, null);
+      assert.equal(undo.parentId.slice(-3), '010');
+      await page
+        .getByRole('button', { name: 'Move Name every error the parser can return', exact: true })
+        .click();
+      await page.getByRole('menuitem', { name: 'Put under…' }).click();
+      await page.getByRole('combobox', { name: /Put Name every error/ }).fill('Stream parser');
+      await page.getByRole('option', { name: /Stream parser/ }).click();
+      await page.waitForFunction(() => window.calls.length === 3);
+      assert.equal(await page.evaluate(() => window.calls[2][0].parentId.slice(-3)), '010');
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+  }
+  await t.test(
+    'keyboard chooses and announces a target, cancels without writing, and reports a stale drop',
+    async () => {
+      const { page, context, errors } = await open(1440, 'light', '?view=tree&drag-stale');
+      const handle = page.getByRole('button', {
+        name: 'Move Name every error the parser can return',
+        exact: true,
+      });
+      await handle.locator('xpath=ancestor::*[@role="row"]').focus();
+      await page.keyboard.press('Tab');
+      assert.equal(await handle.evaluate(element => element === document.activeElement), true);
+      await page.keyboard.press('Enter');
+      await page.getByText(/Picked up Name every error/, { exact: false }).waitFor({ state: 'attached' });
+      await page.keyboard.press('ArrowUp');
+      await page.keyboard.press('ArrowUp');
+      await page
+        .locator('.plan-drop-hint')
+        .getByText(/Put under/)
+        .waitFor();
+      await page.keyboard.press('Escape');
+      assert.equal(await page.locator('.plan-drop-hint').count(), 0);
+      assert.equal(await page.evaluate(() => window.calls.length), 0);
+      await page.keyboard.press('Enter');
+      await page.keyboard.press('ArrowUp');
+      await page.keyboard.press('ArrowUp');
+      await page.keyboard.press('Enter');
+      await page
+        .getByText(/changed since this page read it \(version 3\)\. Nothing moved/)
+        .first()
+        .waitFor();
+      assert.equal(await page.getByRole('button', { name: 'Undo', exact: true }).count(), 0);
+      assert.equal(await page.evaluate(() => window.calls.length), 1);
+      assert.deepEqual(errors, []);
+      await context.close();
+    },
+  );
 
   await t.test('field and settled lists link the parent; settled Items cannot create children', async () => {
     const { page, context } = await open(1440, 'light', '?group=type&hierarchy-worst');

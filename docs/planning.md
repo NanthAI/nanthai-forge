@@ -64,7 +64,9 @@ On an Item page, use **Parent → Set parent…** or **Change…** to pick an op
 
 Use **Relations → Add relation** to choose **Depends on**, **Duplicate of** or **Related**. Reverse links appear as **Blocks**, **Duplicated by** or **Related**. Remove a link with its row action. Parent, Children and Relations changes offer **Undo**. The owner and project writers can make these changes; readers can follow the links but cannot edit.
 
-In unfiltered hand order, the owner can reorder Initiatives using their **Move** menu or the drag handle in the collapsed overview. **Undo** restores the previous hand rank if the Initiative has not changed since the move.
+In List or Tree, in unfiltered hand order grouped by Initiative, drag an Item by its handle. Drop on the middle of an open, top-level Item to put it under that Item, or at a row's edge to place it on the line shown. An indented line places it among siblings, and a top-level line takes it out of its parent. An Initiative band places it at the top of that Initiative. The owner can move a branch between Initiatives; its loaded open children follow it. A writer can change an Item's Initiative only by choosing a parent. The drop target says why an unavailable move cannot happen.
+
+With the keyboard, **Enter** on the handle picks up an Item, the arrow keys choose and announce a place, **Enter** drops, and **Escape** cancels. On a phone, use the handle menu; on a keyboard, **Alt+Down** opens it. Choose **Put under…** for the picker or **Out of …** to put a sub-item just after its parent at the top level. The owner can reorder Initiatives using **Move** or the drag handle in the collapsed overview. A move offers one **Undo**; it restores the previous place if the affected Items have not changed since the move.
 
 In **New Item**, choose **Item** to enter a title, optional description and checklist. Optionally pick a **Parent**; the new Item takes that parent's Initiative. Choose **Initiative** instead to create one from a title and optional text. Creating an Initiative does not grant writers permission to change its settings.
 

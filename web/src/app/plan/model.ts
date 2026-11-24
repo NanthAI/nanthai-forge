@@ -94,15 +94,10 @@ export function matches(row: Pick<PlanRow, 'title' | 'id'>, find: string) {
   return words.every(word => title.includes(word) || row.id.toLowerCase().startsWith(word));
 }
 
-/** `orders` holds moves made here that the read has not caught up with yet; `keep` is the view's filter (type,
+/** `keep` is the view's filter (type,
  * owner, relation, Initiative), applied to the listed lines only, so every count stays the whole plan's. */
-export function planView(
-  read: PlanRead,
-  find = '',
-  orders: ReadonlyMap<string, string> = new Map(),
-  keep?: (row: PlanRow) => boolean,
-): PlanView {
-  const all = parseRows(read).map(row => (orders.has(row.id) ? { ...row, order: orders.get(row.id)! } : row));
+export function planView(read: PlanRead, find = '', keep?: (row: PlanRow) => boolean): PlanView {
+  const all = parseRows(read);
   const byId = new Map(all.map(row => [row.id, row]));
   const items = all.filter(row => row.kind === 'issue' && isLive(row));
   const initiatives = all.filter(row => row.kind === 'initiative');

@@ -3,8 +3,7 @@
 // The backlog's Initiative groups (Item 4df3ee17; decision afcb5bc3; f49e3a5c). Each group folds to its header and
 // stays as this viewer left it (fold.ts, this browser only). With every group folded the list is the Initiatives
 // overview: one row each, dragged or moved by keyboard into hand order. An open group's header keeps a Move key for
-// the keyboard and phones. The header's name opens the Initiative page. A move is one put-planning-item `order`, as
-// for an Item.
+// the keyboard and phones. The header's name opens the Initiative page. A move uses the versioned batch and Undo.
 import { Menu, ReorderList } from '../../ds';
 import type { PlanRow } from '../../../../src/planning-model';
 import { A } from '../frames';
@@ -15,6 +14,8 @@ import { groupBreakdown, type PlanGroup, type PlanView } from './model';
 import { filtered, sortRows, type PlanQuery } from './query';
 import { BreakdownWords, COLS, Line, Roll } from './rows';
 import { Tick, type Ticker } from './Tick';
+import { PlanDragging, type MoveItem, type PlanDrag } from './PlanDrag';
+import type { SearchOpenItems } from './ItemPicker';
 import type { Workers } from './workers';
 
 type At = (patch: Partial<PlaceProps['route']>) => string;
@@ -38,7 +39,8 @@ export function Groups({
   folds,
   workers,
   onToggle,
-  onMove,
+  onDropItem,
+  search,
   onMoveInitiative,
 }: {
   view: PlanView;
@@ -50,7 +52,8 @@ export function Groups({
   /** Who works on each unowned Item now (workers.ts). */
   workers?: Workers | undefined;
   onToggle: (id: string) => void;
-  onMove: (group: PlanGroup, id: string, toIndex: number) => void;
+  onDropItem?: MoveItem | undefined;
+  search?: SearchOpenItems | undefined;
   /** Absent when the order cannot change here (not the owner, sorted or filtered). */
   onMoveInitiative?: ((id: string, toIndex: number) => void) | undefined;
 }) {
@@ -58,7 +61,7 @@ export function Groups({
   const initiatives = shown.flatMap(group => (group.initiative ? [group.initiative] : []));
   if (shown.length && shown.every(group => isShut(folds, groupId(group))))
     return <Overview groups={shown} at={at} onToggle={onToggle} onMoveInitiative={onMoveInitiative} />;
-  return (
+  const render = (drag?: PlanDrag) => (
     <>
       {shown.map(group => (
         <Group
@@ -72,7 +75,7 @@ export function Groups({
           workers={workers}
           shut={isShut(folds, groupId(group))}
           onToggle={() => onToggle(groupId(group))}
-          onMove={(id, toIndex) => onMove(group, id, toIndex)}
+          drag={drag}
           move={
             group.initiative && onMoveInitiative
               ? moveItems(initiatives, group.initiative, onMoveInitiative)
@@ -82,6 +85,18 @@ export function Groups({
         />
       ))}
     </>
+  );
+  return onDropItem && byHand ? (
+    <PlanDragging
+      view={view}
+      folded={group => isShut(folds, groupId(group))}
+      search={search}
+      move={onDropItem}
+    >
+      {render}
+    </PlanDragging>
+  ) : (
+    render()
   );
 }
 
@@ -210,7 +225,7 @@ function Group({
   workers,
   shut,
   onToggle,
-  onMove,
+  drag,
   move,
   aligned,
 }: {
@@ -223,7 +238,7 @@ function Group({
   workers?: Workers | undefined;
   shut: boolean;
   onToggle: () => void;
-  onMove: (id: string, toIndex: number) => void;
+  drag?: PlanDrag | undefined;
   move?: { id: string; label: string; disabled: boolean; onAction: () => void }[] | undefined;
   /** Other headers carry a Move key: keep this name in line with theirs. */
   aligned: boolean;
@@ -235,7 +250,8 @@ function Group({
   const body = `plan-g-${groupId(group)}`;
   return (
     <div className={`grp plan-grp${shut ? ' shut' : ''}`} data-fold="">
-      <div className="band plan-gh">
+      <div className="band plan-gh" data-plan-drop-group={drag ? groupId(group) : undefined}>
+        {drag?.band(group)}
         {move ? (
           <Menu label={`Move ${name}`} className="grip" items={move} focusKey={`move-${groupId(group)}`}>
             <Dots />
@@ -250,8 +266,8 @@ function Group({
           <ReorderList
             label={`${name}, open Items in order`}
             items={items}
-            onMove={onMove}
-            disabled={!view.canEdit || !byHand}
+            disabled={!drag}
+            drop={drag ? ({ line }) => drag.grip(line.row) : undefined}
             cols={`${ticker ? '28px ' : ''}${COLS}`}
           >
             {({ line }, index) => (

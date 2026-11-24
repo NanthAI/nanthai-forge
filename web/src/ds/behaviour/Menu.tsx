@@ -36,8 +36,8 @@ export type ActionMenuProps = {
   placement?: 'bottom start' | 'bottom end' | 'top end';
   /** Matches the first-paint control this key replaces (ds/interactive.tsx keeps focus and a pending press). */
   focusKey?: string;
-  /** The Dock grip opens on click and lets the drag slot handle Enter. */
-  dragHandle?: boolean;
+  /** The grip opens on click or Alt+Down; `native` leaves Enter and drop targets to its screen. */
+  dragHandle?: boolean | 'native';
   /** Arrow navigation reaches this trigger inside a collapsed sidebar. */
   excludeFromTabOrder?: boolean | undefined;
   onNavigate?: (href: string) => void;
@@ -81,7 +81,7 @@ export function ActionMenu({
           aria-current={current}
           autoFocus={autoFocus}
           excludeFromTabOrder={excludeFromTabOrder}
-          slot={dragHandle ? 'drag' : undefined}
+          slot={dragHandle === true ? 'drag' : undefined}
           style={dragHandle ? { pointerEvents: 'auto' } : undefined}
           render={dragHandle ? props => <button {...props} draggable /> : undefined}
           onPress={

@@ -58,7 +58,10 @@ import { Versions } from './Versions';
 import { isShelf, shelfWords, shelve, ShelfList, unshelve, type Shelf } from './Shelf';
 import { isPlanningPrefix, isPlanningUuid } from '../../../../src/planning-id';
 import { DeleteForever, type PurgeItem } from './DeleteForever';
-import type { BatchPut } from '../../../../src/planning-batch';
+import type { BatchPut, BatchWrite } from '../../../../src/planning-batch';
+import { hostedError, hostedErrorCode } from '../../snapshot';
+import { itemPut } from './hierarchy';
+import { dropWrites, type DropMove } from './plan-drop';
 import { BulkBar, SplitSheet, UndoToast, outcomeWords, type Reads } from './Bulk';
 import {
   matches,
@@ -380,7 +383,6 @@ export function PlanScreenView({
   /** The Initiative page's done and dropped fold: subscribe for one Initiative, or drop it (null). */
   showDone?: (initiativeId: string | null) => void;
 }) {
-  const [orders, setOrders] = useState<ReadonlyMap<string, string>>(new Map());
   const [capture, setCapture] = useState(false);
   const [split, setSplit] = useState(false);
   const [versions, setVersions] = useState<{
@@ -391,9 +393,12 @@ export function PlanScreenView({
   const [error, setError] = useState('');
   const [cli, setCli] = useState(false);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
-  const [toast, setToast] = useState<{ outcome: BatchOutcome; words: string; onUndo?: () => void } | null>(
-    null,
-  );
+  const [toast, setToast] = useState<{
+    outcome: BatchOutcome;
+    words: string;
+    onUndo?: () => void;
+    atomic?: true;
+  } | null>(null);
   // The Item just archived or deleted from its page, so the page can say where it went and bring it back.
   const [sent, setSent] = useState<{ row: PlanRow; shelf: Shelf; version: number } | null>(null);
   const [message, announce] = useAnnounce();
@@ -402,10 +407,7 @@ export function PlanScreenView({
   const setRailCounts = navigation?.setCounts;
   const find = query.find;
   const keep = useMemo(() => (row: PlanRow) => keeps(row, query), [query]);
-  const view = useMemo(
-    () => (read ? planView(read, find.trim(), orders, keep) : null),
-    [read, find, orders, keep],
-  );
+  const view = useMemo(() => (read ? planView(read, find.trim(), keep) : null), [read, find, keep]);
   const at = (patch: Partial<PlaceProps['route']>) => hrefFor({ ...route, section: '', rest: '', ...patch });
   const itemKey = resolvedShortId === undefined ? route.rest.toLowerCase() : resolvedShortId;
   const initiativeRow = itemKey
@@ -431,7 +433,7 @@ export function PlanScreenView({
   }, [canCapture]);
   // A changed view keeps no hidden selection: only rows that can be seen stay ticked.
   useEffect(() => setPicked(new Set()), [writeQuery({ ...query, find: '' })]);
-  const whole = useMemo(() => (read ? planView(read, '', orders) : null), [read, orders]);
+  const whole = useMemo(() => (read ? planView(read) : null), [read]);
   const allRows = useMemo(() => (whole ? [...whole.byId.values()] : undefined), [whole]);
   const selectedInitiative = initiativeRow?.id;
   const workerRows = useMemo(
@@ -737,28 +739,52 @@ export function PlanScreenView({
     find.trim() ? `matching “${find.trim()}”` : '',
   ].filter(Boolean);
 
+  /** The live Plan read draws the accepted order. Branch moves and their Undo are all-or-nothing. */
+  const saveMove = async (row: PlanRow, writes: BatchWrite[], words: string) => {
+    if (!run || !whole) return;
+    const atomic = writes.length > 1;
+    setError('');
+    const changed = (version?: number) =>
+      `“${row.title}” changed since this page read it${version === undefined ? '' : ` (version ${version})`}. Nothing moved. Try again.`;
+    try {
+      const outcome = await run(writes, atomic ? { atomic: true } : undefined);
+      const refused = outcome.results.find(result => result.outcome === 'refused');
+      const notice =
+        refused?.code === 'ITEM_CHANGED'
+          ? changed(refused.currentVersion)
+          : refused
+            ? outcomeWords(outcome, whole.byId)
+            : words;
+      setToast({ outcome, words: notice, ...(atomic && { atomic: true }) });
+      announce(notice);
+    } catch (error) {
+      const code = hostedErrorCode(error);
+      const notice =
+        code === 'ITEM_CHANGED'
+          ? `${hostedError(error)} Nothing moved. Try again.`
+          : code === 'BAD_ARGUMENT'
+            ? hostedError(error)
+            : `Forge could not confirm the move of ${row.title}. Check its position and try again.`;
+      setError(notice);
+      announce(notice);
+    }
+  };
+  const dropItem = (row: PlanRow, target: DropMove) => {
+    if (!whole || !byHand || !canWriteItems) return;
+    const words =
+      target.parent && target.parent.id !== row.parentId
+        ? `Put ${row.title} under ${target.parent.title}. ${target.label}.`
+        : `Moved ${row.title}. ${target.label}.`;
+    void saveMove(row, dropWrites(whole, row, target), words);
+  };
   const move = (group: PlanGroup, id: string, toIndex: number) => {
     const ids = group.lines.map(line => line.row.id).filter(other => other !== id);
     ids.splice(toIndex, 0, id);
     const order = movedRank(group.lines, ids, id);
-    const row = view?.byId.get(id);
-    if (!order || !row) return;
-    setOrders(previous => new Map(previous).set(id, order));
-    setError('');
-    put({ itemId: id, expectedVersion: row.version ?? 0, order }).then(
-      () => undefined,
-      () => {
-        setOrders(previous => {
-          const next = new Map(previous);
-          next.delete(id);
-          return next;
-        });
-        setError(`Forge could not move ${row.title}; it is back where it was.`);
-      },
-    );
+    const row = whole?.byId.get(id);
+    if (order && row) void saveMove(row, [itemPut(row, { order })], `Moved ${row.title}.`);
   };
-  /** An Initiative shares the batch Undo path. The live Plan read, not a local rank, draws the accepted order. */
-  const moveInitiative = async (id: string, toIndex: number) => {
+  const moveInitiative = (id: string, toIndex: number) => {
     if (!run || !view?.canEdit || !byHand) return;
     const shown = view.groups.flatMap(group => (group.initiative ? [group.initiative] : []));
     if (shown.findIndex(row => row.id === id) === toIndex) return;
@@ -767,20 +793,27 @@ export function PlanScreenView({
     const order = movedInitiativeRank(shown, ids, id);
     const row = view.byId.get(id);
     if (!order || !row) return;
-    setError('');
-    try {
-      const outcome = await run([
-        { action: 'put-planning-item', itemId: id, expectedVersion: row.version ?? 0, order },
-      ]);
-      const words = outcome.results.some(result => result.outcome === 'refused')
-        ? outcomeWords(outcome, view.byId)
-        : `${row.title} moved to position ${toIndex + 1} of ${shown.length}.`;
-      setToast({ outcome, words });
-      announce(words);
-    } catch {
-      setError(`Forge could not confirm the move of ${row.title}. Check its position and try again.`);
-    }
+    void saveMove(
+      row,
+      [itemPut(row, { order })],
+      `${row.title} moved to position ${toIndex + 1} of ${shown.length}.`,
+    );
   };
+  const listToast =
+    toast && run ? (
+      <UndoToast
+        key={toast.outcome.undoClose}
+        {...toast}
+        run={toast.atomic ? (writes, options) => run(writes, { ...options, atomic: true }) : run}
+        byId={byId}
+        closeReceipt={read?.closeReceipt}
+        onGone={words => {
+          clearCloseObservation?.();
+          setToast(null);
+          if (words) announce(words);
+        }}
+      />
+    ) : null;
   const captureSheet =
     view && canCapture ? (
       <Capture
@@ -818,6 +851,7 @@ export function PlanScreenView({
           announce={announce}
         />
         {captureSheet}
+        {listToast}
         <Announcer message={message} />
       </>
     );
@@ -1062,7 +1096,8 @@ export function PlanScreenView({
                   folds={folds}
                   workers={workers}
                   onToggle={toggleFold}
-                  onMove={move}
+                  onDropItem={canWriteItems && run ? dropItem : undefined}
+                  search={searchOpenItems}
                   onMoveInitiative={canEdit && byHand ? moveInitiative : undefined}
                 />
               ) : null}
@@ -1115,20 +1150,7 @@ export function PlanScreenView({
       </div>
       {captureSheet}
       {purgeDialog}
-      {toast && run ? (
-        <UndoToast
-          key={toast.outcome.undoClose}
-          {...toast}
-          run={run}
-          byId={byId}
-          closeReceipt={read?.closeReceipt}
-          onGone={words => {
-            clearCloseObservation?.();
-            setToast(null);
-            if (words) announce(words);
-          }}
-        />
-      ) : null}
+      {listToast}
       <Announcer message={message} />
     </div>
   );

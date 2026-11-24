@@ -23,12 +23,14 @@ export type ReorderListProps<T extends ReorderItem> = {
   label: string;
   items: readonly T[];
   /** Called with the moved row and its new index; the caller stores the order (the list draws what it is given). */
-  onMove: (id: string, toIndex: number) => void;
+  onMove?: ((id: string, toIndex: number) => void) | undefined;
   children: (item: T, index: number) => ReactNode;
   /** Sorted by something other than hand order: the handles go away and dragging is off. */
   disabled?: boolean;
   /** Column template of a row after the handle (see Row in ds/parts.tsx). */
   cols?: string;
+  /** A screen with semantic drop targets supplies its handle and decoration but keeps the same grid and columns. */
+  drop?: ((item: T) => { handle: ReactNode; hint: ReactNode; onto: boolean }) | undefined;
 };
 
 /** Index the moved row takes when dropped on `target`, counted without the row itself. `order` may hold the row
@@ -51,6 +53,7 @@ export function ReorderList<T extends ReorderItem>({
   children,
   disabled,
   cols = LIST_COLS,
+  drop,
 }: ReorderListProps<T>) {
   const order = items.map(item => item.id);
   const byId = new Map(items.map(item => [item.id, item]));
@@ -63,12 +66,13 @@ export function ReorderList<T extends ReorderItem>({
     const total = latest.current.length;
     const index = Math.max(0, Math.min(total - 1, toIndex));
     if (latest.current.indexOf(id) === index) return;
+    if (!onMove) return;
     onMove(id, index);
     announce(`Moved ${byId.get(id)?.label ?? 'row'} to position ${index + 1} of ${total}.`);
   };
 
   const { dragAndDropHooks } = useDragAndDrop<T>({
-    isDisabled: disabled,
+    isDisabled: disabled || Boolean(drop),
     getItems: keys => [...keys].map(key => ({ 'text/plain': byId.get(String(key))?.label ?? String(key) })),
     onDragStart: event => setMoving(String([...event.keys][0])),
     onDragEnd: () => setMoving(null),
@@ -96,7 +100,7 @@ export function ReorderList<T extends ReorderItem>({
         items={items}
         // The library caches a row by its item; a row's number and its menu depend on the order, so the order (and the
         // caller's render function) invalidate it. Without this the numbers on screen stayed stale after a move.
-        dependencies={[order.join('\n'), children, disabled, cols]}
+        dependencies={[order.join('\n'), children, disabled, cols, drop]}
         dragAndDropHooks={dragAndDropHooks}
         keyboardNavigationBehavior="tab"
         className="ds-list"
@@ -113,14 +117,19 @@ export function ReorderList<T extends ReorderItem>({
         {item => {
           const index = order.indexOf(item.id);
           const last = order.length - 1;
+          const target = disabled ? undefined : drop?.(item);
           return (
             <GridListItem
               id={item.id}
               textValue={item.label}
               className="row ds-row"
+              data-reorder-id={target ? item.id : undefined}
+              data-reorder-onto={target?.onto || undefined}
               style={{ gridTemplateColumns: disabled ? cols : `auto ${cols}` }}
             >
-              {disabled ? null : (
+              {disabled ? null : target ? (
+                target.handle
+              ) : (
                 <>
                   <Button
                     slot="drag"
@@ -166,6 +175,7 @@ export function ReorderList<T extends ReorderItem>({
                 </>
               )}
               {children(item, index)}
+              {target?.hint}
             </GridListItem>
           );
         }}
