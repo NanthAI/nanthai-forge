@@ -340,8 +340,10 @@ export async function batchFinishStep(
     await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
     return { handled: true, command: null };
   }
-  const upload = source.uploads[batch.uploadIndex];
-  if (upload) {
+  const missing = [];
+  // The retained batch schema bounds this window to three metadata objects,
+  // not a source inventory. Their content-addressed bindings are independent.
+  for (const upload of source.uploads.slice(batch.uploadIndex)) {
     const object = await findObject(ctx, input.projectId, upload.pin.sha256);
     const objectKey = r2Key(input.projectId, upload.pin.sha256);
     if (object) {
@@ -350,14 +352,11 @@ export async function batchFinishStep(
         'SOURCE_HASH_MISMATCH',
         'Batch metadata object differs.',
       );
-      if (isStored(object)) {
-        // Empty selection pages are shared with ordinary compose and may live
-        // in Convex storage or a recipe. Their location is not source identity.
-        await writeBatch(ctx, key, { ...batch, uploadIndex: batch.uploadIndex + 1 });
-        await wakeBatch(ctx, key);
-        return { handled: true, command: null };
-      }
-      await ctx.db.patch(ownRow(object)._id, { location: 'r2', r2Key: objectKey });
+      // Reused selection pages can live in legacy storage or a recipe. The
+      // action never rewrites a stored object just to group its uploads.
+      if (isStored(object)) continue;
+      if (object.location !== 'r2' || object.r2Key !== objectKey)
+        await ctx.db.patch(ownRow(object)._id, { location: 'r2', r2Key: objectKey });
     } else
       await ctx.db.insert('projectObjects', {
         projectId: input.projectId,
@@ -368,52 +367,85 @@ export async function batchFinishStep(
         location: 'r2',
         r2Key: objectKey,
       });
+    missing.push(upload);
+  }
+  const [first, ...rest] = missing;
+  if (first) {
     await retryFinish(ctx, originalRow, input);
     return {
       handled: true,
       command: {
         kind: 'plan',
-        ...upload,
+        ...first,
         batchId: batch.id,
         batchComposeOperationId: batch.composeOperationId,
+        batchUpload: { from: batch.uploadIndex, rest },
       },
     };
   }
+  if (batch.uploadIndex !== source.uploads.length)
+    await writeBatch(ctx, key, { ...batch, uploadIndex: source.uploads.length });
   await submitHostedCompose(ctx, source.auth);
   await watchFinishCompose(ctx, originalRow._id, source.operation.firstAttempt.at, async () =>
     exhaustFinishCompose(ctx, (await ctx.db.get(originalRow._id))!, source.auth.operationId),
   );
   return { handled: true, command: null };
 }
+
 export async function resumeBatchIO(
   ctx: MutationCtx,
-  input: FinishIdentity & { command: Extract<FinishCommand, { kind: 'plan' }>; key?: string },
+  input: FinishIdentity & { command: Extract<FinishCommand, { kind: 'plan' }>; key?: string; page?: unknown },
 ) {
-  const key = { projectId: input.projectId, batchId: input.command.batchId! };
+  const { command } = input;
+  const key = { projectId: input.projectId, batchId: command.batchId! };
   const { batch } = await loadBatch(ctx, key);
-  if (batch.phase !== 'composing' || input.command.batchComposeOperationId !== batch.composeOperationId)
-    return;
-  const source = await prepareBatchCompose(ctx, key),
-    upload = source.uploads[batch.uploadIndex];
+  if (batch.phase !== 'composing' || command.batchComposeOperationId !== batch.composeOperationId) return;
+  const window = command.batchUpload;
+  // A pre-deploy drive can receive the grouped step but can only acknowledge
+  // its first PUT. Leave the retained retry armed; do not publish either pin.
+  if (window && (window.from !== batch.uploadIndex || input.page === undefined)) return;
+  const sent = [command, ...(window?.rest ?? [])];
+  const reported = new Map(sent.map(upload => [upload.pin.sha256, upload]));
   invariant(
-    upload &&
-      canonicalPayload(upload.pin) === canonicalPayload(input.command.pin) &&
-      upload.value === input.command.value &&
-      input.key === r2Key(input.projectId, upload.pin.sha256),
+    input.key === r2Key(input.projectId, command.pin.sha256) &&
+      reported.size === sent.length &&
+      (!window || canonicalPayload(input.page) === canonicalPayload([...reported.keys()])),
     'WORK_OPERATION_CHANGED',
-    'Resume only the retained batch metadata upload.',
+    'Resume only the verified batch metadata uploads.',
   );
-  const object = await findObject(ctx, input.projectId, upload.pin.sha256);
-  invariant(
-    object && !object.removed && object.size === upload.pin.size && object.r2Key === input.key,
-    'SOURCE_HASH_MISMATCH',
-    'Batch metadata reservation differs.',
-  );
-  // A stored entry already holds the flag: never copy it into a row to set it again.
-  if (!object.r2Committed) await ctx.db.patch(ownRow(object)._id, { r2Committed: true });
-  await writeBatch(ctx, key, { ...batch, uploadIndex: batch.uploadIndex + 1 });
+  const source = await prepareBatchCompose(ctx, key);
+  const end = window ? source.uploads.length : batch.uploadIndex + 1;
+  for (const upload of source.uploads.slice(batch.uploadIndex, end)) {
+    const object = await findObject(ctx, input.projectId, upload.pin.sha256);
+    invariant(
+      object && !object.removed && object.size === upload.pin.size,
+      'SOURCE_HASH_MISMATCH',
+      'Batch metadata reservation differs.',
+    );
+    const value = reported.get(upload.pin.sha256);
+    if (!value) {
+      invariant(window && isStored(object), 'WORK_OPERATION_CHANGED', 'Batch metadata upload is missing.');
+      continue;
+    }
+    invariant(
+      value.pin.size === upload.pin.size &&
+        value.value === upload.value &&
+        ((window && isStored(object)) ||
+          (object.location === 'r2' && object.r2Key === r2Key(input.projectId, upload.pin.sha256))),
+      'WORK_OPERATION_CHANGED',
+      'Resume only the retained batch metadata uploads.',
+    );
+    if (!isStored(object)) await ctx.db.patch(ownRow(object)._id, { r2Committed: true });
+    reported.delete(upload.pin.sha256);
+  }
+  // A failed check above (including an extra pin after earlier writes) rolls
+  // back the whole Convex transaction; no partial callback is visible.
+  invariant(!reported.size, 'WORK_OPERATION_CHANGED', 'Batch metadata upload was not retained.');
+  await writeBatch(ctx, key, { ...batch, uploadIndex: end });
   const { row } = await loadFinish(ctx, input);
   await cancelPendingTask(ctx, row.wake?.taskId);
   await ctx.db.patch(row._id, { wake: null });
+  // The settle rechecks priority, current membership and stall recovery before
+  // dispatch. An urgent arrival while the action uploaded can still reselect.
   await wakeBatch(ctx, key);
 }

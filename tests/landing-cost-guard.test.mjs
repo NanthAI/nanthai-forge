@@ -19,7 +19,7 @@ import { storageClock as fixedClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { inboundCostFixture } from './hosted-github-inbound-cost-fixture.mjs';
-import { finishFixture, desired } from './hosted-finish-fixture.mjs';
+import { finishFixture, desired, isFinishWake } from './hosted-finish-fixture.mjs';
 import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 import { seedFullMain, passWithSelection } from './hosted-race-fixture.mjs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -804,6 +804,58 @@ async function measureLandingCosts(t, { extraR2Read = false, ...options } = {}) 
   return { measured, scenarios, landings };
 }
 
+test('one cohort uploads its exact metadata in a single drive and resumes before dispatch', async t => {
+  const f = await batchesFixture(t, { startAt: Date.UTC(2026, 0, 1) });
+  while (!f.tables.projectHostedLandingBatches.size) await f.execute(f.pending()[0]);
+  const batch = () => JSON.parse([...f.tables.projectHostedLandingBatches.values()][0].value);
+  const { id, leaderId, composeOperationId } = batch();
+  const submitted = () =>
+    [...f.tables.projectHostedComposes.values()].some(
+      row => row.operationId === composeOperationId && JSON.parse(row.value).status === 'submitted',
+    );
+  const m = meter(f);
+  for (let steps = 0; !submitted(); steps++) {
+    assert(steps < 10, 'finite dispatch of the retained compose');
+    const task = f
+      .pending()
+      .find(task => isFinishWake(task.name) && task.args[0].submissionId === (leaderId ?? id));
+    assert(task, 'the leader retains its wake through dispatch');
+    await run(f, m, task);
+  }
+  const {
+    queries,
+    mutations,
+    v8Actions,
+    nodeActions,
+    readBytes,
+    writeBytes,
+    r2ClassA,
+    r2ClassB,
+    r2BytesPut,
+  } = await m.stop();
+  const measured = {
+    queries,
+    mutations,
+    v8Actions,
+    nodeActions,
+    readBytes,
+    writeBytes,
+    r2ClassA,
+    r2ClassB,
+    r2BytesPut,
+  };
+  t.diagnostic(`cohortMetadata ${JSON.stringify(measured)}`);
+  assert.equal(queries + mutations + v8Actions + nodeActions, 5);
+  assert.equal(r2ClassA, 2, 'only the missing dependency page and source plan are uploaded');
+  assert.equal(r2ClassB, 2, 'each new object is verified once without reading the stored page');
+  assert.equal(
+    r2BytesPut,
+    batch()
+      .uploads.slice(1)
+      .reduce((bytes, upload) => bytes + upload.pin.size, 0),
+  );
+});
+
 let baseline;
 test('cost guard: the scripted landing mix stays within its per-landing cost ledger', async t => {
   const started = performance.now();
@@ -816,7 +868,8 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
     0,
   );
   const feedEvents = mixed.reduce((n, s) => n + s.feed.events, 0);
-  assert.equal(calls, 275, 'feed writes introduce no Convex call in the current six-landing mix');
+  // Item 8b7ab7a9: grouping the cohort's metadata IO replaces serial finish hops.
+  assert.equal(calls, 248, 'feed writes introduce no Convex call in the current six-landing mix');
   assert.equal(feedEvents, 6, 'one terminal feed row per accepted Lane on the fixture mix');
   // f65d8024: the approved commit cursor adds 33 document bytes and two scoped
   // keys totaling 357 modeled key bytes per event and per fixture landing.

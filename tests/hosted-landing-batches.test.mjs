@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { batchEligible } from '../dist/hosted-landing-batch.js';
-import { landingApi, compose, isFinishWake } from './hosted-finish-fixture.mjs';
+import { landingApi, compose, driver, isFinishWake } from './hosted-finish-fixture.mjs';
 import { assertForkRacesNamed } from './fork-race-names.mjs';
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
@@ -339,36 +339,185 @@ test('an unrelated protected-path edit keeps the exact shared check usable', asy
   assert.deepEqual(f.publications, [{ receipts: 4, mainMoves: 1, landed: 4 }]);
 });
 
-test('lost batch upload replies replay the same generation without duplicate source jobs or checks', async t => {
+async function batchUploadFixture(t) {
   const f = await batchesFixture(t);
-  // Select the batch, then crash after its first metadata upload. The durable
-  // ordinary finish watchdog retries that same object and IO generation.
+  const batch = () => JSON.parse([...f.tables.projectHostedLandingBatches.values()][0].value);
   while (!f.tables.projectHostedLandingBatches.size) await f.execute(f.pending()[0]);
-  const retainedBatch = JSON.parse([...f.tables.projectHostedLandingBatches.values()][0].value);
-  const leader = retainedBatch.leaderId ?? retainedBatch.id;
-  let lostReply = false;
-  for (let step = 0; step < 12 && !lostReply; step++) {
+  const leader = batch().leaderId ?? batch().id;
+  for (let step = 0; step < 12; step++) {
     const task = f.pending().find(task => isFinishWake(task.name) && task.args[0].submissionId === leader);
     assert(task, 'batch metadata step remains resumable');
-    // Item 9a04d916 option b (switch on): a settle or retry mutation has no reply to lose;
-    // it hands the upload to the drive whose reply is lost below.
-    if (task.name !== 'projectHostedFinishDriver:drive') {
-      await f.execute(task);
-      continue;
+    if (task.name === 'projectHostedFinishDriver:drive') {
+      const missing = batch().uploads.filter(upload => !f.c.objects.has(upload.pin.sha256));
+      assert.equal(missing.length, 2, 'cold dependency and plan; the empty page is already stored');
+      return {
+        f,
+        batch,
+        task,
+        missing,
+        binding: ({ pin }) => [...f.tables.projectObjects.values()].find(row => row.digest === pin.sha256),
+      };
     }
-    try {
-      await f.execute(task, 'before-resume');
-    } catch (error) {
-      assert.match(error.message, /synthetic crash after upload/);
-      lostReply = true;
-    }
+    await f.execute(task);
   }
-  assert(lostReply, 'crash after a missing metadata page upload, beyond reused pages');
+  assert.fail('the one metadata drive did not start');
+}
+
+test('lost batch upload replies replay the same generation without duplicate source jobs or checks', async t => {
+  const { f, batch, task, missing, binding } = await batchUploadFixture(t);
+  const operation = batch().composeOperationId;
+  await assert.rejects(f.execute(task, 'before-resume'), /synthetic crash after upload/);
+  assert(
+    missing.every(({ pin }) => f.c.objects.has(pin.sha256)),
+    'one drive wrote both exact objects',
+  );
+  assert(
+    missing.every(upload => !binding(upload).r2Committed),
+    'no binding is published before resume',
+  );
+  assert.equal(f.runs().length, 0);
+  const compose = [...f.tables.projectHostedComposes.values()].find(row => row.operationId === operation);
+  assert.deepEqual([...f.tables.projectSourceSteps.values()], [], 'no source work before resume');
   await f.drain();
+  assert.equal(batch().composeOperationId, operation);
+  assert(missing.every(upload => binding(upload).r2Committed));
+  assert.deepEqual(
+    [...new Set([...f.tables.projectSourceSteps.values()].map(step => step.jobId))],
+    [compose.jobId],
+  );
   await f.passChecks();
   await f.drain();
   assert(states(f).every(s => s.phase === 'landed'));
   assert.equal(f.runs().length, 1);
+});
+
+test('a missing cohort metadata HEAD publishes neither binding and retries the original group', async t => {
+  const { f, batch, task, missing, binding } = await batchUploadFixture(t);
+  const operation = batch().composeOperationId;
+  const fetch = globalThis.fetch;
+  let missingHead = true;
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (missingHead && init?.method === 'HEAD' && new URL(url).pathname.endsWith(missing[1].pin.sha256))
+      return new Response(null, { status: 404 });
+    return fetch(url, init);
+  });
+  await assert.rejects(f.execute(task), error => error.code === 'R2_OBJECT_MISSING');
+  assert(missing.every(upload => !binding(upload).r2Committed));
+  assert.equal(f.runs().length, 0);
+  missingHead = false;
+  await f.drain();
+  assert.equal(batch().composeOperationId, operation);
+  assert(missing.every(upload => binding(upload).r2Committed));
+  assert.equal(f.runs().length, 1);
+});
+
+test('a single-upload drive cannot acknowledge a grouped command across deploys', async t => {
+  const { f, batch, task, missing, binding } = await batchUploadFixture(t);
+  const input = task.args[0];
+  const raw = await f.transaction('batch-step', driver.step, input);
+  const command = JSON.parse(raw);
+  const index = batch().uploadIndex;
+  const first = missing[0];
+  f.c.objects.set(first.pin.sha256, Buffer.from(first.value)); // the old drive only verified this PUT
+  await f.transaction('old-batch-callback', driver.resume, {
+    ...input,
+    command: raw,
+    key: binding(first).r2Key,
+  });
+  assert.equal(batch().uploadIndex, index);
+  assert(missing.every(upload => !binding(upload).r2Committed));
+  assert.equal(f.runs().length, 0);
+  // A command produced *before* deployment still advances exactly its old pointer.
+  const next = batch().uploads[index];
+  const { batchUpload, ...oldPlan } = command;
+  assert.equal(batchUpload.from, index);
+  f.c.objects.set(next.pin.sha256, Buffer.from(next.value));
+  await f.transaction('old-batch-callback', driver.resume, {
+    ...input,
+    command: JSON.stringify({ ...oldPlan, ...next }),
+    key: binding(next).r2Key,
+  });
+  const coldIndex = index + 1;
+  assert.equal(batch().uploadIndex, coldIndex);
+  assert(missing.every(upload => !binding(upload).r2Committed));
+  const leaderWake = (name, wakeId) =>
+    f
+      .pending()
+      .find(
+        task =>
+          task.name === name &&
+          task.args[0].submissionId === input.submissionId &&
+          (!wakeId || task.args[0].wakeId === wakeId),
+      );
+  const settle = leaderWake('projectHostedFinishDriver:settle');
+  await f.execute(settle);
+  const live = leaderWake('projectHostedFinishDriver:drive', settle.args[0].wakeId).args[0];
+  const current = JSON.parse(await f.transaction('batch-step', driver.step, live));
+  const { batchUpload: currentWindow, ...coldLegacyPlan } = current;
+  assert.equal(currentWindow.from, coldIndex);
+  const groupedReply = {
+    ...live,
+    command: JSON.stringify(current),
+    key: binding(first).r2Key,
+    page: JSON.stringify(missing.map(upload => upload.pin.sha256)),
+  };
+  for (const stale of [
+    { ...current, batchComposeOperationId: randomUUID() },
+    { ...current, batchUpload: { ...currentWindow, from: index } },
+  ]) {
+    await f.transaction('stale-batch-callback-with-current-wake', driver.resume, {
+      ...groupedReply,
+      command: JSON.stringify(stale),
+    });
+    assert.equal(batch().uploadIndex, coldIndex);
+    assert(missing.every(upload => !binding(upload).r2Committed));
+    assert.equal(leaderWake('projectHostedFinishDriver:retry').args[0].wakeId, live.wakeId);
+  }
+  await f.transaction('legacy-cold-batch-callback', driver.resume, {
+    ...live,
+    command: JSON.stringify(coldLegacyPlan),
+    key: binding(first).r2Key,
+  });
+  assert.equal(batch().uploadIndex, coldIndex + 1);
+  assert.equal(binding(first).r2Committed, true, 'legacy completion commits the cold pin');
+  assert(!binding(missing[1]).r2Committed, 'legacy completion advances only its own pin');
+  await f.drain();
+  assert(missing.every(upload => binding(upload).r2Committed));
+  await f.transaction('delayed-grouped-callback', driver.resume, groupedReply);
+  assert.equal(f.pending().length, 0, 'a stale reply cannot replace the current wake');
+  assert.equal(f.runs().length, 1);
+});
+
+test('urgent work arriving during a cohort upload can still reselect before dispatch', async t => {
+  const { f, batch, task, missing, binding } = await batchUploadFixture(t);
+  const operation = batch().composeOperationId;
+  const fetch = globalThis.fetch;
+  let urgent;
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (init?.method === 'PUT' && new URL(url).pathname.endsWith(missing[0].pin.sha256)) {
+      urgent = await f.enqueue(f.request({ priority: 'urgent', agent: false }));
+    }
+    return fetch(url, init);
+  });
+  await f.execute(task);
+  assert.equal(urgent?.priority, 'urgent', 'the arrival happens during the grouped action');
+  assert(
+    missing.every(upload => binding(upload).r2Committed),
+    'both verified bindings commit together',
+  );
+  assert.equal(batch().phase, 'composing');
+  const stillReady = () =>
+    [...f.tables.projectHostedComposes.values()].some(
+      row => row.operationId === operation && JSON.parse(row.value).status === 'ready',
+    );
+  assert(stillReady(), 'the callback does not dispatch the now lower-priority cohort');
+  const settle = f
+    .pending()
+    .find(next => isFinishWake(next.name) && next.args[0].submissionId === (batch().leaderId ?? batch().id));
+  assert(settle, 'the original leader is scheduled to reconsider');
+  await f.execute(settle);
+  assert.equal(batch().phase, 'superseded');
+  assert(stillReady(), 'reselection did not start the superseded compose');
 });
 
 test('changed exact run pins cannot authorize any shared publication', async t => {

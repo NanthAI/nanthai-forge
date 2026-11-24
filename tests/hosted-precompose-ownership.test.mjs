@@ -182,13 +182,14 @@ test('a delayed clean warmup cannot retake ownership from an already formed trai
   );
   const id = f.entries[0].state.id;
   assert.equal(JSON.parse(f.row(id).value).pending, null, 'formed groups retain their useful preparation');
-  await f.execute(f.pending().find(task => isFinishWake(task.name) && task.args[0].submissionId === id));
+  await runFinishWake(
+    f,
+    f.pending().find(task => isFinishWake(task.name) && task.args[0].submissionId === id),
+  );
   assert.equal(JSON.parse(f.row(id).value).pending, null, 'the shared source owns useful preparation');
   assert.equal(f.metrics.sourceJobs, 0, 'no advisory source job is needed to prepare the train');
-  assert(
-    [...f.tables.projectHostedLandingBatches.values()].some(row => JSON.parse(row.value).uploadIndex > 0),
-    'useful shared source metadata advances on this tick',
-  );
+  const batch = [...f.tables.projectHostedLandingBatches.values()].map(row => JSON.parse(row.value))[0];
+  assert.equal(batch.uploadIndex, batch.uploads.length, 'the shared finish wake makes all metadata ready');
   await drain(f);
   await f.passChecks();
   await drain(f);

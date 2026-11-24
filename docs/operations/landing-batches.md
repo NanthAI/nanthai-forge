@@ -53,6 +53,14 @@ Recompositions freeze the old attempt and its settlement time before installing
 fresh timing. Hosted `committedAt` is recorded in the atomic acceptance transaction;
 it is distinct from a later controller observation of publication.
 
+Before a cohort composes, one finish action uploads the missing exact metadata
+pages and plan together (at most three objects). Already-stored pages keep their
+existing binding. One resume publishes the verified bindings together and
+schedules the normal finish settle. The settle still checks priority and cohort
+eligibility before dispatching the original source operation. A failed or lost
+upload leaves the same retained wake to retry. The scheduler receives no plan
+bodies, and this changes neither source authority nor check selection.
+
 ## Cost and latency observations
 
 Existing agent status `checkCosts` retains monthly runner totals and adds fixed-size

@@ -90,6 +90,8 @@ export type FinishCommand =
       pin: { sha256: string; size: number };
       batchId?: string;
       batchComposeOperationId?: string;
+      /** Missing pins from the same retained batch window. A drive confirms the entire set. */
+      batchUpload?: { from: number; rest: { pin: { sha256: string; size: number }; value: string }[] };
       /** A solo plan's compose, which rebuilds `value` in the action (Item 9a04d916). */
       source?: { actor: string; operationId: string; at: string };
     };

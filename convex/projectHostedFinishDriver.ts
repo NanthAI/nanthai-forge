@@ -271,33 +271,16 @@ export const drive = internalAction({
       return null;
     }
     if (command.kind === 'plan') {
-      const bytes = new TextEncoder().encode(command.value),
-        key = r2Key(input.projectId, command.pin.sha256);
-      invariant(
-        bytes.length === command.pin.size && digest(bytes) === command.pin.sha256,
-        'SOURCE_HASH_MISMATCH',
-        'Source plan differs from its exact bytes.',
-      );
-      const target = await presignPut(r2Config(), key, { digest: command.pin.sha256, size: bytes.length });
-      const response = await exchangeFetch('R2 finish plan upload', target.url, {
-        method: 'PUT',
-        headers: target.headers,
-        body: bytes,
-      });
-      invariant(
-        response.ok || response.status === 412,
-        'R2_UPLOAD_FAILED',
-        'Object storage could not upload the source plan.',
-      );
-      invariant(
-        await verifyArchiveUpload({ r2Key: key, size: bytes.length, digest: command.pin.sha256 }),
-        'R2_OBJECT_MISSING',
-        'Uploaded source plan is missing.',
-      );
+      const uploads = [command, ...(command.batchUpload?.rest ?? [])];
+      // All bindings must verify before publishing any. On failure join the other
+      // PUTs before leaving the original wake to retry the same immutable pins.
+      const results = await Promise.allSettled(uploads.map(upload => uploadFinishPlan(input, upload)));
+      for (const result of results) if (result.status === 'rejected') throw result.reason;
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedFinishDriver:resume'), {
         ...input,
         command: raw,
-        key,
+        key: r2Key(input.projectId, command.pin.sha256),
+        ...(command.batchUpload ? { page: canonicalPayload(uploads.map(upload => upload.pin.sha256)) } : {}),
       });
       return null;
     }
@@ -326,3 +309,32 @@ export const drive = internalAction({
     return null;
   },
 });
+
+async function uploadFinishPlan(
+  input: Pick<FinishIdentity, 'projectId'>,
+  { pin, value }: Pick<Extract<FinishCommand, { kind: 'plan' }>, 'pin' | 'value'>,
+) {
+  const bytes = new TextEncoder().encode(value),
+    key = r2Key(input.projectId, pin.sha256);
+  invariant(
+    bytes.length === pin.size && digest(bytes) === pin.sha256,
+    'SOURCE_HASH_MISMATCH',
+    'Source plan differs from its exact bytes.',
+  );
+  const target = await presignPut(r2Config(), key, { digest: pin.sha256, size: bytes.length });
+  const response = await exchangeFetch('R2 finish plan upload', target.url, {
+    method: 'PUT',
+    headers: target.headers,
+    body: bytes,
+  });
+  invariant(
+    response.ok || response.status === 412,
+    'R2_UPLOAD_FAILED',
+    'Object storage could not upload the source plan.',
+  );
+  invariant(
+    await verifyArchiveUpload({ r2Key: key, size: bytes.length, digest: pin.sha256 }),
+    'R2_OBJECT_MISSING',
+    'Uploaded source plan is missing.',
+  );
+}

@@ -69,11 +69,13 @@ for (const history of [0, 1150])
     // mutation; no call, nothing at idle (about 2.8 KB of DB I/O per landing, +$0.0006 per 1,000). Equal in both arms.
     // Reads 3156 -> 3152 (Item 411727ba): source resolve reuses the project row its step fence read, so the
     // fixture's four resolve calls each read the project document once; no call or write. Equal in both arms.
+    // Item 8b7ab7a9: grouping cohort metadata uploads removes serial finish hops in both arms.
+    // Calls 161 -> 153, reads 3152 -> 2996, canonical writes 1142 -> 1084; wall and idle are unchanged.
     assert.equal(after.metricAliasWrites, before.metricAliasWrites);
     assert.equal(after.metricAliasWrites, 47);
     assert.deepEqual(
       [after.calls, after.reads, after.writes - after.metricAliasWrites, after.lateTaskMs, after.idle],
-      [161, 3152, 1142, 180000, 0],
+      [153, 2996, 1084, 180000, 0],
       '8c9b84fc: disjoint baseline must not grow',
     );
     t.diagnostic(JSON.stringify({ history, before, after }));

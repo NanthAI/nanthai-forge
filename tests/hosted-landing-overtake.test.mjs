@@ -396,10 +396,12 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // and +182 write bytes for the pair, with unchanged calls.
   // Item 3c01e736: the compose state stores its compact server steps: +714 read and +238 write bytes for the pair
   // (and at 4,000 files), with unchanged calls.
+  // Item 8b7ab7a9: the cold metadata pair shares one upload drive and callback.
+  // Four fewer calls, 123,394 fewer read bytes and 26,132 fewer write bytes.
   const measured = canonicalReplayCost(pair);
   assert.deepEqual(
     measured,
-    { calls: 107, readBytes: 1_823_233, writeBytes: 594_182 },
+    { calls: 103, readBytes: 1_699_839, writeBytes: 568_050 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -459,10 +461,12 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item c6615b66: the pair's coordination session rows, as in the small replay: +1,159 read and +1,727 write bytes.
   // Item 411727ba: the same resolve project-row reuse at 4,000 files: 2,088 fewer read bytes.
   // Item 411727ba (bucketed overlap changes): the same +286 read and +182 write bytes at 4,000 files.
+  // Item 8b7ab7a9: the grouped upload still removes four calls at 4,000 files,
+  // with 123,656 fewer read bytes and 26,216 fewer write bytes.
   const measured = canonicalReplayCost(after);
   assert.deepEqual(
     measured,
-    { calls: 107, readBytes: 1_828_090, writeBytes: 596_459 },
+    { calls: 103, readBytes: 1_704_434, writeBytes: 570_243 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);
