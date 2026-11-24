@@ -15,6 +15,7 @@ type Seed = Pick<PlanningItem, 'id' | 'kind' | 'version' | 'status' | 'parentId'
   unchecked: number;
   pinned?: true;
   incomplete?: true;
+  completionHeld?: true;
 };
 type Change = Pick<Seed, 'id' | 'kind' | 'version'> & {
   from: Seed['status'];
@@ -125,6 +126,7 @@ type Page = {
   from: string;
   after: string | null;
   rootsRead: number;
+  targeted?: true;
   rows: (Seed & { workStamp: string })[];
 };
 
@@ -137,6 +139,7 @@ function readFencedPages(pages: readonly Page[]) {
   const rows: Page['rows'] = [];
   for (const page of pages) {
     if (
+      page.targeted ||
       page.from !== next ||
       page.fence.generation !== selected?.generation ||
       page.fence.revision !== selected.revision ||

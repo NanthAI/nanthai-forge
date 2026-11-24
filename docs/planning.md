@@ -183,7 +183,9 @@ New Plan partitions maintain exact direct Item membership counts for parents and
   Abandoned status, even when a child is Proposed or an owner-look line is unchecked. A person can reopen
   a settled row explicitly. An explicit linked Lane or Intent reopen can also reopen its unpinned Item, but
   not its settled parents, Initiatives, or children. Completing the work again only checks the linked Item
-  for closure; it does not undo a terminal status.
+  for closure; it does not undo a terminal status. A retained reopen after Work completed keeps the Item
+  open until newer Work completes, even if the old checklist is fully ticked. Historical Intent repair records
+  the Work's actual completion time, not the time the repair ran.
 - **Override.** An explicit manual status change pins that Item or Initiative. Its status shows who pinned it
   and when, from the retained version. Editing the title or checklist does not pin it. Automation, including
   start and completion, leaves the pinned status alone, but still forwards facts about the children and updates
@@ -261,7 +263,9 @@ status work adds no ancestor reads or writes. A cohort batches by page before th
 Historical active Intent heads that no longer have running work can be checked with the internal Intent repair
 preview. It takes up to 16 explicitly selected Intent IDs and checks at most 100 sibling Lane heads per Intent.
 The separate apply requires the previewed versions and results and does not change any Plan item. A fresh
-reopen, active Lane, reverted landing, missing evidence or outstanding recovery refuses repair.
+reopen, active Lane, reverted landing, missing evidence or outstanding recovery refuses repair. An older Work
+completion consults at most eight predecessor Item versions; missing proof keeps it open. A one-Item preview
+can select a leaf with complete scope coverage, but cannot authorize a full Plan apply.
 
 Version appends include their existing audit, index and projection work; they are not single database document
 writes. Measure whole-document and billed I/O separately from scheduling on a small fixture and a Plan with

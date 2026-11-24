@@ -9,6 +9,7 @@ import { workRecordLookup } from './projectWorkRecordTables';
 import { planCounter, type PlanCounts } from './projectPlanCountsStore';
 import { publishRollupBranches, readRollupBranch, readRollupScope } from './projectPlanRollupStore';
 import { rollupChecklist, rollupWorkReader } from './projectPlanRollupFacts';
+import { completionHeldByReopen } from './projectPlanRollupReopen';
 import { executeCommand } from './projectWorkCommand';
 import { rollupBranch, rollupDecision, rollupReasons } from '../src/planning-rollup';
 import { emptyRollupCounts } from '../src/planning-rollup-membership';
@@ -135,7 +136,8 @@ export const advance = internalMutation({
     if (item.payload || item.payloadKey || typeof item.body !== 'string') return 'blocked' as const;
     if ('planningClose' in row && row.planningClose) return 'blocked' as const;
     if (!enabled && (path.length || item.kind === 'initiative')) return 'unchanged' as const;
-    const { work } = await rollupWorkReader(ctx, project, generation, 32).read(item);
+    const facts = await rollupWorkReader(ctx, project, generation, 32).read(item);
+    const { work } = facts;
     if (work === 'unknown') return 'blocked' as const;
     // This is a versioned lifecycle event, not a fact that live roll-up or recompute can infer.
     const event = args.source === 'lifecycle' && args.reopen;
@@ -176,7 +178,18 @@ export const advance = internalMutation({
             rule: 'workReopened' as const,
             reason: rollupReasons.workReopened,
           }
-        : rollupDecision({ ...item, ...rollupChecklist(item.body), work }, scope, enabled);
+        : rollupDecision(
+            {
+              ...item,
+              ...rollupChecklist(item.body),
+              work,
+              ...((await completionHeldByReopen(ctx, args.projectId, partition, item, facts))
+                ? { completionHeld: true as const }
+                : {}),
+            },
+            scope,
+            enabled,
+          );
     let forwarded = false;
     if (
       branch &&

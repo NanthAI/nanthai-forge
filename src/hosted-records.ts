@@ -83,6 +83,8 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       ...common,
       kind: z.literal('intent'),
       needsFix: needsFixSchema.optional(),
+      /** Set by historical settlement when its Work finished before this retained record was written. */
+      completionEvidenceAt: z.iso.datetime().optional(),
       recoveryRunId: z.uuid().optional(),
       testContracts: z.array(intentTestContractSchema).optional(),
       outcome: z.string().trim().min(1).max(500),

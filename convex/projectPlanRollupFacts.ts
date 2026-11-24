@@ -11,6 +11,7 @@ import { latestItemIntentHead } from './projectItemIntentHeads';
 import { verifiedRollupMembership } from './projectItemMembershipVersion';
 import { planItemOpenLaneMark, planLaneItem } from './projectPlanLaneMarks';
 import { recordPartition } from './projectWorkIndexStore';
+import { intentCompletionTime } from './projectPlanRollupReopen';
 import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 
@@ -25,7 +26,7 @@ const pin = (head: Chain[number] | Lane) =>
   head ? [head.key, head.recordId, head.version, head.status] : null;
 
 type Fact = { chain: Chain; mark: Awaited<ReturnType<typeof planItemOpenLaneMark>> };
-type Item = Pick<PlanningItem, 'id' | 'kind' | 'status' | 'intentIds'>;
+type Item = Pick<PlanningItem, 'id' | 'kind' | 'status' | 'intentIds' | 'version' | 'statusPin'>;
 
 /** A shared bounded reader per transaction; many Item links can name the same Item or Intent. */
 export function rollupWorkReader(
@@ -51,6 +52,7 @@ export function rollupWorkReader(
     return { chain: head ? [head] : [], mark };
   };
   const openByIntent = new Map<string, Promise<Lane>>();
+  const completions = new Map<string, ReturnType<typeof intentCompletionTime>>();
   return {
     get calls() {
       return pending.size;
@@ -101,10 +103,35 @@ export function rollupWorkReader(
                 : live.length
                   ? 'abandoned'
                   : 'none';
+      let completedAt: number | undefined;
+      if (
+        work === 'completed' &&
+        item.version > 1 &&
+        !item.statusPin &&
+        (item.status === 'open' || item.status === 'in-progress')
+      ) {
+        const dates = await Promise.all(
+          chains.flatMap(chain => {
+            const head = chain.at(-1);
+            if (head?.status !== 'completed') return [];
+            let read = completions.get(head.key);
+            if (!read) completions.set(head.key, (read = intentCompletionTime(ctx, head)));
+            return [read];
+          }),
+        );
+        for (const at of dates)
+          if (at !== undefined && (completedAt === undefined || at > completedAt)) completedAt = at;
+      }
       return {
         work,
+        completedAt,
         workStamp: digest(
-          JSON.stringify([chains.map(chain => chain.map(pin)), lanes.map(pin), ...(verified ? [marks] : [])]),
+          JSON.stringify([
+            chains.map(chain => chain.map(pin)),
+            lanes.map(pin),
+            ...(verified ? [marks] : []),
+            completedAt,
+          ]),
         ),
       };
     },

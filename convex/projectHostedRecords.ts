@@ -143,6 +143,8 @@ export async function writeHostedRecord(
     /** The Item selected by a planned start, or null for a new independent Intent. */
     planningItemId?: string | null | undefined;
     reopened?: true;
+    /** Historical repair must carry the proved time, not the time the repair was written. */
+    intentCompletedAt?: string;
     /** Trusted compose metadata, outside the client-visible immutable record body. */
     restoreBases?: string;
     candidateFiles?: { sha256: string; size: number };
@@ -172,6 +174,13 @@ export async function writeHostedRecord(
   }
   if (record.kind === 'lane') await materializeLifecycleLane(ctx, input.projectId, record.id);
   const head = await recordHead(ctx, input.projectId, record.kind, record.id);
+  if (record.kind === 'intent' && (input.intentCompletedAt || record.completionEvidenceAt)) {
+    const intent = { ...record };
+    if (input.intentCompletedAt && intent.status === 'completed')
+      intent.completionEvidenceAt = input.intentCompletedAt;
+    else if (intent.status !== 'completed') delete intent.completionEvidenceAt;
+    ({ record, ref, value } = hostedRecordValue(intent));
+  }
   const old =
     head && record.version <= head.version
       ? await recordVersion(ctx, input.projectId, record.kind, record.id, record.version)

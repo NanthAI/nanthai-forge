@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { batchUndo } from '../dist/planning-batch.js';
-import { prepareRollupApproval } from '../dist/planning-rollup-preview.js';
+import { prepareRollupApproval, previewPlanningRollup } from '../dist/planning-rollup-preview.js';
+import { successorIntentId } from '../dist/hosted-intent-chain.js';
 import { getFunctionName } from 'convex/server';
 import { setup } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -405,11 +406,10 @@ test('a stale active Intent with only a terminal Lane cannot start the Item or i
   assert.equal((await s.read(initiativeId)).status, 'open');
 });
 
-async function lifecycleFixture(s, itemId) {
+async function lifecycleFixture(s, itemId, { intentId = itemId, at = '2026-01-01T00:00:00.000Z' } = {}) {
   const authorityEpoch = 1;
   const project = s.tables.hostedProjects.get(s.projectId);
   Object.assign(project, { sourceAuthority: { mode: 'server', epoch: authorityEpoch } });
-  const at = '2026-01-01T00:00:00.000Z';
   const laneId = randomUUID();
   const base = { head: 'a'.repeat(64), receiptId: randomUUID() };
   const auth = {
@@ -423,7 +423,7 @@ async function lifecycleFixture(s, itemId) {
     ...auth,
     record: {
       kind: 'intent',
-      id: itemId,
+      id: intentId,
       version: 0,
       at,
       outcome: 'Synthetic Work',
@@ -441,7 +441,7 @@ async function lifecycleFixture(s, itemId) {
       id: laneId,
       version: 0,
       at,
-      intentId: itemId,
+      intentId,
       actor: 'owner',
       base,
       head: base.head,
@@ -452,10 +452,19 @@ async function lifecycleFixture(s, itemId) {
     },
   });
   const overlap = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === laneId);
-  const stampLanded = () =>
-    s.ctx.db.patch(overlap._id, {
+  const stampLanded = async () => {
+    const current = await s.ctx.db.get(overlap._id);
+    if (current.planLaneMark) {
+      const { removePlanLanes } = await import(moduleUrl('../convex/projectPlanLaneMarks.ts'));
+      await removePlanLanes(s.ctx, current.planLaneMark, [current.lifecyclePlanId]);
+    }
+    await s.ctx.db.patch(overlap._id, {
+      open: false,
+      planLaneMark: undefined,
+      planLanePin: undefined,
       landed: { receiptId: randomUUID(), commit: base.head, laneHead: base.head, at },
     });
+  };
   const changeLane = async (action, version) => {
     const request = JSON.stringify({
       operationId: randomUUID(),
@@ -544,6 +553,82 @@ test('the version-fenced stale Intent repair updates canonical Work, not Plan, a
   });
   assert.equal(head(changing).status, 'active');
 });
+
+for (const mode of ['legacy', 'verified'])
+  test(`1018d0f8 v58 ${mode} replay: a budget-break reopen beats repaired old Work even with all lines ticked`, async t => {
+    const s = await plan(t);
+    t.mock.property(process, 'env', { ...process.env, CONVEX_CLOUD_URL: preview.approvedDevRollup });
+    const id = await s.add({
+      status: 'open',
+      body: '## Done when\n- [x] Regression measured\n- [x] Replay checked\n- [x] Reported\n- [x] Landed\n- [x] Budget checked',
+    });
+    const partition = s.tables.hostedProjects.get(s.projectId).work.generationId;
+    if (mode === 'verified')
+      await s.ctx.db.patch(s.projectId, {
+        itemLaneMembership: 'verified-v2',
+        planLaneMarkCoverage: { generationId: partition, cursor: null },
+      });
+    const { workRecordTable } = await import(moduleUrl('../convex/projectWorkRecordTables.ts'));
+    const rootTable = await workRecordTable(s.ctx, partition, 'planningItems');
+    const versionsTable = await workRecordTable(s.ctx, partition, 'planningVersions');
+    const root = [...s.tables[rootTable].values()].find(
+      r => r.collection === 'planningItems' && r.key === id,
+    );
+    assert.ok(root);
+    const original = JSON.parse(root.value);
+    const v57 = {
+      ...original,
+      version: 57,
+      previousVersion: 56,
+      status: 'closed',
+      at: '2026-11-24T16:33:32.291Z',
+    };
+    const v58 = {
+      ...original,
+      version: 58,
+      previousVersion: 57,
+      status: 'open',
+      reason: 'Speed budget broken',
+      at: '2026-11-24T16:46:46.734Z',
+    };
+    await s.ctx.db.patch(root._id, { value: JSON.stringify(v58) });
+    for (const item of [v57, v58])
+      await s.ctx.db.insert(versionsTable, {
+        generationId: root.generationId,
+        projectId: s.projectId,
+        collection: 'planningVersions',
+        key: randomUUID(),
+        parent: id,
+        position: item.version,
+        value: JSON.stringify(item),
+      });
+    const { stampLanded } = await lifecycleFixture(s, id);
+    await stampLanded();
+    const batch = { projectId: s.projectId, intentIds: [id] };
+    const repaired = await intentRepair.preview._handler(s.ctx, batch);
+    assert.equal(repaired[0].status, 'completed');
+    await intentRepair.apply._handler(s.ctx, { projectId: s.projectId, expected: repaired });
+    const inspectLeaf = () => preview.page._handler(s.ctx, { projectId: s.projectId, after: '', itemId: id });
+    const output = await inspectLeaf();
+    assert.deepEqual(
+      output.rows.map(r => [r.id, r.work, r.completionHeld]),
+      [[id, 'completed', true]],
+    );
+    assert.deepEqual(previewPlanningRollup(output.rows).changes, []);
+    assert.throws(() => prepareRollupApproval([output]), /missing, repeated, or stale page/);
+    assert.equal(await s.execute(id, { source: 'plan' }), 'unchanged');
+
+    const later = successorIntentId(id);
+    const next = await lifecycleFixture(s, id, { intentId: later, at: '2026-11-25T12:00:00.000Z' });
+    await next.stampLanded();
+    const proof = await intentRepair.preview._handler(s.ctx, { ...batch, intentIds: [later] });
+    await intentRepair.apply._handler(s.ctx, { projectId: s.projectId, expected: proof });
+    const after = await inspectLeaf();
+    assert.deepEqual(
+      previewPlanningRollup(after.rows).changes.map(r => [r.id, r.status, r.rule]),
+      [[id, 'closed', 'ownWorkDone']],
+    );
+  });
 
 test('abandoned linked work does not abandon an Item when a later Plan write checks it', async t => {
   const s = await plan(t);

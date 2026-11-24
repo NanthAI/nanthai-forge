@@ -32,7 +32,7 @@ async function checkedIntent(
     )
     .take(siblings + 1);
   if (lanes.length === 0 || lanes.length > siblings) return null;
-  let completed = false;
+  let completedAt = '';
   let latest = '';
   const evidence: string[][] = [];
   for (const lane of lanes) {
@@ -42,8 +42,8 @@ async function checkedIntent(
       const overlap = await laneOverlapHead(ctx, project._id, lane.key);
       if (lane.pinned || !overlap?.landed || overlap.landed.revertedBy || !landedAtLaneHead(overlap))
         return null;
-      completed = true;
-      stamp.push(overlap.landed.receiptId, overlap.landed.laneHead);
+      if (overlap.landed.at > completedAt) completedAt = overlap.landed.at;
+      stamp.push(overlap.landed.receiptId, overlap.landed.laneHead, overlap.landed.at);
       if (overlap.landed.at > latest) latest = overlap.landed.at;
       continue;
     }
@@ -51,17 +51,25 @@ async function checkedIntent(
     const laneRow = await ctx.db.get(lane.recordId);
     if (!laneRow || laneRow.purged) return null;
     const value = hostedLaneSchema.parse(JSON.parse(await hostedRecordBody(ctx, laneRow)));
-    if (lane.status === 'completed') completed = true;
+    if (lane.status === 'completed') {
+      const overlap = await laneOverlapHead(ctx, project._id, lane.key);
+      const landing = overlap?.landed?.laneHead === value.head ? overlap.landed : undefined;
+      if (landing?.revertedBy) return null;
+      const completed = landing?.at ?? value.at;
+      if (completed > completedAt) completedAt = completed;
+      stamp.push(completed);
+    }
     if (value.at > latest) latest = value.at;
   }
   // An explicit reopen or a recovery may be newer than every terminal Lane. Do not undo either.
   if (latest < intent.at) return null;
   return {
     intent,
+    completedAt,
     move: {
       id,
       version: intent.version,
-      status: completed ? ('completed' as const) : ('abandoned' as const),
+      status: completedAt ? ('completed' as const) : ('abandoned' as const),
       workStamp: digest(JSON.stringify(evidence)),
     },
   };
@@ -122,6 +130,7 @@ export const apply = internalMutation({
         actor: project.owner,
         authorityEpoch: project.sourceAuthority.epoch,
         expectedVersion: move.version,
+        ...(result.completedAt ? { intentCompletedAt: result.completedAt } : {}),
         record: {
           ...result.intent,
           status: move.status,

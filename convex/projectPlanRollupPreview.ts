@@ -3,7 +3,10 @@
 import { v } from 'convex/values';
 import { internalQuery } from './server';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
-import { workRecordTable } from './projectWorkRecordTables';
+import { workRecordLookup, workRecordTable } from './projectWorkRecordTables';
+import { planCounter, type PlanCounts } from './projectPlanCountsStore';
+import { readRollupBranch } from './projectPlanRollupStore';
+import { completionHeldByReopen } from './projectPlanRollupReopen';
 import { generationHead } from './projectWorkHead';
 import { rollupChecklist, rollupWorkReader } from './projectPlanRollupFacts';
 import { invariant } from '../src/errors';
@@ -30,12 +33,15 @@ export const page = internalQuery({
     projectId: v.id('hostedProjects'),
     after: v.string(),
     expected: v.optional(fence),
+    /** A targeted preview is valid only for a leaf Item with proved scope coverage. */
+    itemId: v.optional(v.string()),
   },
   returns: v.object({
     fence,
     from: v.string(),
     after: v.union(v.string(), v.null()),
     rootsRead: v.number(),
+    targeted: v.optional(v.literal(true)),
     intentKeys: v.number(),
     rows: v.array(
       v.object({
@@ -49,6 +55,7 @@ export const page = internalQuery({
         parentId: v.optional(v.string()),
         initiativeId: v.optional(v.string()),
         incomplete: v.optional(v.literal(true)),
+        completionHeld: v.optional(v.literal(true)),
         work: v.union(
           v.literal('none'),
           v.literal('active'),
@@ -82,12 +89,30 @@ export const page = internalQuery({
       'Planning changed since the preview started. Do not combine pages across revisions.',
     );
     const partition = recordPartition(generation);
-    const source = await ctx.db
-      .query(await workRecordTable(ctx, partition, 'planningItems'))
-      .withIndex('by_generation_and_collection_and_key', q =>
-        q.eq('generationId', partition).eq('collection', 'planningItems').gt('key', args.after),
-      )
-      .paginate({ cursor: null, numItems: PAGE, maximumRowsRead: PAGE, maximumBytesRead: BYTES });
+    const leaf = args.itemId && (await workRecordLookup(ctx, partition, 'planningItems', args.itemId));
+    if (args.itemId) {
+      const header = await planCounter(ctx.db, partition);
+      const counts: PlanCounts | null = header ? JSON.parse(header.value) : null;
+      const scope = await readRollupBranch(ctx.db, partition, args.itemId);
+      invariant(
+        args.after === '' &&
+          leaf &&
+          JSON.parse(leaf.value).kind === 'issue' &&
+          counts?.scopeThrough === null &&
+          !counts.scopeBlocked &&
+          !scope.counts.total,
+        'WORK_STALE',
+        'Select a current leaf Item with complete scope coverage for a targeted preview.',
+      );
+    }
+    const source = leaf
+      ? { page: [leaf], isDone: true }
+      : await ctx.db
+          .query(await workRecordTable(ctx, partition, 'planningItems'))
+          .withIndex('by_generation_and_collection_and_key', q =>
+            q.eq('generationId', partition).eq('collection', 'planningItems').gt('key', args.after),
+          )
+          .paginate({ cursor: null, numItems: PAGE, maximumRowsRead: PAGE, maximumBytesRead: BYTES });
     const last = source.page.at(-1)?.key;
     invariant(
       source.isDone || (last && last > args.after),
@@ -108,9 +133,9 @@ export const page = internalQuery({
         if (isShelved(item.status) || item.purged) return null;
         // A compact payload may omit both the pin and links. Never interpret that as unpinned or unlinked.
         const fragmented = Boolean(item.payload || item.payloadKey || typeof item.body !== 'string');
-        const { work, workStamp } = fragmented
-          ? { work: 'unknown' as const, workStamp: '' }
-          : await read.read(item);
+        const facts = fragmented ? { work: 'unknown' as const, workStamp: '' } : await read.read(item);
+        const { work, workStamp } = facts;
+        const completionHeld = await completionHeldByReopen(ctx, args.projectId, partition, item, facts);
         return {
           id: item.id,
           kind: item.kind,
@@ -120,6 +145,7 @@ export const page = internalQuery({
           ...(item.initiativeId ? { initiativeId: item.initiativeId } : {}),
           ...(item.statusPin ? { pinned: true as const } : {}),
           ...(work === 'unknown' ? { incomplete: true as const } : {}),
+          ...(completionHeld ? { completionHeld: true as const } : {}),
           ...(fragmented ? { checked: 0, unchecked: 1 } : rollupChecklist(item.body)),
           work,
           workStamp,
@@ -131,6 +157,7 @@ export const page = internalQuery({
       from: args.after,
       after: source.isDone ? null : last!,
       rootsRead: source.page.length,
+      ...(args.itemId ? { targeted: true as const } : {}),
       intentKeys: read.calls,
       rows: rows.filter(row => row !== null),
     };

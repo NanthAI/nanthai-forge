@@ -62,6 +62,8 @@ type Subject = Pick<PlanningItem, 'status' | 'kind' | 'statusPin'> & {
   unchecked: number;
   checked: number;
   work: RollupWork;
+  /** A retained reopen is newer than completed Work, or the retained proof cannot establish otherwise. */
+  completionHeld?: true;
   /** A compact evaluation needs to know that a pin exists, not its attribution. */
   pinned?: true;
 };
@@ -81,7 +83,8 @@ export function rollupDecision(subject: Subject, scope: RollupCounts, enabled: b
     if (!scope.total || unchecked) return null;
     return scope.done ? move('closed', 'lastItemSettled') : move('abandoned', 'allAbandoned');
   }
-  if (work === 'active' || work === 'abandoned' || work === 'unknown' || unchecked) return null;
+  if (subject.completionHeld || work === 'active' || work === 'abandoned' || work === 'unknown' || unchecked)
+    return null;
   if (enabled && scope.total) return move('closed', 'lastChildSettled');
   if (work === 'completed') return move('closed', 'ownWorkDone');
   return enabled && checked ? move('closed', 'checklistDone') : null;
