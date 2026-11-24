@@ -41,7 +41,7 @@ async function compose(f, state, main, prepareOutput) {
 }
 async function setup(t) {
   const f = await physicalProject(t, 1000);
-  await f.queueSeed();
+  const sourceJob = await f.queueSeed();
   await f.seed();
   const seeded = await f.compose(f.files, f.base, 'main-0');
   f.s.main.head = seeded.head.sha256;
@@ -66,7 +66,7 @@ async function setup(t) {
     });
     return { state, root };
   };
-  return { ...f, main: seeded.head, save };
+  return { ...f, main: seeded.head, save, sourceJob };
 }
 
 test('compose repairs an adopted Lane root without a usable main root', async t => {
@@ -404,6 +404,141 @@ test('a batch terminal quantum repairs its adopted final State after the action-
   assert.notEqual(pin.sha256, final.root.pin.sha256);
   assert(!reader.root.chunks.some(chunk => chunk.pack?.digest === removedChunk.pack.digest));
   assert.deepEqual(await reader.lookup([extras[0].blob]), [null]);
+});
+
+async function resumeColdBatch(f, saved, { warmMain = false } = {}) {
+  const { buildComposePages } = await import('../dist/hosted-compose.js'),
+    { computeMergeStep } = await import('../dist/hosted-source-step-merge.js'),
+    { initialSourceStep } = await import('../dist/hosted-source-step.js'),
+    { saveBytes } = await import('../dist/hosted-save.js'),
+    { convexSourceTransport } = await import(moduleUrl('../convex/projectConvexSourceTransport.ts')),
+    { storeSourceOutputs } = await import(moduleUrl('../convex/projectConvexSourceOutput.ts'));
+  // A plan with a recipe can load main's bytes without consulting main's State row.
+  const makeRecipe = object => {
+    const body = f.s.objects.get(object.sha256),
+      children = [body.subarray(0, 4096), body.subarray(4096)].map(bytes => ({
+        ...f.s.put(bytes),
+        height: 0,
+        length: bytes.length,
+      })),
+      tree = f.s.put(saveBytes({ schema: 1, kind: 'forge-byte-tree', children })),
+      recipe = f.s.put(
+        saveBytes({
+          schema: 1,
+          kind: 'forge-object-recipe',
+          object,
+          tree: { ...tree, height: 1, length: body.length },
+        }),
+      );
+    f.s.patch('projectObjects', physicalObjectRow(f.s, object.sha256)._id, {
+      recipe: { digest: recipe.sha256, size: recipe.size },
+    });
+    return { object, recipe };
+  };
+  const mainRef = makeRecipe(f.main),
+    headRef = warmMain ? makeRecipe(saved.state) : { object: saved.state, recipe: null },
+    members = ['b87e3a8d-b15c-4cbc-96f6-47f21676671a', '7d1efbeb-218c-4539-a855-c98e9cdc44e1'],
+    selections = members.map(candidateId => ({ candidateId, head: saved.state.sha256, state: headRef })),
+    plan = {
+      schema: 1,
+      kind: 'forge-hosted-compose-input',
+      batch: { members },
+      main: mainRef,
+      base: { head: f.main.sha256, receiptId: 'main-1' },
+      inputs: buildComposePages([]).manifest,
+      dependencies: buildComposePages(selections).manifest,
+      algorithm: 'forge-native-compose-v1',
+      message: 'batch compose',
+      at: '2026-01-01T00:00:00.000Z',
+    },
+    cursor = {
+      ...initialSourceStep(f.s.put(saveBytes(plan))),
+      plan,
+      selections,
+      phase: 'compute',
+      index: selections.length,
+      batchMerged: members,
+      head: saved.state.sha256,
+      inventory: { [saved.state.sha256]: headRef, [f.main.sha256]: plan.main },
+    },
+    transport = convexSourceTransport(
+      f.c.context,
+      { ...f.sourceJob, step: 0 },
+      warmMain
+        ? [
+            {
+              descriptor: mainRef,
+              storageId: null,
+              url: null,
+              statePhysical: physicalObjectRow(f.s, f.main.sha256).statePhysical,
+            },
+          ]
+        : [],
+      undefined,
+      { physicalManifests: true, sourceKind: 'compose' },
+    );
+  const puts = f.c.r2Puts.length,
+    gets = f.c.r2Gets.length,
+    putBytes = f.c.r2PutBytes(),
+    calls = f.c.calls.length;
+  await computeMergeStep(cursor, transport.io);
+  await transport.settle();
+  await f.s.run('terminal batch publication', ctx =>
+    storeSourceOutputs(ctx, f.s.projectId, 'synthetic', transport.outputs),
+  );
+  assert.equal(cursor.phase, 'done');
+  assert.deepEqual(JSON.parse(f.s.objects.get(cursor.output.sha256)).result.state, saved.state);
+  return {
+    metadata: f.c.r2Puts.slice(puts).filter(id => f.s.objects.get(id)[0] === 70),
+    gotMainBody: f.c.r2Gets.slice(gets).includes(mainRef.recipe.sha256),
+    putBytes: f.c.r2PutBytes() - putBytes,
+    calls: f.c.calls.slice(calls),
+  };
+}
+
+test('incident 8b7ab7a9: clean batch resume keeps its rooted main lineage without a full metadata repack', async t => {
+  const f = await setup(t),
+    extra = f.s.file('extra.txt', 'new file'),
+    saved = await f.save([...f.files.slice(1), extra], f.main, f.files),
+    result = await resumeColdBatch(f, saved);
+  assert.deepEqual(physicalObjectRow(f.s, saved.state.sha256).statePhysical, saved.root.pin);
+  assert.deepEqual(result.metadata, [], 'accepted partial packs are not copied');
+  assert.equal(result.gotMainBody, false, 'root verification needs no recipe reads');
+  assert(result.putBytes < 1024, 'the terminal quantum writes only its small result');
+  assert.deepEqual(result.calls, ['projectConvexSourceObjects:resolve'], 'one page instead of a seed check');
+});
+
+test('cold batch resume reads exact main membership before adding an absent final root', async t => {
+  const f = await setup(t),
+    extra = f.s.file('extra.txt', 'new file'),
+    saved = await f.save([...f.files, extra], f.main, f.files);
+  f.s.patch('projectObjects', physicalObjectRow(f.s, saved.state.sha256)._id, { statePhysical: undefined });
+  const result = await resumeColdBatch(f, saved);
+  assert.equal(result.gotMainBody, true, 'bounded incremental writes verify exact main membership');
+  assert.deepEqual(physicalObjectRow(f.s, saved.state.sha256).statePhysical, saved.root.pin);
+});
+
+test('cold batch with a warm main still repairs a recipe-backed final State from its actual row', async t => {
+  const f = await setup(t),
+    extras = Array.from({ length: 8 }, (_, i) => f.s.file(`cold-${i}.txt`, `cold member ${i}`)),
+    prior = await f.save([...f.files, ...extras], f.main, f.files),
+    saved = await f.save([...f.files, ...extras.slice(1)], prior.state, [...f.files, ...extras]);
+  await resumeColdBatch(f, saved, { warmMain: true });
+  const stored = physicalObjectRow(f.s, saved.state.sha256).statePhysical,
+    opened = await PhysicalManifestReader.open(saved.state.sha256, stored, f.read);
+  assert.notEqual(stored.sha256, saved.root.pin.sha256);
+  assert.deepEqual(await opened.lookup([extras[0].blob]), [null]);
+});
+
+test('cold batch with a truly rootless main still repairs adopted packs without requeuing the seed', async t => {
+  const f = await setup(t),
+    extra = f.s.file('rootless.txt', 'new file'),
+    saved = await f.save([...f.files.slice(1), extra], f.main, f.files);
+  f.s.patch('projectObjects', physicalObjectRow(f.s, f.main.sha256)._id, { statePhysical: undefined });
+  const result = await resumeColdBatch(f, saved);
+  assert(result.metadata.length > 0, 'without main lineage the partial pack must be repacked');
+  assert.equal(result.gotMainBody, false);
+  assert.deepEqual(result.calls, ['projectConvexSourceObjects:resolve']);
 });
 
 for (const packed of [false, true])

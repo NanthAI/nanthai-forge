@@ -247,7 +247,10 @@ packs. With the physical manifest writer enabled, generated Candidate States
 extend only the verified main root selected by the compose plan. They use the same-State
 catalog while main has no usable root. An adopted Candidate repairs metadata packs
 with superseded buckets, treating every pack as outside main's lineage when main
-has no usable root. Competing root replacements fall back to the exact State
+has no usable root. Resumed compose resolves the pinned main descriptor alongside
+its final head before deciding whether main is unrooted. A rooted terminal quantum
+verifies main's root without downloading its State body unless it needs to build a
+new incremental root. Competing root replacements fall back to the exact State
 catalog when the observed root changed before commit.
 Ordinary incremental State writes share unchanged manifest buckets. The ordinary
 100-object windows and their call counts stay unchanged. Ancestry

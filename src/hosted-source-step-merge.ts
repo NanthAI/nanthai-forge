@@ -467,32 +467,53 @@ export async function computeMergeStep(
     return;
   }
   const plan = sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan));
-  io.selectPhysicalComposeMain?.(plan.main.object.sha256);
-  if (io.seedPhysicalState && !io.hasPhysicalState?.(plan.main.object.sha256)) {
+  const mainId = plan.main.object.sha256,
+    terminal = c.index >= c.selections.length;
+  io.selectPhysicalComposeMain?.(mainId);
+  // Member quanta have already offered to seed main. A genuine rootless
+  // terminal resume uses the catalog; it need not requeue the same seed.
+  if (io.seedPhysicalState && (!terminal || c.index === 0) && !io.hasPhysicalState?.(mainId)) {
     const reader = new MemorySourceReader(source, io);
     await reader.bytes(plan.main);
-    await io.seedPhysicalState(plan.main.object, source.state(plan.main.object.sha256).files);
+    await io.seedPhysicalState(plan.main.object, source.state(mainId).files);
   }
   // Member accounting starts with the first quantum; an older in-flight cursor has none.
   if (plan.batch && c.index === 0) c.batchMerged ??= [];
-  if (c.index >= c.selections.length) {
+  if (terminal) {
     invariant(c.head, 'SOURCE_JOB_INVALID', 'Compose has no selected head.');
     if (plan.batch && c.batchMerged) assertBatchAccounted(plan.batch.members, c.batchMerged, c.batchDropped);
-    let state = c.inventory[c.head]?.object;
-    if (!state) {
-      invariant(io.describeBatch, 'SOURCE_WORKER_UNAVAILABLE', 'Resolve final State.');
-      state = (await io.describeBatch([c.head]))[0]!.object;
+    const own = source.objects.get(c.head),
+      generated = own && source.outputState(own),
+      adopted = io.composePhysicalState && c.head !== mainId && !generated;
+    let mainRef = plan.main,
+      finalRef = c.inventory[c.head];
+    if (adopted && io.probeStates) {
+      // The cursor retains logical pins, not the action's physical descriptors.
+      // Fetch both exact rows in one bounded window; either row may already be warm.
+      const { refs, unavailable } = await io.probeStates([mainId, c.head]);
+      invariant(!unavailable.length, 'SOURCE_UNAVAILABLE', 'Exact compose State is absent.');
+      invariant(
+        refs[0]?.object.sha256 === mainId &&
+          refs[0].object.size === mainRef.object.size &&
+          refs[1]?.object.sha256 === c.head &&
+          (!finalRef || refs[1].object.size === finalRef.object.size),
+        'SOURCE_HASH_MISMATCH',
+        'Compose State descriptors changed.',
+      );
+      [mainRef, finalRef] = [refs[0], refs[1]];
     }
-    const reader = new MemorySourceReader(source, io);
-    const own = source.objects.get(c.head);
-    if (io.composePhysicalState && c.head !== plan.main.object.sha256 && !(own && source.outputState(own))) {
-      const ref = c.inventory[c.head] ?? (await io.describeBatch!([c.head]))[0]!;
-      await reader.bytes(ref);
-      await io.composePhysicalState(state, source.state(c.head).files, plan.main.object.sha256);
-    } else if (io.writePhysicalState && !io.hasPhysicalState?.(c.head) && !(own && source.outputState(own))) {
-      const ref = c.inventory[c.head] ?? (await io.describeBatch!([c.head]))[0]!;
-      await reader.bytes(ref);
-      await io.writePhysicalState(state, source.state(c.head).files, [plan.main.object.sha256]);
+    if (!finalRef) {
+      invariant(io.describeBatch, 'SOURCE_WORKER_UNAVAILABLE', 'Resolve final State.');
+      finalRef = (await io.describeBatch([c.head]))[0]!;
+    }
+    const state = finalRef.object,
+      reader = new MemorySourceReader(source, io);
+    if (adopted && io.composePhysicalState) {
+      await reader.bytes(finalRef);
+      await io.composePhysicalState(state, source.state(c.head).files, mainId, () => reader.state(mainRef));
+    } else if (io.writePhysicalState && !io.hasPhysicalState?.(c.head) && !generated) {
+      await reader.bytes(finalRef);
+      await io.writePhysicalState(state, source.state(c.head).files, [mainId]);
     }
     const docs = docsMerge(c.docsPaths ?? []);
     const listing =

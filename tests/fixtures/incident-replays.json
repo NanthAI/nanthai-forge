@@ -14246,6 +14246,30 @@
       "file": "tests/hosted-agent-cli.test.mjs",
       "paths": [],
       "test": "incident 789b7b21: agent ROOT open into a non-existent folder creates ROOT and its checkout instead of redirecting to addressed state"
+    },
+    {
+      "incident": "8b7ab7a9",
+      "what": "Dry N=3 bench cells forge-n3-r1-dry-a1-20261124T070718 and forge-n3-r1-dry-a2-20261124T074857 repacked about 2.11 MB per clean batch terminal quantum after losing the exact main physical descriptor across an action boundary.",
+      "file": "tests/physical-manifest-compose.test.mjs",
+      "paths": [
+        "convex/projectConvexPhysicalManifest.ts",
+        "convex/projectConvexSourceActive.ts",
+        "convex/projectConvexSourceLease.ts",
+        "convex/projectHostedCompose.ts",
+        "convex/projectHostedComposeJobs.ts",
+        "convex/projectHostedComposePublish.ts",
+        "convex/projectHostedComposeStore.ts",
+        "convex/projectHostedFinishWake.ts",
+        "convex/projectHostedLandingDesiredWake.ts",
+        "convex/projectMetricAliasWriter.ts",
+        "convex/projectMetricComposeMembership.ts",
+        "convex/projectSourceJobs.ts",
+        "convex/schedulerCancel.ts",
+        "src/hosted-batch-coverage.ts",
+        "src/hosted-compose.ts",
+        "src/hosted-source-step-merge.ts"
+      ],
+      "test": "incident 8b7ab7a9: clean batch resume keeps its rooted main lineage without a full metadata repack"
     }
   ]
 }

@@ -15,6 +15,8 @@ const CORE = [
   // cancel. The source store, pool and fan-out only call these at their own scheduling points; their
   // scheduling is covered by the source worker tests, and a change to the wake itself lands here.
   /^convex\/(?:projectConvexSourceLease|projectConvexSourceActive|projectSourceJobs)\.ts$/,
+  // Compose's verified-lineage selection gates the exact Candidate that enters the queue.
+  /^(?:src\/hosted-source-step-merge|convex\/projectConvexPhysicalManifest)\.ts$/,
   /^src\/(?:landing-(?!capsule|accepted-by|message|preview-records)|hosted-landing|hosted-finish|hosted-acceptance|hosted-batch|hosted-compose|hosted-cross-head|hosted-would-conflict|hosted-land-gates|hosted-queue-status|scoped-recheck|check-reuse|queue-|first-check-risk)[^/]*\.ts$/,
   /^src\/hosted-check(?:-evidence|-verdict|-controller|-only-compose)?\.ts$/,
   /^src\/(?:package-placement(?:-pin|-js)?|js-inbound-(?:imports|specifiers)|hosted-actions-job-(?:plan|client))\.ts$/,

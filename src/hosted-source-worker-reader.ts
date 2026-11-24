@@ -34,8 +34,14 @@ export interface SourceWorkerTransport {
   /** Fast-forwards can select an existing State without uploading its bytes again. */
   writePhysicalState?(pin: WorkerPin, files: readonly NativeFile[], bases: readonly string[]): Promise<void>;
   hasPhysicalState?(id: string): boolean;
-  /** Only trusted compose may replace a working physical root. */
-  composePhysicalState?(pin: WorkerPin, files: readonly NativeFile[], main: string): Promise<void>;
+  /** Only trusted compose may replace a working physical root. Reopened roots
+   * need no main body unless the writer must build a new incremental root. */
+  composePhysicalState?(
+    pin: WorkerPin,
+    files: readonly NativeFile[],
+    main: string,
+    loadMain?: () => Promise<unknown>,
+  ): Promise<void>;
   stateGeneration?(id: string): number | undefined;
   /** Recorded parents of a hash-verified State's descriptor; absent for older rows. */
   stateParents?(id: string): readonly string[] | undefined;

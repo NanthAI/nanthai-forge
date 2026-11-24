@@ -156,7 +156,12 @@ export function sourcePhysicalManifests(options: {
     row.statePhysical = result.statePhysical;
     options.outputs.push(output);
   };
-  const compose = async (pin: WorkerPin, files: readonly NativeFile[], mainId: string) => {
+  const compose = async (
+    pin: WorkerPin,
+    files: readonly NativeFile[],
+    mainId: string,
+    loadMain?: () => Promise<unknown>,
+  ) => {
     if (pin.sha256 === mainId) return;
     const row = options.locations.get(pin.sha256),
       mainRow = options.locations.get(mainId);
@@ -174,6 +179,7 @@ export function sourcePhysicalManifests(options: {
       }
     };
     const [head, main] = await Promise.all([open(row), open(mainRow)]);
+    if (!head && main && !options.members(mainId)) await loadMain?.();
     if (!head && !row.statePhysical) return existing(pin, files, [mainId]);
     if (!head) {
       // Regenerate the invalid derived root from verified main membership.

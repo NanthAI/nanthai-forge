@@ -1,0 +1,233 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectConvexPhysicalManifest.ts": "ea371e810996455c7910728ba34d6f870eed19010d1ea62bb9c6cd30dfe5013e",
+    "src/hosted-source-step-merge.ts": "abc33ee48bcfcb5203bab8229b0c3cbf21105903c34b1cdd700e0f3db9206828"
+  },
+  "replay": {
+    "incident": "8b7ab7a9",
+    "test": "incident 8b7ab7a9: clean batch resume keeps its rooted main lineage without a full metadata repack",
+    "receipt": "19b6bdc7-9bee-4e83-b296-2bb0867efdbb"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Adbae984b-6164-495d-86b6-dcf086396ecb",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A273a46d4-fc39-4b1f-be13-1d6829f0fa65",
+    "receipt": "618dc923-f909-404d-88b2-a8b0dd8e6bf4"
+  },
+  "exercised": {
+    "convex/projectConvexPhysicalManifest.ts": {
+      "executed": [
+        "physicalSourceBinding",
+        "sourcePhysicalManifests"
+      ],
+      "digest": "e459d0e8d0478c72e6f80f909de00378adf6ec87593d0956e16048a2af7600d1",
+      "units": [
+        [
+          "ForgeError",
+          "c8934d5ec6f70ce797a0d05c3ecfb78031a48937ad3336194885e4520006a12d"
+        ],
+        [
+          "physicalKey",
+          "36e4991061521ac88ee57a471284de7a1a5b007040d0617d6a4b2e9d4efecfd1"
+        ],
+        [
+          "physicalSourceBinding",
+          "1145053e1282aa01875c752a2b0a8885f9184cc6cdf21d0ccd17d18580c0f8c9"
+        ],
+        [
+          "r2Key",
+          "6139c7ecb1ef81acde791e2ca521e084af827cd6c6564dbe999d38f290e52426"
+        ],
+        [
+          "r2ObjectKey",
+          "b0302afc832e38b632d4f04f1a0daeb5669c62e32039dcf2809a7cda88fcae49"
+        ],
+        [
+          "repairPhysicalRoot",
+          "9862904a9dfa33f5d390b1cd9d87d2df97c79dc412cec5e086861227dcb9daf6"
+        ],
+        [
+          "sourcePhysicalManifests",
+          "6e047a577d1ff64d483fbd6ede323a50b6b8ec7e331f4f55179da42656c10000"
+        ],
+        [
+          "writePhysicalManifest",
+          "d5816cdd8350c6d057058dcc008f63dda9716b83a89611251290772820797a8a"
+        ]
+      ],
+      "shell": "d81dcafdf420121aaec4dc76ef93f9311a840911206390b6a127a42df7e2b559"
+    },
+    "src/hosted-source-step-merge.ts": {
+      "executed": [
+        "computeMergeStep"
+      ],
+      "digest": "fe56b96155eaf30062e11eef722b533fc8282a2488ad2a44a8dc3ceee63ee4eb",
+      "units": [
+        [
+          "ForgeError",
+          "80782ffe370115376243f742db60843dd45ba6c24c25340d4092b697f7ab8a84"
+        ],
+        [
+          "MemoryMergeSource",
+          "fdf78f1c398376baf2649682c87dd3c8f61e976b4d7f6d177429358d54f28846"
+        ],
+        [
+          "MemorySourceReader",
+          "18f04c0a2daba5c73f52e4a8006b002aa6a4b8bddb6be030da818bf5f53d5a8d"
+        ],
+        [
+          "assertBatchAccounted",
+          "aef9149a71a92f5c786904be7af477540fdddb44aebc0496a5d0564eee5649d3"
+        ],
+        [
+          "buildComposePages",
+          "0ca0e55dc191430b806c383998daf8925944e9331b700e630c9791530457238b"
+        ],
+        [
+          "buildHostedComposeState",
+          "8070c8af345751827c864741253479de8a794b1529cde6947ef69e7843958b65"
+        ],
+        [
+          "buildHostedSyncState",
+          "e56e281e7d050f3f9cdb0a48e5a2ac4a1917af6a36974761333596b80f584297"
+        ],
+        [
+          "candidateFileList",
+          "14150d53718b161082674f99fc7568c32cf1c1bb52d09f290abdb0ed85ea317a"
+        ],
+        [
+          "canonicalPayload",
+          "e849c92670263c93c96aee911973f1a3d78272a993a2276e2d66fbd3e7df9aad"
+        ],
+        [
+          "changedPaths",
+          "b21c3fa28fc46e1a7f61587f43626f6a30034fef7e526bd31577dbe42dc22428"
+        ],
+        [
+          "composeConflictPageSchema",
+          "e64996bdcc91ac391c6c857a6fd61ad582aab8b3fb3690b47ef4c22dce854812"
+        ],
+        [
+          "composeDependencySchema",
+          "52a9687e8592a2f60e98e09f3416ac7f6e9c35611dca6673d42e9972e53b42cb"
+        ],
+        [
+          "composeInputSchema",
+          "69a1742d2cadb7d38e2b21e14aa6c04a67a3ceada32056120a9e16f83d6a0ad1"
+        ],
+        [
+          "composeLaneSchema",
+          "e7ac660d5f23387bb6b112757f4c533442cf3b1eccdb706910caaab5bca634d8"
+        ],
+        [
+          "composeResultSchema",
+          "a9973e8395cd608c127258d08518ebf6e545b0bd7416247fd6be34e53a917963"
+        ],
+        [
+          "computeMergeStep",
+          "8f78ce9b8f82a73d518e87d14d6756195d7aa645deb88a365e45fce0674a6cbe"
+        ],
+        [
+          "describeStackTips",
+          "972a118f508603315a5add03b52a0bf0de9bdbfeba1b0974b2497b1b4759d15c"
+        ],
+        [
+          "docsMerge",
+          "3bca68ceeed1a92ac94061f1b1c2401dbb2750097fdde3c197880fe89e4f1f85"
+        ],
+        [
+          "full",
+          "f0e79495a2b66280becbefcdc7f03e7ae422d94303c4febef349c08bd384e4b4"
+        ],
+        [
+          "invariant",
+          "fb5fbff612c49715a7a83d1db218f54589e8865f9f0bb1b36b1ebb32d1f3051d"
+        ],
+        [
+          "manifestConflict",
+          "feb0cec556df4925153b20763eb24f9a7ef1b1ce39000ff9994c93041936c1ab"
+        ],
+        [
+          "mapSourceOrdered",
+          "6afc06f71a340f045703d4a81000fa02d65c77eab55b290e5c94ec44ca54036f"
+        ],
+        [
+          "prepareMergeStep",
+          "40aa513616e8805cb0a65c10c1acce4b4f390351a12ba93bb405d0e3f166f063"
+        ],
+        [
+          "readJson",
+          "10ef2e4c86f29c0f8d19ded8b9096b6f69b64fdfeb0adf5ce14ea2acd18ae702"
+        ],
+        [
+          "resolveRight",
+          "d77b4f6ab739dfabe9957e3ac2668443626f5622a7658490e81e47fbe75a810a"
+        ],
+        [
+          "saveBytes",
+          "0f5315c4a115275e456881a93b3afb2661d0ca84e02b1f2a33ea498d0f1d7f8f"
+        ],
+        [
+          "savePin",
+          "29e23ed43f0c10beaa28d0f4f48e1f553b27bbfe94f913e20bb8409aabb72700"
+        ],
+        [
+          "sourceAncestryCut",
+          "bf28939533927645c23a2d8c5ccf445fa97c7f7c040bef8c49ebe44018f6ac86"
+        ],
+        [
+          "sourceAncestryFrontier",
+          "d459620f2c777e48618fd108c9a3122657dc8c318203952e0d618326c1a45bc8"
+        ],
+        [
+          "sourceGenerationWalk",
+          "8518d5ace26b1d6d337c5f3b86fd51653e50aacace3d89fdf3d4037d55e47573"
+        ],
+        [
+          "sourceStepBytes",
+          "926068843cf9a5d38cdf2627995d9c8f41fde5a00dd3a3d2748f6ca2e52080ad"
+        ],
+        [
+          "sourceValidation",
+          "e04aebf923cfbf10bbfff06209ab78ce1fb8a8b5920cfba3c9e65e0adca7fb5d"
+        ],
+        [
+          "sourceWindows",
+          "5beab48962fb1c852e29cb3883324614cf8cb9208c2275bc6400ca0a694e0c84"
+        ],
+        [
+          "stackedSync",
+          "27e902faea58af23d9c35c38fecf7489947abc09a6e4f478e6aa951f85c6cd68"
+        ],
+        [
+          "stateSummary",
+          "c42e1214786c0032e20bf3a41c2693752c96eee48707bbc1de22eda0ff8ddefb"
+        ],
+        [
+          "syncInputSchema",
+          "31472665c506d35ba0ab0b8dc1209f702420928ad4fe09f7ed82438e1f8f3266"
+        ],
+        [
+          "syncRoots",
+          "b9deec23d78390e073be20677cd371775af16d049fefbf84417769e21d2ab996"
+        ],
+        [
+          "syncStateDelta",
+          "bdf9b5451a6d9a81d55f8f24fd02ad07a5172d64b03db1a58dc92a22785743cb"
+        ],
+        [
+          "validateComposePage",
+          "72d85e973d978937fb463e7e8e92d11ca63f482f2842fefd3a823a4723d572e1"
+        ],
+        [
+          "yieldStep",
+          "44e65d01ef234bd0166b53ff64cbe4cc64ad8fc4a58c641cf306676f9f5324ec"
+        ]
+      ],
+      "shell": "757646e0759c422db653cf5342d37f8f9f0ff4665a28570904b5c784b2e7dd8e"
+    }
+  }
+}
