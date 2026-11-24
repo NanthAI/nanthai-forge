@@ -228,6 +228,136 @@ test('Item 8b6efb50: checkoutForgeState replaces a directory with a file and a f
   assert.equal(readFileSync(join(dir, 'notes/item.md'), 'utf8'), 'nested under former file\n');
 });
 
+test('Item 8b6efb50 incident (web-deploy run 45284079680, "Missing source grant for blob"): checkout decodes the server reply shapes: physical-manifest rows, packed ranges, recipe closures and recipe byte trees', async t => {
+  const dir = temporaryDirectory(t, 'forge-deploy-shapes-');
+  // Three small packed blobs share one pack object; the server signs each with a {offset,total} range.
+  const packedA = Buffer.from('export const a = 1;\n');
+  const packedB = Buffer.from('export const b = 2;\n');
+  const pack = Buffer.concat([Buffer.from('xx'), packedA, packedB, Buffer.from('yy')]);
+  const packId = hash(pack);
+  // One large file stored as a forge-object-recipe byte tree (height 1, two leaves).
+  const leaf1 = Buffer.from('first half of a large file\n');
+  const leaf2 = Buffer.from('second half of a large file\n');
+  const large = Buffer.concat([leaf1, leaf2]);
+  const ref = (bytes, height = 0, length = bytes.length) => ({
+    sha256: hash(bytes),
+    size: bytes.length,
+    height,
+    length,
+  });
+  const page = Buffer.from(
+    JSON.stringify({ kind: 'forge-byte-tree', schema: 1, children: [ref(leaf1), ref(leaf2)] }),
+  );
+  const recipe = Buffer.from(
+    JSON.stringify({
+      kind: 'forge-object-recipe',
+      schema: 1,
+      object: { sha256: hash(large), size: large.length },
+      tree: ref(page, 1, large.length),
+    }),
+  );
+  // One file whose recipe comes with a signed closure (ordered leaves).
+  const closed = Buffer.concat([leaf2, leaf1]);
+  const objects = new Map([
+    [packId, pack],
+    [hash(leaf1), leaf1],
+    [hash(leaf2), leaf2],
+    [hash(page), page],
+    [hash(recipe), recipe],
+  ]);
+  // The manifest itself is stored as a recipe (one leaf), like a large State.
+  const manifestBytes = Buffer.from(
+    JSON.stringify({
+      files: [
+        { path: 'src/a.ts', blob: hash(packedA), mode: 'file' },
+        { path: 'src/b.ts', blob: hash(packedB), mode: 'file' },
+        { path: 'assets/large.txt', blob: hash(large), mode: 'file' },
+        { path: 'assets/closed.txt', blob: hash(closed), mode: 'file' },
+      ],
+    }),
+  );
+  const state = hash(manifestBytes);
+  objects.set(state, manifestBytes);
+  const manifestRecipe = Buffer.from(
+    JSON.stringify({
+      kind: 'forge-object-recipe',
+      schema: 1,
+      object: { sha256: state, size: manifestBytes.length },
+      tree: ref(manifestBytes),
+    }),
+  );
+  objects.set(hash(manifestRecipe), manifestRecipe);
+  const url = id => `https://r2.invalid/${id}`;
+  const physicalRow = (bytes, offset) => ({
+    descriptor: { object: { sha256: hash(bytes), size: bytes.length }, recipe: null },
+    url: url(packId),
+    range: { offset, total: pack.length },
+  });
+  const catalogRow = id => ({ digest: id, size: objects.get(id).length, location: 'r2', url: url(id) });
+  const calls = [];
+  const api = async cmd => {
+    calls.push(cmd);
+    assert.equal(cmd.kind, 'source');
+    if (cmd.object) return { mode: 'catalog', rows: cmd.digests.map(catalogRow) };
+    // The member page: physical-manifest rows for packed blobs, catalog rows for recipe members.
+    return {
+      mode: 'catalog',
+      rows: cmd.digests.map(id =>
+        id === hash(packedA)
+          ? physicalRow(packedA, 2)
+          : id === hash(packedB)
+            ? physicalRow(packedB, 2 + packedA.length)
+            : id === hash(large)
+              ? {
+                  digest: id,
+                  size: large.length,
+                  location: 'recipe',
+                  recipe: { digest: hash(recipe), size: recipe.length },
+                }
+              : {
+                  digest: id,
+                  size: closed.length,
+                  location: 'recipe',
+                  recipe: { digest: '0'.repeat(64), size: 1 },
+                  closure: [
+                    { digest: hash(leaf2), size: leaf2.length, url: url(hash(leaf2)) },
+                    { digest: hash(leaf1), size: leaf1.length, url: url(hash(leaf1)) },
+                  ],
+                },
+      ),
+    };
+  };
+  const request = async (target, init) => {
+    const bytes = objects.get(target.split('/').at(-1));
+    const range = init.headers.range && /^bytes=(\d+)-(\d+)$/.exec(init.headers.range);
+    if (!range) return new Response(bytes, { status: 200 });
+    return new Response(bytes.subarray(Number(range[1]), Number(range[2]) + 1), { status: 206 });
+  };
+  const stats = await checkoutForgeState({
+    dir,
+    state,
+    manifest: {
+      sha256: state,
+      size: manifestBytes.length,
+      url: null,
+      recipe: { sha256: hash(manifestRecipe), size: manifestRecipe.length },
+    },
+    api,
+    request,
+  });
+  assert.equal(stats.updatedFiles, 4);
+  assert.equal(readFileSync(join(dir, 'src/a.ts'), 'utf8'), packedA.toString());
+  assert.equal(readFileSync(join(dir, 'src/b.ts'), 'utf8'), packedB.toString());
+  assert.equal(readFileSync(join(dir, 'assets/large.txt'), 'utf8'), large.toString());
+  assert.equal(readFileSync(join(dir, 'assets/closed.txt'), 'utf8'), closed.toString());
+  // Recipe nodes are granted under their owner so the server checks recipe membership.
+  assert(calls.filter(c => c.object).every(c => c.object === state || c.object === hash(large)));
+  assert(
+    calls.some(c => c.object === state),
+    'manifest recipe read through the State',
+  );
+});
+
 test('Item 8b6efb50: planConvexWithBootstrap falls back to GitHub main when /deploy/actions returns 404', async () => {
   const err = new Error('HTTP 404');
   err.httpStatus = 404;

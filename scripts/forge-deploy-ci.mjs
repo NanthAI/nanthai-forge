@@ -218,47 +218,106 @@ async function fetchBytes(url, headers = {}, request = globalThis.fetch) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-/** Download one object (direct, packed range, or chunked recipe) and verify its SHA-256. */
-async function downloadGrantRow(row, api, state, sequence, request = globalThis.fetch) {
-  if (row.recipe) {
-    const chunks = row.recipe.chunks ?? [];
-    const ids = chunks.map(c => c.sha256);
-    const grants = await api({
+/** Normalize the two reply-row shapes the shared State source grant returns (Item 8b6efb50 fix):
+ * physical-manifest rows `{descriptor:{object,recipe}, url, range:{offset,total}}` and catalog rows
+ * `{digest, size, url?, range:{offset,total}?, recipe:{digest,size,url?,range?}?, closure?}`. */
+export function grantRowPin(row) {
+  const object = row?.descriptor?.object;
+  const digest = object?.sha256 ?? row?.digest;
+  const size = object?.size ?? row?.size;
+  const recipe = row?.descriptor?.recipe
+    ? { digest: row.descriptor.recipe.sha256, size: row.descriptor.recipe.size }
+    : row?.recipe
+      ? { digest: row.recipe.digest, size: row.recipe.size, url: row.recipe.url, range: row.recipe.range }
+      : null;
+  return { digest, size, recipe };
+}
+
+/** Download one object from a source grant row (direct, packed range, signed recipe closure or
+ * recipe byte tree read through `object`-scoped grants) and verify its SHA-256. */
+async function downloadGrantRow(row, api, state, sequence, request = globalThis.fetch, owner) {
+  const { digest, size, recipe } = grantRowPin(row);
+  let bytes;
+  if (row.url) bytes = await downloadSingle({ digest, size, url: row.url, range: row.range }, request);
+  else if (row.closure) {
+    const parts = [];
+    for (const leaf of row.closure) {
+      const part = await downloadSingle(leaf, request);
+      if (sha256(part) !== leaf.digest) throw new Error(`Recipe leaf hash mismatch for ${leaf.digest}.`);
+      parts.push(part);
+    }
+    bytes = Buffer.concat(parts);
+  } else if (recipe) bytes = await readRecipe(digest, size, recipe, api, state, sequence, request, owner);
+  else throw new Error(`Source grant for ${digest} has no download URL or recipe.`);
+  if (bytes.length !== size || sha256(bytes) !== digest)
+    throw new Error(`Object hash mismatch for ${digest}.`);
+  return bytes;
+}
+
+/** Walk a forge-object-recipe byte tree. Every node is granted through `object` (the State itself
+ * for the manifest, else the member owning the recipe) so the server checks recipe membership. */
+async function readRecipe(digest, size, recipe, api, state, sequence, request, owner = digest) {
+  const grantsFor = async ids => {
+    const reply = await api({
       kind: 'source',
       state,
       ...(sequence ? { sequence } : {}),
       digests: ids,
-      object: row.digest,
+      object: owner,
     });
-    const byDigest = new Map((grants.rows ?? []).map(r => [r.digest, r]));
-    const parts = [];
-    for (const chunk of chunks) {
-      const grant = byDigest.get(chunk.sha256);
-      if (!grant?.url) throw new Error(`Missing chunk download grant for ${chunk.sha256}.`);
-      const part = await downloadSingle(grant, request);
-      if (sha256(part) !== chunk.sha256) throw new Error(`Chunk hash mismatch for ${chunk.sha256}.`);
-      parts.push(part);
+    const byDigest = new Map((reply.rows ?? []).map(r => [grantRowPin(r).digest, r]));
+    return Promise.all(
+      ids.map(async id => {
+        const grant = byDigest.get(id);
+        if (!grant) throw new Error(`Missing recipe grant for ${id} of ${digest}.`);
+        const bytes = await downloadGrantRow(grant, api, state, sequence, request, owner);
+        return bytes;
+      }),
+    );
+  };
+  const json = bytes => JSON.parse(bytes.toString('utf8'));
+  const [root] = recipe.url ? [await downloadSingle(recipe, request)] : await grantsFor([recipe.digest]);
+  if (sha256(root) !== recipe.digest) throw new Error(`Recipe hash mismatch for ${recipe.digest}.`);
+  const parsed = json(root);
+  if (
+    parsed.kind !== 'forge-object-recipe' ||
+    parsed.schema !== 1 ||
+    parsed.object?.sha256 !== digest ||
+    parsed.object?.size !== size ||
+    parsed.tree?.length !== size
+  )
+    throw new Error(`Recipe for ${digest} selects different bytes.`);
+  // Breadth-first by height keeps one grant request per tree level; leaves stay in byte order.
+  let level = [parsed.tree];
+  while (level.some(node => node.height > 0)) {
+    const inner = level.filter(node => node.height > 0);
+    const pages = await grantsFor(inner.map(node => node.sha256));
+    const next = [];
+    let at = 0;
+    for (const node of level) {
+      if (!node.height) {
+        next.push(node);
+        continue;
+      }
+      const page = json(pages[at++]);
+      if (page.kind !== 'forge-byte-tree' || page.schema !== 1 || !Array.isArray(page.children))
+        throw new Error(`Recipe page ${node.sha256} changed.`);
+      next.push(...page.children);
     }
-    const combined = Buffer.concat(parts);
-    if (sha256(combined) !== row.digest) throw new Error(`Recipe hash mismatch for ${row.digest}.`);
-    return combined;
+    level = next;
   }
-  const bytes = await downloadSingle(row, request);
-  if (sha256(bytes) !== row.digest) throw new Error(`Blob hash mismatch for ${row.digest}.`);
-  return bytes;
+  const leaves = await grantsFor(level.map(node => node.sha256));
+  return Buffer.concat(leaves);
 }
 
 async function downloadSingle(row, request = globalThis.fetch) {
   if (!row.url) throw new Error(`Missing download URL for ${row.digest}.`);
   const headers = {};
-  if (row.range) {
-    const start = row.range.offset;
-    const end = row.range.offset + row.range.length - 1;
-    headers.range = `bytes=${start}-${end}`;
-  }
+  // Grant ranges are `{offset, total}` pack intervals; the object's own size gives the length.
+  if (row.range) headers.range = `bytes=${row.range.offset}-${row.range.offset + row.size - 1}`;
   const buf = await fetchBytes(row.url, headers, request);
-  if (row.range && buf.length !== row.range.length && buf.length >= row.range.offset + row.range.length)
-    return buf.subarray(row.range.offset, row.range.offset + row.range.length);
+  if (row.range && buf.length !== row.size && buf.length >= row.range.offset + row.size)
+    return buf.subarray(row.range.offset, row.range.offset + row.size);
   return buf;
 }
 
@@ -338,12 +397,22 @@ export async function checkoutForgeState({
       size: resolvedManifest.size,
       url: resolvedManifest.url,
       range: resolvedManifest.range,
-      recipe: resolvedManifest.recipe,
+      closure: resolvedManifest.closure,
+      // The manifest reply carries the descriptor recipe pin `{sha256, size}`.
+      ...(resolvedManifest.recipe
+        ? {
+            descriptor: {
+              object: { sha256: state, size: resolvedManifest.size },
+              recipe: resolvedManifest.recipe,
+            },
+          }
+        : {}),
     },
     api,
     state,
     sequence,
     request,
+    state,
   );
   if (sha256(manifestBytes) !== state) throw new Error('Forge main State manifest hash mismatch.');
   const parsed = JSON.parse(manifestBytes.toString('utf8'));
@@ -380,8 +449,7 @@ export async function checkoutForgeState({
       ...(sequence ? { sequence } : {}),
       digests: page,
     });
-    const rows = grants.rows ?? [];
-    const byDigest = new Map(rows.map(r => [r.digest, r]));
+    const byDigest = new Map((grants.rows ?? []).map(r => [grantRowPin(r).digest, r]));
     let cursor = 0;
     const worker = async () => {
       while (cursor < page.length) {
