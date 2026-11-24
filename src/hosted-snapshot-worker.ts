@@ -8,6 +8,7 @@ import { childEnv } from '../scripts/child-env.mjs';
 import { workerPath } from './worker-install.js';
 import { withExchangeProgress } from './exchange-progress.js';
 import {
+  finishedLaneCheckout,
   markTimedSnapshot,
   snapshotDirectory,
   snapshotLockHeld,
@@ -27,10 +28,11 @@ export const snapshotWorkerTestHooks: { launch?: typeof spawn } = {};
 /** Start the worker for a Lane checkout: the timed snapshot. Skips while the project's interval
  * (policy autoSnapshotIntervalMinutes) has not passed since this checkout's last timed snapshot
  * (the latest state wins: the first command after the interval, or the turn end, takes it), when a
- * snapshot of it is running, or when one started within the last few seconds (a burst of commands
- * snapshots once). Never throws or waits. */
+ * snapshot of it is running, when the Lane is already finished, or when one started within the last
+ * few seconds (a burst of commands snapshots once). Never throws or waits. */
 export function launchSnapshotWorker(root: string, address: HostedAgentAddress): boolean {
   try {
+    if (finishedLaneCheckout(root)) return false;
     if (!timedSnapshotDue(root, snapshotSettings(root).intervalMinutes)) return false;
     if (snapshotLockHeld(root)) return false;
     const stamp = join(snapshotDirectory(root), 'worker');

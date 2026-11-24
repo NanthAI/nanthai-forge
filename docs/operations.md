@@ -1991,6 +1991,16 @@ the cache, including `dependencies.downloadBytes` for package-manager downloads.
 A busy sweep reports `dependencies.status: "busy"` with no numeric total.
 Explicit prune can also reclaim clean, idle copies in the Lane checkout cache when
 the server confirms permanent project deletion to its owner. Access failures and
-projects in the restore window keep their local copies.
+projects in the restore window keep their local copies by default; explicit
+`nforge prune --unreachable [--apply]` previews or removes clean, idle nested cache
+copies whose project is unreachable or unavailable past the grace period
+(`max(autoPruneHours, clientCacheMaxAgeHours)`), never `AUTH_REQUIRED` copies or
+copies with unsaved edits, pins or active work. Explicit prune lists up to 20
+unsaved paths (`added`, `modified`, `deleted`) on each kept dirty copy and flags
+checkouts whose local marker lags the Lane's hosted saved head or version
+(`staleMarkerHead` / `staleMarkerVersion`);
+`nforge agent ROOT status '{"files":true,"laneId":"LANE_ID"}'` inspects a registered
+Lane folder's unsaved paths locally with no server call, and
+`status '{"laneId":"LANE_ID"}'` flags a stale checkout marker head.
 See [dependency sharing](parallel-work-defaults.md#sharedependencies) for scope,
 size accounting, automatic eviction and changed-lockfile relinking.

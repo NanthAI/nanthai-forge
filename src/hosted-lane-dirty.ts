@@ -20,6 +20,61 @@ import { diskMode } from './source-links.js';
 import { workingMatches, worktreeText } from './checkout-text.js';
 
 const LARGE_FILE = 256 * 1024 * 1024;
+export type UnsavedPathChange = { path: string; change: 'added' | 'modified' | 'deleted' };
+export type UnsavedLaneReport =
+  | { dirty: false }
+  | {
+      dirty: true;
+      kind: 'changes' | 'pending-apply' | 'unreadable-marker' | 'unreadable-checkout';
+      paths?: UnsavedPathChange[];
+      truncated?: true;
+    };
+
+/** Inspect a Lane checkout for unsaved edits against its saved baseline without writing anything
+ * unless `refresh` is explicitly requested. Returns the exact reason or up to `limit` changed paths
+ * (`added`, `modified`, `deleted`), using the same comparison as `hostedLaneDirty`. */
+export function inspectUnsavedLane(
+  root: string,
+  {
+    refresh,
+    selection,
+    preserveMaterializedSubmodules,
+    limit = 20,
+  }: {
+    refresh?: boolean;
+    preserveMaterializedSubmodules?: boolean;
+    selection?: Pick<HostedLaneCheckoutMarker['selection'], 'laneId' | 'head'>;
+    limit?: number;
+  } = {},
+): UnsavedLaneReport {
+  try {
+    if (deltaApplyPending(root)) return { dirty: true, kind: 'pending-apply' };
+    const marker = readHostedLaneCheckout(root);
+    if (
+      !marker ||
+      (selection &&
+        (marker.selection.laneId !== selection.laneId || marker.selection.head !== selection.head))
+    )
+      return { dirty: true, kind: 'unreadable-marker' };
+    const capped = Number.isFinite(limit) ? limit + 1 : limit;
+    const found = collectLaneChanges(root, marker, {
+      ...(refresh === undefined ? {} : { refresh }),
+      ...(preserveMaterializedSubmodules ? { preserveMaterializedSubmodules } : {}),
+      limit: capped,
+    });
+    if (!found.length) return { dirty: false };
+    const truncated = Number.isFinite(limit) && found.length > limit;
+    return {
+      dirty: true,
+      kind: 'changes',
+      paths: truncated ? found.slice(0, limit) : found,
+      ...(truncated ? { truncated: true } : {}),
+    };
+  } catch {
+    return { dirty: true, kind: 'unreadable-checkout' };
+  }
+}
+
 /** True when the checkout differs from its saved baseline, or when that cannot be established
  * (an in-place apply is running or was interrupted: the marker may not describe the bytes yet).
  * Local: it hashes files in place (skipping those the checkout stat index vouches for). With
@@ -28,35 +83,13 @@ const LARGE_FILE = 256 * 1024 * 1024;
  * every check. Housekeeping probes leave it off: they write nothing, so they never look like use. */
 export function hostedLaneDirty(
   root: string,
-  {
-    refresh,
-    selection,
-    preserveMaterializedSubmodules,
-  }: {
+  options: {
     refresh?: boolean;
     preserveMaterializedSubmodules?: boolean;
     selection?: Pick<HostedLaneCheckoutMarker['selection'], 'laneId' | 'head'>;
   } = {},
 ): boolean {
-  try {
-    if (deltaApplyPending(root)) return true;
-    const marker = readHostedLaneCheckout(root);
-    if (
-      !marker ||
-      (selection &&
-        (marker.selection.laneId !== selection.laneId || marker.selection.head !== selection.head))
-    )
-      return true;
-    return (
-      laneChanges(root, marker, {
-        ...(refresh === undefined ? {} : { refresh }),
-        ...(preserveMaterializedSubmodules ? { preserveMaterializedSubmodules } : {}),
-        limit: 1,
-      }).length > 0
-    );
-  } catch {
-    return true;
-  }
+  return inspectUnsavedLane(root, { ...options, limit: 1 }).dirty;
 }
 
 /** The paths of this checkout that differ from `expected` (by default the head its marker names):
@@ -78,9 +111,24 @@ export function laneChanges(
     expected?: { files: readonly NativeFile[]; materialized: readonly string[] };
   } = {},
 ): string[] {
+  return collectLaneChanges(root, marker, options).map(item => item.path);
+}
+
+function collectLaneChanges(
+  root: string,
+  marker: HostedLaneCheckoutMarker,
+  options: {
+    refresh?: boolean;
+    preserveMaterializedSubmodules?: boolean;
+    record?: boolean;
+    limit?: number;
+    scan?: () => string[];
+    expected?: { files: readonly NativeFile[]; materialized: readonly string[] };
+  } = {},
+): UnsavedPathChange[] {
   const files = options.expected?.files ?? marker.state.files,
     limit = options.limit ?? Number.POSITIVE_INFINITY,
-    changed: string[] = [];
+    changed: UnsavedPathChange[] = [];
   const baseline = new Map(files.map(file => [file.path, file]));
   const refresh = statIndexRefresh(root);
   const retained = [...baseline.keys()];
@@ -97,7 +145,7 @@ export function laneChanges(
     if (changed.length >= limit) return changed;
     const old = baseline.get(path);
     if (!old) {
-      changed.push(path);
+      changed.push({ path, change: 'added' });
       continue;
     }
     const absolute = join(root, path),
@@ -109,11 +157,11 @@ export function laneChanges(
         old.mode !== 'gitlink' ||
         digest(gitlinkDirectoryPointer(root, path)) !== old.blob
       )
-        changed.push(path);
+        changed.push({ path, change: 'modified' });
       continue;
     }
     if (!stat.isSymbolicLink() && !stat.isFile()) {
-      changed.push(path);
+      changed.push({ path, change: 'modified' });
       continue;
     }
     const mode = stat.isSymbolicLink()
@@ -127,18 +175,20 @@ export function laneChanges(
       continue;
     }
     if (!stat.isSymbolicLink() && stat.size > LARGE_FILE) {
-      changed.push(path);
+      changed.push({ path, change: 'modified' });
       continue;
     }
     const bytes = stat.isSymbolicLink()
       ? readlinkSync(absolute, { encoding: 'buffer' })
       : readFileSync(absolute);
-    if (mode !== old.mode || !workingMatches(text, path, bytes, old.blob, mode)) changed.push(path);
+    if (mode !== old.mode || !workingMatches(text, path, bytes, old.blob, mode))
+      changed.push({ path, change: 'modified' });
     else refresh.read(path, stat, old.blob);
   }
   const present = new Set(local);
   for (const path of options.expected?.materialized ?? marker.materialized)
-    if (changed.length < limit && !forgeCachePath(path) && !present.has(path)) changed.push(path);
+    if (changed.length < limit && !forgeCachePath(path) && !present.has(path))
+      changed.push({ path, change: 'deleted' });
   if (options.refresh && !changed.length) refresh.commit();
   return changed;
 }

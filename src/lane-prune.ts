@@ -22,7 +22,7 @@ import {
 } from './lane-registry.js';
 import { logLanePrune } from './lane-prune-log.js';
 import { readClientSettings, type ClientSettings } from './client-settings.js';
-import { hostedLaneDirty } from './hosted-lane-dirty.js';
+import { hostedLaneDirty, inspectUnsavedLane, type UnsavedLaneReport } from './hosted-lane-dirty.js';
 import { invariant } from './errors.js';
 import { digest } from './hash.js';
 import { hostedLaneMarkerName } from './forge-cache-paths.js';
@@ -33,8 +33,12 @@ import { processBlocker, workingProcesses } from './clean-processes.js';
 const hour = 3_600_000;
 /** An open Lane may be waiting on a long landing or review; its root outlives a week by default. */
 const DEFAULT_ACTIVE_PRUNE_HOURS = 168;
+/** Unreachable or deleted-project copies need an explicit flag and a grace window before removal. */
+const DEFAULT_UNREACHABLE_GRACE_HOURS = 24;
 /** Unsaved-edit checks hash a whole checkout; bound them per pass. */
 const DIRTY_CHECKS = 8;
+/** Cap unsaved paths reported per kept dirty Lane in explicit prune output. */
+const PRUNE_UNSAVED_PATH_LIMIT = 20;
 /** The detached snapshot worker writes its launch stamp before it can take the lock.
  * Keep a launch window as long as the worker's one-minute deadline. */
 const SNAPSHOT_LAUNCH_MS = 60_000;
@@ -42,7 +46,16 @@ const terminal = new Set(['completed', 'abandoned']);
 const receiptPageSize = 48;
 export { markerIdentity };
 export type LaneAddress = { url: string; projectId: string };
-type LaneState = string | { state: string; pinned?: boolean; reason?: string; landedHead?: string };
+type LaneState =
+  | string
+  | {
+      state: string;
+      pinned?: boolean;
+      reason?: string;
+      version?: number;
+      head?: string;
+      landedHead?: string;
+    };
 type LaneStateGroup = { address: LaneAddress; laneIds: string[] };
 /** Legacy single-project readers use 100-Lane pages; hosted prune uses 250 identities
  * across projects per deployment. Unavailable data never authorizes removal. */
@@ -57,6 +70,7 @@ export type IdleLane = { laneId: string; outcome?: string; idleHours: number; ro
 /** An idle Lane on this machine that another agent run (or an unknown, older run) of the account
  * started (d730121f): listed so nobody is surprised, never offered for abandon. */
 export type OtherRunLane = { laneId: string; idleHours: number; run: 'other' | 'unknown'; agent?: string };
+type PruneUnsavedDetail = Omit<Extract<UnsavedLaneReport, { dirty: true }>, 'dirty'>;
 export type LaneHousekeeping = {
   /** Idle Lanes this agent run started (all idle Lanes when no run is given, e.g. `nforge prune`). */
   idle: IdleLane[];
@@ -66,7 +80,14 @@ export type LaneHousekeeping = {
   pruned: { laneId: string; root: string; bytes: number }[];
   /** Roots a dry run would remove; they still exist. Empty when applying. */
   wouldPrune: { laneId: string; root: string; bytes: number }[];
-  kept: { laneId: string; reason: string; root?: string }[];
+  kept: {
+    laneId: string;
+    reason: string;
+    root?: string;
+    unsaved?: PruneUnsavedDetail;
+    staleMarkerHead?: { checkoutHead: string; savedHead: string };
+    staleMarkerVersion?: { checkoutVersion: number; serverVersion: number };
+  }[];
   apply: boolean;
   folders?: PruneFolder[];
 };
@@ -177,7 +198,7 @@ export async function laneHousekeeping(input: {
   address?: LaneAddress;
   apply: boolean;
   settings?: Pick<ClientSettings, 'autoPruneHours' | 'idleLaneHours'> &
-    Partial<Pick<ClientSettings, 'activeLanePruneHours'>>;
+    Partial<Pick<ClientSettings, 'activeLanePruneHours' | 'clientCacheMaxAgeHours'>>;
   /** The calling agent run (session slug; null for a person). Given: `idle` lists only this run's
    * Lanes and the rest go to `otherRuns`. Omitted: every idle Lane is listed as before. */
   run?: string | null;
@@ -194,6 +215,9 @@ export async function laneHousekeeping(input: {
   scratchBudgetBytes?: number;
   /** Permanently deleted projects are eligible only in the explicit prune command. */
   deletedProjects?: boolean;
+  /** Explicit `--unreachable` opt-in: allow pruning clean, idle nested cache copies whose project
+   * is unreachable or unavailable past the grace period (never `AUTH_REQUIRED`, never automatic). */
+  unreachableProjects?: boolean;
   now?: number;
   /** Replaceable in tests. True when the root has edits that are not saved. */
   isDirty?: (root: string) => boolean;
@@ -206,7 +230,11 @@ export async function laneHousekeeping(input: {
     settings = input.settings ?? readClientSettings();
   const pruneMs = settings.autoPruneHours * hour,
     idleMs = settings.idleLaneHours * hour,
-    activeMs = (settings.activeLanePruneHours ?? DEFAULT_ACTIVE_PRUNE_HOURS) * hour;
+    activeMs = (settings.activeLanePruneHours ?? DEFAULT_ACTIVE_PRUNE_HOURS) * hour,
+    unreachableGraceMs = Math.max(
+      pruneMs,
+      (settings.clientCacheMaxAgeHours ?? DEFAULT_UNREACHABLE_GRACE_HOURS) * hour,
+    );
   // A dry run (no apply) changes no registry file, pin mirror, link or checkout.
   const registered = listLanes();
   const registeredById = new Map(registered.map(entry => [entry.laneId, entry]));
@@ -238,10 +266,30 @@ export async function laneHousekeeping(input: {
   };
   const entries: LaneRegistryEntry[] = [];
   const found = new Map((scanned?.found ?? []).map(entry => [entry.laneId, entry]));
-  const kept = (entry: LaneRegistryEntry, reason: string) => {
-    result.kept.push({ laneId: entry.laneId, reason, ...(input.scan ? { root: entry.root } : {}) });
+  const kept = (
+    entry: LaneRegistryEntry,
+    reason: string,
+    extra?: {
+      unsaved?: PruneUnsavedDetail;
+      staleMarkerHead?: { checkoutHead: string; savedHead: string };
+      staleMarkerVersion?: { checkoutVersion: number; serverVersion: number };
+    },
+  ) => {
+    result.kept.push({
+      laneId: entry.laneId,
+      reason,
+      ...(input.scan ? { root: entry.root } : {}),
+      ...(extra?.unsaved ? { unsaved: extra.unsaved } : {}),
+      ...(extra?.staleMarkerHead ? { staleMarkerHead: extra.staleMarkerHead } : {}),
+      ...(extra?.staleMarkerVersion ? { staleMarkerVersion: extra.staleMarkerVersion } : {}),
+    });
     const folder = scanned?.byRoot.get(entry.root);
-    if (folder) folder.reason = reason;
+    if (folder) {
+      folder.reason = reason;
+      if (extra?.unsaved) folder.unsaved = extra.unsaved;
+      if (extra?.staleMarkerHead) folder.staleMarkerHead = extra.staleMarkerHead;
+      if (extra?.staleMarkerVersion) folder.staleMarkerVersion = extra.staleMarkerVersion;
+    }
   };
   for (const entry of [...registered.filter(entry => !found.has(entry.laneId)), ...found.values()]) {
     if (input.automatic && entry.url !== input.automatic.url) continue;
@@ -329,6 +377,9 @@ export async function laneHousekeeping(input: {
   const verifyCompleted = Boolean(input.finishedOnly || (auto && input.apply));
   const states = new Map<string, string | null>();
   const landedHeads = new Map<string, string>();
+  const savedHeads = new Map<string, string>();
+  const serverVersions = new Map<string, number>();
+  const unreachable = new Set<string>();
   const pins = new Map<string, boolean>();
   const groups = new Map<string, LaneRegistryEntry[]>();
   for (const entry of due) {
@@ -377,8 +428,9 @@ export async function laneHousekeeping(input: {
     if (Date.now() >= scanDeadline) break;
     if (input.automatic && !input.automatic.claim()) return result;
     let read: Map<string, LaneState> | null = null;
+    let authFailure = false;
     let failure =
-      'State read unavailable: check sign-in and deployment/CLI compatibility, then rerun nforge prune; copy retained.';
+      'State read unavailable: check sign-in and deployment/CLI compatibility, then rerun nforge prune; copy retained (pass --unreachable --apply to prune clean idle cache copies past the grace period).';
     try {
       read = input.readStates.batch
         ? await input.readStates.batch(page, verifyCompleted)
@@ -388,31 +440,68 @@ export async function laneHousekeeping(input: {
       const code =
         (error as { code?: string; data?: { code?: string } } | null)?.data?.code ??
         (error as { code?: string } | null)?.code;
-      if (code === 'PROJECT_UNAVAILABLE' || code === 'AUTH_REQUIRED')
-        failure = `${code}: restore project access/sign-in, then rerun nforge prune; copy retained.`;
+      if (code === 'AUTH_REQUIRED') {
+        authFailure = true;
+        failure = 'AUTH_REQUIRED: restore project access/sign-in, then rerun nforge prune; copy retained.';
+      } else if (code === 'PROJECT_UNAVAILABLE') {
+        failure =
+          'PROJECT_UNAVAILABLE: restore project access/sign-in, then rerun nforge prune; copy retained (pass --unreachable --apply to prune clean idle cache copies past the grace period).';
+      }
     }
     for (const { laneIds } of page)
       for (const laneId of laneIds) {
         const row = read?.get(laneId);
         const state = row === undefined ? null : typeof row === 'string' ? row : row.state;
         states.set(laneId, state);
-        if (typeof row === 'object' && row.landedHead) landedHeads.set(laneId, row.landedHead);
+        if (typeof row === 'object') {
+          if (typeof row.version === 'number') serverVersions.set(laneId, row.version);
+          if (row.landedHead) landedHeads.set(laneId, row.landedHead);
+          const head = row.head ?? row.landedHead;
+          if (head) savedHeads.set(laneId, head);
+        }
         // An inaccessible/missing record contains no current pin evidence. Keep the local
         // mirror so offline cache GC cannot evict a previously pinned copy.
         if (read && row !== undefined && state && (state === 'active' || terminal.has(state)))
           pins.set(laneId, typeof row === 'string' ? false : Boolean(row.pinned));
-        reasons.set(laneId, typeof row === 'object' && row.reason ? row.reason : failure);
+        const rowReason = typeof row === 'object' && row.reason ? row.reason : failure;
+        const isUnreachable =
+          !authFailure &&
+          (read === null ||
+            (state === 'unknown' &&
+              typeof row === 'object' &&
+              typeof row.reason === 'string' &&
+              row.reason.startsWith('PROJECT_UNAVAILABLE')));
+        if (isUnreachable) unreachable.add(laneId);
+        const actionableReason =
+          isUnreachable && !rowReason.includes('--unreachable')
+            ? `${rowReason} Pass --unreachable --apply to prune clean idle cache copies past the grace period.`
+            : rowReason;
+        reasons.set(laneId, actionableReason);
       }
   }
   const isDirty = input.isDirty ?? (root => hostedLaneDirty(root, { preserveMaterializedSubmodules: true }));
   let dirtyChecks = 0;
   let snapshotHelpers: typeof import('./lane-snapshot-hint.js') | undefined;
-  const checkUnsaved = (root: string, bounded: boolean) =>
-    bounded && dirtyChecks++ >= DIRTY_CHECKS
-      ? 'unsaved-edit check deferred'
-      : isDirty(root)
-        ? 'unsaved edits'
-        : null;
+  const checkUnsaved = (
+    root: string,
+    bounded: boolean,
+  ): { reason: string; unsaved?: PruneUnsavedDetail } | null => {
+    if (bounded && dirtyChecks++ >= DIRTY_CHECKS) return { reason: 'unsaved-edit check deferred' };
+    if (!input.automatic && !input.isDirty) {
+      const report = inspectUnsavedLane(root, {
+        preserveMaterializedSubmodules: true,
+        limit: PRUNE_UNSAVED_PATH_LIMIT,
+      });
+      if (!report.dirty) return null;
+      const detail: PruneUnsavedDetail = {
+        kind: report.kind,
+        ...(report.paths ? { paths: report.paths } : {}),
+        ...(report.truncated ? { truncated: report.truncated } : {}),
+      };
+      return { reason: 'unsaved edits', unsaved: detail };
+    }
+    return isDirty(root) ? { reason: 'unsaved edits' } : null;
+  };
   const measure = (entry: LaneRegistryEntry, tree: NonNullable<ReturnType<typeof scanTree>>) => {
     const folder = scanned?.byRoot.get(entry.root);
     if (!folder) return;
@@ -473,8 +562,13 @@ export async function laneHousekeeping(input: {
     // An active Lane idle past the active prune age loses its root only when nothing in it is unsaved
     // and no command runs in it; `open` restores it from the saved head.
     const deleted = !input.finishedOnly && input.deletedProjects === true && state === 'project-deleted';
+    const unreachableCandidate =
+      !input.automatic &&
+      !input.finishedOnly &&
+      input.unreachableProjects === true &&
+      unreachable.has(entry.laneId);
     const activeIdle = state === 'active' && activeLimit > 0 && idleFor >= activeLimit;
-    const limit = activeIdle ? activeLimit : pruneMs;
+    const limit = activeIdle ? activeLimit : unreachableCandidate ? unreachableGraceMs : pruneMs;
     if (state === 'active' && !activeIdle) {
       if (idleMs > 0 && idleFor >= idleMs) listIdle();
       const folder = scanned?.byRoot.get(entry.root);
@@ -485,9 +579,16 @@ export async function laneHousekeeping(input: {
       kept(entry, 'project deleted; finished Lane state unavailable');
       continue;
     }
-    if (!state || (!activeIdle && !deleted && !terminal.has(state)) || limit === 0 || idleFor < limit) {
+    if (
+      (!unreachableCandidate && (!state || (!activeIdle && !deleted && !terminal.has(state)))) ||
+      limit === 0 ||
+      idleFor < limit
+    ) {
       const reason = reasons.get(entry.laneId);
-      if (!state || !terminal.has(state)) kept(entry, reason ?? 'Lane state unavailable');
+      if (!unreachableCandidate && (!state || !terminal.has(state)))
+        kept(entry, reason ?? 'Lane state unavailable');
+      else if (unreachableCandidate && limit > 0 && idleFor < limit)
+        kept(entry, `unreachable project grace period (${limit / hour}h) not elapsed`);
       else if (scanned?.byRoot.has(entry.root))
         kept(entry, limit ? `Forge action within ${limit / hour}h` : 'automatic pruning disabled');
       continue;
@@ -510,7 +611,7 @@ export async function laneHousekeeping(input: {
     }
     const marker = join(root, '.forge', 'hosted-lane.json');
     const before = exists(marker);
-    if (deleted && (root !== resolve(entry.root) || !isNestedLaneCopy(root))) {
+    if ((deleted || unreachableCandidate) && (root !== resolve(entry.root) || !isNestedLaneCopy(root))) {
       kept(entry, 'outside the Lane checkout cache');
       continue;
     }
@@ -526,7 +627,7 @@ export async function laneHousekeeping(input: {
             unsafeLink()
           ? 'not this Lane checkout'
           : laneCommandRunning(entry) ||
-              (deleted && (entry.landing || entry.hold)) ||
+              (!terminal.has(state ?? '') && (entry.landing || entry.hold)) ||
               exists(join(clientCacheRoot(root), 'lock'))
             ? 'command running'
             : nestedLanes(root)
@@ -559,18 +660,52 @@ export async function laneHousekeeping(input: {
         snapshotHelpers.snapshotLockHeld(root)
       );
     };
+    const unsavedCheck =
+      tree.nested || now - tree.newest < limit || snapshotBusy(now)
+        ? null
+        : checkUnsaved(root, activeIdle || deleted || unreachableCandidate);
     reason = tree.nested
       ? 'contains other Lane roots'
       : now - tree.newest < limit
         ? `modified within ${limit / hour}h`
         : snapshotBusy(now)
           ? 'snapshot running'
-          : checkUnsaved(root, activeIdle || deleted);
+          : (unsavedCheck?.reason ?? null);
+    const staleMarker = (
+      laneId: string,
+      laneState: string | null,
+      markerId: ReturnType<typeof markerIdentity>,
+    ): {
+      staleMarkerHead?: { checkoutHead: string; savedHead: string };
+      staleMarkerVersion?: { checkoutVersion: number; serverVersion: number };
+    } => {
+      const savedHead = savedHeads.get(laneId);
+      if (savedHead && markerId?.head) {
+        return savedHead !== markerId.head
+          ? { staleMarkerHead: { checkoutHead: markerId.head, savedHead } }
+          : {};
+      }
+      const serverVersion = serverVersions.get(laneId);
+      // Completing or abandoning a Lane bumps version by 1 without changing the saved head.
+      const terminalStep = laneState && terminal.has(laneState) ? 1 : 0;
+      if (
+        serverVersion !== undefined &&
+        markerId?.version !== undefined &&
+        serverVersion > markerId.version + terminalStep
+      ) {
+        return { staleMarkerVersion: { checkoutVersion: markerId.version, serverVersion } };
+      }
+      return {};
+    };
     if (reason) {
       if (activeIdle && idleMs > 0 && idleFor >= idleMs) listIdle();
-      kept(entry, reason);
+      kept(entry, reason, {
+        ...(unsavedCheck?.unsaved ? { unsaved: unsavedCheck.unsaved } : {}),
+        ...(unsavedCheck ? staleMarker(entry.laneId, state, identity) : {}),
+      });
       continue;
     }
+    const effectiveState = state ?? 'unreachable';
     const reclaimedBytes = input.automatic ? tree.rootBytes : tree.bytes;
     const recordResult = () => {
       const companion = scanned?.byRoot.get(clientCacheRoot(root));
@@ -581,7 +716,10 @@ export async function laneHousekeeping(input: {
             : 'removed with Lane checkout'
           : 'would be pruned with Lane checkout, retaining any recovery';
       const folder = scanned?.byRoot.get(entry.root);
-      if (folder) folder.reason = input.apply ? `${state} Lane pruned` : `${state} Lane eligible for prune`;
+      if (folder)
+        folder.reason = input.apply
+          ? `${effectiveState} Lane pruned`
+          : `${effectiveState} Lane eligible for prune`;
       (input.apply ? result.pruned : result.wouldPrune).push({
         laneId: entry.laneId,
         root,
@@ -618,7 +756,7 @@ export async function laneHousekeeping(input: {
         (latest &&
           ((latest.pinned && !original?.pinned) ||
             laneCommandRunning(latest) ||
-            (!terminal.has(state) && (latest.hold || latest.landing))))
+            (!terminal.has(effectiveState) && (latest.hold || latest.landing))))
       ) {
         kept(entry, 'Lane use changed during prune');
         return;
@@ -628,19 +766,26 @@ export async function laneHousekeeping(input: {
         kept(entry, nestedCheckout);
         return;
       }
+      if (Date.now() >= deadline) return;
       // A writer could have saved an edit and exited after the initial check and
-      // before the final process census. Check again before automatic removal.
-      if (input.automatic && isDirty(root)) {
-        kept(entry, 'unsaved edits');
-        return;
+      // before the final process census. Re-check right before removal.
+      if (input.automatic || !input.isDirty) {
+        const finalUnsaved = checkUnsaved(root, false);
+        if (finalUnsaved) {
+          kept(entry, finalUnsaved.reason, {
+            ...(finalUnsaved.unsaved ? { unsaved: finalUnsaved.unsaved } : {}),
+            ...staleMarker(entry.laneId, state, identity),
+          });
+          return;
+        }
       }
       if (Date.now() >= deadline) return;
       logLanePrune(
         {
           laneId: entry.laneId,
           root,
-          state,
-          reason: `${state} Lane idle ${idleHours}h, threshold ${limit / hour}h`,
+          state: effectiveState,
+          reason: `${effectiveState} Lane idle ${idleHours}h, threshold ${limit / hour}h`,
           idleHours,
           bytes: reclaimedBytes,
         },
@@ -654,7 +799,8 @@ export async function laneHousekeeping(input: {
           rmSync(rootSibling(root, '.forge-metrics.jsonl'), { force: true, recursive: true });
         }
         rmSync(root, { recursive: true, force: true });
-        if (!deleted) for (const link of links.get(root) ?? []) rmSync(link, { force: true });
+        if (!deleted && !unreachableCandidate)
+          for (const link of links.get(root) ?? []) rmSync(link, { force: true });
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code !== 'ENOTEMPTY') throw error;
@@ -740,8 +886,10 @@ export function convexLaneStates(
     const rows = (typeof value === 'string' ? JSON.parse(value) : value) as {
       laneId: string;
       state: string;
+      version?: number;
       pinned?: boolean;
       reason?: string;
+      head?: string;
       landedHead?: string;
     }[];
     return new Map(
@@ -749,7 +897,9 @@ export function convexLaneStates(
         row.laneId,
         {
           state: row.state,
+          ...(typeof row.version === 'number' ? { version: row.version } : {}),
           pinned: row.pinned === true,
+          ...(row.head ? { head: row.head } : {}),
           ...(row.landedHead ? { landedHead: row.landedHead } : {}),
           ...(row.reason ? { reason: row.reason } : {}),
         },
@@ -798,17 +948,29 @@ export function housekeepingLines(
   return lines;
 }
 
-/** nforge prune [--apply] [--finished-only] [--scan DIRECTORY] */
+/** nforge prune [--apply] [--finished-only] [--unreachable] [--scan DIRECTORY] */
 export async function pruneCli(args: string[], readStates: LaneStateReader) {
   let apply = false,
     finishedOnly = false,
+    unreachable = false,
     scan: string | undefined;
   for (let index = 0; index < args.length; index++) {
     if (args[index] === '--apply') apply = true;
     else if (args[index] === '--finished-only') finishedOnly = true;
+    else if (args[index] === '--unreachable') unreachable = true;
     else if (args[index] === '--scan' && args[index + 1]) scan = args[++index];
-    else invariant(false, 'BAD_ARGUMENT', 'Use prune [--apply] [--finished-only] [--scan DIRECTORY].');
+    else
+      invariant(
+        false,
+        'BAD_ARGUMENT',
+        'Use prune [--apply] [--finished-only] [--unreachable] [--scan DIRECTORY].',
+      );
   }
+  invariant(
+    !(finishedOnly && unreachable),
+    'BAD_ARGUMENT',
+    'Use --finished-only or --unreachable separately.',
+  );
   const settings = readClientSettings();
   const localLanes = join(clientCacheRoot(process.cwd()), 'lanes');
   if (!scan && exists(localLanes)?.isDirectory()) scan = localLanes;
@@ -818,12 +980,14 @@ export async function pruneCli(args: string[], readStates: LaneStateReader) {
     readStates,
     apply,
     deletedProjects: true,
+    unreachableProjects: unreachable,
     finishedOnly,
     scratchBudgetBytes: settings.clientCacheMaxGB * 1e9,
     settings: {
       autoPruneHours: hours,
       idleLaneHours: settings.idleLaneHours,
       activeLanePruneHours: settings.activeLanePruneHours,
+      clientCacheMaxAgeHours: settings.clientCacheMaxAgeHours,
     },
     ...(scan ? { scan } : {}),
   });
@@ -831,5 +995,10 @@ export async function pruneCli(args: string[], readStates: LaneStateReader) {
     /* @vite-ignore */ new URL('./dependency-cache.js', import.meta.url).href
   )) as typeof import('./dependency-cache.js');
   const dependencies = pruneDependencyCache({ apply: apply && !finishedOnly, remeasure: true });
-  return { ...result, olderThanHours: hours, dependencies };
+  return {
+    ...result,
+    olderThanHours: hours,
+    ...(unreachable ? { unreachableGraceHours: Math.max(hours, settings.clientCacheMaxAgeHours) } : {}),
+    dependencies,
+  };
 }

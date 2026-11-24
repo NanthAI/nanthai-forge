@@ -80,7 +80,10 @@ function write(entry: LaneRegistryEntry) {
 }
 /** Record or refresh a Lane checkout. Never throws: the registry is advisory. */
 export function recordLane(
-  input: Partial<LaneRegistryEntry> & { laneId: string },
+  input: Partial<Omit<LaneRegistryEntry, 'state'>> & {
+    laneId: string;
+    state?: LaneRegistryEntry['state'] | null;
+  },
   now = Date.now(),
 ): LaneRegistryEntry | null {
   if (disabled()) return null;
@@ -88,7 +91,7 @@ export function recordLane(
     const previous = readLaneEntry(input.laneId);
     const root = input.root ?? previous?.root;
     if (!root && !previous) return null;
-    const entry = laneRegistryEntrySchema.parse({
+    const merged: Record<string, unknown> = {
       ...previous,
       ...Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)),
       root,
@@ -96,7 +99,9 @@ export function recordLane(
       projectId: input.projectId ?? previous?.projectId ?? '',
       openedAt: previous?.openedAt ?? now,
       lastActionAt: input.lastActionAt ?? now,
-    });
+    };
+    if (input.state === null) delete merged.state;
+    const entry = laneRegistryEntrySchema.parse(merged);
     write(entry);
     if (entry.resolutionOf && laneResolutions()[entry.resolutionOf] !== entry.laneId)
       noteResolution(entry.resolutionOf, entry.laneId);

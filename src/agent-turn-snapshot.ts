@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { editTarget } from './agent-edit-target.js';
 import { withExchangeProgress } from './exchange-progress.js';
-import { snapshotsKept } from './lane-snapshot-hint.js';
+import { finishedLaneCheckout, snapshotsKept } from './lane-snapshot-hint.js';
 import type { SnapshotClient, SnapshotReceipt } from './hosted-lane-snapshot.js';
 
 /** The installed Stop hook has 5 s: stop the upload well inside it. */
@@ -21,7 +21,7 @@ export async function turnEndSnapshot(
 ): Promise<SnapshotReceipt | null> {
   if (typeof input.cwd !== 'string' || !input.cwd) return null;
   const target = editTarget(`${input.cwd}/.`);
-  if (!target?.url || !snapshotsKept(target.root)) return null;
+  if (!target?.url || !snapshotsKept(target.root) || finishedLaneCheckout(target.root)) return null;
   const cancel = new AbortController();
   const timer = setTimeout(() => cancel.abort(), TURN_END_SNAPSHOT_MS);
   timer.unref();

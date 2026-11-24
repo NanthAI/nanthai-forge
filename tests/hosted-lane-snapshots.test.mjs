@@ -8,6 +8,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, w
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getFunctionName } from 'convex/server';
+import { ConvexError } from 'convex/values';
 import { lifecycleFixture, code } from './hosted-lane-lifecycle-fixture.mjs';
 import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -29,6 +30,7 @@ import {
   snapshotIntervalMinutes,
 } from '../dist/autonomy-policy.js';
 import { snapshotDirectory } from '../dist/lane-snapshot-hint.js';
+import { recordLane } from '../dist/lane-registry.js';
 import { executeSnapshots } from '../dist/hosted-lane-snapshot-restore.js';
 import { LANE_SNAPSHOT, snapshotTarget } from '../dist/lane-snapshot-contract.js';
 import { effectivePolicy } from '../dist/autonomy-policy.js';
@@ -959,4 +961,72 @@ test('new snapshot reservations share the project storage quota and refuse befor
   assert.equal(reply.code, 'QUOTA_EXCEEDED');
   assert.equal(x.rows().length, 0);
   assert.equal(x.stored().length, 0);
+});
+
+test('d8012963: snapshot worker, turn-end hook and snapshotLaneCheckout skip finished Lanes without touching stat.json or Convex', async t => {
+  const savedStateHome = process.env.XDG_STATE_HOME;
+  const x = await fixture(t);
+  process.env.XDG_STATE_HOME = join(x.root, '..', 'state');
+  t.after(() => {
+    if (savedStateHome === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = savedStateHome;
+  });
+  rememberSnapshotsKept(x.root, true, { intervalMinutes: 5, packs: false });
+  writeFileSync(join(x.root, 'a.txt'), 'edited after landing\n');
+  recordLane({
+    laneId: x.f.laneId,
+    root: x.root,
+    url: 'https://fixture.invalid',
+    projectId: x.f.projectId,
+    state: 'completed',
+  });
+  let spawned = false;
+  const restoreLaunch = snapshotWorkerTestHooks.launch;
+  snapshotWorkerTestHooks.launch = () => {
+    spawned = true;
+    return { on() {}, unref() {} };
+  };
+  t.after(() => {
+    snapshotWorkerTestHooks.launch = restoreLaunch;
+  });
+  assert.equal(
+    launchSnapshotWorker(x.root, { url: 'https://fixture.invalid', projectId: x.f.projectId }),
+    false,
+    'finished Lane does not spawn snapshot worker',
+  );
+  assert.equal(spawned, false);
+  assert(!existsSync(join(snapshotDirectory(x.root), 'worker')));
+  const skipped = await x.snap();
+  assert.deepEqual(skipped, { status: 'skipped', reason: 'Lane is finished', calls: 0 });
+  assert.equal(x.calls.length, 0);
+  assert(!existsSync(join(snapshotDirectory(x.root), 'stat.json')));
+  let clientCreated = false;
+  assert.equal(
+    await turnEndSnapshot({ cwd: x.root }, async () => {
+      clientCreated = true;
+      return x.client();
+    }),
+    null,
+  );
+  assert.equal(clientCreated, false);
+
+  // Reopening clears the terminal registry state and resumes snapshots.
+  recordLane({ laneId: x.f.laneId, state: null });
+  const reopened = await x.snap();
+  assert.equal(reopened.status, 'saved');
+
+  // If the server closed the Lane elsewhere (LANE_NOT_ACTIVE), clear the local snapshots-kept hint.
+  const closedClient = {
+    mutation: async () => {
+      throw new ConvexError({ code: 'LANE_NOT_ACTIVE', message: 'Snapshots are taken only of open Lanes.' });
+    },
+    query: async () => {
+      throw new Error('unexpected query');
+    },
+  };
+  writeFileSync(join(x.root, 'a.txt'), 'edited again\n');
+  const refused = await snapshotLaneCheckout(x.root, x.f.projectId, closedClient);
+  assert.equal(refused.status, 'skipped');
+  assert.equal(refused.code, 'LANE_NOT_ACTIVE');
+  assert.equal(snapshotsKept(x.root), false);
 });

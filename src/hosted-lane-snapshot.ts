@@ -8,6 +8,7 @@ import type { ConvexHttpClient } from 'convex/browser';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { captureSnapshot } from './hosted-lane-snapshot-capture.js';
 import {
+  finishedLaneCheckout,
   rememberSnapshotsKept,
   snapshotDirectory,
   snapshotLockHeld,
@@ -136,6 +137,8 @@ export async function snapshotLaneCheckout(
   if (!marker || marker.selection.projectId !== projectId)
     return { status: 'skipped', reason: 'not a hosted Lane checkout of this project', calls: 0 };
   const laneId = marker.selection.laneId;
+  // A finished Lane never accepts new snapshots; skip before taking the lock or rewriting stat.json (friction d8012963).
+  if (finishedLaneCheckout(root)) return { status: 'skipped', reason: 'Lane is finished', calls: 0 };
   let calls = 0;
   const outcome = await exclusive(root, async (): Promise<SnapshotReceipt> => {
     const ledger = readSnapshotLedger(root, laneId);
@@ -301,8 +304,8 @@ export async function snapshotLaneCheckout(
     }
   }).catch((error: unknown): SnapshotReceipt => {
     const code = (error as { code?: string }).code;
-    // The project turned the policy off since this checkout last saw it on.
-    if (code === 'SNAPSHOTS_OFF') rememberSnapshotsKept(root, false);
+    // The project turned the policy off or this Lane closed since the checkout last saw it active.
+    if (code === 'SNAPSHOTS_OFF' || code === 'LANE_NOT_ACTIVE') rememberSnapshotsKept(root, false);
     return {
       status: 'skipped',
       reason: error instanceof Error ? error.message : 'snapshot failed',

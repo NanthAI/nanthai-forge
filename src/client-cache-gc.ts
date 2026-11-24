@@ -1,11 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { removeCachePreservingKept } from './hosted-apply-kept.js';
 import { canonicalRoot, clientCacheRoot, rootSibling } from './root-paths.js';
-import { lstatSync, readdirSync, readlinkSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import {
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
 import { readClientSettings, type ClientSettings } from './client-settings.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
-import { listLanes } from './lane-registry.js';
+import { laneCommandRunning, listLanes, readLaneEntry } from './lane-registry.js';
 import { readCacheUse, writeCacheUse, unknownCacheMetadata } from './client-cache-use.js';
 import {
   isLaneDirectoryName,
@@ -20,6 +29,7 @@ import { hostedLaneMarkerName } from './forge-cache-paths.js';
 const hour = 3_600_000;
 /** A copy touched this recently counts as in use by a running operation. */
 const GRACE_MS = 10 * 60_000;
+const SNAPSHOT_LAUNCH_MS = 60_000;
 const BUDGET_MS = 15_000;
 /** An unfinished pass resumes this long after it stopped. */
 const RETRY_MS = 5 * 60_000;
@@ -28,6 +38,24 @@ const exists = (path: string) => {
     return lstatSync(path);
   } catch {
     return null;
+  }
+};
+const inside = (path: string, root: string) => path === root || path.startsWith(root + sep);
+const siblings = (root: string) => [root, clientCacheRoot(root), rootSibling(root, '.forge-metrics.jsonl')];
+const snapshotBusy = (root: string, time: number) => {
+  const dir = join(clientCacheRoot(root), 'snapshots');
+  const worker = exists(join(dir, 'worker'));
+  if (worker !== null && time - worker.mtimeMs < SNAPSHOT_LAUNCH_MS) return true;
+  const lockPath = join(dir, 'lock');
+  const lock = exists(lockPath);
+  if (!lock || Date.now() - lock.mtimeMs > 120_000) return false;
+  try {
+    const pid = Number(readFileSync(lockPath, 'utf8'));
+    if (!Number.isInteger(pid) || pid <= 0) return true;
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as { code?: string }).code === 'EPERM';
   }
 };
 /** Allocated bytes of a tree; symlinks are never followed. */
@@ -61,9 +89,9 @@ export type CacheGcResult = {
   finished: boolean;
 };
 /** Nested Lane copies under ROOT.forge-client/lanes are a cache: bounded by size and age, evicted
- * least recently used first. Never the caller's own Lane, a copy in use (lock or touched within
- * ten minutes), a copy a sibling symlink points at, a Lane checkout this machine's registry
- * records at that path, or one with unsaved edits. Local only. */
+ * least recently used first. Never the caller's own Lane, a copy in use (lock, running snapshot,
+ * active process or touched within ten minutes), a copy a sibling symlink points at, a Lane
+ * checkout this machine's registry records, or one with unsaved edits. Local only. */
 export function gcNestedLanes(input: {
   root: string;
   /** The caller's own Lane, never evicted. */
@@ -76,7 +104,7 @@ export function gcNestedLanes(input: {
 }): CacheGcResult {
   const now = input.now ?? Date.now(),
     settings = input.settings ?? readClientSettings(),
-    isDirty = input.isDirty ?? hostedLaneDirty,
+    isDirty = input.isDirty ?? (root => hostedLaneDirty(root, { preserveMaterializedSubmodules: true })),
     deadline = Date.now() + (input.budgetMs ?? BUDGET_MS);
   const result: CacheGcResult = { evicted: [], kept: [], totalBytes: 0, finished: true };
   const maxBytes = settings.clientCacheMaxGB * 1e9,
@@ -90,6 +118,7 @@ export function gcNestedLanes(input: {
   } catch {
     return result;
   }
+  const workingRoot = canonicalRoot(process.cwd());
   // Sibling symlinks (conflict checkouts) point into this cache and keep a copy alive.
   const linked = new Set<string>();
   try {
@@ -135,7 +164,35 @@ export function gcNestedLanes(input: {
     }
   }
   let total = copies.reduce((sum, item) => sum + (item.bytes ?? 0), 0);
+  const observe = input.processes ?? (() => workingProcesses(true));
+  const runningProcess = (root: string, observed: ReturnType<typeof workingProcesses>) => {
+    for (const path of siblings(root)) {
+      const reason = processBlocker(path, observed);
+      if (reason) return reason;
+    }
+    return null;
+  };
   let processes: ReturnType<typeof workingProcesses> | undefined;
+  // Batch pre-delete re-checks like lane-prune: one fresh process census per batch of up to 16
+  // candidates instead of one open-file census per evicted copy.
+  const pending: { bytes: number; run: (observed: ReturnType<typeof workingProcesses>) => void }[] = [];
+  const flush = () => {
+    if (!pending.length) return;
+    if (Date.now() > deadline) {
+      result.finished = false;
+      for (const entry of pending.splice(0)) total += entry.bytes;
+      return;
+    }
+    const observed = observe();
+    for (const entry of pending.splice(0)) {
+      if (Date.now() > deadline) {
+        result.finished = false;
+        total += entry.bytes;
+        continue;
+      }
+      entry.run(observed);
+    }
+  };
   for (const item of copies) {
     if (Date.now() > deadline) {
       result.finished = false;
@@ -147,46 +204,100 @@ export function gcNestedLanes(input: {
     // Named folders use the full marker id, including after an in-place resolution.
     const laneId = item.legacyId ?? markerIdentity(item.copy)?.laneId;
     if (!laneId) continue;
-    const reason = keep.has(laneId)
-      ? 'the caller’s Lane'
-      : pinned.has(laneId)
-        ? 'pinned'
-        : lockHeld(item.copy) || now - item.used < GRACE_MS
-          ? 'in use'
-          : linked.has(item.copy)
-            ? 'linked from a sibling directory'
-            : registry.has(item.copy)
-              ? 'registered Lane checkout'
-              : (processBlocker(item.copy, (processes ??= (input.processes ?? workingProcesses)())) ??
-                (unknownCacheMetadata(item.copy)
-                  ? 'unknown Forge metadata'
-                  : isDirty(item.copy)
-                    ? 'unsaved edits'
-                    : null));
+    const marker = join(item.copy, '.forge', hostedLaneMarkerName);
+    const before = exists(marker);
+    // Re-read the registry entry after any tree walk so a builder that started or resumed this
+    // Lane during GC is never evicted under its feet (frictions a868ee3d, 9ecd8dab).
+    const liveEntry = readLaneEntry(laneId);
+    const liveRegistered = Boolean(
+      liveEntry &&
+      (canonicalRoot(liveEntry.root) === item.copy ||
+        liveEntry.pinned ||
+        laneCommandRunning(liveEntry) ||
+        (!liveEntry.state && (liveEntry.landing || liveEntry.hold))),
+    );
+    const unsafeLink = () =>
+      Boolean(exists(item.copy)?.isSymbolicLink() || exists(clientCacheRoot(item.copy))?.isSymbolicLink());
+    const reason =
+      keep.has(laneId) || inside(workingRoot, item.copy)
+        ? 'the caller’s Lane'
+        : pinned.has(laneId) || liveEntry?.pinned
+          ? 'pinned'
+          : unsafeLink() || lockHeld(item.copy) || snapshotBusy(item.copy, now) || now - item.used < GRACE_MS
+            ? 'in use'
+            : linked.has(item.copy)
+              ? 'linked from a sibling directory'
+              : registry.has(item.copy) || liveRegistered
+                ? 'registered Lane checkout'
+                : (runningProcess(item.copy, (processes ??= observe())) ??
+                  (unknownCacheMetadata(item.copy)
+                    ? 'unknown Forge metadata'
+                    : isDirty(item.copy)
+                      ? 'unsaved edits'
+                      : null));
     if (reason) {
       result.kept.push({ laneId, reason });
       continue;
     }
-    logLanePrune(
-      {
-        laneId,
-        root: item.copy,
-        state: 'cache',
-        reason: tooOld ? 'Unused Lane cache exceeded age limit' : 'Unused Lane cache exceeded size cap',
-        idleHours: (now - item.used) / hour,
-        bytes: item.bytes ?? 0,
+    const bytes = item.bytes ?? 0;
+    total -= bytes;
+    pending.push({
+      bytes,
+      run: observed => {
+        // Re-check live state right before deletion: a builder could have opened, edited or started a
+        // process in this folder during the scan above.
+        const after = exists(marker);
+        const latestEntry = readLaneEntry(laneId);
+        const latestUse = readCacheUse(item.copy);
+        const checkTime = input.now ?? Date.now();
+        const latestBlocked =
+          (before && (!after || before.ino !== after.ino || before.ctimeMs !== after.ctimeMs)) ||
+          (!before && Boolean(after)) ||
+          unsafeLink() ||
+          lockHeld(item.copy) ||
+          snapshotBusy(item.copy, checkTime) ||
+          (latestUse?.used !== undefined && checkTime - latestUse.used < GRACE_MS) ||
+          Boolean(
+            latestEntry &&
+            (canonicalRoot(latestEntry.root) === item.copy ||
+              latestEntry.pinned ||
+              laneCommandRunning(latestEntry) ||
+              (!latestEntry.state && (latestEntry.landing || latestEntry.hold))),
+          )
+            ? 'in use'
+            : (runningProcess(item.copy, observed) ?? (isDirty(item.copy) ? 'unsaved edits' : null));
+        if (latestBlocked) {
+          total += bytes;
+          result.kept.push({ laneId, reason: latestBlocked });
+          return;
+        }
+        logLanePrune(
+          {
+            laneId,
+            root: item.copy,
+            state: 'cache',
+            reason: tooOld ? 'Unused Lane cache exceeded age limit' : 'Unused Lane cache exceeded size cap',
+            idleHours: (now - item.used) / hour,
+            bytes,
+          },
+          now,
+        );
+        try {
+          removeCachePreservingKept(clientCacheRoot(item.copy));
+          rmSync(rootSibling(item.copy, '.forge-metrics.jsonl'), { recursive: true, force: true });
+          rmSync(item.copy, { recursive: true, force: true });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw error;
+          total += bytes;
+          result.kept.push({ laneId, reason: 'removal interrupted (ENOTEMPTY); remaining files retained' });
+          return;
+        }
+        result.evicted.push({ laneId, bytes });
       },
-      now,
-    );
-    for (const path of [
-      item.copy,
-      clientCacheRoot(item.copy),
-      rootSibling(item.copy, '.forge-metrics.jsonl'),
-    ])
-      rmSync(path, { recursive: true, force: true });
-    total -= item.bytes ?? 0;
-    result.evicted.push({ laneId, bytes: item.bytes ?? 0 });
+    });
+    if (pending.length === 16) flush();
   }
+  flush();
   result.totalBytes = total;
   return result;
 }

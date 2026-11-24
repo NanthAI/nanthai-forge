@@ -1111,3 +1111,50 @@ test('ad80e037: status {files:true} lists the files that differ from the saved h
     error => error.code === 'HOSTED_CHECKOUT_REQUIRED',
   );
 });
+
+test('0ca3c3ca: status {files:true, laneId} inspects a registered Lane from the project root with no server call, and status {laneId} flags a stale checkout marker head', async t => {
+  const savedStateHome = process.env.XDG_STATE_HOME;
+  const s = agentFixture(t, {
+    base: { 'keep.txt': 'Keep\n', 'edit.txt': 'Before\n', 'gone.txt': 'Gone\n' },
+    lane: { 'keep.txt': 'Keep\n', 'edit.txt': 'Saved\n', 'gone.txt': 'Gone\n' },
+  });
+  process.env.XDG_STATE_HOME = join(s.root, '..', 'state');
+  t.after(() => {
+    if (savedStateHome === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = savedStateHome;
+  });
+  const laneRoot = join(s.root, '..', 'lane-copy');
+  mkdirSync(laneRoot, { recursive: true });
+  await new HostedAgentTransport(laneRoot, s.address, s.exchange).dispatch('open', {
+    laneId: s.lane.laneId,
+  });
+  recordLane({
+    laneId: s.lane.laneId,
+    root: laneRoot,
+    url: s.address.url,
+    projectId: s.address.projectId,
+  });
+  writeFileSync(join(laneRoot, 'edit.txt'), 'Edited in lane folder\n');
+  writeFileSync(join(laneRoot, 'added.txt'), 'Added\n');
+  rmSync(join(laneRoot, 'gone.txt'));
+  const before = s.calls.length;
+  const fromRoot = await s.transport().dispatch('status', { files: true, laneId: s.lane.laneId });
+  assert.equal(s.calls.length, before, 'answered locally from project root: no server call');
+  assert.equal(fromRoot.result.root, laneRoot);
+  assert.equal(fromRoot.result.laneId, s.lane.laneId);
+  assert.deepEqual(fromRoot.result.unsaved, {
+    count: 3,
+    paths: [
+      { path: 'added.txt', change: 'added' },
+      { path: 'edit.txt', change: 'modified' },
+      { path: 'gone.txt', change: 'deleted' },
+    ],
+  });
+  // Simulate a newer save from another checkout so this folder's marker head is older than the hosted saved head.
+  const checkoutHead = readHostedLaneCheckout(laneRoot).selection.head;
+  const newerHead = 'c'.repeat(64);
+  s.lane.head = newerHead;
+  const online = await s.transport().dispatch('status', { laneId: s.lane.laneId });
+  assert.equal(online.result.staleCheckoutHead?.checkoutHead, checkoutHead);
+  assert.equal(online.result.staleCheckoutHead?.savedHead, newerHead);
+});

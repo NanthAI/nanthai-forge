@@ -89,13 +89,22 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   no abandon offer. `nforge prune` (the operator asking) still lists every idle Lane.
 - `nforge prune` is a dry run (it lists `wouldPrune` and changes no registry, pin, link or checkout);
   `--apply` removes and lists `pruned`. From a project checkout, prune inventories its local
-  `ROOT.forge-client/lanes` directory. `--scan DIRECTORY` selects a different directory.
+  `ROOT.forge-client/lanes` directory. `--scan DIRECTORY` selects a different directory, including a
+  project checkout (scanning its sibling `ROOT.forge-client/lanes`) or a `.forge-client` folder.
   The `folders` report includes unregistered checkouts, markerless directories, cache companions,
   and allocated checkout and scratch sizes where they can be measured. `largeScratch` flags
-  scratch above the configured client cache size budget. A standard apply also registers
+  scratch above the configured client cache size budget. Copies kept for unsaved edits list up to 20
+  unsaved paths (`added`, `modified`, `deleted`) or the exact block (`pending-apply`,
+  `unreadable-marker`, `unreadable-checkout`) and flag `staleMarkerHead` (when a saved/landed
+  head is returned) or `staleMarkerVersion` (when the checkout marker version lags the server's
+  Lane version). A standard apply also registers
   discovered checkouts that remain and removes dangling links to missing nested copies.
   Use `--finished-only` to reclaim abandoned Lanes and completed Lanes whose checkout head
   has a current landing receipt. It previews dependency eviction after releasing their links.
+  Use `--unreachable` (mutually exclusive with `--finished-only`, never automatic) to preview or
+  (`--apply`) reclaim clean, idle nested cache copies whose project is unreachable or unavailable
+  past the grace period (`max(autoPruneHours, clientCacheMaxAgeHours)`), never `AUTH_REQUIRED`
+  copies or copies with unsaved edits, pins, holds or active work.
   If a directory changes during removal and the filesystem returns `ENOTEMPTY`, prune
   reports that root and continues with other eligible roots. Receipt reads use pages of up to 48 Lane identities. An explicit prune with
   `autoPruneHours` set to 0 uses 3 hours.
@@ -112,12 +121,16 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 - At most once an hour, from the CLI start, one local pass removes copies over the age limit and
   then least recently used copies until the directory is under the size cap. It reads no server
   and runs no timer. A pass that runs out of its 15-second budget continues on the next start.
-- A copy is kept when it is the caller's own Lane, holds the work lock or was used in the last ten
-  minutes, is the target of a symlink beside ROOT (conflict checkouts), is an open Lane checkout this
-  machine started, opened or resolved there, has unsaved edits, or a live local process works in it.
+- A copy is kept when it is the caller's own Lane, holds the work or snapshot lock or was used in
+  the last ten minutes, is the target of a symlink beside ROOT (conflict checkouts), is an open Lane
+  checkout this machine started, opened or resolved there, has unsaved edits, or a live local
+  process works in or holds open files under it or its cache companion. Right before removal, cache
+  GC re-reads the Lane registry, marker, locks, open-file processes and unsaved-edit state, preserves
+  any `kept-apply` recovery directory, and retains the copy on `ENOTEMPTY`.
   Registered Lane roots use the hosted state read above. Unknown process coverage also keeps a
   copy. Cache eviction and idle Lane
-  pruning share explicit cleanup's one batched process-directory observation, only when a copy
+  pruning share explicit cleanup's batched process-directory observation (one scan pass and one per
+  removal batch), only when a copy
   might be removed. Cache eviction records its path, reason and bytes in the existing local Lane
   prune log before removal; it adds no server calls or idle activity.
 

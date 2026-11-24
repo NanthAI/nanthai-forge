@@ -24,7 +24,7 @@ export function isNestedLaneCopy(copy: string) {
 /** Reads the Lane identity without validating or rehashing the checkout's source baseline. */
 export function markerIdentity(
   root: string,
-): { laneId: string; url: string; projectId: string; head?: string } | null {
+): { laneId: string; url: string; projectId: string; head?: string; version?: number } | null {
   let descriptor: number | undefined;
   try {
     const forge = join(root, '.forge');
@@ -36,7 +36,7 @@ export function markerIdentity(
     if (!fstatSync(descriptor).isFile()) return null;
     const marker = JSON.parse(readFileSync(descriptor, 'utf8')) as {
       url?: unknown;
-      selection?: { laneId?: unknown; projectId?: unknown; head?: unknown };
+      selection?: { laneId?: unknown; projectId?: unknown; head?: unknown; version?: unknown };
     };
     const laneId = marker.selection?.laneId,
       projectId = marker.selection?.projectId;
@@ -46,6 +46,7 @@ export function markerIdentity(
           projectId,
           url: typeof marker.url === 'string' ? marker.url : '',
           ...(typeof marker.selection?.head === 'string' ? { head: marker.selection.head } : {}),
+          ...(typeof marker.selection?.version === 'number' ? { version: marker.selection.version } : {}),
         }
       : null;
   } catch {

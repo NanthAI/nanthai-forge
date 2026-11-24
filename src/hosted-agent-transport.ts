@@ -876,15 +876,20 @@ export class HostedAgentTransport {
       typeof input.laneId === 'string' ? input.laneId : (markerIdentity(this.root)?.laneId ?? undefined);
     if (!laneId) return;
     const text = JSON.stringify(response.result ?? null);
-    const state =
-      action === 'abandon'
-        ? ('abandoned' as const)
-        : action === 'complete' || (action === 'finish' && /"phase":"landed"/.test(text))
-          ? ('completed' as const)
-          : undefined;
     // A submitted landing stays recorded until a land or wait sees it settle, so a later land finds it by Lane.
     const settled = /"phase":"(landed|terminal-failed)"/.test(text);
     const recorded = action === 'wait' && settled ? readLaneEntry(laneId)?.landing : undefined;
+    const ownWaitLanded = Boolean(
+      recorded && /"phase":"landed"/.test(text) && text.includes(recorded.operationId),
+    );
+    const state =
+      action === 'reopen'
+        ? null
+        : action === 'abandon'
+          ? ('abandoned' as const)
+          : action === 'complete' || (action === 'finish' && /"phase":"landed"/.test(text)) || ownWaitLanded
+            ? ('completed' as const)
+            : undefined;
     // A save that replaced the live finish on purpose (supersedeFinish) ends that landing too (F2).
     const superseded = ['save', 'checkpoint'].includes(action) && /"supersededFinish"/.test(text);
     const landing =
@@ -895,7 +900,11 @@ export class HostedAgentTransport {
           : /"phase":"finish"/.test(text) && !settled
             ? { operationId: response.operationId, at: Date.now() }
             : null;
-    recordLane({ laneId, ...(state ? { state } : {}), ...(landing !== undefined ? { landing } : {}) });
+    recordLane({
+      laneId,
+      ...(state !== undefined ? { state } : {}),
+      ...(landing !== undefined ? { landing } : {}),
+    });
   }
   /** status {laneId} reads the Lane's landing in flight only where this machine worked on the Lane
    * and either recorded a landing or lost its folder (7da396ed). Any other status keeps its budget. */
@@ -1162,9 +1171,15 @@ export class HostedAgentTransport {
         return this.response(action, result.operationId, result);
       }
       // git status: local, before capability discovery, so it makes no server call (ad80e037).
+      // Passing laneId from the project root inspects that Lane's registered local checkout (0ca3c3ca).
       if (action === 'status' && (input as { files?: unknown }).files === true) {
         const selected = hostedAgentCommandSchemas.status.parse(input);
-        return this.response(action, null, unsavedFiles(this.root, selected.laneId));
+        const resolved =
+          selected.laneId && markerIdentity(this.root)?.laneId !== selected.laneId
+            ? openLaneRoot({ root: this.root, address: this.address }, selected.laneId)
+            : null;
+        const files = unsavedFiles(resolved ?? this.root, selected.laneId);
+        return this.response(action, null, resolved ? { ...files, root: resolved } : files);
       }
       if (action === 'status' && Object.keys(input).length === 0 && readHostedMainSelection(this.root))
         return this.response(
@@ -1360,7 +1375,9 @@ export class HostedAgentTransport {
       // Unsaved-work snapshot (7ac4e32f): only when the policy is on and files changed; never fails the command.
       // A project without the policy costs one local file check here; the Lane marker is read only when it is on.
       const keep = capabilities.laneSnapshots ? this.snapshotRoot(command.data) : null;
-      if (keep) {
+      const keepLaneId = keep ? markerIdentity(keep)?.laneId : undefined;
+      const keepFinished = Boolean(keepLaneId && action !== 'reopen' && readLaneEntry(keepLaneId)?.state);
+      if (keep && !keepFinished) {
         rememberSnapshotsKept(keep, true, {
           intervalMinutes: capabilities.snapshotIntervalMinutes ?? LANE_SNAPSHOT.intervalMinutes.default,
           packs: this.serverFeatures.includes('lane-snapshot-packs'),
@@ -2881,14 +2898,29 @@ export class HostedAgentTransport {
   private async localLane(laneId: string, observed: unknown) {
     const successor = resolutionFollow({ root: hostedAgentRoot(this.root), address: this.address }, laneId);
     const inFlight = (observed as { inFlight?: { operationId?: unknown } } | null)?.inFlight;
-    const root = [readLaneEntry(laneId)?.root, this.root].find(path => {
+    let root: string | undefined;
+    let rootMarker: ReturnType<typeof markerIdentity> = null;
+    for (const path of [readLaneEntry(laneId)?.root, this.root]) {
       const marker = path ? markerIdentity(path) : null;
-      return (
+      if (
         marker?.laneId === laneId &&
         marker.projectId === this.address.projectId &&
         marker.url === this.address.url
-      );
-    });
+      ) {
+        root = path;
+        rootMarker = marker;
+        break;
+      }
+    }
+    const observedHead = (observed as { head?: unknown } | null)?.head;
+    const staleCheckoutHead =
+      rootMarker?.head && typeof observedHead === 'string' && rootMarker.head !== observedHead
+        ? {
+            checkoutHead: rootMarker.head,
+            savedHead: observedHead,
+            note: 'This folder’s marker head differs from the Lane’s hosted saved head; unsaved differences may include older copies of saved work.',
+          }
+        : undefined;
     return {
       // The landing in flight resumes from this folder by its own id, with or without the Lane folder.
       ...(typeof inFlight?.operationId === 'string'
@@ -2901,6 +2933,7 @@ export class HostedAgentTransport {
         : {}),
       local: laneLiveness(laneId),
       ...(root ? { disk: await this.laneDisk(root) } : {}),
+      ...(staleCheckoutHead ? { staleCheckoutHead } : {}),
       ...(successor
         ? {
             continuesAs: {

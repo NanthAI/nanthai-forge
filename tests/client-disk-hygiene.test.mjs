@@ -28,7 +28,7 @@ import { gcNestedLanes, gcNestedLanesHourly, touchNestedLane } from '../dist/cli
 import { writeCacheUse } from '../dist/client-cache-use.js';
 import { pruneDependencyCache, touchDependencyEntry } from '../dist/dependency-cache.js';
 import { hostedLaneDirty } from '../dist/hosted-lane-dirty.js';
-import { laneHousekeeping } from '../dist/lane-prune.js';
+import { laneHousekeeping, pruneCli } from '../dist/lane-prune.js';
 import { automaticLaneHousekeeping } from '../dist/lane-prune-automatic.js';
 import { laneDiskUsage } from '../dist/lane-disk-usage.js';
 import { clientSettingsSchema } from '../dist/client-settings.js';
@@ -1259,4 +1259,347 @@ test('automatic idle pruning retains a process directory even when no Forge comm
     [id],
   );
   assert(!existsSync(root));
+});
+
+test('0ca3c3ca: explicit prune lists unsaved paths (added/modified/deleted) and flags stale checkout marker heads', async t => {
+  const directory = realpathSync(isolated(t));
+  const now = Date.parse('2026-01-02T00:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const scan = join(directory, 'lanes');
+  const dirtyRoot = join(scan, 'dirty-11111111');
+  const pendingRoot = join(scan, 'pending-22222222');
+  const dirtyId = await realCheckout(dirtyRoot);
+  const pendingId = await realCheckout(pendingRoot);
+  const markerHead = JSON.parse(readFileSync(join(dirtyRoot, '.forge', 'hosted-lane.json'), 'utf8')).selection
+    .head;
+  const newerHead = 'b'.repeat(64);
+  writeFileSync(join(dirtyRoot, 'src', 'a.txt'), 'edited locally\n');
+  writeFileSync(join(dirtyRoot, 'src', 'new.txt'), 'brand new\n');
+  rmSync(join(dirtyRoot, 'bin', 'run'));
+  mkdirSync(join(`${pendingRoot}.forge-client`), { recursive: true });
+  writeFileSync(join(`${pendingRoot}.forge-client`, 'delta-apply.json'), JSON.stringify({ op: '1' }));
+  for (const [root, laneId] of [
+    [dirtyRoot, dirtyId],
+    [pendingRoot, pendingId],
+  ]) {
+    ageTree(root, 10);
+    ageTree(`${root}.forge-client`, 10);
+    age(`${root}.forge-metrics.jsonl`, 10);
+    recordLane({ laneId, root, ...address, lastActionAt: now - 10 * hour }, now);
+  }
+  const result = await laneHousekeeping({
+    apply: false,
+    scan,
+    now,
+    settings: { autoPruneHours: 3, idleLaneHours: 1 },
+    readStates: async () =>
+      new Map([
+        [dirtyId, { state: 'completed', head: newerHead }],
+        [pendingId, { state: 'abandoned', head: markerHead }],
+      ]),
+    processes: () => ({ paths: [], unknown: false }),
+  });
+  const dirtyKept = result.kept.find(row => row.laneId === dirtyId);
+  assert.equal(dirtyKept?.reason, 'unsaved edits');
+  assert.deepEqual(dirtyKept?.unsaved, {
+    kind: 'changes',
+    paths: [
+      { path: 'src/a.txt', change: 'modified' },
+      { path: 'src/new.txt', change: 'added' },
+      { path: 'bin/run', change: 'deleted' },
+    ],
+  });
+  assert.deepEqual(dirtyKept?.staleMarkerHead, { checkoutHead: markerHead, savedHead: newerHead });
+  const dirtyFolder = result.folders?.find(row => row.root === dirtyRoot);
+  assert.deepEqual(dirtyFolder?.unsaved, dirtyKept?.unsaved);
+  assert.deepEqual(dirtyFolder?.staleMarkerHead, dirtyKept?.staleMarkerHead);
+  const pendingKept = result.kept.find(row => row.laneId === pendingId);
+  assert.equal(pendingKept?.reason, 'unsaved edits');
+  assert.deepEqual(pendingKept?.unsaved, { kind: 'pending-apply' });
+
+  // Standard states queries return version without head: flag version lag past the terminal +1 step only.
+  const markerVersion = JSON.parse(readFileSync(join(dirtyRoot, '.forge', 'hosted-lane.json'), 'utf8'))
+    .selection.version;
+  const versionOnly = await laneHousekeeping({
+    apply: false,
+    scan,
+    now,
+    settings: { autoPruneHours: 3, idleLaneHours: 1 },
+    readStates: async () =>
+      new Map([
+        [dirtyId, { state: 'completed', version: markerVersion + 2 }],
+        [pendingId, { state: 'abandoned', version: markerVersion + 1 }],
+      ]),
+    processes: () => ({ paths: [], unknown: false }),
+  });
+  const dirtyVersionKept = versionOnly.kept.find(row => row.laneId === dirtyId);
+  assert.deepEqual(dirtyVersionKept?.staleMarkerVersion, {
+    checkoutVersion: markerVersion,
+    serverVersion: markerVersion + 2,
+  });
+  assert.equal(dirtyVersionKept?.staleMarkerHead, undefined);
+  assert.deepEqual(
+    versionOnly.folders?.find(row => row.root === dirtyRoot)?.staleMarkerVersion,
+    dirtyVersionKept?.staleMarkerVersion,
+  );
+  const pendingVersionKept = versionOnly.kept.find(row => row.laneId === pendingId);
+  assert.equal(pendingVersionKept?.staleMarkerVersion, undefined);
+});
+
+test('fdc491fe: explicit prune explains how to clear unreachable projects and --unreachable removes only clean idle cache copies past the grace period', async t => {
+  const directory = realpathSync(isolated(t));
+  const now = Date.parse('2026-01-02T00:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const prepare = async (name, hours, { nested = true, flags = {}, projectId = 'gone' } = {}) => {
+    const laneId = randomUUID();
+    const root = nested
+      ? join(directory, `${name}.forge-client`, 'lanes', laneId)
+      : join(directory, `${name}-outside`);
+    const addr = { url: address.url, projectId };
+    await realCheckout(root, laneId, addr);
+    ageTree(root, hours);
+    ageTree(`${root}.forge-client`, hours);
+    age(`${root}.forge-metrics.jsonl`, hours);
+    recordLane({ laneId, root, ...addr, lastActionAt: now - hours * hour, ...flags }, now);
+    return { laneId, root };
+  };
+  const oldClean = await prepare('old-clean', 30);
+  const freshUnreachable = await prepare('fresh', 5);
+  const dirtyUnreachable = await prepare('dirty', 30);
+  const pinnedUnreachable = await prepare('pinned', 30, { flags: { pinned: true } });
+  const inUseUnreachable = await prepare('in-use', 30);
+  const outsideCache = await prepare('outside', 30, { nested: false });
+  const authFailed = await prepare('auth', 30, { projectId: 'auth-expired' });
+  writeFileSync(join(dirtyUnreachable.root, 'src', 'a.txt'), 'unsaved\n');
+  age(join(dirtyUnreachable.root, 'src', 'a.txt'), 30);
+
+  // Separate deployments so AUTH_REQUIRED throws cleanly on its own page while gone projects return PROJECT_UNAVAILABLE.
+  const authAddr = { url: 'https://auth.invalid', projectId: 'auth-expired' };
+  recordLane(
+    { laneId: authFailed.laneId, root: authFailed.root, ...authAddr, lastActionAt: now - 30 * hour },
+    now,
+  );
+  const perDeploymentRead = Object.assign(
+    async (addr, ids) => {
+      if (addr.url === authAddr.url) throw Object.assign(new Error('expired'), { code: 'AUTH_REQUIRED' });
+      return new Map(
+        ids.map(id => [
+          id,
+          {
+            state: 'unknown',
+            reason: 'PROJECT_UNAVAILABLE: restore project access, then rerun nforge prune; copy retained.',
+          },
+        ]),
+      );
+    },
+    {
+      batch: async groups => {
+        if (groups[0].address.url === authAddr.url)
+          throw Object.assign(new Error('expired'), { code: 'AUTH_REQUIRED' });
+        return new Map(
+          groups.flatMap(g =>
+            g.laneIds.map(id => [
+              id,
+              {
+                state: 'unknown',
+                reason:
+                  'PROJECT_UNAVAILABLE: restore project access, then rerun nforge prune; copy retained.',
+              },
+            ]),
+          ),
+        );
+      },
+    },
+  );
+  const baseInput = {
+    readStates: perDeploymentRead,
+    now,
+    settings: { autoPruneHours: 3, idleLaneHours: 1, clientCacheMaxAgeHours: 24 },
+    processes: () => ({ paths: [inUseUnreachable.root], unknown: false }),
+  };
+  const defaultRun = await laneHousekeeping({ ...baseInput, apply: true, deletedProjects: true });
+  assert.deepEqual(defaultRun.pruned, []);
+  const unavailableKept = defaultRun.kept.find(row => row.laneId === oldClean.laneId);
+  assert.match(unavailableKept?.reason ?? '', /PROJECT_UNAVAILABLE.*--unreachable --apply/);
+  const authKept = defaultRun.kept.find(row => row.laneId === authFailed.laneId);
+  assert.match(authKept?.reason ?? '', /AUTH_REQUIRED/);
+  assert(!/--unreachable/.test(authKept?.reason ?? ''), 'AUTH_REQUIRED never suggests --unreachable');
+
+  const dryUnreachable = await laneHousekeeping({
+    ...baseInput,
+    apply: false,
+    deletedProjects: true,
+    unreachableProjects: true,
+  });
+  assert.deepEqual(
+    dryUnreachable.wouldPrune.map(row => row.laneId),
+    [oldClean.laneId],
+  );
+  assert(existsSync(oldClean.root));
+  assert.match(
+    dryUnreachable.kept.find(row => row.laneId === freshUnreachable.laneId)?.reason ?? '',
+    /grace period/,
+  );
+  assert.equal(
+    dryUnreachable.kept.find(row => row.laneId === outsideCache.laneId)?.reason,
+    'outside the Lane checkout cache',
+  );
+  assert.deepEqual(dryUnreachable.kept.find(row => row.laneId === dirtyUnreachable.laneId)?.unsaved, {
+    kind: 'changes',
+    paths: [{ path: 'src/a.txt', change: 'modified' }],
+  });
+
+  const applied = await laneHousekeeping({
+    ...baseInput,
+    apply: true,
+    deletedProjects: true,
+    unreachableProjects: true,
+  });
+  assert.deepEqual(
+    applied.pruned.map(row => row.laneId),
+    [oldClean.laneId],
+  );
+  assert(!existsSync(oldClean.root));
+  assert(
+    [freshUnreachable, dirtyUnreachable, pinnedUnreachable, inUseUnreachable, outsideCache, authFailed].every(
+      lane => existsSync(lane.root),
+    ),
+  );
+  await assert.rejects(
+    pruneCli(['--finished-only', '--unreachable'], perDeploymentRead),
+    error => error.code === 'BAD_ARGUMENT',
+  );
+});
+
+test('d8012963: prune --scan finds unregistered Lane checkouts when pointed at a project root or .forge-client directory', async t => {
+  const directory = realpathSync(isolated(t));
+  const now = Date.parse('2026-01-02T00:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const repo = join(directory, 'repo');
+  mkdirSync(repo, { recursive: true });
+  const nested = join(`${repo}.forge-client`, 'lanes', 'unregistered-12345678');
+  const laneId = await realCheckout(nested);
+  ageTree(nested, 10);
+  ageTree(`${nested}.forge-client`, 10);
+  age(`${nested}.forge-metrics.jsonl`, 10);
+  for (const scanTarget of [repo, `${repo}.forge-client`]) {
+    const dry = await laneHousekeeping({
+      apply: false,
+      scan: scanTarget,
+      now,
+      settings: { autoPruneHours: 3, idleLaneHours: 1 },
+      readStates: async () => new Map([[laneId, 'abandoned']]),
+      processes: () => ({ paths: [], unknown: false }),
+    });
+    assert.deepEqual(
+      dry.wouldPrune.map(row => row.laneId),
+      [laneId],
+      `scan target ${scanTarget} finds unregistered checkout`,
+    );
+    assert(dry.folders?.some(row => row.root === nested && row.registered === false));
+  }
+});
+
+test('a868ee3d / 9ecd8dab: cache GC and prune never remove a Lane folder that is in use, snapshotting, held, or edited mid-pass', async t => {
+  const directory = realpathSync(isolated(t));
+  const now = Date.parse('2026-01-02T00:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const project = join(directory, 'project');
+  const racedReg = copy(project, 1e9, 40);
+  const racedEdit = copy(project, 1e9, 41);
+  const snapBusy = copy(project, 1e9, 42);
+  const companionBusy = copy(project, 1e9, 43);
+  const keptRecovery = copy(project, 1e9, 44);
+  const secondClean = copy(project, 1e9, 45);
+  mkdirSync(snapshotDirectory(snapBusy.path), { recursive: true });
+  writeFileSync(snapshotLockPath(snapBusy.path), String(process.pid));
+  const keptFile = join(`${keptRecovery.path}.forge-client`, 'kept-apply', 'round-1', 'saved.txt');
+  mkdirSync(join(keptFile, '..'), { recursive: true });
+  writeFileSync(keptFile, 'preserved recovery\n');
+  let racedEditChecks = 0;
+  let gcProcessCensuses = 0;
+  const gc = gcNestedLanes({
+    root: project,
+    now,
+    settings: settings(0.5, 0),
+    processes: () => {
+      gcProcessCensuses++;
+      return { paths: [`${companionBusy.path}.forge-client`], unknown: false };
+    },
+    isDirty: root => {
+      if (root === racedReg.path) {
+        recordLane({ laneId: racedReg.laneId, root: racedReg.path, ...address, lastActionAt: now }, now);
+        return false;
+      }
+      if (root === racedEdit.path) return ++racedEditChecks > 1;
+      return false;
+    },
+  });
+  assert.equal(gcProcessCensuses, 2, 'GC batches process census: one scan pass plus one per removal batch');
+  assert(existsSync(racedReg.path), 'Lane registered mid-GC survives');
+  assert(existsSync(racedEdit.path), 'Lane edited mid-GC survives');
+  assert(existsSync(snapBusy.path), 'Lane with running snapshot survives');
+  assert(existsSync(companionBusy.path), 'Lane with process in companion cache survives');
+  assert(!existsSync(keptRecovery.path), 'clean unused copy is evicted');
+  assert(!existsSync(secondClean.path), 'second clean unused copy is evicted in the same batch');
+  assert.equal(readFileSync(keptFile, 'utf8'), 'preserved recovery\n', 'kept-apply recovery survives GC');
+  assert.equal(gc.kept.find(row => row.laneId === racedReg.laneId)?.reason, 'in use');
+  assert.equal(gc.kept.find(row => row.laneId === racedEdit.laneId)?.reason, 'unsaved edits');
+  assert.equal(gc.kept.find(row => row.laneId === snapBusy.laneId)?.reason, 'in use');
+  assert.match(gc.kept.find(row => row.laneId === companionBusy.laneId)?.reason ?? '', /process is working/);
+
+  // Active Lane with an in-flight landing is kept in both dry run and apply even past activeLanePruneHours.
+  const heldRoot = join(directory, 'held-active');
+  const heldId = await realCheckout(heldRoot);
+  ageTree(heldRoot, 200);
+  ageTree(`${heldRoot}.forge-client`, 200);
+  age(`${heldRoot}.forge-metrics.jsonl`, 200);
+  recordLane(
+    {
+      laneId: heldId,
+      root: heldRoot,
+      ...address,
+      lastActionAt: now - 200 * hour,
+      landing: { operationId: randomUUID(), at: now - 200 * hour },
+    },
+    now,
+  );
+  const dryHeld = await laneHousekeeping({
+    apply: false,
+    now,
+    address,
+    settings: { autoPruneHours: 3, idleLaneHours: 1, activeLanePruneHours: 24 },
+    readStates: async () => new Map([[heldId, 'active']]),
+    processes: () => ({ paths: [], unknown: false }),
+  });
+  assert.deepEqual(dryHeld.wouldPrune, []);
+  assert.equal(dryHeld.kept.find(row => row.laneId === heldId)?.reason, 'command running');
+
+  // Explicit prune --apply also re-checks unsaved edits right before deletion so a mid-pass edit survives.
+  const racedPruneRoot = join(directory, 'raced-prune-edit');
+  const racedPruneId = await realCheckout(racedPruneRoot);
+  ageTree(racedPruneRoot, 10);
+  ageTree(`${racedPruneRoot}.forge-client`, 10);
+  age(`${racedPruneRoot}.forge-metrics.jsonl`, 10);
+  recordLane({ laneId: racedPruneId, root: racedPruneRoot, ...address, lastActionAt: now - 10 * hour }, now);
+  let censusCalls = 0;
+  const appliedRace = await laneHousekeeping({
+    apply: true,
+    now,
+    address,
+    settings: { autoPruneHours: 3, idleLaneHours: 1 },
+    readStates: async () => new Map([[racedPruneId, 'abandoned']]),
+    processes: () => {
+      if (++censusCalls === 2) writeFileSync(join(racedPruneRoot, 'src', 'a.txt'), 'late unsaved edit\n');
+      return { paths: [], unknown: false };
+    },
+  });
+  assert.deepEqual(appliedRace.pruned, []);
+  assert(existsSync(racedPruneRoot), 'Lane edited between initial scan and flush survives explicit prune');
+  const racedKept = appliedRace.kept.find(row => row.laneId === racedPruneId);
+  assert.equal(racedKept?.reason, 'unsaved edits');
+  assert.deepEqual(racedKept?.unsaved, {
+    kind: 'changes',
+    paths: [{ path: 'src/a.txt', change: 'modified' }],
+  });
 });

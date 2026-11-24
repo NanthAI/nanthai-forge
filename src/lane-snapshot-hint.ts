@@ -1,9 +1,33 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { clientCacheRoot } from './root-paths.js';
 import { neverIndex } from './forge-disk.js';
+
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** True when this checkout's Lane is already recorded as finished in the local Lane registry
+ * (friction d8012963). Reads only two small JSON files so snapshot hooks never pull `zod` or
+ * `lane-registry` into the CLI startup chunk graph. */
+export function finishedLaneCheckout(root: string): boolean {
+  if (process.env.NODE_TEST_CONTEXT && !process.env.XDG_STATE_HOME) return false;
+  try {
+    const marker = JSON.parse(readFileSync(join(root, '.forge', 'hosted-lane.json'), 'utf8')) as {
+      selection?: { laneId?: unknown };
+    };
+    const laneId = marker.selection?.laneId;
+    if (typeof laneId !== 'string' || !uuid.test(laneId)) return false;
+    const stateHome = process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state');
+    const entry = JSON.parse(readFileSync(join(stateHome, 'forge', 'lanes', `${laneId}.json`), 'utf8')) as {
+      state?: unknown;
+    };
+    return entry.state === 'completed' || entry.state === 'abandoned';
+  } catch {
+    return false;
+  }
+}
 
 /** Private snapshot state of one checkout, beside it in `<root>.forge-client/snapshots`. */
 export const snapshotDirectory = (root: string) => join(clientCacheRoot(root), 'snapshots');

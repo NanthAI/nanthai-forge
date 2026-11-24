@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { lstatSync, readdirSync, readlinkSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { sweepKeptApplyCache } from './hosted-apply-kept.js';
 import { markerIdentity } from './hosted-lane-directory.js';
-import { canonicalRoot } from './root-paths.js';
+import type { UnsavedLaneReport } from './hosted-lane-dirty.js';
+import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import type { LaneRegistryEntry } from './lane-registry.js';
 
 export type PruneFolder = {
@@ -15,6 +16,9 @@ export type PruneFolder = {
   bytes?: number;
   scratchBytes?: number;
   largeScratch?: true;
+  unsaved?: Omit<Extract<UnsavedLaneReport, { dirty: true }>, 'dirty'>;
+  staleMarkerHead?: { checkoutHead: string; savedHead: string };
+  staleMarkerVersion?: { checkoutVersion: number; serverVersion: number };
 };
 
 const cacheSuffix = '.forge-client';
@@ -69,36 +73,56 @@ export function scanLaneDirectory(
     copies.push({ ...entry, ...identity, root, openedAt: entry?.openedAt ?? now, lastActionAt });
     candidates.set(laneId, copies);
   };
+  const visitCache = (cachePath: string) => {
+    const folder = { root: cachePath, reason: 'client cache companion' };
+    byRoot.set(cachePath, folder);
+    try {
+      if (sweepRecovery) sweepKeptApplyCache(cachePath);
+      const lanes = join(cachePath, 'lanes');
+      const lanesStat = present(lanes);
+      if (!lanesStat?.isDirectory() || lanesStat.isSymbolicLink()) return;
+      for (const lane of children(lanes))
+        if (lane.isDirectory()) {
+          const nested = join(lanes, lane.name);
+          if (!lane.name.endsWith(cacheSuffix) || markerIdentity(nested)) visit(nested);
+          else byRoot.set(nested, { root: nested, reason: 'client cache companion' });
+        }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+        folder.reason = 'client cache companion could not be fully inspected';
+    }
+  };
   directory = canonicalRoot(directory);
-  for (const item of children(directory)) {
-    const path = join(directory, item.name);
-    if (item.isSymbolicLink()) {
-      try {
-        const target = canonicalRoot(resolve(directory, readlinkSync(path)));
-        const targetLinks = links.get(target) ?? [];
-        targetLinks.push(path);
-        links.set(target, targetLinks);
-      } catch {
-        // A broken or unreadable link cannot authorize removal of a checkout.
-      }
-    } else if (item.isDirectory() && item.name.endsWith(cacheSuffix) && !markerIdentity(path)) {
-      const folder = { root: path, reason: 'client cache companion' };
-      byRoot.set(path, folder);
-      try {
-        if (sweepRecovery) sweepKeptApplyCache(path);
-        const lanes = join(path, 'lanes');
-        if (!present(lanes)?.isDirectory()) continue;
-        for (const lane of children(lanes))
-          if (lane.isDirectory()) {
-            const nested = join(path, 'lanes', lane.name);
-            if (!lane.name.endsWith(cacheSuffix) || markerIdentity(nested)) visit(nested);
-            else byRoot.set(nested, { root: nested, reason: 'client cache companion' });
-          }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-          folder.reason = 'client cache companion could not be fully inspected';
-      }
-    } else if (item.isDirectory()) visit(path);
+  // Passing a project's .forge-client folder directly inspects its lanes/ cache instead of
+  // marking lanes/ as a markerless folder (friction d8012963).
+  if (basename(directory).endsWith(cacheSuffix) && !markerIdentity(directory)) {
+    visitCache(directory);
+  } else {
+    // Passing a project checkout root also inspects its sibling ROOT.forge-client/lanes cache.
+    const siblingCache = clientCacheRoot(directory);
+    const siblingStat = present(siblingCache);
+    if (
+      siblingStat?.isDirectory() &&
+      !siblingStat.isSymbolicLink() &&
+      !markerIdentity(siblingCache) &&
+      present(join(siblingCache, 'lanes'))?.isDirectory()
+    )
+      visitCache(siblingCache);
+    for (const item of children(directory)) {
+      const path = join(directory, item.name);
+      if (item.isSymbolicLink()) {
+        try {
+          const target = canonicalRoot(resolve(directory, readlinkSync(path)));
+          const targetLinks = links.get(target) ?? [];
+          targetLinks.push(path);
+          links.set(target, targetLinks);
+        } catch {
+          // A broken or unreadable link cannot authorize removal of a checkout.
+        }
+      } else if (item.isDirectory() && item.name.endsWith(cacheSuffix) && !markerIdentity(path)) {
+        visitCache(path);
+      } else if (item.isDirectory()) visit(path);
+    }
   }
   for (const copies of candidates.values()) {
     if (copies.length === 1) found.push(copies[0]!);
