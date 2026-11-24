@@ -21,9 +21,18 @@ before reauthorization. Recovery merges original rows with live rows and capsule
 under a relocation fence. Existing rows larger than a page use ordered, hash-verified transport fragments;
 every physical segment still uses S1’s codec. Original row bytes reassemble before
 projection or export, preserving the record capability and bounded page transport.
-The separate writer is installed behind the default-off server setting
-`FORGE_JOURNAL_SEGMENTS=1`; the setting is not enabled by a deployment. Existing
-readers continue to resolve retained objects when the setting is off.
+The writer is off by default and is enabled per deployment with
+`FORGE_JOURNAL_SEGMENTS=1`:
+
+| Deployment | Rollout evidence |
+| --- | --- |
+| Forge development (dogfood) | Enabled in the rollout (Item `27d4c1fd`); completed packs and retained segments verified. |
+| Forge benchmark | Left off in that rollout; no later enablement verified here. |
+| Production and self-hosted deployments | No rollout verified here; the writer stays off unless explicitly enabled. |
+
+Confirm the setting on the target deployment before planning a pack or measuring
+its cost. Archived rows prove that packing ran, not that the writer is still
+enabled. Existing readers resolve retained objects even when the writer is off.
 
 Terminal source operations and primary Work commands become eligible after seven
 days and coordination detail after fourteen. Their writes do not each schedule a

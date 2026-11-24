@@ -136,30 +136,42 @@ idle call. Every page is one idempotent transaction. Run them on one deployment 
 after the code that writes the new layout is deployed. The placement record is
 [fewer index copies](../data-placement.d/after/1600-fewer-index-copies.md).
 
+**The stop rules use cumulative Convex billed I/O.** Between batches, sum
+`usageStats.databaseIoReadBytes + databaseIoWriteBytes` from the deployment's
+Convex Completion logs (or the [spend ledger](convex-spend.md)). Count the page
+mutations, discovery reads and any retried or failed executions, once each.
+Reconcile an unknown outcome before spending more. If coverage is incomplete,
+pause; the function reply is not a substitute for billing data.
+
+`budgetBytes` is a per-call estimate from selected document counters. It omits
+index I/O and can cross its threshold by a final page. Start with a small batch
+and use the observed billed I/O for that job to size the next batch. Reserve room
+for a full final page; do not start or resume if the batch cannot fit under the
+remaining billed stop. On dev, the capsule pin move reported 21.5 MB and billed
+35.1 MB (1.63×); the history move reported 311 MB and billed 344.4 MB (1.11×).
+These are observed ratios, not upper bounds: the now-retired overlap backfill
+reported only read document bytes (20.5 MB) and billed 72.8 MB total (3.55×).
+
 1. **Capsule pins (row 5).**
-   - Budget: about 1,000 pointers, each 8.7 KB read and 6 KB body plus 3 KB pointer
-     written. That is about 0.02 GB; stop at 0.05 GB ($0.01).
-   - Run `npx convex run projectLandingCapsulePinsMove:run '{"cursor":null,"pages":200,"budgetBytes":50000000}'`.
+   - Stop at **0.05 GB billed** ($0.01). Start with one 32-row page, after
+     confirming it fits the budget:
+     `npx convex run projectLandingCapsulePinsMove:run '{"cursor":null,"pages":1,"budgetBytes":1000000}'`.
    - Resume with the returned `nextCursor` until `isDone` is true. A pointer that has
-     already moved is skipped.
-   - `budgetBytes` caps one call, not the whole run. Keep a running total of the returned
-     `readBytes + writtenBytes`, and pass only what is left of the 0.05 GB on each resume.
+     already moved is skipped. Size later batches by `pages` and `budgetBytes`.
 2. **Item history and Work events (row 3).**
-   - Budget, on dev: about 43K rows and 120 MB of documents. The copy reads and writes about
-     0.24 GB, and cleanup reads and deletes about 0.24 GB. That is about 0.5 GB ($0.10);
-     stop at 0.6 GB ($0.12).
+   - Stop at **0.6 GB billed** ($0.12), including discovery and every partition.
    - List the partitions with `projectWorkRecordMigration:pending '{"cursor":null}'`, then
-     follow `nextCursor`.
-   - Move each partition with `projectWorkRecordMigration:run '{"generationId":"…","operationId":"<fresh uuid>","cursor":null,"budgetBytes":600000000}'`.
-     It runs copy, then cutover, then cleanup, at most 100 pages per call.
+     follow `nextCursor` while the budget permits.
+   - Start each partition with `npx convex run projectWorkRecordMigration:run '{"generationId":"…","operationId":"<fresh uuid>","cursor":null,"budgetBytes":1}'`.
+     The positive one-byte threshold allows a nonempty page to finish but does not
+     cap its I/O. The driver runs copy, then cutover, then cleanup, at most 100 pages per call.
    - To resume, pass the returned `cursor` and `cleanup` with the same `operationId`. A
      page whose reply was lost replays its stored receipt.
    - When the selected partition is cut over, its open list and search cursors fail
      WORK_STALE once.
    - Purges of a partition refuse with a retry message until its cleanup finishes.
-   - `budgetBytes` caps one call, not the run. Keep one running total of the returned
-     `readBytes + writtenBytes + deletedBytes` across every call and every partition, and pass
-     only what is left of the 0.6 GB. Stop and report when it reaches zero.
+   - Size later batches with `budgetBytes` from measured billed I/O. The reply's
+     `deletedBytes` describes documents, not a separate charge to add to provider writes.
 
 Before each run and a day after it, record:
 
