@@ -21,6 +21,7 @@ const completion = await import(moduleUrl('../convex/projectHostedAcceptanceComp
 const revertNotice = await import(moduleUrl('../convex/projectHostedRevertNotice.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+const itemWork = await import(moduleUrl('../convex/projectItemWork.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -155,6 +156,20 @@ test('incident replay 2bf85ddf: a parked Lane the queue lands after its agent st
   assert(comment.text.includes(`receipt ${receiptId.slice(0, 8)}`));
   assert(comment.text.includes(`Lane ${laneId.slice(0, 8)}`));
   assert(!comment.text.includes(receipt.actor.id), 'the text names no account');
+  // The same queue acceptance produces the completed Intent, landed Lane and Work evidence.
+  // This fixture seeds the link, not a planning Item version; reconcile itself is tested separately.
+  const work = JSON.parse(
+    await f.c.run('itemWork', (ctx, input) => itemWork.read._handler(ctx, input), {
+      projectId: f.projectId,
+      itemId: parkedItem,
+    }),
+  );
+  assert.equal(work.intent, 'completed');
+  const lane = work.lanes.find(row => row.laneId === laneId);
+  assert.deepEqual(
+    [lane?.intentId, lane?.state, lane?.receipt?.receiptId, lane?.receipt?.commit],
+    [parkedItem, 'landed', receiptId, receipt.candidate.head],
+  );
   // The predecessor's Item gets its own note; each Item exactly one.
   assert.equal(notesOf(f, olderItem).length, 1);
   assert.equal(notesOf(f, parkedItem).length, 1);

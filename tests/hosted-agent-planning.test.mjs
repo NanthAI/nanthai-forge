@@ -238,6 +238,82 @@ test('active search hides settled Items and an explicit Closed search finds both
   assert.ok(more.items.every(item => item.status === 'closed' || item.status === 'abandoned'));
 });
 
+test('reconciliation closes an Item from its completed hosted Intent, but reports open Done-when lines', async t => {
+  const s = await setup(t);
+  const p = port(s, new Map(), undefined, true);
+  const { writeHostedRecord } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+  const { completeIntentWhenLanesDone } = await import(
+    moduleUrl('../convex/projectHostedIntentCompletion.ts')
+  );
+  const { projectId, ctx } = s;
+  const authorityEpoch = 1;
+  await ctx.db.patch(projectId, { sourceAuthority: { mode: 'server', epoch: authorityEpoch } });
+  const actor = 'owner';
+  const base = { head: 'a'.repeat(64), receiptId: 'initial-receipt' };
+  for (const met of [true, false]) {
+    const body = `Done when:\n- [${met ? 'x' : ' '}] The source still reads exactly.`;
+    const title = met ? 'Ready to close' : 'Evidence still missing';
+    const { itemId } = (await put(p, { kind: 'issue', title, body, status: 'in-progress' })).result;
+    const at = '2026-11-20T12:00:00.000Z';
+    await writeHostedRecord(ctx, {
+      projectId,
+      actor,
+      authorityEpoch,
+      planningItemId: itemId,
+      expectedVersion: null,
+      record: {
+        kind: 'intent',
+        id: itemId,
+        version: 0,
+        at,
+        outcome: title,
+        constraints: '',
+        creatorAccountId: actor,
+        assigneeAccountIds: [],
+        base,
+        status: 'active',
+      },
+    });
+    const lane = {
+      kind: 'lane',
+      id: randomUUID(),
+      intentId: itemId,
+      actor,
+      at,
+      base,
+      head: base.head,
+      authorityEpoch,
+      version: 0,
+      sourceVersion: 0,
+      lifecycleVersion: 0,
+      state: 'active',
+    };
+    await writeHostedRecord(ctx, { projectId, actor, authorityEpoch, expectedVersion: null, record: lane });
+    const reading = { id: itemId, reconcile: true };
+    assert.equal((await list(p, reading)).item.status, 'in-progress');
+    // Acceptance publishes the completed Lane, then runs this same Intent transition.
+    await writeHostedRecord(ctx, {
+      projectId,
+      actor,
+      authorityEpoch,
+      expectedVersion: 0,
+      record: { ...lane, version: 1, lifecycleVersion: 1, state: 'completed' },
+    });
+    assert.equal(
+      await completeIntentWhenLanesDone(ctx, { projectId, actor, authorityEpoch, at, intentId: itemId }),
+      true,
+    );
+    const after = await list(p, reading);
+    assert.equal(after.item.intent, 'completed');
+    assert.equal(after.item.status, met ? 'closed' : 'in-progress');
+    if (!met) {
+      assert.equal(after.reconciled.held[0].openLines, 1);
+      assert.match(after.reconciled.held[0].reason, /The source still reads exactly/);
+    }
+    assert.equal((await list(p, { id: itemId, reconcile: false })).item.status, after.item.status);
+  }
+});
+
 test('title-only capture never starts a model and refinement needs an explicit project opt-in', async t => {
   const s = await setup(t);
   const p = port(s);
