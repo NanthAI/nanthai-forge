@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
-import { blobStore } from './blobStore';
 import { internalMutation, internalQuery } from './server';
 import { activeOwnedProject } from './projectAuthority';
-import { storageDigest } from './projectStorage';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
-import { findObject, ownRow } from './projectObjectFind';
+import { findObject } from './projectObjectFind';
 const pin = { projectId: v.id('hostedProjects'), actor: v.string(), digest: v.string(), size: v.number() };
 /** Internal only: the importer has verified these bytes against the Git object.
  * No cross-project digest-existence oracle is exposed to clients. */
@@ -27,45 +25,6 @@ export const reuse = internalMutation({
     }
     // New bytes always upload to R2; only an already stored binding is reused.
     return false;
-  },
-});
-export const bind = internalMutation({
-  args: { ...pin, storageId: v.id('_storage'), nonce: v.string() },
-  returns: v.null(),
-  handler: async (ctx, input) => {
-    await activeOwnedProject(ctx, input.projectId, input.actor);
-    const stored = await ctx.db.system.get(input.storageId);
-    invariant(
-      stored &&
-        stored.size === input.size &&
-        storageDigest(stored.sha256) === input.digest &&
-        stored.contentType === `application/x-forge-object-${input.nonce}`,
-      'INVALID_WORK_BACKUP',
-      'Imported object differs from verified source.',
-    );
-    const own = await findObject(ctx, input.projectId, input.digest);
-    if (own && isStored(own)) {
-      if (own.storageId !== input.storageId) await blobStore(ctx).delete(input.storageId);
-      return null;
-    }
-    const shared = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_digest_and_removed', q => q.eq('digest', input.digest).eq('removed', false))
-      .take(20);
-    const existing = shared.find(row => row.storageId && row.size === input.size);
-    const storageId = existing?.storageId ?? input.storageId;
-    if (own) await ctx.db.patch(ownRow(own)._id, { storageId });
-    else
-      await ctx.db.insert('projectObjects', {
-        projectId: input.projectId,
-        digest: input.digest,
-        size: input.size,
-        nonce: input.nonce,
-        removed: false,
-        storageId,
-      });
-    if (storageId !== input.storageId) await blobStore(ctx).delete(input.storageId);
-    return null;
   },
 });
 export const stored = internalQuery({

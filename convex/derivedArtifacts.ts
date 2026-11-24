@@ -8,6 +8,7 @@ import { internal } from './_generated/api';
 import { artifactMetadata } from './artifactStorage';
 import { storageDigest, scanComplete } from './storageDigest';
 import { derivedFields } from './derivedArtifactFields';
+import { invariant } from '../src/errors';
 const key = { original: v.string(), kind: v.string(), pin: v.string() };
 const find = (ctx: Pick<QueryCtx, 'db'>, args: { original: string; kind: string; pin: string }) =>
   ctx.db
@@ -75,6 +76,11 @@ export const attach = internalMutation({
   args: { id: v.id('derivedArtifacts'), storageId: v.string() },
   returns: v.any(),
   handler: async (ctx, { id, storageId }) => {
+    invariant(
+      artifactBlobId(storageId),
+      'R2_REQUIRED',
+      'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
+    );
     const row = await ctx.db.get(id),
       file = await artifactMetadata(ctx, storageId);
     if (

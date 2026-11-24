@@ -62,11 +62,6 @@ const storageAllowlist = {
     'Legacy storageId import receipts beside R2 keys; nothing new writes them.',
     '2027-01-31',
   ],
-  'projectGithubImportObjects.ts field': [
-    1,
-    'Legacy storageId import receipts beside R2 keys; nothing new writes them.',
-    '2027-01-31',
-  ],
   'projectHostedActionsPlan.ts field': [2, legacy, '2027-01-31'],
   'projectHostedFinishDriver.ts field': [1, legacy, '2027-01-31'],
   'projectLifecycle.ts field': [1, legacy, '2027-01-31'],

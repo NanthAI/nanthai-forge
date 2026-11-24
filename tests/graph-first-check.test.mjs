@@ -630,16 +630,15 @@ async function server(t, { check = ci(), main = 'green', paths = ['crates/a/src/
       command: [check.executable, ...check.args],
     };
     const recipe = hostedActionsRecipeSchema.parse({ ...pins, pin: checkPin(pins) });
-    storage.set('selection', savePin(selection));
-    storage.set('recipe', savePin(recipe));
+    // Plan bytes live in R2 under their content keys (old Convex file storage is retired, F6).
     return JSON.parse(
       await f.call('graphPlan', plans.prepare, {
         ...id,
         claims: JSON.stringify(claims),
         recipe: JSON.stringify(recipe),
         lockfile: 'e'.repeat(64),
-        selectionStorage: 'selection',
-        recipeStorage: 'recipe',
+        selectionR2Key: `v1/p/${id.projectId}/o/${savePin(selection).sha256}`,
+        recipeR2Key: `v1/p/${id.projectId}/o/${savePin(recipe).sha256}`,
       }),
     );
   };

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { legacyMetadata } from './legacyStorageRead';
 import { validStateSize, type StateSize } from '../src/state/size';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -54,14 +53,12 @@ export async function storeSourceOutputs(
       'SOURCE_JOB_INVALID',
       'Output needs one physical encoding.',
     );
-    if (pin.storageId) {
-      const metadata = await legacyMetadata(ctx, pin.storageId);
-      invariant(
-        metadata?.sha256 === pin.sha256 && metadata.size === pin.size,
-        'SOURCE_HASH_MISMATCH',
-        'Worker storage pin changed.',
-      );
-    } else if (pin.r2Key) {
+    invariant(
+      !pin.storageId,
+      'R2_REQUIRED',
+      'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
+    );
+    if (pin.r2Key) {
       // The fixed action supplies checksum-confirmed bodies or hash-verified
       // ranges in an existing committed project body.
       invariant(
@@ -133,9 +130,7 @@ export async function storeSourceOutputs(
     }
     const encoding = pin.r2Key
       ? { location: 'r2' as const, r2Key: pin.r2Key, r2Committed: true, recipe: undefined, pack: pin.pack }
-      : pin.storageId
-        ? { storageId: pin.storageId, recipe: undefined }
-        : { storageId: undefined, recipe: { digest: pin.recipe!.sha256, size: pin.recipe!.size } };
+      : { storageId: undefined, recipe: { digest: pin.recipe!.sha256, size: pin.recipe!.size } };
     const old = await findObject(ctx, projectId, pin.sha256);
     if (old?.sourceReferenced && isR2Object(old) && pin.r2Key && old.r2Key !== pin.r2Key) {
       await retainSourceKey(ctx, projectId, {

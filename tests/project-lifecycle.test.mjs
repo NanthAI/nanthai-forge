@@ -486,7 +486,7 @@ test('same-operation duplicate backup completion and lost-ID reconciliation dele
   );
   assert.ok(s.files.has('denied-extra'));
 });
-test('two issued URLs for the same initial backup retain one archive and clean the second successful upload without rewinding history', async () => {
+test('F6: two issued native URLs for the same initial backup never complete into old Convex file storage', async () => {
   const s = fixture(),
     request = {
       key: randomUUID(),
@@ -500,27 +500,19 @@ test('two issued URLs for the same initial backup retain one archive and clean t
   const first = await backups.prepare._handler(s.ctx, request),
     second = await backups.prepare._handler(s.ctx, request);
   assert.equal(first.backup.id, second.backup.id);
-  assert.equal(first.contentType, second.contentType);
   assert.ok(first.uploadUrl && second.uploadUrl);
   s.put('url-one', first.contentType);
   s.put('url-two', second.contentType);
-  await backups.complete._handler(s.ctx, { id: first.backup.id, storageId: 'url-one' });
-  const winner = await backups.complete._handler(s.ctx, { id: first.backup.id, storageId: 'url-two' });
-  assert.equal(winner.current, true);
-  assert.ok(s.files.has('url-one'));
-  assert.ok(!s.files.has('url-two'));
+  for (const storageId of ['url-one', 'url-two'])
+    await assert.rejects(
+      backups.complete._handler(s.ctx, { id: first.backup.id, storageId }),
+      e => (e.code ?? e.data?.code) === 'R2_REQUIRED',
+    );
   const row = s.tables.projectBackups.get(first.backup.id);
-  assert.equal(row.storageId, 'url-one');
-  assert.equal(s.tables.hostedProjects.get(winner.projectId).revision, 1);
-  assert.ok(s.files.has('original'));
-  s.ctx.db.system.query = () => {
-    throw Error('Unrelated storage enumeration unavailable');
-  };
-  assert.equal(
-    (await backups.prepare._handler(s.ctx, request)).backup.id,
-    first.backup.id,
-    'A known stored operation replay does not require enumerating unrelated files.',
-  );
+  assert.equal(row.status, 'uploading');
+  assert.equal(row.storageId, undefined);
+  assert.equal(s.tables.hostedProjects.get(row.projectId).revision, 0);
+  assert.ok(s.files.has('original'), 'the existing stored backup is untouched');
 });
 test('stored proposal duplicate outcomes recheck current grant; removal receipts reconcile original uploader late bytes without source access', async () => {
   const s = fixture(),

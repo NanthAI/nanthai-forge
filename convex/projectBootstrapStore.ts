@@ -90,9 +90,9 @@ export const publish = internalMutation({
       for (const [index, object] of input.objects.entries()) {
         const expected = bootstrap.objects[index]!;
         invariant(
-          !!object.storageId !== !!object.r2Key,
-          'INVALID_WORK_BACKUP',
-          'Bootstrap object needs one storage binding.',
+          !object.storageId && object.r2Key,
+          'R2_REQUIRED',
+          'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
         );
         if (object.r2Key) {
           invariant(

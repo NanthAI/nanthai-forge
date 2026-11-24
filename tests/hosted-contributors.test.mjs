@@ -267,6 +267,14 @@ function upload(s, prepared, bytes, id = 'proposal-file') {
   });
   return id;
 }
+// Historical shape (F6): a native proposal stored before the R2 cutover. Completing a native
+// upload now refuses (R2_REQUIRED), so stored legacy rows are seeded as they exist.
+function storedNative(s, prepared, storageId) {
+  const row = s.tables.projectProposals.get(prepared.proposal._id);
+  Object.assign(row, { status: 'stored', storageId });
+  return structuredClone(row);
+}
+const r2Required = e => (e.code ?? e.data?.code) === 'R2_REQUIRED';
 test('native contributor grant discovers full project and source without GitHub entitlement; server actor controls own Intent operations', async t => {
   const s = await setup(t),
     before = structuredClone(s.tables.hostedProjects.get('project'));
@@ -355,7 +363,7 @@ test('contributor retries are actor-bound, grant revocation during final append 
     );
   }
 });
-test('immutable contributor proposal completion, exact upload retry and owner download preserve canonical backup and Channels', async t => {
+test('F6: a native proposal completion refuses; a stored legacy proposal replays, downloads and cleans up preserving canonical backup and Channels', async t => {
   const s = await setup(t),
     c = await candidate(t, s),
     before = structuredClone(s.tables.hostedProjects.get('project'));
@@ -372,20 +380,14 @@ test('immutable contributor proposal completion, exact upload retry and owner do
     'uploading',
   );
   s.ctx.runQuery = nativeQuery;
+  // F6: a late native upload never completes into old Convex file storage.
+  upload(s, prepared, c.bytes, 'late-native');
+  await assert.rejects(
+    proposals.complete._handler(s.ctx, { id: prepared.proposal._id, storageId: 'late-native' }),
+    r2Required,
+  );
   const storageId = upload(s, prepared, c.bytes);
-  const native = s.ctx.runMutation;
-  let lost = false;
-  s.ctx.runMutation = async (ref, args) => {
-    const result = await native(ref, args);
-    if (getFunctionName(ref) === 'projectProposals:complete' && !lost) {
-      lost = true;
-      throw Error('lost completion reply');
-    }
-    return result;
-  };
-  await assert.rejects(proposals.complete._handler(s.ctx, { id: prepared.proposal._id, storageId }));
-  s.ctx.runMutation = native;
-  const stored = await proposals.complete._handler(s.ctx, { id: prepared.proposal._id, storageId });
+  const stored = storedNative(s, prepared, storageId);
   assert.equal(stored.status, 'stored');
   assert.equal(stored.head, c.view.head);
   assert.equal(stored.actor, 'contributor');
@@ -534,7 +536,7 @@ test('archive and proposal transfers recheck grant after byte read, and unrelate
     e => e.data.code === 'INVALID_WORK_BACKUP',
   );
   assert.equal(s.reads(), reads);
-  await proposals.complete._handler(s.ctx, { id: prepared.proposal._id, storageId });
+  storedNative(s, prepared, storageId);
   const originalFetch = globalThis.fetch;
   const revokedBody = async (input, init) => {
     const response = await originalFetch(input, init);
@@ -599,7 +601,7 @@ test('owner proposal cleanup preserves recorded shared files and foreign members
     c = await candidate(t, s),
     prepared = await proposals.prepare._handler(s.ctx, c.input),
     storageId = upload(s, prepared, c.bytes);
-  const stored = await proposals.complete._handler(s.ctx, { id: prepared.proposal._id, storageId });
+  const stored = storedNative(s, prepared, storageId);
   await assert.rejects(modules.projectProposals.remove._handler(s.ctx, { id: stored._id }), unavailable);
   s.tables.projectProposals.set('second-reference', {
     ...stored,

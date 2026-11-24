@@ -224,34 +224,12 @@ async function retainLegacyInput(s, args) {
   return { ...args, at, objects };
 }
 
-test('publication reconciles original legacy Convex storage receipts', async () => {
-  const s = setup(),
-    args = input(),
-    retained = await retainLegacyInput(s, args);
-  const publish = () => s.transaction(() => modules.projectBootstrapStore.publish._handler(s.ctx, retained));
-  const { projectId, created } = await publish();
-  assert.equal(created, true);
-  assert.equal(s.tables.projectObjectCatalog.size, 0);
-  assert.equal(s.tables.projectObjects.size, 3);
-  const main = await modules.projectHostedChannels.hostedStartMain(s.ctx, projectId);
-  const row = await modules.projectObjectFind.findStoredObject(s.ctx, projectId, main.head);
-  assert.equal(row.storageId, retained.objects[0].storageId);
-  assert.equal(row.stateGeneration, 1);
-  assert.deepEqual(row.stateSize, { fileCount: 0, manifestBytes: row.size });
-  assert.equal(
-    (await storedBytes(s, row)).toString(),
-    emptyHostedProject(args.operationId, retained.at).objects[0].text,
-  );
-  assert.deepEqual(await publish(), { projectId, created: false });
-});
-
-test('publication validates all immutable bytes and rolls back a corrupt bootstrap', async () => {
+test('F6: publication refuses an old Convex storage receipt and creates nothing', async () => {
   const s = setup(),
     retained = await retainLegacyInput(s, input());
-  s.files.get(retained.objects[1].storageId).metadata.size++;
   await assert.rejects(
     s.transaction(() => modules.projectBootstrapStore.publish._handler(s.ctx, retained)),
-    code('INVALID_WORK_BACKUP'),
+    code('R2_REQUIRED'),
   );
   assert.equal(s.tables.hostedProjects.size, 0);
   assert.equal(s.tables.projectBackups.size, 0);

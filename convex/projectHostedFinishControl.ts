@@ -478,7 +478,13 @@ async function resumeFinishIOOnce(
       'SOURCE_HASH_MISMATCH',
       'Source plan binding differs.',
     );
-    if (input.key) {
+    // An already-issued legacy IO callback cannot bind a Convex file any more (Item c0af6cfa).
+    invariant(
+      input.key,
+      'R2_REQUIRED',
+      'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
+    );
+    {
       invariant(
         old &&
           old.location === 'r2' &&
@@ -489,25 +495,6 @@ async function resumeFinishIOOnce(
       );
       // A stored entry already holds the flag: never copy it into a row to set it again.
       if (!old.r2Committed) await ctx.db.patch(ownRow(old)._id, { r2Committed: true });
-    } else {
-      // Read-only compatibility for an already-issued legacy IO callback.
-      const metadata = await blobStore(ctx).getMetadata(input.storageId!);
-      invariant(
-        metadata?.sha256 === pin.sha256 && metadata.size === pin.size,
-        'SOURCE_HASH_MISMATCH',
-        'Uploaded source plan differs from its exact bytes.',
-      );
-      const storageId = input.storageId as import('./_generated/dataModel').Id<'_storage'>;
-      if (!old)
-        await ctx.db.insert('projectObjects', {
-          projectId: input.projectId,
-          digest: pin.sha256,
-          size: pin.size,
-          storageId,
-          nonce: crypto.randomUUID(),
-          removed: false,
-        });
-      else if (!isStored(old)) await ctx.db.patch(ownRow(old)._id, { storageId });
     }
     await submitHostedCompose(ctx, {
       projectId: input.projectId,

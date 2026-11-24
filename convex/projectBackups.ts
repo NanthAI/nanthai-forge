@@ -310,20 +310,12 @@ export const complete = internalMutation({
         if (storageId !== backup.storageId) await removeDuplicate(ctx, backup, 'backup', storageId);
         return item(backup, project);
       }
-      const file = await ctx.db.system.get(storageId);
-      invariant(
-        file &&
-          file.contentType === `application/x-forge-backup-${backup.nonce}` &&
-          file.size === backup.size &&
-          storageDigest(file.sha256) === backup.digest,
-        'INVALID_WORK_BACKUP',
-        'Uploaded bytes are not this owner-bound archive. Original project and backups remain available.',
-      );
-      await ctx.db.patch(id, { status: 'stored', storageId });
-      // Store a concurrent candidate without silently replacing a newer remote backup pointer.
-      if (project.currentBackup === backup.previous)
-        await ctx.db.patch(project._id, { currentBackup: id, revision: project.revision + 1 });
-      return item((await ctx.db.get(id))!, (await ctx.db.get(project._id))!);
+      // A Convex upload can no longer complete a backup (Item c0af6cfa); R2 uploads use completeR2.
+      return invariant(
+        false,
+        'R2_REQUIRED',
+        'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
+      ) as never;
     } catch (error) {
       return report(error);
     }

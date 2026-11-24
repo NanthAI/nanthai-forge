@@ -55,7 +55,8 @@ export const migrateArchive = internalMutation({
       );
       await ctx.db.patch(backup._id, {
         transport: 'objects',
-        storageId: object.storageId,
+        // The manifest object row holds the bytes; a backup never copies an old storage pointer.
+        storageId: undefined,
         location: undefined,
         r2Key: undefined,
         r2Committed: undefined,

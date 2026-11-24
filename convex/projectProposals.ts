@@ -164,17 +164,12 @@ export const complete = internalMutation({
         return proposal;
       }
       await intentAuthority(ctx, proposal.projectId, actor, proposal.intentId);
-      const file = await ctx.db.system.get(storageId);
-      invariant(
-        file &&
-          file.contentType === `application/x-forge-proposal-${proposal.nonce}` &&
-          file.size === proposal.size &&
-          storageDigest(file.sha256) === proposal.digest,
-        'INVALID_WORK_BACKUP',
-        'Uploaded bytes differ from this actor-bound proposal.',
-      );
-      await ctx.db.patch(id, { status: 'stored', storageId });
-      return (await ctx.db.get(id))!;
+      // A Convex upload can no longer complete a proposal (Item c0af6cfa); R2 uploads use completeR2.
+      return invariant(
+        false,
+        'R2_REQUIRED',
+        'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
+      ) as never;
     } catch (error) {
       return report(error);
     }

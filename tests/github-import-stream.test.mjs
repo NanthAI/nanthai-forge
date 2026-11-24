@@ -34,7 +34,7 @@ test('100 MiB acquisition streams bounded physical windows with memory margin', 
   t.diagnostic(JSON.stringify(result));
 });
 
-test('batched completion rejects changed bytes and current access is rechecked', async () => {
+test('batched completion refuses old Convex file storage (F6) and current access is rechecked', async () => {
   const s = pagedFixture(),
     projectId = await s.ctx.db.insert('hostedProjects', {
       owner: 'owner',
@@ -57,7 +57,7 @@ test('batched completion rejects changed bytes and current access is rechecked',
       objects: [{ id: pin.id, storageId }],
       recipes: [],
     }),
-    e => e.code === 'INVALID_WORK_BACKUP',
+    e => e.code === 'R2_REQUIRED',
   );
   await assert.rejects(
     s.ctx.runMutation(makeFunctionReference('projectGithubImportBatch:prepare'), {

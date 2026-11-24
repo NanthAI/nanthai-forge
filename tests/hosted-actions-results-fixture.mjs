@@ -155,15 +155,14 @@ async function landing(t, shards, batch = false, packed = false, r2Reports = fal
     command: ['node', 'scripts/forge-check.mjs'],
   };
   const recipe = { ...pins, pin: checkPin(pins) };
-  storage.set('selection', savePin(recipe.selection));
-  storage.set('recipe', savePin(recipe));
+  // Plan bytes live in R2 under their content keys (old Convex file storage is retired, F6).
   await s.transaction('prepare', plans.prepare, {
     ...id,
     claims: JSON.stringify(claims()),
     recipe: JSON.stringify(recipe),
     lockfile: 'e'.repeat(64),
-    selectionStorage: 'selection',
-    recipeStorage: 'recipe',
+    selectionR2Key: `v1/p/${id.projectId}/o/${savePin(recipe.selection).sha256}`,
+    recipeR2Key: `v1/p/${id.projectId}/o/${savePin(recipe).sha256}`,
     ...(batch ? { resultsBatch: true } : {}),
     ...(packed ? { resultsPacked: true } : {}),
   });

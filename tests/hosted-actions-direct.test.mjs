@@ -176,19 +176,13 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null, r
       ...(actions ? { actions } : {}),
     };
     const recipe = { ...pins, pin: checkPin(pins) };
-    const selectionStorage = 'selection-storage',
-      recipeStorage = 'recipe-storage';
-    storage.set(selectionStorage, {
-      sha256: savePin(recipe.selection).sha256,
-      size: savePin(recipe.selection).size,
-    });
-    storage.set(recipeStorage, { sha256: savePin(recipe).sha256, size: savePin(recipe).size });
+    // Plan bytes live in R2 under their content keys (old Convex file storage is retired, F6).
     return call(plans, 'prepare', {
       ...input(),
       recipe: JSON.stringify(recipe),
       lockfile: 'e'.repeat(64),
-      selectionStorage,
-      recipeStorage,
+      selectionR2Key: `v1/p/${s.projectId}/o/${savePin(recipe.selection).sha256}`,
+      recipeR2Key: `v1/p/${s.projectId}/o/${savePin(recipe).sha256}`,
       ...extra,
     });
   };

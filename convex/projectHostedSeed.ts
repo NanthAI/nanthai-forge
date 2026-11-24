@@ -325,7 +325,6 @@ export const commit = internalMutation({
       ...(request.format === 'native' && input.validatedWorkRecords
         ? { validatedWorkRecords: 1 as const }
         : {}),
-      ...(content.storageId ? { storageId: content.storageId } : {}),
       preview: {
         ...request.preview,
         format: request.format === 'native' ? 'native' : request.head.length === 40 ? 'sha1' : 'sha256',

@@ -6,7 +6,6 @@ import { validStateSize, type StateSize } from '../src/state/size';
 import type { Id } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
 import { stateSize, isStored } from './projectObjectFields';
-import { storageDigest, removeExclusive } from './projectStorage';
 import { r2Config, r2Key } from './r2';
 import { invariant } from '../src/errors';
 import { importPageFiles } from '../src/github-import-pages';
@@ -120,20 +119,12 @@ export async function completeObjects(
         'R2 binding changed.',
       );
       if (!isStored(row)) await ctx.db.patch(row._id, { r2Committed: true });
-    } else {
-      const stored = object.storageId && (await ctx.db.system.get(object.storageId));
+    } else
       invariant(
-        stored &&
-          stored.size === row.size &&
-          storageDigest(stored.sha256) === row.digest &&
-          stored.contentType === `application/x-forge-object-${row.nonce}`,
-        'INVALID_WORK_BACKUP',
-        'Imported bytes differ from their reserved identity.',
+        false,
+        'R2_REQUIRED',
+        'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
       );
-      if (isStored(row)) {
-        if (row.storageId !== object.storageId) await removeExclusive(ctx, object.storageId!);
-      } else await ctx.db.patch(row._id, { storageId: object.storageId! });
-    }
   }
   for (const pin of recipes) {
     const recipe = await findObject(ctx, projectId, pin.recipeDigest);

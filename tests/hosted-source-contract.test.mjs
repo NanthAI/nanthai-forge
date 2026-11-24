@@ -34,19 +34,15 @@ const defaultAuthority = { mode: 'native-owner', epoch: 0 };
 test('native upload and an unpublished GitHub import keep native authority; a browser project is hosted from birth', async () => {
   const s = state([]);
   const nativeId = await native.open._handler(s.ctx, { key: randomUUID(), name: 'Native' });
-  const input = { operationId: randomUUID(), name: 'Browser', at };
-  const seed = emptyHostedProject(input.operationId, at);
-  const objects = await Promise.all(
-    seed.objects.map(async object => {
-      const nonce = randomUUID();
-      const storageId = await s.ctx.storage.store(
-        new Blob([object.text], {
-          type: `application/x-forge-object-${nonce}`,
-        }),
-      );
-      return { storageId, nonce };
-    }),
-  );
+  const operation = { operationId: randomUUID(), name: 'Browser' };
+  // Bootstrap bytes live in R2 under the reserved project's content keys (F6).
+  const reserved = await bootstrap.prepare._handler(s.ctx, operation);
+  const input = { ...operation, at: reserved.at, projectId: reserved.projectId };
+  const seed = emptyHostedProject(input.operationId, input.at);
+  const objects = seed.objects.map(object => ({
+    r2Key: `v1/p/${reserved.projectId}/o/${object.sha256}`,
+    nonce: randomUUID(),
+  }));
   const { projectId: browserId } = await bootstrap.publish._handler(s.ctx, { ...input, objects });
   const cursor = await s.ctx.storage.store(new Blob(['synthetic']));
   const { id: importId } = await github.begin._handler(s.ctx, {

@@ -43,6 +43,69 @@ with the delete guard and skip-and-report for refused files (see
 further run needs fresh inputs, verification and dry-run evidence, a new
 operation and a new lead go.
 
+## Pointer retirement (one shape)
+
+Rows whose bytes already read from a committed R2 object can still carry an old
+`storageId`. Byte readers pick R2 first for those rows (`isR2Object`), so the
+pointer is unused. `storagePointerRetire:run` clears it on live
+`projectObjects` rows: `{"apply":false}` is the dry run, `{"apply":true}`
+writes. It never clears a removed, purged or native-only row, an object a saved
+source continuation names (its ownership proof), or any backup (its old id is an
+archive alias). Those come back as `blocked` with up to 20 ids per table.
+
+Dev ran it from the refs-only landing of Lane 79793887 before the pointer
+readers were deleted. Prod (Item c0af6cfa, sign-off point 4) runs it from the
+pinned in-between release. Every gate below must hold, in order; stop and report
+on any miss.
+
+1. **Release.** Name the State the in-between release pins and confirm
+   `convex/storagePointerRetire.ts` and `convex/storagePointerProof.ts` exist at
+   it (`nforge agent . show` with that `state` and `path`). Confirm the deploy
+   at that State succeeded and that the deployment answers
+   `storagePointerRetire:run`. Commands target one deployment explicitly: dev
+   with `CONVEX_DEPLOYMENT=dev:<name>` on `npx convex run`, prod with `--prod`,
+   and prod only with the owner's go for that run.
+2. **Writers stopped.** At that State, pointer writers refuse with
+   `R2_REQUIRED` (source output, finish, derived artifacts, backups, proposals,
+   imports, bootstrap, seed, archive migration). Do not run against a release
+   that still writes pointers.
+3. **Inventory.** Read-only, under a stated read budget: count rows with a set
+   `storageId` (or `archiveReceipt.storageId`) in all six families
+   (`projectObjects`, `projectBackups`, `projectProposals`, `projectSourceSteps`,
+   `projectDerivedArtifacts`, `projectWorkGenerations`), and count native
+   `_storage` files. Only `projectObjects` and `projectBackups` may hold
+   pointers; any other family or any native file stops the run. Keep ids private.
+4. **Proof before.** Choose the proof ids privately: a sample of pointer
+   objects spread over projects, every backup with a pointer, and every object
+   a continuation names. `storagePointerProof:read` takes at most 64 rows and
+   64 MiB of objects per call (split larger selections; a single larger object
+   is refused). It refuses a missing or repeated id and any byte or size
+   mismatch, and reports `alias` (continuation ownership for objects, archive
+   alias resolution for backups). Keep the output.
+5. **Dry run.** `run {"apply":false}` reads every pointer row once plus every
+   continuation row (dev scale: about 19 MB of continuations, 28 MB of
+   pointers). The blocked rows must be exactly the expected set (backups,
+   continuation-named objects); any removed, purged or native-only blocker
+   stops the run. More than 1,000 continuation refs refuses: settle those jobs
+   first.
+6. **Apply.** `run {"apply":true}` writes one mutation per page (256 rows or
+   1 MiB) and ends with a rescan that clears nothing; `WORK_STALE` means a
+   writer still sets pointers: stop and find it. A partial run (timeout, error)
+   is safe to rerun: cleared rows have left the index, so the rerun resumes.
+7. **Replay.** A second `run {"apply":true}` must clear 0 and block the same
+   rows.
+8. **Proof after.** The same ids give the same `sha256` and `size`, `pointer`
+   false for cleared rows and true for blocked ones, and an unchanged `alias`.
+   Only then may the release that deletes the pointer readers, the schema field
+   and these two modules go out.
+
+Tombstone copies (owner decision 2026-11-24, relayed by the lead): the R2
+copies held only by legacy tombstones are not kept until a calendar date. The
+release that deletes the tombstone table deletes them too. Before that release,
+count those copy keys and their bytes read-only, delete exactly those keys,
+then count again (0 keys, 0 bytes); record counts and bytes only, never the
+contents or the keys.
+
 ## Online retirement
 
 Issue 779d17be authorizes the dev retirement of the last 16 native files while
