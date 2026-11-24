@@ -306,3 +306,18 @@ test('workflow executables come from the lockfile rather than unlocked npx insta
   assert.match(workflow, /npm ci --ignore-scripts --prefix site\/deploy/);
   assert.match(workflow, /\.\.\/site\/deploy\/node_modules\/\.bin\/cf deploy/);
 });
+
+test('no workflow run line is a plain YAML scalar containing " #", which YAML reads as a comment', () => {
+  // The dev site upload ran `--message "main #$DEPLOY_SEQUENCE ..."` as a plain scalar, so the shell got `--message "main`
+  // and failed on an unmatched quote (run 45302901284). Commands with " #" go in a block scalar (`run: |`).
+  const dir = '.github/workflows';
+  const offenders = readdirSync(dir)
+    .filter(file => /\.ya?ml$/.test(file))
+    .flatMap(file =>
+      readFileSync(join(dir, file), 'utf8')
+        .split('\n')
+        .map((line, index) => ({ file, line: index + 1, text: line }))
+        .filter(({ text }) => /^\s*(?:- )?run: (?![|>'"])\S.*\s#/.test(text)),
+    );
+  assert.deepEqual(offenders, []);
+});
