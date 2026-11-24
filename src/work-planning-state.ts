@@ -31,12 +31,13 @@ export function planningStatusTransition(
 export const currentPlanning = (data: Pick<WorkData, 'planningItems'>) => [
   ...new Map(data.planningItems.map(item => [item.id, item])).values(),
 ];
-export const normalizedPlanning = (command: PlanningWrite): PlanningWrite =>
-  command.action === 'put-planning-item'
-    ? command.intentIds
-      ? { ...command, intentIds: [...new Set(command.intentIds)].sort() }
-      : command
-    : command;
+export const normalizedPlanning = (command: PlanningWrite): PlanningWrite => {
+  if (command.action !== 'put-planning-item' || (!command.restoredTopLevel && !command.intentIds))
+    return command;
+  const original = { ...command };
+  delete original.restoredTopLevel;
+  return original.intentIds ? { ...original, intentIds: [...new Set(original.intentIds)].sort() } : original;
+};
 export const planningRequest = (command: PlanningWrite) =>
   digest(JSON.stringify(normalizedPlanning(command)));
 export function retainedPlanning(data: WorkData, command: PlanningWrite) {

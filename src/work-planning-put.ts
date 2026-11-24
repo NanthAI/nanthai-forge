@@ -130,7 +130,8 @@ function resolveModelFields(command: PlanningPut, current?: Partial<PlanningItem
   const kind = command.kind ?? current?.kind;
   // Initiatives take no parent here: a retained legacy Initiative parentId stays on its record untouched.
   invariant(kind === 'issue' || !command.parentId, 'BAD_ARGUMENT', 'Only an Item can have a parent Item.');
-  const parentId = kind === 'issue' ? keep(command.parentId, current?.parentId) : undefined;
+  const parentId =
+    kind === 'issue' && !command.restoredTopLevel ? keep(command.parentId, current?.parentId) : undefined;
   invariant(parentId !== command.itemId, 'BAD_ARGUMENT', 'An Item cannot be its own parent.');
   const relations = command.relations ?? current?.relations ?? [];
   invariant(

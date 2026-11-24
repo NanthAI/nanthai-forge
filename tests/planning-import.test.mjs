@@ -8,7 +8,7 @@ import { setup } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { meterReads } from './hosted-read-set.mjs';
 import { planningImportId } from '../dist/work-planning-put.js';
-import { planningImportPages, planningImportRowSchema } from '../dist/planning-import.js';
+import { importPlanningPut, planningImportPages, planningImportRowSchema } from '../dist/planning-import.js';
 import { executeHostedPlanning } from '../dist/hosted-agent-planning.js';
 import { exportPlanning } from '../dist/work-planning-state.js';
 const imports = await import(moduleUrl('../convex/projectPlanningImport.ts'));
@@ -77,6 +77,22 @@ async function fixture(t) {
     );
   return { ...s, calls, port, read, run, invoke };
 }
+
+test('an ordinary put cannot claim the import path to assign a missing parent', async t => {
+  const s = await fixture(t);
+  const command = importPlanningPut(
+    planningImportRowSchema.parse(row('old/child', { parentKey: 'old/missing' })),
+    randomUUID(),
+  );
+  await assert.rejects(
+    s.invoke('projectWorkCommand:command', {
+      operationId: command.operationId,
+      command: JSON.stringify(command),
+    }),
+    code('BAD_ARGUMENT'),
+  );
+  assert.equal(await s.read('old/child'), null);
+});
 
 test('source-agnostic review writes nothing; apply keeps closed history, parent/order, source and original dates without landing evidence', async t => {
   const s = await fixture(t),

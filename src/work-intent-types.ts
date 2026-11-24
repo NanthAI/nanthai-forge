@@ -6,6 +6,7 @@ import { digest } from './state/hash.js';
 import {
   PURGED_ITEM_TITLE,
   planningPutSchema,
+  retainedPlanningPutSchema,
   planningCommentCommandSchema,
   planningPurgeSchema,
   planningCommentPurgeSchema,
@@ -55,6 +56,7 @@ export const metadataCommandSchema = z.union([
 ]);
 /** Every command a stored Work journal row may hold: client commands plus the server-only purge. */
 export const journalCommandSchema = z.union([
+  retainedPlanningPutSchema,
   metadataCommandSchema,
   planningPurgeSchema,
   planningCommentPurgeSchema,
@@ -84,6 +86,7 @@ export const purgeFieldClasses = {
       'initiativeId',
       'order',
       'parentId',
+      'restoredTopLevel',
       'relations',
       'hidden',
       'agent',
@@ -115,14 +118,14 @@ export const purgeFieldClasses = {
 /** The commands a purge redacts: an Item's puts and comments (also through an alias or its Intent id), and an
  * Intent-born Item's intent row and Lane notes. Parsed strictly, so a stored row with an extra key is refused. */
 export const purgeableCommandSchema = z.discriminatedUnion('action', [
-  planningPutSchema,
+  retainedPlanningPutSchema,
   planningCommentCommandSchema,
   storedIntentSchema,
   intentNoteSchema,
 ]);
 export type PurgeableCommand = z.infer<typeof purgeableCommandSchema>;
 const strictFactsSchema = z.discriminatedUnion('action', [
-  planningPutSchema.strict(),
+  retainedPlanningPutSchema.strict(),
   planningCommentCommandSchema.strict(),
   storedIntentSchema.strict(),
   intentNoteSchema.strict(),

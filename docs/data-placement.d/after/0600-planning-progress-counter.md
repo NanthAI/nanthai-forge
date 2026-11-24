@@ -19,5 +19,15 @@ in the same transaction). A version 1 row is rebuilt from the start by the backf
 runs members do too. After a rollback to code that does not move `g`, rebuild every row with
 `backfill {restart:true}` before rolling forward, and the same rebuild empties a large `x`. A not-exact visitor figure
 shows that the plan has more than 100 groups or lookups, some possibly hidden; it names no Item.
+
+Alongside `backfillAll`, run `projectPlanCounts:prepareScopesAll {}` once after deploy to build the exact parent
+and Initiative tallies for existing partitions. It schedules 50 projects per transaction; each project task reads
+at most 50 planning roots (256 KiB) per transaction and advances its own cursor before scheduling the next page.
+Retry the driver safely. Check `projectPlanCounts:scopeCoverage {}` and follow `next` as `cursor` until it is null;
+all selected Plan partitions must be complete, with `pending` and `blocked` both zero. Projects without a selected
+Plan are reported separately. While preparation is incomplete, assigning a different parent to an existing Item
+is refused; creation, clearing and ordinary updates do not need tally coverage. Guard reads are indexed points,
+reuse transactional tallies including earlier writes in a batch, and add no idle work.
+
 It shares the partition's purge, snapshot exclusion and retirement; no table, index or
 retention rule is added.

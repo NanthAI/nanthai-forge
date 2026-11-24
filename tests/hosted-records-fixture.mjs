@@ -155,10 +155,10 @@ export function recordsFixture() {
         const q = {
           withIndex: (index, build) => {
             const declared = schema.tables[table].export().indexes.find(x => x.indexDescriptor === index);
-            const definition = declared && {
-              ...declared,
-              fields: [...declared.fields, '_creationTime', '_id'],
-            };
+            const definition =
+              index === 'by_creation_time'
+                ? { fields: ['_creationTime', '_id'] }
+                : declared && { ...declared, fields: [...declared.fields, '_creationTime', '_id'] };
             assert(definition, `${table}.${index} exists`);
             const equalities = [];
             let lower = null,
@@ -191,7 +191,7 @@ export function recordsFixture() {
                 return bounds;
               },
             };
-            build(bounds);
+            build?.(bounds);
             const cacheKey = `${table}:${index}:${equalities.length}`;
             if (!indexes.has(cacheKey)) {
               const groups = new Map();

@@ -12,7 +12,7 @@ import {
   rollupMembershipChanges,
   type RollupScope,
 } from '../src/planning-rollup-membership';
-import { applyRollupDeltas, readRollupScope } from './projectPlanRollupStore';
+import { applyRollupDeltas, readRollupScope, rollupScopeReads } from './projectPlanRollupStore';
 
 export const PLAN_COUNTS = '_workStorePlanCounts';
 const KEY = 'counts';
@@ -226,7 +226,29 @@ export function planCountsWriter(db: MutationCtx['db']) {
       scoped: { key: string; changes: Deltas | null }[];
     }
   >();
+  const header = new Map<Id<'projectWorkGenerations'>, ReturnType<typeof planCounter>>();
+  const getHeader = (partition: Id<'projectWorkGenerations'>) => {
+    const row = header.get(partition) ?? planCounter(db, partition);
+    header.set(partition, row);
+    return row;
+  };
+  const scopes = rollupScopeReads(db);
   return {
+    /** Earlier writes in the same mutation have changed their roots, but their tallies haven't flushed. */
+    async children(partition: Id<'projectWorkGenerations'>, parentId: string) {
+      const row = await getHeader(partition);
+      const counts = row ? (JSON.parse(row.value) as PlanCounts) : null;
+      if (counts?.scopeThrough !== null || counts.scopeBlocked) return null;
+      const pending = changes.get(partition)?.scoped ?? [];
+      if (pending.some(change => !change.changes)) return null;
+      const key = `parent:${parentId}` as const;
+      const total = { ...(await scopes.read(partition, key)).counts };
+      for (const change of pending) {
+        const delta = change.changes?.get(key);
+        if (delta) addRollupCounts(total, delta);
+      }
+      return total.total >= 0 ? total.total : null;
+    },
     change(before: Root | null, after: Root | null) {
       const was = planRootFacts(before),
         now = planRootFacts(after);
@@ -257,7 +279,7 @@ export function planCountsWriter(db: MutationCtx['db']) {
     },
     async flush() {
       for (const [partition, { projectId, totals, scoped }] of changes) {
-        const row = await planCounter(db, partition);
+        const row = await getHeader(partition);
         if (!row) continue;
         const counts = JSON.parse(row.value) as PlanCounts;
         if (scoped.length && counts.scopeThrough !== undefined && !counts.scopeBlocked) {
@@ -274,7 +296,12 @@ export function planCountsWriter(db: MutationCtx['db']) {
               addRollupCounts(delta, move);
             }
           }
-          if (!counts.scopeBlocked && !(await applyRollupDeltas(db, { projectId, partition }, deltas)))
+          if (
+            !counts.scopeBlocked &&
+            !(await applyRollupDeltas(db, { projectId, partition }, deltas, key =>
+              scopes.read(partition, key),
+            ))
+          )
             counts.scopeBlocked = true;
         }
         if (!totals.length && !counts.scopeBlocked) continue;
@@ -292,6 +319,8 @@ export function planCountsWriter(db: MutationCtx['db']) {
         if (value !== row.value) await db.patch(row._id, { value });
       }
       changes.clear();
+      header.clear();
+      scopes.clear();
     },
   };
 }

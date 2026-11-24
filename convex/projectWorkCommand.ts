@@ -32,7 +32,7 @@ import { commutativeCommand } from './projectWorkCommandRun';
 import { internalMutation } from './server';
 import { isItemRetentionOperation, itemRetentionOperation } from './projectItemRetentionStore';
 import { decisionOperationId } from '../src/work-planning-put';
-import { isLive } from '../src/planning-model';
+import { planningParent, restoredTopLevelNotice } from './projectPlanningParent';
 import { workRecordTable } from './projectWorkRecordTables';
 
 /** Commands this revision-free mutation runs. A planning put (flip 5 S5) checks only its item version
@@ -49,10 +49,14 @@ export async function executeCommand(
     startGeneration?: NonNullable<Awaited<ReturnType<typeof selectedGeneration>>>;
     planningClose?: string | undefined;
     planningRestore?: string | undefined;
+    /** The reviewed import endpoint replays source hierarchy, even before a later page creates its parent. */
+    planningImport?: true;
     planningTick?: true;
     /** Trusted parent-move notes have fixed server text and the project as their author. */
     planningMoveNote?: true;
-    onPlanningBatchState?: (state: { replayed: true } | { before: PlanningItem | null }) => void;
+    onPlanningBatchState?: (
+      state: ({ replayed: true } | { before: PlanningItem | null }) & { notice?: string },
+    ) => void;
     /** A server job writing as the owner, or a close cascade's derived child write: exempt from the account limiter (convex/accountLimits.ts). */
     server?: true;
   } = {},
@@ -62,10 +66,12 @@ export async function executeCommand(
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to use your Forge project.');
   const project = options.planning?.project ?? (await activeProject(ctx, input.projectId, user.subject));
   let parsed;
+  let assertsRestore = false;
   try {
     // The server's purge steps send only a purge (an Item's or one comment's); every other caller only client
     // commands, never a purge.
     const raw = JSON.parse(input.command);
+    assertsRestore = raw?.action === 'put-planning-item' && raw.restoredTopLevel !== undefined;
     parsed = (
       !options.purge
         ? metadataCommandSchema
@@ -77,7 +83,8 @@ export async function executeCommand(
     invariant(false, 'BAD_ARGUMENT', 'Send a supported hosted Work command.');
   }
   invariant(parsed.success, 'BAD_ARGUMENT', 'Send a supported hosted Work command.');
-  const command = parsed.data;
+  invariant(!assertsRestore, 'BAD_ARGUMENT', 'Only Forge marks a restore top level.');
+  const command: typeof parsed.data & { restoredTopLevel?: true } = parsed.data;
   invariant(commutativeCommand(command), 'BAD_ARGUMENT', 'Use the pinned action for this Work command.');
   invariant(
     /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.operationId),
@@ -158,7 +165,11 @@ export async function executeCommand(
       'WORK_OPERATION_CHANGED',
       'Reconcile this operation’s original command.',
     );
-    options.onPlanningBatchState?.({ replayed: true });
+    const restored = command.action === 'put-planning-item' && JSON.parse(original.command).restoredTopLevel;
+    options.onPlanningBatchState?.({
+      replayed: true,
+      ...(restored ? { notice: restoredTopLevelNotice } : {}),
+    });
     return original;
   }
   // Recovery notices belong to canonical hosted Intents, while this endpoint also updates Work.
@@ -245,6 +256,7 @@ export async function executeCommand(
       'Select an existing Item that is not archived or deleted.',
     );
   }
+  let batchBefore: PlanningItem | null = null;
   if (options.onPlanningBatchState && command.action === 'put-planning-item' && command.expectedVersion > 0) {
     // Undo captures the exact previous Item the versioned command already loaded.
     const previous = rows.filter(
@@ -252,7 +264,7 @@ export async function executeCommand(
         row?.key === command.itemId && ['planningItems', 'planningItems:attributes'].includes(row.collection),
     );
     if (!unified) await commandPayloadRows(previous, lookup);
-    options.onPlanningBatchState({ before: commandValues(previous, 'planningItems')[0] ?? null });
+    batchBefore = commandValues(previous, 'planningItems')[0] ?? null;
   }
   if (
     command.action === 'put-planning-item' &&
@@ -323,20 +335,50 @@ export async function executeCommand(
         },
   );
   const revision = generation.revision;
-  const projection = commandProjection(
-    project,
-    generation,
-    backup,
-    { ...input, revision },
-    user.subject,
-    command,
-    request,
-    rows,
-  );
+  const projectCommand = () =>
+    commandProjection(
+      project,
+      generation,
+      backup,
+      { ...input, revision },
+      user.subject,
+      command,
+      request,
+      rows,
+    );
+  let projection = projectCommand();
+  let notice: string | undefined;
+  const put = command.action === 'put-planning-item' ? command : null;
+  const target =
+    put && (put.parentId !== undefined || put.status !== undefined)
+      ? projection.entries.find(entry => entry.collection === 'planningItems')
+      : undefined;
+  const before = target
+    ? commandValues(rows, 'planningItems').find(item => item.id === target.key)
+    : undefined;
+  // Trusted import and close Undo preserve retained hierarchy. They do not take a new parent from an Item edit.
+  const imported = options.planningImport && put?.expectedVersion === 0 && put.imported;
+  if (put && target && !options.planningRestore && !imported) {
+    const after = JSON.parse(target.value) as PlanningItem;
+    notice = await planningParent(
+      ctx,
+      recordPartition(generation),
+      before,
+      after,
+      load,
+      member && Boolean(put.parentId),
+    );
+    if (notice) {
+      // Journal the derived fact so a rebuild makes the same choice without changing the request identity.
+      put.restoredTopLevel = true;
+      projection = projectCommand();
+    }
+  }
+  if (put && options.onPlanningBatchState)
+    options.onPlanningBatchState({ before: batchBefore, ...(notice ? { notice } : {}) });
   if (command.action === 'put-planning-item' && command.status !== undefined) {
     // The reducer can redirect an alias to its current Item. Check the row it
     // actually plans to publish, using the header this command already read.
-    const target = projection.entries.find(entry => entry.collection === 'planningItems');
     const locked = rows.find(
       row =>
         row?.collection === 'planningItems' &&
@@ -351,12 +393,7 @@ export async function executeCommand(
       'The parent close or Undo is still applying. Retry this change after it finishes.',
     );
   }
-  const current =
-    member && command.action === 'put-planning-item' && command.parentId !== undefined
-      ? (commandValues(rows, 'planningItems').find(item => item.id === command.itemId) as
-          | PlanningItem
-          | undefined)
-      : undefined;
+  const current = member ? before : undefined;
   const shift =
     member &&
     command.action === 'put-planning-item' &&
@@ -365,22 +402,6 @@ export async function executeCommand(
     command.initiativeId !== undefined
       ? command.initiativeId !== (current?.initiativeId ?? null)
       : false;
-  if (member && command.action === 'put-planning-item' && command.parentId) {
-    const parent =
-      (await load('planningSearch', command.parentId)) ?? (await load('planningItems', command.parentId));
-    const target = parent ? (JSON.parse(parent.value) as PlanningItem) : undefined;
-    invariant(
-      target?.kind === 'issue' && !target.purged && isLive(target) && !target.parentId,
-      'BAD_ARGUMENT',
-      'Select a top-level parent Item.',
-    );
-    invariant(
-      (target.initiativeId ?? null) ===
-        (command.initiativeId === undefined ? (current?.initiativeId ?? null) : command.initiativeId),
-      'BAD_ARGUMENT',
-      'The Item must move to its parent’s Initiative.',
-    );
-  }
   if (shift && command.action === 'put-planning-item' && !command.parentId) {
     // A clear cannot move an Item between Initiatives. Its one exception is a versioned
     // Undo of the preceding parent change, restoring the exact former membership.

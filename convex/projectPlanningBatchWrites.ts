@@ -59,7 +59,7 @@ export async function applyWrites(
     const index = (options.offset ?? 0) + position;
     const operationId = batchWriteOperationId(input.operationId, index);
     const base = { index, itemId: write.itemId, action: write.action } as const;
-    const prior: { item?: PlanningItem | null; replayed?: true } = {};
+    const prior: { item?: PlanningItem | null; replayed?: true; notice?: string } = {};
     try {
       await executeCommand(
         ctx,
@@ -78,6 +78,7 @@ export async function applyWrites(
           onPlanningBatchState: state => {
             if ('replayed' in state) prior.replayed = true;
             else prior.item = state.before;
+            if (state.notice) prior.notice = state.notice;
           },
         },
       );
@@ -100,7 +101,12 @@ export async function applyWrites(
     }
     const version = write.expectedVersion + 1;
     if (prior.replayed) {
-      results.push({ ...base, outcome: 'replayed', version });
+      results.push({
+        ...base,
+        outcome: 'replayed',
+        version,
+        ...(prior.notice ? { message: prior.notice } : {}),
+      });
       continue;
     }
     const kept: BatchBefore = {};
@@ -108,7 +114,13 @@ export async function applyWrites(
       for (const field of undoableFields)
         if (field in write && (write as Record<string, unknown>)[field] !== undefined)
           (kept as Record<string, unknown>)[field] = prior.item[field] ?? null;
-    results.push({ ...base, outcome: 'applied', version, before: kept });
+    results.push({
+      ...base,
+      outcome: 'applied',
+      version,
+      before: kept,
+      ...(prior.notice ? { message: prior.notice } : {}),
+    });
   }
   return results;
 }

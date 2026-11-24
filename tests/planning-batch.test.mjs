@@ -66,23 +66,48 @@ const planBatch = (s, writes, options, operationId = id()) =>
     .then(JSON.parse);
 
 test('explicit close preserves live direct children in their stored Initiatives and one replayable Undo restores their links', async t => {
-  const s = await setup(t);
-  const add = async fields => {
-    const item = s.item(fields);
-    await s.send(item);
-    return item.itemId;
-  };
-  const first = await add({ kind: 'initiative' });
-  const second = await add({ kind: 'initiative' });
-  const parent = await add({ initiativeId: first });
-  const otherParent = await add({});
-  const proposed = await add({ parentId: parent, initiativeId: second, status: 'proposed' });
-  const active = await add({ parentId: otherParent, status: 'in-progress', body: 'Keep this history.' });
-  const planned = await add({ parentId: parent, initiativeId: first });
-  const selectedChild = await add({ parentId: otherParent, initiativeId: second });
-  const done = await add({ parentId: parent, status: 'closed' });
-  const dropped = await add({ parentId: parent, status: 'abandoned' });
-  const grandchild = await add({ parentId: planned });
+  const [
+    first,
+    second,
+    parent,
+    otherParent,
+    proposed,
+    active,
+    planned,
+    selectedChild,
+    done,
+    dropped,
+    grandchild,
+  ] = Array.from({ length: 11 }, id);
+  // Start from a legacy journal that already held two levels, not a new hosted write.
+  const s = await setup(t, true, async (_root, local) => {
+    for (const [itemId, fields] of [
+      [first, { kind: 'initiative' }],
+      [second, { kind: 'initiative' }],
+      [parent, { initiativeId: first }],
+      [otherParent, {}],
+      [proposed, { parentId: parent, initiativeId: second, status: 'proposed' }],
+      [active, { parentId: otherParent, status: 'in-progress', body: 'Keep this history.' }],
+      [planned, { parentId: parent, initiativeId: first }],
+      [selectedChild, { parentId: otherParent, initiativeId: second }],
+      [done, { parentId: parent, status: 'closed' }],
+      [dropped, { parentId: parent, status: 'abandoned' }],
+      [grandchild, { parentId: planned }],
+    ])
+      await local.dispatch(
+        {
+          action: 'put-planning-item',
+          operationId: id(),
+          itemId,
+          expectedVersion: 0,
+          kind: 'issue',
+          title: 'Synthetic issue',
+          status: 'open',
+          ...fields,
+        },
+        local.status().revision,
+      );
+  });
   const writes = closeMany(
     [parent, otherParent, selectedChild].map(id => ({ id, version: 1 })),
     'Shipped',
@@ -97,7 +122,9 @@ test('explicit close preserves live direct children in their stored Initiatives 
     receipt.results.map(row => row.outcome),
     ['applied', 'applied', 'applied'],
   );
-  const addedLater = await add({ parentId: parent });
+  const later = s.item({ parentId: parent });
+  await s.send(later);
+  const addedLater = later.itemId;
   s.caller('foreign');
   await assert.rejects(
     planBatch(s, writes, { close: true }, operationId),

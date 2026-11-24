@@ -196,6 +196,10 @@ export const planningPutSchema = z.object({
   /** The writing agent session's declared client and model (`tool:model`); dropped without `agent` or off-shape. */
   agentClient: z.string().max(100).optional(),
 });
+/** A hosted restore detached an obsolete parent edge; journal-derived, never a command argument. */
+export const retainedPlanningPutSchema = planningPutSchema.extend({
+  restoredTopLevel: z.literal(true).optional(),
+});
 export const planningCommentCommandSchema = z.object({
   action: z.literal('comment-planning-item'),
   operationId: id,
@@ -265,7 +269,7 @@ export const planningCommandSchema = z.discriminatedUnion('action', [
 ]);
 export type PlanningItem = z.infer<typeof planningItemSchema>;
 export type PlanningCommand = z.infer<typeof planningCommandSchema>;
-export type PlanningWrite = z.infer<typeof planningWriteSchema>;
+export type PlanningWrite = z.infer<typeof retainedPlanningPutSchema | typeof planningCommentCommandSchema>;
 
 /** A versioned Work item moved past the version a write expected (flip 5, Issue 0695ab24). It names the
  * item and both versions, so a caller re-reads that one item instead of the whole project. */

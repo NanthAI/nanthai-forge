@@ -22,7 +22,7 @@ import {
 import { visitorPlanCounter } from './publicWorkReadContext';
 import { internal } from './_generated/api';
 import { planQuery as query } from './cliServer';
-import { internalMutation } from './server';
+import { internalMutation, internalQuery } from './server';
 import { finishReadReader, finishReadSourceDb } from './projectFinishReadReader';
 import { accessibleProject, readProjectRole } from './projectAuthority';
 import { publicWorkPlan, type PublicPlanRoot } from './publicWorkPlan';
@@ -290,19 +290,23 @@ export const backfill = internalMutation({
 export const prepareScopes = internalMutation({
   args: {
     projectId: v.id('hostedProjects'),
-    expectedPartition: v.id('projectWorkGenerations'),
-    after: v.string(),
+    expectedPartition: v.optional(v.id('projectWorkGenerations')),
+    after: v.optional(v.string()),
+    chain: v.optional(v.boolean()),
   },
   returns: v.object({ after: v.union(v.string(), v.null()), counted: v.number(), replayed: v.boolean() }),
   handler: async (ctx, args) => {
     const project = await ctx.db.get(args.projectId);
     const generation = project && !project.removal && (await selectedGeneration(ctx, project));
-    invariant(
-      generation && recordPartition(generation) === args.expectedPartition,
-      'WORK_STALE',
-      'The Plan partition changed. Recheck it before preparing exact tallies.',
-    );
-    const partition = recordPartition(generation);
+    const partition = generation ? recordPartition(generation) : null;
+    if (!partition || (args.expectedPartition && partition !== args.expectedPartition)) {
+      if (args.chain) return { after: null, counted: 0, replayed: true };
+      invariant(
+        false,
+        'WORK_STALE',
+        'The Plan partition changed. Recheck it before preparing exact tallies.',
+      );
+    }
     const row = await counter(ctx.db, partition);
     const counts = row ? (JSON.parse(row.value) as PlanCounts) : emptyPlanCounts(false);
     invariant(
@@ -311,7 +315,8 @@ export const prepareScopes = internalMutation({
       'This planning tally is blocked. Repair its partition before using it.',
     );
     const after = counts.scopeThrough === undefined ? '' : counts.scopeThrough;
-    if (after === null || after !== args.after) return { after, counted: 0, replayed: true };
+    if (after === null || (args.after !== undefined && after !== args.after))
+      return { after, counted: 0, replayed: true };
     const page = await ctx.db
       .query(await planningRecordTable(ctx, partition))
       .withIndex('by_generation_and_collection_and_key', q =>
@@ -348,16 +353,33 @@ export const prepareScopes = internalMutation({
     if (row) await ctx.db.patch(row._id, { value });
     else
       await ctx.db.insert('projectWorkDataRecords', { ...planCountsBirth(args.projectId, partition), value });
+    if (args.chain && counts.scopeThrough !== null)
+      await ctx.scheduler.runAfter(0, internal.projectPlanCounts.prepareScopes, {
+        projectId: args.projectId,
+        expectedPartition: partition,
+        after: counts.scopeThrough,
+        chain: true,
+      });
+    // An operator can sum completed page lengths with this invocation's billed DB usage; no Item data in logs.
+    console.info('FORGE_PLAN_SCOPE_PAGE', page.page.length);
     return { after: counts.scopeThrough, counted: page.page.length, replayed: false };
   },
 });
 
+const projectPage = (ctx: QueryCtx, cursor: string | null | undefined) =>
+  ctx.db
+    .query('hostedProjects')
+    .withIndex('by_creation_time')
+    .paginate({ cursor: cursor ?? null, numItems: 50, maximumRowsRead: 50 });
+const preparationArgs = { cursor: v.optional(v.union(v.string(), v.null())) };
+const preparationResult = v.object({ scheduled: v.number(), isDone: v.boolean() });
+
 /** Starts `backfill` for every project, 50 projects per transaction. Run once after deploy. */
 export const backfillAll = internalMutation({
-  args: { cursor: v.optional(v.union(v.string(), v.null())) },
-  returns: v.object({ scheduled: v.number(), isDone: v.boolean() }),
+  args: preparationArgs,
+  returns: preparationResult,
   handler: async (ctx, { cursor }) => {
-    const page = await ctx.db.query('hostedProjects').paginate({ cursor: cursor ?? null, numItems: 50 });
+    const page = await projectPage(ctx, cursor);
     for (const project of page.page)
       await ctx.scheduler.runAfter(0, internal.projectPlanCounts.backfill, { projectId: project._id });
     if (!page.isDone)
@@ -365,5 +387,55 @@ export const backfillAll = internalMutation({
         cursor: page.continueCursor,
       });
     return { scheduled: page.page.length, isDone: page.isDone };
+  },
+});
+
+/** One scheduled root page per project mutation; projects themselves are discovered in bounded pages. */
+export const prepareScopesAll = internalMutation({
+  args: preparationArgs,
+  returns: preparationResult,
+  handler: async (ctx, { cursor }) => {
+    const page = await projectPage(ctx, cursor);
+    for (const project of page.page)
+      await ctx.scheduler.runAfter(0, internal.projectPlanCounts.prepareScopes, {
+        projectId: project._id,
+        chain: true,
+      });
+    if (!page.isDone)
+      await ctx.scheduler.runAfter(0, internal.projectPlanCounts.prepareScopesAll, {
+        cursor: page.continueCursor,
+      });
+    return { scheduled: page.page.length, isDone: page.isDone };
+  },
+});
+
+/** Operator proof over selected Plan partitions only; no planning roots are read. */
+export const scopeCoverage = internalQuery({
+  args: preparationArgs,
+  returns: v.object({
+    complete: v.number(),
+    pending: v.number(),
+    blocked: v.number(),
+    noPlan: v.number(),
+    next: v.union(v.string(), v.null()),
+  }),
+  handler: async (ctx, { cursor }) => {
+    const page = await projectPage(ctx, cursor);
+    const count = { complete: 0, pending: 0, blocked: 0, noPlan: 0 };
+    await Promise.all(
+      page.page.map(async project => {
+        const generation = project.removal ? null : await selectedGeneration(ctx, project);
+        if (!generation) {
+          count.noPlan++;
+          return;
+        }
+        const row = await counter(ctx.db, recordPartition(generation));
+        const coverage = row ? replayScopeCoverage(row.value) : null;
+        if (coverage?.scopeBlocked) count.blocked++;
+        else if (coverage?.scopeThrough === null) count.complete++;
+        else count.pending++;
+      }),
+    );
+    return { ...count, next: page.isDone ? null : page.continueCursor };
   },
 });

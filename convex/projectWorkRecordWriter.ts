@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import type { MutationCtx } from './_generated/server';
 import { planRowsWriter } from './projectPlanRowsWriter';
-import { planCountsBirth, planCountsWriter } from './projectPlanCountsStore';
+import { exactChildTally, planCountsBirth, planCountsWriter } from './projectPlanCountsStore';
 import { requestPlanRepair } from './projectPlanPreparationStore';
 import type { Doc, Id } from './_generated/dataModel';
 import { layoutRecordTable, splitRecordTable } from './projectWorkRecordTables';
@@ -16,6 +16,15 @@ export const workRecordOriginalDb = (db: MutationCtx['db']) => originals.get(db)
 type Row = Omit<Doc<'projectWorkRecords'>, '_id' | '_creationTime'>;
 const flushers = new WeakMap<object, () => Promise<boolean | undefined> | undefined>();
 const preparations = new WeakMap<object, () => void>();
+const childCounts = new WeakMap<object, ReturnType<typeof planCountsWriter>['children']>();
+export async function workChildCount(
+  ctx: MutationCtx,
+  partition: Id<'projectWorkGenerations'>,
+  itemId: string,
+) {
+  const read = childCounts.get(ctx.db);
+  return read ? read(partition, itemId) : ((await exactChildTally(ctx.db, partition, itemId))?.total ?? null);
+}
 export const finishWorkRecordWrites = (ctx: MutationCtx) => flushers.get(ctx)?.();
 /** Replacement preparation has already cleared the old layout; never schedule itself recursively. */
 export const preparePlanRowsWrites = (ctx: MutationCtx) => preparations.get(ctx)?.();
@@ -300,6 +309,7 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
       return key === 'db' ? writer : Reflect.get(target, key, receiver);
     },
   });
+  childCounts.set(writer, (partition, id) => counts().children(partition, id));
   preparations.set(context, () => {
     preparing = true;
   });

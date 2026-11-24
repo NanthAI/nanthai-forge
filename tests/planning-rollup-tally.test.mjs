@@ -11,7 +11,9 @@ const { workRecordWriter, finishWorkRecordWrites } = await import(
 );
 const { exactChildTally, planCounter } = await import(moduleUrl('../convex/projectPlanCountsStore.ts'));
 const { readRollupScope } = await import(moduleUrl('../convex/projectPlanRollupStore.ts'));
-const { prepareScopes } = await import(moduleUrl('../convex/projectPlanCounts.ts'));
+const { prepareScopes, prepareScopesAll, scopeCoverage } = await import(
+  moduleUrl('../convex/projectPlanCounts.ts')
+);
 
 async function fixture(legacy = false) {
   const s = recordsFixture();
@@ -118,6 +120,19 @@ test('exact child and Initiative tallies follow moves, shelves and hidden settle
   assert(s.counts.at(-1).documents <= 1, 'a covered sparse lookup reads no siblings');
 });
 
+test('the exact child count includes hidden children and groups that overflow the visibility counter', async () => {
+  const s = await fixture();
+  for (let i = 0; i < 101; i++) await s.put(`overflow-${i}`, i, { initiativeId: `initiative-${i}` });
+  await s.put('overflow-child', 101, {
+    parentId: 'overflow-parent',
+    initiativeId: 'another',
+    status: 'closed',
+  });
+  await s.put('hidden-child', 102, { parentId: 'overflow-parent', hidden: true });
+  assert.equal((await s.child('overflow-parent')).total, 2);
+  assert.equal((await s.child('overflow-parent')).unsettled, 1);
+});
+
 test('legacy scope preparation stays unknown until the last page and folds interleaved writes once', async () => {
   const s = await fixture(true);
   const docs = [];
@@ -134,4 +149,45 @@ test('legacy scope preparation stays unknown until the last page and folds inter
   assert.equal((await s.child('b')).done, 2);
   assert.deepEqual(await s.prepare(page.after), { after: null, counted: 0, replayed: true });
   assert.equal((await s.child('b')).total, 2);
+});
+
+test('the all-project preparation driver advances one root page per task and is safe to restart', async () => {
+  const s = await fixture(true);
+  for (let i = 100; i < 155; i++) await s.put(`child-${i}`, i, { parentId: 'a' });
+  const scheduled = [];
+  s.ctx.scheduler.runAfter = async (_delay, ref, args) => {
+    assert.equal(getFunctionName(ref), 'projectPlanCounts:prepareScopes');
+    scheduled.push(args);
+    return 'task';
+  };
+  assert.deepEqual(await scopeCoverage._handler(s.ctx, {}), {
+    complete: 0,
+    pending: 1,
+    blocked: 0,
+    noPlan: 0,
+    next: null,
+  });
+  assert.deepEqual(await prepareScopesAll._handler(s.ctx, {}), { scheduled: 1, isDone: true });
+  const first = await prepareScopes._handler(s.ctx, scheduled.shift());
+  assert.equal(first.counted, 50);
+  assert.equal(await s.child('a'), null);
+  assert.equal(scheduled.length, 1);
+  const last = await prepareScopes._handler(s.ctx, scheduled.shift());
+  assert.equal(last.counted, 5);
+  assert.equal(scheduled.length, 0);
+  assert.equal((await s.child('a')).total, 55);
+  assert.deepEqual(await scopeCoverage._handler(s.ctx, {}), {
+    complete: 1,
+    pending: 0,
+    blocked: 0,
+    noPlan: 0,
+    next: null,
+  });
+  await prepareScopesAll._handler(s.ctx, {});
+  assert.deepEqual(await prepareScopes._handler(s.ctx, scheduled.shift()), {
+    after: null,
+    counted: 0,
+    replayed: true,
+  });
+  assert.equal((await s.child('a')).total, 55);
 });

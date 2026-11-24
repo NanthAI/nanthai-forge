@@ -309,6 +309,100 @@ test('a writer can undo a cross-Initiative move even when the previous Item snap
   assert.equal(restored.body, child.body);
 });
 
+test('one batch cannot build a second level using pending parent tally changes', async t => {
+  const s = await project(t);
+  const a = s.capture(),
+    b = s.capture(),
+    c = s.capture();
+  for (const row of [a, b, c]) await s.send(row);
+  const move = (source, parent, expectedVersion = 1) => ({
+    action: 'put-planning-item',
+    itemId: source.itemId,
+    expectedVersion,
+    parentId: parent?.itemId ?? null,
+  });
+  const { results } = await s.batch([move(c, b), move(b, a), move(a, c)]);
+  assert.deepEqual(
+    results.map(result => result.outcome),
+    ['applied', 'refused', 'refused'],
+  );
+  assert.match(results[1].message, /with sub-items/);
+  assert.match(results[2].message, /top-level parent/);
+  assert.equal((await s.latest(b.itemId)).parentId, undefined);
+  assert.equal((await s.latest(c.itemId)).parentId, b.itemId);
+  const cleared = await s.batch([move(c, null, 2), move(b, a)]);
+  assert.deepEqual(
+    cleared.results.map(result => result.outcome),
+    ['applied', 'applied'],
+  );
+  assert.equal((await s.latest(b.itemId)).parentId, a.itemId);
+});
+
+test('hidden children count against a parent move; shelved children restore top level with notice', async t => {
+  const s = await project(t);
+  const a = s.capture(),
+    b = s.capture();
+  for (const row of [a, b]) await s.send(row);
+  const child = { ...s.capture(), parentId: b.itemId, hidden: true, status: 'closed' };
+  await s.send(child);
+  const put = (source, expectedVersion, fields) => ({
+    action: 'put-planning-item',
+    itemId: source.itemId,
+    expectedVersion,
+    ...fields,
+  });
+  const move = put(b, 1, { parentId: a.itemId });
+  assert.match((await s.batch([move])).results[0].message, /with sub-items/);
+  assert.equal((await s.batch([put(child, 1, { status: 'archived' }), move])).results[1].outcome, 'applied');
+  const operationId = randomUUID();
+  const restore = [put(child, 2, { status: 'closed' })];
+  const { results } = await s.batch(restore, operationId);
+  assert.equal(results[0].outcome, 'applied');
+  assert.match(results[0].message, /Restored as a top-level Item/);
+  const replay = (await s.batch(restore, operationId)).results[0];
+  assert.equal(replay.outcome, 'replayed');
+  assert.equal(replay.message, results[0].message);
+  await assert.rejects(
+    s.batch([{ ...restore[0], parentId: null }], operationId),
+    error => error.data?.code === 'WORK_OPERATION_CHANGED',
+  );
+  const forged = await s.batch([put(b, 2, { status: 'open', restoredTopLevel: true })]);
+  assert.equal(forged.results[0].code, 'BAD_ARGUMENT');
+  assert.equal((await s.latest(b.itemId)).parentId, a.itemId);
+  const current = await s.latest(child.itemId);
+  assert.equal(current.status, 'closed');
+  assert.equal(current.parentId, undefined);
+  assert.equal(current.version, 3);
+});
+
+test('unknown tally coverage refuses moving an existing Item, not capture, clearing or editing', async t => {
+  const s = await project(t);
+  const a = s.capture(),
+    b = s.capture();
+  for (const row of [a, b]) await s.send(row);
+  const { _id, value } = [...s.tables.projectWorkDataRecords.values()].find(
+    row => row.collection === '_workStorePlanCounts',
+  );
+  const { scopeThrough, ...legacy } = JSON.parse(value);
+  assert.equal(scopeThrough, null);
+  await s.ctx.db.patch(_id, { value: JSON.stringify(legacy) });
+  const put = (itemId, expectedVersion, fields) => ({
+    action: 'put-planning-item',
+    itemId,
+    expectedVersion,
+    ...fields,
+  });
+  const { results } = await s.batch([
+    put(b.itemId, 1, { parentId: a.itemId }),
+    put(b.itemId, 1, { body: 'Refined description.' }),
+  ]);
+  assert.match(results[0].message, /Retry once preparation finishes/);
+  assert.equal(results[1].outcome, 'applied');
+  const child = { ...s.capture(), parentId: a.itemId };
+  await s.send(child);
+  assert.equal((await s.batch([put(child.itemId, 1, { parentId: null })])).results[0].outcome, 'applied');
+});
+
 test('Capture by a writer cannot reuse the identity of an independent Work Intent', async t => {
   const s = await project(t);
   const base = (await s.read()).sourceHead;

@@ -102,7 +102,11 @@ export async function findWorkEvent(
       'Reconcile this operation’s original command.',
     );
     const facts = JSON.parse(body.journalCommand ?? '{}');
-    const original = { ...command, ...(facts.intentIds ? { intentIds: facts.intentIds } : {}) };
+    const original = {
+      ...command,
+      ...(facts.intentIds ? { intentIds: facts.intentIds } : {}),
+      ...(facts.restoredTopLevel ? { restoredTopLevel: true } : {}),
+    };
     return eventDocument({ ...body, command: JSON.stringify(original) });
   }
   if (replay && 'authority' in replay)

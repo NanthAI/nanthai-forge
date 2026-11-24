@@ -52,6 +52,13 @@ export function outcomeWords(outcome: BatchOutcome, byId: ReadonlyMap<string, Pl
       ? `Kept ${outcome.detached.toLocaleString()} live ${outcome.detached === 1 ? 'sub-item' : 'sub-items'} as Items.`
       : '',
     moved.length ? `Changed meanwhile: ${names(moved)}.` : '',
+    [
+      ...new Set(
+        outcome.results.flatMap(result =>
+          result.outcome !== 'refused' && result.message ? [result.message] : [],
+        ),
+      ),
+    ].join(' '),
     refused.length - moved.length
       ? `Refused: ${refused
           .filter(result => result.code !== 'ITEM_CHANGED')

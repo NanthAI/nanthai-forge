@@ -23,7 +23,7 @@ import {
   intentCreateSchema,
   intentNoteSchema,
   intentStatusSchema,
-  metadataCommandSchema,
+  journalCommandSchema,
   purgedPlanningRowSchema,
   sourceAnchorSchema,
 } from './work-intent-types.js';
@@ -40,12 +40,7 @@ import { historicalWorkSchema } from './native-history-types.js';
 import { companionReceiptSchema } from './native-companion-types.js';
 export type { DeclaredInput, InputObservation, InputAssessmentCommand } from './work-input-types.js';
 import { declaredInputSchema, inputObservationSchema } from './work-input-types.js';
-import {
-  planningItemSchema,
-  planningCommentSchema,
-  planningCommentPurgeSchema,
-  planningPurgeSchema,
-} from './work-planning-types.js';
+import { planningItemSchema, planningCommentSchema } from './work-planning-types.js';
 export {
   planningItemSchema,
   planningCommentSchema,
@@ -1057,9 +1052,7 @@ export const sourceReturnSchema = z.object({
   previousRevision: z.number().safe().nonnegative(),
 });
 export const hostedCommandSchema = z.union([
-  metadataCommandSchema,
-  planningPurgeSchema,
-  planningCommentPurgeSchema,
+  journalCommandSchema,
   purgedPlanningRowSchema,
   sourceReturnSchema,
   hostedChannelCommandSchema,

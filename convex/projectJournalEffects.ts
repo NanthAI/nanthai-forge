@@ -67,6 +67,7 @@ export async function applyJournal(ctx: MutationCtx, pending: Pending, rows: Jou
             action: command.action,
             ...(command.base ? { base: command.base } : {}),
             ...(command.intentIds ? { intentIds: command.intentIds } : {}),
+            ...(command.restoredTopLevel ? { restoredTopLevel: true } : {}),
           };
         // Current captures keep these commands hot. An older pending capture still publishes atomically.
         const itemId = archivedEventItem(body.operationId, command);

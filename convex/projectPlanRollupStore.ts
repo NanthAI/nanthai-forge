@@ -56,12 +56,13 @@ export async function applyRollupDeltas(
   db: MutationCtx['db'],
   scope: Scope,
   changes: ReadonlyMap<RollupScope, RollupCounts>,
+  read = (key: RollupScope) => rollupScope(db, scope.partition, key),
 ) {
   const touched = await Promise.all(
     [...changes]
       .filter(([, delta]) => Object.values(delta).some(Boolean))
       .map(async ([key, delta]) => {
-        const previous = await rollupScope(db, scope.partition, key);
+        const previous = await read(key);
         const counts = { ...previous.counts };
         addRollupCounts(counts, delta);
         return { key, previous, counts };
@@ -70,6 +71,20 @@ export async function applyRollupDeltas(
   if (touched.some(({ counts }) => !validCounts(counts))) return false;
   for (const { key, previous, counts } of touched) await writeScope(db, scope, key, previous, { counts });
   return true;
+}
+
+/** Reuse a scope point read if its row will also be updated at the end of the same mutation. */
+export function rollupScopeReads(db: QueryCtx['db']) {
+  const cached = new Map<string, ReturnType<typeof rollupScope>>();
+  return {
+    read(partition: Scope['partition'], key: RollupScope) {
+      const id = `${partition}/${key}`;
+      const row = cached.get(id) ?? rollupScope(db, partition, key);
+      cached.set(id, row);
+      return row;
+    },
+    clear: () => cached.clear(),
+  };
 }
 
 /** One indexed point after the parent writer proved complete coverage from the selected Plan metadata.

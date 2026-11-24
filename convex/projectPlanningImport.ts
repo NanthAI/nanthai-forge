@@ -209,6 +209,7 @@ export const apply = mutation({
             command: canonicalPayload(command),
           },
           actor,
+          { planningImport: true },
         );
         result.created.push(row.id);
       }
