@@ -22,6 +22,7 @@ export type BatchInput = {
   operationId: string;
   writes: string;
   close?: true;
+  atomic?: true;
   undoClose?: string;
 };
 

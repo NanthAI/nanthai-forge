@@ -61,7 +61,7 @@ export async function applyBatch(ctx: MutationCtx, input: BatchInput) {
     );
     return JSON.stringify({ operationId: input.operationId, results });
   }
-  const results = await applyWrites(ctx, input, user.subject, writes);
+  const results = await applyWrites(ctx, input, user.subject, writes, { atomic: input.atomic === true });
   return JSON.stringify({ operationId: input.operationId, results });
 }
 
@@ -73,6 +73,7 @@ export const apply = mutation({
     operationId: v.string(),
     writes: v.string(),
     close: v.optional(v.literal(true)),
+    atomic: v.optional(v.literal(true)),
     undoClose: v.optional(v.string()),
   },
   returns: v.string(),

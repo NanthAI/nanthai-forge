@@ -96,6 +96,19 @@ if (worstPlan) {
     ...Array.from({ length: 1284 * worstPlan }, (_, n) => item(10000 + n, { title: 'One of many planned Items ' + (n + 1), doneWhen: null })),
   );
 }
+if (boardFlags.has('hierarchy-worst')) {
+  const release = { ...launch, id: uuid(4), title: 'Hierarchy release', position: 4 };
+  rows.push(release,
+    item(50, { title: 'A', initiativeId: release.id }),
+    item(51, { title: 'B', initiativeId: release.id }),
+    item(52, { title: 'Parent of 40', initiativeId: release.id,
+      relations: Array.from({ length: 20 }, (_, n) => ({ kind: 'related', id: uuid(100 + n) })), }),
+    ...Array.from({ length: 40 }, (_, n) => item(100 + n, {
+      title: n === 39 ? 'العربية' : 'Child ' + (n + 1), initiativeId: release.id, parentId: uuid(52),
+      doneWhen: n === 39 ? [1, 60] : [0, 1],
+    })),
+  );
+}
 const bigSettled = largeInitiative
   ? { done: 1000, dropped: 1000, atLeast: true }
   : { done: 123, dropped: 7, atLeast: false };
@@ -109,7 +122,11 @@ const read = {
   settled: emptyPlan ? [] : [{ initiativeId: launch.id, ...launchProgress }, { initiativeId: docs.id, done: partialCounts ? 2 : 0, dropped: 0, atLeast: partialCounts }, { initiativeId: big.id, ...bigSettled }],
   canEdit: true,
 };
-const settledRows = [item(20, { title: 'Old reader removed', status: 'closed', initiativeId: launch.id }), item(21, { title: 'Ship a second parser', status: 'abandoned' })];
+const settledRows = [item(20, { title: 'Old reader removed', status: 'closed', initiativeId: launch.id,
+  ...(boardFlags.has('hierarchy-worst') ? { parentId: uuid(52), initiativeId: uuid(4) } : {}) }), item(21, { title: 'Ship a second parser', status: 'abandoned' })];
+const deferred = boardFlags.has('deferred-relation');
+const duplicateSource = item(802, { title: 'Deferred duplicate', version: 8, relations: [{ kind: 'duplicate-of', id: uuid(10) }] });
+const extraLink = { kind: 'related', id: uuid(11) };
 const settled = { rows: settledRows, more: false, loading: false, failed: false, loadMore() {} };
 // Archive and Deleted (Item 4c9e961e): each row says when it went and the status it left.
 const shelfRows = {
@@ -191,6 +208,13 @@ const run = async (writes, options) => {
     return { results: [], undo: [], kept: 0 };
   }
   window.calls.push(writes);
+  if (deferred) {
+    const [write] = writes;
+    if (write.expectedVersion === 8) return { results: [{ index: 0, itemId: write.itemId, outcome: 'refused', code: 'ITEM_CHANGED', currentVersion: 9 }], undo: [], kept: 0 };
+    const results = [{ index: 0, itemId: write.itemId, outcome: 'applied', version: write.expectedVersion + 1,
+      before: { relations: [...duplicateSource.relations, extraLink] } }];
+    return { results, ...batchUndo(writes, results) };
+  }
   const results = writes.map((write, index) => index === 1 && writes.length > 1 && window.calls.length === 1
     ? { index, itemId: write.itemId, action: write.action, outcome: 'refused', code: 'ITEM_CHANGED', currentVersion: 3 }
     : { index, itemId: write.itemId, action: write.action, outcome: 'applied', version: (write.expectedVersion || 0) + 1, before: { owner: null, status: 'open', type: null, initiativeId: null } });
@@ -250,11 +274,17 @@ function Fixture() {
     <React.Suspense fallback={<h1>Loading</h1>}>{window.livePlan ?
       <ConvexProvider client={linkBackend.client}><LivePlan route={route} projectId="synthetic"
         projectName="Synthetic project" viewerHandle="example-builder" /></ConvexProvider> :
-      <PlanScreenView route={route} projectId={rest === uuid(16) ? undefined : "synthetic"} projectName="Synthetic project" feed={planFeed}
+      <PlanScreenView route={route} projectId={rest === uuid(16) || deferred || boardFlags.has('hierarchy-worst') ? undefined : "synthetic"} projectName="Synthetic project" feed={planFeed}
       progress={boardFlags.has('no-counts') ? null : boardFlags.has('loading-plan') ? undefined : progress} needs={planNeeds}
       read={boardFlags.has('loading-plan') ? undefined : read} stale={boardFlags.has('stale-plan')}
       put={put} run={run} purge={purge} reads={reads} query={query} go={go} viewer="example-builder"
+      readItemWork={deferred ? async () => JSON.stringify({ role: true, lanes: [], total: 0, nextCursor: null, related: [{ kind: 'Duplicated by', id: duplicateSource.id, title: duplicateSource.title }] }) : undefined}
+      readItemText={deferred ? async (id, full) => {
+        if (!full || id !== duplicateSource.id) return null;
+        return window.calls.length ? { ...duplicateSource, version: 9, relations: [...duplicateSource.relations, extraLink] } : duplicateSource;
+      } : undefined}
       readInitiativeWork={window.readItemWork ? initiativeId => window.readItemWork({initiativeId}) : undefined}
+      linkedItem={boardFlags.has('hierarchy-worst') ? settledRows.find(row => row.id === rest) ?? null : null}
       closed={query.scope === 'open' && !rest ? undefined : settled}
       shelved={shelfRows[query.scope] ? { ...settled, rows: shelfRows[query.scope] } : undefined}
       shelvedItem={[...shelfRows.archived, ...shelfRows.deleted].find(row => row.id === rest) ?? null} showDone={id => window.doneFor.push(id)} />}</React.Suspense>
@@ -938,6 +968,140 @@ test('plan views and bulk bar: real components keep the view in the address and 
         await context.close();
       });
 
+  for (const width of [1440, 390])
+    for (const theme of ['light', 'dark'])
+      await t.test(
+        `hierarchy ${width} ${theme}: counts, filter context and refused parent picks`,
+        async () => {
+          const id = n => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
+          const { page, context, errors } = await open(width, theme, '?view=tree&hierarchy-worst');
+          const child = page
+            .locator('.row')
+            .filter({ has: page.getByRole('link', { name: 'العربية', exact: true }) });
+          await child.locator('.plan-elbow').waitFor();
+          assert.match(await child.locator('.rk').textContent(), /3\.40/);
+          await page.getByText('40 sub-items', { exact: true }).waitFor();
+          await check(page, `hierarchy tree ${width} ${theme}`);
+          if (shots)
+            await page.screenshot({
+              path: join(shots, `plan-hierarchy-tree-${width}-${theme}.png`),
+              fullPage: true,
+            });
+          await page.goto(`https://forge.test/example-builder/synthetic/plan?q=العربية&hierarchy-worst`);
+          await page.locator('.plan-under').getByRole('link', { name: 'Parent of 40' }).waitFor();
+          await page.goto(`https://forge.test/example-builder/synthetic/plan/${id(52)}?hierarchy-worst`);
+          assert.equal(await page.getByRole('button', { name: 'Set parent…' }).isDisabled(), true);
+          const children = page.getByRole('region', { name: 'Children', exact: true });
+          assert.equal(await children.locator('.plan-child').count(), 40);
+          assert.equal(await children.getByText('1/60', { exact: true }).count(), 1);
+          assert.equal(await children.getByText('0/1', { exact: true }).count(), 39);
+          const relation = page.getByRole('region', { name: 'Relations', exact: true });
+          assert.equal(await relation.locator('.plan-relation').count(), 20);
+          assert.equal(await relation.getByRole('button', { name: 'Add relation' }).isDisabled(), true);
+          await children.getByRole('button', { name: 'Add existing…' }).click();
+          const picker =
+            width === 390 ? page.getByRole('dialog', { name: 'Find an existing child' }) : children;
+          const search = picker.getByRole('combobox', { name: 'Find an existing child' });
+          await search.fill('Parent of 40');
+          assert.equal(await picker.getByRole('option').getAttribute('aria-disabled'), 'true');
+          await search.press('ArrowDown');
+          await search.press('Enter');
+          assert.deepEqual(await page.evaluate(() => window.calls), []);
+          await search.fill('العربية');
+          assert.equal(await picker.getByRole('option').getAttribute('aria-disabled'), 'true');
+          assert.match(await picker.getByRole('option').textContent(), /Already its parent|loop/i);
+          await search.fill('no matching Item');
+          await picker.getByText(/No open Item matches/).waitFor();
+          await check(page, `hierarchy detail ${width} ${theme}`);
+          if (shots)
+            await page.screenshot({
+              path: join(shots, `plan-hierarchy-${width}-${theme}.png`),
+              fullPage: true,
+            });
+          await page.goto(`https://forge.test/example-builder/synthetic/plan/${id(51)}?hierarchy-worst`);
+          await page.getByRole('button', { name: 'Set parent…' }).click();
+          const pickParent = page.getByRole('combobox', { name: 'Find a parent' });
+          await pickParent.fill('العربية');
+          const nested = page.getByRole('option', { name: /العربية/ });
+          assert.equal(await nested.getAttribute('aria-disabled'), 'true');
+          assert.match(await nested.textContent(), /One level only/);
+          await pickParent.press('ArrowDown');
+          await pickParent.press('Enter');
+          assert.deepEqual(await page.evaluate(() => window.calls), []);
+          assert.deepEqual(errors, []);
+          await context.close();
+        },
+      );
+
+  await t.test('field and settled lists link the parent; settled Items cannot create children', async () => {
+    const { page, context } = await open(1440, 'light', '?group=type&hierarchy-worst');
+    const root = 'https://forge.test/example-builder/synthetic/plan';
+    const parent = page.locator('.plan-under').getByRole('link', { name: 'Parent of 40' }).first();
+    try {
+      await parent.waitFor();
+      await page.getByText('40 sub-items', { exact: true }).waitFor();
+      await page.goto(root + '?scope=closed&hierarchy-worst');
+      await parent.waitFor();
+      await page.goto(root + '/00000000-0000-4000-8000-000000000021?hierarchy-worst');
+      const children = page.getByRole('region', { name: 'Children', exact: true });
+      await children.waitFor();
+      assert.equal(await children.getByRole('button', { name: /New child|Add existing/ }).count(), 0);
+    } finally {
+      await context.close();
+    }
+  });
+
+  await t.test('Add existing refuses an apparent leaf on a partial plan without writing', async () => {
+    const { page, context } = await open(
+      1440,
+      'light',
+      '/' + '00000000-0000-4000-8000-000000000010?hierarchy-worst&partial-counts',
+    );
+    try {
+      const children = page.getByRole('region', { name: 'Children', exact: true });
+      await children.getByRole('button', { name: 'Add existing…' }).click();
+      const search = children.getByRole('combobox', { name: 'Find an existing child' });
+      await search.fill('Tidy the old notes');
+      const option = children.getByRole('option', { name: /Tidy the old notes/ });
+      assert.equal(await option.getAttribute('aria-disabled'), 'true');
+      assert.match(await option.textContent(), /sub-items may not be shown/);
+      await search.press('ArrowDown');
+      await search.press('Enter');
+      assert.deepEqual(await page.evaluate(() => window.calls), []);
+    } finally {
+      await context.close();
+    }
+  });
+
+  await t.test(
+    'a deferred incoming duplicate is removed after a version retry and returns on Undo',
+    async () => {
+      const { page, context } = await open(
+        1440,
+        'light',
+        '/00000000-0000-4000-8000-000000000010?deferred-relation',
+      );
+      try {
+        const relations = page.getByRole('region', { name: 'Relations', exact: true });
+        const duplicate = relations.getByRole('link', { name: 'Deferred duplicate' });
+        await relations.getByRole('button', { name: 'Remove duplicated by: Deferred duplicate' }).click();
+        await duplicate.waitFor({ state: 'hidden' });
+        const writes = await page.evaluate(() => window.calls.flat());
+        assert.deepEqual(
+          writes.map(write => write.expectedVersion),
+          [8, 9],
+        );
+        assert.deepEqual(writes[1].relations, [
+          { kind: 'related', id: '00000000-0000-4000-8000-000000000011' },
+        ]);
+        await page.getByRole('button', { name: 'Undo', exact: true }).click();
+        await duplicate.waitFor();
+      } finally {
+        await context.close();
+      }
+    },
+  );
+
   // The Initiative page: its open Items, progress and About; an edit writes only what changed; done Items on request.
   {
     const { page, errors, context } = await open(1440, 'dark', `/${launchId}`);
@@ -978,6 +1142,37 @@ test('plan views and bulk bar: real components keep the view in the address and 
       await page.evaluate(() => window.puts[1].body),
       'Steps for **streaming**.\n\nDone when:\n- [ ] Try one example\n',
     );
+    await page.getByRole('button', { name: /^New Item here/ }).click();
+    await page.getByRole('button', { name: 'Set parent…' }).click();
+    await page.getByRole('combobox', { name: 'Find a parent' }).fill('Write the recovery guide');
+    await page.getByRole('option', { name: /Write the recovery guide/ }).click();
+    assert.equal(
+      await page.getByRole('combobox', { name: 'Initiative (from its parent)' }).isDisabled(),
+      true,
+    );
+    await page.getByRole('textbox', { name: 'Title' }).fill('A child of the recovery guide');
+    await page.getByRole('button', { name: 'Plan it' }).click();
+    await page.waitForFunction(() => window.puts.length === 3);
+    assert.equal(await page.evaluate(() => window.puts[2].parentId.slice(-3)), '014');
+    assert.equal(await page.evaluate(() => window.puts[2].initiativeId.slice(-3)), '002');
+    await page.getByRole('button', { name: /^New Item here/ }).click();
+    await page
+      .getByRole('group', { name: 'Create kind' })
+      .getByRole('button', { name: 'Initiative' })
+      .click();
+    await page.getByRole('textbox', { name: 'Title' }).fill('Follow-up release');
+    await page.getByRole('textbox', { name: 'Text' }).fill('Scope for the next release.');
+    await page.getByRole('button', { name: 'Create Initiative' }).click();
+    await page.waitForFunction(() => window.puts.length === 4);
+    const { itemId, ...initiative } = await page.evaluate(() => window.puts[3]);
+    assert.ok(itemId);
+    assert.deepEqual(initiative, {
+      kind: 'initiative',
+      title: 'Follow-up release',
+      body: 'Scope for the next release.',
+      status: 'open',
+      expectedVersion: 0,
+    });
     assert.deepEqual(errors, []);
     await context.close();
   }
@@ -1393,7 +1588,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
             await work.getByRole('button', { name: 'Lanes', exact: true }).getAttribute('aria-expanded'),
             'true',
           );
-          for (const name of ['Landings', 'Related', 'History'])
+          for (const name of ['Landings', 'History'])
             assert.equal(
               await work.getByRole('button', { name, exact: true }).getAttribute('aria-expanded'),
               'true',
@@ -1413,24 +1608,20 @@ test('plan views and bulk bar: real components keep the view in the address and 
             assert(calls.at(-1).cursor?.startsWith('forge-item-work-v2:'));
             assert.equal(await more.count(), 0);
           }
-          const relatedPart = work
-            .getByRole('button', { name: 'Related', exact: true })
-            .locator('xpath=../..');
-          const relatedMore = relatedPart.getByRole('button', { name: /^Show \d+ more$/ });
-          if (await relatedMore.count()) await relatedMore.click();
+          const relations = page.getByRole('region', { name: 'Relations', exact: true });
           assert.equal(await lanes.first().textContent(), 'Synthetic outcome');
           assert.match(await lanes.first().locator('..').textContent(), /cobalt-fox.*1 save.*Last save/);
           assert.equal(await work.getByText('2 files changed', { exact: true }).count(), 1);
           assert.equal(await work.getByText('Passed', { exact: true }).count(), 1);
           assert.equal(
-            await work.getByRole('link', { name: 'Define the wire format' }).getAttribute('href'),
+            await relations.getByRole('link', { name: 'Define the wire format' }).getAttribute('href'),
             `/example-builder/synthetic/plan/${workFixture.dependencyId}`,
           );
-          assert.equal(await work.getByRole('link', { name: 'Parser release' }).count(), 1);
-          assert.equal(await work.getByText('Split into', { exact: true }).count(), 1);
-          assert.equal(await work.getByText('Blocks', { exact: true }).count(), 2);
+          assert.equal(await work.getByRole('link', { name: 'Parser release' }).count(), 0);
+          assert.equal(await relations.getByText('Split into', { exact: true }).count(), 1);
+          assert.equal(await relations.getByText('Blocks', { exact: true }).count(), 1);
           assert.equal(
-            await work.getByRole('link', { name: 'Document compatibility' }).getAttribute('href'),
+            await relations.getByRole('link', { name: 'Document compatibility' }).getAttribute('href'),
             `/example-builder/synthetic/plan/${workFixture.settledBlockerId}`,
           );
           assert.doesNotMatch(await page.locator('.head .crumb').textContent(), /00000000/);
@@ -1491,7 +1682,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
           assert.equal(await lanes.count(), 12);
           assert.equal(await laneThreads.count(), 12);
           assert.equal(await landings.count(), 2);
-          assert.equal(await work.getByRole('link', { name: 'Define the wire format' }).count(), 1);
+          assert.equal(await relations.getByRole('link', { name: 'Define the wire format' }).count(), 1);
           assert.equal(await more.count(), 0);
           assert.deepEqual((await page.evaluate(() => window.planQueries)).sort(), [
             'projectHostedPlanning:itemHistory',
@@ -1638,7 +1829,9 @@ test('plan views and bulk bar: real components keep the view in the address and 
       try {
         const work = page.getByRole('region', { name: 'Work', exact: true });
         const more = work.getByRole('button', { name: 'Show more work' });
-        const older = work.getByRole('link', { name: 'Older reverse link' });
+        const older = page
+          .getByRole('region', { name: 'Relations', exact: true })
+          .getByRole('link', { name: 'Older reverse link' });
         await more.waitFor();
         assert.equal(await work.locator('a.ttl[href*="/lanes/"]').count(), 2);
         assert.equal(await work.getByRole('button', { name: 'Show more Lanes' }).count(), 0);

@@ -43,7 +43,7 @@ type Lane = {
   moreSaves: boolean;
   lastSaveAt: string | null;
 };
-type Related = { kind: string; id: string; title: string };
+import type { Related } from './ItemRelations';
 const linkKey = (link: Related) => `${link.kind}:${link.id}`;
 type Work =
   | { role: false }
@@ -349,10 +349,12 @@ export function ItemWork({
   itemId,
   read,
   readHistory,
+  relations,
   at,
   project,
 }: {
   itemId: string;
+  relations?: ((related?: readonly Related[], more?: boolean) => ReactNode) | undefined;
   read: ReadItemWork;
   readHistory?: ReadItemHistory | undefined;
   at: (patch: Partial<ProjectRoute>) => string;
@@ -363,7 +365,7 @@ export function ItemWork({
   const [paging, setPaging] = useState(false);
   const [pageFailed, setPageFailed] = useState<'lanes' | 'work' | null>(null);
   const [stale, setStale] = useState(false);
-  const [revealed, reveal] = useState({ lanes: 0, landings: 0, related: 0 });
+  const [revealed, reveal] = useState({ lanes: 0, landings: 0 });
   const [attempt, retry] = useState(0);
   const epoch = useRef(0);
   useEffect(() => {
@@ -373,7 +375,7 @@ export function ItemWork({
     setStale(false);
     setPageFailed(null);
     setPaging(false);
-    reveal({ lanes: 0, landings: 0, related: 0 });
+    reveal({ lanes: 0, landings: 0 });
     read(itemId, null, VISIBLE_ROWS)
       .then(raw => {
         if (source === epoch.current) setWork(JSON.parse(raw) as Work);
@@ -433,13 +435,12 @@ export function ItemWork({
       const landings = new Map(
         [...(work.landings ?? []), ...(next.landings ?? [])].map(landing => [landing.receiptId, landing]),
       );
-      const related = [...(work.related ?? []), ...(next.related ?? [])];
+      const related = new Map(
+        [...(work.related ?? []), ...(next.related ?? [])].map(link => [linkKey(link), link]),
+      );
       reveal(before => ({
         lanes: before.lanes + Number(lanes.size > work.lanes.length),
         landings: before.landings + Number(landings.size > (work.landings?.length ?? 0)),
-        related:
-          before.related +
-          Number(new Set(related.map(linkKey)).size > new Set(work.related?.map(linkKey)).size),
       }));
       setWork({
         ...next,
@@ -448,7 +449,7 @@ export function ItemWork({
         moreLandings: Boolean(next.moreLandings ?? work.moreLandings),
         total: next.total ?? work.total,
         atLeast: next.atLeast ?? work.atLeast,
-        related,
+        related: [...related.values()],
       });
       return true;
     } catch (error) {
@@ -464,7 +465,6 @@ export function ItemWork({
   const landings = [...(work.landings ?? [])].sort(
     (a, b) => b.at.localeCompare(a.at) || (b.sequence ?? 0) - (a.sequence ?? 0),
   );
-  const related = new Map((work.related ?? []).map(link => [linkKey(link), link]));
   const fold = `item-work:${project.handle}/${project.project}:${itemId}`;
   const more = continueWork ? (
     <div className="pad">
@@ -474,7 +474,7 @@ export function ItemWork({
       {pageFailed === 'work' ? <p role="status">More work could not be loaded. Try again.</p> : null}
     </div>
   ) : null;
-  return (
+  const workRegion = (
     <Region title="Work">
       <Part name="Lanes" fold={`${fold}:lanes`} count={work.total} atLeast={work.atLeast}>
         <TopRows
@@ -574,21 +574,6 @@ export function ItemWork({
           )}
         />
       </Part>
-      <Part name="Related" fold={`${fold}:related`} count={related.size}>
-        <TopRows
-          rows={[...related.values()]}
-          reveal={revealed.related}
-          empty={work.moreRelated ? 'No links in this page.' : 'No related Items.'}
-          draw={link => (
-            <Row key={`${link.kind}:${link.id}`} cols="8em minmax(0, 1fr)">
-              <span className="t2">{link.kind}</span>
-              <A className="lk ttl" href={at({ rest: link.id })} dir="auto">
-                {link.title}
-              </A>
-            </Row>
-          )}
-        />
-      </Part>
       {readHistory ? (
         <Part name="History" fold={`${fold}:history`} lazy>
           <ItemHistory itemId={itemId} read={readHistory} project={project} />
@@ -596,5 +581,11 @@ export function ItemWork({
       ) : null}
       {more}
     </Region>
+  );
+  return (
+    <>
+      {relations?.(work.related, work.moreRelated)}
+      {workRegion}
+    </>
   );
 }

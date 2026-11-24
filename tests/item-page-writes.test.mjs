@@ -184,6 +184,131 @@ test('writers cannot shelf work, change Initiative text or post unpaired evidenc
   assert.deepEqual((await s.read()).data.planningComments, []);
 });
 
+test('only writers can create Initiatives or edit Item hierarchy; Initiative settings remain owner-only', async t => {
+  const s = await project(t);
+  const origin = { ...s.capture(), kind: 'initiative', title: 'Origin release' };
+  const target = { ...s.capture(), kind: 'initiative', title: 'Next release' };
+  const parent = { ...s.capture(), initiativeId: target.itemId };
+  const child = { ...s.capture(), initiativeId: origin.itemId };
+  const put = (itemId, expectedVersion, fields) => ({
+    action: 'put-planning-item',
+    itemId,
+    expectedVersion,
+    ...fields,
+  });
+  const move = put(child.itemId, 1, { parentId: parent.itemId, initiativeId: target.itemId, order: 'a' });
+  await s.send(origin);
+  await s.send(child);
+  s.caller('reader');
+  await assert.rejects(s.send(target), unavailable);
+  await assert.rejects(
+    s.send({ ...s.capture(), parentId: child.itemId, initiativeId: origin.itemId }),
+    unavailable,
+  );
+  for (const mutation of [
+    move,
+    put(child.itemId, 1, { parentId: null }),
+    put(child.itemId, 1, { order: 'a' }),
+    put(child.itemId, 1, { relations: [{ kind: 'related', id: parent.itemId }] }),
+  ])
+    await assert.rejects(s.batch([mutation]), unavailable);
+
+  s.caller('writer');
+  await s.send(target);
+  await s.send(parent);
+  for (const fields of [
+    { body: 'Rewrite' },
+    { status: 'archived' },
+    { status: 'deleted' },
+    { hidden: true },
+    { order: 'a' },
+    { relations: [] },
+  ])
+    await assert.rejects(s.batch([put(target.itemId, 1, fields)]), unavailable);
+  await assert.rejects(s.batch([put(child.itemId, 1, { initiativeId: target.itemId })]), unavailable);
+  const mismatch = await s.batch([{ ...move, initiativeId: origin.itemId }]);
+  assert.equal(mismatch.results[0].code, 'BAD_ARGUMENT');
+  const operationId = randomUUID();
+  assert.equal((await s.batch([move], operationId)).results[0].outcome, 'applied');
+  assert.equal((await s.batch([move], operationId)).results[0].outcome, 'replayed');
+  assert.equal(
+    (await s.batch([put(child.itemId, 2, { relations: [{ kind: 'related', id: parent.itemId }] })]))
+      .results[0].outcome,
+    'applied',
+  );
+  s.caller('owner');
+  const latest = await s.latest(child.itemId);
+  assert.equal(latest.parentId, parent.itemId);
+  assert.equal(latest.initiativeId, target.itemId);
+  assert.deepEqual(latest.relations, [{ kind: 'related', id: parent.itemId }]);
+  const notes = (await s.read()).data.planningComments;
+  assert.deepEqual(
+    notes.map(note => [note.itemId, note.text.split(':')[0]]),
+    [
+      [origin.itemId, 'Moved out to Next release'],
+      [target.itemId, 'Moved in'],
+    ],
+  );
+});
+
+test('a writer can undo their fresh child, not abandon another author’s child', async t => {
+  const s = await project(t);
+  const parent = s.capture();
+  await s.send(parent);
+  const other = { ...s.capture(), parentId: parent.itemId };
+  await s.send(other);
+  s.caller('writer');
+  const child = { ...s.capture(), parentId: parent.itemId };
+  assert.equal((await s.batch([child])).results[0].outcome, 'applied');
+  const undo = itemId => [
+    { action: 'put-planning-item', itemId, expectedVersion: 1, status: 'abandoned', reason: 'Undone' },
+  ];
+  await assert.rejects(s.batch(undo(other.itemId)), unavailable);
+  assert.equal((await s.batch(undo(child.itemId))).results[0].outcome, 'applied');
+  s.caller('owner');
+  assert.equal((await s.latest(child.itemId)).status, 'abandoned');
+  assert.equal((await s.latest(other.itemId)).status, 'open');
+});
+
+test('a writer can undo a cross-Initiative move even when the previous Item snapshot is chunked', async t => {
+  const s = await project(t);
+  const origin = { ...s.capture(), kind: 'initiative' };
+  const next = { ...s.capture(), kind: 'initiative' };
+  const parent = { ...s.capture(), initiativeId: next.itemId };
+  for (const row of [origin, next, parent]) await s.send(row);
+  s.caller('writer');
+  const child = {
+    ...s.capture(),
+    initiativeId: origin.itemId,
+    parentId: null,
+    body: 'Specimen '.repeat(5000),
+  };
+  await s.send(child);
+  const args = { projectId: s.projectId, collection: 'planningItems', id: child.itemId };
+  assert(
+    JSON.parse((await detail._handler(s.ctx, args)).value).payloadKey,
+    'the prior snapshot needs chunks',
+  );
+  const move = {
+    action: 'put-planning-item',
+    itemId: child.itemId,
+    expectedVersion: 1,
+    parentId: parent.itemId,
+    initiativeId: next.itemId,
+  };
+  assert.equal((await s.batch([move])).results[0].outcome, 'applied');
+  assert.equal(
+    (await s.batch([{ ...move, expectedVersion: 2, parentId: null, initiativeId: origin.itemId }])).results[0]
+      .outcome,
+    'applied',
+  );
+  s.caller('owner');
+  const restored = await s.latest(child.itemId);
+  assert.equal(restored.initiativeId, origin.itemId);
+  assert.equal(restored.parentId, undefined);
+  assert.equal(restored.body, child.body);
+});
+
 test('Capture by a writer cannot reuse the identity of an independent Work Intent', async t => {
   const s = await project(t);
   const base = (await s.read()).sourceHead;

@@ -21,7 +21,7 @@ import { serverCommentWriter, serverPutWriter } from './planningCommentWriter';
 import { report } from './errors';
 import { activeProject } from './projectAuthority';
 import { planningTarget } from '../src/work-planning-unified';
-import { memberPlanningTarget, memberPlanningWrite } from './projectPlanningWriteAccess';
+import { memberCreationUndo, memberPlanningTarget, memberPlanningWrite } from './projectPlanningWriteAccess';
 import { intentAuthority } from './projectContributors';
 import { selectedGeneration, record, recordPartition } from './projectWorkIndexStore';
 import { generationHead } from './projectWorkHead';
@@ -31,6 +31,9 @@ import { appendWork } from './projectWork';
 import { commutativeCommand } from './projectWorkCommandRun';
 import { internalMutation } from './server';
 import { isItemRetentionOperation, itemRetentionOperation } from './projectItemRetentionStore';
+import { decisionOperationId } from '../src/work-planning-put';
+import { isLive } from '../src/planning-model';
+import { workRecordTable } from './projectWorkRecordTables';
 
 /** Commands this revision-free mutation runs. A planning put (flip 5 S5) checks only its item version
  * (ITEM_CHANGED); the project revision is read in the same transaction, so an unrelated write never
@@ -47,6 +50,8 @@ export async function executeCommand(
     planningClose?: string | undefined;
     planningRestore?: string | undefined;
     planningTick?: true;
+    /** Trusted parent-move notes have fixed server text and the project as their author. */
+    planningMoveNote?: true;
     onPlanningBatchState?: (state: { replayed: true } | { before: PlanningItem | null }) => void;
     /** A server job writing as the owner, or a close cascade's derived child write: exempt from the account limiter (convex/accountLimits.ts). */
     server?: true;
@@ -108,7 +113,7 @@ export async function executeCommand(
         'BAD_ARGUMENT',
         'Post line evidence with its Done-when tick.',
       );
-      await serverCommentWriter(ctx, command, project);
+      if (!options.planningMoveNote) await serverCommentWriter(ctx, command, project);
     }
     if (command.action === 'put-planning-item') {
       if (command.agent === undefined && command.agentClient === undefined) {
@@ -231,7 +236,11 @@ export async function executeCommand(
       : undefined;
     const current = commandValues(rows, 'planningItems').find(item => item.id === command.itemId);
     invariant(
-      (!target || (target.intent && target.historyId === command.itemId)) && memberPlanningTarget(current),
+      (!target || (target.intent && target.historyId === command.itemId)) &&
+        memberPlanningTarget(current) &&
+        (command.action !== 'put-planning-item' ||
+          !memberCreationUndo(command) ||
+          (current?.parentId && current.author === user.subject && !target?.intent?.base)),
       'PROJECT_UNAVAILABLE',
       'Select an existing Item that is not archived or deleted.',
     );
@@ -342,7 +351,61 @@ export async function executeCommand(
       'The parent close or Undo is still applying. Retry this change after it finishes.',
     );
   }
-  return appendWork(ctx, {
+  const current =
+    member && command.action === 'put-planning-item' && command.parentId !== undefined
+      ? (commandValues(rows, 'planningItems').find(item => item.id === command.itemId) as
+          | PlanningItem
+          | undefined)
+      : undefined;
+  const shift =
+    member &&
+    command.action === 'put-planning-item' &&
+    command.expectedVersion > 0 &&
+    command.parentId !== undefined &&
+    command.initiativeId !== undefined
+      ? command.initiativeId !== (current?.initiativeId ?? null)
+      : false;
+  if (member && command.action === 'put-planning-item' && command.parentId) {
+    const parent =
+      (await load('planningSearch', command.parentId)) ?? (await load('planningItems', command.parentId));
+    const target = parent ? (JSON.parse(parent.value) as PlanningItem) : undefined;
+    invariant(
+      target?.kind === 'issue' && !target.purged && isLive(target) && !target.parentId,
+      'BAD_ARGUMENT',
+      'Select a top-level parent Item.',
+    );
+    invariant(
+      (target.initiativeId ?? null) ===
+        (command.initiativeId === undefined ? (current?.initiativeId ?? null) : command.initiativeId),
+      'BAD_ARGUMENT',
+      'The Item must move to its parent’s Initiative.',
+    );
+  }
+  if (shift && command.action === 'put-planning-item' && !command.parentId) {
+    // A clear cannot move an Item between Initiatives. Its one exception is a versioned
+    // Undo of the preceding parent change, restoring the exact former membership.
+    const partition = recordPartition(generation);
+    const recent = await ctx.db
+      .query(await workRecordTable(ctx, partition, 'planningVersions'))
+      .withIndex('by_generation_and_collection_and_parent_and_position', q =>
+        q.eq('generationId', partition).eq('collection', 'planningVersions').eq('parent', command.itemId),
+      )
+      .order('desc')
+      .take(2);
+    const previous = recent[1]
+      ? (JSON.parse(recent[1].value) as PlanningItem & { payloadKey?: string })
+      : undefined;
+    invariant(
+      current?.parentId &&
+        previous &&
+        previous.version === current.version - 1 &&
+        !previous.parentId &&
+        (previous.initiativeId ?? null) === command.initiativeId,
+      'BAD_ARGUMENT',
+      'Clearing a parent keeps the Item in its current Initiative.',
+    );
+  }
+  const event = await appendWork(ctx, {
     ...input,
     owner: user.subject,
     request,
@@ -356,6 +419,49 @@ export async function executeCommand(
       : {}),
     ...(options.server ? { server: true as const } : {}),
   });
+  if (shift && current && command.action === 'put-planning-item') {
+    // A writer can move an Item to its parent's Initiative but cannot post arbitrary Initiative comments.
+    const initiatives = commandValues(rows, 'initiatives') as PlanningItem[];
+    const from = initiatives.find(item => item.id === current.initiativeId);
+    const to = initiatives.find(item => item.id === command.initiativeId);
+    const title = `${current.title.slice(0, 400)} (${current.id.slice(0, 8)})`;
+    const note = async (item: PlanningItem, text: string, seed: string) => {
+      const operationId = decisionOperationId(seed);
+      try {
+        await executeCommand(
+          ctx,
+          {
+            projectId: input.projectId,
+            operationId,
+            command: JSON.stringify({
+              action: 'comment-planning-item',
+              itemId: item.id,
+              operationId,
+              text,
+              authorLabel: 'Forge',
+            }),
+          },
+          project.owner,
+          { server: true, planningMoveNote: true },
+        );
+      } catch {
+        // Never leave a move committed without its notices, including inside a partial-write batch.
+        invariant(
+          false,
+          'WORK_CONFLICT',
+          'The move and its Initiative notes could not be saved. Nothing moved.',
+        );
+      }
+    };
+    if (from && !from.purged)
+      await note(
+        from,
+        `Moved out to ${to?.title.slice(0, 400) ?? 'No Initiative'}: ${title}.`,
+        `${input.operationId}:out`,
+      );
+    if (to && !to.purged) await note(to, `Moved in: ${title}.`, `${input.operationId}:in`);
+  }
+  return event;
 }
 export const command = mutation({
   args: { projectId: v.id('hostedProjects'), operationId: v.string(), command: v.string() },

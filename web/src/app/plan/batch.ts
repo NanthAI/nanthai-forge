@@ -16,11 +16,18 @@ import {
 
 export const batchApply = makeFunctionReference<
   'mutation',
-  { projectId: Id<'hostedProjects'>; operationId: string; writes: string; close?: true; undoClose?: string },
+  {
+    projectId: Id<'hostedProjects'>;
+    operationId: string;
+    writes: string;
+    close?: true;
+    atomic?: true;
+    undoClose?: string;
+  },
   string
 >('projectPlanningBatch:apply');
 
-export type BatchOptions = { operationId?: string; close?: true; undoClose?: string };
+export type BatchOptions = { operationId?: string; close?: true; atomic?: true; undoClose?: string };
 export type RunBatch = (writes: readonly BatchWrite[], options?: BatchOptions) => Promise<BatchOutcome>;
 export type BatchOutcome = {
   results: BatchResult[];
@@ -40,6 +47,7 @@ export async function runBatch(
     operationId: string;
     writes: string;
     close?: true;
+    atomic?: true;
     undoClose?: string;
   }) => Promise<string>,
   projectId: Id<'hostedProjects'>,

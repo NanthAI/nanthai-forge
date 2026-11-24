@@ -205,6 +205,29 @@ test('the Plan names an eligible sub-item as Next even when the list filters it 
   assert.equal(planSentence(filtered).bold, '3 Items are left; next is Check split bytes.');
 });
 
+test('hand numbers reach the fortieth sub-item and do not renumber when Find hides its parent', () => {
+  const parent = item({ title: 'Parent' }, 2);
+  const children = Array.from({ length: 40 }, (_, i) =>
+    item({ parentId: parent.id, title: i === 39 ? 'العربية' : 'A' }, i + 3),
+  );
+  const read = {
+    rows: JSON.stringify([item({}, 0), item({}, 1), parent, ...children, item({}, 43)]),
+    more: false,
+    settled: [],
+    canEdit: true,
+  };
+  const view = planView(read);
+  assert.equal(view.groups[0].lines.at(-2).childNumber, '3.40');
+  assert.equal(view.groups[0].lines.at(-2).parentShown, true);
+  assert.equal(view.groups[0].lines.at(-1).rank, 4);
+  assert.equal(view.children.get(parent.id).length, 40);
+
+  const [line] = planView(read, 'العربية').groups[0].lines;
+  assert.equal(line.childNumber, '3.40');
+  assert.equal(line.parentShown, false);
+  assert.equal(line.parentNumber, '3');
+});
+
 test('Plan keeps a sub-item under its displayed parent while counting it under its stored Initiative', () => {
   const source = item({ kind: 'initiative', title: 'Source' }, 0);
   const target = item({ kind: 'initiative', status: 'closed', title: 'Target' }, 1);

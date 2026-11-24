@@ -254,7 +254,7 @@ function Group({
             disabled={!view.canEdit || !byHand}
             cols={`${ticker ? '28px ' : ''}${COLS}`}
           >
-            {({ line }) => (
+            {({ line }, index) => (
               <>
                 {ticker ? <Tick row={line.row} ticker={ticker} /> : null}
                 <Line
@@ -262,6 +262,11 @@ function Group({
                   href={at({ rest: line.row.id })}
                   ranked={query.sort === 'hand'}
                   flat={!tree}
+                  view={view}
+                  itemHref={id => at({ rest: id })}
+                  continues={Boolean(
+                    line.row.parentId && lines[index + 1]?.row.parentId === line.row.parentId,
+                  )}
                   workers={workers}
                 />
               </>

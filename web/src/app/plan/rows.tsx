@@ -7,13 +7,13 @@ import { itemStatusLabel, type PlanRow } from '../../../../src/planning-model';
 import { ItemState, State, Who } from '../../ds';
 import { A } from '../frames';
 import { breakdownTotal, breakdownWords, type Breakdown } from '../progress';
-import { statusOf, type PlanLine } from './model';
+import { statusOf, type PlanLine, type PlanView } from './model';
 import type { Workers } from './workers';
 
 /** Columns after the handle: position, the name with its flags, done-when, owner, status. On a phone plan.css sets
  * `--plan-cols` to the position and the name only; the name's cell then shows the status before the flags, on a line
  * under the name. */
-export const COLS = 'var(--plan-cols, 2.2em minmax(0, 1fr) auto auto auto)';
+export const COLS = 'var(--plan-cols, 3.25em minmax(0, 1fr) auto auto auto)';
 
 export function Status({ row }: { row: PlanRow }) {
   const status = statusOf(row);
@@ -94,28 +94,65 @@ export function Line({
   ranked = true,
   flat = false,
   workers,
+  view,
+  itemHref,
+  continues = false,
 }: {
   line: PlanLine;
   href: string;
   ranked?: boolean;
+  view?: Pick<PlanView, 'byId' | 'children' | 'more' | 'numbers'> | undefined;
+  itemHref?: ((id: string) => string) | undefined;
+  continues?: boolean;
   /** Who works on each Item now (workers.ts), shown when the Item has no owner. */
   workers?: Workers | undefined;
   /** List layout: sub-items sit at their parent's place without the tree's indent. */
   flat?: boolean;
 }) {
   const { row } = line;
+  const numberedChild = ranked && line.parentShown && line.childNumber;
+  const number = row.parentId ? numberedChild || '' : ranked ? line.rank : '';
+  const indented = line.depth > 0 && !flat;
+  const connected = indented && numberedChild;
+  const parent = row.parentId ? view?.byId.get(row.parentId) : undefined;
+  const parentNumber = line.parentNumber ?? (row.parentId ? view?.numbers.get(row.parentId) : undefined);
+  const childCount = view?.children.get(row.id)?.length ?? 0;
+  const partial = view?.more;
   return (
     <>
-      <span className="rk" aria-hidden="true">
-        {line.depth || !ranked ? '' : line.rank}
+      <span className={`rk${row.parentId ? ' plan-child-rank' : ''}`}>
+        {numberedChild ? <span className="sr">Sub-item </span> : null}
+        {number}
       </span>
-      <span className={`tt${line.depth && !flat ? ' sub' : ''}`}>
+      <span
+        className={`tt${indented ? ' sub' : ''}${connected ? ' plan-elbow' : ''}${connected && continues ? ' plan-elbow-more' : ''}`}
+      >
         <A className="ttl" href={href} dir="auto" title={row.title}>
           {row.title}
         </A>
         <span className="plan-st">
           <Status row={row} />
         </span>
+        {row.parentId && !numberedChild ? (
+          <span className="plan-under">
+            {parent && itemHref ? (
+              <>
+                under {parentNumber ? `${parentNumber} · ` : ''}
+                <A className="lk" href={itemHref(parent.id)} dir="auto" title={parent.title}>
+                  {parent.title}
+                </A>
+              </>
+            ) : (
+              'sub-item · parent not shown'
+            )}
+          </span>
+        ) : null}
+        {childCount ? (
+          <span className="flag">
+            {childCount}
+            {partial ? '+' : ''} {childCount === 1 && !partial ? 'sub-item' : 'sub-items'}
+          </span>
+        ) : null}
         {line.next ? (
           <span
             className="nextmark"

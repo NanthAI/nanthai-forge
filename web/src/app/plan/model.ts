@@ -35,6 +35,11 @@ export type PlanLine = {
   row: PlanRow;
   depth: number;
   rank: number;
+  /** Hand number for a child with a loaded parent, before applying filters. */
+  childNumber?: string;
+  /** The parent's hand number is known even when a filter hides it. */
+  parentNumber?: string;
+  parentShown?: boolean;
   next: boolean;
   blockedBy?: PlanRow;
   /** Its Initiative is not among the read Initiatives although all were read: it was archived or deleted (members
@@ -69,6 +74,8 @@ export type PlanView = {
   more: boolean;
   canEdit: boolean;
   byId: Map<string, PlanRow>;
+  numbers: ReadonlyMap<string, string>;
+  children: ReadonlyMap<string, readonly PlanRow[]>;
 };
 
 export const parseRows = (read: PlanRead): PlanRow[] => {
@@ -83,8 +90,8 @@ export const parseRows = (read: PlanRead): PlanRow[] => {
 /** A plain find over the loaded titles: every word must appear, in any order, ignoring case. */
 export function matches(row: Pick<PlanRow, 'title' | 'id'>, find: string) {
   const words = find.toLowerCase().split(/\s+/).filter(Boolean);
-  const hay = `${row.title} ${row.id.slice(0, 8)}`.toLowerCase();
-  return words.every(word => hay.includes(word));
+  const title = row.title.toLowerCase();
+  return words.every(word => title.includes(word) || row.id.toLowerCase().startsWith(word));
 }
 
 /** `orders` holds moves made here that the read has not caught up with yet; `keep` is the view's filter (type,
@@ -137,15 +144,34 @@ export function planView(
   const { next } = nextItem(shown);
   const open = new Set(items.map(row => row.id));
   const groups: PlanGroup[] = [];
+  const numbers = new Map<string, string>();
+  const children = new Map<string, PlanRow[]>();
+  const visible = new Set(items.filter(row => matches(row, find) && (!keep || keep(row))).map(row => row.id));
   for (const { initiative, rows } of planOrder(shown)) {
     const group: PlanGroup = initiative
       ? initiativeGroups.get(initiative.id)!
       : { ...progressFor(null), lines: [] };
     let top = 0;
+    let sub = 0;
+    const inGroup = new Set(rows.map(({ row }) => row.id));
+    for (const { row, depth } of rows) {
+      if (!depth) {
+        top++;
+        sub = 0;
+      }
+      if (depth || !row.parentId) numbers.set(row.id, depth ? `${top}.${++sub}` : `${top}`);
+      if (row.parentId && row.parentId !== row.id) {
+        const siblings = children.get(row.parentId);
+        if (siblings) siblings.push(row);
+        else children.set(row.parentId, [row]);
+      }
+    }
+    top = 0;
     rows.forEach(({ row, depth }) => {
-      // Sub-items share their parent's place; only top-level Items are numbered.
       if (!depth) top++;
-      if ((find && !matches(row, find)) || (keep && !keep(row))) return;
+      if (!visible.has(row.id)) return;
+      const childNumber = depth ? numbers.get(row.id) : undefined;
+      const parentNumber = row.parentId ? numbers.get(row.parentId) : undefined;
       const blocker = row.relations?.find(
         relation => relation.kind === 'depends-on' && relation.id !== row.id && open.has(relation.id),
       );
@@ -153,6 +179,9 @@ export function planView(
         row,
         depth,
         rank: top,
+        ...(childNumber ? { childNumber } : {}),
+        ...(parentNumber ? { parentNumber } : {}),
+        parentShown: Boolean(row.parentId && visible.has(row.parentId) && inGroup.has(row.parentId)),
         next: row.id === next?.id,
         ...(blocker ? { blockedBy: byId.get(blocker.id) } : {}),
         ...(!initiative && !read.more && row.initiativeId && !known.has(row.initiativeId)
@@ -174,6 +203,8 @@ export function planView(
     more: read.more,
     canEdit: read.canEdit,
     byId,
+    numbers,
+    children,
   };
 }
 

@@ -454,8 +454,10 @@ export function FieldList({
   tree,
   liveAtLeast,
   settledRead,
+  view,
 }: {
   bands: readonly PlanBand[];
+  view?: Parameters<typeof Line>[0]['view'];
   sort: Sort;
   at: At;
   ticker: Ticker | undefined;
@@ -503,6 +505,8 @@ export function FieldList({
                       ranked={false}
                       flat={!tree}
                       workers={workers}
+                      view={view}
+                      itemHref={id => at({ rest: id })}
                     />
                   </div>
                 ))}

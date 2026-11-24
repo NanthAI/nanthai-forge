@@ -23,7 +23,7 @@ type Conflict = { latest?: FullItem; version?: number | undefined; compared?: tr
 export type ItemEdits = ReturnType<typeof useItemEdits>;
 export type EditItemPorts = {
   run: RunBatch;
-  undo: (outcome: BatchOutcome, words: string) => void;
+  undo: (outcome: BatchOutcome, words: string, onUndo?: () => void) => void;
   compare?: ((base: number, current: number | undefined) => void) | undefined;
 };
 

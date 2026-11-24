@@ -616,8 +616,10 @@ export function UndoToast({
   onGone,
   byId,
   closeReceipt,
+  onUndo,
 }: {
   words: string;
+  onUndo?: (() => void) | undefined;
   outcome: BatchOutcome;
   run: RunBatch;
   onGone: (words?: string) => void;
@@ -662,7 +664,10 @@ export function UndoToast({
           : undefined,
       );
       if (back.pendingOperation) setPendingUndo(back.pendingOperation);
-      else onGone(undone(back));
+      else {
+        if (back.results.length && back.results.every(result => result.outcome !== 'refused')) onUndo?.();
+        onGone(undone(back));
+      }
     } catch (error) {
       const code = hostedErrorCode(error);
       if (

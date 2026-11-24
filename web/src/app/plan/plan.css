@@ -7,7 +7,36 @@
 [data-ds] {
   .plan .rk { color: var(--text-3); font: var(--w-medium) var(--t-meta)/1 var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
   .plan .tt { display: flex; gap: var(--s-2); align-items: baseline; min-width: 0; }
-  .plan .tt.sub { padding-left: var(--s-4); }
+  .plan .rk.plan-child-rank { color: var(--text-2); }
+  .plan .tt.sub { position: relative; padding-inline-start: var(--s-6); }
+  .plan .tt.plan-elbow::before { content: ''; position: absolute; inset-inline-start: 7px; top: -22px; height: 32px; width: 11px; border-inline-start: var(--rule) solid var(--text-3); border-bottom: var(--rule) solid var(--text-3); }
+  .plan .tt.plan-elbow-more::after { content: ''; position: absolute; inset-inline-start: 7px; top: 10px; bottom: -22px; border-inline-start: var(--rule) solid var(--text-3); }
+  .plan .plan-under { color: var(--text-3); font-size: var(--t-meta); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plan .plan-under .lk { color: var(--text-2); }
+  .plan-picker { min-width: 0; display: grid; gap: var(--s-1); }
+  .plan-picker-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s-1); }
+  .plan-picker-surface { background: var(--surface-2); border: var(--rule) solid var(--line-strong); box-shadow: var(--shadow); }
+  .plan-picker [role='listbox'] { max-height: 280px; overflow: auto; }
+  .plan-picker [role='option'] { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s-0) var(--s-2); min-height: 32px; padding: var(--s-1) var(--s-3); font-size: var(--t-small); cursor: pointer; }
+  .plan-picker [role='option'] > * { min-width: 0; overflow-wrap: anywhere; }
+  .plan-picker [role='option'] > span { max-width: 18ch; color: var(--text-2); }
+  .plan-picker [role='option'] small { grid-column: 1 / -1; color: var(--text-3); font-size: var(--t-meta); }
+  .plan-picker [role='option'][aria-disabled='true'] { color: var(--text-3); cursor: not-allowed; }
+  .plan-picker [role='option'][aria-selected='true'], .plan-picker [role='option']:hover { background: var(--accent-bg); }
+  .plan-picker-footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); padding: var(--s-1) var(--s-3); border-top: var(--rule) solid var(--line); color: var(--text-3); font-size: var(--t-meta); }
+  .plan .plan-parent { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-1) var(--s-2); min-width: 0; }
+  .plan .plan-parent .lk { overflow-wrap: anywhere; }
+  .plan .plan-parent + .plan-picker { margin-top: var(--s-2); }
+  .plan .plan-child, .plan .plan-relation { display: grid; gap: var(--s-0) var(--s-3); align-items: baseline; padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
+  .plan .plan-child { grid-template-columns: 3.25em minmax(0, 1fr) auto; }
+  .plan .plan-child .rk { color: var(--text-2); }
+  .plan .plan-child-meta { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-0) var(--s-3); }
+  .plan .plan-relation { grid-template-columns: minmax(0, 1fr) auto; }
+  .plan :is(.plan-child, .plan-relation) .ttl { font-weight: var(--w-strong); overflow-wrap: anywhere; }
+  .plan .plan-hierarchy-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); padding: var(--s-2) var(--gut); }
+  .plan .plan-new-child { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--s-2); padding: var(--s-2) var(--gut); background: var(--surface-2); }
+  .plan .plan-relation-add { display: grid; gap: var(--s-2); background: var(--surface-2); padding: var(--s-2) var(--gut); }
+  .plan .plan-relation-add .seg { justify-self: start; max-width: 100%; flex-wrap: wrap; }
   .plan .tt .ttl { font-weight: var(--w-strong); min-width: min(14ch, 60%); overflow-wrap: anywhere; }
   .plan .dw { display: inline-flex; gap: var(--s-1); align-items: center; font-size: var(--t-meta); white-space: nowrap; }
   .plan .dw .num { font-variant-numeric: tabular-nums; color: var(--text-2); }
@@ -154,7 +183,7 @@
     /* An Item row: handle and tick, then its number and name; the status and the flags share one line under the name,
        so the name keeps the width. Done-when and owner are on the Item page (plan-wide). Descendant selectors: a
        reorderable row's cells sit in one display: contents cell. */
-    .plan { --plan-cols: 2.2em minmax(0, 1fr); }
+    .plan { --plan-cols: 3.25em minmax(0, 1fr); }
     .plan .row:has(.tt) { column-gap: var(--s-2); align-items: baseline; }
     .plan .row:has(.tt) :is(.grip, .ckhit) { align-self: center; }
     .plan .row:has(.tt) .state { display: none; }
@@ -174,6 +203,7 @@
     .plan .ph { flex-wrap: wrap; }
     .plan .tt { flex-wrap: wrap; row-gap: 2px; }
     .plan .tt .ttl { flex-basis: 100%; }
+    .plan .plan-new-child .inp { grid-column: 1 / -1; }
     .plan .plan-grp .band { flex-wrap: wrap; }
     .plan .plan-grp .band .hint { white-space: normal; flex-basis: 100%; }
     .plan .plan-gh .plan-prog, .plan .plan-gh > .plan-pl { order: 1; flex: 1 1 100%; flex-wrap: wrap; row-gap: 2px; }

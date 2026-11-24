@@ -52,6 +52,16 @@ model for refinement. If true, use the returned title, body and version to sugge
 in your own tool. Forge does not call a model, edit the Item, or start a Lane. To apply agreed changes, use
 `put-planning-item` with `itemId` set to `item.id` and `expectedVersion` set to `item.version`.
 
+## Hierarchy and relations in the Web Plan
+
+In the Plan's **List** and **Tree**, a sub-item has a number such as `3.2` when its parent is shown in hand order. Tree also indents it. When a filter or grouping separates the rows, the sub-item links to its parent instead. The parent shows how many sub-items are loaded; `+` marks a lower bound.
+
+On an Item page, use **Parent → Set parent…** or **Change…** to pick an open, top-level Item. Choosing a parent in another Initiative moves the sub-item to that Initiative. **Clear** makes it top level in its current Initiative. The **Children** region links to the sub-items. On an open, top-level Item, use **New child** to capture one by title or **Add existing…** to move an open Item under it. The picker explains why an Item cannot be chosen; it does not move an Item when the Plan is partial and there may be unloaded sub-items. Pickers search loaded Items first, with an explicit **Search all open Items** when there is more to search.
+
+Use **Relations → Add relation** to choose **Depends on**, **Duplicate of** or **Related**. Reverse links appear as **Blocks**, **Duplicated by** or **Related**. Remove a link with its row action. Parent, Children and Relations changes offer **Undo**. The owner and project writers can make these changes; readers can follow the links but cannot edit.
+
+In **New Item**, choose **Item** to enter a title, optional description and checklist. Optionally pick a **Parent**; the new Item takes that parent's Initiative. Choose **Initiative** instead to create one from a title and optional text. Creating an Initiative does not grant writers permission to change its settings.
+
 ## Item Work
 
 Open an Item from the Plan, including its Done and Dropped lists. **Text** renders the Item's Markdown and folds long prose in place. **Done when** lists the task lines in their stored order: open (`[ ]`), done (`[x]`) or moved (`[~]`, not counted). Text and Done when use one selected Item read, refreshed only when the Item's live version changes. When a retained body doesn't fit in the first record, **Show all text** loads it on request. Task examples inside Markdown fences are prose, not checklist lines. The Item page and wide Plan rows show the exact ticked count beside the same bar: one block per line up to 12, then 12 grouped blocks. Partial blocks fill from the bottom in thirds, so even one tick is visible. Narrow Plan rows keep the space for the title; open the Item to see its bar.

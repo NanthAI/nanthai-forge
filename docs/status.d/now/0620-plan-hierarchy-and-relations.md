@@ -1,0 +1,1 @@
+**Plan hierarchy and relations.** List and Tree identify sub-items and link back to parents when rows are separated. An Item page has Parent, Children and Relations controls for project writers and the owner, with Undo. New Item can capture a sub-item or create an Initiative. See [Hierarchy and relations in the Web Plan](../../planning.md#hierarchy-and-relations-in-the-web-plan).

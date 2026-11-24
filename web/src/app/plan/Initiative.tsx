@@ -186,7 +186,15 @@ export function InitiativePage({
               disabled={!view.canEdit}
               cols={COLS}
             >
-              {({ line }) => <Line line={line} href={at({ rest: line.row.id })} workers={workers} />}
+              {({ line }) => (
+                <Line
+                  line={line}
+                  href={at({ rest: line.row.id })}
+                  view={view}
+                  itemHref={id => at({ rest: id })}
+                  workers={workers}
+                />
+              )}
             </ReorderList>
           ) : (
             <div className="quietline">
@@ -226,6 +234,8 @@ export function InitiativePage({
                         line={{ row, depth: 0, rank: 0, next: false }}
                         href={at({ rest: row.id })}
                         ranked={false}
+                        view={view}
+                        itemHref={id => at({ rest: id })}
                       />
                     </div>
                   ))}

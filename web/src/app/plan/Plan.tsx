@@ -78,6 +78,10 @@ import { useProjectPages } from '../project-pages';
 import { ItemWork, type ReadItemHistory, type ReadItemWork } from './ItemWork';
 import type { ReadItem } from './ItemDetail';
 import { itemBody } from './item-body';
+import { ItemChildren, ParentFact } from './ItemHierarchy';
+import { ItemRelations, type Related } from './ItemRelations';
+import type { SearchOpenItems } from './ItemPicker';
+import { planningSearchTerms } from '../../../../src/planning-search';
 import './plan.css';
 
 const planRead = makeFunctionReference<
@@ -190,6 +194,22 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle, needsRe
   const deleteForever = useAction(api.projectItemRetention.deleteForever);
   const apply = useMutation(batchApply);
   const client = useConvex();
+  const searchOpenItems = useCallback<SearchOpenItems>(
+    async text => {
+      const terms = planningSearchTerms(text);
+      if (!terms.text) return [];
+      const raw = await client.query(api.projectHostedPlanningSearch.search, {
+        projectId,
+        ...terms,
+        status: 'active',
+        kind: 'issue',
+        cursor: null,
+        limit: 10,
+      });
+      return (JSON.parse(raw) as { items: PlanRow[] }).items;
+    },
+    [client, projectId],
+  );
   const readItemText = useCallback<ReadItem>(
     (id, full) => readItem(client, projectId, id, full),
     [client, projectId],
@@ -251,6 +271,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle, needsRe
       run={run}
       purge={input => deleteForever({ projectId, ...input })}
       reads={reads}
+      searchOpenItems={searchOpenItems}
       readItemText={readItemText}
       readItemWork={readItemWork}
       readItemHistory={readItemHistory}
@@ -300,6 +321,7 @@ export function PlanScreenView({
   run,
   purge,
   reads,
+  searchOpenItems,
   readItemText,
   readItemWork,
   readItemHistory,
@@ -336,6 +358,7 @@ export function PlanScreenView({
   run?: RunBatch;
   purge?: PurgeItem;
   reads?: Reads;
+  searchOpenItems?: SearchOpenItems | undefined;
   readItemText?: ReadItem | undefined;
   readItemWork?: ReadItemWork | undefined;
   readItemHistory?: ReadItemHistory | undefined;
@@ -361,7 +384,9 @@ export function PlanScreenView({
   const [error, setError] = useState('');
   const [cli, setCli] = useState(false);
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
-  const [toast, setToast] = useState<{ outcome: BatchOutcome; words: string } | null>(null);
+  const [toast, setToast] = useState<{ outcome: BatchOutcome; words: string; onUndo?: () => void } | null>(
+    null,
+  );
   // The Item just archived or deleted from its page, so the page can say where it went and bring it back.
   const [sent, setSent] = useState<{ row: PlanRow; shelf: Shelf; version: number } | null>(null);
   const [message, announce] = useAnnounce();
@@ -522,6 +547,7 @@ export function PlanScreenView({
         workers={workers}
         at={at}
         projectId={projectId}
+        searchOpenItems={searchOpenItems}
         readItemText={readItemText}
         readItemWork={readItemWork}
         readItemHistory={readItemHistory}
@@ -531,8 +557,8 @@ export function PlanScreenView({
           canWriteItems && run
             ? {
                 run,
-                undo: (outcome, words) => {
-                  setToast({ outcome, words });
+                undo: (outcome, words, onUndo) => {
+                  setToast({ outcome, words, ...(onUndo ? { onUndo } : {}) });
                   announce(words);
                 },
                 compare:
@@ -755,6 +781,7 @@ export function PlanScreenView({
         onOpenChange={setCapture}
         view={view}
         put={put}
+        search={searchOpenItems}
         announce={announce}
         initiative={initiativeRow?.id ?? ''}
       />
@@ -1007,6 +1034,7 @@ export function PlanScreenView({
               {listBands ? (
                 <FieldList
                   bands={listBands}
+                  view={view ? { ...view, byId } : undefined}
                   sort={query.sort}
                   at={at}
                   ticker={ticker}
@@ -1060,7 +1088,13 @@ export function PlanScreenView({
             </>
           )}
           {settledShown && query.layout !== 'board' && !listBands ? (
-            <SettledList rows={settledRows} sort={query.sort} at={at} ticker={ticker} />
+            <SettledList
+              rows={settledRows}
+              sort={query.sort}
+              at={at}
+              ticker={ticker}
+              view={view ? { ...view, byId } : undefined}
+            />
           ) : null}
           {settledShown ? <SettledPager closed={closed} dropped={dropped} /> : null}
           {shelfScope ? (
@@ -1098,8 +1132,10 @@ function SettledList({
   sort,
   at,
   ticker,
+  view,
 }: {
   rows: readonly PlanRow[];
+  view?: Parameters<typeof Line>[0]['view'];
   sort: PlanQuery['sort'];
   at: (patch: Partial<PlaceProps['route']>) => string;
   ticker: Ticker | undefined;
@@ -1129,6 +1165,8 @@ function SettledList({
                 line={{ row, depth: 0, rank: 0, next: false }}
                 href={at({ rest: row.id })}
                 ranked={false}
+                view={view}
+                itemHref={id => at({ rest: id })}
               />
             </div>
           ))}
@@ -1182,6 +1220,7 @@ function ItemPage({
   workers,
   at,
   projectId,
+  searchOpenItems,
   readItemText,
   readItemWork,
   readItemHistory,
@@ -1206,6 +1245,7 @@ function ItemPage({
   workers: Workers;
   at: (patch: Partial<PlaceProps['route']>) => string;
   projectId: Id<'hostedProjects'> | undefined;
+  searchOpenItems?: SearchOpenItems | undefined;
   readItemText?: ReadItem | undefined;
   readItemWork?: ReadItemWork | undefined;
   readItemHistory?: ReadItemHistory | undefined;
@@ -1227,6 +1267,22 @@ function ItemPage({
 }) {
   const [full, setFull] = useState<FullItem>();
   const moved = full ? itemBody(full.body).lines.filter(line => line.state === 'moved').length : 0;
+  const hierarchy =
+    row && view
+      ? {
+          row,
+          view,
+          href: (id: string) => at({ rest: id }),
+          search: searchOpenItems,
+          edit,
+          read: readItemText,
+        }
+      : undefined;
+  const relations = hierarchy
+    ? (links?: readonly Related[], more?: boolean) => (
+        <ItemRelations {...hierarchy} related={links} more={more} />
+      )
+    : undefined;
   const workItem = row?.id ?? (row === null ? shelved?.row.id : undefined);
   const work =
     workItem && readItemWork ? (
@@ -1235,6 +1291,7 @@ function ItemPage({
         itemId={workItem}
         read={readItemWork}
         readHistory={readItemHistory}
+        relations={relations}
         at={at}
         project={route}
       />
@@ -1255,6 +1312,7 @@ function ItemPage({
         ],
         ['Owner', <Owner key="o" owner={row.owner} workers={workers.get(row.id)} />],
         ...(row.type ? ([['Type', row.type]] as [string, ReactNode][]) : []),
+        ...(hierarchy ? ([['Parent', <ParentFact {...hierarchy} />]] as [string, ReactNode][]) : []),
         ...(row.hidden ? ([['Public plan', 'hidden']] as [string, ReactNode][]) : []),
       ]
     : [];
@@ -1354,7 +1412,8 @@ function ItemPage({
                     ))}
                   </dl>
                 </Region>
-                {work}
+                {hierarchy ? <ItemChildren {...hierarchy} /> : null}
+                {work ?? relations?.()}
               </>
             }
           />
