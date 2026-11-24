@@ -45,13 +45,16 @@ type Subject = Pick<PlanningItem, 'status' | 'kind' | 'statusPin'> & {
   unchecked: number;
   checked: number;
   work: RollupWork;
+  /** A compact evaluation needs to know that a pin exists, not its attribution. */
+  pinned?: true;
 };
 
 /** Decide one row from retained facts, the same way on a live wake or in recompute preview.
  * An absent or incomplete counter is not an empty counter; its caller must prove coverage first. */
 export function rollupDecision(subject: Subject, scope: RollupCounts, enabled: boolean) {
   const { kind, status, statusPin, work, unchecked, checked } = subject;
-  if (statusPin || status === 'proposed' || status === 'archived' || status === 'deleted') return null;
+  if (subject.pinned || statusPin || status === 'proposed' || status === 'archived' || status === 'deleted')
+    return null;
   const move = (next: Subject['status'], rule: keyof typeof rollupReasons) =>
     next === status ? null : { status: next, rule, reason: rollupReasons[rule] };
   if (kind === 'initiative' && !enabled) return null;
@@ -61,7 +64,7 @@ export function rollupDecision(subject: Subject, scope: RollupCounts, enabled: b
       scope.started || work === 'active' || work === 'completed' ? 'in-progress' : 'open',
       'workReopened',
     );
-  if (settled) return null;
+  if (settled && kind === 'issue') return null;
   if (status === 'open' && kind === 'issue' && work === 'active') return move('in-progress', 'laneStarted');
   if (status === 'open' && enabled && scope.unsettled && scope.started)
     return move('in-progress', 'childStarted');

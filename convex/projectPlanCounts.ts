@@ -31,6 +31,14 @@ import { planningRecordTable } from './projectWorkRecordTables';
 import { planningPage } from './projectPlanningList';
 import { report } from './errors';
 import { invariant } from '../src/errors';
+import type { RollupCounts } from '../src/planning-rollup';
+import {
+  addRollupCounts,
+  emptyRollupCounts,
+  rollupMembershipChanges,
+  type RollupScope,
+} from '../src/planning-rollup-membership';
+import { applyRollupDeltas } from './projectPlanRollupStore';
 
 /** Roots read per backfill step; each step is one transaction. */
 export const PLAN_COUNTS_PAGE = 200;
@@ -208,6 +216,14 @@ export const read = query({
   },
 });
 
+function replayScopeCoverage(value: string) {
+  const { scopeThrough, scopeBlocked } = JSON.parse(value) as PlanCounts;
+  return {
+    ...(scopeThrough !== undefined ? { scopeThrough } : {}),
+    ...(scopeBlocked ? { scopeBlocked } : {}),
+  };
+}
+
 async function step(ctx: MutationCtx, project: Doc<'hostedProjects'>, restart: boolean) {
   const generation = await selectedGeneration(ctx, project);
   if (!generation) return { done: true, counted: 0 };
@@ -222,6 +238,7 @@ async function step(ctx: MutationCtx, project: Doc<'hostedProjects'>, restart: b
       : {
           ...emptyPlanCounts(false),
           ...(parsed ? { day: parsed.day, closedToday: parsed.closedToday } : {}),
+          ...(row && replayScopeCoverage(row.value)),
         };
   if (counts.done) return { done: true, counted: 0 };
   const page = await ctx.db
@@ -264,6 +281,74 @@ export const backfill = internalMutation({
     const result = await step(ctx, project, restart === true);
     if (!result.done) await ctx.scheduler.runAfter(0, internal.projectPlanCounts.backfill, { projectId });
     return result;
+  },
+});
+
+/** One explicit page. Advancing the cursor and adding the page's counts are one write transaction. A replay
+ * of the previous cursor returns the current cursor without adding the page twice. Ordinary Item writes update
+ * only roots behind the cursor; pages ahead of it see their latest committed versions. */
+export const prepareScopes = internalMutation({
+  args: {
+    projectId: v.id('hostedProjects'),
+    expectedPartition: v.id('projectWorkGenerations'),
+    after: v.string(),
+  },
+  returns: v.object({ after: v.union(v.string(), v.null()), counted: v.number(), replayed: v.boolean() }),
+  handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId);
+    const generation = project && !project.removal && (await selectedGeneration(ctx, project));
+    invariant(
+      generation && recordPartition(generation) === args.expectedPartition,
+      'WORK_STALE',
+      'The Plan partition changed. Recheck it before preparing exact tallies.',
+    );
+    const partition = recordPartition(generation);
+    const row = await counter(ctx.db, partition);
+    const counts = row ? (JSON.parse(row.value) as PlanCounts) : emptyPlanCounts(false);
+    invariant(
+      !counts.scopeBlocked,
+      'WORK_STALE',
+      'This planning tally is blocked. Repair its partition before using it.',
+    );
+    const after = counts.scopeThrough === undefined ? '' : counts.scopeThrough;
+    if (after === null || after !== args.after) return { after, counted: 0, replayed: true };
+    const page = await ctx.db
+      .query(await planningRecordTable(ctx, partition))
+      .withIndex('by_generation_and_collection_and_key', q =>
+        q.eq('generationId', partition).eq('collection', 'planningSearch').gt('key', after),
+      )
+      .paginate({ cursor: null, numItems: 50, maximumRowsRead: 50, maximumBytesRead: 256 * 1024 });
+    const deltas = new Map<RollupScope, RollupCounts>();
+    for (const root of page.page) {
+      const fact = facts(root);
+      invariant(
+        fact?.kind !== 'issue' || fact.member,
+        'WORK_STALE',
+        'A planning root is unreadable. Exact scope preparation stopped.',
+      );
+      for (const [key, delta] of rollupMembershipChanges(null, fact?.member ?? null)) {
+        let counts = deltas.get(key);
+        if (!counts) deltas.set(key, (counts = emptyRollupCounts()));
+        addRollupCounts(counts, delta);
+      }
+    }
+    invariant(
+      await applyRollupDeltas(ctx.db, { projectId: args.projectId, partition }, deltas),
+      'WORK_STALE',
+      'The planning tally changed during preparation. Nothing was published.',
+    );
+    const last = page.page.at(-1)?.key;
+    invariant(
+      page.isDone || (last && last > after),
+      'WORK_STALE',
+      'The bounded tally page could not advance. No cursor was published.',
+    );
+    counts.scopeThrough = page.isDone ? null : last!;
+    const value = JSON.stringify(counts);
+    if (row) await ctx.db.patch(row._id, { value });
+    else
+      await ctx.db.insert('projectWorkDataRecords', { ...planCountsBirth(args.projectId, partition), value });
+    return { after: counts.scopeThrough, counted: page.page.length, replayed: false };
   },
 });
 

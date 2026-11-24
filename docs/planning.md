@@ -136,6 +136,8 @@ body retains every annotation, including dates that have been checked off.
 
 ### Status roll-up (design; not yet active)
 
+New Plan partitions maintain exact direct Item membership counts for parents and Initiatives. Counts include hidden Items and exclude Archived and Deleted Items; a move updates the old and new scopes together. Older partitions report unknown child coverage until an explicit bounded preparation finishes. Partial counts never authorize automatic status changes.
+
 - **Start.** A Lane start moves its unpinned Item to In progress. An In progress descendant moves every unpinned
   Planned ancestor Item and the applicable Planned Initiatives to In progress. Completed work is also evidence
   of starting when there is still open work in the scope. Proposed Items still require planning; a Proposed or

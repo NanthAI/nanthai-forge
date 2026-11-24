@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { rollupContribution, rollupDecision } from '../dist/planning-rollup.js';
+import { rollupMembershipChanges } from '../dist/planning-rollup-membership.js';
 import { purgedIndexValue } from '../dist/work-planning-purge.js';
 import { resolvePlanningPut } from '../dist/work-planning-put.js';
 import { planningItemSchema } from '../dist/work-planning-types.js';
@@ -89,6 +90,22 @@ test('turning roll-up off leaves parents and Initiatives alone while own Lane st
   assert.equal(decide(item({ work: 'active' }), empty, false).status, 'in-progress');
   assert.equal(decide(item({ status: 'in-progress', work: 'completed' }), empty, false).status, 'closed');
   assert.equal(decide(item({ statusPin: pin, work: 'active' }), empty, false), null);
+});
+
+test('moving an active member between parents and Initiatives takes it out of both old scopes and adds it once to both new ones', () => {
+  const before = item({ status: 'in-progress', parentId: 'old-parent', initiativeId: 'old-group' });
+  const after = { ...before, parentId: 'new-parent', initiativeId: 'new-group' };
+  const changes = rollupMembershipChanges(before, after);
+  assert.deepEqual([...changes.keys()].sort(), [
+    'initiative:new-group',
+    'initiative:old-group',
+    'parent:new-parent',
+    'parent:old-parent',
+  ]);
+  assert.equal(totals(rollupContribution(before.status), changes.get('parent:old-parent')).total, 0);
+  assert.equal(decide(item(), changes.get('parent:new-parent')).status, 'in-progress');
+  assert.equal(decide(initiative(), changes.get('initiative:new-group')).status, 'in-progress');
+  assert.equal(rollupMembershipChanges(before, before).size, 0, 'a replay does not dirty any scope');
 });
 
 test('a retained pin survives an unrelated edit and is erased when the record is purged', () => {

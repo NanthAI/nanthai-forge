@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // The planning counter's row and its in-transaction writer (Item 3fa3187d; read and backfill: projectPlanCounts.ts).
-// Imported by projectWorkRecordWriter.ts, so it depends on nothing but types.
+// Imported by projectWorkRecordWriter.ts; keep dependencies below the work writer to avoid a cycle.
 import type { Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
+import type { PlanningItem } from '../src/work-planning-types';
+import type { RollupCounts } from '../src/planning-rollup';
+import {
+  addRollupCounts,
+  emptyRollupCounts,
+  rollupMembershipChanges,
+  type RollupScope,
+} from '../src/planning-rollup-membership';
+import { applyRollupDeltas, readRollupScope } from './projectPlanRollupStore';
 
 export const PLAN_COUNTS = '_workStorePlanCounts';
 const KEY = 'counts';
@@ -28,6 +37,10 @@ export type PlanCounts = {
   g?: Record<string, number[]>;
   /** Version 2: grouped Issues kept in no `g` entry once `g` held PLAN_GROUPS entries. Visitors never count them. */
   x?: number[];
+  /** Exact direct scope tallies: absent on older partitions, key through the imported prefix, null when ready. */
+  scopeThrough?: string | null;
+  /** A bad delta invalidates automation, not the source Item write. Only an explicit repair can clear it. */
+  scopeBlocked?: true;
 };
 /** At most this many `g` entries (each about 50 to 90 bytes); later groups go to `x`, so the row stays bounded. */
 export const PLAN_GROUPS = 100;
@@ -46,6 +59,7 @@ export const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 type Root = {
   collection: string;
+  projectId: Id<'hostedProjects'>;
   key?: string;
   generationId: Id<'projectWorkGenerations'>;
   value: string;
@@ -64,17 +78,21 @@ function rootWords(root: Root | null) {
     }
   return { key: root.key, kind, status };
 }
-/** An Issue root's visibility group (PlanCounts.g); null for none. The fields publicPlanVisible reads. */
-function rootGroup(root: Root) {
-  let row: { hidden?: unknown; initiativeId?: unknown; parentId?: unknown };
+type ScopeMember = Pick<PlanningItem, 'status' | 'parentId' | 'initiativeId'>;
+type ScopeFields = Pick<PlanningItem, 'parentId' | 'initiativeId' | 'hidden'>;
+function scopeFields(root: Root): ScopeFields | null {
   try {
-    row = JSON.parse(root.value) as typeof row;
+    return JSON.parse(root.value) as ScopeFields;
   } catch {
-    return 'h'; // An unreadable root is never counted as public.
+    return null;
   }
-  if (row.hidden) return 'h';
-  const initiative = row.initiativeId ? String(row.initiativeId) : '';
-  const parent = row.parentId ? String(row.parentId) : '';
+}
+
+/** An Issue root's visibility group (PlanCounts.g); null for none. The fields publicPlanVisible reads. */
+function rootGroup(row: ScopeFields | null) {
+  if (!row || row.hidden) return 'h'; // An unreadable root is never counted as public.
+  const initiative = row.initiativeId || '';
+  const parent = row.parentId || '';
   return initiative || parent ? `${initiative}|${parent}` : null;
 }
 /** A counted root's kind, status and (Issues) visibility group; null for Archived and Deleted roots, which no count
@@ -88,12 +106,12 @@ export function planRootFacts(root: Root | null) {
   )
     return null;
   const kind = words.kind as Kind;
-  return {
-    key: words.key,
-    kind,
-    status: words.status as Status,
-    group: kind === 'issue' ? rootGroup(root!) : null,
-  };
+  const status = words.status as Status;
+  const fields = kind === 'issue' ? scopeFields(root!) : null;
+  const member: ScopeMember | null = fields
+    ? { status, parentId: fields.parentId, initiativeId: fields.initiativeId }
+    : null;
+  return { key: words.key, kind, status, group: kind === 'issue' ? rootGroup(fields) : null, member };
 }
 /** Move one Issue in or out of its group. An Issue joins its group's entry, or `x` when the entry is missing and
  * either `g` is full or `x` holds any Issue: no entry is created while `x` is in use, so an Issue that went to `x` can
@@ -137,6 +155,27 @@ export const planCounter = (db: QueryCtx['db'], partition: Id<'projectWorkGenera
     )
     .unique();
 
+/** Internal child-existence guard: exact across hidden and settled children; shelved Items do not count.
+ * Supply the coverage header when the caller already holds it so the guard costs one point read. */
+export async function exactChildTally(
+  db: QueryCtx['db'],
+  partition: Id<'projectWorkGenerations'>,
+  parentId: string,
+  counts?: PlanCounts,
+) {
+  if (!counts) {
+    const row = await planCounter(db, partition);
+    if (!row) return null;
+    counts = JSON.parse(row.value) as PlanCounts;
+  }
+  return readRollupScope(
+    db,
+    partition,
+    `parent:${parentId}`,
+    counts.scopeThrough === null && !counts.scopeBlocked,
+  );
+}
+
 /** An empty map entry means zero only when every counted Issue kept its Initiative membership. */
 export async function coveredInitiativeTallies(db: QueryCtx['db'], partition: Id<'projectWorkGenerations'>) {
   const row = await planCounter(db, partition);
@@ -164,7 +203,7 @@ export const planCountsBirth = (
   key: KEY,
   parent: '',
   position: 0,
-  value: JSON.stringify(emptyPlanCounts(true)),
+  value: JSON.stringify({ ...emptyPlanCounts(true), scopeThrough: null }),
 });
 
 type Change = {
@@ -178,20 +217,35 @@ type Change = {
 /** Collects status and visibility-group moves in one transaction; `flush` reads and writes each touched counter
  * once, and only when a count moved (a title or body edit costs nothing). A partition with no counter row is left to its backfill. */
 export function planCountsWriter(db: MutationCtx['db']) {
-  const changes = new Map<Id<'projectWorkGenerations'>, Change[]>();
+  type Deltas = Map<RollupScope, RollupCounts>;
+  const changes = new Map<
+    Id<'projectWorkGenerations'>,
+    {
+      projectId: Id<'hostedProjects'>;
+      totals: Change[];
+      scoped: { key: string; changes: Deltas | null }[];
+    }
+  >();
   return {
     change(before: Root | null, after: Root | null) {
       const was = planRootFacts(before),
         now = planRootFacts(after);
-      if (was && now && was.kind === now.kind && was.status === now.status && was.group === now.group) return;
-      const list = (generationId: Id<'projectWorkGenerations'>) => {
-        let entries = changes.get(generationId);
-        if (!entries) changes.set(generationId, (entries = []));
+      const scopeDeltas = rollupMembershipChanges(was?.member ?? null, now?.member ?? null);
+      const badScope = (was?.kind === 'issue' && !was.member) || (now?.kind === 'issue' && !now.member);
+      const entriesFor = (root: Root) => {
+        let entries = changes.get(root.generationId);
+        if (!entries)
+          changes.set(root.generationId, (entries = { projectId: root.projectId, totals: [], scoped: [] }));
         return entries;
       };
-      if (was) list(before!.generationId).push({ ...was, sign: -1, closing: false });
+      if (scopeDeltas.size || badScope) {
+        const root = (after ?? before)!;
+        entriesFor(root).scoped.push({ key: root.key!, changes: badScope ? null : scopeDeltas });
+      }
+      if (was && now && was.kind === now.kind && was.status === now.status && was.group === now.group) return;
+      if (was) entriesFor(before!).totals.push({ ...was, sign: -1, closing: false });
       if (now)
-        list(after!.generationId).push({
+        entriesFor(after!).totals.push({
           ...now,
           sign: 1,
           closing:
@@ -202,13 +256,31 @@ export function planCountsWriter(db: MutationCtx['db']) {
         });
     },
     async flush() {
-      for (const [partition, list] of changes) {
+      for (const [partition, { projectId, totals, scoped }] of changes) {
         const row = await planCounter(db, partition);
         if (!row) continue;
         const counts = JSON.parse(row.value) as PlanCounts;
+        if (scoped.length && counts.scopeThrough !== undefined && !counts.scopeBlocked) {
+          const deltas: Deltas = new Map();
+          for (const { key, changes: moves } of scoped) {
+            if (counts.scopeThrough !== null && key > counts.scopeThrough) continue;
+            if (!moves) {
+              counts.scopeBlocked = true;
+              break;
+            }
+            for (const [scope, move] of moves) {
+              let delta = deltas.get(scope);
+              if (!delta) deltas.set(scope, (delta = emptyRollupCounts()));
+              addRollupCounts(delta, move);
+            }
+          }
+          if (!counts.scopeBlocked && !(await applyRollupDeltas(db, { projectId, partition }, deltas)))
+            counts.scopeBlocked = true;
+        }
+        if (!totals.length && !counts.scopeBlocked) continue;
         const today = utcDay(Date.now());
-        if (counts.day !== today) Object.assign(counts, { day: today, closedToday: 0 });
-        for (const change of list) {
+        if (totals.length && counts.day !== today) Object.assign(counts, { day: today, closedToday: 0 });
+        for (const change of totals) {
           if (change.closing) counts.closedToday++;
           // Mid-backfill, a root past the cursor is counted when the backfill reaches it, with its status then.
           if (!counts.done && (counts.after === null || change.key > counts.after)) continue;
