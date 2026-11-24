@@ -567,6 +567,127 @@ test('a1e71a48: session-directed and ended-session questions stay out of actiona
   );
 });
 
+const RAW = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\bnforge\b/i;
+const uuid = n => `5d1c7a0e-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+test('J08: a card is worded for a person, never from the board text: no raw id or agent command in any Needs you notice or FYI row', () => {
+  const fyiModule = import(moduleUrl('../web/src/app/needs/fyi.ts'));
+  return fyiModule.then(({ fyiView }) => {
+    const input = {
+      ...read([], []),
+      notices: [
+        {
+          kind: 'reverted',
+          id: uuid(1),
+          summary: `Reverted receipt ${uuid(2)} by receipt ${uuid(3)}: the change is off main.`,
+          next: `nforge agent ROOT start --reopen '{"laneId":"${uuid(4)}"}'`,
+        },
+        {
+          kind: 'needs-fix',
+          id: uuid(5),
+          summary: `Main audit ${uuid(6)} failed.`,
+          next: `nforge agent ROOT start`,
+        },
+        {
+          kind: 'mirror',
+          id: 'mirror',
+          summary: 'The mirror stopped.',
+          next: 'run nforge github resume demo',
+        },
+        { kind: 'deploy', id: 'deploy:site', summary: 'The deploy failed.', next: null },
+        {
+          kind: 'reverted',
+          id: uuid(7),
+          summary: `Reverted receipt ${uuid(8)} by receipt ${uuid(9)}: the change is off main.`,
+          next: null,
+          taken: {
+            laneId: uuid(10),
+            title: 'Retry the upload',
+            by: 'sample-two',
+            agent: 'quiet-otter',
+            at: 1000,
+          },
+        },
+      ],
+      tookOut: [{ id: uuid(11), laneId: uuid(12), title: uuid(13), by: 'sample-one', agent: null, at: 2000 }],
+    };
+    const view = needsView(input, 5000);
+    for (const row of view.notices) {
+      assert.doesNotMatch(row.head, RAW, `${row.kind} head`);
+      assert.doesNotMatch(row.next ?? '', RAW, `${row.kind} next`);
+    }
+    assert.equal(
+      view.notices[0].head,
+      'A change was taken out of main.',
+      'a bare summary falls back to plain words',
+    );
+    assert.equal(view.notices[4].head, 'sample-two/quiet-otter took “Retry the upload” out of main.');
+    const fyi = fyiView(
+      {
+        owner: true,
+        state: { clearedAt: null, clearedSequence: null, dismissed: [] },
+        landings: [],
+        landingsMore: false,
+        broke: [],
+        settings: [],
+        access: [],
+        messages: [],
+        messagesMore: false,
+      },
+      [],
+      5000,
+      false,
+      view.tookOut,
+    );
+    assert.equal(fyi.rows.length, 1);
+    assert.equal(
+      fyi.rows[0].title,
+      'You took a change out of main.',
+      'a title that is only an id is never drawn',
+    );
+    assert.deepEqual(fyi.rows[0].taken, { laneId: uuid(12), intentId: uuid(11), title: uuid(13) });
+    for (const row of fyi.rows) assert.doesNotMatch(`${row.title} ${row.fact}`, RAW);
+    assert.equal(view.count, 5, 'the five Needs you notices count; the FYI row does not');
+  });
+});
+
+test('J08: only taken-out offers waiting means nothing is held, and the sentence says so', () => {
+  const offer = {
+    kind: 'reverted',
+    id: uuid(1),
+    summary: '',
+    next: null,
+    taken: { laneId: uuid(2), title: null, by: 'sample-two', agent: null, at: 1 },
+  };
+  const one = needsView({ ...read([], []), notices: [offer] });
+  assert.equal(one.count, 1);
+  assert.equal(needsSentence(one).bold, 'A change you own was taken out of main.');
+  assert.equal(one.notices[0].head, '@sample-two took a change out of main.');
+  const mixed = needsView({ ...read([held('l1', 'review', 5)], []), notices: [offer] });
+  assert.equal(needsSentence(mixed).bold, '1 thing holds work until you decide.', 'the offer is not a hold');
+});
+
+test('J08: Bring it back sends the lifecycle request the CLI sends for a reopen, so the browser adds no second path', async () => {
+  const { reopenRequest } = await import(moduleUrl('../web/src/app/needs/taken-actions.ts'));
+  const { hostedLifecycleRequestSchema } = await import(moduleUrl('../src/hosted-lifecycle.ts'));
+  const request = reopenRequest(uuid(1), {
+    head: 'a'.repeat(64),
+    version: 3,
+    sourceVersion: 4,
+    lifecycleVersion: 5,
+    authority: { epoch: 2 },
+  });
+  const parsed = hostedLifecycleRequestSchema.parse(request);
+  assert.equal(parsed.action, 'reopen');
+  assert.equal(parsed.authorityEpoch, 2);
+  assert.deepEqual(parsed.target.expected, {
+    head: 'a'.repeat(64),
+    version: 3,
+    sourceVersion: 4,
+    lifecycleVersion: 5,
+  });
+});
+
 test('sealed secrets that wait on the reader (Item 41a0df87) count in the shell and on Needs me, as one row that points at Secrets', () => {
   const input = {
     held: [],

@@ -9,6 +9,8 @@ import { A } from '../frames';
 import { Capped } from './Capped';
 import { focusHref, fyiSum, sinceText, type Area, type FyiRow, type FyiState, type fyiView } from './fyi';
 import type { Dismiss } from './NeedsMe';
+import { TakenKeys } from './TakenKeys';
+import type { TakenActions } from './taken-actions';
 
 /** FYI rows shown before "Show more". */
 const FYI_CAP = 6;
@@ -38,6 +40,7 @@ export function Fyi({
   announce,
   href,
   heldHref,
+  taken,
   all = false,
 }: {
   handle: ReactNode;
@@ -49,6 +52,8 @@ export function Fyi({
   href: (to: FyiRow['links'][number]['to']) => string;
   /** The Held page's link (Needs me); absent on the Held page itself. */
   heldHref?: string;
+  /** Bring a taken-out Lane back or leave it out (J08); absent on the Held page. */
+  taken?: TakenActions;
   /** The Held page: every row, not the first few. */
   all?: boolean;
 }) {
@@ -162,27 +167,40 @@ export function Fyi({
                         {link.label}
                       </A>
                     ))}
+                    {row.taken ? (
+                      <TakenKeys
+                        target={row.taken}
+                        title={row.taken.title}
+                        actions={taken}
+                        announce={announce}
+                        quiet
+                      />
+                    ) : null}
                   </span>
-                  <button
-                    type="button"
-                    className="fyi-x"
-                    aria-label={`Dismiss: ${row.title}`}
-                    title="Dismiss"
-                    disabled={busy}
-                    onClick={() => void send({ keys: [row.key] }, 'Dismissed. It shows again if it changes.')}
-                  >
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 16 16"
-                      aria-hidden="true"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
+                  {row.taken ? null : (
+                    <button
+                      type="button"
+                      className="fyi-x"
+                      aria-label={`Dismiss: ${row.title}`}
+                      title="Dismiss"
+                      disabled={busy}
+                      onClick={() =>
+                        void send({ keys: [row.key] }, 'Dismissed. It shows again if it changes.')
+                      }
                     >
-                      <path d="M4 4l8 8M12 4l-8 8" />
-                    </svg>
-                  </button>
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 16 16"
+                        aria-hidden="true"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                      >
+                        <path d="M4 4l8 8M12 4l-8 8" />
+                      </svg>
+                    </button>
+                  )}
                 </Row>
               )}
             </Capped>

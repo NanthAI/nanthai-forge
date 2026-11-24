@@ -100,7 +100,11 @@ export type Notice = {
   id: string;
   summary: string;
   next: string | null;
+  /** A revert somebody ran, offered to the Lane's owner (J08): never a hold on work. */
+  taken?: Taken;
 };
+/** Which Lane was taken out of main, by whom and when (convex/projectHostedRevertNotice.ts); the card is worded from it. */
+export type Taken = { laneId: string; title: string | null; by: string; agent: string | null; at: number };
 export type NeedsRead = {
   held: readonly HeldLane[];
   more: number;
@@ -115,6 +119,8 @@ export type NeedsRead = {
   noticesMore?: true;
   /** What waits on a person in sealed secrets (convex/projectNeedsMe.ts `secrets`); write members only. */
   secrets?: number;
+  /** Reverts the reader ran themselves (J08): FYI, never counted. `id` is the reverted Intent. */
+  tookOut?: readonly (Taken & { id: string })[];
 };
 
 export const needsRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, NeedsRead>(

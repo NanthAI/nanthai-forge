@@ -8,8 +8,8 @@
 // shows again. Nothing here holds work: approvals and questions are never FYI rows. Pure: tests/app-needs-fyi.test.mjs.
 import type { StateWord } from '../../ds';
 import type { SetupPreferences } from '../start/setup-model';
-import type { NowRow } from './model';
-import { whoOf } from './model';
+import type { NowRow, TookOutRow } from './model';
+import { takenHead, whoOf } from './model';
 
 export type FyiState = { clearedAt: number | null; clearedSequence: number | null; dismissed: string[] };
 export type FyiRead = {
@@ -83,6 +83,8 @@ export type FyiRow = {
   who: string | null;
   fact: string;
   links: Link[];
+  /** A revert the reader ran: its Lane can be brought back, or left out (J08). Such a row has no plain dismiss. */
+  taken?: { laneId: string; intentId: string; title: string | null };
 };
 export type FyiView = {
   rows: FyiRow[];
@@ -153,6 +155,23 @@ function heldRows(held: readonly NowRow[]): FyiRow[] {
           { label: 'Open the Lane', to: { place: 'lanes', rest: row.laneId } },
         ]
       : [],
+  }));
+}
+
+/** Reverts the reader ran, as FYI rows: the version is the time, so a later revert of the same Item shows again. */
+function tookRows(took: readonly TookOutRow[]): FyiRow[] {
+  return took.map(row => ({
+    key: `taken:${row.id}@${row.at}`,
+    at: row.at,
+    area: 'code',
+    event: false,
+    word: 'Done',
+    tag: 'Taken out',
+    title: takenHead(row, true),
+    who: null,
+    fact: 'its Lane keeps its saved work',
+    links: [{ label: 'Open the Lane', to: { place: 'lanes', rest: row.laneId } }],
+    taken: { laneId: row.laneId, intentId: row.id, title: row.title },
   }));
 }
 
@@ -260,6 +279,7 @@ export function fyiView(
   now: number,
   /** The Held page lists every Lane held now, whatever the reader dismissed or cleared on Needs me. */
   holdsAlways = false,
+  took: readonly TookOutRow[] = [],
 ): FyiView {
   const cleared = read.state.clearedAt;
   const from = cleared ?? startOfDay(now);
@@ -267,9 +287,11 @@ export function fyiView(
   const holds = heldRows(held);
   const kept = (row: FyiRow) =>
     !hidden.has(row.key) && (row.event ? row.at >= from : cleared === null || row.at > cleared);
-  const rows = [...(holdsAlways ? holds : holds.filter(kept)), ...readRows(read).filter(kept)].sort(
-    (a, b) => b.at - a.at,
-  );
+  const rows = [
+    ...(holdsAlways ? holds : holds.filter(kept)),
+    ...readRows(read).filter(kept),
+    ...tookRows(took).filter(kept),
+  ].sort((a, b) => b.at - a.at);
   return {
     rows,
     since: { at: from, cleared: cleared !== null },

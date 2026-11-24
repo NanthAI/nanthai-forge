@@ -429,6 +429,53 @@ const noticesRead: NeedsRead = {
     },
   ],
 };
+// J08: `?data=taken` is the project after the owner's walkthrough. Someone else took the viewer's Lane out of main (an
+// offer in Needs you); the viewer took another out themselves (an FYI row); a main audit's revert and fix-needed notices
+// still carry receipt ids and agent commands in their summaries, which no card may show.
+const takenRead: NeedsRead = {
+  ...baseRead,
+  held: [],
+  asks: [],
+  parked: [],
+  approvals: JSON.stringify({ requests: [], complete: true }),
+  notices: [
+    {
+      kind: 'reverted',
+      id: uuid(710),
+      summary: `Reverted receipt ${uuid(711)} by receipt ${uuid(712)}: the change is off main. Its Lane keeps the saved head.`,
+      next: null,
+      taken: {
+        laneId: uuid(713),
+        title: 'Stream parser: handle split UTF-8',
+        by: 'sample-two',
+        agent: null,
+        at: ago(14),
+      },
+    },
+    {
+      kind: 'reverted',
+      id: uuid(714),
+      summary: `Reverted receipt ${uuid(715)}: queue.test.mjs failed on main.`,
+      next: `nforge agent ROOT start '{"intentId":"${uuid(714)}"}'`,
+    },
+    {
+      kind: 'needs-fix',
+      id: uuid(716),
+      summary: `Main audit ${uuid(717)} failed. queue.test.mjs failed.`,
+      next: `nforge agent ROOT start '{"intentId":"${uuid(716)}"}'`,
+    },
+  ],
+  tookOut: [
+    {
+      id: uuid(720),
+      laneId: uuid(721),
+      title: 'Retry the upload on a dropped socket',
+      by: 'sample-one',
+      agent: null,
+      at: ago(3),
+    },
+  ],
+};
 // Incident a1e71a48: a session-directed question whose recipient session ended shows no live answer keys,
 // names who it was for with Dismiss, and a refused answer key shows the mapped error reason.
 const endedAskRead: NeedsRead = {
@@ -467,44 +514,46 @@ const read: NeedsRead =
     ? endedAskRead
     : variant === 'notices'
       ? noticesRead
-      : variant === 'conversation'
-        ? conversationRead
-        : variant === 'held-more'
-          ? extraRead
-          : worst || variant === 'towers'
-            ? worstRead
-            : calm || quiet || unavailable
-              ? {
-                  held: [],
-                  more: 0,
-                  moreIsLowerBound: false,
-                  approvals: JSON.stringify({ requests: [], complete: true }),
-                  canDecide: true,
-                  asks: [],
-                }
-              : connect
+      : variant === 'taken'
+        ? takenRead
+        : variant === 'conversation'
+          ? conversationRead
+          : variant === 'held-more'
+            ? extraRead
+            : worst || variant === 'towers'
+              ? worstRead
+              : calm || quiet || unavailable
                 ? {
                     held: [],
                     more: 0,
                     moreIsLowerBound: false,
-                    approvals: JSON.stringify({
-                      requests: [
-                        {
-                          ...approval(
-                            'setting:github-connect',
-                            'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
-                            4,
-                          ),
-                          kind: 'setting',
-                          setting: { origin: 'github-connect' },
-                        },
-                      ],
-                      complete: true,
-                    }),
+                    approvals: JSON.stringify({ requests: [], complete: true }),
                     canDecide: true,
                     asks: [],
                   }
-                : baseRead;
+                : connect
+                  ? {
+                      held: [],
+                      more: 0,
+                      moreIsLowerBound: false,
+                      approvals: JSON.stringify({
+                        requests: [
+                          {
+                            ...approval(
+                              'setting:github-connect',
+                              'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
+                              4,
+                            ),
+                            kind: 'setting',
+                            setting: { origin: 'github-connect' },
+                          },
+                        ],
+                        complete: true,
+                      }),
+                      canDecide: true,
+                      asks: [],
+                    }
+                  : baseRead;
 type Mark = LineFeed['lanes'][number];
 const moving = (n: number, stage: Mark['stage'], minutes: number, check?: string): Mark => ({
   laneId: uuid(400 + n),
@@ -748,6 +797,18 @@ function Fixture() {
         }}
         dismissAsk={async ask => void writes.push(['dismissAsk', ask.id])}
         dismiss={record('dismiss')}
+        taken={{
+          bringBack: async target => {
+            writes.push(['bringBack', target]);
+            return params.get('bringBack') === 'refused'
+              ? { ok: false, reason: 'Only the Lane’s owner or the project owner can bring it back.' }
+              : { ok: true };
+          },
+          leaveOut: async intentId => {
+            writes.push(['leaveOut', intentId]);
+            return { ok: true };
+          },
+        }}
         loose={open =>
           open ? (
             <LooseFoldView

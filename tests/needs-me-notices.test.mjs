@@ -11,6 +11,7 @@ import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
 import { acceptMirrorReceipt as accept } from './github-mirror-catchup-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const needs = await import(moduleUrl('../convex/projectNeedsMe.ts'));
+const revertNotice = await import(moduleUrl('../convex/projectHostedRevertNotice.ts'));
 const { needsCount } = await import(moduleUrl('../web/src/app/needs/count.ts'));
 const { needsView, needsSentence, heldSentence } = await import(moduleUrl('../web/src/app/needs/model.ts'));
 
@@ -113,4 +114,88 @@ test('more notices than the read lists make the Needs you count a lower bound, n
   assert.equal(view.countAtLeast, true);
   assert.match(needsSentence(view).bold, /^At least 20 things hold work/);
   assert.equal(heldSentence(view).bold, 'Nothing is held now.', 'the held-Lane read was complete');
+});
+
+/** A revert a person or agent ran (J08): the entry also names the Lane, who took it out and whose Lane it was. */
+const taken = (extra = {}) =>
+  JSON.stringify({
+    at: '2026-11-24T10:00:00.000Z',
+    state: 'reverted',
+    head: 'a'.repeat(64),
+    summary: 'Reverted receipt r1 by receipt r2: the change is off main. Its Lane keeps the saved head.',
+    undo: `nforge agent ROOT start --reopen '{"laneId":"x"}'`,
+    lane: randomUUID(),
+    title: 'Retry the upload',
+    by: 'reverter',
+    owner: 'lane-owner',
+    ...extra,
+  });
+
+test('J08: a revert goes to FYI for who ran it and to Needs you as an offer only for the Lane owner; nobody else is told', async () => {
+  const f = mirrorControlsFixture(false, 'synthetic/mirror');
+  const id = randomUUID();
+  f.patch('hostedProjects', f.projectId, { needsFix: { [id]: taken() } });
+  const asReader = actor => f.call('needs', needs.read, { projectId: f.projectId }, actor);
+  // `coordinationAccess` needs a team role for the reverter and the owner; the project owner is `owner`.
+  const own = await asReader('owner');
+  assert.equal(own.notices, undefined, 'the project owner is neither who ran it nor the Lane owner');
+  assert.equal(own.tookOut, undefined);
+  f.patch('hostedProjects', f.projectId, { owner: 'reverter' });
+  const ran = await asReader('reverter');
+  assert.equal(ran.notices, undefined, 'the one who took it out is not asked');
+  assert.deepEqual(
+    ran.tookOut.map(({ id: intent, title, by }) => [intent, title, by]),
+    [[id, 'Retry the upload', 'reverter']],
+  );
+  assert.deepEqual(needsCount(ran), { n: 0, atLeast: false }, 'an FYI row is not counted');
+  f.patch('hostedProjects', f.projectId, { owner: 'lane-owner' });
+  const theirs = await asReader('lane-owner');
+  assert.equal(theirs.tookOut, undefined);
+  assert.equal(theirs.notices.length, 1);
+  assert.equal(theirs.notices[0].taken.by, 'reverter');
+  assert.equal(theirs.notices[0].taken.laneId.length, 36);
+  assert.deepEqual(needsCount(theirs), { n: 1, atLeast: false });
+  const sentence = needsSentence(needsView(theirs));
+  assert.match(sentence.bold, /^A change you own was taken out of main\.$/, 'an offer is not a hold');
+});
+
+test('J08: Leave it out clears the card for that reader only and Bring it back for everyone; the agent-facing entry keeps its gate', async () => {
+  const f = mirrorControlsFixture(false, 'synthetic/mirror');
+  const id = randomUUID();
+  f.patch('hostedProjects', f.projectId, { owner: 'lane-owner', needsFix: { [id]: taken() } });
+  const asReader = actor => f.call('needs', needs.read, { projectId: f.projectId }, actor);
+  const answer = (actor, action) =>
+    f.call('resolve', revertNotice.resolveTaken, { projectId: f.projectId, intentId: id, action }, actor);
+  await answer('lane-owner', 'left');
+  assert.equal((await asReader('lane-owner')).notices, undefined, 'left out: gone for them');
+  assert.equal((await asReader('lane-owner')).tookOut, undefined);
+  const stored = JSON.parse(f.tables.hostedProjects.get(f.projectId).needsFix[id]);
+  assert.deepEqual(stored.left, ['lane-owner']);
+  assert.equal(stored.state, 'reverted', 'the fix gate and the agent text are untouched');
+  assert.match(stored.undo, /^nforge agent ROOT start --reopen/);
+  f.patch('hostedProjects', f.projectId, {
+    needsFix: { [id]: taken({ left: [], back: false }) },
+  });
+  await answer('lane-owner', 'back');
+  assert.equal((await asReader('lane-owner')).notices, undefined, 'brought back: gone');
+  assert.equal(
+    JSON.parse(f.tables.hostedProjects.get(f.projectId).needsFix[id]).state,
+    'reverted',
+    'the entry stays so the re-land still runs the full gate',
+  );
+  await assert.rejects(
+    answer('lane-owner', 'left').then(() => answer('nobody', 'back')),
+    /./,
+    'a stranger cannot answer',
+  );
+});
+
+test('J08: a main audit’s revert and an older entry keep the shared-state notice for the team', async () => {
+  const f = mirrorControlsFixture(false, 'synthetic/mirror');
+  const id = randomUUID();
+  f.patch('hostedProjects', f.projectId, { needsFix: { [id]: fix('reverted', 'Reverted receipt r1.') } });
+  const reply = await read(f);
+  assert.equal(reply.notices.length, 1);
+  assert.equal(reply.notices[0].taken, undefined);
+  assert.equal(reply.tookOut, undefined);
 });

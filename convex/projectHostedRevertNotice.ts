@@ -1,22 +1,30 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
+import { mutation } from './cliServer';
 import { internalMutation, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { acceptancePage, acceptanceRow } from './projectHostedAcceptanceStore';
 import { independentIntentItem, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { postSystemLaneNote } from './projectBoardSystem';
 import { postIntentLandingNote } from './projectIntentLandingNotes';
+import { accessibleProject } from './projectAuthority';
+import { requireMemberAuthority } from './projectLaneAuthority';
+import { withoutRawId } from './projectNeedsMe';
+import { report } from './errors';
+import { invariant } from '../src/errors';
 import { hostedAcceptanceSchema, type HostedAcceptance } from '../src/hosted-acceptance';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import {
   REVERT_NOTICE_FANOUT,
+  REVERT_NOTICE_LEFT,
   reopenCommand,
   revertNoticeId,
   revertNoticeSummary,
   revertNoticeText,
+  takenOutOf,
 } from '../src/hosted-revert-notice';
 
 type Revert = {
@@ -27,6 +35,8 @@ type Revert = {
   revertOf: string;
   actor: string;
   agent?: string;
+  /** Forge's own main-audit recovery ran this revert: its notice holds work, so it keeps the shared shape. */
+  auto?: true;
 };
 
 /**
@@ -60,6 +70,7 @@ export async function noticeRevert(ctx: MutationCtx, input: Revert) {
     index: 0,
   });
   const lanes: string[] = [];
+  let first: { owner: string | null; title: string | null } | undefined;
   let notes = 0;
   for (const value of page ? validateComposePage(JSON.parse(page.value)).entries : []) {
     if (lanes.length >= REVERT_NOTICE_FANOUT) break;
@@ -71,6 +82,10 @@ export async function noticeRevert(ctx: MutationCtx, input: Revert) {
       .query('projectHostedOverlapLanes')
       .withIndex('by_project_and_lane', q => q.eq('projectId', input.projectId).eq('laneId', laneId))
       .unique();
+    first ??= {
+      owner: row ? (row.holderActor ?? row.actor) : null,
+      title: row ? withoutRawId(row.intent) || null : null,
+    };
     if (row?.landed?.receiptId === input.revertOf && !row.landed.revertedBy)
       await ctx.db.patch(row._id, {
         landed: { ...row.landed, revertedBy: { receiptId: input.receiptId, at: revert.at } },
@@ -88,7 +103,10 @@ export async function noticeRevert(ctx: MutationCtx, input: Revert) {
     });
     if (posted === 'posted') notes++;
   }
-  const { needsFix, itemNoteIntentId } = await markIntent(ctx, project, original, revert, lanes[0]);
+  const { needsFix, itemNoteIntentId } = await markIntent(ctx, project, original, revert, lanes[0], {
+    ...(input.auto ? {} : { by: input.actor, ...(input.agent ? { agent: input.agent } : {}) }),
+    ...first,
+  });
   // Issue 3a733ee8: the reverted Intent's Item gets a system note matching its landing note.
   if (itemNoteIntentId)
     await postIntentLandingNote(ctx, input.projectId, {
@@ -120,6 +138,8 @@ async function markIntent(
   original: HostedAcceptance,
   revert: HostedAcceptance,
   laneId: string | undefined,
+  /** Who took it out and whose Lane it was, for the web's card (absent for a main audit's own revert). */
+  told: { by?: string; agent?: string; owner?: string | null; title?: string | null },
 ) {
   const key = { projectId: project._id, actor: project.owner };
   const candidate = await readHostedRecord(ctx, { ...key, kind: 'candidate', key: original.candidate.id });
@@ -163,6 +183,15 @@ async function markIntent(
         head: notice.head,
         summary: notice.summary.slice(0, 240),
         undo: notice.undo,
+        ...(told.by && laneId
+          ? {
+              lane: laneId,
+              by: told.by,
+              ...(told.agent ? { agent: told.agent } : {}),
+              ...(told.owner ? { owner: told.owner } : {}),
+              ...(told.title ? { title: told.title.slice(0, 120) } : {}),
+            }
+          : {}),
       }),
     },
   });
@@ -176,10 +205,52 @@ export const accepted = internalMutation({
     revertOf: v.string(),
     actor: v.string(),
     agent: v.optional(v.string()),
+    auto: v.optional(v.literal(true)),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
     await noticeRevert(ctx, input);
     return null;
+  },
+});
+
+/**
+ * The web card's two answers to a revert (J08): `left` is the reader leaving the change out (the card goes for them),
+ * `back` is the Lane reopened from the card (the card goes for everyone). Both only mark the project's notice entry;
+ * its fix gate and the agent-facing text stay as they are. One project row read and write, on a click.
+ */
+export const resolveTaken = mutation({
+  args: {
+    projectId: v.id('hostedProjects'),
+    intentId: v.string(),
+    action: v.union(v.literal('left'), v.literal('back')),
+  },
+  returns: v.null(),
+  handler: async (ctx, { projectId, intentId, action }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to answer this.');
+      const project = await accessibleProject(ctx, projectId, user.subject);
+      const stored = project.needsFix?.[intentId];
+      const entry = stored ? takenOutOf(JSON.parse(stored)) : null;
+      invariant(entry, 'WORK_STALE', 'This change is no longer waiting for an answer.');
+      if (action === 'back') requireMemberAuthority(project, entry.owner ?? entry.by, user.subject, 'Lane');
+      const fix = JSON.parse(stored!) as Record<string, unknown>;
+      const next =
+        action === 'back'
+          ? { ...fix, back: true }
+          : {
+              ...fix,
+              left: [...entry.left.filter(id => id !== user.subject), user.subject].slice(
+                -REVERT_NOTICE_LEFT,
+              ),
+            };
+      await ctx.db.patch(projectId, {
+        needsFix: { ...project.needsFix, [intentId]: canonicalPayload(next) },
+      });
+      return null;
+    } catch (error) {
+      return report(error);
+    }
   },
 });

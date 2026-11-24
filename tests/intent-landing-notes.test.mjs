@@ -272,6 +272,12 @@ test('a revert posts a matching reverted note on the reverted Item, once', async
   assert.equal(reverted[0].revertOf, receipt.id);
   assert.equal(reverted[0].receiptId, final.acceptance.receiptId);
   assert.deepEqual(reverted[0].laneIds, originalNote.laneIds);
+  // J08: the project's notice also names the Lane and who took it out, so the web can word its card; the summary and
+  // undo the agents read are the same text as before.
+  const entry = Object.values(f.tables.hostedProjects.get(f.projectId).needsFix ?? {}).map(JSON.parse)[0];
+  assert.equal(entry?.by, 'owner');
+  assert.equal(entry?.lane, originalNote.laneIds[0]);
+  assert.match(entry?.summary ?? '', /^Reverted receipt /);
   const text = landingNoteText(reverted[0]);
   assert.match(text, /^Reverted: receipt /);
   assert(text.includes(receipt.id.slice(0, 8)));

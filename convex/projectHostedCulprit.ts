@@ -1856,6 +1856,7 @@ async function revertedNotices(
       receiptId: receipt.id,
       revertOf: target.id,
       actor: project.owner,
+      auto: true,
     });
 }
 /** Called from the existing receipt-completion transaction, never a status read. */

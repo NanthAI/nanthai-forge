@@ -813,7 +813,11 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
             `${tag} is a Needs you row`,
           );
         const reverted = rows.filter({ hasText: 'Reverted receipt 3f2a9c10' });
-        assert.match(await reverted.locator('.why').textContent(), /^Next: nforge agent ROOT start/);
+        assert.equal(
+          await reverted.locator('.why').count(),
+          0,
+          'J08: an agent command is never drawn on a card; the board note and CLI keep it',
+        );
         assert.match(
           await reverted.getByRole('link', { name: 'Open the Item' }).getAttribute('href'),
           /\/plan\//,
@@ -832,6 +836,100 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
           await page.evaluate(() => window.intervals),
           0,
           'no repeating timer: idle costs nothing',
+        );
+      },
+    );
+
+    await t.test(
+      'J08: a change taken out of main is FYI for who took it and an offer for the Lane owner; no card shows a raw id or an agent command',
+      async t => {
+        const raw = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\bnforge\b/i;
+        for (const viewport of [DESK, PHONE])
+          for (const theme of ['dark', 'light']) {
+            const label = `${viewport.width} ${theme}`;
+            const page = await open(t, viewport, 'taken', theme);
+            const needs = region(page, 'Needs you');
+            const fyi = region(page, 'FYI');
+            const shell = await page.locator('header.top a.needs .cnt').textContent();
+            assert.equal(
+              shell,
+              '3',
+              `${label}: the offer and the two audit notices count; the FYI row does not`,
+            );
+            // The offer says who took which Lane out and when, with two answers; nothing is held for it.
+            const offer = needs.locator('.dec', { hasText: 'Stream parser: handle split UTF-8' });
+            assert.match(
+              await offer.locator('h3').textContent(),
+              /^@sample-two took “Stream parser: handle split UTF-8” out of main\.$/,
+              label,
+            );
+            assert.match(await offer.locator('.dtop').textContent(), /Taken out of main.*14 min ago/, label);
+            assert.deepEqual(
+              await offer.getByRole('button').allTextContents(),
+              ['Bring it back', 'Leave it out'],
+              label,
+            );
+            assert.match(
+              await offer.getByRole('link', { name: 'Open the Lane' }).getAttribute('href'),
+              /\/lanes\//,
+              label,
+            );
+            assert.equal(
+              await page.locator('b', { hasText: 'until you decide' }).first().textContent(),
+              '2 things hold work until you decide.',
+              `${label}: the headline counts the two holds, not the offer`,
+            );
+            // The reader's own revert is an FYI row, never a Needs you card.
+            assert.equal(await needs.getByText('Retry the upload on a dropped socket').count(), 0, label);
+            const own = fyi.locator('.fyi-row', { hasText: 'Retry the upload on a dropped socket' });
+            assert.match(
+              await own.locator('.ttl').textContent(),
+              /You took “Retry the upload on a dropped socket” out of main\./,
+              label,
+            );
+            assert.deepEqual(
+              await own.getByRole('button').allTextContents(),
+              ['Bring it back', 'Leave it out'],
+              label,
+            );
+            assert.equal(await own.getByRole('button', { name: /^Dismiss/ }).count(), 0, label);
+            // J08 finding 3: neither region draws a raw id or an agent's command.
+            for (const [name, area] of [
+              ['Needs you', needs],
+              ['FYI', fyi],
+            ])
+              assert.doesNotMatch(
+                await area.innerText(),
+                raw,
+                `${label}: ${name} draws no raw id or nforge command`,
+              );
+            await offer.getByRole('button', { name: 'Bring it back' }).click();
+            await own.getByRole('button', { name: 'Leave it out' }).click();
+            const writes = await page.evaluate(() => window.writes);
+            assert.deepEqual(
+              writes.filter(([kind]) => kind === 'bringBack' || kind === 'leaveOut'),
+              [
+                [
+                  'bringBack',
+                  {
+                    laneId: '5d1c7a0e-0000-4000-8000-000000000713',
+                    intentId: '5d1c7a0e-0000-4000-8000-000000000710',
+                  },
+                ],
+                ['leaveOut', '5d1c7a0e-0000-4000-8000-000000000720'],
+              ],
+              label,
+            );
+            assert.equal(await page.evaluate(() => window.intervals), 0, `${label}: idle costs nothing`);
+          }
+        const refused = await open(t, DESK, 'taken', 'dark', { query: { bringBack: 'refused' } });
+        const offer = region(refused, 'Needs you').locator('.dec', {
+          hasText: 'Stream parser: handle split UTF-8',
+        });
+        await offer.getByRole('button', { name: 'Bring it back' }).click();
+        assert.match(
+          await offer.getByRole('status').textContent(),
+          /Only the Lane’s owner or the project owner/,
         );
       },
     );
@@ -871,7 +969,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
     );
 
     await t.test('axe and widths: busy and first day, both themes, desk and phone', async t => {
-      for (const data of ['busy', 'first', 'connect', 'notices', 'ended-ask'])
+      for (const data of ['busy', 'first', 'connect', 'notices', 'taken', 'ended-ask'])
         for (const viewport of [DESK, PHONE]) {
           const page = await open(t, viewport, data); // Loose ends is open by default
           await page.addScriptTag({ path: axePath });

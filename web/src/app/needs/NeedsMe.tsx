@@ -56,6 +56,8 @@ import { Capped, CAP } from './Capped';
 import { fyiDismiss, fyiRead } from './fyi-reads';
 import { Fyi } from './FyiRegion';
 import { HeldSetting } from './HeldSetting';
+import { TakenKeys } from './TakenKeys';
+import { useTakenActions, type TakenActions } from './taken-actions';
 import { LooseFold } from './LooseFold';
 import {
   needsSentence,
@@ -149,6 +151,7 @@ function NeedsMeScreen({
   const decide = useProjectDecide(projectId);
   const answer = useAnswer(projectId);
   const dismissAsk = useDismissAsk(projectId);
+  const taken = useTakenActions(projectId);
   // Each Conflict Lane's notices for its hover on the picture: read only while a Lane is in conflict (Item 9b9057a9).
   const conflicts = useConflictNotes(projectId, !!feed?.lanes.some(lane => isConflict(lane)));
   const dismissMutation = useMutation(fyiDismiss);
@@ -169,6 +172,7 @@ function NeedsMeScreen({
         decide={decide}
         answer={answer}
         dismissAsk={dismissAsk}
+        taken={taken}
         dismiss={input => dismissMutation({ projectId, ...input })}
         loose={open => (
           <LooseFold
@@ -235,6 +239,7 @@ export function NeedsMeView({
   decide,
   answer,
   dismissAsk,
+  taken,
   dismiss,
   loose,
   setup,
@@ -251,6 +256,8 @@ export function NeedsMeView({
   decide: Decide;
   answer: Answer;
   dismissAsk?: DismissAsk;
+  /** Bring a taken-out Lane back, or leave it out (taken-actions.ts). */
+  taken?: TakenActions;
   dismiss: Dismiss;
   /** The Loose ends body (LooseFold), given whether its region is open so it reads only then. */
   loose?: (open: boolean) => ReactNode;
@@ -282,7 +289,10 @@ export function NeedsMeView({
     phone ? PHONE_LAYOUT : LAYOUT,
   );
   const [message, announce] = useAnnounce();
-  const list = useMemo(() => (fyi && view ? fyiView(fyi, view.fyi, drawnAt) : null), [fyi, view, drawnAt]);
+  const list = useMemo(
+    () => (fyi && view ? fyiView(fyi, view.fyi, drawnAt, false, view.tookOut) : null),
+    [fyi, view, drawnAt],
+  );
   // Open by default (owner 2026-11-19): a folded Loose ends left an empty-looking box beside FYI.
   const looseFold = useFold('needs-loose', true);
   const at = (patch: Partial<ProjectRoute>) => hrefFor({ ...route, section: '', rest: '', ...patch });
@@ -357,6 +367,9 @@ export function NeedsMeView({
   // (1 : 1.1); nothing changes place (approved home mock). The rule follows whichever column holds the picture.
   const flowZone = layout.a.includes('flow') ? 'a' : layout.b.includes('flow') ? 'b' : null;
   const held = !!view?.count;
+  // Only offers of taken-out changes wait on the reader: nothing is held (J08).
+  const holdsNothing =
+    !!view && view.count > 0 && view.count === view.notices.filter(row => row.taken).length;
   const ratio = flowZone
     ? ({
         [`--col-${flowZone}`]: held ? '1fr' : '1.6fr',
@@ -422,7 +435,12 @@ export function NeedsMeView({
               <>
                 {waiting ? (
                   <div className="grp" data-weight="act">
-                    <Band title="Holding work now" count={view.count} needs hint="longest held first" />
+                    <Band
+                      title={holdsNothing ? 'Yours to decide' : 'Holding work now'}
+                      count={view.count}
+                      needs
+                      hint="longest held first"
+                    />
                     <Capped
                       rows={heldRows}
                       cap={Math.max(CAP, rowToReveal + 1)}
@@ -435,16 +453,21 @@ export function NeedsMeView({
                             <NoticeCard
                               key={`${row.kind}:${row.id}`}
                               row={row}
+                              taken={taken}
+                              announce={announce}
+                              drawnAt={drawnAt}
                               href={
-                                row.kind === 'mirror'
-                                  ? at({ place: 'settings', section: 'mirror' })
-                                  : row.kind === 'secrets'
-                                    ? at({ place: 'settings', section: 'secrets' })
-                                    : row.kind === 'deploy'
-                                      ? row.next?.startsWith('https://')
-                                        ? row.next
-                                        : at({ place: 'settings', section: 'checks' })
-                                      : at({ place: 'plan', rest: row.id })
+                                row.taken
+                                  ? at({ place: 'lanes', rest: row.taken.laneId })
+                                  : row.kind === 'mirror'
+                                    ? at({ place: 'settings', section: 'mirror' })
+                                    : row.kind === 'secrets'
+                                      ? at({ place: 'settings', section: 'secrets' })
+                                      : row.kind === 'deploy'
+                                        ? row.next?.startsWith('https://')
+                                          ? row.next
+                                          : at({ place: 'settings', section: 'checks' })
+                                        : at({ place: 'plan', rest: row.id })
                               }
                             />
                           ) : 'question' in row ? (
@@ -631,6 +654,7 @@ export function NeedsMeView({
             })
           }
           heldHref={at({ section: 'held' })}
+          taken={taken}
           state={fyi?.state}
         />
       ),
@@ -816,21 +840,53 @@ function Held({
 }
 
 /** Work reverted from main, work that needs a fix, or a stopped GitHub mirror (Item 12fde646): a shared-state decision
- * only a person settles. It stays until the state changes, so it has no Later. */
-function NoticeCard({ row, href }: { row: NoticeRow; href: string }) {
+ * only a person settles. It stays until the state changes, so it has no Later. A revert somebody ran is an offer to
+ * the Lane's owner (J08): who took which Lane out and when, with Bring it back and Leave it out; never a raw id or an
+ * agent's command, which stay on the board note and in the CLI. */
+function NoticeCard({
+  row,
+  href,
+  taken,
+  announce,
+  drawnAt,
+}: {
+  row: NoticeRow;
+  href: string;
+  taken: TakenActions | undefined;
+  announce: (text: string) => void;
+  drawnAt: number;
+}) {
+  const offer = row.taken;
   return (
     <div className="dec">
       <div className="dtop">
-        <State word={row.word}>{row.tag}</State>
+        <State word={offer ? 'Done' : row.word}>{offer ? 'Taken out of main' : row.tag}</State>
+        {offer ? <span>{waited(offer.at, drawnAt)} ago</span> : null}
       </div>
       <h3 dir="auto">{row.head}</h3>
-      {row.next ? (
+      {offer ? (
+        <p className="why" dir="auto">
+          Its Lane keeps its saved work. Bring it back to fix it and land it again, or leave it out.
+        </p>
+      ) : row.next ? (
         <p className="why" dir="auto">
           Next: {row.next}
         </p>
       ) : null}
       <div className="btns">
-        {row.kind === 'deploy' && href.startsWith('https://') ? (
+        {offer ? (
+          <>
+            <TakenKeys
+              target={{ laneId: offer.laneId, intentId: row.id }}
+              title={offer.title}
+              actions={taken}
+              announce={announce}
+            />
+            <A className="btn ghost sm" href={href}>
+              Open the Lane
+            </A>
+          </>
+        ) : row.kind === 'deploy' && href.startsWith('https://') ? (
           <a className="btn ghost sm" href={href} target="_blank" rel="noreferrer">
             Open workflow run
           </a>

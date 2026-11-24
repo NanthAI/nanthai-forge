@@ -25,3 +25,32 @@ export function revertNoticeId(receiptId: string, laneId: string) {
   const hex = digest(JSON.stringify(['revert-notice', receiptId, laneId])).slice(0, 32);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
+
+/** What the project's `needsFix` entry for a revert somebody ran also says about it, beside the agent-facing summary
+ * and undo (which stay as they are): which Lane, who took it out, who owns the Lane, and who has dealt with it. The web
+ * words the card from these fields, never from the summary. Absent on an entry from a main audit or an older revert. */
+export type TakenOut = { laneId: string; title: string | null; by: string; agent: string | null; at: number };
+export type TakenEntry = TakenOut & { owner: string | null; left: string[]; back: boolean };
+
+export function takenOutOf(fix: Record<string, unknown>): TakenEntry | null {
+  const text = (value: unknown) => (typeof value === 'string' && value ? value : null);
+  const laneId = text(fix.lane);
+  const by = text(fix.by);
+  const at = typeof fix.at === 'string' ? Date.parse(fix.at) : NaN;
+  if (!laneId || !by || !Number.isFinite(at)) return null;
+  return {
+    laneId,
+    title: text(fix.title),
+    by,
+    agent: text(fix.agent),
+    at,
+    owner: text(fix.owner),
+    left: Array.isArray(fix.left)
+      ? fix.left.filter((value): value is string => typeof value === 'string')
+      : [],
+    back: fix.back === true,
+  };
+}
+
+/** Who has left a revert's notice alone; the newest few, so the entry stays small. */
+export const REVERT_NOTICE_LEFT = 20;

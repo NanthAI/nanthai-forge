@@ -17,6 +17,7 @@ import { failedDeployNotices } from './projectDeployStore';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { mirrorSummary } from '../src/github-mirror-sentence';
 import { needsFix } from '../src/culprit-bisect';
+import { takenOutOf, type TakenOut } from '../src/hosted-revert-notice';
 import { lineOwner } from './projectLiveLineOwners';
 import { landingRow } from './projectHostedLandingStore';
 import { finishRow } from './projectHostedFinishWake';
@@ -57,6 +58,13 @@ export const needsMeWhy = v.union(
    * the next step, never guessed (Item 9b9057a9). */
   v.literal('unknown'),
 );
+const takenOutShape = {
+  laneId: v.string(),
+  title: v.union(v.string(), v.null()),
+  by: v.string(),
+  agent: v.union(v.string(), v.null()),
+  at: v.number(),
+};
 export const needsMeResult = v.object({
   held: v.array(
     v.object({
@@ -136,6 +144,8 @@ export const needsMeResult = v.object({
         id: v.string(),
         summary: v.string(),
         next: v.union(v.string(), v.null()),
+        /** A revert somebody ran, offered to the Lane's owner (J08): the card says who took which Lane out and when. */
+        taken: v.optional(v.object(takenOutShape)),
       }),
     ),
   ),
@@ -143,6 +153,8 @@ export const needsMeResult = v.object({
   /** What waits on a person in the project's sealed secrets (Item 41a0df87): removed people still listed, names to
    * rotate and waiting proposals, from the counter on the project row. Write members only; absent when zero. */
   secrets: v.optional(v.number()),
+  /** Reverts the reader ran themselves: FYI, never counted, with the Lane they can bring back (J08). */
+  tookOut: v.optional(v.array(v.object({ id: v.string(), ...takenOutShape }))),
   /** Questions with choices addressed to the viewer, unanswered, on an open Lane (Items 12fde646, 48049998). */
   asksMore: v.optional(v.literal(true)),
   asks: v.optional(
@@ -262,6 +274,7 @@ type Notice = {
   id: string;
   summary: string;
   next: string | null;
+  taken?: TakenOut;
 };
 
 /** The GitHub mirror, only when it stopped on a conflict a person settles (GitHub's main moved, GitHub refused the push,
@@ -405,18 +418,33 @@ export const read = query({
       const secrets =
         project.secretsNeeds && (await hasWriteRole(ctx, project, user.subject)) ? project.secretsNeeds : 0;
       const notices: Notice[] = [];
+      const tookOut: (TakenOut & { id: string })[] = [];
       let noticesMore = false;
       if (team) {
         noticesMore = fixes.length > NEEDS_ME_NOTICE_LIMIT;
-        for (const fix of fixes.slice(0, NEEDS_ME_NOTICE_LIMIT))
+        for (const fix of fixes.slice(0, NEEDS_ME_NOTICE_LIMIT)) {
+          // A revert somebody ran (J08): FYI for whoever ran it, an offer for the Lane's owner when that is someone
+          // else, nothing for the rest; once brought back or left out it is gone. Entries without these fields (a main
+          // audit's, an older revert) keep the shared-state notice below.
+          const summary = String(fix.summary ?? '')
+            .replace(/\s+/g, ' ')
+            .slice(0, NOTE_CHARS);
+          const taken = fix.state === 'reverted' ? takenOutOf(fix) : null;
+          if (taken) {
+            const { owner: laneOwner, left, back, ...shown } = taken;
+            if (back || left.includes(user.subject)) continue;
+            if (taken.by === user.subject) tookOut.push({ id: fix.intentId, ...shown });
+            else if (laneOwner === user.subject)
+              notices.push({ kind: 'reverted', id: fix.intentId, summary, next: null, taken: shown });
+            continue;
+          }
           notices.push({
             kind: fix.state === 'reverted' ? 'reverted' : 'needs-fix',
             id: fix.intentId,
-            summary: String(fix.summary ?? '')
-              .replace(/\s+/g, ' ')
-              .slice(0, NOTE_CHARS),
+            summary,
             next: typeof fix.undo === 'string' ? fix.undo.slice(0, NOTE_CHARS) : null,
           });
+        }
       }
       const mirror = team && owner ? await stoppedMirror(ctx, project) : null;
       if (mirror) notices.push(mirror);
@@ -426,6 +454,7 @@ export const read = query({
         held,
         parked,
         ...(notices.length ? { notices } : {}),
+        ...(tookOut.length ? { tookOut } : {}),
         ...(noticesMore ? { noticesMore: true as const } : {}),
         ...(secrets ? { secrets } : {}),
         parkedMore: parks.length > NEEDS_ME_PARKED_LIMIT,

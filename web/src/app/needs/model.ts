@@ -21,9 +21,10 @@ import {
   type Notice,
   type Park,
   type ParkedLane,
+  type Taken,
 } from './count';
 
-export type { Ask, HeldLane, HeldWhy, NeedsRead, Notice, Park, ParkedLane } from './count';
+export type { Ask, HeldLane, HeldWhy, NeedsRead, Notice, Park, ParkedLane, Taken } from './count';
 /** One open request from the approvals payload (projectHostedApprovals `openApprovalRequests`). */
 export type Approval = {
   laneId: string;
@@ -62,6 +63,8 @@ export type NowRow = HeldLane & {
 export type AskRow = Ask & { who: string | null };
 /** Work reverted from main, work that needs a fix, or a stopped mirror (Item 12fde646): a shared-state decision. */
 export type NoticeRow = Notice & { word: StateWord; tag: string; head: string };
+/** A revert the reader ran: an FYI row with the Lane to bring back. */
+export type TookOutRow = Taken & { id: string };
 /** A Lane parked for the reader (Item e1633718): named to the reader, or the reader's own Lane parked with no one
  * named and idle 4 h. `since` is when it was parked (named) or last active (no one named). */
 export type ParkedRow = ParkedLane & {
@@ -84,6 +87,8 @@ export type NeedsView = {
   parked: ParkedRow[];
   /** Shared-state decisions (work reverted from main, a stopped mirror): counted, and kept until the state changes. */
   notices: NoticeRow[];
+  /** Reverts the reader ran themselves (J08): FYI rows, never counted. */
+  tookOut: TookOutRow[];
   /** Held, but nothing for a person to decide (count.ts `waitsOnPerson`): FYI rows, never counted. */
   fyi: NowRow[];
   ahead: AheadRow[];
@@ -229,12 +234,33 @@ const noticeTags = {
   deploy: 'Deploy failed',
   secrets: 'Secrets',
 } as const;
+const noticeFallback = {
+  reverted: 'A change was taken out of main.',
+  'needs-fix': 'A change needs a fix before it can land again.',
+  mirror: 'The GitHub mirror stopped.',
+  deploy: 'A deploy failed.',
+  secrets: 'Sealed secrets wait on you.',
+} as const;
+const RAW_UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const AGENT_COMMAND = /\bnforge\b/i;
+/** Text a person reads: a card never shows a raw id or an agent's command (J08). The board note, CLI and agent status
+ * keep their exact text; the web words the card itself. */
+export const readable = (text: string | null | undefined) =>
+  text && !RAW_UUID.test(text) && !AGENT_COMMAND.test(text) ? text : null;
+/** "@who took “title” out of main" (an offer to the Lane's owner), or "You took …" for the one who ran it. */
+export function takenHead(taken: Taken, mine: boolean) {
+  const title = readable(taken.title?.replace(/\s+/g, ' ').trim());
+  return `${mine ? 'You' : (whoOf(taken.by, taken.agent) ?? 'Someone')} took ${title ? `“${title}”` : 'a change'} out of main.`;
+}
 function noticeRow(notice: Notice): NoticeRow {
   return {
     ...notice,
     word: notice.kind === 'reverted' || notice.kind === 'deploy' ? 'Check failed' : 'Needs you',
     tag: noticeTags[notice.kind],
-    head: notice.summary || `${noticeTags[notice.kind]}.`,
+    head: notice.taken
+      ? takenHead(notice.taken, false)
+      : (readable(notice.summary) ?? noticeFallback[notice.kind]),
+    next: readable(notice.next),
   };
 }
 
@@ -311,6 +337,7 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
     ...(sessionAsks.length ? { sessionAsks } : {}),
     parked,
     // Sealed secrets that wait on the reader (Item 41a0df87): one row that points at Settings, Secrets, where each is.
+    tookOut: [...(read.tookOut ?? [])],
     notices: [
       ...(read.notices ?? []).map(noticeRow),
       ...(read.secrets
@@ -368,13 +395,21 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString
 
 /** The page sentence: the answer first, then at most one more clause (DESIGN.md rule 45). */
 export function needsSentence(view: NeedsView): { bold: string; rest: string } {
-  const lanes = `${view.countAtLeast ? 'At least ' : ''}${plural(view.count, 'thing')}`;
+  // A taken-out change offered to its owner is a choice, not a hold: nothing waits on it (J08).
+  const offers = view.notices.filter(notice => notice.taken).length;
+  const holds = view.count - offers;
+  const lanes = `${view.countAtLeast ? 'At least ' : ''}${plural(holds, 'thing')}`;
   const aheadCount = view.ahead.length + (view.askedAhead?.length ?? 0);
   const ahead = aheadCount
     ? `${plural(aheadCount, 'request')} asked ahead ${aheadCount === 1 ? 'holds' : 'hold'} nothing yet.`
     : '';
-  if (view.count)
-    return { bold: `${lanes} ${view.count === 1 ? 'holds' : 'hold'} work until you decide.`, rest: ahead };
+  if (holds > 0)
+    return { bold: `${lanes} ${holds === 1 ? 'holds' : 'hold'} work until you decide.`, rest: ahead };
+  if (offers)
+    return {
+      bold: `${offers === 1 ? 'A change' : `${offers.toLocaleString()} changes`} you own ${offers === 1 ? 'was' : 'were'} taken out of main.`,
+      rest: ahead || 'Nothing is held; bring it back or leave it out.',
+    };
   if (view.countAtLeast) return { bold: 'Some requests could not be listed.', rest: ahead };
   // A hold that asks nobody is still a hold: never "nothing is held" while one is (Item 9b9057a9).
   const stuck = view.fyi.length;
