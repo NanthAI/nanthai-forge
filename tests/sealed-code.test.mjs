@@ -535,8 +535,10 @@ test('d4/C6 every proposal or join builder in src and convex checks the confirme
       .filter(path => pattern.test(readFileSync(new URL(path, root), 'utf8')))
       .sort();
   // src/sealed-auto.ts (A3 Automatic share): Development only, behind requireConfirmedBase(pin, 'wrap').
+  // src/sealed-checks.ts (slice 5 machine add): an owner device's Checks step, behind requireConfirmedBase(pin, 'wrap').
   assert.deepEqual(callers(/\bwrapSetKey\(/), [
     'src/sealed-auto.ts',
+    'src/sealed-checks.ts',
     'src/sealed-genesis.ts',
     'src/sealed-keys.ts',
     'src/sealed-rekey.ts',

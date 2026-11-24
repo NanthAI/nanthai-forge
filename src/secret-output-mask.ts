@@ -27,16 +27,35 @@ function forms(value: Buffer): Buffer[] {
   return encoded;
 }
 
+type Rule = { from: Buffer; to: Buffer; bounded: boolean };
+/** A letter, digit or underscore: a short value is masked only where it does not touch one. */
+const word = (byte: number | undefined) =>
+  byte !== undefined &&
+  ((byte >= 0x30 && byte <= 0x39) ||
+    (byte >= 0x41 && byte <= 0x5a) ||
+    (byte >= 0x61 && byte <= 0x7a) ||
+    byte === 0x5f);
+
 /** Byte-oriented and bounded across chunks; stdout and stderr each get a separate carry.
+ * A whole value under eight characters is masked raw where it stands as its own word (no letter, digit or
+ * underscore touching it on either side); its encoded forms and short lines of a multiline value pass.
  * This stops accidental output, not a program deliberately disclosing or probing a value. */
 export class SecretOutputMask {
   private pending = Buffer.alloc(0);
-  private readonly rules: { from: Buffer; to: Buffer }[];
-  private readonly byFirst = new Map<number, { from: Buffer; to: Buffer }[]>();
+  /** The last stream byte before `pending`, for a short value's left boundary. */
+  private before: number | undefined;
+  private readonly rules: Rule[];
+  private readonly byFirst = new Map<number, Rule[]>();
   readonly carryBytes: number;
   constructor(secrets: readonly Pick<RunSecret, 'name' | 'value'>[]) {
-    const unique = new Map<string, { from: Buffer; to: Buffer }>();
+    const unique = new Map<string, Rule>();
     for (const { name, value } of secrets) {
+      if (value.length && [...value.toString('utf8')].length < 8 && !unique.has(value.toString('hex')))
+        unique.set(value.toString('hex'), {
+          from: Buffer.from(value),
+          to: Buffer.from(`[secret:${name}]`),
+          bounded: true,
+        });
       const values = [
         value,
         ...value
@@ -50,6 +69,7 @@ export class SecretOutputMask {
             unique.set(from.toString('hex'), {
               from: Buffer.from(from),
               to: Buffer.from(`[secret:${name}]`),
+              bounded: false,
             });
     }
     this.rules = [...unique.values()].sort((a, b) => b.from.length - a.from.length);
@@ -59,7 +79,11 @@ export class SecretOutputMask {
       rules.push(rule);
       this.byFirst.set(first, rules);
     }
-    this.carryBytes = this.rules.reduce((longest, rule) => Math.max(longest, rule.from.length), 1) - 1;
+    // A bounded rule also needs the byte after it before it can decide.
+    this.carryBytes = this.rules.reduce(
+      (longest, rule) => Math.max(longest, rule.from.length - 1 + (rule.bounded ? 1 : 0)),
+      0,
+    );
   }
   write(chunk: Uint8Array, final = false): Buffer {
     const source = Buffer.concat([this.pending, chunk]);
@@ -73,7 +97,9 @@ export class SecretOutputMask {
         ?.find(
           rule =>
             source.length - cursor >= rule.from.length &&
-            source.subarray(cursor, cursor + rule.from.length).equals(rule.from),
+            source.subarray(cursor, cursor + rule.from.length).equals(rule.from) &&
+            (!rule.bounded ||
+              (!word(cursor ? source[cursor - 1] : this.before) && !word(source[cursor + rule.from.length]))),
         );
       if (match) {
         output.push(source.subarray(start, cursor), match.to);
@@ -82,6 +108,7 @@ export class SecretOutputMask {
       } else cursor++;
     }
     output.push(source.subarray(start, cursor));
+    if (cursor) this.before = source[cursor - 1];
     this.pending.fill(0);
     this.pending = Buffer.from(source.subarray(cursor));
     return Buffer.concat(output);
@@ -92,6 +119,7 @@ export class SecretOutputMask {
   dispose() {
     this.pending.fill(0);
     this.pending = Buffer.alloc(0);
+    this.before = undefined;
     for (const rule of this.rules) rule.from.fill(0);
   }
 }

@@ -33,6 +33,15 @@ count. Synthetic fixture at 100 recipients and 200 names: `propose` read 5 docum
 write applying 32 proposals from 4 devices read 4 documents (294 KB), wrote 34 (set,
 history, 32 deletes) and took 62 ms. Local observations, not Convex-billed I/O or time.
 
+`sealedMachineReaders` (slice 5) holds one row per Checks machine entry: the
+project, set kind and set id, the machine id and a 32-byte hash of the machine's
+read token, about 100 bytes. A set has at most 100 (one per roster entry). The
+owner write that adds a machine inserts its row; a Checks roster step or genesis
+reads the set's rows in one indexed range and deletes those whose machine left
+the roster. A machine read looks up its own row first and reads the set and
+history rows only for a matching token, so an unauthenticated caller costs one
+small indexed read.
+
 No application subscribes to these tables. CLI reads are one-shot. A cached
 `run` asks with its verified head hash and receives only an unchanged response
 when current; the server still reads the bounded current row, and checks current

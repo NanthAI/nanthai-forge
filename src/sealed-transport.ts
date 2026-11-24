@@ -2,6 +2,8 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
+import { deadlineConvexClient } from './network-convex-client.js';
+import { networkFetch, networkTimeout } from './network-fetch.js';
 import { ForgeError, invariant } from './errors.js';
 import { framedHash } from './sealed-format.js';
 import { headBytes } from './sealed-records.js';
@@ -60,7 +62,13 @@ export interface SealedTransport {
     headHash?: ArrayBuffer;
     rosterVersion?: number;
   }): Promise<SealedReadWire | null>;
-  write(input: SealedWriteArgs & { kind: 1 | 2 | 3 }): Promise<{ accepted: boolean; replay: boolean }>;
+  write(
+    input: SealedWriteArgs & {
+      kind: 1 | 2 | 3;
+      /** Slice 5: the read verifier of the one machine entry this write's step adds (src/sealed-machine.ts). */
+      machineReader?: { machineId: ArrayBuffer; verifier: ArrayBuffer };
+    },
+  ): Promise<{ accepted: boolean; replay: boolean }>;
   /** Design 5.1: post this device's own join request (sealedSecrets:join). */
   join?(input: { kind: 1 | 2 | 3; request: ArrayBuffer }): Promise<{ accepted: boolean; replay: boolean }>;
   /** Gate B2 M3: record this device on its sign-in, so ending the sign-in elsewhere marks it (sealedSecrets:link). */
@@ -195,3 +203,36 @@ export function hostedSealedTransport(deployment: string, projectId: string, tok
       client.mutation(makeFunctionReference<'mutation'>('sealedSecrets:reject'), { projectId, ...input }),
   };
 }
+/** Slice 5: a machine has no Forge sign-in. It reads its set's row with the token its key derives
+ * (sealedMachines:read); the reply is verified as a machine before anything opens. */
+export function machineSealedTransport(deployment: string, projectId: string) {
+  let url: URL;
+  try {
+    url = new URL(deployment);
+  } catch {
+    throw new ForgeError('BAD_ARGUMENT', 'Use a Forge deployment URL.');
+  }
+  invariant(
+    (url.protocol === 'https:' ||
+      (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) &&
+      !url.username &&
+      !url.password,
+    'BAD_ARGUMENT',
+    'Use an HTTPS Forge deployment URL with no credentials.',
+  );
+  const client = deadlineConvexClient(url.origin, {
+    skipConvexDeploymentUrlCheck: true,
+    logger: false,
+    fetch: (input, init) =>
+      networkFetch(input, { ...init, redirect: 'error', signal: networkTimeout(30_000) }, { retries: 1 }),
+  });
+  return {
+    read: (input: {
+      kind: 1 | 2 | 3;
+      machineId: ArrayBuffer;
+      token: ArrayBuffer;
+    }): Promise<SealedReadWire | null> =>
+      client.query(makeFunctionReference<'query'>('sealedMachines:read'), { projectId, ...input }),
+  };
+}
+export type MachineSealedTransport = ReturnType<typeof machineSealedTransport>;

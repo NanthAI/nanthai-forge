@@ -65,7 +65,9 @@ export function secretRunRoot(from: string) {
 }
 export async function secretRunCli(args: string[], provider?: RunSecretProvider) {
   if (args.length === 1 && ['--help', '-h'].includes(args[0]!)) {
-    process.stdout.write(`${secretRunUsage}\nDevelopment uses the owner device’s verified sealed set.\n`);
+    process.stdout.write(
+      `${secretRunUsage}\nDevelopment uses this device’s verified sealed set. Checks runs on any CI with one machine key: FORGE_SECRETS_KEY, given only to this step, and --only naming the check's secrets.\n`,
+    );
     return;
   }
   const input = secretRunOptions(args);
@@ -77,8 +79,18 @@ export async function secretRunCli(args: string[], provider?: RunSecretProvider)
     AGENT_CLIENTS.some(client => client.sessionVariable && source[client.sessionVariable]) ||
     nearestAgentProcess(),
   );
+  const from = resolve(input.root ?? '.');
+  // A CI machine (slice 5) runs in a checkout of the mirror, which has no Forge marker: its root is the folder.
+  const machine = input.set === 'checks' && Boolean(source.FORGE_SECRETS_KEY);
+  let root: string;
+  try {
+    root = secretRunRoot(from);
+  } catch (error) {
+    if (!machine) throw error;
+    root = canonicalRoot(from);
+  }
   process.exitCode = await runWithSecrets(
-    { ...input, root: secretRunRoot(resolve(input.root ?? '.')) },
+    { ...input, root },
     provider ?? (await import('./sealed-run.js')).sealedRunSecrets,
     { source, agent },
   );

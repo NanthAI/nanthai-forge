@@ -13,7 +13,7 @@ import { safeSecretName } from './sealed-display.js';
 import { checkSecretWriteName } from './secret-names.js';
 
 export const sealedUsage =
-  'nforge secret set NAME [--file] [--root ROOT] [--operation-id UUID]   (a piped value loses one trailing newline; --file keeps exact bytes)\nnforge secret list [--root ROOT]\nnforge secret rm NAME [--root ROOT] [--operation-id UUID]\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID|--marked [--root ROOT]\nnforge secret proposals [--root ROOT]\nnforge secret apply ID [--root ROOT]   (a person, on a terminal)\nnforge secret reject ID [--root ROOT]';
+  'nforge secret set NAME [--set checks] [--file] [--root ROOT] [--operation-id UUID]   (a piped value loses one trailing newline; --file keeps exact bytes)\nnforge secret list [--set checks] [--root ROOT]\nnforge secret rm NAME [--set checks] [--root ROOT] [--operation-id UUID]\nnforge secret machine add LABEL --set checks [--root ROOT] [--operation-id UUID]   (a person, on a terminal: shows the CI key once)\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID|--marked [--root ROOT]\nnforge secret proposals [--root ROOT]\nnforge secret apply ID [--root ROOT]   (a person, on a terminal)\nnforge secret reject ID [--root ROOT]';
 export function sealedAgent() {
   const source = process.env;
   return (
@@ -127,27 +127,34 @@ async function askYes(summary: string) {
 export async function sealedCli(args: string[]) {
   if (!args.length || args.includes('--help') || args.includes('-h')) {
     process.stdout.write(
-      `${sealedUsage}\nValues come from a hidden prompt or stdin, never an argument. Slice 1 supports the owner's Development device.\n`,
+      `${sealedUsage}\nValues come from a hidden prompt or stdin, never an argument. Checks is held by owner devices and CI machine keys.\n`,
     );
     return;
   }
   const command = args.shift();
   invariant(
-    ['set', 'list', 'rm', 'repin', 'resolve', 'unshare', 'proposals', 'apply', 'reject'].includes(command!),
+    ['set', 'list', 'rm', 'repin', 'resolve', 'unshare', 'proposals', 'apply', 'reject', 'machine'].includes(
+      command!,
+    ),
     'BAD_ARGUMENT',
     sealedUsage,
   );
+  invariant(command !== 'machine' || args.shift() === 'add', 'BAD_ARGUMENT', sealedUsage);
+  const label = command === 'machine' ? args.shift() : undefined;
   const name = ['set', 'rm'].includes(command!) ? args.shift() : undefined;
   const proposalId = ['apply', 'reject'].includes(command!) ? args.shift() : undefined;
   const fingerprint = command === 'unshare' ? args.shift() : undefined,
     marked = fingerprint === '--marked';
   let root = '.',
     file = false,
+    set = 'development' as 'development' | 'checks',
     operationId: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--file' && command === 'set') file = true;
     else if (arg === '--root' && args[i + 1]) root = args[++i]!;
+    else if (arg === '--set' && ['development', 'checks'].includes(args[i + 1]!))
+      set = args[++i] as 'development' | 'checks';
     else if (arg === '--operation-id' && args[i + 1]) operationId = args[++i];
     else
       throw new ForgeError(
@@ -156,13 +163,38 @@ export async function sealedCli(args: string[]) {
       );
   }
   const agent = sealedAgent();
-  if (name) checkSecretWriteName(name, { set: 'development', agent, writeLine: () => {} });
+  if (name) checkSecretWriteName(name, { set, agent, writeLine: () => {} });
+  invariant(
+    set === 'development' || ['set', 'rm', 'list', 'machine'].includes(command!),
+    'BAD_ARGUMENT',
+    'Only set, list, rm and machine add take --set checks.',
+  );
+  invariant(command !== 'machine' || (label && set === 'checks'), 'BAD_ARGUMENT', sealedUsage);
   if (command === 'set' || command === 'rm') invariant(name, 'BAD_ARGUMENT', sealedUsage);
   if (command === 'unshare') invariant(fingerprint, 'BAD_ARGUMENT', sealedUsage);
   if (command === 'apply' || command === 'reject') invariant(proposalId, 'BAD_ARGUMENT', sealedUsage);
-  const client = await sealedClientForRoot(secretRunRoot(resolve(root)), agent);
+  const development = await sealedClientForRoot(secretRunRoot(resolve(root)), agent);
+  const client =
+    set === 'checks' ? await (await import('./sealed-checks.js')).checksClient(development) : development;
+  const where = client.setName;
   try {
-    if (command === 'set' || command === 'rm') {
+    if (command === 'machine') {
+      // Design 5.7: the key goes to a person's terminal once, never to a pipe, a file or an agent.
+      invariant(
+        !agent && process.stdin.isTTY && process.stdout.isTTY,
+        'PERSON_REQUIRED',
+        'A person adds a machine on a terminal: the key is shown once, there.',
+      );
+      const { addMachine } = await import('./sealed-checks.js');
+      const added = await addMachine(
+        client as import('./sealed-checks.js').ChecksClient,
+        label!,
+        operationId ? { operationId } : {},
+      );
+      process.stdout.write(
+        `Machine ${safeSecretName(label!)} (id ${added.machineId.slice(0, 8)}) can now open Checks. Operation ${added.operationId}. Its key is shown once. Store it as the CI secret FORGE_SECRETS_KEY, given only to the step that runs nforge run:\n\n${added.bundle}\n\nThat step also needs FORGE_DEPLOYMENT_URL and FORGE_PROJECT_ID, and runs: nforge run --set checks --only NAME,NAME -- COMMAND\nWhoever holds this key opens every Checks value. Never give it to a step that runs untrusted code, such as a pull request from a fork.\n`,
+      );
+    } else if (command === 'set' || command === 'rm') {
       const value = command === 'set' ? await readValue(file) : null;
       try {
         const receipt = await client.write(name!, value, { file, ...(operationId ? { operationId } : {}) });
@@ -171,7 +203,7 @@ export async function sealedCli(args: string[]) {
         process.stdout.write(
           proposed
             ? `Proposed ${op === 'remove' ? 'removing' : op === 'add' ? 'adding' : 'a new value for'} ${safeSecretName(name!)} in Development: proposal ${proposed} waits for a person (nforge secret apply ${proposed}).\n`
-            : `${'replay' in receipt && receipt.replay ? 'Confirmed original operation for' : command === 'rm' ? 'Removed' : 'Set'} ${name} in Development. Operation ${receipt.operationId}.\n`,
+            : `${'replay' in receipt && receipt.replay ? 'Confirmed original operation for' : command === 'rm' ? 'Removed' : 'Set'} ${name} in ${where}. Operation ${receipt.operationId}.\n`,
         );
       } finally {
         value?.fill(0);
@@ -212,7 +244,7 @@ export async function sealedCli(args: string[]) {
     } else if (command === 'list') {
       const result = await client.read();
       if (!result) {
-        process.stdout.write('Development is not set up. The owner runs nforge secret set NAME.\n');
+        process.stdout.write(`${client.notSetUp().message}\n`);
         return;
       }
       try {
@@ -255,6 +287,6 @@ export async function sealedCli(args: string[]) {
       process.stdout.write('Development trust rebuilt from this device’s signed head.\n');
     }
   } finally {
-    for (const key of [client.keys.sign, client.keys.enc, client.keys.pinKey]) key.fill(0);
+    for (const key of [development.keys.sign, development.keys.enc, development.keys.pinKey]) key.fill(0);
   }
 }

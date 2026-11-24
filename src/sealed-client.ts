@@ -80,10 +80,23 @@ export class SealedClient {
     /** A person sees stderr on a terminal: kept automatic-share notices are cleared once shown here. */
     readonly terminal = false,
   ) {}
+  /** The set this client reads and writes; ChecksClient (src/sealed-checks.ts) is the owner device's Checks view. */
+  get kind(): 1 | 2 {
+    return 1;
+  }
+  get setName() {
+    return this.kind === 1 ? 'Development' : 'Checks';
+  }
+  notSetUp() {
+    return new ForgeError(
+      'SECRETS_NOT_SET_UP',
+      `${this.setName} is not set up. The owner runs nforge secret set NAME${this.kind === 2 ? ' --set checks' : ''}.`,
+    );
+  }
   request(anchor?: JourneyAnchor): VerifyRequest {
     return {
       forgeProjectId: this.project,
-      setKind: 1,
+      setKind: this.kind,
       // Without a journey anchor, preserve the original creator-only proof: this locally held identity must
       // be the sole genesis entry, and every subsequent transition must chain from it.
       anchor: anchor ?? { kind: 'own-genesis', deviceId: this.keys.id },
@@ -97,23 +110,25 @@ export class SealedClient {
     wire: SealedReadWire,
   ): Promise<Awaited<ReturnType<SealedClient['read']>>> {
     try {
-      const anchor = current ? undefined : await firstContactAnchor(this, reply, wire);
+      // Checks has no automatic join: an owner device's first contact is its own genesis (the default anchor).
+      const anchor = current || this.kind !== 1 ? undefined : await firstContactAnchor(this, reply, wire);
       const result = await this.pins.verifyAndSave(reply, this.request(anchor), Date.now(), true);
       for (const line of result.notices) this.notice(line);
-      if (wire.proposals && !this.agent)
+      if (wire.proposals && !this.agent && this.kind === 1)
         this.notice(
           `${wire.proposals} proposal${wire.proposals === 1 ? ' waits' : 's wait'} in Development: nforge secret proposals`,
         );
       try {
-        for (const line of await afterVerified(this, reply, result, current?.pin ?? null, anchor, wire))
-          this.notice(line);
+        if (this.kind === 1)
+          for (const line of await afterVerified(this, reply, result, current?.pin ?? null, anchor, wire))
+            this.notice(line);
       } finally {
         if (cached) result.key?.fill(0);
       }
       return { reply, ...result, key: cached ? undefined : result.key };
     } catch (error) {
       if (error instanceof ForgeError && ['SECRETS_ROLLBACK', 'SECRETS_FORK'].includes(error.code)) {
-        const latest = await this.pins.load(this.project, 1);
+        const latest = await this.pins.load(this.project, this.kind);
         if (
           current &&
           latest &&
@@ -127,21 +142,17 @@ export class SealedClient {
   async read(
     cached = false,
   ): Promise<({ reply: SealedReply } & ReturnType<typeof verifySealedReply>) | null> {
-    const current = await this.pins.load(this.project, 1);
+    const current = await this.pins.load(this.project, this.kind);
     if (cached && current) {
       // The small response on a hit still rechecks current access; the full bounded row is read server-side.
       const hash = Uint8Array.from(framedHash(headBytes(current.pin.head))).buffer;
       try {
         const wire = await this.transport.read({
-          kind: 1,
+          kind: this.kind,
           headHash: hash,
           rosterVersion: current.pin.roster.rosterVersion,
         });
-        invariant(
-          wire,
-          'SECRETS_NOT_SET_UP',
-          'Development is not set up. The owner runs nforge secret set NAME.',
-        );
+        if (!wire) throw this.notSetUp();
         const reply = sealedRead(wire, current.cache);
         return await this.verifyFetched(reply, current, true, wire);
       } catch (error) {
@@ -153,7 +164,7 @@ export class SealedClient {
       }
     }
     const wire = await this.transport.read({
-      kind: 1,
+      kind: this.kind,
       ...(current ? { rosterVersion: current.pin.roster.rosterVersion } : {}),
     });
     if (!wire) return null;
@@ -163,7 +174,17 @@ export class SealedClient {
   async write(name: string, value: Buffer | null, options: { file?: boolean; operationId?: string } = {}) {
     const operationId = options.operationId ?? randomUUID();
     invariant(/^[0-9a-f-]{36}$/i.test(operationId), 'BAD_ARGUMENT', 'Use a UUID operation id.');
-    checkSecretWriteName(name, { set: 'development', agent: this.agent, writeLine: this.notice });
+    checkSecretWriteName(name, {
+      set: this.kind === 1 ? 'development' : 'checks',
+      agent: this.agent,
+      writeLine: this.notice,
+    });
+    // Owner decision 3: a person changes Checks values; agents run checks, they never write their secrets.
+    invariant(
+      this.kind === 1 || !this.agent,
+      'PERSON_REQUIRED',
+      'A person sets Checks values: run nforge secret set NAME --set checks on a terminal.',
+    );
     const journal = new SealedJournal(this.pins.directory, this.pins.lock);
     const identity = { project: this.project, name, removing: value === null, file: Boolean(options.file) };
     let pending = await journal.read(operationId, identity);
@@ -197,7 +218,7 @@ export class SealedClient {
       if (!pending) {
         const state = await this.read();
         // Design 5.5: a person's write first removes the entries Forge marked, with a re-key (once per write).
-        if (await removeMarkedFirst(this, state, removedMarked)) {
+        if (this.kind === 1 && (await removeMarkedFirst(this, state, removedMarked))) {
           removedMarked = true;
           continue;
         }
@@ -212,12 +233,8 @@ export class SealedClient {
         const previous = state ? framedHash(headBytes(state.reply.head)) : null;
         let reply: SealedReply, key: Buffer;
         if (!state) {
-          invariant(
-            value !== null,
-            'SECRETS_NOT_SET_UP',
-            'Development is not set up. The owner runs nforge secret set NAME.',
-          );
-          ({ reply, key } = newSealedSet(this.project, this.account, this.keys, Date.now()));
+          if (value === null) throw this.notSetUp();
+          ({ reply, key } = await this.genesis());
         } else {
           reply = nextReply(this, state);
           key = state.key!;
@@ -227,7 +244,7 @@ export class SealedClient {
           invariant(
             writeDevice(findEntry(reply.roster, this.keys.id), reply.roster.setKind),
             'SECRETS_NOT_ALLOWED',
-            'Only a device of a write member or owner holding Development writes its values.',
+            `Only a device of ${this.kind === 1 ? 'a write member or owner holding Development' : 'an owner holding Checks'} writes its values.`,
           );
           // Gate B2 L7: a write rests on a roster this device confirmed, not one it only trusted on first use. A value
           // sealed into a set a compromised server built for a tofu device would reach that server.
@@ -317,7 +334,7 @@ export class SealedClient {
       }
       let receipt: { accepted: boolean; replay: boolean };
       try {
-        receipt = await this.transport.write({ ...sealedWriteArgs(pending.wire), kind: 1 });
+        receipt = await this.transport.write({ ...sealedWriteArgs(pending.wire), kind: this.kind });
       } catch (error) {
         const refused = sealedRefusal(error);
         if (refused) {
@@ -340,7 +357,7 @@ export class SealedClient {
         throw unknown();
       }
       const reply = sealedRead(pending.wire);
-      const latest = await this.pins.load(this.project, 1);
+      const latest = await this.pins.load(this.project, this.kind);
       if (!latest || latest.pin.head.headVersion <= reply.head.headVersion) {
         const verified = await this.pins.verifyAndSave(
           reply,
@@ -362,6 +379,10 @@ export class SealedClient {
       }
       return { operationId, name, removed: value === null, replay: receipt.replay };
     }
+  }
+  /** The first head of this client's set: Development's genesis; ChecksClient overrides it. */
+  async genesis(): Promise<{ reply: SealedReply; key: Buffer }> {
+    return newSealedSet(this.project, this.account, this.keys, Date.now());
   }
   resolve(operationId: string, confirmDiscard?: (summary: string) => Promise<boolean>) {
     return resolveSealedOperation(this, operationId, confirmDiscard);

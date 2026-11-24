@@ -10,7 +10,7 @@ re-keying. A person who leaves the project, or loses access when it is trashed, 
 marked for removal; an owner's next
 write (or `nforge secret unshare --marked`) removes and re-keys, and `nforge secret
 list` shows what to rotate. Code sharing,
-proposals, passkey recovery, Checks/machine delivery, import, per-added-name owner
+proposals, passkey recovery, import, per-added-name owner
 alerts and Secret Object retirement remain pending. Gate B follows the sharing
 slice; no completed code-review gate is claimed. Default policies protect
 `.env.example`; explicit owner lists stay authoritative. See [security](../../security.md#sealed-development-core).

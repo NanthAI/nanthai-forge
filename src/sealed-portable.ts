@@ -50,6 +50,9 @@ const purposes = [
   'pins',
   'pin-index',
   'machine-bundle',
+  'machine-read',
+  'machine-reader',
+  'machine-key',
 ] as const;
 export type Purpose = (typeof purposes)[number];
 declare const framed: unique symbol;
@@ -190,3 +193,7 @@ export function checkAgreementKey(encPub: Uint8Array) {
     'Invalid recipient agreement key.',
   );
 }
+/** Slice 5: what the server keeps to let one machine key read its set's ciphertext row. The read token derives from
+ * the machine's private key (src/sealed-machine.ts), so it opens nothing; the server stores only this hash of it. */
+export const machineReaderVerifier = (token: Uint8Array) =>
+  framedHash(frame('machine-reader', fixed(token, 32)));

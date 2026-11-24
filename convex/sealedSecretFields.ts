@@ -68,4 +68,14 @@ export const sealedSecretTables = {
     proposal: v.bytes(),
     at: v.number(),
   }).index('by_project_and_setId', ['projectId', 'setId']),
+  /** Slice 5 (review F4): one Checks machine's read verifier, a hash of the token its key derives
+   * (convex/sealedMachines.ts). A machine read checks this small row before it reads the set row. Written in the
+   * owner write that adds the machine; a Checks step that removes the machine deletes it. At most 100 per set. */
+  sealedMachineReaders: defineTable({
+    projectId: v.id('hostedProjects'),
+    kind: sealedKind,
+    setId: v.bytes(),
+    machineId: v.bytes(),
+    verifier: v.bytes(),
+  }).index('by_project_and_kind_and_machine', ['projectId', 'kind', 'machineId']),
 };

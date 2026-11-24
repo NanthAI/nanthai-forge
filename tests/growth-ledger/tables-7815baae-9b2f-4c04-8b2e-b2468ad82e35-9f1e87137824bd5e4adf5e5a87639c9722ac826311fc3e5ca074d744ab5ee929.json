@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "41a0df87 slice 5 review F4: sealedMachineReaders is one ~100-byte row per Checks machine (at most 100 per set, the roster cap) so an unauthenticated machine read checks its token before the 512 KiB set row; it replaces the machineReaders field on the set row, which is removed",
+  "date": "2026-11-24"
+}

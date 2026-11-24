@@ -38,7 +38,7 @@ test('T16 masking catches every split of raw, URL, JSON, hex and all base64 alig
   }
 });
 
-test('T16 multiline values mask both complete values and individual lines; seven characters pass through', () => {
+test('T16 multiline values mask both complete values and individual lines; short lines pass through', () => {
   const text = '-----BEGIN SYNTHETIC-----\nline-of-synthetic-material\n-----END SYNTHETIC-----';
   for (const output of [text, ...text.split('\n')]) {
     const mask = new SecretOutputMask([{ name: 'FILE', value: Buffer.from(text) }]);
@@ -47,8 +47,33 @@ test('T16 multiline values mask both complete values and individual lines; seven
     ).toString();
     assert.equal(rendered, '[secret:FILE]');
   }
-  const mask = new SecretOutputMask([{ name: 'SHORT', value: Buffer.from('seven77') }]);
-  assert.equal(Buffer.concat([mask.write(Buffer.from('seven77')), mask.end()]).toString(), 'seven77');
+  const mask = new SecretOutputMask([{ name: 'FILE', value: Buffer.from('header-line\nend\n') }]);
+  assert.equal(Buffer.concat([mask.write(Buffer.from('end of run')), mask.end()]).toString(), 'end of run');
+});
+
+test('a value under eight characters is masked where it stands as its own word, in any chunking', () => {
+  const output = 'pin=4821; code 4821\n(4821) x4821 4821y 48210 _4821 4821';
+  const expected = 'pin=[secret:PIN]; code [secret:PIN]\n([secret:PIN]) x4821 4821y 48210 _4821 [secret:PIN]';
+  for (const size of [1, 2, 3, 5, output.length]) {
+    const mask = new SecretOutputMask([{ name: 'PIN', value: Buffer.from('4821') }]);
+    const chunks = [];
+    for (let at = 0; at < output.length; at += size)
+      chunks.push(mask.write(Buffer.from(output.slice(at, at + size))));
+    chunks.push(mask.end());
+    assert.equal(Buffer.concat(chunks).toString(), expected, `chunk size ${size}`);
+  }
+  // A short value never hides a longer value that contains it, and its encoded forms are not rules.
+  const both = new SecretOutputMask([
+    { name: 'PIN', value: Buffer.from('4821') },
+    { name: 'URL', value: Buffer.from('https://4821.example.test') },
+  ]);
+  assert.equal(
+    Buffer.concat([
+      both.write(Buffer.from('https://4821.example.test 4821 NDgyMQ==')),
+      both.end(),
+    ]).toString(),
+    '[secret:URL] [secret:PIN] NDgyMQ==',
+  );
 });
 
 test('masking prefers a complete longer match and preserves its carry across overlapping chunks', () => {

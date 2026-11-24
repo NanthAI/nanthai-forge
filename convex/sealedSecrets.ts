@@ -22,6 +22,7 @@ import {
   storedRoster,
 } from './sealedSecretGate';
 import { linkSealedDevice } from './sealedSecretMarkers';
+import { storeMachineReaders } from './sealedMachines';
 
 const history = v.object({
   genesis: v.bytes(),
@@ -102,6 +103,8 @@ export const write = mutation({
     transition: v.union(v.bytes(), v.null()),
     /** Waiting proposals this write resolves beyond its own proposal records (adopted, or rejected with it). */
     resolved: v.optional(v.array(v.bytes())),
+    /** Slice 5: the read verifier of the machine this write's step adds (convex/sealedMachines.ts). */
+    machineReader: v.optional(v.object({ machineId: v.bytes(), verifier: v.bytes() })),
   },
   returns: v.object({ accepted: v.boolean(), replay: v.boolean() }),
   handler: async (ctx, args) => {
@@ -179,6 +182,18 @@ export const write = mutation({
         ...(args.resolved ? { resolved: args.resolved } : {}),
       });
       if (!state) return { accepted: false, replay: false };
+      // Slice 5 (review F4): machine readers, one small row each, follow the roster this write stores. A refused
+      // reader stops the write before any row changes.
+      await storeMachineReaders(ctx, {
+        projectId: args.projectId,
+        kind: args.kind,
+        setId,
+        roster: facts.roster,
+        stepped: args.transition !== null,
+        genesis: !set,
+        owner: project.owner === user.subject,
+        reader: args.machineReader,
+      });
       const next = {
         projectId: args.projectId,
         kind: args.kind,

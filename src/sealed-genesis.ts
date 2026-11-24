@@ -6,7 +6,13 @@ import { inboxKeys, keyCommit, signBytes, wrapSetKey, type DeviceKeys } from './
 import { headBytes, rosterBytes, type Entry, type Roster } from './sealed-records.js';
 import type { SealedReply } from './sealed-verify.js';
 
-export function newSealedSet(project: string, account: string, keys: DeviceKeys, now: number) {
+export function newSealedSet(
+  project: string,
+  account: string,
+  keys: DeviceKeys,
+  now: number,
+  kind: 1 | 2 = 1,
+) {
   const projectId = forgeSecretId('project', project),
     setId = randomBytes(16),
     key = randomBytes(32);
@@ -28,9 +34,10 @@ export function newSealedSet(project: string, account: string, keys: DeviceKeys,
     v: 1,
     projectId,
     setId,
-    setKind: 1,
+    setKind: kind,
     // Owner decision 2 (design 3, 4.8): Development starts in Automatic; the owner may switch it to Confirm.
-    sharingMode: 1,
+    // Checks is Confirm only (a constant): its recipients are owner devices and machines.
+    sharingMode: kind === 1 ? 1 : 2,
     checksPointer: null,
     rosterVersion: 1,
     epoch: 1,
@@ -54,7 +61,7 @@ export function newSealedSet(project: string, account: string, keys: DeviceKeys,
         v: 1,
         projectId,
         setId,
-        setKind: 1,
+        setKind: kind,
         headVersion: 1,
         prevHeadHash: Buffer.alloc(32),
         rosterVersion: 1,

@@ -38,12 +38,16 @@ The process boundary enforces these rules:
   startup environment; this process boundary is not OS isolation.
 - Piped stdout and stderr mask injected values of at least eight characters as
   `[secret:NAME]`: raw, URL-encoded, JSON-escaped, hex, base64 and base64url at all
-  three alignments. Multiline values are masked whole and line by line (lines
-  shorter than eight characters pass). Each stream keeps at most the longest
-  encoded form minus one byte across chunks. An agent marker, agent entry point
-  or MCP keeps masking enabled even with a terminal. A person can use `--show`;
-  an agent cannot. Masking stops accidents, can test a guess, and cannot prevent
-  code deliberately disclosing a value.
+  three alignments. A value under eight characters is masked raw where it stands
+  as its own word (no letter, digit or underscore touching it); its encoded forms
+  pass. Multiline values are masked whole and line by line (lines shorter than
+  eight characters pass). Each stream keeps at most the longest encoded form
+  minus one byte across chunks, plus one byte for a short value's right edge. An
+  agent marker, agent entry point or MCP keeps masking enabled even with a
+  terminal, and a Checks machine run always masks. A person can use `--show` on
+  Development; an agent cannot, and nobody can on Checks. Masking stops
+  accidents, can test a guess, and cannot prevent code deliberately disclosing a
+  value.
 - File values use a private folder outside the tree and declared kept-output
   paths, under `/dev/shm` on Linux or the private temporary area elsewhere.
   Folders are `0700`, files `0600`. Normal exit, startup failure and handled

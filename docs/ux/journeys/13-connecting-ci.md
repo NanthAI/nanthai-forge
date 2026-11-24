@@ -23,14 +23,17 @@ Walked: `check-settings`, `help check`, `help wait`, `help limits`, the checks s
 
 ### Secrets for a check
 
-The rebuilt **Settings → Secrets** page now explains runner passthrough and the
-planned sealed Development/Checks sets in one place. Its provider remains an
-unavailable metadata stub. Gate A on `41a0df87` is unresolved; declared-name
-delivery from a Checks set and one machine-key setup are not delivered. The table
-below describes today's runner contract. See [current guidance](../../security.md#secrets-for-checks).
+The rebuilt **Settings → Secrets** page explains runner passthrough and the
+sealed Development/Checks sets in one place. Its provider remains an unavailable
+metadata stub. On any CI, a check reads the Checks set with one machine key; the
+Forge runner's `credentials` do not read Checks yet. See [current guidance](../../security.md#secrets-for-checks).
 
 | Need | Route |
 | --- | --- |
+| A Checks value in a CI step, any provider | The owner runs `nforge secret set NAME --set checks`, then `nforge secret machine add ci --set checks` on a terminal, and stores the printed `FORGE_SECRETS_KEY` as the CI's own secret. The step runs `nforge run --set checks --only NAME -- COMMAND`, with `FORGE_DEPLOYMENT_URL` and `FORGE_PROJECT_ID` outside a Forge checkout. The command gets exactly the declared names. (tests) |
+| A declared name with no value | Setup fails before the command runs: `SECRETS_NOT_SET_UP`, "Check setup failed before the command ran; missing: NAME (no value in Checks)". (tests) |
+| A value printed to the CI log | Always replaced with `[secret:NAME]` on a machine run, in a terminal too; `--show` is refused for Checks. (tests) |
+| A step that runs untrusted code (a fork's pull request) | Never give it `FORGE_SECRETS_KEY`: a command can read its own process's key and open every Checks value. `--only` limits what an honest command gets; it is not a boundary. (docs) |
 | An environment variable or a credential in the check | Declare names, never values: `"env":["SERVICE_URL"],"credentials":["SERVICE_TOKEN"]`. "Omitted variables are absent; failed runs suggest omitted names that may need passthrough." The values must already exist on the runner (a GitHub Actions secret, or the machine's service environment). (docs) |
 | Toolchain locations on Actions | A fixed allowlist (`JAVA_HOME`, `GOROOT`, `CARGO_HOME` …). "No name containing TOKEN, SECRET, PASSWORD, CREDENTIAL, AUTH or KEY passes, whatever pattern it matches." (docs) |
 | Secrets held by Forge | Settings → **Secret Objects** exists ("Create Secret Object", "Import a GitHub credential from .env", "Rotate credential", "Capabilities", "Audit events"), but check declarations "do not inject Secret Objects". (source, docs) |

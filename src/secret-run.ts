@@ -10,7 +10,11 @@ import { secretRunEnvironment, type RunSecret } from './secret-run-environment.j
 import { prepareSecretFileStorage, secretFileFolder } from './secret-run-files.js';
 import { secretMaskStream } from './secret-output-mask.js';
 
-export type RunSecretProvider = (input: { root: string; set: 'development' | 'checks' }) => Promise<{
+export type RunSecretProvider = (input: {
+  root: string;
+  set: 'development' | 'checks';
+  source?: NodeJS.ProcessEnv;
+}) => Promise<{
   secrets: RunSecret[];
   machine?: boolean;
 }>;
@@ -60,7 +64,18 @@ export async function runWithSecrets(
   );
   const example = readSecretExample(input.root);
   const set = input.set ?? 'development';
-  const result = await provider({ root: input.root, set });
+  // A CI step can run in a terminal (a PTY runner, docker -t), so Checks output is never unmasked.
+  invariant(
+    !input.show || set !== 'checks',
+    'PERSON_REQUIRED',
+    '--show is not available for Checks; Checks output is always masked.',
+  );
+  const result = await provider({ root: input.root, set, source });
+  invariant(
+    !input.show || !result.machine,
+    'PERSON_REQUIRED',
+    '--show is not available on a machine run; its output is always masked.',
+  );
   let folder: ReturnType<typeof secretFileFolder> | undefined;
   let child: ChildProcess | undefined;
   const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
@@ -96,6 +111,8 @@ export async function runWithSecrets(
     });
     if (input.declaration)
       selected.selected = selected.selected.filter(secret => input.declaration!.includes(secret.name));
+    // Slice 5: a check gets exactly its declared names, or setup fails by name before its command starts.
+    if (result.machine) checkDeclared(input.only ?? input.declaration ?? [], selected, example.names);
     // Sweep on every run, including an env-only run after a killed file run.
     // Unavailable file storage must not prevent delivery that needs no files.
     try {
@@ -126,7 +143,9 @@ export async function runWithSecrets(
         selected.env[secret.name] = folder.write(secret.name, secret.value);
       } else selected.env[secret.name] = secret.value.toString('utf8');
     }
-    const mask = !input.show && (!terminal || agent || (options.entryPoint && options.entryPoint !== 'cli'));
+    const mask =
+      result.machine ||
+      (!input.show && (!terminal || agent || (options.entryPoint && options.entryPoint !== 'cli')));
     child = spawn(input.command[0]!, [...input.command.slice(1)], {
       cwd: input.root,
       env: selected.env,
@@ -158,4 +177,19 @@ export async function runWithSecrets(
     signals.forEach((signal, index) => process.removeListener(signal, handlers[index]!));
     for (const secret of result.secrets) secret.value.fill(0);
   }
+}
+/** Names only: each declared name must arrive from the set or already be in the step's own environment. */
+function checkDeclared(
+  declared: readonly string[],
+  selected: ReturnType<typeof secretRunEnvironment>,
+  listed: readonly string[],
+) {
+  const missing = declared
+    .filter(name => !selected.selected.some(s => s.name === name) && selected.env[name] === undefined)
+    .map(name => `${name} (${listed.includes(name) ? 'no value in Checks' : 'not listed in .env.example'})`);
+  invariant(
+    !missing.length,
+    'SECRETS_NOT_SET_UP',
+    `Check setup failed before the command ran; missing: ${missing.join(', ')}.`,
+  );
 }
