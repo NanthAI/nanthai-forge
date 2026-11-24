@@ -131,6 +131,102 @@ Put `@due YYYY-MM-DD` before the text of an unchecked line to date it. The agent
 pending date on each open Issue, with the exact line number in its body. Dates are calendar dates in UTC and the Issue
 body retains every annotation, including dates that have been checked off.
 
+### Status roll-up (design; not yet active)
+
+- **Start.** A Lane start moves its unpinned Item to In progress. An In progress descendant moves every unpinned
+  Planned ancestor Item and the applicable Planned Initiatives to In progress. Proposed Items still require
+  planning; a Proposed or pinned ancestor does not stop the start signal from reaching the next level.
+- **Done.** An Item closes when its own Done-when lines are met and its children are settled (Done or Abandoned).
+  An Item with linked work still needs that work to finish. A parent without its own Lane can close after its
+  last child settles. An unstarted leaf without a checklist does not close merely because it has nothing to tick.
+  After the last child settles, a parent with unchecked lines stays open and the Item shows the remaining lines.
+  An Initiative closes when it has at least one Item and every Item in it is settled, even if all were Abandoned.
+  Its reason says the last Item settled, not that work landed. Archived and Deleted rows are outside the live
+  Plan, so they neither block closure nor count as completed work. Initiative membership is the Item's stored
+  `initiativeId`, counted once even when that Item is nested.
+- **Reopen.** New or reopened work under a settled parent or Initiative reopens it. It becomes In progress if
+  work in its scope has started, or Planned if none has. A Lane start or recorded completed work is evidence of
+  starting; abandoning an unstarted Item is not. A reopen does not reopen any settled children or recreate Lanes.
+- **Override.** An explicit manual status change pins that Item or Initiative. Its status shows who pinned it
+  and when, from the retained version. Editing the title or checklist does not pin it. Automation, including
+  start and completion, leaves the pinned status alone, but still forwards facts about the children and updates
+  the rest of the tree. A pinned Done Item counts as Done in its Initiative; a pin does not settle its descendants.
+  Close and bulk status changes pin each changed row. On the web choose **Follow work** in the status menu;
+  in CLI or MCP use `put-planning-item` with the current `expectedVersion` and `fields: {"statusPin": null}`.
+  The member Item or Initiative reply shows `statusPin` with who and when; clearing starts the same evaluation
+  as a new work change, so an open child can reopen the row or a settled scope can close it. If no rule applies,
+  the status stays where it is. To undo an automatic change, set the previous status, which pins it. Batch Undo
+  restores the previous pin with the previous status; Archive and Restore from the shelf keep the pin state.
+- **Project setting.** **Roll up planning status** defaults to on; the owner can turn it off in Settings → Project →
+  Plan. Off stops ancestor and Initiative changes, not an unpinned Item's own start and finish behavior. The signal
+  is the Item's work and checklist state, its direct children's maintained facts, and the Initiative's membership
+  tally. The formula is the rules above: on applies them; off leaves aggregate statuses alone. There is no tuned
+  range beyond off and on. In manual mode the hint is “Automatic would turn this on because status follows work.”
+  The top metric is flow (landings that stay landed); check minutes, wall time and cost per 1,000 landings guard it.
+  This setting does not change Lane creation, completion, acceptance or autonomy policy. Direct counter facts
+  are still maintained while off. Switching back on starts one bounded catch-up using the existing recompute
+  path; it does not wait for another Lane or schedule recurring work.
+
+Automatic changes append ordinary retained planning versions, not a separate history. Versions and History say
+what changed and why, with a Forge actor and a rule such as “Done: last child closed”. CLI, MCP and the web use
+those same stored statuses. Explanations in public replies must not identify hidden work or disclose private
+checklist content or attribution; audit reads keep their existing member access rules.
+
+#### How roll-up is bounded
+
+Reuse the planning counter writer and its record partition. Keep exact status tallies keyed by parent and by
+Initiative; do not use the capped public visibility groups as a source of truth. Track open work and evidence of
+starting through an overridden ancestor separately from that ancestor's displayed status. On a status or link
+change, subtract the old contribution and add the new one, including moves out of an old parent or Initiative.
+A body-only edit whose checklist facts did not change touches neither tally. One write evaluates one level; it
+can process a bounded page of targets at that level. It does not enumerate siblings or descendants.
+
+Schedule the next affected level after commit, coalescing the same target within a page. Each step checks the
+current setting, generation, links, counters and Item version; it never overwrites a newer override or applies a
+stale delta. The causing operation and target version identify the derived write. The contribution, version and
+successor checkpoint commit together, so a retry neither changes the counters twice nor loses its next step.
+Stop when facts no longer change, at a missing or shelved parent, or when a target repeats. The depth budget is
+16 ancestor levels per continuation segment; deeper valid trees continue in another segment, not a new nesting
+limit. For a pinned topology of `N` live-Plan Items, the absolute bound is `N − 1` Item ancestors per starting
+Item. Initiative evaluations are terminal. If a target repeats, stop that path without treating the cycle as
+settled. If topology moves, evaluate the old and new affected links from their current facts. There is no polling,
+idle call or extra client round trip.
+
+| Planning status work for one linked Item landing | Before | Design budget after |
+| --- | --- | --- |
+| Acceptance and required completion | No planning status read or write in the acceptance transaction. Completion already schedules the Work fold. | No added read, write or call on acceptance or required completion. Start evaluation in the existing background Work fold. |
+| Item closure | No status change without a reconciling read or last tick. Reconciliation reads the Intent state (one point read, in the page query), reads the selected Item, then appends one ordinary status version; an unticked checklist can instead append one hold version and one comment. | Reuse the fold's project and Item root, read at most one child tally plus one Intent head for the Item, and append zero or one ordinary status version. Replace the closing read and hold writes; clients no longer drive status. |
+| Propagation | Zero reads and writes for parents and Initiatives. | Per affected target: at most one root and one tally read for the decision, one counter update per changed contribution, and zero or one ordinary status version. Pages share scope reads and the scheduler continuation; stable facts and disabled roll-up add no ancestor step. |
+
+For one landing that closes one Item, the old status path selects two records (Intent state and the Item, not
+counting their lookup and payload overhead) and appends one version. The new bound, excluding the fold's
+existing reads, is `2 + 2(H + I)` point reads for decisions and at most `1 + H + I` version appends, where `H`
+is the number of affected ancestors and `I` the number of distinct affected Initiatives (at most `H + 1`). There
+are at most two maintained counter updates per changed Item and one wake per nonempty page needing a successor.
+For one parent and one Initiative this means at most six decision reads, four counter updates and three version
+appends, instead of two record selections and one version append. A landing with no due status work adds no
+ancestor reads or writes. A cohort batches by page and deduplicates shared targets before these counts apply.
+
+Version appends include their existing audit, index and projection work; they are not single database document
+writes. Measure whole-document and billed I/O separately from scheduling on a small fixture and a Plan with
+about 1,300 roots. The per-level I/O is independent of sibling count, and peak memory is one bounded page plus
+the ordinary version writer's working set. Last-child propagation time depends on depth and scheduler latency,
+not width. Measure it off the acceptance critical path rather than assuming a scheduler deadline.
+
+#### Existing Plans
+
+Before making decisions from the new counters, a one-time recompute builds complete coverage in a selected
+partition, then evaluates statuses from the leaves up. Use indexed pages of at most 50 roots and a 256 KiB compact
+working page, with a saved cursor and a revision fence. Interleaved writes must be accounted for before publishing
+coverage. An incomplete pass supplies no zero counts and cannot produce an automatic close. No source bytes move.
+
+For an initial, lead-approved **dev-only** run on a Plan of about 1,300 roots, budget two root passes (about 2,600
+root reads before point reads and status appends), at most one status append per changed root, and a cumulative
+stop of **0.10 GB billed Convex database I/O ($0.02 at $0.20/GB)**, including index I/O, retries and a reserve for
+the final page. Pilot one page within **0.01 GB** of that total. Compare provider usage before allowing the next
+batch, and stop if the next batch plus the reserve will not fit. Function reply byte estimates are not billing
+ceilings. Verify the resulting Initiative statuses with the owner on dev; this does not authorize a production run.
+
 ### Archive and Deleted
 
 Archive and Delete are two different places an Item can be sent and brought back from. Both hide the Item from every
