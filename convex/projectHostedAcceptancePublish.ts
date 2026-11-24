@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { attributeCheckTime } from '../src/check-time-added';
+import { queueProjectSnapshots } from './publicSnapshotJobs';
 import { writeLineMain } from './projectLiveLineStore';
 import { requireLandingCheck } from './projectHostedCheckEntries';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
@@ -493,6 +494,7 @@ export async function publishAcceptance(
     main.receipt.kind === 'server' && main.receipt.previousReceiptId !== null,
     receipt.snapshot.revision,
   );
+  await queueProjectSnapshots(ctx, project, false);
   await ctx.db.insert('projectHostedAcceptanceSnapshots', {
     projectId: claim.projectId,
     snapshotId: receipt.snapshot.id,

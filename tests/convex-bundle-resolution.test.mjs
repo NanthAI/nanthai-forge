@@ -35,6 +35,18 @@ test('bundle guard resolves static dependencies and builtins in isolation, and r
   await assert.rejects(checkConvexBundles(missing), /Could not resolve/);
 });
 
+test('isolated import resolves a manifest larger than a subprocess argument', async t => {
+  const folder = 'nested-'.repeat(21);
+  const files = Object.fromEntries(
+    Array.from({ length: 600 }, (_, i) => [
+      `convex/${folder}/${folder}/entry-${i}.ts`,
+      'export const synthetic = true;',
+    ]),
+  );
+  const root = fixture(t, files);
+  assert.equal((await checkConvexBundles(root)).entries, 600);
+});
+
 test('isolated source task bundles reconcile identical imports without local node_modules', async t => {
   const out = mkdtempSync(join(tmpdir(), 'forge-test-source-parser-'));
   t.after(() => rmSync(out, { recursive: true, force: true }));

@@ -22,6 +22,7 @@ const readArgs = { order: 'active', now: NOW };
 const deployment = 'https://example.convex.cloud';
 const cli = resolve('dist/cli-entry.js');
 const run = promisify(execFile);
+const searchPath = '/-/public/v1/search/1.json';
 const explorePath = '/-/public/v1/explore/active.json';
 
 async function directory(t, body, status = 200) {
@@ -34,8 +35,10 @@ async function directory(t, body, status = 200) {
       for await (const chunk of req) chunks.push(chunk);
       posts.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
     }
-    res.writeHead(status, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(body));
+    res.writeHead(typeof status === 'function' ? status(req.url) : status, {
+      'content-type': 'application/json',
+    });
+    res.end(JSON.stringify(typeof body === 'function' ? body(req.url) : body));
   });
   t.after(() => new Promise(done => server.close(done)));
   server.listen(0, '127.0.0.1');
@@ -116,8 +119,8 @@ test('signed-out CLI and MCP find the same public projects with one request per 
   const result = await callTool(client, { name: 'forge_find_project', arguments: { name: '@ada/atlas' } });
   assert.deepEqual(JSON.parse(result.content[0].text), lookup);
   assert.deepEqual(requests, [
-    ['GET', explorePath, null, null],
-    ['GET', explorePath, null, null],
+    ['GET', searchPath, null, null],
+    ['GET', searchPath, null, null],
   ]);
   await client.close();
 
@@ -179,7 +182,7 @@ test('a private project with a stale listing is absent from name and exact addre
 test('a failed directory request produces a structured error without a fallback request', async t => {
   const { site, requests } = await directory(t, {}, 503);
   await assert.rejects(hostedCloneCli(['atlas', '--site', site]), { code: 'EXCHANGE_REQUEST_FAILED' });
-  assert.deepEqual(requests, [['GET', explorePath, null, null]]);
+  assert.deepEqual(requests, [['GET', searchPath, null, null]]);
 });
 
 test('one full public directory page can be searched without requesting another page', async t => {
@@ -192,7 +195,50 @@ test('one full public directory page can be searched without requesting another 
   const result = await hostedCloneCli(['atlas', '--site', site]);
   assert.equal(result.projects.length, projects.length);
   assert.equal(result.more, true);
-  assert.deepEqual(requests, [['GET', explorePath, null, null]]);
+  assert.deepEqual(requests, [['GET', searchPath, null, null]]);
+});
+
+test('older sites may lack the compact search route; a 404 can use the legacy directory', async t => {
+  const body = { v: 1, more: true, deployment, projects: [{ handle: 'ada', slug: 'atlas', name: 'Atlas' }] };
+  const { site, requests } = await directory(t, body, path => (path === searchPath ? 404 : 200));
+  const result = await hostedCloneCli(['--find', 'ada/atlas', '--site', site]);
+  assert.equal(result.projects[0].slug, 'atlas');
+  assert.deepEqual(
+    requests,
+    [searchPath, explorePath].map(path => ['GET', path, null, null]),
+  );
+});
+
+test('clone --find finds an exact address in the second search shard without sending the query', async t => {
+  let origin = deployment;
+  const { site, requests } = await directory(t, path => {
+    const more = path.endsWith('/1.json');
+    const shard = more ? 1 : 2;
+    return {
+      deployment: more ? deployment : origin,
+      shard,
+      start: more ? 0 : 1,
+      total: 2,
+      more,
+      projects: more
+        ? [['ada', 'atlas-records', '', 2, 100, 0, 2, 0]]
+        : [['ada', 'atlas', '', 1, null, 1, 0, 0]],
+    };
+  });
+  const result = await hostedCloneCli(['--find', 'ada/atlas', '--site', site]);
+  assert.deepEqual(
+    result.projects.map(project => project.slug),
+    ['atlas', 'atlas-records'],
+  );
+  assert.equal(result.more, false);
+  assert.deepEqual(
+    requests,
+    [searchPath, '/-/public/v1/search/2.json'].map(path => ['GET', path, null, null]),
+  );
+  origin = 'https://unrelated.example';
+  await assert.rejects(hostedCloneCli(['--find', 'ada/atlas', '--site', site]), {
+    code: 'EXCHANGE_REQUEST_FAILED',
+  });
 });
 
 test('explicit lookup searches names that look like flags or URLs', async t => {

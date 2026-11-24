@@ -12,6 +12,9 @@ import { invariant } from '../src/errors';
 import { endAccountDevices } from './deviceEndAll';
 import { endSessions } from './accountCloseSignIn';
 import { isPublicProject } from './publicVisibility';
+import { accountFor } from './urlIdentity';
+import { publicSnapshotJobsEnabled, queuePublicAccountRead } from './publicSnapshotJobs';
+import { internal } from './_generated/api';
 
 const scope = v.union(v.literal('global'), v.literal('project'), v.literal('account'));
 const PURGE_PAGE = 200;
@@ -102,6 +105,15 @@ export async function applySwitch(ctx: MutationCtx, input: SwitchInput) {
       await endSessions(ctx, target.owner);
     }
     await relistAccount(ctx, target.owner, input.off, null);
+    if (publicSnapshotJobsEnabled() && Boolean(row?.off) !== input.off) {
+      const account = await accountFor(ctx, target.owner);
+      if (account?.handle)
+        await ctx.scheduler.runAfter(0, internal.publicSnapshotJobs.ownerPage, {
+          owner: target.owner,
+          handle: account.handle,
+          cursor: null,
+        });
+    }
   }
   return { key: target.label, off: input.off };
 }
@@ -114,9 +126,22 @@ async function relistAccount(ctx: MutationCtx, owner: string, suspended: boolean
     .query('projectPublic')
     .withIndex('by_owner_and_listed', q => q.eq('owner', owner).eq('listed', suspended))
     .paginate({ cursor, numItems: LISTING_PAGE });
+  const relisted: Id<'hostedProjects'>[] = [];
   for (const row of page.page) {
     if (suspended) await ctx.db.patch(row._id, { listed: false });
-    else if (isPublicProject(await ctx.db.get(row.projectId))) await ctx.db.patch(row._id, { listed: true });
+    else if (isPublicProject(await ctx.db.get(row.projectId))) {
+      await ctx.db.patch(row._id, { listed: true });
+      relisted.push(row.projectId);
+    }
+  }
+  if (cursor !== null && relisted.length && publicSnapshotJobsEnabled()) {
+    const account = await accountFor(ctx, owner);
+    await queuePublicAccountRead(ctx, account?.handle, {
+      profile: true,
+      directory: true,
+      coalesce: true,
+      projects: relisted,
+    });
   }
   if (!page.isDone)
     await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectBoardOperator:relist'), {

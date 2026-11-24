@@ -1,0 +1,1 @@
+| `publicDirectoryChanges` | Coalesced project IDs and directory serials for pending publication. Retained through source removal or an unknown action outcome, and consumed after an acknowledged R2 checkpoint. Directory row and pack bytes are stored in R2. | Discovery publication |

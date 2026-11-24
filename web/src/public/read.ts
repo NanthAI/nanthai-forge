@@ -5,6 +5,14 @@
 // may already supply its snapshot; otherwise read once. No polling, timer or calls while the tab is idle.
 import { useEffect, useRef, useState } from 'react';
 import type { ProfileRead } from '../../../src/person-days';
+import {
+  collectPublicSearch,
+  readSearchShard,
+  searchShardPath,
+  type ExploreOrder,
+  type SearchRow,
+} from '../../../src/public-explore-pages';
+export type { ExploreOrder } from '../../../src/public-explore-pages';
 
 export type MainCheck = 'passing' | 'unchecked';
 export type ListedProject = {
@@ -18,17 +26,22 @@ export type ListedProject = {
   days: number[];
   main: MainCheck;
 };
-export type ExploreOrder = 'active' | 'stars' | 'newest';
 export type ExplorePage = {
   asOf: number;
   starLookup?: true;
   order: ExploreOrder;
+  page?: number;
+  start?: number;
+  search?: true;
+  active?: number;
+  deployment?: string;
   total: number;
   more: boolean;
   projects: ListedProject[];
 };
 export type ProfilePage = {
   asOf: number;
+  moreCount?: number;
   starLookup?: true;
   handle: string;
   projects: ListedProject[];
@@ -46,6 +59,7 @@ export type PlanView =
     };
 export type ProjectPage = {
   asOf: number;
+  moreCount?: number;
   starLookup?: true;
   /** The source deployment, absent from pages cached before it was included. */
   deployment?: string;
@@ -96,6 +110,45 @@ function embeddedRead<T>(path: string): Read<T> | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The first search loads the compact index once. Keystrokes and order changes filter it locally. */
+export function useExploreDirectory(first: ExplorePage | undefined, searching: boolean) {
+  const [attempt, setAttempt] = useState(0);
+  const deployment = first?.search && first.deployment;
+  const [result, setResult] = useState<{ deployment: string; projects: SearchRow[] | null }>();
+  const current = result?.deployment === deployment ? result : undefined;
+  useEffect(() => {
+    if (!searching || !deployment || current) return;
+    const controller = new AbortController();
+    void collectPublicSearch(deployment, async number => {
+      const response = await fetch(publicReadUrl(searchShardPath(number)), {
+        signal: controller.signal,
+        credentials: 'omit',
+        headers: { accept: 'application/json' },
+      });
+      if (!response.ok || !response.headers.get('content-type')?.includes('json'))
+        throw new Error('Explore is unavailable.');
+      const shard = readSearchShard(await response.json());
+      if (!shard) throw new Error('Explore search is unavailable.');
+      return shard;
+    }).then(
+      projects => {
+        if (!controller.signal.aborted) setResult({ deployment, projects });
+      },
+      () => {
+        if (!controller.signal.aborted) setResult({ deployment, projects: null });
+      },
+    );
+    return () => controller.abort();
+  }, [deployment, searching, current, attempt]);
+  return {
+    projects: current?.projects,
+    retry: () => {
+      setResult(undefined);
+      setAttempt(number => number + 1);
+    },
+  };
 }
 
 /** Reuse the document's page, or read one cached JSON file for a client navigation or explicit retry. */

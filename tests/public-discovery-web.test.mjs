@@ -449,7 +449,33 @@ test('public discovery screens: explore, a profile signed out and as its person,
         asked.push(url.pathname);
         assert.equal(route.request().method(), 'GET');
         assert.equal(route.request().headers().cookie, undefined, 'a public read sends no cookie');
-        const body = reads[url.pathname];
+        const paged = path === '/explore?paged=1';
+        const next = url.pathname.endsWith('/2.json');
+        let body = reads[url.pathname];
+        if (paged && url.pathname.startsWith('/-/public/v1/explore/active'))
+          body = {
+            ...explore('active'),
+            deployment: sourceDeployment,
+            search: true,
+            page: next ? 2 : 1,
+            start: next ? 35 : 0,
+            total: 36,
+            more: !next,
+            projects: next
+              ? [listed('ogden', 'late-atlas', 0, 0)]
+              : Array.from({ length: 35 }, (_, index) => listed('ada', `project-${index}`, 0, 0)),
+          };
+        if (paged && url.pathname.startsWith('/-/public/v1/search/'))
+          body = {
+            deployment: sourceDeployment,
+            shard: next ? 2 : 1,
+            total: 36,
+            start: next ? 35 : 0,
+            more: !next,
+            projects: next
+              ? [['ogden', 'late-atlas', '', 0, null, 0, 0, 0]]
+              : Array.from({ length: 35 }, (_, index) => ['ada', `project-${index}`, '', 0, null, 0, 0, 0]),
+          };
         return route.fulfill(
           body
             ? { contentType: 'application/json', body: JSON.stringify(body) }
@@ -526,6 +552,27 @@ test('public discovery screens: explore, a profile signed out and as its person,
     await ex.getByRole('dialog').getByRole('link', { name: 'Sign in' }).getAttribute('href'),
     /^\/signin\?next=%2Fexplore$/,
   );
+
+  asked.length = 0;
+  const paged = await open('/explore?paged=1');
+  await paged.locator('.row.xrow').first().waitFor();
+  assert.deepEqual(asked, ['/-/public/v1/explore/active.json'], 'browsing page one does not read the rest');
+  await paged.getByRole('searchbox').fill('late-atlas');
+  await paged.getByRole('link', { name: /late-atlas/ }).waitFor();
+  await paged.getByRole('searchbox').fill('ogden');
+  await paged.locator('.row.hitrow').filter({ hasText: '@ogden' }).waitFor();
+  assert.deepEqual(asked, [
+    '/-/public/v1/explore/active.json',
+    '/-/public/v1/search/1.json',
+    '/-/public/v1/search/2.json',
+  ]);
+  await paged.getByRole('searchbox').fill('');
+  await paged.getByRole('button', { name: 'Next page' }).click();
+  await paged
+    .locator('.pager')
+    .getByText(/36 to 36 of 36/)
+    .waitFor();
+  assert.equal(asked.at(-1), '/-/public/v1/explore/active/2.json');
 
   // A public project page: what was done, what is in progress, what is left; Next is derived from the plan.
   const pp = await open('/ada/atlas');

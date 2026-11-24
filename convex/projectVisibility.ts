@@ -5,12 +5,28 @@
 // needs its name typed, like permanent delete. One mutation, retry-safe per operation id; it reads and writes the one
 // project row, its operation row and its listing row, and nothing runs while idle.
 import { v } from 'convex/values';
-import { accountMutation } from './cliServer';
+import { accountMutation, isDeviceIdentity, query } from './cliServer';
 import { requireOwnerPerson } from './ownerPerson';
 import { activeOwnedProject } from './projectAuthority';
 import { publicRow, ensurePublicRow } from './publicListing';
+import { queueProjectSnapshots, snapshotHidePending } from './publicSnapshotJobs';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+
+/** Only its owner sees whether all public copies have been hidden. No jobs are created by reads. */
+export const hidePending = query({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.boolean(),
+  handler: async (ctx, { projectId }) => {
+    if (process.env.FORGE_PUBLIC_SNAPSHOTS !== '1') return false;
+    const actor = await ctx.auth.getUserIdentity();
+    if (!actor || isDeviceIdentity(actor)) return false;
+    const project = await ctx.db.get(projectId);
+    if (!project || project.owner !== actor.subject || (!project.removal && project.visibility !== 'private'))
+      return false;
+    return snapshotHidePending(ctx, project);
+  },
+});
 
 /** Set the project public or private. A private project keeps no listing: its row (stars stay) stops being `listed`.
  * Links to a private project's pages and its GitHub status links follow the project's visibility at read time
@@ -66,6 +82,7 @@ export const setVisibility = accountMutation('person')({
         const next = { ...project, visibility: input.visibility };
         if (input.visibility === 'public' || (await publicRow(ctx, project._id)))
           await ensurePublicRow(ctx, next);
+        await queueProjectSnapshots(ctx, next, true);
       }
       await ctx.db.insert('projectAccessOperations', {
         projectId: input.projectId,

@@ -5,6 +5,7 @@ import { policyPreset } from '../src/autonomy-policy';
 import type { MutationCtx } from './_generated/server';
 import { activeOwnedProject } from './projectAuthority';
 import { ensurePublicRow } from './publicListing';
+import { queueProjectSnapshots } from './publicSnapshotJobs';
 import { syncPersonOrder } from './accountProjectOrder';
 import { chargeProjectCreation } from './accountLimits';
 import { verifiedItemMembership } from './projectItemMembershipVersion';
@@ -18,6 +19,7 @@ export async function createProject(
     .query('hostedProjects')
     .withIndex('by_owner_and_key', q => q.eq('owner', input.owner).eq('key', input.key))
     .unique();
+  const isNew = project === null;
   if (!project) {
     // A new project only: the owner's daily rate and active total (a retry of this key is free).
     await chargeProjectCreation(ctx, input.owner);
@@ -43,5 +45,7 @@ export async function createProject(
   );
   await ensureProjectSlug(ctx, project);
   await syncPersonOrder(ctx, project._id, project.owner, project);
-  return activeOwnedProject(ctx, project._id, input.owner);
+  const ready = await activeOwnedProject(ctx, project._id, input.owner);
+  if (isNew && ready.visibility === 'public') await queueProjectSnapshots(ctx, ready, true);
+  return ready;
 }

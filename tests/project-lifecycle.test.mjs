@@ -17,6 +17,7 @@ for (const name of [
   'projectContributors',
   'projectProposals',
   'projectLifecycle',
+  'publicSnapshotJobs',
 ])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 const { purgeSettleMs } = await import(moduleUrl('../convex/projectRetention.ts'));
@@ -172,6 +173,49 @@ test('deleting a project hides it from everyone (owner included), stops all chan
     [],
   );
 });
+test('a public project in Trash and its deleted tombstone both report unconfirmed public hiding to the owner', async t => {
+  const prior = process.env.FORGE_PUBLIC_SNAPSHOTS;
+  process.env.FORGE_PUBLIC_SNAPSHOTS = '1';
+  t.after(() => {
+    if (prior === undefined) delete process.env.FORGE_PUBLIC_SNAPSHOTS;
+    else process.env.FORGE_PUBLIC_SNAPSHOTS = prior;
+  });
+  const s = fixture();
+  s.tables.publicSnapshotJobs = new Map();
+  s.tables.publicProfileDependencies = new Map();
+  s.tables.publicDirectoryChanges = new Map();
+  s.tables.forgeAccounts.set('account', { _id: 'account', owner: 'owner', handle: 'ada' });
+  Object.assign(s.tables.hostedProjects.get('project'), { visibility: 'public', slug: 'atlas' });
+  const read = () => modules.projectBackups.deletionStatus._handler(s.ctx, { projectId: 'project' });
+  await modules.projectLifecycle.trash._handler(s.ctx, s.operation());
+  assert.equal((await read()).hiding, true);
+  const entry = (await modules.projectBackups.list._handler(s.ctx, { ...page, removed: true })).page[0];
+  assert.equal(entry.hiding, true);
+  assert.deepEqual([...s.tables.publicSnapshotJobs.values()].map(row => row.key).sort(), [
+    'directory',
+    'profile/ada',
+    'project/ada/atlas',
+  ]);
+  await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, { ...s.operation(), confirm: 'atlas' });
+  await s.drain();
+  const status = await read();
+  assert.equal(status.removal, 'deleted');
+  assert.equal(status.slug, undefined);
+  assert.equal(status.hiding, true, 'removing the source and slug does not confirm the edge purge');
+  s.caller('contributor');
+  assert.equal(await read(), null);
+  s.caller('owner');
+  for (const id of s.tables.publicSnapshotJobs.keys()) {
+    const count = s.tables.publicSnapshotJobs.get(id).key.startsWith('profile/') ? 3 : 2;
+    for (let step = 0; step < count; step++) {
+      const args = { id, serial: s.tables.publicSnapshotJobs.get(id).serial };
+      assert.ok(await modules.publicSnapshotJobs.claim._handler(s.ctx, args));
+      await modules.publicSnapshotJobs.settle._handler(s.ctx, { ...args, ok: true });
+    }
+  }
+  assert.equal((await read()).hiding, undefined);
+});
+
 // SM-D machine M1 (project removal), bugs M1-a and M1-b: a stale second tab used to bump the revision
 // (failing every other holder with WORK_STALE) and trash used to re-measure and re-arm retention.
 test('M1 guards: restore on an active project and trash on a trashed one are no-ops with no revision bump', async () => {

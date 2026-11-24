@@ -39,7 +39,7 @@ export function TrashRow({
     >
       <span className="nm">
         <span className="ttl" dir="auto" translate="no">
-          {project.name}
+          {project.name || 'Deleted project'}
         </span>
         <span className="meta">
           <span className="mono any" translate="no">
@@ -47,6 +47,7 @@ export function TrashRow({
           </span>
           {moved ? ` · ${moved}` : ''}
           {form.note ? ` · ${form.note}` : ''}
+          {project.hiding ? <span role="status"> · Hiding in progress…</span> : null}
         </span>
       </span>
       <span className="left">

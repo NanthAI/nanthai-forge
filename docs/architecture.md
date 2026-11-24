@@ -36,6 +36,78 @@ R2, with no Convex fallback. The document includes crawlable facts and inert
 page data for the browser to reuse. Deployments still use the existing Convex
 cache fill; do not bind the reader without the writer and visibility revocation.
 Public Code and History use their existing path.
+The snapshot storage boundary uses conditional writes against the observed R2
+ETag. A hide replaces the body with a retained visibility-generation tombstone;
+that key must not be deleted, so a delayed create-only writer cannot resurrect
+it. The reader treats a tombstone like a missing object for both HTML and JSON.
+The purge helper shares the reader's versioned cache-key builder. The gated
+writer (`FORGE_PUBLIC_SNAPSHOTS=1`) enqueues work in the source mutation; a
+visibility revocation skips coalescing and advances the serving generation.
+It uses a lease to recover a lost action, and stops after seven failed
+attempts per step (or a deterministic invalid projection), logging one
+`FORGE_PUBLIC_SNAPSHOT_FAILED` alert for operator recovery. Unconfirmed work
+stays unconfirmed. It purges after publishing and again 30 seconds later.
+Only the canonical hostname serves bound snapshots; other hostnames redirect
+before any cache or storage read.
+Project settings and Trash show hiding in progress until the requested jobs
+confirm both purges. A profile selection registers its project IDs in the
+transaction that reads current visibility, before any R2 write. The reverse
+index includes fenced in-flight selections and older copies that may still be
+cached. Revocation pages through those profiles, writes generation-fenced
+tombstones and purges them first, then replaces them with redacted snapshots.
+While a profile is tombstoned the Worker returns 404. As for project pages,
+an older edge copy may survive up to the first purge acknowledgement; a
+second purge 30 seconds after the first clears late fills. Group confirmation
+waits for every profile rewrite and second purge as well as the project's
+own keys. The Worker adds no profile visibility lookup. The directory also
+rebuilds the sitemap on revocation; its two URLs share one canonical cache key.
+
+Explore snapshots use byte-aware, numbered pages of up to 50 rows and 16 KiB.
+Eight logical pages share one conditional R2 object in eight fixed-width frames.
+The Worker reads one 16 KiB range, validates the returned range, and caches the
+logical URL separately; the pack never crosses the public read boundary. A
+revocation replaces a pack under a newer generation and targets all eight JSON
+cache entries (plus `/explore` for the first active pack). Unused or retired
+frames contain a data-free tombstone padded to the frame width, so even a
+nonfirst frame stays range-readable and returns 404. A retired pack or shard
+can reopen at a later directory publication revision in the same visibility
+generation; entity hides still fence all same-generation writes. Project and
+profile detail lists fit the stored byte caps and report an omitted-entry
+count. The first page retains
+`explore/<order>.json`; later pages use `explore/<order>/<page>.json` under the
+public read API. Each carries the source
+deployment, start offset, total, and continuation flag. Display names in the
+listing and index are clipped to 80 UTF-8 bytes; project snapshots keep the
+full name. The CLI and browser search locally over compact `search/<shard>.json`
+objects of up to 64 KiB, with no search term sent to the server. A first-page
+browse does not fetch the index. While unbound, the first search shard URL
+shares the legacy Explore response and cache entry; no later shard exists.
+
+Normal changes coalesce for one minute per project or profile and ten minutes
+for the directory. Idle schedules no work. The first rebuild reads the listed
+projects in pages of 128. Later rebuilds start with the previous packs' row set
+from a private R2 checkpoint, read changed projects in pages of 128, and check
+up to 32 listed and 32 previously published rows for drift. They roll unchanged
+weekly counts forward from the stored UTC day without reading their projects.
+The checkpoint is written only after all serving writes succeed, so retry never
+uses a mix of half-written ranks. Dirty serials are consumed after the checkpoint
+and newer marks survive. Conditional writes recheck their job once per batch of
+up to 16 physical keys. Ranking and packing still take memory and R2 work
+proportional to the directory size, not Convex reads for the whole directory.
+
+A directory revocation purges eight URLs per reserved pack, one per reserved
+search shard, `/explore` and the sitemap's canonical key, twice. At the two cost
+fixture sizes that is 100 and 809 directory URLs per pass, batched into up to
+30 URLs per provider call and up to four calls in flight. Profile and project
+keys add two URLs per affected address; their fan-out is scheduled in pages of
+32. A refused purge never acknowledges hiding.
+
+The cost regression meters Class A PUT attempts, including failed conditional
+writes, by Explore order and search shard, and counts serialized Convex
+read/write bytes through the actual directory source handlers. It includes
+project, profile and checkpoint PUTs at 1,284 and 12,840 public projects. The
+database figures are a local cost model; they do not include billed index
+traffic or replace isolated dev billing evidence.
 
 Forge has one client mode: hosted. Hosted main, Lanes and the landing queue are canonical; the CLI keeps regenerable caches and retry journals and cannot accept. A folder without a hosted marker is refused with `FORGE_ROOT_UNAVAILABLE` and the next step `nforge host ROOT`; "offline" means a Lane keeps working and lands once back online. The native-owner mode (local source authority, its landing driver and local Work store commands) is removed; the shared kernel below (State format, merge, durable writes) serves hosted clients and the server. Exchange push, source return and the `autoExchange` policy are retired. See [source exchange](operations/source-exchange.md).
 

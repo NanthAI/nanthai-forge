@@ -91,7 +91,8 @@ export function trashForm(project: TrashProject, now: number): TrashForm {
 /** Rows to list: finished tombstones are not the Trash (they stay only for the visit that deleted them). */
 export function listed(projects: readonly TrashProject[], keep: ReadonlySet<string>, now: number) {
   return projects.filter(
-    project => deriveProjectPhase(project, now).state !== 'purged' || keep.has(project.id as string),
+    project =>
+      project.hiding || deriveProjectPhase(project, now).state !== 'purged' || keep.has(project.id as string),
   );
 }
 /** Soonest to go first: end of the restore window ascending; rows with no window follow in the server's order. */

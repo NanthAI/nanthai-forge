@@ -16,6 +16,7 @@ import { effectivePolicy } from '../src/autonomy-policy';
 import { isPublicProject } from './publicVisibility';
 import { ensurePublicRow, publicRow } from './publicListing';
 import { entry, listedProjects } from './publicRead';
+import { queueProjectRead, queueProjectSnapshots } from './publicSnapshotJobs';
 
 /** A star is a signed-in person's: no sign-in and agent credentials each get a structured refusal naming the step. */
 async function starringPerson(ctx: MutationCtx) {
@@ -52,6 +53,7 @@ export const star = mutation({
       else await ctx.db.delete(existing!._id);
       const stars = Math.max(0, row.stars + (starred ? 1 : -1));
       await ctx.db.patch(row._id, { stars });
+      await queueProjectSnapshots(ctx, project!, false);
       return { starred, stars };
     } catch (error) {
       return report(error);
@@ -207,6 +209,7 @@ export const setSettings = mutation({
       const project = await ownedProject(ctx, projectId, user.subject);
       const row = await ensurePublicRow(ctx, project);
       const laneTitles = requested ?? row.laneTitles === true;
+      const titlesChanged = laneTitles !== (row.laneTitles === true);
       if (row.laneTitles !== laneTitles) await ctx.db.patch(row._id, { laneTitles });
       const current = planOf(project);
       const request = JSON.stringify({ planVisibility: plan });
@@ -226,6 +229,7 @@ export const setSettings = mutation({
           'Retry the plan change with its original values.',
         );
         // Already applied: report the project as it is now; a later change by someone else is not undone.
+        if (titlesChanged) await queueProjectRead(ctx, project, !laneTitles);
         return { laneTitles, planVisibility: current, stars: row.stars };
       }
       if (plan && plan !== current) {
@@ -245,6 +249,8 @@ export const setSettings = mutation({
           rule: 'owner-person',
         });
       }
+      if (titlesChanged || (plan && plan !== current))
+        await queueProjectRead(ctx, project, (titlesChanged && !laneTitles) || plan === 'members');
       return { laneTitles, planVisibility: plan ?? current, stars: row.stars };
     } catch (error) {
       return report(error);

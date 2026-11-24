@@ -28,8 +28,10 @@ import { stopWords } from '../app/lane-state';
 import { lineStops, type LineStage } from '../app/Line';
 import { hrefFor, publicProjectHref, type AppRoute } from '../app/paths';
 import { shellQuote } from '../../../src/shell-quote';
+import { explorePagePath, explorePageSize, orderSearchRows } from '../../../src/public-explore-pages';
 import { publicProjectClone, publicProjectLogin } from '../../../src/public-project-commands';
 import {
+  useExploreDirectory,
   usePublicRead,
   type ExploreOrder,
   type ExplorePage,
@@ -430,23 +432,46 @@ const ORDERS: Record<ExploreOrder, [string, string]> = {
 
 function Explore({ signedIn }: { signedIn: boolean }) {
   const [order, setOrder] = useState<ExploreOrder>('active');
+  const [page, setPage] = useState(1);
   const [query, setQuery] = useState('');
-  const [read, retry] = usePublicRead<ExplorePage>(`explore/${order}.json`);
-  if (read.state === 'loading') return <Loading what="Explore" />;
+  const [start, setStart] = useState(0);
+  const changeQuery = (text: string) => {
+    setQuery(text);
+    setStart(0);
+  };
+  const [read, retry] = usePublicRead<ExplorePage>(explorePagePath(order, page));
+  const term = query.trim().toLowerCase();
+  const directory = useExploreDirectory(
+    read.state === 'ok' && read.data.order === order ? read.data : undefined,
+    Boolean(term),
+  );
+  if (
+    read.state === 'loading' ||
+    (read.state === 'ok' && (read.data.order !== order || (read.data.page ?? 1) !== page))
+  )
+    return <Loading what="Explore" />;
   if (read.state !== 'ok') return <Failed what="Explore" retry={retry} />;
   const { total, more, projects } = read.data;
-  const active = projects.filter(project => project.landings > 0).length;
-  const term = query.trim().toLowerCase();
-  const shown = term
-    ? projects.filter(project =>
-        [project.handle, project.name, project.slug, `${project.handle}/${project.slug}`].some(text =>
-          text.toLowerCase().includes(term),
-        ),
-      )
-    : projects;
-  const people = term
-    ? [...new Set(projects.map(project => project.handle))].filter(h => h.includes(term))
-    : [];
+  const useIndex = Boolean(term && read.data.search);
+  const matchesAddress = (handle: string, slug: string, name: string) =>
+    [handle, name, slug, `${handle}/${slug}`].some(text => text.toLowerCase().includes(term));
+  const indexed = useIndex ? (directory.projects ?? []) : [];
+  const hits = indexed
+    .filter(([handle, slug, name]) => matchesAddress(handle, slug, name))
+    .sort((a, b) => orderSearchRows(order, a, b));
+  const shown = useIndex
+    ? []
+    : term
+      ? projects.filter(({ handle, slug, name }) => matchesAddress(handle, slug, name))
+      : projects;
+  const active = read.data.page ? read.data.active : projects.filter(project => project.landings > 0).length;
+  const searchHits = hits.slice(start, start + explorePageSize);
+  const counts = new Map<string, number>();
+  if (term)
+    for (const handle of useIndex ? indexed.map(row => row[0]) : projects.map(project => project.handle)) {
+      if (handle.includes(term)) counts.set(handle, (counts.get(handle) ?? 0) + 1);
+    }
+  const people = [...counts.keys()];
   return (
     <>
       <div className="head">
@@ -458,9 +483,9 @@ function Explore({ signedIn }: { signedIn: boolean }) {
             <>
               <b>
                 {plural(total, 'public project')}
-                {more ? ' and more' : ''}.
-              </b>{' '}
-              {nf.format(active)} of them landed something this week.
+                {more && !read.data.page ? ' and more' : ''}.
+              </b>
+              {active !== undefined ? ` ${nf.format(active)} of them landed something this week.` : ''}
             </>
           )}
         </p>
@@ -487,17 +512,30 @@ function Explore({ signedIn }: { signedIn: boolean }) {
               spellCheck={false}
               placeholder="Find a project, person or organisation…"
               value={query}
-              onChange={event => setQuery(event.target.value)}
+              onChange={event => changeQuery(event.target.value)}
             />
           </label>
           <div className="seg" role="group" aria-label="Order">
             {(Object.keys(ORDERS) as ExploreOrder[]).map(key => (
-              <button key={key} type="button" aria-pressed={key === order} onClick={() => setOrder(key)}>
+              <button
+                key={key}
+                type="button"
+                aria-pressed={key === order}
+                onClick={() => {
+                  setOrder(key);
+                  setPage(1);
+                  setStart(0);
+                }}
+              >
                 {ORDERS[key][0]}
               </button>
             ))}
           </div>
-          <span className="n">{plural(shown.length, 'project')}</span>
+          <span className="n">
+            {useIndex && directory.projects === undefined
+              ? 'Searching…'
+              : plural(useIndex ? hits.length : shown.length, 'project')}
+          </span>
         </form>
         {people.length ? (
           <>
@@ -509,40 +547,77 @@ function Explore({ signedIn }: { signedIn: boolean }) {
               <a className="row hitrow" key={handle} href={profileHref(handle)} onClick={followLink}>
                 <Avatar handle={`@${handle}`} large />
                 <span className="ttl mono">@{handle}</span>
-                <span className="meta">
-                  {plural(projects.filter(project => project.handle === handle).length, 'public project')}
-                </span>
+                <span className="meta">{plural(counts.get(handle) ?? 0, 'public project')}</span>
               </a>
             ))}
             <div className="band">
               <span>Projects</span>
-              <span className="cnt">{shown.length}</span>
+              <span className="cnt">{useIndex ? hits.length : shown.length}</span>
             </div>
           </>
         ) : null}
-        {projects.length ? (
-          <Rows
-            projects={projects}
-            visibleProjects={shown}
-            signedIn={signedIn}
-            starLookup={read.data.starLookup}
-          />
+        {shown.length ? (
+          <Rows projects={shown} signedIn={signedIn} starLookup={read.data.starLookup} />
         ) : null}
-        {term && !shown.length && !people.length ? (
+        {searchHits.map(([handle, slug, name]) => (
+          <a
+            className="row hitrow"
+            href={projectHref(handle, slug)}
+            onClick={followLink}
+            key={`${handle}/${slug}`}
+          >
+            <Avatar handle={`@${handle}`} large />
+            <span className="ttl" translate="no">
+              {handle}/{name || slug}
+            </span>
+          </a>
+        ))}
+        {useIndex && directory.projects === null ? (
+          <Failed what="Explore search" retry={directory.retry} />
+        ) : null}
+        {term && (!useIndex || directory.projects) && !hits.length && !shown.length && !people.length ? (
           <div className="empty">
             <h3>No match for “{query.trim()}”</h3>
             <p>Handles and project names are searched. Private projects are never listed here.</p>
-            <button type="button" className="btn" onClick={() => setQuery('')}>
+            <button type="button" className="btn" onClick={() => changeQuery('')}>
               Clear the search
             </button>
+          </div>
+        ) : null}
+        {useIndex && hits.length > explorePageSize ? (
+          <div className="pager">
+            <span className="n">
+              {nf.format(start + 1)} to {nf.format(start + searchHits.length)} of {nf.format(hits.length)}
+            </span>
+            {start > 0 ? (
+              <button type="button" className="btn sm" onClick={() => setStart(start - explorePageSize)}>
+                Previous 50
+              </button>
+            ) : null}
+            {start + searchHits.length < hits.length ? (
+              <button type="button" className="btn sm" onClick={() => setStart(start + explorePageSize)}>
+                Next 50
+              </button>
+            ) : null}
           </div>
         ) : null}
         {!term && shown.length ? (
           <div className="pager">
             <span className="n">
-              1 to {nf.format(shown.length)} of {nf.format(total)}
-              {more ? '+' : ''} · {ORDERS[order][1]}
+              {nf.format((read.data.start ?? 0) + 1)} to {nf.format((read.data.start ?? 0) + shown.length)} of{' '}
+              {nf.format(total)}
+              {more && !read.data.page ? '+' : ''} · {ORDERS[order][1]}
             </span>
+            {page > 1 ? (
+              <button type="button" className="btn sm" onClick={() => setPage(page - 1)}>
+                Previous page
+              </button>
+            ) : null}
+            {more && read.data.page ? (
+              <button type="button" className="btn sm" onClick={() => setPage(page + 1)}>
+                Next page
+              </button>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -577,6 +652,9 @@ function Profile({ handle, signedIn }: { handle: string; signedIn: boolean }) {
           ) : (
             <p className="quietline">Nothing public here yet. Private projects are never listed.</p>
           )}
+          {read.data.moreCount ? (
+            <p className="quietline">{nf.format(read.data.moreCount)} more public entries are not shown.</p>
+          ) : null}
         </section>
       }
     />
@@ -692,6 +770,9 @@ function Project({
         <p>{facts}</p>
         <span className="asof">as of {clock.format(read.data.asOf)}</span>
       </div>
+      {read.data.moreCount ? (
+        <p className="quietline">{nf.format(read.data.moreCount)} more public entries are not shown.</p>
+      ) : null}
       {plan.shown ? (
         <Standing
           of="public"

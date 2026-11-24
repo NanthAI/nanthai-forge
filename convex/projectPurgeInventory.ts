@@ -190,6 +190,10 @@ export const projectPurgeSpecial = {
   hostedProjects: 'tombstone',
   /** Archive blob rows live under the `v1/p/<projectId>/` namespace prefix. */
   artifactBlobs: 'namespace',
+  /** A removed project keeps its profile revocation pins until the edge acknowledges the second purge. */
+  publicProfileDependencies: 'publicProfileDependencies:confirmPage',
+  /** Source deletion still needs a directory delta to remove the old address from its retained checkpoint. */
+  publicDirectoryChanges: 'publicDirectorySource:consumeChanges',
 } as const;
 
 type Shape = {

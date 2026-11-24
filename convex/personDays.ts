@@ -10,6 +10,7 @@ import type { Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { query, isDeviceIdentity } from './cliServer';
 import { accountFor } from './urlIdentity';
+import { accountSuspended } from './accountLimits';
 import { isPublicProject } from './publicVisibility';
 import { projectRole } from './projectRole';
 import { report } from './errors';
@@ -65,7 +66,13 @@ export async function recordPersonDays(
 /** The profile for one viewer: `viewer` is an account id, or null when signed out. */
 export async function readProfile(
   ctx: QueryCtx,
-  input: { owner: string; handle: string; viewer: string | null; agentsFrom: number },
+  input: {
+    owner: string;
+    handle: string;
+    viewer: string | null;
+    agentsFrom: number;
+    snapshotDependencies?: Set<Id<'hostedProjects'>>;
+  },
 ) {
   const self = input.viewer === input.owner;
   // Caps count what the viewer may see (Item a9ad21c9): a person active mostly in private projects still shows a full
@@ -100,11 +107,16 @@ export async function readProfile(
     if (membersPlan && !self && role === null) planHidden.add(id);
     const shared = !open && role !== null;
     if (!self && !open && !shared) return;
-    if (!handles.has(project.owner))
-      handles.set(project.owner, (await accountFor(ctx, project.owner))?.handle ?? null);
+    if (!handles.has(project.owner)) {
+      const account = await accountFor(ctx, project.owner);
+      const hidden =
+        input.snapshotDependencies && (account?.closing || (await accountSuspended(ctx, project.owner)));
+      handles.set(project.owner, hidden ? null : (account?.handle ?? null));
+    }
     const handle = handles.get(project.owner);
     if (!handle) return;
     seen.set(id, { visibility: open ? 'public' : 'private', shared, handle, slug: project.slug });
+    if (projectId && open) input.snapshotDependencies?.add(projectId);
     if (role === 'owner' || role === 'write') writes.add(id);
   };
   // Newest day first, so a person on many projects keeps the ones they worked on lately.

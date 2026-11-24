@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { cancelPendingTask } from './schedulerCancel';
+import { queueProjectSnapshots } from './publicSnapshotJobs';
 import { scheduleR2Purge } from './projectPurgeScheduling';
 import { noteDeleteOutcome } from './projectDeleteRequestOutcome';
 import { claimSlug, ensureProjectSlug, restoreProjectSlug, slugTaken } from './urlIdentity';
@@ -157,9 +158,14 @@ export async function transition(
   else await dropProjectOrder(ctx, project._id);
   if (action === 'trash') await startRetention(ctx, project._id);
   if (action === 'delete') await schedule(ctx, (await ctx.db.get(project._id))!);
+  if (removal && project.visibility === 'public')
+    await queueProjectSnapshots(ctx, { ...project, removal }, true);
   if (action === 'restore') {
     // Item eb631a53: a live project may have taken this address while it was removed.
-    const address = await restoreProjectSlug(ctx, (await ctx.db.get(project._id))!);
+    const restored = (await ctx.db.get(project._id))!;
+    const address = await restoreProjectSlug(ctx, restored);
+    if (project.visibility === 'public')
+      await queueProjectSnapshots(ctx, { ...restored, slug: address.slug }, true, address.previousSlug);
     if (address.moved) {
       const moved = { slug: address.slug, previousSlug: address.previousSlug! };
       await ctx.db.patch(project._id, {
@@ -330,6 +336,8 @@ async function applyRename(ctx: MutationCtx, project: Doc<'hostedProjects'>, inp
       ...(input.slug !== undefined ? { slug: input.slug } : {}),
     },
   });
+  if (project.visibility === 'public')
+    await queueProjectSnapshots(ctx, { ...project, slug, name }, true, previousSlug);
 }
 /** `expectedLastLanding` (Loose ends, Item fc1831eb): the landing receipt id the reader saw, or null for none. A
  * project that landed since is refused as WORK_STALE (a landing does not move the project revision), and the reply

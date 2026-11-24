@@ -35,8 +35,43 @@ export const publicDiscoveryTables = {
     ),
   })
     .index('by_projectId', ['projectId'])
+    // index-order: caller: convex/publicDirectorySource.ts#readSlice; order: stable creation-time cursor for bootstrap and drift repair; star writes cannot move a row past it.
+    .index('by_listed', ['listed'])
     .index('by_listed_and_stars', ['listed', 'stars'])
     .index('by_owner_and_listed', ['owner', 'listed']),
+  // Only durable job coordinates, never snapshot bytes. Keep the generation even after a job settles.
+  publicSnapshotJobs: defineTable({
+    key: v.string(),
+    generation: v.number(),
+    serial: v.number(),
+    phase: v.union(v.literal('idle'), v.literal('queued'), v.literal('running'), v.literal('failed')),
+    step: v.union(v.literal('publish'), v.literal('purgeAgain'), v.literal('blankProfile')),
+    urgent: v.boolean(),
+    purgeAfter: v.optional(v.number()),
+    task: v.optional(v.id('_scheduled_functions')),
+    dirtyAt: v.optional(v.number()),
+    attempt: v.number(),
+    confirmedGeneration: v.optional(v.number()),
+    extents: v.optional(
+      v.object({ active: v.number(), stars: v.number(), newest: v.number(), search: v.number() }),
+    ),
+  }).index('by_key', ['key']),
+  // A revision pin for a changed directory row, retained even when its source is removed.
+  publicDirectoryChanges: defineTable({
+    source: v.id('hostedProjects'),
+    serial: v.number(),
+  })
+    .index('by_source', ['source'])
+    .index('by_serial', ['serial']),
+  // Project references in cached or in-flight profiles, never profile facts.
+  publicProfileDependencies: defineTable({
+    source: v.id('hostedProjects'),
+    profile: v.id('publicSnapshotJobs'),
+    absentSince: v.optional(v.number()),
+    pending: v.optional(v.object({ epoch: v.number(), generation: v.number() })),
+  })
+    .index('by_source', ['source'])
+    .index('by_profile_and_source', ['profile', 'source']),
   // A star is a person's, one per account and project; agents cannot star.
   projectStars: defineTable({ projectId: v.id('hostedProjects'), account: v.string() })
     .index('by_project_and_account', ['projectId', 'account'])

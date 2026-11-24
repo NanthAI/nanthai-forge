@@ -24,7 +24,12 @@ export function fixture({ projectVisibility = 'public', laneTitles, planVisibili
   );
   // The planning contract's project setting (d3357f40); set past the schema until that field is on main.
   if (planVisibility) s.tables.hostedProjects.get('project').planVisibility = planVisibility;
-  s.tables.forgeAccounts.set('acct', { _id: 'acct', owner: 'owner', handle: 'ada' });
+  s.tables.forgeAccounts.set('acct', {
+    _id: 'acct',
+    _creationTime: NOW - 86_400_000,
+    owner: 'owner',
+    handle: 'ada',
+  });
   s.tables.accountHandles.set('alias', { _id: 'alias', owner: 'owner', handle: 'ada' });
   s.tables.projectSlugs.set('slug', { _id: 'slug', owner: 'owner', slug: 'atlas', projectId: 'project' });
   s.tables.projectWorkGenerations.set('gen', {

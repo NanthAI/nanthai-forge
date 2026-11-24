@@ -1,0 +1,6 @@
+{
+  "actions": [
+    "hidePending"
+  ],
+  "reason": "Read-only purge status for a private project; compares the caller with its owner and grants no authority. Changing visibility still requires the owner person."
+}

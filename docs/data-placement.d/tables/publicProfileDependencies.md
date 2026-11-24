@@ -1,0 +1,1 @@
+| `publicProfileDependencies` | Project IDs referenced by published or fenced in-flight public profile snapshots, with purge acknowledgment pins. No profile facts or payload bytes. Retired after a replacement publication and the stale-write and edge-cache window. | Discovery publication |

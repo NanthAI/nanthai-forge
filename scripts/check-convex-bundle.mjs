@@ -120,6 +120,7 @@ function isolatedImports(root, out, result, entries) {
       '-e',
       `
     import { createRequire, isBuiltin } from 'node:module';
+    import { readFileSync } from 'node:fs';
     import { fileURLToPath } from 'node:url';
     import { dirname } from 'node:path';
     globalThis.__filename = fileURLToPath(import.meta.url);
@@ -131,7 +132,7 @@ function isolatedImports(root, out, result, entries) {
       return builtinRequire(name);
     };
     const result = [];
-    for (const item of JSON.parse(process.argv[1])) {
+    for (const item of JSON.parse(readFileSync(0, 'utf8'))) {
       try {
         const module = await import(item.url);
         result.push({ source: item.source, names: Object.keys(module).filter(name => {
@@ -145,20 +146,24 @@ function isolatedImports(root, out, result, entries) {
     }
     console.log(JSON.stringify(result));
   `,
-      JSON.stringify(
+    ],
+    {
+      // The list can exceed Linux's per-argument cap even when total ARG_MAX is not reached.
+      input: JSON.stringify(
         outputs.map(([path, value]) => ({
           url: pathToFileURL(resolve(root, path)).href,
           source: value.entryPoint,
         })),
       ),
-    ],
-    {
       cwd: out,
       encoding: 'utf8',
       env: { NODE_PATH: '', NODE_ENV: 'production' },
       maxBuffer: 8 * 1024 * 1024,
     },
   );
-  if (child.status !== 0) throw new Error(`CONVEX_BUNDLE_ISOLATED_IMPORT ${child.stderr.trim()}`);
+  if (child.status !== 0) {
+    const detail = child.stderr?.trim() || child.error?.code || child.signal || `exit ${child.status}`;
+    throw new Error(`CONVEX_BUNDLE_ISOLATED_IMPORT ${detail}`);
+  }
   return JSON.parse(child.stdout);
 }

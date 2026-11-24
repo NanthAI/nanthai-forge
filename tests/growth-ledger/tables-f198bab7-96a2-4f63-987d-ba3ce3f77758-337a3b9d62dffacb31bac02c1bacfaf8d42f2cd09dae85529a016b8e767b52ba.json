@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "8947a779: durable serving-key generations, recovery leases and purge acknowledgments must survive source deletion and action loss; one small job table replaces adaptive scheduling and stores no snapshot bytes.",
+  "date": "2026-11-24"
+}

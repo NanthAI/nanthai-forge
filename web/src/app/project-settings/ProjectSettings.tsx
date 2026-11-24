@@ -4,7 +4,7 @@
 // open (a one-off query, read again after a rename); each action is one retry-safe mutation; nothing runs while idle.
 // Trash and restore live in Account > Projects (SPEC-01-trash): a trashed project is closed to everyone.
 import { useCallback, useEffect, useState } from 'react';
-import { useConvex } from 'convex/react';
+import { useConvex, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import { crumbsFor, Head } from '../Place';
 import { hrefFor } from '../paths';
@@ -46,6 +46,27 @@ export default function ProjectSettings(props: PlaceProps) {
   }, [client, projectId, route.handle]);
   useEffect(read, [read]);
   const owner = !!viewerHandle && viewerHandle === route.handle;
+  const privateRevision = owner && facts?.visibility === 'private' ? facts.revision : null;
+  const [watch, setWatch] = useState<string | null>(null);
+  const watchKey = privateRevision === null ? null : `${projectId}:${privateRevision}`;
+  useEffect(() => {
+    if (!watchKey) return;
+    let active = true;
+    void client
+      .query(api.projectVisibility.hidePending, { projectId })
+      .then(pending => {
+        if (active && pending) setWatch(watchKey);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [client, projectId, watchKey]);
+  const watching = watch !== null && watch === watchKey;
+  const hiding = useQuery(api.projectVisibility.hidePending, watching ? { projectId } : 'skip');
+  useEffect(() => {
+    if (hiding === false) setWatch(null);
+  }, [hiding]);
   const trail = crumbsFor(route, projectName);
   if (!facts)
     return (
@@ -58,6 +79,7 @@ export default function ProjectSettings(props: PlaceProps) {
     <ProjectSettingsView
       facts={facts}
       owner={owner}
+      hiding={watching && hiding !== false}
       trail={trail}
       lanes={feed ? { n: feed.lanes.length + feed.more, atLeast: feed.moreIsLowerBound } : null}
       now={Date.now()}

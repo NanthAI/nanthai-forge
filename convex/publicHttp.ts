@@ -19,6 +19,8 @@ import type { Id } from './_generated/dataModel';
 import { codeAddress, type CodeAddress } from './publicCode';
 import { sameSecret } from './siteSecret';
 import { CLIENT_HASH, CLIENT_HEADER } from '../src/client-hash';
+import { sitemapXml } from '../src/public-sitemap';
+export { sitemapXml } from '../src/public-sitemap';
 
 /** Shared-cache lifetime: browsers always revalidate; the CDN keeps a page 30 seconds, with no stale serving. */
 export const PUBLIC_CACHE = {
@@ -131,26 +133,6 @@ async function code(
       },
     });
   }
-}
-
-const xmlEscape = (text: string) =>
-  text.replace(
-    /[<>&'"]/g,
-    c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]!,
-  );
-
-/** The sitemap lists only what the public read lists; `origin` is the configured canonical web address. */
-export function sitemapXml(origin: string, rows: readonly { handle: string; slug: string }[]) {
-  const urls = new Set([`${origin}/explore`]);
-  for (const { handle, slug } of rows) {
-    urls.add(`${origin}/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`);
-    urls.add(`${origin}/${encodeURIComponent(handle)}`);
-  }
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${[
-    ...urls,
-  ]
-    .map(url => `  <url><loc>${xmlEscape(url)}</loc></url>`)
-    .join('\n')}\n</urlset>\n`;
 }
 
 const siteCaller = (request: Request) =>

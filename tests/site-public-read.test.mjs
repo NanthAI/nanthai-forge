@@ -19,8 +19,19 @@ import { clientHash } from '../dist/client-hash.js';
 const { serve } = await import(moduleUrl('../site/worker.ts'));
 const { readFor, publicRead, isPublicReadPath } = await import(moduleUrl('../site/public-read.ts'));
 const { SECURITY_HEADERS } = await import(moduleUrl('../site/headers.ts'));
+const { purgePublicSnapshotCache } = await import(moduleUrl('../convex/publicSnapshotPurge.ts'));
 const SITE = 'https://backend.example';
 const APP = '<html><head><title>Forge</title><script>theme()</script></head><body></body></html>';
+const explore = (page, total, projects) => ({
+  order: 'active',
+  deployment: 'https://example.convex.cloud',
+  page,
+  start: page === 1 ? 0 : 35,
+  total,
+  search: true,
+  more: (page === 1 ? 0 : 35) + projects.length < total,
+  projects,
+});
 const PAGE = {
   project: { handle: 'ada', slug: 'atlas', name: 'atlas' },
   stars: 2,
@@ -47,7 +58,7 @@ function backend(t, answers, settings = {}) {
   t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
     const url = String(input instanceof Request ? input.url : input);
     asked.push({ url, headers: new Headers(init.headers), redirect: init.redirect });
-    const answer = answers(url);
+    const answer = answers(url, init);
     if (answer instanceof Error) throw answer;
     return answer;
   });
@@ -161,9 +172,26 @@ test('the edge keeps a 200 for the period the backend allows and serves it again
   assert.equal(asked.length, 2, 'an expired entry reads the backend again');
 });
 
+const published = value => ({
+  v: 1,
+  state: 'public',
+  generation: 1,
+  asOf: 1,
+  contentHash: '0'.repeat(64),
+  ...value,
+});
 const snapshotObject = value => {
-  const json = JSON.stringify(value);
+  const json = JSON.stringify(value.state === 'hidden' ? value : published(value));
   return { size: Buffer.byteLength(json), text: async () => json };
+};
+
+const FRAME = 16 * 1024;
+const PACK = 8 * FRAME;
+const activePack = 'public-pages/v1/explore/active/pack/1.bin';
+const rangeObject = (value, range) => {
+  const raw = value.state === 'hidden' ? value : published(value);
+  const bytes = new TextEncoder().encode(JSON.stringify(raw).padEnd(FRAME, ' '));
+  return { size: PACK, range, arrayBuffer: async () => bytes.buffer };
 };
 
 const SNAPSHOT_KEY = 'public-pages/v1/project/ada/atlas.json';
@@ -175,15 +203,17 @@ test('snapshot pages put crawlable facts and inert data in the document and reus
       SNAPSHOT_KEY,
       { ...PAGE, v: 1, project: { ...PAGE.project, name: '$& </template><script>bad()</script>' } },
     ],
-    ['public-pages/v1/explore/active/1.json', { v: 1, order: 'active', total: 1, projects: [PAGE.project] }],
+    [activePack, explore(1, 1, [PAGE.project])],
     ['public-pages/v1/profile/ada.json', { v: 1, handle: 'ada', projects: [PAGE.project] }],
   ]);
   const read = [];
   const { asked, env } = backend(t, () => new Error('R2 discovery must not reach Convex'), {
     PUBLIC_PAGES: {
-      get: async key => {
+      get: async (key, { range } = {}) => {
         read.push(key);
-        return buckets.has(key) ? snapshotObject(buckets.get(key)) : null;
+        const item = buckets.get(key);
+        if (!item) return null;
+        return range ? rangeObject(item, range) : snapshotObject(item);
       },
     },
   });
@@ -261,7 +291,11 @@ test('the Worker accepts exact-limit snapshots and refuses one byte more before 
   const fixtures = [
     ['project/ada/atlas.json', { ...PAGE, v: 1 }, 64 * 1024],
     ['profile/ada.json', { v: 1, handle: 'ada', projects: [] }, 24 * 1024],
-    ['explore/active.json', { v: 1, order: 'active', total: 0, projects: [] }, 16 * 1024],
+    [
+      'search/1.json',
+      { deployment: 'https://example.convex.cloud', shard: 1, start: 0, total: 0, more: false, projects: [] },
+      64 * 1024,
+    ],
   ];
   let object;
   let bodies = 0;
@@ -275,13 +309,190 @@ test('the Worker accepts exact-limit snapshots and refuses one byte more before 
       [cap, 200],
       [cap + 1, 502],
     ]) {
-      const json = JSON.stringify(content).padEnd(size, ' ');
+      const json = JSON.stringify(published(content)).padEnd(size, ' ');
       object = { size, text: async () => (bodies++, json) };
       assert.equal((await serve(request)).status, status, `${path} at ${size} bytes`);
     }
     assert.equal(bodies, count + 1, `${path} only reads the in-budget body`);
   }
   assert.deepEqual(asked, []);
+});
+
+test('a serving-key tombstone is indistinguishable from an absent project and never reaches Convex', async t => {
+  const { asked, serve } = backend(t, () => json(PAGE), {
+    PUBLIC_PAGES: {
+      get: async key =>
+        key === SNAPSHOT_KEY ? snapshotObject({ v: 1, state: 'hidden', generation: 2, at: 30_000 }) : null,
+    },
+  });
+  const read = async slug => {
+    const response = await serve(new Request(`https://site.example/-/public/v1/project/ada/${slug}.json`));
+    return [response.status, await response.text()];
+  };
+  assert.deepEqual(await read('atlas'), [404, '{"found":false}']);
+  assert.deepEqual(await read('atlas'), await read('missing'));
+  assert.deepEqual(asked, []);
+});
+
+test('revocation clears the exact Worker HTML and JSON keys; unconfirmed purge stays retryable', async t => {
+  const { edge } = edgeCaches(t);
+  let stored = snapshotObject({ ...PAGE, project: { ...PAGE.project, name: 'Old public Atlas' } });
+  let fail = true;
+  const { serve, env } = backend(
+    t,
+    (url, init) => {
+      if (new URL(url).hostname !== 'api.cloudflare.com')
+        return new Error('R2 discovery must not reach Convex');
+      if (fail) return new Response(null, { status: 503 });
+      for (const key of JSON.parse(init.body).files) edge.values.delete(key);
+      return json({ success: true });
+    },
+    { PUBLIC_PAGES: { get: async () => stored } },
+  );
+  env.ASSETS.fetch = async () => new Response(APP.replace('</body>', '<div id="root"></div></body>'));
+  const config = { zone: 'a'.repeat(32), token: 'synthetic-purge-token', origin: 'https://site.example' };
+  const paths = ['/ada/atlas', '/-/public/v1/project/ada/atlas.json'];
+  const read = path => serve(new Request(config.origin + path));
+  for (const path of paths) {
+    assert.match(await (await read(path)).text(), /Old public Atlas/);
+    const alias = await serve(new Request('https://alternate.example' + path + '?query=kept'));
+    assert.equal(alias.status, 308);
+    assert.equal(alias.headers.get('location'), config.origin + path + '?query=kept');
+    assert.equal(await alias.text(), '', 'no independent alias copy of public facts');
+  }
+  assert.ok([...edge.values.keys()].every(key => key.startsWith(config.origin)));
+  stored = snapshotObject({ v: 1, state: 'hidden', generation: 2, at: 10 });
+  await assert.rejects(
+    purgePublicSnapshotCache(config, paths),
+    error => error.code === 'HOSTED_REQUEST_FAILED',
+  );
+  fail = false;
+  await purgePublicSnapshotCache(config, paths);
+  const html = await read(paths[0]);
+  assert.equal(html.status, 404);
+  assert.doesNotMatch(await html.text(), /Old public Atlas/);
+  assert.equal((await read(paths[0])).status, 404, 'the warm missing HTML keeps the original 404');
+  assert.equal((await read(paths[1])).status, 404);
+});
+
+test('numbered Explore reads exactly one page and refuses incompatible directory metadata', async t => {
+  const keys = [];
+  let data = explore(2, 36, [PAGE.project]);
+  const { serve, asked } = backend(t, () => new Error('no Convex fallback'), {
+    PUBLIC_PAGES: { get: async (key, { range }) => (keys.push({ key, range }), rangeObject(data, range)) },
+  });
+  const page = number => serve(new Request(`https://site.example/-/public/v1/explore/active/${number}.json`));
+  assert.deepEqual((await (await page(2)).json()).projects, [PAGE.project]);
+  assert.deepEqual(keys, [{ key: activePack, range: { offset: FRAME, length: FRAME } }]);
+  assert.equal((await page('02')).status, 404);
+  assert.equal(keys.length, 1);
+  for (const invalid of [{ deployment: undefined }, { more: undefined }, { page: 1 }]) {
+    data = { ...explore(2, 36, [PAGE.project]), ...invalid };
+    assert.equal((await page(2)).status, 502);
+  }
+  assert.equal(asked.length, 0);
+});
+
+test('one Explore pack uses separate edge keys and refuses to buffer an ignored range', async t => {
+  const { edge } = edgeCaches(t);
+  const reads = [];
+  let packed = true;
+  const { serve, asked } = backend(t, () => new Error('no Convex fallback'), {
+    PUBLIC_PAGES: {
+      get: async (key, { range }) => {
+        reads.push({ key, range });
+        if (!packed)
+          return { size: PACK, arrayBuffer: () => assert.fail('Worker must not read an unranged pack') };
+        const data =
+          range.offset === 0
+            ? { ...explore(1, 36, [PAGE.project]), more: true }
+            : explore(2, 36, [{ ...PAGE.project, slug: 'other' }]);
+        return rangeObject(data, range);
+      },
+    },
+  });
+  const read = path => serve(new Request(`https://site.example/-/public/v1/explore/${path}.json`));
+  assert.equal((await (await read('active')).json()).projects[0].slug, 'atlas');
+  assert.equal((await (await read('active/2')).json()).projects[0].slug, 'other');
+  assert.equal((await (await read('active')).json()).projects[0].slug, 'atlas');
+  assert.deepEqual(
+    reads,
+    [0, FRAME].map(offset => ({ key: activePack, range: { offset, length: FRAME } })),
+  );
+  assert.equal(edge.puts.length, 2);
+  packed = false;
+  assert.equal((await read('active/3')).status, 502);
+  assert.equal(asked.length, 0);
+});
+
+test('a bound sitemap and its legacy API spelling cannot serve removed URLs after the canonical purge', async t => {
+  const { edge } = edgeCaches(t);
+  const readKeys = [];
+  let value = snapshotObject({
+    projects: [
+      ['ada', 'atlas'],
+      ['kit', 'docs'],
+    ],
+  });
+  const { serve } = backend(
+    t,
+    (url, init) => {
+      if (new URL(url).hostname !== 'api.cloudflare.com')
+        return new Error('bound sitemap must never use Convex');
+      for (const key of JSON.parse(init.body).files) edge.values.delete(key);
+      return json({ success: true });
+    },
+    { PUBLIC_PAGES: { get: async key => (readKeys.push(key), value) } },
+  );
+  const config = { zone: 'a'.repeat(32), token: 'synthetic-token', origin: 'https://site.example' };
+  const paths = ['/sitemap.xml', '/-/public/v1/sitemap.xml'];
+  const read = path => serve(new Request(config.origin + path));
+  for (const path of paths) assert.match(await (await read(path)).text(), /ada\/atlas/);
+  value = snapshotObject({ generation: 2, projects: [['kit', 'docs']] });
+  await purgePublicSnapshotCache(config, ['/sitemap.xml']);
+  for (const path of paths) {
+    const body = await (await read(path)).text();
+    assert.doesNotMatch(body, /ada/);
+    assert.match(body, /kit\/docs/);
+  }
+  assert.deepEqual(readKeys, Array(2).fill('public-pages/v1/sitemap.json'));
+});
+
+test('unbound compact search shares the existing legacy Explore edge entry', async t => {
+  edgeCaches(t);
+  const { serve, asked } = backend(t, () => json({ projects: [PAGE.project] }));
+  const read = path => serve(new Request(`https://site.example/-/public/v1/${path}`));
+  assert.equal((await read('explore/active.json')).status, 200);
+  assert.deepEqual((await (await read('search/1.json')).json()).projects, [PAGE.project]);
+  assert.equal((await read('search/2.json')).status, 404);
+  assert.deepEqual(
+    asked.map(call => new URL(call.url).pathname),
+    ['/public/v1/explore/active.json'],
+  );
+});
+
+test('compact search reads one bounded R2 shard and its tombstone does not reach Convex', async t => {
+  const keys = [];
+  const projects = [['ada', 'atlas', '', 1, null, 0, 0, 0]];
+  let object = snapshotObject({
+    deployment: 'https://example.convex.cloud',
+    shard: 1,
+    total: 1,
+    start: 0,
+    more: false,
+    projects,
+  });
+  const { serve, asked } = backend(t, () => new Error('no Convex fallback'), {
+    PUBLIC_PAGES: { get: async key => (keys.push(key), object) },
+  });
+  const read = () => serve(new Request('https://site.example/-/public/v1/search/1.json'));
+  assert.deepEqual((await (await read()).json()).projects, projects);
+  object = snapshotObject({ v: 1, state: 'hidden', generation: 2, at: 100 });
+  assert.equal((await read()).status, 404);
+  object = { size: 65537, text: () => assert.fail('an oversize shard must not read its body') };
+  assert.equal((await read()).status, 502);
+  assert.deepEqual(keys, Array(3).fill('public-pages/v1/search/1.json'));
+  assert.equal(asked.length, 0);
 });
 
 const CODE_PATH = `/public/v1/code/ada/atlas/${'1'.repeat(64)}/page/612e7473/0.json`;

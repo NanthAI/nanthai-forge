@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "8947a779: a compact reverse index replaces full scans of profile/person histories during revocation. It retains only project and serving-job IDs, never profile screenshot or snapshot bytes.",
+  "date": "2026-11-24"
+}

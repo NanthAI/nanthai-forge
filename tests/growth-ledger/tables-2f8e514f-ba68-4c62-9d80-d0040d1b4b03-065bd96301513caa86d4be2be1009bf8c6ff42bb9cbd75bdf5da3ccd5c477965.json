@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "8947a779: per-project dirty serials replace repeated full directory source scans; markers are consumed after acknowledged R2 writes without a cache payload in Convex.",
+  "date": "2026-11-24"
+}

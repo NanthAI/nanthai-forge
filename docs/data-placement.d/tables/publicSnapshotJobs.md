@@ -1,0 +1,1 @@
+| `publicSnapshotJobs` | One record per discovery serving address and one for the directory: generation, scheduling lease, key extents and purge acknowledgments. No source or snapshot bytes. Retained after source removal to fence delayed writes and preserve hide confirmation. | Discovery publication |

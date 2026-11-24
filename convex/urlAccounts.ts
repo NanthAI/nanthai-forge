@@ -8,6 +8,7 @@ import { handleError } from '../src/readable-urls';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { syncTeamHandles } from './teamHandles';
+import { queueOwnerSnapshots } from './publicSnapshotJobs';
 export const current = query({
   args: {},
   returns: v.union(v.object({ handle: v.string(), pick: v.optional(v.literal(true)) }), v.null()),
@@ -97,6 +98,7 @@ export const set = accountMutation('handle')({
           await ctx.db.insert('accountHandles', { owner: user.subject, handle: input.handle });
         await ctx.db.patch(account._id, { handle: input.handle });
         await syncTeamHandles(ctx, user.subject, input.handle);
+        await queueOwnerSnapshots(ctx, user.subject, input.handle, account.handle);
       }
       const authUser = await ctx.db
         .query('users')

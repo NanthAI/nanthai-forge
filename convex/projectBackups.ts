@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { accountFor } from './urlIdentity';
 import { projectExecution } from './projectExecution';
+import { snapshotHidePending } from './publicSnapshotJobs';
 import { archivePut, reserveArchive, commitArchive, archiveTarget } from './archiveUpload';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
@@ -66,6 +67,7 @@ const projectStatus = v.object({
   currentBackup: v.union(v.id('projectBackups'), v.null()),
   revision: v.number(),
   removal: v.optional(projectRemoval),
+  hiding: v.optional(v.literal(true)),
   purgeBlocked: v.optional(projectPurgeBlocked),
   removedAt: v.optional(v.number()),
   retention: v.optional(
@@ -79,7 +81,7 @@ const projectStatus = v.object({
   ),
   purge: v.optional(projectPurge),
 });
-function statusItem(project: Doc<'hostedProjects'>, handle?: string) {
+function statusItem(project: Doc<'hostedProjects'>, handle?: string, hiding = false) {
   return {
     id: project._id,
     key: project.key,
@@ -89,6 +91,7 @@ function statusItem(project: Doc<'hostedProjects'>, handle?: string) {
     currentBackup: project.currentBackup,
     revision: project.revision,
     ...(project.removal ? { removal: project.removal } : {}),
+    ...(hiding ? { hiding: true as const } : {}),
     ...(project.purgeBlocked ? { purgeBlocked: project.purgeBlocked } : {}),
     ...(project.removal && project.removedAt ? { removedAt: project.removedAt } : {}),
     ...(project.retention
@@ -117,7 +120,11 @@ export const deletionStatus = query({
     if (!project || project.owner !== user.subject) return null;
     projectExecution(ctx, projectId, project.name, project.key);
     const account = await accountFor(ctx, user.subject);
-    return statusItem(project, account?.handle);
+    return statusItem(
+      project,
+      account?.handle,
+      Boolean(project.removal) && (await snapshotHidePending(ctx, project)),
+    );
   },
 });
 /** The owner's projects, newest first: active ones by default, or with `removed` only those in the deletion
@@ -140,7 +147,13 @@ export const list = query({
       .order('desc')
       .paginate(paginationOpts);
     const account = await accountFor(ctx, user.subject);
-    return { ...result, page: result.page.map(project => statusItem(project, account?.handle)) };
+    const shared = new Map();
+    const page = await Promise.all(
+      result.page.map(async project =>
+        statusItem(project, account?.handle, !!removed && (await snapshotHidePending(ctx, project, shared))),
+      ),
+    );
+    return { ...result, page };
   },
 });
 export const history = query({

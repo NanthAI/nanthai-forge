@@ -32,6 +32,7 @@ export type RenameInput = { name: string; slug: string; operationId: string; exp
 export function ProjectSettingsView({
   facts,
   owner,
+  hiding,
   trail,
   lanes,
   now,
@@ -46,6 +47,7 @@ export function ProjectSettingsView({
 }: {
   facts: ProjectFacts;
   owner: boolean;
+  hiding?: boolean;
   trail: Crumb[];
   lanes: { n: number; atLeast: boolean } | null;
   now: number;
@@ -81,7 +83,9 @@ export function ProjectSettingsView({
             {facts.handle}/{facts.slug ?? facts.name}
           </span>
         </Fact>
-        <Fact label="Visibility">{visibilityWords(facts.visibility)}</Fact>
+        <Fact label="Visibility">
+          <span role="status">{hiding ? 'Hiding in progress…' : visibilityWords(facts.visibility)}</span>
+        </Fact>
         <Fact label="Plan">{planWords(facts)}</Fact>
         <Fact label="Owner">
           <span className="mono" translate="no">

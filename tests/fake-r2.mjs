@@ -3,7 +3,7 @@
 // contract: tests/contracts/r2.contract.test.mjs
 // A local stand-in for R2's S3 endpoint. It verifies the SigV4 query signature with the Node
 // reference presigner, then enforces what R2 enforces on presigned PUTs: signed content-length,
-// create-only `If-None-Match: *` (412) and `x-amz-checksum-sha256` (400). GET serves the stored
+// `If-None-Match: *` or `If-Match` with the observed ETag (412), and `x-amz-checksum-sha256` (400). GET serves the stored
 // bytes (with `Range`, 206). Objects live in memory; `readThrough(key)` can serve GET and HEAD
 // misses from elsewhere (the restore drill reads its source prefix this way, never copying it).
 import { createServer } from 'node:http';
@@ -21,7 +21,8 @@ const b64 = bytes => createHash('sha256').update(bytes).digest('base64');
 // provider fixture has wrapped global fetch. Non-bucket requests still use the
 // caller's current mock.
 const networkFetch = globalThis.fetch;
-const mustSign = ['content-length', 'if-none-match', 'x-amz-checksum-sha256'];
+const mustSign = ['content-length', 'x-amz-checksum-sha256'];
+const etag = bytes => `"${createHash('md5').update(bytes).digest('hex')}"`;
 
 /** `local: true` serves at its own loopback origin (`fake.endpoint`, for R2_ENDPOINT) instead
  * of standing in for the account host through `install()`. */
@@ -154,7 +155,11 @@ export async function startFakeR2(config = fakeR2Config, { local = false, readTh
         return send(204);
       }
       if (req.method === 'PUT') {
-        if (!mustSign.every(name => signed.includes(name))) return send(403);
+        if (
+          !mustSign.every(name => signed.includes(name)) ||
+          signed.includes('if-match') === signed.includes('if-none-match')
+        )
+          return send(403);
         if (fake.putDelay) await new Promise(resolve => setTimeout(resolve, fake.putDelay));
         if (fake.failPuts > 0) {
           fake.failPuts--;
@@ -162,7 +167,9 @@ export async function startFakeR2(config = fakeR2Config, { local = false, readTh
         }
         if (Number(headers['content-length']) !== body.length) return send(400);
         if (headers['x-amz-checksum-sha256'] !== b64(body)) return send(400);
-        if (headers['if-none-match'] === '*' && objects.has(id)) return send(412);
+        const previous = objects.get(id);
+        if (headers['if-none-match'] === '*' && previous) return send(412);
+        if (headers['if-match'] && (!previous || headers['if-match'] !== etag(previous))) return send(412);
         objects.set(id, body);
         return send(200);
       }
@@ -207,7 +214,7 @@ export async function startFakeR2(config = fakeR2Config, { local = false, readTh
           return res.end(stored.subarray(from, to + 1));
         }
         fake.requests.push({ method: 'GET', path: req.url, status: 200 });
-        res.writeHead(200, { 'content-length': String(stored.length) });
+        res.writeHead(200, { 'content-length': String(stored.length), etag: etag(object) });
         return res.end(stored);
       }
       return send(405);

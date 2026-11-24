@@ -554,6 +554,11 @@ const projectFields = {
   work: v.optional(hostedWorkFields),
   removal: v.optional(projectRemoval),
   removedAt: v.optional(v.number()),
+  /** Purge acknowledgments must remain attributable after rename, address reuse or source deletion. */
+  snapshotHide: v.optional(v.array(v.object({ id: v.id('publicSnapshotJobs'), generation: v.number() }))),
+  snapshotProfileRevocation: v.optional(
+    v.object({ epoch: v.number(), scanning: v.boolean(), pending: v.number() }),
+  ),
   task: v.optional(v.id('_scheduled_functions')),
   nameChange: v.optional(
     v.object({

@@ -37,6 +37,7 @@ import { scopedRecheckPairs } from '../src/scoped-recheck-policy';
 import { scheduleAcceptanceCompletion } from './projectHostedAcceptanceCompletion';
 import { landingPublisher } from './projectIntentLandingNotes';
 import { coverageLanding, noteMainLanding } from './projectHostedMainAuditState';
+import { queueProjectSnapshots } from './publicSnapshotJobs';
 import { writeLineMain } from './projectLiveLineStore';
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
 import { hostedMainV2Schema } from '../src/hosted-main';
@@ -497,6 +498,7 @@ export async function publishLandingBatch(
     main.receipt.kind === 'server' && main.receipt.previousReceiptId !== null,
     receipts[0]!.snapshot.revision,
   );
+  await queueProjectSnapshots(ctx, project, false);
   await ctx.db.patch(channel._id, {
     operationId: last.id,
     selection: canonicalPayload(

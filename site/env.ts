@@ -5,13 +5,24 @@ import { networkFetch } from '../src/network-fetch';
 /** The site Worker's bindings (scripts/build-site.mjs declares them). Settings are Worker secrets, so an unset one is
  * undefined and the route that needs it answers "not configured". */
 export type RateLimit = { limit(options: { key: string }): Promise<{ success: boolean }> };
+type PageRange = { offset: number; length: number };
 export type SiteEnv = {
   /** The built web app (hosted-web-dist), served by the platform before the Worker runs. */
   ASSETS: { fetch(request: Request): Promise<Response> };
   /** Per-address backstops (Cloudflare's rate-limit binding, counted per location); absent in tests. */
   PUBLIC_LIMIT?: RateLimit;
   /** Optional R2 binding; when present, discovery never falls back to a Convex fill. */
-  PUBLIC_PAGES?: { get(key: string): Promise<{ size: number; text(): Promise<string> } | null> };
+  PUBLIC_PAGES?: {
+    get(
+      key: string,
+      options?: { range: PageRange },
+    ): Promise<{
+      size: number;
+      range?: PageRange;
+      text(): Promise<string>;
+      arrayBuffer(): Promise<ArrayBuffer>;
+    } | null>;
+  };
   DEVICE_LIMIT?: RateLimit;
   FORGE_WEB_URL?: string;
   FORGE_CONVEX_SITE_URL?: string;

@@ -88,6 +88,44 @@ test('a members-only plan shows nothing of the plan to visitors, counts included
     assert.doesNotMatch(text, /Secret initiative|Loose planned|Under the/);
 });
 
+test('snapshot projections redact hidden Plan and Lane titles and never publish an out-of-date address', async () => {
+  const s = fixture({ planVisibility: 'members' });
+  const project = (handle = 'ada', slug = 'atlas') =>
+    read.projectPage._handler(s.ctx, { handle, slug, now: NOW, snapshot: true });
+  const profile = (handle = 'ada') => read.profilePage._handler(s.ctx, { handle, now: NOW, snapshot: true });
+  const visible = await project();
+  assert.deepEqual(visible.plan, { shown: false });
+  assert.doesNotMatch(JSON.stringify(visible.lanes), /Secret Lane title|lane-1/);
+  assert.equal((await profile()).handle, 'ada');
+  const account = s.tables.forgeAccounts.get('acct');
+  account.closing = { operationId: 'close' };
+  assert.equal(await project(), null);
+  assert.equal(await profile(), null);
+  delete account.closing;
+  s.tables.boardSwitches.set('switch', { _id: 'switch', key: 'account:owner', off: true });
+  assert.equal(await project(), null);
+  assert.equal(await profile(), null);
+  s.tables.boardSwitches.clear();
+  const row = s.tables.hostedProjects.get('project');
+  row.removal = 'trashed';
+  assert.equal(await project(), null);
+  delete row.removal;
+  assert.ok(await project(), 'restoring the record makes the current address eligible again');
+  row.slug = 'modern';
+  s.tables.projectSlugs.set('modern', {
+    _id: 'modern',
+    owner: 'owner',
+    slug: 'modern',
+    projectId: 'project',
+  });
+  assert.equal(await project(), null);
+  assert.equal((await project('ada', 'modern')).project.slug, 'modern');
+  account.handle = 'modern-owner';
+  s.tables.accountHandles.set('modern', { _id: 'modern', owner: 'owner', handle: 'modern-owner' });
+  assert.equal(await profile(), null);
+  assert.equal((await profile('modern-owner')).handle, 'modern-owner');
+});
+
 test('a hidden Item is absent from every public read and from the Left count', async () => {
   const s = fixture({ hidden: [id(5)] });
   const body = await page(s);

@@ -29,6 +29,7 @@
  * own account link: signing in with GitHub again starts a new, empty account. A passkey-only user row goes. Scale: `close` reads one small page per owned and shared kind plus up to
  * RECEIPTS_SCAN receipts and writes one row; each step reads and writes at most about STEP rows; idle 0. */
 import { v } from 'convex/values';
+import { queuePublicAccountRead } from './publicSnapshotJobs';
 import { internalMutation, type MutationCtx } from './server';
 import { accountMutation, query, type QueryCtx } from './cliServer';
 import type { Doc } from './_generated/dataModel';
@@ -226,6 +227,7 @@ async function closeAccount(ctx: MutationCtx, actor: string, input: { operationI
     secretsLeftBelow: Math.max(account.secretsLeftBelow ?? 0, below),
     closing: { operationId: input.operationId, at, below, phase: 'secrets', cursor: null },
   });
+  await queuePublicAccountRead(ctx, account.handle, { profile: true });
   await schedule(ctx, (await ctx.db.get(account._id))!, 'secrets', null);
   return { stage: 'closing' } satisfies Reply;
 }
@@ -294,7 +296,10 @@ export const step = internalMutation({
     )
       return null;
     const actor = account.owner;
-    const stop = () => ctx.db.patch(account._id, { closing: undefined });
+    const stop = async () => {
+      await ctx.db.patch(account._id, { closing: undefined });
+      await queuePublicAccountRead(ctx, account.handle, { profile: true });
+    };
     if (phase === 'secrets') {
       const p = await grantsWithParents(
         () =>

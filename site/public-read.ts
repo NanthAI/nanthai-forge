@@ -22,11 +22,12 @@ import {
   publicCodeRemaining,
 } from '../src/public-code-cache';
 import { reservedHandles } from '../src/readable-urls';
+import { HANDLE, SLUG, snapshotCacheUrl } from '../src/public-snapshot-contract';
 import { CLIENT_HEADER, clientHash } from '../src/client-hash';
 import { earlierAppPath, isAppPath, normalizeAccountPathname } from '../web/src/app/paths';
 import { exploreMeta, profileMeta, projectMeta, withMeta, type PageMeta } from './public-meta';
 import { limited, siteFetch, type SiteContext, type SiteEnv } from './env';
-import { HANDLE, SLUG, readSnapshot, snapshotAddress, withSnapshot } from './public-snapshots';
+import { readSitemap, readSnapshot, snapshotAddress, withSnapshot } from './public-snapshots';
 
 /** The backend marks a shareable public answer with this header (convex/publicHttp.ts PUBLIC_CACHE.shared). */
 const UPSTREAM_SHARED = 'netlify-cdn-cache-control';
@@ -102,7 +103,14 @@ const tooMany = () =>
   });
 
 // Keep malformed discovery URLs on the snapshot path too, so they cannot fall through to the legacy fill.
-const snapshotRoute = (path: string) => /^\/public\/v1\/(?:project|explore|profile)(?:\/|$)/.test(path);
+const firstSearch = '/-/public/v1/search/1.json';
+const sitemapPath = '/sitemap.xml';
+const upstreamSitemap = '/public/v1/sitemap.xml';
+const isSitemap = (path: string) => path === sitemapPath || path === `/-${upstreamSitemap}`;
+const legacyExplore = '/-/public/v1/explore/active.json';
+const searchRoute = (path: string) => /^\/public\/v1\/search(?:\/|$)/.test(path);
+const snapshotRoute = (path: string) =>
+  searchRoute(path) || /^\/public\/v1\/(?:project|explore|profile)(?:\/|$)/.test(path);
 const missingSnapshot = () =>
   new Response('{"found":false}', {
     status: 404,
@@ -189,8 +197,7 @@ export function readFor(
     return null;
   }
   const [first = '', second] = parts;
-  if (parts.length === 1 && first === 'explore')
-    return { json: '/-/public/v1/explore/active.json', meta: exploreMeta as never };
+  if (parts.length === 1 && first === 'explore') return { json: legacyExplore, meta: exploreMeta as never };
   if (!HANDLE.test(first) || reservedHandles.has(first)) return null;
   if (parts.length === 1)
     return { json: `/-/public/v1/profile/${encodeURIComponent(first)}.json`, meta: profileMeta as never };
@@ -214,6 +221,7 @@ async function page(env: SiteEnv, origin: string | null, url: URL, path: string,
   let html = await appShell(env, url);
   const read = readFor(path);
   let seconds = FAILURE_SECONDS;
+  let status = 200;
   if (origin && read) {
     const path = read.json.slice(2);
     const address = env.PUBLIC_PAGES && snapshotAddress(path);
@@ -223,6 +231,7 @@ async function page(env: SiteEnv, origin: string | null, url: URL, path: string,
         else {
           const snapshot = await readSnapshot(env.PUBLIC_PAGES, address);
           if (snapshot) html = withMeta(html, read.meta(origin, snapshot.data as never));
+          else status = 404;
           html = withSnapshot(html, path.slice('/public/v1/'.length), snapshot);
         }
       } else if (!env.PUBLIC_PAGES) {
@@ -236,6 +245,7 @@ async function page(env: SiteEnv, origin: string | null, url: URL, path: string,
   }
   return edge(
     new Response(html, {
+      status,
       headers: {
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'public, max-age=0, must-revalidate',
@@ -285,9 +295,26 @@ async function respond(request: Request, env: SiteEnv, url: URL, visitor: Visito
       headers: { location: `${origin ?? ''}${path}${url.search}`, 'cache-control': 'no-store' },
     });
   if (data && !origin) return unavailable(503, 'Public reads are not configured.');
-  if (path === '/sitemap.xml') return proxy(env, '/public/v1/sitemap.xml', visitor);
+  if (isSitemap(path)) {
+    if (!env.PUBLIC_PAGES) return proxy(env, upstreamSitemap, visitor);
+    if (await limited(env.PUBLIC_LIMIT, visitor.ip)) return tooMany();
+    const xml = await readSitemap(env.PUBLIC_PAGES, origin!);
+    return xml
+      ? edge(
+          new Response(xml, {
+            headers: {
+              'content-type': 'application/xml; charset=utf-8',
+              'cache-control': 'public, max-age=0, must-revalidate',
+            },
+          }),
+          FAILURE_SECONDS,
+        )
+      : edge(missingSnapshot(), FAILURE_SECONDS);
+  }
   if (path.startsWith('/-/public/v1/')) {
     const upstream = path.slice(2);
+    if (!env.PUBLIC_PAGES && searchRoute(upstream))
+      return path === firstSearch ? proxy(env, legacyExplore.slice(2), visitor) : missingSnapshot();
     if (!env.PUBLIC_PAGES || !snapshotRoute(upstream)) return proxy(env, upstream, visitor);
     const address = snapshotAddress(upstream);
     if (!address) return missingSnapshot();
@@ -332,8 +359,22 @@ export async function publicRead(request: Request, env: SiteEnv, ip: string | nu
   // A shared edge entry per canonical path: ordinary query parameters share one object (they stay in the browser).
   const snapshot =
     env.PUBLIC_PAGES &&
-    (readFor(url.pathname) || (url.pathname.startsWith('/-/') && snapshotRoute(url.pathname.slice(2))));
-  const key = `${url.origin}${url.pathname}${snapshot ? '?forge-cache=public-pages-v1' : ''}`;
+    (isSitemap(url.pathname) ||
+      readFor(url.pathname) ||
+      (url.pathname.startsWith('/-/') && snapshotRoute(url.pathname.slice(2))));
+  const canonical = snapshot ? httpsOrigin(env.FORGE_WEB_URL) : url.origin;
+  // Only the purge authority's hostname can serve a bound snapshot. Aliases cannot retain
+  // independent copies, and a missing canonical binding must not create unpurgeable cache entries.
+  if (!canonical) return unavailable(503, 'Public reads are not configured.');
+  if (snapshot && canonical !== url.origin)
+    return new Response(null, {
+      status: 308,
+      headers: { location: `${canonical}${url.pathname}${url.search}`, 'cache-control': 'no-store' },
+    });
+  const legacyPath = !env.PUBLIC_PAGES && url.pathname === firstSearch ? legacyExplore : url.pathname;
+  const key = snapshot
+    ? snapshotCacheUrl(canonical, isSitemap(url.pathname) ? sitemapPath : url.pathname)
+    : `${url.origin}${legacyPath}`;
   const storage = (globalThis as unknown as { caches?: { default?: Cache } }).caches;
   const cache = request.method === 'GET' || request.method === 'HEAD' ? storage?.default : undefined;
   let response: Response;
