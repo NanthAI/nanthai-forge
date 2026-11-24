@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Account > Projects as real components with synthetic rows (Item 3d5d8839): the held project is the one first stop,
-// every row links to its project, the empty state offers Start and Import, and the list, the worst case and the empty
-// page pass axe with no sideways scroll at desk and phone width in both themes. Set FORGE_PROJECTS_SHOTS to a folder to
-// also save the screenshots.
+// Account > Projects as real components with synthetic rows (Items 3d5d8839, a0cf8c22): the held project is the one
+// first stop, every row links to its project, the empty state gives one line with a copyable agent-led onboarding
+// prompt and setup link plus the manual setup guide, and the list, the worst case and the empty page pass axe with no
+// sideways scroll at desk and phone width in both themes. Set FORGE_PROJECTS_SHOTS to a folder to also save the
+// screenshots.
 import test from 'node:test';
 import { settleBrowserPage } from './browser-runtime.mjs';
 import assert from 'node:assert/strict';
@@ -149,6 +150,11 @@ test('account projects: the held project leads, rows link to projects, and every
       await page.getByRole('link', { name: 'stream-parser', exact: true }).getAttribute('href'),
       '/sample-owner/stream-parser',
     );
+    assert.equal(await page.getByRole('link', { name: 'Start a project' }).getAttribute('href'), '/new');
+    assert.equal(
+      await page.getByRole('link', { name: 'Import a repository' }).getAttribute('href'),
+      '/new/import',
+    );
     assert.match(await main.textContent(), /Items not reported/);
     assert.deepEqual(errors, []);
     await context.close();
@@ -164,13 +170,58 @@ test('account projects: the held project leads, rows link to projects, and every
     await context.close();
   }
   {
-    const { page, context } = await open(390, 'dark', 'empty');
-    assert.match(await page.locator('main').textContent(), /No projects yet/);
-    assert.equal(await page.getByRole('link', { name: 'Start a project' }).getAttribute('href'), '/new');
-    assert.equal(
-      await page.getByRole('link', { name: 'Import a repository' }).getAttribute('href'),
-      '/new/import',
+    // Empty Projects page (Item a0cf8c22, Owner 2026-11-23): one line, copyable prompt + setup link, manual guide, no wizard.
+    const { page, errors, context } = await open(390, 'dark', 'empty');
+    const main = page.locator('main');
+    assert.match(await main.textContent(), /No projects yet\./);
+    assert.match(
+      await main.textContent(),
+      /Your projects appear here\. Paste this into your agent to set Forge up\./,
     );
+    const promptRegion = main.getByRole('region', { name: 'Paste this into your agent' });
+    const promptText = await promptRegion.locator('pre').textContent();
+    assert.match(promptText, /^Read https:\/\/forge\.test\/docs\/quickstart\.md\./);
+    assert.match(promptText, /nforge login https:\/\//);
+    assert.match(promptText, /nforge import <github-url>/);
+    assert.match(promptText, /nforge host <folder> --deployment https:\/\//);
+    assert.match(promptText, /nforge clone <project-url> <dir>/);
+    assert.match(promptText, /nforge connect <app>/);
+    // Fallback when navigator.clipboard is missing (non-HTTPS / restricted webview), announced in a status live region.
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    });
+    const copyButton = page.getByRole('button', { name: 'Copy prompt' });
+    assert.equal(await copyButton.getAttribute('aria-live'), null, 'aria-live lives on a status region');
+    await copyButton.click();
+    await page.getByRole('button', { name: 'Select the text to copy' }).waitFor();
+    assert.equal(
+      await main.locator('[role="status"][aria-live="polite"]').textContent(),
+      'Select the text to copy',
+    );
+    await page.evaluate(() => {
+      window.__copied = null;
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async text => {
+            window.__copied = text;
+          },
+        },
+      });
+    });
+    await page.getByRole('button', { name: 'Select the text to copy' }).click();
+    await page.getByRole('button', { name: 'Copied' }).waitFor();
+    assert.equal(await page.evaluate(() => window.__copied), promptText);
+    assert.equal(await main.locator('[role="status"][aria-live="polite"]').textContent(), 'Copied');
+    const guideLink = page.getByRole('link', { name: 'Open /docs/quickstart.md' });
+    const manualLink = page.getByRole('link', { name: 'Manual setup guide' });
+    assert.equal(await guideLink.getAttribute('href'), '/docs/quickstart.md');
+    assert.equal(await manualLink.getAttribute('href'), '/docs/quickstart/#install-the-development-cli');
+    assert.ok((await guideLink.boundingBox()).height >= 40, 'phone touch target >= 40 px for agent link');
+    assert.ok((await manualLink.boundingBox()).height >= 40, 'phone touch target >= 40 px for manual link');
+    assert.equal(await page.getByRole('link', { name: 'Start a project' }).count(), 0);
+    assert.equal(await page.getByRole('link', { name: 'Trash' }).getAttribute('href'), '/account?view=trash');
+    assert.deepEqual(errors, []);
     await context.close();
   }
   for (const data of ['sample', 'worst', 'empty'])

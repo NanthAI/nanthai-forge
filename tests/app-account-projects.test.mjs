@@ -5,11 +5,17 @@
 // counted is "not reported", never zero.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { moduleUrl } from './convex-module.mjs';
+import { readDocument } from '../scripts/package-documents.mjs';
 
 const { grouped, sentence, heldWords, laneWords, itemWords, metaWords, updatedWords } = await import(
   moduleUrl('../web/src/app/projects/model.ts')
 );
+const { agentSetupHref, manualSetupHref, onboardingPrompt } = await import(
+  moduleUrl('../web/src/app/start/agent-apps.ts')
+);
+const root = fileURLToPath(new URL('..', import.meta.url));
 const c = (n, atLeast = false) => ({ n, atLeast });
 const row = (id, fields = {}) => ({
   id,
@@ -93,4 +99,40 @@ test('ages are whole hours, then whole days, like the server order', () => {
   assert.equal(updatedWords(0, 24 * h), 'updated 1 day ago');
   assert.equal(updatedWords(0, 80 * h), 'updated 3 days ago');
   assert.equal(updatedWords(5 * h, 0), 'updated this hour');
+});
+
+test('empty Projects onboarding prompt follows real CLI order with deployment URL and existing quickstart links', () => {
+  const deployment = 'https://example-123.convex.cloud';
+  const prompt = onboardingPrompt('https://forge.example', deployment);
+  assert.match(prompt, /^Read https:\/\/forge\.example\/docs\/quickstart\.md\./);
+  assert.ok(prompt.includes(`nforge login ${deployment}`), 'includes deployment URL for clean-machine login');
+  assert.ok(prompt.includes('nforge import <github-url>'));
+  assert.ok(prompt.includes(`nforge host <folder> --deployment ${deployment}`));
+  assert.ok(prompt.includes('nforge clone <project-url> <dir>'));
+  assert.ok(prompt.includes('nforge connect <app>'));
+  const loginAt = prompt.indexOf(`nforge login ${deployment}`);
+  const importAt = prompt.indexOf('nforge import <github-url>');
+  const cloneAt = prompt.indexOf('nforge clone <project-url> <dir>');
+  const connectAt = prompt.indexOf('nforge connect <app>');
+  assert.ok(loginAt > 0 && loginAt < importAt && importAt < cloneAt && cloneAt < connectAt, 'real CLI order');
+  assert.doesNotMatch(
+    prompt,
+    /npm (install|i) -g|npx nforge|tool server|local Git clone with history|project settings/,
+    'no unbuilt or overpromised capabilities',
+  );
+  assert.match(onboardingPrompt('', deployment), /^Read \/docs\/quickstart\.md\./);
+  assert.equal(agentSetupHref, '/docs/quickstart.md');
+  assert.equal(manualSetupHref, '/docs/quickstart/#install-the-development-cli');
+  const [page, anchor] = manualSetupHref.split('#');
+  const doc = readDocument(root, `${page.replace(/^\//, '').replace(/\/$/, '')}.md`);
+  const slug = text =>
+    text
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+      .replace(/\s/g, '-');
+  assert.ok(
+    [...doc.matchAll(/^#{1,6} (.+)$/gm)].some(match => slug(match[1]) === anchor),
+    'manualSetupHref anchor exists in docs/quickstart.md',
+  );
+  assert.match(doc, /^## Sign in$/m);
 });

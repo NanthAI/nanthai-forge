@@ -17,6 +17,8 @@ import { MoveToTrash } from '../trash/MoveToTrash';
 import { Toasts, useToast } from '../trash/Toasts';
 import { useLifecycle } from '../trash/lifecycle';
 import { untilDay } from '../trash/trash-model';
+import { agentSetupHref, deploymentUrl, manualSetupHref, onboardingPrompt } from '../start/agent-apps';
+import { CopyKey } from '../start/parts';
 import { AccountStrip } from './AccountStrip';
 import type { AccountProps } from '../screen-route';
 import {
@@ -151,26 +153,36 @@ export function ProjectsView({
         )}
       </div>
     );
-  if (!data.projects.length)
+  if (!data.projects.length) {
+    const prompt = onboardingPrompt(typeof location === 'undefined' ? '' : location.origin, deploymentUrl());
     return (
       <div className="account-projects">
         <AccountStrip current="projects" />
         <Head trail={trail} sentence="No projects yet." />
         {read.state === 'failed' ? <Notice retry={retry} /> : null}
         <div className="empty">
-          <h2>Your projects will appear here</h2>
-          <p>Start one for your agents, or bring a repository you already have.</p>
+          <p className="proj-empty-line">
+            Your projects appear here. Paste this into your agent to set Forge up.
+          </p>
+          <section className="proj-prompt-region" aria-label="Paste this into your agent">
+            <pre className="cmd mono proj-prompt" translate="no">
+              {prompt}
+            </pre>
+          </section>
           <div className="btns">
-            <A className="btn primary" href={startHref}>
-              Start a project
-            </A>
-            <A className="btn" href={importHref}>
-              Import a repository
-            </A>
+            <CopyKey text={prompt} label="Copy prompt" kind="primary" />
+            <a className="lk" href={agentSetupHref}>
+              Open <span translate="no">{agentSetupHref}</span>
+            </a>
+            <a className="lk" href={manualSetupHref}>
+              Manual setup guide
+            </a>
           </div>
         </div>
+        <Toasts toast={toast} onGone={clear} />
       </div>
     );
+  }
   const shown = data.projects.length;
   return (
     <div className="account-projects">

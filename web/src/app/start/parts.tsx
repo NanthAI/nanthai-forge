@@ -37,22 +37,29 @@ export function CopyKey({
   const [said, setSaid] = useState<'' | 'Copied' | 'Select the text to copy'>('');
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
+  const announce = (word: 'Copied' | 'Select the text to copy') => {
+    setSaid(word);
+    clearTimeout(timer.current);
+    // One timer, only after a press: the label returns; nothing runs while the page sits idle.
+    timer.current = setTimeout(() => setSaid(''), 2000);
+  };
   const copy = () => {
-    void navigator.clipboard
-      ?.writeText(text)
-      .then(() => 'Copied' as const)
-      .catch(() => 'Select the text to copy' as const)
-      .then(word => {
-        setSaid(word);
-        clearTimeout(timer.current);
-        // One timer, only after a press: the label returns; nothing runs while the page sits idle.
-        timer.current = setTimeout(() => setSaid(''), 2000);
-      });
+    const clipboard = navigator.clipboard;
+    if (!clipboard?.writeText) return announce('Select the text to copy');
+    void clipboard
+      .writeText(text)
+      .then(() => announce('Copied'))
+      .catch(() => announce('Select the text to copy'));
   };
   return (
-    <Key kind={kind} size={size} onClick={copy} aria-live="polite">
-      {said || label}
-    </Key>
+    <>
+      <Key kind={kind} size={size} onClick={copy}>
+        {said || label}
+      </Key>
+      <span className="sr" role="status" aria-live="polite">
+        {said}
+      </span>
+    </>
   );
 }
 

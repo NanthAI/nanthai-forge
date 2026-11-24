@@ -9,8 +9,16 @@
   .account-projects .proj-name .mono { overflow-wrap: anywhere; }
   .account-projects .proj-facts { display: grid; justify-items: end; gap: 2px; font-size: var(--t-meta); color: var(--text-2); text-align: right; }
   .account-projects .proj-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-3); }
-  .account-projects .empty .btns { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; }
+  .account-projects .empty { grid-template-columns: minmax(0, 1fr); gap: var(--s-3); }
+  .account-projects .empty .proj-empty-line { max-width: var(--m-prose); }
+  .account-projects .empty .proj-prompt-region { width: min(100%, var(--m-prose)); min-width: 0; max-width: 100%; }
+  .account-projects .empty .proj-prompt { text-align: left; background: var(--surface); border-block: var(--rule) solid var(--line); }
+  .account-projects .empty .btns { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4); justify-content: center; align-items: center; }
+  .account-projects .empty a.lk { text-decoration: underline; }
   .account-projects .row.proj .icb { margin-top: -3px; }
+  @media (max-width: 860px) {
+    .account-projects .empty a.lk { display: inline-flex; align-items: center; min-height: var(--ctl-h-touch); padding-inline: var(--s-2); }
+  }
   @container (max-width: 560px) {
     .account-projects .row.proj { grid-template-columns: minmax(0, 1fr) 28px !important; row-gap: var(--s-2); }
     .account-projects .proj-facts { grid-column: 1 / -1; grid-row: 2; justify-items: start; text-align: left; }
