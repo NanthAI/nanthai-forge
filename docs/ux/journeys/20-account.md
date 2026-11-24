@@ -53,12 +53,15 @@ Walked: `nforge auth status`, `help auth`, the sign-in, device approval, device 
 - **Agent, not person:** a credential that does not expire mid-task without warning; a refusal that names the address to open and the code to type (present); never to be asked for anything it cannot do itself.
 - **Person, not agent:** sign-up that takes one step (a passkey); one list of everything signed in as them, browsers and terminals and agents together; a token they can scope; one button to export and one to delete the account.
 
+## Decisions
+
+- Passkey first, with the existing external sign-in as the alternative; no email and password (Item de67c77d).
+- Account deletion is to be one action with a 30-day grace period. CI is to get scoped personal tokens separate from terminal sign-in (Item f99dc5e6). This is not the current close-account flow.
+- A person is to be able to name and revoke an individual agent independently of its device (Item 4e841181). A session is live presence; it does not grant access.
+
 ## Questions for the owner
 
-1. With Convex Auth: is sign-up passkey first with GitHub as the alternative, and is email and password offered at all?
-2. Does deleting an account exist as one action, with a grace period like the 90 days a project has?
-3. Are personal access tokens added (scoped to a project, read or write, with an expiry), separate from terminal sign-ins?
-4. Is one list of sessions (browsers, terminals, agents) the target, and can a person revoke a single agent?
-5. Should a terminal credential warn before it expires, and may it be renewed without the browser while it is still valid?
-6. Should `nforge auth status` in a project folder answer for that project's service first?
-7. What does a person on the waiting list see, and can they read public projects meanwhile?
+- Which account-close recovery details and extra passkey removal checks, if any, are required beyond the agreed grace period?
+- Should browsers, terminals and agents appear in one list? Should a terminal credential warn before it expires, and may it be renewed without the browser while it is still valid?
+- Should `nforge auth status` in a project folder answer for that project's service first?
+- What does a person on the waiting list see, and can they read public projects meanwhile?

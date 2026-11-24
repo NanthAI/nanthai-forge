@@ -56,11 +56,13 @@ These owner decisions guide the P7 spec; the steps and findings above describe t
 - **I42:** Read state is kept per account so web, phone and CLI agree.
 - **I43:** Home holds one inbox across projects, filterable by project.
 
+## Decisions
+
+- Home is to hold one inbox across projects, filterable by project ([inbox decisions](README.md#approved-asking-answering-and-inbox-decisions)). Exact counts remain required.
+- Until Phase 9, use two Items with a note linking the work. An agent may list only the projects its person can currently access; a first-class cross-project link and authorized listing are tracked by Item 98084923.
+
 ## Questions for the owner
 
-1. **Answered in group I:** Home holds one inbox across projects, filterable by project. Exact-count implementation remains required.
-2. Does a cross-repository change get a first-class link (one Item, a Lane per project, an order), or is it two Items with a note until Phase 9?
-3. May an agent list the projects its person can reach, or only the ones it is pointed at?
-4. For shared usage (98084923): what does a person see first, model allowance or CI concurrency, and where?
-5. Does an Initiative ever span projects (the grievance research lists cross-repo planning), or does that wait for organizations?
-6. Should every CLI reply name the service when more than one is signed in?
+- For shared usage (Item 98084923), what does a person see first, model allowance or CI concurrency, and where?
+- Does an Initiative ever span projects, or does that wait for organizations?
+- Should every CLI reply name the service when more than one is signed in?

@@ -25,14 +25,14 @@ Speed, measured on the dogfood project: the Lane changes view made "13 serialize
 
 | Id | Severity | Finding | Evidence |
 | --- | --- | --- | --- |
-| J15-1 | S1 | **On a project that lands automatically, nothing invites a review.** The default for an established project is that agent work lands on a passing check. Needs you lists decisions, not "these twelve changes landed while you were away; read them". The review page exists for every landed Candidate, but a person has to go and find each one. Review after the fact is the normal case with agents and has no entry point. | source, docs |
+| J15-1 | S1 | **Review after landing starts in FYI.** Open Review from a landed row, then dismiss it when read. These rows are not approval requests. | Item 48049998 |
 | J15-2 | S2 | **"Ask for changes" changes nothing a person can see.** It records feedback and sends a message. The Candidate can still be approved, by the same person or another. Nothing shows "changes asked, not yet answered" on the Candidate, in Needs you or on the Lane (journey 7, J7-6). | docs, source |
 | J15-3 | S2 | **A person cannot tell whether the agent got the message.** Delivery depends on the agent's next command; acknowledgement is explicit and optional. An agent that has already stopped never answers, and the page shows a sent message with no reply. | docs |
-| J15-4 | S2 | **Line comments belong to one Candidate.** A comment is anchored to a Candidate snapshot. When the agent saves again and a new Candidate is composed, the earlier comments stay on the old one. Comments that survive later edits are frozen work (Issue 82e8ddb8). A reviewer cannot see "my three comments, two addressed". | docs |
+| J15-4 | S2 | **Line comments belong to one Candidate.** A comment is anchored to a Candidate snapshot. When the agent saves again and a new Candidate is composed, the earlier comments stay on the old one. Moving anchors across later saves is deferred until after beta. A reviewer cannot see "my three comments, two addressed". | docs |
 | J15-5 | S2 | **The story is organised by save, with titles "Save 1", "Save 2".** Agents save often and for their own reasons (every 30 minutes, before a preflight). The grouping is honest and rarely matches how a person would read the change. Save messages, when present, are not shown as the group title. | source |
-| J15-6 | S2 | **An unchecked Candidate can be approved from the same button.** "People retain their existing ability to accept an unchecked Candidate." The button label does not change when no check has run; the only signal was the line "No check recorded for this Candidate." further down. **Decided 2026-11-19 (question 46, option A): no confirm step, a fact line beside Approve.** Delivered (Item e6f1290b): on the Review page, and on a landing held for review that has no run, a plain line "No check ran yet; it will be checked before landing." sits under **Approve and land**. Needs me and the Lane page carry no check data in their read, so they show nothing; adding it would need a new read and stays open. | docs, source; `tests/ui-owner-acceptance.test.mjs`, `tests/landing-decision-browser.test.mjs` |
+| J15-6 | S2 | **An unchecked Candidate can be approved from the same button.** "People retain their existing ability to accept an unchecked Candidate." The button label does not change when no check has run; the only signal was the line "No check recorded for this Candidate." further down. Item e6f1290b added an explanatory line where check evidence is available. The later decision supersedes the copy-only requirement: ask once for confirmation (Item c008cb43). | docs, source; `tests/ui-owner-acceptance.test.mjs`, `tests/landing-decision-browser.test.mjs` |
 | J15-7 | S2 | **The diff is slow.** 3.5 seconds for a small change is measured (4bc460aa). A reviewer moving through ten agent changes waits more than they read. | docs |
-| J15-8 | S2 | **Agent findings share the Item discussion.** Versioned structured batches carry Lane/base/head and file-blob/line evidence, finding ids, severity, origin and reasoned outcomes. The web draws them as findings; CLI and exports retain the complete JSON. They remain reported, advisory snapshots; automatic cross-save anchors and enforcement are open under question 47. | [delivered scope](../../guides/review.md#structured-review-findings); persistence/render/browser regression |
+| J15-8 | S2 | **Agent findings share the Item discussion.** Versioned structured batches carry Lane/base/head and file-blob/line evidence, finding ids, severity, origin and reasoned outcomes. The web draws them as findings; CLI and exports retain the complete JSON. They remain reported, advisory snapshots; cross-save anchoring is deferred until after beta, and the findings add no approval requirement. | [delivered scope](../../guides/review.md#structured-review-findings); persistence/render/browser regression |
 | J15-9 | S2 | **Three words for the reviewed thing on one page.** Candidate (titles), View (routes and source names such as `reviewView`), "Accepted versions" (the list). The owner's decision is Candidate. | source |
 | J15-10 | S3 | **The decision words are in flux.** The button says **Accept into main**; the owner's decision is that a person approves and the system accepts (tracked on a4c5394c). "A project owner or maintainer accepts" still names a role that does not exist. | source |
 | J15-11 | S3 | **Who wrote what is partly unknown.** "Groups come from retained provenance; missing save authors remain unknown." With several agents under one handle, the author shown is the person, and the run name is the only hint. | docs |
@@ -40,9 +40,8 @@ Speed, measured on the dogfood project: the Lane changes view made "13 serialize
 
 ## Dead ends
 
-- "What landed that I have not looked at?": no list.
 - A comment thread across two Candidates of the same Lane.
-- Automatic cross-save anchoring and enforcement for agent review findings (question 47).
+- Automatic cross-save anchoring is outside the beta. Using findings as an acceptance gate is a separate, unapproved change.
 
 ## Naming and tone
 
@@ -62,11 +61,12 @@ These owner decisions guide the P7 spec; the steps and findings above describe t
 - **I41:** Needs you holds approvals, questions, handoffs and reviews; failures appear only when no agent is on them. Order the longest-blocked agent first.
 - **I42:** Read state is kept per account so web, phone and CLI agree.
 
+## Decisions
+
+- FYI is the landed, not yet read list. Its Review buttons open landing evidence; a person can dismiss some rows or all. Read state is per account ([inbox decisions](README.md#approved-asking-answering-and-inbox-decisions); Item 48049998).
+- **Ask for changes** holds a landing only where the project requires approval (Item 3607c6d6). **Approve** asks once for confirmation if no check has run (Item c008cb43).
+- Agent review findings are first-class, attached to an exact saved source version in Item discussion. They do not add an acceptance gate. Keeping findings pinned to lines across later saves is after beta (Item 5dda91bc for exact-save findings; disposition on Item 581bd373).
+
 ## Questions for the owner
 
-1. **Answered in group I:** Read state is per account (I42); whether to offer the landed-not-yet-read list remains open (question 45).
-2. Should **Ask for changes** hold the Candidate until the agent answers or the person lifts it (journey 7, question 4)?
-3. Should the **Approve** button change, or ask once more, when no check has run on the Candidate?
-4. Are review comments from agents first-class (line comments by an agent reviewer), and do they count for anything?
-5. Is the change story grouped by save, by file, or by the agent's own summary of what it did?
-6. Do comments have to survive a new save before the beta (unfreezing 82e8ddb8), or is "comments on this Candidate only" acceptable if it is stated?
+- Is the change story grouped by save, by file, or by the agent's own summary of what it did?

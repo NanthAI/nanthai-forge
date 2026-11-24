@@ -69,12 +69,14 @@ Walked: the governance doc, the workflows doc (contributor proposals, Home, outs
 - **Person, not agent (outsider):** to find the project, see that it is alive, and send a change in the tool they already use. They will not install a CLI to fix a typo.
 - **Person, not agent (maintainer):** one inbox of outside changes with the check result, who sent it and whether an agent wrote it; one switch to pause intake; a way to block an account.
 
+## Decisions
+
+- An outsider with a free account can make a Forge proposal in the beta design. A pull request on the mirror is to become a Forge proposal automatically (Item bd1a9b9e; mirror bridge tracked with Item b0ab4cd3). These are not open today.
+- Signed-in people can file project bug reports, with labels, an assignee and a `starter` label (Item 15aa4210). This is separate from project-local friction.
+- Checks on an outsider's change run on the maintainer's CI after a maintainer first approves it (Item 8b748a1a).
+- The beta includes Explore, public profiles and account-backed counted stars (Item 8947a779; [journey 31](31-discover-and-star.md)).
+- **Contributor** means an outsider; invited people are **members** (Item 203fd4f8).
+
 ## Questions for the owner
 
-1. What is the outsider's route in the beta: a Forge proposal (a Lane in the outsider's own space that targets the project), a pull request on the mirror, or both?
-2. Does an outsider need a Forge account to propose? To report a bug?
-3. Is there a public place for bug reports and requests on a project (public Items), and who may write there?
-4. Who pays for the check of an outsider's change, and does it always wait for a maintainer first (the fork rule), or only for a first-time contributor?
-5. Is there an explore page and public profiles in the beta, and do stars become account-wide and countable?
-6. Should "contributor" now mean the outsider, since invited people have the write role?
-7. Is the archive proposal route removed now (with the retired commands in open Issue e41b074c)?
+- Is the archive proposal route removed now with the retired commands (Item e41b074c)?

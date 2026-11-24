@@ -114,5 +114,4 @@ These owner decisions guide the P7 spec; the steps and findings above describe t
 2. Should actions accept the eight-character ids Forge prints, when unique?
 3. Does evidence attach to a done-when line by an explicit action (tick with a receipt or a note)?
 4. Should `--help` on an action print the one-line form and examples first, with the schema behind a flag?
-5. **Answered in group I:** `ask` (with choices) and `hand back` become agent actions beside start, save and land. The scorecard should cover both actions.
-6. Is journey 6 scored at all before cross-repository coordination exists?
+5. Is journey 6 scored using two Items and a note before first-class cross-project coordination exists (Item 98084923)?

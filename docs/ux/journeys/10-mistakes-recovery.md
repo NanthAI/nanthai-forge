@@ -52,9 +52,12 @@ Walked: `status` (clone root and agent), `help lanes`, `help retry`, `help land`
 - **Agent, not person:** exact commands in the failure reply (present for most); a rule for when to abandon versus fix (present in the rules); protection of unsaved work without having to know a policy flag.
 - **Person, not agent:** one word (Undo) wherever something automatic happened, and confidence that nothing is gone. The web holds to this for landings and projects. A person has no window into Lane snapshots.
 
+## Decisions
+
+- Automatic snapshots are to default on only after their cost per 1,000 landings is measured and stated. Until then, they remain opt-in (Item c09b96c7).
+- `abandon` and `revert` sit beside `start`, `save` and `land`; `cancel` is also a core verb ([source commands](../../status.md); Item 6b7d5a79 for plain `land` saving first).
+- Lane undo can return to any earlier save, including the save before an update from main. It does not rewind main (Item e7812d8f).
+
 ## Questions for the owner
 
-1. Should automatic snapshots be on for every project by default? The cost is one call and one upload per changed snapshot.
-2. Should `abandon`, `revert` and `cancel` move out of `nforge x` and sit beside start, save and land?
-3. What does Lane-level undo (e7812d8f) cover: back to an earlier save, or also undoing a sync?
-4. Should "abandon" be renamed (close, drop, set aside) when the web is redesigned?
+- Should the web use “abandon” for the action (rather than close, drop or set aside)?

@@ -48,12 +48,14 @@ Walked: `planning` (list by Initiative, read one, short id), `help planning`, `s
 ## What each persona needs
 
 - **Agent, not person:** a compact list (id, title, status, order); the next item by rule; whole context of one item in one read with dependency titles; a way to tick a Done-when line; who wrote each comment.
-- **Person, not agent:** to add an item in seconds, drag items into order, see what is in motion and what is stuck, and see an Initiative's progress (open Issue b7a0dff1). The owner's vision in `docs/design/planning/` describes this; the web today has creation and grouping, not ordering.
+- **Person, not agent:** add an Item quickly, set its place in the shared order, and see what is in progress or needs a decision. See [journey 38](38-where-a-project-is-at.md) for Initiative progress.
+
+## Decisions
+
+- People see **Item**. Intent is internal; Issue survives only as a help search alias. Use **Proposed, Planned, In progress, Done, Abandoned** ([product vocabulary](../../../PRODUCT.md#capabilities-and-constraints)).
+- Each Initiative has one shared order and no separate priority field. Writers and agents may reorder; record who reordered and offer Undo (Item 5907e992).
 
 ## Questions for the owner
 
-1. After the rename, is the noun Item everywhere, including where the web says Intent today? What then is an Intent to a person: nothing they see, or the name for an Item in motion?
-2. Does an Item keep the name Issue anywhere (for people coming from GitHub)?
-3. How is order expressed: a manual rank within an Initiative, a priority field, or both? Who may reorder: people only, or agents too?
-4. Which status words are the one set: Proposed, Planned, In motion, Done?
-5. Should the wire names (`planningItemId`, `put-planning-item`) change with the rename, or stay as aliases?
+- Should the wire names (`planningItemId`, `put-planning-item`) change with the rename, or stay as aliases?
+- What is the final wording for “No Initiative”, and what is the default policy for custom Item types?

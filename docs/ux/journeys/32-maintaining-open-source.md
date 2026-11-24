@@ -52,11 +52,13 @@ Walked: `help lanes`, `help board`, `help queue` as read in part 1, the `lanes` 
 - **Agent, not person:** when it is the outsider's agent, the project's contribution rules and limits in its first reply; when it is the maintainer's agent, a queue of incoming changes it may pre-review, with findings recorded where the maintainer reads them.
 - **Person, not agent:** one triage inbox for outside changes and reports, sorted by trust and by check result; bulk actions; a pause switch; shared approval with co-maintainers; a starter-task list that newcomers can see.
 
+## Decisions
+
+- Before organizations, the owner may let any writer approve, so more than one person can approve. Flood controls are required before a project accepts outside proposals (Item bd1a9b9e). This is not live outside intake.
+- Signed-in people can file project bug reports with labels, an assignee and a `starter` label (Item 15aa4210). Friction saved by an agent stays in the project addressed by the command, not in a global product inbox; separate feedback work clarifies that destination (Item c70e94ab).
+
 ## Questions for the owner
 
-1. May more than one person approve on a project in the beta (several owners, or approval delegated per path)?
-2. Is triage built on Items with labels and an assignee, and are some Items public and writable by outsiders?
-3. What does a maintainer see about an incoming change's author: account age, earlier landings here, whether an agent made it?
-4. Are the flood controls (five open proposals, a pause switch, block an account) required before any public project opens to proposals?
-5. May a maintainer's agent pre-review outside changes and write a recommendation the maintainer sees first?
-6. Is there a public starter-task list, and can an outsider claim a task?
+- What does a maintainer see about an incoming change's author: account age, earlier landings here, whether an agent made it?
+- May a maintainer's agent pre-review outside changes and write a recommendation the maintainer sees first?
+- Beyond the `starter` label, is there a separate starter-task list, and can an outsider claim a task?

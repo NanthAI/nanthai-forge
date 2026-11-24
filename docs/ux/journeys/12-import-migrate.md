@@ -29,7 +29,7 @@ Walked: the import and new-project sources, `nforge --help`, `help github`, `hel
 
 | Id | Severity | Finding | Evidence |
 | --- | --- | --- | --- |
-| J12-1 | S1 | **Migration scope is stated on the web screen, in the CLI reply and in the docs.** Source and the full Git history come across; issues, pull requests, people and tags stay on GitHub, and CI config stays in the repository with the project's own CI. The screen suggests asking an agent to triage the issues worth keeping and recreate them as Items. Staged aggregate counts preserve unknown counts; a list of open pull requests after import and live qualification of the counts remain open (Item bd24f0a6). | source, docs |
+| J12-1 | S1 | **Migration scope is stated on the web screen, in the CLI reply and in the docs.** Source and the full Git history come across; issues, pull requests, people and tags stay on GitHub, and CI config stays in the repository with the project's own CI. The screen suggests asking an agent to triage the issues worth keeping and recreate them as Items. Staged aggregate counts preserve unknown counts; live qualification of the counts remains open (Item bd24f0a6). Open pull requests are not listed after import. | source, docs |
 | J12-2 | S1 | **Backlog import is staged.** Agents prepare source-agnostic history through existing planning commands; apply is default off. Web review, look-alike merge and exact-additions Undo are still tracked on the import Item. Source import itself does not migrate tracker work. | source, docs |
 | J12-3 | S2 | **"Git history is separate" hides a strength.** The full history is kept with the same commit ids, and blame matches GitHub. The quickstart's four words read as "history is lost". | docs |
 | J12-4 | S2 | **Branches and tags other than the one imported are not mentioned.** The import pins one commit. Nothing says what happens to other branches, to open pull request branches or to tags. Forge has Lanes instead of branches, so the answer needs saying. | docs |
@@ -61,14 +61,15 @@ Walked: the import and new-project sources, `nforge --help`, `help github`, `hel
 - **Agent, not person:** one command that imports and returns the clone command (present); the resume command in the reply (present); the size limits in the reply before it starts work that will hit them.
 - **Person, not agent:** a migration checklist with what comes across and what does not; a choice of visibility; proof that history and blame survived; a clear statement of who may still push to GitHub and what happens when they do.
 
+## Decisions
+
+- Source import brings source and Git history only. Issues, open pull requests, CI setup, people, tags and release notes stay at the origin; the import screen and CLI say so. Agents can use their own authorized tools to find open pull requests and triage tracker work. They can recreate the Items worth keeping through the separate source-agnostic planning path (Item bd24f0a6; scope decision on Item 581bd373).
+
 ## Questions for the owner
 
-1. Decided: agents read authorized source exports or APIs and recreate backlog through the source-agnostic planning path. Built-in tracker connectors and ongoing two-way tracker synchronization are outside the current scope.
-2. What is the promise for open pull requests at the time of the move: finish them on GitHub through two-way, or re-create them as Lanes?
-3. May a person choose private when importing a public repository?
-4. What is two-way called beside "mirror", and is it on by default when a mirror is connected (today `nforge github connect` turns it on)?
-5. Should the import report compare the repository with the size limits and warn before the first refusal?
-6. Do tags and release notes come across (see [journey 19](19-releases.md))?
+- May a person choose private when importing a public repository?
+- What is two-way called beside “mirror”, and which direction is the default on connect?
+- Should the import report compare the repository with the size limits and warn before the first refusal?
 
 ## Migration ledger and backlog transfer
 
@@ -76,8 +77,8 @@ The source import and [migration ledger](../../operations/github-project-import.
 selected source, separate Git history acquisition and work that stays at the origin. The staged collector uses
 one aggregate metadata batch, keeps unknown counts not reported, and retains the operation, ref and exact commit
 on failure or resume. The CLI report carries the same ledger and a readable scope sentence, and the web import screen states what
-comes across and what stays on GitHub. The collection setting is default off; live qualification of the counts
-and a list of open pull requests after the import remain open.
+comes across and what stays on GitHub. The collection setting is default off, and live qualification of the counts remains open.
+The import does not list open pull requests.
 
 [Backlog transfer](../../planning.md#backlog-import) is source-agnostic: an authorized agent reads milestone docs
 or an authorized Issue export/API and prepares rows with original dates, final status, source and public handles.

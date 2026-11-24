@@ -12,6 +12,11 @@ A visitor can open Explore at `/explore`, search by name or handle, or follow a 
 
 Public project stars follow the account (I42). Forge drops old public browser stars from the public Projects view and count. A person can star the project again from any browser. Private project bookmarks in the legacy Projects list still live in that browser. Source bookmarks are account-backed.
 
-The site currently caches public responses for 30 seconds. The existing Explore ranking has no time-to-main signal and refreshes each project's activity summary when the public project page is read. On-change materialisation and R2 delivery are tracked by 6a60e89a. Crawler scope and rollout remain on 581bd373, question 73. The project front page still needs a README or `.nforge/home.md` and license, and the fork action and its sign-in prompt depend on d1303286.
+The site currently caches public responses for 30 seconds. The existing Explore ranking has no time-to-main signal and refreshes each project's activity summary when the public project page is read. On-change materialisation and R2 delivery are tracked by 6a60e89a. The fork action and its sign-in prompt depend on Item d1303286.
+
+## Decisions
+
+- The beta includes Explore, public profiles and account-backed counted stars. Crawlers may index public project pages, not Lane or diff pages. Verify crawler scope and public rollout on Item 8947a779.
+- The public front page leads with the README and recent landings beside it; the code map is one click away (Item 8947a779).
 
 The [security guide](../../security.md#downloads-and-public-viewing) describes public-read access and redaction. [Journey 16](16-outside-contributor.md) covers what a visitor can do after finding a project.

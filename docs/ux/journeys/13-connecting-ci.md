@@ -80,11 +80,13 @@ below describes today's runner contract. See [current guidance](../../security.m
 - **Agent, not person:** to know before it starts whether a check exists and which command it runs; the changed-paths file (present); a single terminal word for "the infrastructure failed, not your change".
 - **Person, not agent:** a setup that starts from "which CI do you already have?"; who pays for the minutes; whether logs are public; where a secret goes; a test run of the check before the first landing depends on it.
 
+## Decisions
+
+- Connect the project's existing CI in one web flow under Landing & checks. Forge does not own runners (Item 0c9207b8).
+- Sealed secrets are to be the single store for check and deploy secrets. CI gets one key; Secret Objects retire (Item a67effb2).
+
 ## Questions for the owner
 
-1. Which route is the default for a new project: your own CI file (least setup) or Forge's runner (selection and shards)?
-2. Should connecting CI be a web flow under Landing & checks, with the CLI as the agent's route?
-3. Are Secret Objects meant to feed checks? If not, where does the product tell people to put CI secrets?
-4. Is there a "try the check now" step before the first landing?
-5. When does a second CI provider have to be usable for real: at the public beta, or later (open Issue a697aba8 is in Phase 8)?
-6. What does a person see when checks have no runner at all: a blocked landing with a setup link, or a project that cannot be created without one?
+- Is there a “try the check now” step before the first landing?
+- When does a second CI provider have to be usable for real: at the public beta, or later (Item a697aba8)?
+- What does a person see when checks have no runner at all: a blocked landing with a setup link, or a project that cannot be created without one?

@@ -50,10 +50,10 @@ Walked: the public landing source, `nforge --help`, `nforge docs`, `nforge statu
 - **Agent, not person:** one copyable block from install to first `start`; the same guide offline (`nforge docs` provides this); every refusal carries `next` and `learn` (it does). An agent needs to be told plainly that sign-in needs a person.
 - **Person, not agent:** to see the promise before installing anything; to know what Forge will change on their machine; one place that says "you are set up, here is the first thing to do". The first-run guide covers the last point only after a project exists.
 
-## Questions for the owner
+## Decisions
 
-1. What is the activation moment: the first landing, or the first time two agents land in parallel without a conflict?
-2. Will there be a default hosted service, so `nforge login` needs no address?
-3. Answered 2026-11-19 (C15, option A): keep installing the hooks on the first command. The [quickstart](../../quickstart.md#install-the-development-cli) lists the exact edits and the undo. The planned `nforge connect` preview (Item 7b74e67b) will list them too, with a backup and undo.
-4. Should the public preview show a landing (a recorded or simulated one) instead of, or before, the code map?
-5. Which first-ideas list is the canonical one for newcomers: Issue, Lane, landing (concepts) or Intent, Lane, Check, Channel (README)? The answer depends on the planned Item rename.
+- Activation is sign-up followed by creating, importing or cloning a project. Cloning someone else's public project counts. A landing is not required and there is no gamified checklist (Item 8edd3157).
+- `nforge login` is to default to the Forge hosted service; `--url` stays for self-hosting (Item f3f45a41).
+- Advisory hooks install on the first command and say so in one line. The [quickstart](../../quickstart.md#install-the-development-cli) lists the edits and Undo (Items e6f4b0a6 and 7b74e67b).
+- A public project leads with its README, with recent landings beside it and the code map one click away (Item 8947a779).
+- The core work terms are Item, Lane and landing, as in [concepts](../../concepts.md#core-model).

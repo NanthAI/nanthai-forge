@@ -75,9 +75,6 @@ These owner decisions guide the P7 spec; the steps and findings above describe t
 
 ## Questions for the owner
 
-1. **Answered in group I:** At beta, batched email reaches a person for approvals, agent questions and handoffs; phone push comes later.
-2. **Answered in group I:** Read state is kept per account so web, phone and CLI agree.
-3. **Answered in group I:** Home holds one inbox across projects, filterable by project.
-4. Should the project-wide "Fix needed" notices leave every agent's replies and go only to the Lane that caused them and to the owner?
-5. Is a digest wanted (daily or weekly, per project or per account), or does the away summary replace it?
-6. May a person read and answer Needs you from the terminal?
+- Should the project-wide “Fix needed” notices leave every agent's replies and go only to the Lane that caused them and to the owner?
+- Is a digest wanted (daily or weekly, per project or per account), or does the away summary replace it?
+- May a person read and answer Needs you from the terminal?

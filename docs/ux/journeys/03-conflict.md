@@ -57,9 +57,11 @@ The setting is `acceptance.earlyResolve`: `"automatic"` (also when absent), `"on
 - **Agent, not person:** the exact pins and one command; the folder; a plain statement of what happens to its work if the change ahead fails.
 - **Person, not agent:** who is blocked on whom, and whether anything needs them. Today a conflict reaches a person only when an agent cannot resolve it, and then as "Can't update from main".
 
+## Decisions
+
+- When early resolution is not favoured, recommend waiting and offer resolving now as the alternative. Every early-resolve reply says the resolution must be redone if the change ahead does not land (Item 577927f1; see [the reply](#the-early-resolve-reply)).
+- There is no browser conflict editor. The page says “Ask your agent to resolve this conflict” and offers a copyable prompt with the conflict evidence and exact command (Item a0cf8c22).
+
 ## Questions for the owner
 
-1. Answered 2026-11-19 (E20, option A): yes; see [the early-resolve reply](#the-early-resolve-reply).
-2. Should every early-resolve reply state that the resolution is redone if the change ahead does not land?
-3. Should a person be able to resolve a small text conflict in the browser, or is "hand to an agent" the only route by design?
-4. Is "early resolve" the name people will see in settings? The reply needs a plain phrase for "the change ahead of yours".
+- Is “early resolve” the name people will see in settings?

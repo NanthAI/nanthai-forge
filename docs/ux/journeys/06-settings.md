@@ -69,11 +69,7 @@ There is no nudge for the admission check or the gate, and no single statement o
 - **Agent, not person:** one read that says which settings shape its landing, with dead settings removed; when a setting differs from the recommendation, one line it can pass to the owner. Agents never change settings; a held write must say so and give the link (it does).
 - **Person, not agent:** each switch explained by its consequence (minutes, waiting time, whether main can be red), the current value at rest, and the change made where it is read.
 
-## Questions for the owner
+## Decisions
 
-1. Are there two settings areas (who decides, how landings are checked) or one? What are they called? "Autonomy" and "CI" are today's candidates.
-2. With Automatic and Manual coming: is fast or strict landing one of the things Automatic picks, or does it stay the owner's choice above it?
-3. Should the owner be able to change every project setting on the web, so the CLI path is only for agents asking?
-4. Should settings with no effect be removed from the page and the reads now, ahead of the redesign?
-5. Is "recommended" always what Automatic would pick from measurements, or is there also a fixed starting baseline for a new project with no history?
-6. Which single word replaces the several meanings of "automatic"?
+- Use **People & access** for who decides and **Landing & checks** for how landings are checked. The owner should be able to change every project setting on the web; the CLI remains the path for agents asking. Remove settings with no effect from the page and reads without waiting for a redesign (Items 871e9b73 and 573409a3).
+- **Automatic** means Forge recommends from this project's measurements, including the choice of fast or strict landing. A project without history gets a fixed starting value labelled as such. Owners can override it, and manual mode shows what Automatic would pick and why (Item bd0f850e).

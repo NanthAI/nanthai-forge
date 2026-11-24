@@ -64,10 +64,12 @@ The rebuilt Code place answers J18-1 for history and leaves blame and compare op
 - **Agent, not person:** exact bytes at an exact version (present); blame for a line range before it edits (present, undiscoverable); a cheap log.
 - **Person, not agent:** a history tab with landings as the entries (title, who, when, check, revert state), blame, a compare, and full-text search. One id per version that can be pasted into search.
 
+## Decisions
+
+- History lists landings, with Git commit details where available. Blame belongs beside file landing history in Phase 7, with the file's existing visibility. Keep compare within its current scope (Item 3968a655).
+- People see **version** for a source snapshot; the CLI keeps **State** (Item c008cb43).
+
 ## Questions for the owner
 
-1. Is the web history a list of landings (Forge's unit) with the Git commit as a detail, or a Git log?
-2. Do blame and compare on the web belong in Phase 7 with the code view, or with full-text search in Phase 9?
-3. What is the one word for "a version of the project" that people see: State, version, or the landing itself?
-4. Should a receipt id be searchable from ⌘K, so a person can follow what an agent quotes?
-5. Is a server-side file listing for agents wanted, or is "check it out first" the rule?
+- Should a receipt id be searchable from ⌘K, so a person can follow what an agent quotes?
+- Is a server-side file listing for agents wanted, or is “check it out first” the rule?

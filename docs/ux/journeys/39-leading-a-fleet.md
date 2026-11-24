@@ -1,6 +1,6 @@
 # Journey 39: a lead agent running several builders
 
-A fourth persona, the **lead** or orchestrator: an agent (or a person) that plans work, hands Items to builder agents, follows them and re-drives what stalls. This journey is not on the list of Issue a0cf8c22. It comes from the lead playbook in this repository, open Issues f65d8024 (an event feed for orchestrators) and 98084923 (shared usage), and the 2026-11-09 design review ("a full-time lead agent doing three jobs by hand: sequencing work so builders do not collide, checking that landed is true, and re-driving stuck things"). [Journey 5](05-many-agents.md) maps several agents from a builder's seat.
+Leading a fleet is a workflow, not a separate Forge persona. An agent or person plans work, hands Items to builders, follows progress and acts on holds. This journey is not on the list of Issue a0cf8c22. It comes from the lead playbook in this repository, Items f65d8024 (the project event feed) and 98084923 (shared usage), and the 2026-11-09 design review ("a full-time lead agent doing three jobs by hand: sequencing work so builders do not collide, checking that landed is true, and re-driving stuck things"). [Journey 5](05-many-agents.md) maps several agents from a builder's seat.
 
 Walked: the lead playbook and brief template, `planning` (lists, counts and `schedule`), `lanes`, `queue`, `board`, `decisions`, `friction-list`, `help wait`, `help board`, and this mapping's own coordination with a builder working in the parent Lane. **Not walked:** launching builders (this task forbade child agents).
 
@@ -48,7 +48,7 @@ Walked: the lead playbook and brief template, `planning` (lists, counts and `sch
 ## What each persona needs
 
 - **Agent, not person (lead):** a plan read that returns runnable groups; assignment that Forge records; one wait over many Lanes; liveness per builder; a status sentence it does not have to compose ([journey 38](38-where-a-project-is-at.md)).
-- **Person, not agent:** to see the lead's plan and its builders as a group on Now: who has what, who is stuck, what the lead decided on their behalf.
+- **Person, not agent:** use the same Plan, Now and decision records to see who has what and what needs a decision. No lead-only view is required.
 
 ## Approved direction (group I)
 
@@ -59,10 +59,11 @@ These owner decisions guide the P7 spec; the steps and findings above describe t
 - **I40:** When the agent has stopped, the answer waits on the Lane and Forge offers a ready resume prompt. Forge never starts an agent by itself.
 - **I44:** Owner and write roles may order two overlapping Lanes from Now. Record the order and show it with Undo.
 
+## Decisions
+
+- “Lead” is not a product persona or role. Leads use the project event feed and `nforge watch` (Item f65d8024). Existing permissions apply; there is no extra power to move someone else's work.
+- Record assignment at handover and show **Handed over, not started** until the agent starts (Item 95b7ab51).
+
 ## Questions for the owner
 
-1. Is the lead a product persona with its own surfaces (assignment, a group view, a feed), or a harness concern that Forge only serves with events?
-2. Should Forge record assignment (Item → agent run) at hand-over, so "who has this" has an answer before the first save?
-3. Does the event feed (f65d8024) come before the Phase 7 pages, since Now for a fleet depends on the same events?
-4. May a lead hold a role its builders do not (reprioritise, abandon others' Lanes), which needs agent identities (df06081d)?
-5. Is a general "leading agents on Forge" guide part of the docs site, separate from this repository's playbook?
+- Is a general “leading agents on Forge” guide part of the docs site, separate from this repository's playbook?

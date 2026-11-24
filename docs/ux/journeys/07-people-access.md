@@ -73,11 +73,8 @@ Needs you lists these as "Ready to accept", "Approval request", "Handoff to you"
 - **Agent, not person:** to know before it starts whether its landing will be held and for which paths; one command that returns the link; a wait that ends on the decision (present).
 - **Person, not agent:** to be told when something waits for them; to see who can do what at a glance; to give the least access that works. The invited person needs a link.
 
-## Questions for the owner
+## Decisions
 
-1. Does an invitation send an email, produce a link to copy, or both?
-2. What are the roles called, and is there a read-only invite for private projects? (Issue b987e608 says owner, write, read.)
-3. Which one word is the owner's yes: accept or approve? PRODUCT.md says accept; most of the product says approve.
-4. Should "Ask for changes" be able to hold a landing?
-5. Should an owner be able to decide from the terminal with a second factor (a passkey), or is the browser the only place by design?
-6. Is "maintainer" a role to add or a word to remove?
+- An invitation offers email and a copyable link bound to the recipient. Private projects allow read-only invites. Link support is delivered (Item c6629fda); enabling the email sender belongs to rollout (Item ab3fab64).
+- Use **owner**, **write** and **read**; there is no Maintainer role. Use **Approve** for the person's yes ([product vocabulary](../../../PRODUCT.md#capabilities-and-constraints)).
+- **Ask for changes** holds a landing only if the project requires approval (Item 3607c6d6). At beta, approval is in the browser only (Item 0a99ab23). Neither decision enables agent approval.

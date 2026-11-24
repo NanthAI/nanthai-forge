@@ -53,9 +53,12 @@ Walked: `nforge --help`, `nforge mcp-config . --agent`, `nforge docs`, `capabili
 - **Agent, not person:** on first contact, in under twenty lines: the three verbs, how to read help, what is forbidden for it here (held paths, limits), and who else is working. Then nothing repeated.
 - **Person, not agent:** one place that lists their connected agents by a name they recognise, what each may do, when each last acted, and a way to cut one off. Today that place is the device list under Account, which lists machines, not agents.
 
+## Decisions
+
+- The CLI is the first setup route; MCP is optional. Each supported app is first-class. One command previews configuration edits, backs them up and offers Undo. Connected means that app made its first authenticated agent call; show the recorded result on load without polling (Item 7b74e67b).
+- A person is to be able to name and revoke one agent without revoking the device (Item 4e841181). A Lane or receipt still identifies the recorded run and reported app and model (Items 41514fee and 6a251b23).
+- Use one Zones mechanism for protected, private, trusted and owned paths (Item c9d27e91).
+
 ## Questions for the owner
 
-1. Is the recommended route the CLI, with MCP as an option, or the reverse? The setup flow needs one default per harness.
-2. May a person name an agent ("Claude on the laptop"), and does that name replace the generated run name in receipts?
-3. Which single mechanism do people learn for limiting an agent: Zones? Do scoped grants, trust and protected paths become settings of a Zone?
-4. What is the first-contact reply's budget (lines or tokens), and may it differ for an agent's first-ever Lane in a project?
+- What is the first-contact reply's budget (lines or tokens), and may it differ for an agent's first-ever Lane in a project?

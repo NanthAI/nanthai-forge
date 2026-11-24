@@ -11,7 +11,9 @@ shared prices, bounded pages, reconciled totals, member sample omissions, budget
 wording, chart/table parity, navigation and empty/loading/error states. Rendered
 checks use the real account frame with synthetic data; live usage is not reported.
 
-Open lines remain on `93907d28` (live CLI/MCP limiter metadata), `5822dd13` (Phase 8
-payments and accounting), and `581bd373` (owner decisions about warnings and
-storage-removal controls). An absent usage figure is not zero. Showing existing
-service bounds does not authorise deletion, extra steps or a new restriction.
+## Decisions
+
+- Public prices are **Hobby free, Pro $15, Team $49**, without a “planned” label. Prices may be revisited. Price copy (Item 7f207066) does not turn on charging; billing and accounting are separate (Item 5822dd13). Yearly billing is outside the first build.
+- Usage is to warn at 80% and show how people can reclaim space by removing old Lanes, objects and trash (Item a39ede89). An absent usage figure is not zero. Showing a limit does not authorize automatic deletion or a new restriction.
+
+Live CLI/MCP limiter metadata remains on Item 93907d28.

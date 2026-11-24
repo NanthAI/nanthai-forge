@@ -21,7 +21,7 @@ Walked: the landing, public preview and first-run guide sources, the README, the
 
 | Id | Severity | Finding | Evidence |
 | --- | --- | --- | --- |
-| J34-1 | S2 | **There is no walkthrough; there are four partial explanations.** The landing page (three statements), the preview (a code map), the first-run guide (three steps) and the docs (three different lists of ideas). Each is short and none follows from the one before. A newcomer never sees the whole loop once: Item, agent, Lane, check, land, and what the person does in between. | source, docs |
+| J34-1 | S2 | **The first-run prompt is the walkthrough.** The landing page, public preview and docs can introduce the terms, but the empty-page prompt is where a new user starts the loop. | Item a0cf8c22 |
 | J34-2 | S2 | **The preview shows the least distinctive thing first.** "Your code, as a map" is a graph of imports. The claim in the headline is about many agents landing safely (journey 1, J1-11). The "Who is doing what, now" panel is the product, and it is an example with invented activity for a repository where nothing is happening. | source |
 | J34-3 | S2 | **The first-run guide appears after the hard part.** It lives on Now, which needs a project. Sign-in, the handle, a project and, for real work, the CLI and a check ([journey 13](13-connecting-ci.md)) all come before it. Onboarding pattern: show value before asks. | source |
 | J34-4 | S2 | **The guide's third step is wrong for most projects.** "When the check passes, Needs you asks for one decision." is true for a supervised project. On a project that lands automatically, nothing asks. The words need to follow the project's setting. | source, docs |
@@ -44,12 +44,13 @@ Walked: the landing, public preview and first-run guide sources, the README, the
 ## What each persona needs
 
 - **Agent, not person:** its own walkthrough is the first-contact reply and the skill ([journey 14](14-setting-up-agents.md)); it needs none of this.
-- **Person, not agent:** in under a minute and before any ask: one Item handed to an agent, two agents changing the same project, one check, one landing, one moment where the person decides. Then exactly one next step.
+- **Person, not agent:** one prompt to give to an agent from the empty page. The walkthrough should lead into real work, not a tour or prefilled account.
+
+## Decisions
+
+- The empty-page agent prompt is the walkthrough. No sample project is created for a new account (Item a0cf8c22). Activation is sign-up plus create, import or clone, not a tutorial or landing (Item 8edd3157).
+- The public project page leads with its README and recent landings, with the code map one click away (Item 8947a779).
 
 ## Questions for the owner
 
-1. What is the walkthrough's form: a short recorded landing of real work, an interactive sample project, or three annotated screens?
-2. Does it run before sign-up (on the landing page) or at first sign-in, or both with the same content?
-3. Is there a sample project every new account can open, with agents' work already in it, so Now is never empty on day one?
-4. Which five words does it teach, in order: Item, Lane, check, land, Needs you?
-5. Should the public preview keep the code map, or show the walkthrough with the visitor's repository name in it?
+- Which terms does the prompt teach, and in what order?

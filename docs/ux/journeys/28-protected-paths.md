@@ -48,10 +48,12 @@ Walked: `policy`, the Autonomy settings source, the governance doc, the workflow
 - **Agent, not person:** a warning at the first write to a protected file, and again at save, with the link request ready; the choice to split the protected part into its own Lane so the rest can land.
 - **Person, not agent:** to see the default list when the project is created, with the reason for each entry; a preview of what a pattern matches; one place that shows, for a file, who can change it alone.
 
+## Decisions
+
+- Use one Zones mechanism for protected, private, trusted and owned paths. Warn at the first write to a protected file and offer to split that part into its own Lane (Item c9d27e91). The existing save-time notice is not this first-write flow (Item 2ec78c62).
+- Approval is browser-only at beta (Item 0a99ab23).
+
 ## Questions for the owner
 
-1. Should an agent be told at the first write that a file is protected, and offered to split that part into its own Lane?
-2. One list or two? Can `protectedPaths` and `ownerApprovalPaths` become one list with a "who is held" setting?
-3. May the owner approve from the terminal that made the change, with a second factor (journey 7, question 5)?
-4. Does changing the list ever release a held landing without a decision, or should a held landing always need its decision?
-5. Is "protected paths" the base for path owners (517523cf) and private files (6bd7ddb1), so people learn one concept, a Zone with rules?
+- How should the current protection and approval lists map into Zones?
+- Does changing a rule ever release a held landing without a decision?

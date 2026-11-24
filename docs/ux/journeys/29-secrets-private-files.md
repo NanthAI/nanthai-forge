@@ -57,11 +57,12 @@ See [secrets for checks](../../security.md#secrets-for-checks).
 - **Agent, not person:** to be stopped before the save, with the line and the kind; for a fixture, the exact allow entry and the fact that it needs its own landing first.
 - **Person, not agent:** one page for "secrets this project's checks and deploys use", with who can read each; an alert that reaches them when a scan is overridden; a way to mark a file private.
 
+## Decisions
+
+- Scan at save and refuse a detected credential before storing it. Keep the allow-entry path for false positives and the landing check as a backstop. After a real leak, rotate the credential; an owner can purge eligible save bytes in one action with a receipt (Item 9d3c407d). This is not a rewrite of main or a purge of backups, archives, chunked files or other Lanes' local caches.
+- Sealed secrets are to be the one store for check and deploy secrets. CI gets one key; Secret Objects retire (Item a67effb2).
+- The owner and the person who added a file may hide its path. The owner can undo the hide (Item 6bd7ddb1).
+
 ## Questions for the owner
 
-1. Should the value scan also run at save, so a credential never reaches storage, with the landing scan as the backstop?
-2. When a real secret was saved, should Forge offer to purge that save's bytes after rotation?
-3. Are Secret Objects the store for check and deploy secrets (one page under Landing & checks), or do they stay a separate feature?
-4. May an allow entry land together with the fixture it covers when the owner approves that landing, to cut the two-step?
-5. Who may hide a path: the owner only, or also the person who adds the file (the open point on 6bd7ddb1)?
-6. Is the product word "secret"?
+- May an allow entry land together with the fixture it covers when the owner approves that landing?

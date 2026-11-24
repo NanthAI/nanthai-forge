@@ -49,11 +49,12 @@ Walked: `help github`, `help retry`, `help storage`, `help system`, `help wait`,
 - **Agent, not person:** one field on every reply during an incident: what is degraded, since when, whether to wait or stop, and that its code is not the cause.
 - **Person, not agent:** a line on Now and a public page with the same facts; a ping when their landings are affected; afterwards, what was delayed and that nothing was lost.
 
+## Decision
+
+- Forge detects incidents and says so in replies and on Now without polling for each reply. The public beta status page shows uptime, time to main and queue wait (Item 2c11ea35; infrastructure detection groundwork on Item 0d8a85a3).
+
 ## Questions for the owner
 
-1. Should Forge detect an incident itself (several infrastructure failures across Lanes in a short window) and say so on every reply and on Now?
-2. Is the public status page (2c11ea35) part of the beta, and does it show Forge's own bad days from the first day?
-3. Which numbers are public: uptime, time to main, failed-landing rate?
-4. What is the promise when GitHub is down: "landing continues" only for projects whose checks do not run on GitHub? Should setup say which kind a project is?
-5. During an incident, should agents stop filing friction and stop retrying, on Forge's instruction?
-6. Is one waiting ceiling stated to agents ("give up and report after N minutes")?
+- What can keep landing when the external provider is down, and should setup explain that dependency?
+- During an incident, should agents stop filing friction and stop retrying, on Forge's instruction?
+- Is one waiting ceiling stated to agents?

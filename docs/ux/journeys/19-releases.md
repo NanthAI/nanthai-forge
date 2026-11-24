@@ -40,7 +40,7 @@ Walked: `nforge --help`, `policy`, `history` status, the workflows doc (Channels
 
 ## Naming and tone
 
-- Channel, release, version, tag, State and checkpoint need a decision as a set (see [journey 18](18-browsing-code.md), question 3).
+- Keep a version (a source snapshot) distinct from a tag or a future Forge release. See [journey 18](18-browsing-code.md#decisions).
 - The mirror's rule is stated well: "Forge still owns main".
 
 ## What each persona needs
@@ -48,11 +48,13 @@ Walked: `nforge --help`, `policy`, `history` status, the workflows doc (Channels
 - **Agent, not person:** to know whether its landing triggered a deploy and whether that deploy passed; to be refused clearly if it may not cut a release.
 - **Person, not agent:** to mark a landing as a version, see what changed since the last one in plain words, and know what is live. An owner approves a release; an agent may propose one.
 
+## Decisions
+
+- No Forge releases in the beta. Tags are to go out to the mirror; Forge releases with notes come later (Item 5832d5f5). This does not add inbound tag sync.
+- Hide **Channel** until there is a second one (Item c008cb43).
+
 ## Questions for the owner
 
-1. Does Forge have releases (a named, immutable version of main with generated notes) in the beta, or is the mirror's tag the answer until Phase 9?
-2. If releases exist: are notes assembled from Item titles and done-when lines, and may an agent cut a release or only propose one?
-3. Is deploy after landing (954340ea) a Phase 7 design item as the 2026-11-09 review asked, and is its unit "a command on the project's runner"?
-4. Are tags mirrored to GitHub, read from GitHub, both, or neither?
-5. Does "Channel" stay a word people see, given only `main` exists, or does it wait for release branches?
-6. Should a failed post-landing deploy appear in Needs you?
+- After beta, how are release notes assembled, and may an agent cut a release or only propose one?
+- Is deploy after landing (Item 954340ea) a Phase 7 design item, and is its unit a command on the project's runner?
+- Should a failed post-landing deploy appear in Needs you?

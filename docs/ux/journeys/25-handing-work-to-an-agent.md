@@ -44,7 +44,7 @@ The agent's own route needs no person: `planning '{"status":"open"}'`, then `sta
 ## What each persona needs
 
 - **Agent, not person:** a prompt short enough to keep, with the Item id, the one command to start and the done-when lines; everything else fetched when needed.
-- **Person, not agent:** to hand over in one action and then see "waiting to be picked up", "picked up by NAME", "stuck"; to hand over to an agent that is already connected without leaving the page.
+- **Person, not agent:** hand over in one action and see whether the agent has started, who has the work and whether it needs an answer.
 
 ## Approved direction (group I)
 
@@ -52,10 +52,12 @@ These owner decisions guide the P7 spec; the steps and findings above describe t
 
 - **I40:** When the agent has stopped, the answer waits on the Lane and Forge offers a ready resume prompt. Forge never starts an agent by itself.
 
+## Decision
+
+- Record the handover on the Item. Show **Handed over, not started** until the agent starts (Item 95b7ab51).
+
 ## Questions for the owner
 
-1. **Answered in group I:** When the agent has stopped, the answer waits on the Lane and Forge offers a ready resume prompt. Forge never starts an agent by itself.
-2. Should an Item show "handed over, not started" for a time after the prompt is copied?
-3. May a person assign an Item to a person or a named agent before any Lane exists?
-4. Should the sheet show the prompt text and allow one added note that is kept on the Item?
-5. Are **Hand to an agent** (start work) and **Hand off** (transfer work in progress) two names to keep, or one action with two cases?
+- Who can be assigned an Item before any Lane exists?
+- Should the sheet show the prompt text and allow one added note that is kept on the Item?
+- Are **Hand to an agent** (start work) and **Hand off** (transfer work in progress) two names to keep, or one action with two cases?

@@ -50,10 +50,11 @@ Walked: `policy`, `nforge github status`, `help github`, `help git`, the GitHub 
 - **Agent, not person:** almost nothing here. It needs to know a mirror failure never blocks a landing (the help says so) and that the landing message becomes a commit message with a size limit (the limits topic says so).
 - **Person, not agent:** proof before committing to Forge that leaving is one step: what is exported, in what format, and that the GitHub copy is current. This journey is read before sign-up as much as at the end.
 
+## Decisions
+
+- The departure package is a Git repository with full history, including imported history, plus one archive of Items, comments and receipts. The same work must verify what an attached mirror carries on a populated migration; do not treat it as a verified full export (Item 9b601e3b).
+- Call it the **mirror**. Connect, pause and disconnect are managed on the web (Item c63c2171).
+
 ## Questions for the owner
 
-1. What is the promise to a person who leaves: a Git repository with full history, plus one archive of everything else (Issue 9b601e3b)?
-2. Does the mirror carry the imported history as well as the landings?
-3. Should the mirror be controlled on the web (connect, pause, disconnect), or stay a CLI and policy matter?
-4. Should the retired archive commands and the "Import archive" route be removed now, before the redesign?
-5. Which word names the GitHub link in the product: mirror?
+- Should the retired archive commands and the “Import archive” route be removed ahead of the redesign?

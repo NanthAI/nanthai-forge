@@ -49,11 +49,12 @@ Walked: the generator of `llms.txt` and `llms-full.txt` (`scripts/llm-documents.
 - **Agent, not person:** a start page of a few hundred tokens with the three verbs and the help command; references fetched per action, not in bulk; the same text in `llms.txt`, the skill, the MCP descriptions and the CLI help, generated from one source.
 - **Person, not agent:** to ask their own assistant "what is Forge and should I use it?" and get a correct, current answer with the real limits; a docs site with one page per task.
 
+## Decisions
+
+- The canonical name is **NanthAI Forge**, or **Forge** for short. Describe it as source control built for many AI agents working at once. The approved positioning is parallel landings without breaking main, faster and cheaper than doing the same work on the comparison host. Treat that comparison as positioning, not evidence; support any public speed or cost claim with measured results (Items 7f207066 and 00c3f715).
+- Generate the agent rules in `llms.txt` and the skill from the CLI contract. Say plainly that Forge is in beta (Item 00c3f715).
+
 ## Questions for the owner
 
-1. What is the one sentence a model should repeat about Forge, in words a newcomer would search for?
-2. Which measurements does `llms.txt` carry: only the current benchmark with its losses, or history too?
-3. Should the agent rules in `llms.txt` and the skill be generated from the same source as the CLI help, so they cannot drift?
-4. Is there a short `llms.txt` path for "getting started" separate from the full reference, with a stated token budget?
-5. Before the package exists, does `llms.txt` say plainly that Forge is not yet open to the public?
-6. Which name is canonical for search and for models: NanthAI Forge?
+- Which measurements does `llms.txt` carry: only the current benchmark with its losses, or history too?
+- Is there a short `llms.txt` path for “getting started” separate from the full reference, with a stated token budget?

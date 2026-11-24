@@ -49,12 +49,13 @@ Walked: the ledger, Lane row, landing decision, signals (Undo), fix-notice and L
 - **Agent, not person:** covered in journey 10: one family of undo commands outside the operator namespace.
 - **Person, not agent:** Undo that acts wherever it is shown; one word; how long the fix will take and what is paused; a way back inside a Lane without a terminal.
 
+## Decisions
+
+- Keep **Take it out of main** for a landed change. It creates a new, checked revert of that change; later landings stay (Item 9e7a17df).
+- A revert of broken main is to go first while other landings wait. This is queue priority, not permission to skip checks. The current action uses the ordinary queue; the priority change is tracked in Item 80172816.
+- Lane undo can return to any earlier save, including before an update from main (Item e7812d8f).
+
 ## Questions for the owner
 
-1. Does **Undo** on an automatic landing start the revert directly (with one confirmation), and is the word Undo or Revert everywhere? (Owner question 48 on Item 581bd373, open. The rebuilt app uses the approved design's **Take it out of main**, one press, no confirmation.)
-2. While a revert of a broken main is in the queue, are other landings held or do they continue?
-3. May a revert of a red main skip the queue (land first), since it restores a state that already passed?
-
-Questions 2 and 3 are owner question 49 on Item 581bd373, open; a revert waits in the ordinary queue meanwhile.
-4. Is Lane-level undo (e7812d8f) available to a person on the web, as "return to this save"?
-5. Do settings changes get an Undo for a period after they are made?
+- Should a person also be able to return to a Lane save from the web?
+- Do settings changes get an Undo for a period after they are made?

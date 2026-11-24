@@ -46,7 +46,7 @@ Walked: `queue`, `lanes`, `board`, `peers` help, `help overlap`, `help queue`, `
 ## What each persona needs
 
 - **Agent, not person:** to be interrupted when something changes; one waiting field with the reason and the action; whole notes in one read.
-- **Person, not agent:** who is working and whether anyone is stuck. Now answers the first. "Stuck" is spread over Lane rows.
+- **Person, not agent:** who is working and what needs a decision. Lane rows show the recorded reason work is waiting; there is no separate “stuck” status.
 
 ## Approved direction (group I)
 
@@ -54,8 +54,11 @@ These owner decisions guide the P7 spec; the steps and findings above describe t
 
 - **I44:** Owner and write roles may order two overlapping Lanes from Now. Record the order and show it with Undo.
 
+## Decision
+
+- Show the public run name on Lanes and receipts, with the reported app and model. The name links to the run; missing declarations stay explicit (Items 41514fee and 6a251b23).
+
 ## Questions for the owner
 
-1. Should an agent's reply carry whole board notes (they are at most 240 characters) instead of a hint and a truncated list?
-2. Is `nforge queue` to be removed, or pointed at the hosted queue?
-3. Should run names be shown to people at all, and if so where does a person look one up?
+- Should an agent's reply carry whole board notes (they are at most 240 characters) instead of a hint and a truncated list?
+- Is `nforge queue` to be removed, or pointed at the hosted queue?

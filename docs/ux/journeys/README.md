@@ -1,6 +1,8 @@
-# User journeys as they are
+# User journeys
 
-Current-state maps of forty journeys through Forge. Journeys 1 to 11 were mapped first; 12 to 40 add the rest of the list in Issue a0cf8c22 and the journeys found on the planning board and in the docs. Two personas run through all of them: a **person** (the project owner or a teammate, mostly on the web app) and a **coding agent** (mostly on the CLI and MCP). Four more appear where named: an outside contributor, a maintainer, a lead agent and an operator who hosts Forge. Each file lists the steps as they work now, with the exact command or screen and the reply, then the findings and the questions only the owner can answer.
+These forty maps pair observed steps with approved decisions. The steps and findings describe what was observed when mapped unless they name a later delivery. Decision sections specify the intended behavior and name the work that carries it; they do not announce that a feature is live. Only unresolved choices belong under Questions for the owner.
+
+The main perspectives are a **person** (usually on the web) and a **coding agent** (usually on the CLI or MCP). Other journeys cover outside contributors, people maintaining or hosting a project, and people or agents coordinating work. Leading work does not grant a separate role or interface.
 
 These maps describe behaviour. They contain no visual design. The flow specs, screens and the agent scorecard of Issue a0cf8c22 build on them.
 
@@ -93,12 +95,13 @@ The owner decided the vocabulary below. Findings and command transcripts in thes
 - **Approve** is a person's decision on something held. **Accept** is the system's result when a change passes. "Grant" and "apply" retire as names for the owner's yes.
 - **Land** is the visible event in CLI, web and tagline. **Accepted** appears only as a state inside a receipt.
 - **Candidate**, not View, is the exact combination of Lane saves.
-- Statuses are **Proposed, Planned, In motion, Done, Abandoned**. Abandoned has a reason: **won't do**, **duplicate** or **superseded**, matching the existing Lane abandon verb.
+- Statuses are **Proposed, Planned, In progress, Done, Abandoned**. Abandoned has a reason: **won't do**, **duplicate** or **superseded**. Inactivity does not move work out of In progress; there is no “stuck” status ([journey 38](38-where-a-project-is-at.md#decision)).
 - Settings has **People & access** (who decides) and **Landing & checks** (how landings are checked). **Automatic** means only that Forge picks from the project's own data.
-- Roles are **owner / write / read**, matching GitHub; no Maintainer role is added.
-- The GitHub link is the **mirror**.
+- Roles are **owner / write / read**; no Maintainer role is added. Invited people are **members**; **contributor** means an outsider (Item 203fd4f8).
+- The link to the external Git host is the **mirror**.
+- People see **version**, the CLI keeps **State**, and **Channel** is hidden while there is only one (Item c008cb43).
 
-The remaining owner questions (groups B–H and J–Q of the mapping handoffs) are tracked in Item 581bd373. Group I (37–44) is answered below. Naming and status implementation is tracked on d3357f40; the person-decision and landing-event wording is tracked on a4c5394c.
+Accepted answers from Item 581bd373 are recorded under Decisions in the relevant journeys, with the Items that carry the work. They describe approved behavior, not a rollout. Remaining questions stay explicit. Naming and status implementation is tracked on d3357f40; the person-decision and landing-event wording is tracked on a4c5394c.
 
 ## Approved asking, answering and inbox decisions
 
@@ -112,6 +115,8 @@ Group I (37–44) is answered. These are requirements for the P7 specs, not clai
 42. Read state is kept per account so web, phone and CLI agree.
 43. Home holds one inbox across projects, filterable by project.
 44. Owner and write roles may order two overlapping Lanes from Now. Record the order and show it with Undo.
+
+Items b54a14c0 and 77d2e8bc cover the message and inbox foundations; Item e88f503d tracks notification work. Those deliveries do not establish that every requirement above is live. The FYI list shows landed work not yet read, with Review links and individual or bulk dismissal (Item 48049998).
 
 ## How to read a finding
 
@@ -136,18 +141,18 @@ Steps that could not be walked without changing a project (a first sign-in, an i
 3. **The web app shows controls and commands that no longer do anything.** A switch with no effect on hosted projects, and export commands the CLI refuses. See [06](06-settings.md), [11](11-leaving.md).
 4. **Settings that decide how a landing is checked have no web control.** A person changes them through a CLI command that is then held for the same person's approval on the web. See [06](06-settings.md).
 5. **Replies are built for agents; nothing is built for a person at a terminal.** Reads return full hashes, UUIDs and epoch times with no one-line summary. `nforge status` is the one exception. See [02](02-first-task.md), [09](09-cost-usage.md), [10](10-mistakes-recovery.md).
-6. **Replies contradict each other in a few places an agent will read.** `check-settings` reports that agent landings wait for review on a project where they land automatically; the stalled-landing rule and help topic give opposite instructions. See [02](02-first-task.md), [04](04-failed-check.md).
-7. **Cost is invisible to the person who pays.** No web surface shows CI minutes or cost; the CLI report uses internal row codes. See [09](09-cost-usage.md).
+6. **Recovery needs one exact command.** Follow the stalled-landing receipt's repair command rather than starting another bare `land`. See [04](04-failed-check.md).
+7. **Project savings need a stated baseline.** Stats shows estimated dollars saved; see [09](09-cost-usage.md) and [23](23-stats-and-savings.md).
 8. **The recipient half of sharing is missing.** An invitation sends nothing to the person invited. See [07](07-people-access.md).
 9. **Forge speaks only when spoken to.** Nothing reaches a person outside the app, and an agent hears news on the reply to its next command. See [17](17-staying-informed.md), [26](26-answering-an-agent.md), [27](27-what-needs-me.md), [30](30-provider-outage.md).
-10. **The outsider has no door.** No proposal without an invitation, no bug report, no directory, and crawlers are kept out of project pages. See [16](16-outside-contributor.md), [31](31-discover-and-star.md), [32](32-maintaining-open-source.md).
+10. **Discovery and outside intake are separate.** Explore and public project pages let people find projects; outside proposals and bug reports have separate rollout requirements. See [16](16-outside-contributor.md), [31](31-discover-and-star.md), [32](32-maintaining-open-source.md).
 11. **One owner and one identity.** One account approves everything on a project, and every terminal sign-in is an agent under its person's handle with all of that person's reach. See [14](14-setting-up-agents.md), [20](20-account.md), [28](28-protected-paths.md), [36](36-organizations-teams.md), [39](39-leading-a-fleet.md).
 12. **An agent cannot ask or hand back with the commands it is taught.** Two message systems exist and do not meet. See [26](26-answering-an-agent.md), [33](33-agent-scorecard-journeys.md).
-13. **What people from GitHub look for first is absent.** A history tab, blame, tags and releases, an issue import, a small edit on the web. See [12](12-import-migrate.md), [18](18-browsing-code.md), [19](19-releases.md), [40](40-a-person-changes-code.md).
+13. **Source, work and releases follow different paths.** Import brings source and history, not tracker work. Read history and blame in Forge; edit in a Lane. Tags are to go to the mirror, with Forge releases deferred. See [12](12-import-migrate.md), [18](18-browsing-code.md), [19](19-releases.md), [40](40-a-person-changes-code.md).
 14. **Setup happens in a terminal and the docs, with no screen.** Connecting CI, connecting an agent and self-hosting. See [13](13-connecting-ci.md), [14](14-setting-up-agents.md), [37](37-running-forge-yourself.md).
 15. **Texts written for agents by hand drift from the CLI.** `llms.txt` and the skill teach retired verbs; the help omits a working action. See [24](24-llm-discovery.md), [18](18-browsing-code.md), [33](33-agent-scorecard-journeys.md).
-16. **Measured facts are not shown where a person decides.** Main's health, counts per Initiative, usage against limits and savings exist in reads and reports only. See [21](21-plans-billing-limits.md), [23](23-stats-and-savings.md), [30](30-provider-outage.md), [38](38-where-a-project-is-at.md).
-17. **Some controls describe an action without performing it.** Undo beside an automatic landing is a tooltip; the proposal upload needs an archive the CLI no longer makes. See [35](35-undo-for-a-person.md), [16](16-outside-contributor.md).
+16. **Put each figure where it informs a decision.** Show savings on Stats, space warnings on Usage and progress on the Initiative. See [21](21-plans-billing-limits.md), [23](23-stats-and-savings.md), [30](30-provider-outage.md), [38](38-where-a-project-is-at.md).
+17. **A revert is a new landing.** “Take it out of main” reverts the exact change without rewinding main. See [35](35-undo-for-a-person.md).
 
 ## Pattern references
 

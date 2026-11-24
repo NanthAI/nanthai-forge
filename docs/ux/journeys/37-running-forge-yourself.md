@@ -50,10 +50,13 @@ Walked: the operations doc (self-host, backup and recovery headings, R2 storage)
 - **Agent, not person:** nothing different, except a reply that names the service it is talking to ([journey 22](22-many-projects.md), J22-6).
 - **Person, not agent (operator):** one guide from nothing to a working, backed-up instance with a real address; a list of what must be supplied; an upgrade path; a statement of what is supported.
 
+## Decisions
+
+- Self-hosting is possible but unsupported at beta. Document it; do not promise a package, a production setup or support (Item ca64692f).
+- Hosted login is to become the default; self-hosters keep `nforge login --url` (Item f3f45a41).
+
 ## Questions for the owner
 
-1. Is production self-hosting a supported offer at the beta, or "possible, unsupported" until later? The public pages need one of the two sentences.
-2. If supported: what is the packaged form (a container image, a compose file) and who maintains it?
-3. Does the self-host guide become one page for operators, separate from Forge's own operations notes?
-4. What is the upgrade promise for self-hosters: which CLI versions work with which server versions?
-5. Does the backup guide cover the storage bucket, so one procedure restores a project?
+- Does the self-host guide become one page for operators, separate from Forge's own operations notes?
+- What CLI and server version combinations should the docs describe?
+- Does the backup guide cover the storage bucket, so one procedure restores a project?

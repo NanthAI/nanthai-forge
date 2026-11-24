@@ -22,7 +22,7 @@ Walked: `help check`, `help retry`, `help wait`, `help queue`, `capabilities`, `
 
 | Id | Severity | Finding | Evidence |
 | --- | --- | --- | --- |
-| J4-1 | S1 | **Two opposite instructions for a stalled landing.** The project's generated rules say: "A LANDING_STALLED receipt names its repair command; run that, do not resubmit." The help topics for waiting and for the queue say: "LANDING_STALLED: … Read queue '{}', then land --save again from the same Lane." | ran |
+| J4-1 | S1 | **The receipt owns stall recovery.** Follow the exact repair command in the `LANDING_STALLED` receipt. Item c24edcb2 removed conflicting advice to start a new landing. | Item c24edcb2 |
 | J4-2 | S2 | **The agent is asked to name the cause of a failure it cannot diagnose.** A retry takes `reason:"flake"`, `"main-moved"`, `"infra"` or `"other"`. Nothing in the failure reply says which applies. In the two-day report the waste table shows 0 attempts under `flake` and 13 under `check-failed`. | docs, ran |
 | J4-3 | S2 | **"Is main broken right now?" has no single answer for an agent.** The help sends it to `queue` and `status`. The fact is in `check-settings` under `mainAudit` (`result`, `redSince`, `redMinutes`), which the help topic does not mention. | ran |
 | J4-4 | S2 | **Half of recent landings needed a second agent or a second attempt.** Of 16 landings in one day: 6 first try, 1 after a retry, 1 after a recompose, 8 "after fixer". Recovery is the common path, not the exception, so its replies deserve the same care as the happy path. | ran |
@@ -47,8 +47,11 @@ Walked: `help check`, `help retry`, `help wait`, `help queue`, `capabilities`, `
 - **Agent, not person:** the failing test and first error (present); whether the cause is its change, main or the machine; one field name for "do this next".
 - **Person, not agent:** whether anything needs them. A failed check an agent is already fixing should not ask for attention; a reverted landing should. The Needs you kinds make this split.
 
+## Decisions
+
+- For a stalled landing, follow the exact repair command in its receipt; do not start another bare `land` (Item c24edcb2).
+- Forge is to classify failures with rules checked against real incidents. If none matches, say the cause is unclassified. Agents do not choose the cause (Item 154f3399, Phase 8).
+
 ## Questions for the owner
 
-1. For a stalled landing, which instruction is right: follow the repair command in the receipt, or land again? (J4-1)
-2. Should Forge classify the failure cause itself (flake, main moved, machine) so agents never choose a `reason`?
-3. Do owners get a flaky-check view on the web, and does it sit with checks, with cost or in Now?
+- Do owners get a flaky-check view on the web, and does it sit with checks, with cost or in Now?

@@ -46,11 +46,13 @@ Walked: the teams, sharing, contributors and project lifecycle sources, the secu
 - **Agent, not person:** nothing new, except that its reach follows its person's memberships at every call (it does today for projects).
 - **Person, not agent:** to create a shared home for projects, add a colleague once, give a team access to several projects, see and remove a leaver everywhere, and have more than one person able to approve.
 
+## Decisions
+
+- Adopt the organization model on Item 1e474c35: owner, member and billing manager, read as the default base permission, and project-scoped outside collaborators. Move existing reader teams into that model. The proposal also owns organization-wide removal and its list of secrets to rotate.
+- Before organizations, the owner may let any writer approve; multiple approvers do not require multiple owners (Item bd1a9b9e).
+
 ## Questions for the owner
 
-1. Is the organization model as proposed on 1e474c35 (owner, member, billing manager; base permission default read; outside collaborators per project)?
-2. Can a project have more than one owner before organizations exist?
-3. What happens to today's reader teams: renamed, folded into organization teams, or removed with the analysis imports?
-4. On transfer, does the address change with a permanent redirect, as for a rename?
-5. Is "remove this person from everything" one action for an organization owner, and does it list the secrets to rotate (as 1e474c35 proposes)?
-6. Do organizations appear in the Phase 7 designs (owner switcher, organization page) even if built in Phase 8?
+- Can a project have more than one owner before organizations exist?
+- On transfer, does the address change with a permanent redirect, as for a rename?
+- Do organizations appear in the Phase 7 designs even if built in Phase 8?

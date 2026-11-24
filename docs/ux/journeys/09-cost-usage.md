@@ -15,7 +15,7 @@ Walked: `nforge metrics` (JSON and `--report`), the agent `metrics` action, `lan
 | 5 | What did one landing cost? | `landings` rows | `costs:{"attempts":2,"writes":8,"r2ClassA":4,"r2ClassB":7,"r2BytesPut":49188,"runnerAccepted":95.65,"runnerDiscarded":0}`. (ran) |
 | 6 | Whose CI runs the checks? | `check-settings` | Provider, runner repository, `runsOn`, `concurrencyBudget`, and the public-logs notice. (ran) |
 | 7 | What did an import cost? | The `nforge import` reply | The GitHub API requests the import made, "by who paid for them". (docs) |
-| 8 | Any of this on the web? | Settings → Checks | Runs and last run per check. No minutes, no cost, no totals. A search of the web source for CI minutes, runner minutes and cost found nothing. (ran) |
+| 8 | Any of this on the web? | Project Stats | Estimated savings and CI figures, not operator costs or a provider bill (Item 3678767e). |
 | 9 | Usage statistics | n/a | Not built. Open Issue 8edd3157. |
 
 Other rows in the report: "5.1 Landings by path" (first try, retry, recompose, fixer), "5.2 Lifecycle errors per 100 finishes", "5.3 Dropped landings", "5.5 Interventions per landing", "5.7 Authority lag and contradictions", "R Red-main minutes", "B Proved-reuse back-stop".
@@ -24,19 +24,18 @@ Other rows in the report: "5.1 Landings by path" (first try, retry, recompose, f
 
 | Id | Severity | Finding | Evidence |
 | --- | --- | --- | --- |
-| J9-1 | S1 | **The person who pays cannot see what they pay.** The web has no CI-minute or cost figure anywhere. The only route is a CLI command whose default output is hundreds of kilobytes of JSON. | ran |
+| J9-1 | S1 | **A saving is not a bill.** Project Stats shows estimated savings; actual provider bills and the owner's detailed cost report are separate. | ran |
 | J9-2 | S2 | **The report is written for Forge's own team.** Its rows are numbered 5.1 to 5.8 (the stages of an internal plan), R and B. Terms such as "fixer", "compensating", "authority lag", "proved-reuse back-stop" and "estimator error" are not explained. Coverage notes are longer than the values. | ran |
 | J9-3 | S2 | **Two kinds of minutes with no definition on the page.** "134.494 runner" and "17.095 check-minutes" per landing differ by about eight times. The report defines neither and does not say which one is billed. `runnerAccepted: 95.65` in a landing row has no unit. | ran |
 | J9-4 | S2 | **Money is "unknown" unless typed in by hand.** Dollars per landing needs each provider's bill entered through a command. No estimate from list prices is shown in its place. | ran |
-| J9-5 | S2 | **Nothing states who pays for what.** With your own CI, check minutes are on the owner's CI account; storage and backend calls are on the Forge operator. No surface says this, and pricing is not decided. | docs |
-| J9-6 | S2 | **The saving against GitHub has no number.** The journeys Issue asks for "cost and savings (CI minutes, tokens, against GitHub)". Today there is waste (minutes discarded) and reuse (0.1), and the README states that no advantage for single agents has been shown. Token use is self-reported by agents and optional. | ran, docs |
-| J9-7 | S2 | **Two open Issues disagree about money on the web.** 9e748e41 (Now view) says "No ledger or money for users". a0cf8c22 lists "see cost and savings" in the core loop. | ran |
+| J9-5 | S2 | **Nothing states who pays for what.** With your own CI, check minutes are on the owner's CI account; storage and backend calls are on the Forge operator. Public plan prices describe Forge, not a project's CI bill. See [journey 21](21-plans-billing-limits.md). | docs |
+| J9-6 | S2 | **The savings estimate needs its method.** State the same-work CI baseline and keep optional token reports separate from the estimate. See [journey 23](23-stats-and-savings.md). | ran, docs |
+| J9-7 | S2 | **Project savings and service costs are separate.** Stats shows estimated dollars saved; Now does not show an operator cost ledger. See [journey 23](23-stats-and-savings.md) for how the comparison is made. | ran |
 | J9-8 | S3 | **Agents get no warning before a limit.** A refusal names the limit and `retryAt`; nothing shows the remaining budget beforehand. Open Issue 93907d28. | ran |
 | J9-9 | S3 | **The numbers that would persuade are already measured.** One day: 16 landings, 6 on the first try, first-attempt land rate 0.571, 1.688 interventions per landing, finish-to-main p50 about 11 minutes. They are visible only in the report. | ran |
 
 ## Dead ends
 
-- A person on the web looking for usage: there is no page.
 - "Dollars per landing: $unknown" with no hint in the row about how to fill it (the command is in the help, not the report).
 
 ## Naming and tone
@@ -47,12 +46,13 @@ Other rows in the report: "5.1 Landings by path" (first try, retry, recompose, f
 ## What each persona needs
 
 - **Agent, not person:** its remaining budget and the cost of the action it is about to repeat (a failed check costs N runner minutes); nothing about money.
-- **Person, not agent:** three or four numbers at a glance with a trend: minutes per landing, share landed first try, waiting time, and what was wasted and why. Then, when pricing exists, what they owe.
+- **Person, not agent:** what Forge saved in dollars, then time to main, first-try rate and CI minutes per landing. What they owe is a separate billing question.
+
+## Decisions
+
+- Every owner can use `nforge metrics` for their own account and projects, not to see service-wide data (Item 0de95ef2).
+- The same-work comparison is on project Stats, not only in published benchmarks. Estimated dollars saved lead, then time to main, first-try rate and CI minutes per landing (Items 3678767e and 8edd3157). See [journey 23](23-stats-and-savings.md#decisions) for the baseline.
 
 ## Questions for the owner
 
-1. Is money shown to users at all? 9e748e41 says no ledger; a0cf8c22 says cost and savings. If yes: as CI minutes only, or dollars?
-2. Which numbers come first for an owner: minutes per landing, first-try rate, time to main, wasted minutes?
-3. Is `nforge metrics` a tool for every owner or for the Forge team? That decides whether its report gets plain row names.
-4. Should Forge estimate cost from list prices when no bill is entered, marked as an estimate?
-5. Is a comparison with GitHub shown inside the product, or only in published benchmarks?
+- Outside the Stats comparison, should usage show an estimated bill from list prices when no bill is entered?

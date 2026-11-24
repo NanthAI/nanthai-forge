@@ -48,7 +48,7 @@ Walked: the Needs you, attention, answers, fix-notice and Home sources, the work
 | J27-5 | S2 | **Nothing ranks or ages the list.** Items carry "recorded ages"; no rule puts a blocked agent above a week-old quarantine note. With several agents, the oldest approval is the most expensive item and looks like the others. | docs, source |
 | J27-6 | S2 | **The mirror item is written in internals.** Four heads and "both heads retained" (journey 11, J11-5) in the one place a person looks for plain questions. | source |
 | J27-7 | S2 | **"Fix needed" and "Reverted from main" stay until someone closes them, for everyone.** They remain "until the Intent re-lands or is closed" and count in the badge. On the Forge project three such notices were four days old and still in every agent's replies (journey 17, J17-7). A stale item teaches people to ignore the badge. | ran, docs |
-| J27-8 | S2 | **Reviews of landed work are absent.** The inbox has no "landed, not yet read" (journey 15, J15-1), although the journey's description lists reviews. | source |
+| J27-8 | S2 | **Reviews of landed work are in FYI, not the decision queue.** Review opens the landing; dismissal clears it from the unread list. | Item 48049998 |
 | J27-9 | S3 | **Three counts** (panel, badge, Home) follow different rules (journey 17, J17-4). | docs |
 | J27-10 | S3 | **What a teammate with the write role sees is not stated.** The docs say owners see approval requests "that wait for them"; what a write-role member sees for a held landing they submitted is not stated. | docs |
 
@@ -78,11 +78,12 @@ These owner decisions guide the P7 spec; the steps and findings above describe t
 - **I42:** Read state is kept per account so web, phone and CLI agree.
 - **I43:** Home holds one inbox across projects, filterable by project.
 
+## Decision
+
+- FYI is the landed, not yet read list, including automatic landings. Review opens landing evidence. A person can dismiss individual rows or all of them (Item 48049998).
+
 ## Questions for the owner
 
-1. **Answered in group I:** Needs you holds approvals, questions, handoffs and reviews; failures appear only when no agent is on them. Order the longest-blocked agent first.
-2. **Answered in group I:** Needs you holds approvals, questions, handoffs and reviews; failures appear only when no agent is on them. Order the longest-blocked agent first.
-3. **Answered in group I:** Read state is per account (I42); a snooze time or condition remains undecided.
-4. Who sees and may clear "Fix needed" and "Reverted from main", and do they expire?
-5. **Answered in group I:** At beta, batched email reaches a person for approvals, agent questions and handoffs; phone push comes later. The email batching cadence remains to be specified.
-6. Does the inbox include "landed, not yet read" on projects that land automatically?
+- What is the snooze time or condition?
+- Who sees and may clear “Fix needed” and “Reverted from main”, and do they expire?
+- What is the email batching cadence?

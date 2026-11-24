@@ -69,8 +69,4 @@ These owner decisions guide the P7 spec; the steps and findings above describe t
 
 ## Questions for the owner
 
-1. **Answered in group I:** `ask` (with choices) and `hand back` become agent actions beside start, save and land.
-2. **Answered in group I:** Use one message system: one thread per Lane or Item, with choices on a message. Board notes and session messages merge into it.
-3. **Answered in group I:** When the agent has stopped, the answer waits on the Lane and Forge offers a ready resume prompt. Forge never starts an agent by itself.
-4. **Answered in group I:** Owner and write roles may order two overlapping Lanes from Now. Record the order and show it with Undo.
-5. When should an agent ask and not decide? Is that a project setting (the "You decide ↔ Agents decide" scale) that agents can read?
+- When should an agent ask and not decide? Is that a project setting (the “You decide ↔ Agents decide” scale) that agents can read?

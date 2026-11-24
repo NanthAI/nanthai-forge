@@ -53,8 +53,8 @@ None found on the happy path. Every refusal read carried `next` and `learn`.
 - **Agent, not person:** exact ids and replay commands; one reply shape; exit codes with fixed meanings (present); a rule for when to stop waiting (present). An agent does not need the Lane id three times or settings that contradict the policy.
 - **Person, not agent:** a title and a sentence, not ids; "did it land, who accepted it, what changed" in one line; no JSON. Today a person gets this only on the web.
 
-## Questions for the owner
+## Decisions
 
-1. Should plain `land` become the whole verb, with `--save` implied?
-2. Is the CLI for agents only, with people on the web? Or should reads print a one-line human summary first, as `nforge status` does?
-3. Should the wording be "landed" or "accepted" everywhere? PRODUCT.md fixes "accept"; the CLI and docs use "land".
+- Plain `land` saves first. `abandon` and `revert` sit beside `start`, `save` and `land` (Item 6b7d5a79).
+- The CLI is mainly for agents, but people can use it. Reads may start with one human line; JSON remains the contract (Item 235878aa).
+- People see **Landed**. Acceptance is the internal result recorded in the receipt; **Approve** is the person's decision ([product vocabulary](../../../PRODUCT.md#capabilities-and-constraints)).
