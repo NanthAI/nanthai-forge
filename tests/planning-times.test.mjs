@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { getDocumentSize } from 'convex/values';
 import { moduleUrl } from './convex-module.mjs';
 import { setup } from './hosted-planning-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
@@ -12,13 +13,16 @@ import { hostedRecordValue } from '../dist/hosted-records.js';
 import { workStoreRecord } from '../dist/work-store-records.js';
 
 const { storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
-const { withPlanningTimes, planningHistoryBudget, backfillPlanningTimes } = await import(
+const { withPlanningTimes, planningHistoryBudget } = await import(
   moduleUrl('../convex/projectPlanningHistory.ts')
 );
+const { provePlanningTimes } = await import(moduleUrl('../convex/projectPlanningTimesProof.ts'));
 const backfill = await import(moduleUrl('../convex/projectPlanningTimesBackfill.ts'));
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const { command } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const { recordPartition } = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
+
+process.env.R2_SECRET_ACCESS_KEY = 'synthetic-planning-proof-key';
 
 async function fixture(t) {
   const s = await setup(t);
@@ -53,15 +57,9 @@ async function fixture(t) {
       JSON.stringify(item),
       planningHistoryBudget(undefined, limit),
     ).then(JSON.parse);
-  const derive = item =>
-    backfillPlanningTimes(
-      s.ctx,
-      project,
-      generationId,
-      JSON.stringify(item),
-      planningHistoryBudget(undefined, Infinity),
-    );
-  const fill = cursor => backfill.page._handler(s.ctx, { projectId: s.projectId, cursor });
+  const derive = item => provePlanningTimes(s.ctx, generationId, head(item.id)).then(proof => proof.times);
+  const fill = (cursor, headCursor) =>
+    backfill.page._handler(s.ctx, { projectId: s.projectId, cursor, headCursor });
   return { ...s, put, head, detail, walk, derive, fill };
 }
 
@@ -135,6 +133,40 @@ test('an unavailable journal snapshot cannot pin null and hide later retained ev
   assert.equal(JSON.parse(before[1].value).closedAt, closed.at);
   assert.equal((await s.fill(null)).filled, 1);
   assert.deepEqual(await endpoints(s, id), before);
+});
+
+test('restore backfill recovers chunked legacy shelf evidence and refuses a missing chunk', async t => {
+  const s = await fixture(t);
+  const id = randomUUID();
+  const closed = snapshot(id, 1, 'closed');
+  const shelf = snapshot(id, 2, 'archived', { was: 'closed', body: 'x'.repeat(40 * 1024) });
+  const restored = snapshot(id, 3, 'closed');
+  await s.put(closed);
+  await s.ctx.db.patch(s.head(id)._id, { planningTimes: undefined });
+  await s.put(shelf);
+  await s.ctx.db.patch(s.head(id).recordId, { journalSegment: 'synthetic-journal-pin' });
+  await s.put(restored);
+  const generation = s.tables.projectWorkGenerations.get(
+    s.tables.hostedProjects.get(s.projectId).work.generationId,
+  );
+  const [header, ...chunks] = indexedRecord('planningVersions', shelf.operationId, id, 2, shelf);
+  assert.equal(chunks.length, 2);
+  const retain = entry =>
+    setWorkRecord(s.tables, `shelf-${entry.key}`, {
+      ...entry,
+      _id: `shelf-${entry.key}`,
+      _creationTime: 1,
+      projectId: s.projectId,
+      generationId: recordPartition(generation),
+    });
+  retain(header);
+  retain(chunks[0]);
+  assert.deepEqual((await s.fill(null)).blocked, [id]);
+  assert.equal(s.head(id).planningTimes, undefined);
+  retain(chunks[1]);
+  assert.equal((await s.detail(id)).closedAt, closed.at);
+  assert.equal((await s.fill(null)).filled, 1);
+  assert.deepEqual(times(await s.detail(id)), { lastStatusChangeAt: restored.at, closedAt: closed.at });
 });
 
 test('backfill verification visits every head despite byte splits, including heads on later pages', async t => {
@@ -301,13 +333,14 @@ test('backfill recovers a close past 32 edits, pins its version, and replays wit
   assert.equal((await s.detail(id)).closedAt, original.at);
 });
 
-test('out-of-order copies invalidate a formerly incomplete head; stale pins and purge tombstones cannot answer times', async t => {
+test('out-of-order copies cannot pin a history gap; stale pins and purge tombstones cannot answer times', async t => {
   const s = await fixture(t);
   const id = randomUUID();
   const first = snapshot(id, 1, 'closed');
   const second = snapshot(id, 2, 'closed');
   await s.put(second);
-  assert.equal((await s.fill(null)).filled, 1);
+  assert.deepEqual((await s.fill(null)).blocked, [id]);
+  assert.equal(s.head(id).planningTimes, undefined);
   assert.equal((await s.detail(id)).closedAt, null);
   await s.put(first);
   assert.equal(s.head(id).planningTimes, undefined);
@@ -322,14 +355,88 @@ test('out-of-order copies invalidate a formerly incomplete head; stale pins and 
   assert.deepEqual(times(await s.detail(id)), { lastStatusChangeAt: null, closedAt: null });
 });
 
-test('a head beyond the backfill page budget remains unpinned and is reported, not written with a guessed date', async t => {
+async function longRestoredHistory(t) {
   const s = await fixture(t);
   const id = randomUUID();
-  await s.put(snapshot(id, 1, 'closed', { body: 'x'.repeat(400 * 1024) }));
+  const original = snapshot(id, 1, 'closed', { body: 'x'.repeat(100 * 1024) });
+  await s.put(original);
   await s.ctx.db.patch(s.head(id)._id, { planningTimes: undefined });
-  await s.put(snapshot(id, 2, 'closed'));
-  const result = await s.fill(null);
-  assert.equal(result.filled, 0);
-  assert.deepEqual(result.blocked, [id]);
+  for (let n = 2; n <= 10; n++) await s.put(snapshot(id, n, 'closed', { body: original.body }));
+  await s.put(snapshot(id, 11, 'archived', { was: 'closed', body: original.body }));
+  const restored = snapshot(id, 12, 'closed', { body: original.body });
+  await s.put(restored);
+  for (const row of s.tables.projectHostedRecords.values()) {
+    if (row.key !== id) continue;
+    const body = s.tables.projectHostedRecordBodies.get(row.bodyId);
+    await s.ctx.db.patch(row._id, { inline: body.value });
+  }
+  return { ...s, id, original, restored };
+}
+
+test('backfill resumes a byte-limited restore history without guessing a date or skipping the Item', async t => {
+  const s = await longRestoredHistory(t);
+  const first = await s.fill(null);
+  assert.deepEqual(first.blocked, []);
+  assert.equal(first.nextCursor, null);
+  assert.equal(first.filled, 0);
+  assert.equal(s.head(s.id).planningTimes, undefined);
+  assert.equal(typeof first.headCursor, 'string');
+  const headRead = getDocumentSize(s.head(s.id));
+  const largestHeader = Math.max(...Array.from(s.tables.projectHostedRecords.values(), getDocumentSize));
+  // This first window loads an inline head and shelf, no extra snapshot document or anchor.
+  assert.ok(first.readBytes >= headRead + 384 * 1024);
+  assert.ok(first.readBytes < headRead + 384 * 1024 + largestHeader);
+  const result = await backfill.run._handler(
+    { runMutation: (_, args) => s.fill(args.cursor, args.headCursor) },
+    {
+      projectId: s.projectId,
+      cursor: null,
+      headCursor: first.headCursor,
+      pages: 24,
+      budgetBytes: 20_000_000,
+    },
+  );
+  assert.equal(result.filled, 1);
+  assert.equal(result.scanned, 1);
+  assert.equal(result.nextCursor, null);
+  assert.equal(result.headCursor, undefined);
+  assert.deepEqual(result.blocked, []);
+  assert.deepEqual(times(await s.detail(s.id)), {
+    lastStatusChangeAt: s.restored.at,
+    closedAt: s.original.at,
+  });
+  const replay = await s.fill(null, first.headCursor);
+  assert.equal(replay.filled, 0);
+  assert.equal(replay.headCursor, undefined);
+  assert.equal(replay.nextCursor, null);
+});
+
+test('a checkpoint cannot skip an unproved open to closed transition', async t => {
+  const s = await fixture(t);
+  const id = randomUUID();
+  await s.put(snapshot(id, 1, 'open'));
+  await s.ctx.db.patch(s.head(id)._id, { planningTimes: undefined });
+  await s.put(snapshot(id, 2, 'open'));
+  const closed = snapshot(id, 3, 'closed');
+  await s.put(closed);
+  await s.put(snapshot(id, 4, 'closed'));
+  const { recordId, version, status } = s.head(id);
+  const forged = `${JSON.stringify({ key: id, recordId, version, status, visitedVersion: 2 })}.${'a'.repeat(64)}`;
+  await assert.rejects(s.fill(null, forged), { code: 'BAD_ARGUMENT' });
   assert.equal(s.head(id).planningTimes, undefined);
+  assert.equal((await s.fill(null)).filled, 1);
+  assert.deepEqual(times(await s.detail(id)), { lastStatusChangeAt: closed.at, closedAt: closed.at });
+});
+
+test('a paused history proof restarts at the current version after a concurrent status move', async t => {
+  const s = await longRestoredHistory(t);
+  const { headCursor } = await s.fill(null);
+  assert.ok(headCursor);
+  const reopened = snapshot(s.id, 13, 'open');
+  await s.put(reopened);
+  assert.equal(s.head(s.id).planningTimes, undefined);
+  const resumed = await s.fill(null, headCursor);
+  assert.equal(resumed.filled, 1);
+  assert.equal(resumed.headCursor, undefined);
+  assert.deepEqual(times(await s.detail(s.id)), { lastStatusChangeAt: reopened.at, closedAt: null });
 });

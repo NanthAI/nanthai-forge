@@ -17,7 +17,7 @@ import { hostedRecordValue } from './hostedRecordValue';
 import { itemIntentChain } from './projectIntentLandingNotes';
 import { landingNoteWindow } from './projectIntentLandingNoteArchive';
 import { cursorJson, itemLandingFromNote } from './projectItemLandingHistory';
-import { legacyVersions, planningHistoryBudget } from './projectPlanningHistory';
+import { legacyVersions, legacyVersionValue, planningHistoryBudget } from './projectPlanningHistory';
 import { record } from './projectWorkIndexStore';
 import { workRecordTable } from './projectWorkRecordTables';
 import { storeItem } from './projectWorkStoreReads';
@@ -85,12 +85,15 @@ export async function loadVersionSnapshot(
     let read = 0;
     for await (const legacy of legacyVersions(ctx, partition, row.key)) {
       if (read++ >= 64 || !charge.record(legacy)) break;
-      const item = JSON.parse(legacy.value) as PlanningItem;
-      if (item.version === row.version && !item.purged) {
+      const header = JSON.parse(legacy.value) as PlanningItem;
+      if (header.version === row.version && !header.purged) {
+        const value = await legacyVersionValue(ctx, partition, legacy, charge);
+        if (value === null) return null;
+        const item = JSON.parse(value) as PlanningItem;
         const actor = await lookupEventActor(ctx, projectId, item.operationId, charge);
         return { item, actor };
       }
-      if (item.version < row.version) break;
+      if (header.version < row.version) break;
     }
     return null;
   }
@@ -513,19 +516,26 @@ export async function readItemAuditHistory(
             versionHasMore = true;
             break;
           }
-          const item = JSON.parse(row.value) as PlanningItem;
-          if (item.version > state.v) {
+          const header = JSON.parse(row.value) as PlanningItem;
+          if (header.version > state.v) {
             if (++skipped > 4096) {
               versionBudgetHit = true;
               break;
             }
             continue;
           }
-          if (item.purged) break;
+          if (header.purged) break;
           if (loaded.length >= pageLimit + 1) {
             versionHasMore = true;
             break;
           }
+          const value = await legacyVersionValue(ctx, partition, row, charge);
+          if (value === null) {
+            versionHasMore = true;
+            versionBudgetHit = true;
+            break;
+          }
+          const item = JSON.parse(value) as PlanningItem;
           const actor = await lookupEventActor(ctx, project._id, item.operationId, charge);
           loaded.push({ item, actor });
         }

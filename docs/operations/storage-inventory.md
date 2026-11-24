@@ -199,12 +199,20 @@ and retries. No new tables, indexes, R2 bodies, jobs or idle calls. Start with o
 npx convex run projectPlanningTimesBackfill:run '{"projectId":"…","cursor":null,"pages":1,"budgetBytes":12582912}'
 ```
 
-Each page reads up to five heads in Item-key order and walks their version chains
-with a byte limit but no version-count cap. Its cursor is the last visited key;
-partial provider pagination cannot skip unseen heads. The driver reserves 12 MiB
-before starting a page and does not schedule more work. Compare its reply with the billed completion logs before sizing
-another batch. Resume with `nextCursor`; replaying a cursor skips heads already pinned.
-`blocked` lists heads the page could not prove within its budget or available record
-bodies. Stop and inspect those Items; don't treat such a pass as complete. A second pass
-must scan to `nextCursor: null` with zero `filled` and no `blocked` before considering
+Each page reads up to five heads in Item-key order. A long history returns a `headCursor`
+after a roughly 384 KiB window (an individual document can cross that target). The cursor
+holds authenticated version references, not status timestamps or Item text. The next page resumes
+at that version if the head is unchanged, or restarts the proof at its current version. If the
+checkpoint is invalid or the deployment's existing R2 key rotated, omit it and restart at the
+last completed Item key. The Item is
+counted as scanned only after its proof finishes or its existing pin is verified. No partial
+proof publishes a pin.
+
+The driver reserves 12 MiB before starting a page and does not schedule more work. Compare
+its reply with the billed completion logs before sizing another batch. Resume by passing
+`nextCursor` as `cursor` and copying `headCursor` unchanged when present. Replaying a
+cursor skips heads already pinned. `blocked` lists Items with a gap or unavailable snapshot
+evidence, including evidence that cannot be read within the snapshot budget. Stop and
+inspect those Items; don't skip the blocked key. A fresh pass from `cursor: null` must reach
+`nextCursor: null` with no `headCursor`, zero `filled` and no `blocked` before considering
 any removal of the fallback.

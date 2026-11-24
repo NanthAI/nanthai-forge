@@ -5,6 +5,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { isShelved } from '../src/work-planning-types';
 import { planningStatusTransition } from '../src/work-planning-state';
+import { digest } from '../src/state/hash';
 import { hostedRecordBody } from './projectHostedRecords';
 import { workRecordTable } from './projectWorkRecordTables';
 import { instant, planningTime, type PlanningTimes } from './projectPlanningTimes';
@@ -41,7 +42,6 @@ export const planningHistoryResult = v.object({
 
 export function planningHistoryBudget(byteLimit = pageBytes, maxVersions = perItemVersions) {
   let bytes = byteLimit;
-  let unavailable = false;
   const spend = (size: number) => {
     bytes -= size;
     return bytes >= 0;
@@ -52,12 +52,6 @@ export function planningHistoryBudget(byteLimit = pageBytes, maxVersions = perIt
     },
     get readBytes() {
       return byteLimit - bytes;
-    },
-    get unavailable() {
-      return unavailable;
-    },
-    missingSnapshot: () => {
-      unavailable = true;
     },
     maxVersions,
     record: (row: Parameters<typeof getDocumentSize>[0]) => spend(getDocumentSize(row)),
@@ -78,6 +72,47 @@ export async function* legacyVersions(
     .order('desc');
 }
 
+/** Read chunks only for selected legacy snapshots, under the same caller byte budget as headers. */
+export async function legacyVersionValue(
+  ctx: QueryCtx,
+  partition: Id<'projectWorkGenerations'>,
+  row: { key: string; value: string },
+  charge: ReturnType<typeof planningHistoryBudget>,
+) {
+  const { payloadKey, payloadParts } = JSON.parse(row.value) as {
+    payloadKey?: string;
+    payloadParts?: number;
+  };
+  if (payloadKey === undefined) return row.value;
+  if (
+    charge.exhausted ||
+    !Number.isSafeInteger(payloadParts) ||
+    payloadParts! < 1 ||
+    !payloadKey.startsWith(`${row.key}:`)
+  )
+    return null;
+  const collection = 'planningVersions:payload';
+  const chunks: string[] = [];
+  const rows = ctx.db
+    .query(await workRecordTable(ctx, partition, collection))
+    .withIndex('by_generation_and_collection_and_parent_and_position', q =>
+      q.eq('generationId', partition).eq('collection', collection).eq('parent', payloadKey),
+    );
+  for await (const part of rows) {
+    if (
+      !charge.record(part) ||
+      part.position !== chunks.length ||
+      part.key !== `${payloadKey}:${chunks.length}`
+    )
+      return null;
+    chunks.push(part.value);
+    if (chunks.length === payloadParts) break;
+  }
+  if (chunks.length !== payloadParts) return null;
+  const value = chunks.join('');
+  return payloadKey === `${row.key}:${digest(value)}` ? value : null;
+}
+
 export async function recordSnapshot(
   ctx: QueryCtx,
   partition: Id<'projectWorkGenerations'>,
@@ -92,10 +127,12 @@ export async function recordSnapshot(
     for await (const legacy of legacyVersions(ctx, partition, row.key)) {
       if (read++ >= charge.maxVersions || !charge.record(legacy)) break;
       const snapshot = JSON.parse(legacy.value) as Snapshot;
-      if (snapshot.version === row.version && !snapshot.purged) return snapshot;
+      if (snapshot.version === row.version && !snapshot.purged) {
+        const value = await legacyVersionValue(ctx, partition, legacy, charge);
+        return value === null ? null : (JSON.parse(value) as Snapshot);
+      }
       if (snapshot.version < row.version) break;
     }
-    charge.missingSnapshot();
     return null;
   }
   if (row.inline === undefined && !charge.spend(row.bytes)) return null;
@@ -129,7 +166,13 @@ async function* earlierVersions(
     const previous = JSON.parse(row.value) as Snapshot;
     if (previous.version > through) continue;
     if (previous.purged) break;
-    yield { ...previous, snapshot: async () => previous };
+    yield {
+      ...previous,
+      snapshot: async () => {
+        const value = await legacyVersionValue(ctx, partition, row, charge);
+        return value === null ? null : (JSON.parse(value) as Snapshot);
+      },
+    };
   }
 }
 
@@ -141,12 +184,8 @@ export async function restoredClosed(previous: VersionRead) {
   return was === undefined ? null : was === 'closed';
 }
 
-async function itemTimes(
-  item: Snapshot,
-  history: AsyncIterable<VersionRead>,
-  maxVersions: number,
-  seekClose = item.status === 'closed',
-) {
+async function itemTimes(item: Snapshot, history: AsyncIterable<VersionRead>, maxVersions: number) {
+  const seekClose = item.status === 'closed';
   let version: VersionRead = { ...item, snapshot: async () => item };
   let statusChange: VersionRead | undefined;
   let close: VersionRead | undefined;
@@ -212,29 +251,6 @@ export async function withPlanningTimes(
     lastStatusChangeAt,
     closedAt: item.status === 'closed' ? closeKept : null,
   });
-}
-
-/** One-off derivation. Unlike request reads there is no version cap, and a spent byte budget
- * never publishes a partial proof. A shelved head keeps the close a later restore would use. */
-export async function backfillPlanningTimes(
-  ctx: QueryCtx,
-  project: Project,
-  partition: Id<'projectWorkGenerations'>,
-  value: string,
-  charge: ReturnType<typeof planningHistoryBudget>,
-): Promise<PlanningTimes | undefined> {
-  const item = JSON.parse(value) as Snapshot;
-  if (item.purged)
-    return { version: item.version, lastStatusChangeAt: null, closeKept: null, closedAt: null };
-  const seekClose = item.status === 'closed' || (isShelved(item.status) && item.was === 'closed');
-  const times = await itemTimes(
-    item,
-    earlierVersions(ctx, project, partition, item, charge),
-    Infinity,
-    seekClose,
-  );
-  if (!charge.exhausted && !charge.unavailable)
-    return { ...times, version: item.version, closedAt: item.status === 'closed' ? times.closeKept : null };
 }
 
 /** The Initiative on the immutable version is its group at the time of the close. The range uses

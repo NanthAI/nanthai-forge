@@ -2,18 +2,25 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { getDocumentSize, v } from 'convex/values';
 import { internal } from './_generated/api';
-import type { Doc } from './_generated/dataModel';
 import { internalAction, internalMutation } from './server';
 import { invariant } from '../src/errors';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
-import { backfillPlanningTimes, planningHistoryBudget, recordSnapshot } from './projectPlanningHistory';
 import { pinnedPlanningTimes } from './projectPlanningTimes';
+import {
+  openPlanningHeadCursor,
+  provePlanningTimes,
+  sealPlanningHeadCursor,
+} from './projectPlanningTimesProof';
 
-const perHeadBytes = 384 * 1024;
 const reserveBytes = 12 * 1024 * 1024;
-const selection = { projectId: v.id('hostedProjects'), cursor: v.union(v.string(), v.null()) };
+const selection = {
+  projectId: v.id('hostedProjects'),
+  cursor: v.union(v.string(), v.null()),
+  headCursor: v.optional(v.string()),
+};
 const resultFields = {
   nextCursor: selection.cursor,
+  headCursor: selection.headCursor,
   scanned: v.number(),
   filled: v.number(),
   blocked: v.array(v.string()),
@@ -39,44 +46,44 @@ export const page = internalMutation({
     });
     const result = {
       nextCursor: null as string | null,
+      headCursor: input.headCursor,
       scanned: 0,
       filled: 0,
       blocked: [] as string[],
       readBytes: 0,
       writtenBytes: 0,
     };
-    const fillHead = async (head: Doc<'projectHostedRecordHeads'>) => {
-      const charge = planningHistoryBudget(perHeadBytes, Infinity);
-      let value = head.value;
-      if (value === undefined) {
-        const row = await ctx.db.get(head.recordId);
-        if (row && !row.purged && charge.record(row)) {
-          const item = await recordSnapshot(ctx, partition, row, charge);
-          if (item) value = JSON.stringify(item);
-        }
-      }
-      const planningTimes = value && (await backfillPlanningTimes(ctx, project, partition, value, charge));
-      result.readBytes += charge.readBytes;
-      if (!planningTimes || planningTimes.version !== head.version) {
-        result.blocked.push(head.key);
-        return;
-      }
-      await ctx.db.patch(head._id, { planningTimes });
-      result.filled++;
-      result.writtenBytes += getDocumentSize({ ...head, planningTimes });
-    };
-    let headBytes = 0;
+    let last = input.cursor;
+    const checkpoint = input.headCursor
+      ? await openPlanningHeadCursor(project._id, input.headCursor)
+      : undefined;
     for await (const head of heads) {
-      const size = getDocumentSize(head);
-      headBytes += size;
-      result.readBytes += size;
+      result.readBytes += getDocumentSize(head);
+      const resume = checkpoint?.key === head.key ? checkpoint : undefined;
+      if (resume) result.headCursor = undefined;
+      if (!pinnedPlanningTimes(head)) {
+        const proof = await provePlanningTimes(ctx, partition, head, resume);
+        result.readBytes += proof.readBytes;
+        if ('resume' in proof || 'blocked' in proof) {
+          result.nextCursor = last;
+          if ('resume' in proof) result.headCursor = await sealPlanningHeadCursor(project._id, proof.resume);
+          else result.blocked.push(head.key);
+          break;
+        }
+        const planningTimes = proof.times;
+        await ctx.db.patch(head._id, { planningTimes });
+        result.filled++;
+        result.writtenBytes += getDocumentSize({ ...head, planningTimes });
+      }
+      last = head.key;
       result.scanned++;
-      if (!pinnedPlanningTimes(head)) await fillHead(head);
-      if (result.scanned === 5 || headBytes >= 512 * 1024) {
-        result.nextCursor = head.key;
+      if (result.scanned === 5 || result.readBytes >= 512 * 1024) {
+        result.nextCursor = last;
         break;
       }
     }
+    // If the range ran out, an unmatched checkpoint no longer refers to a live head.
+    if (result.nextCursor === null && result.headCursor === input.headCursor) result.headCursor = undefined;
     const meter = await ctx.meta?.getTransactionMetrics?.();
     result.readBytes = Math.max(result.readBytes, meter?.bytesRead.used ?? 0);
     result.writtenBytes = Math.max(result.writtenBytes, meter?.bytesWritten.used ?? 0);
@@ -102,6 +109,7 @@ export const run = internalAction({
     );
     const result = {
       nextCursor: input.cursor,
+      headCursor: input.headCursor,
       scanned: 0,
       filled: 0,
       blocked: [] as string[],
@@ -116,13 +124,15 @@ export const run = internalAction({
       const pageResult = await ctx.runMutation(internal.projectPlanningTimesBackfill.page, {
         projectId: input.projectId,
         cursor: result.nextCursor,
+        ...(result.headCursor === undefined ? {} : { headCursor: result.headCursor }),
       });
       result.pages++;
       result.nextCursor = pageResult.nextCursor;
+      result.headCursor = pageResult.headCursor;
       for (const field of ['scanned', 'filled', 'readBytes', 'writtenBytes'] as const)
         result[field] += pageResult[field];
       result.blocked.push(...pageResult.blocked);
-      if (result.nextCursor === null || result.blocked.length) break;
+      if ((result.nextCursor === null && !result.headCursor) || result.blocked.length) break;
     }
     return result;
   },
