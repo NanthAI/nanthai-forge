@@ -55,17 +55,28 @@ const sooner = (s: number | null) =>
   s === null ? 'not replayed' : s === 0 ? 'the same' : `${duration(Math.abs(s))} ${soonerWord(s)}`;
 
 /** One row of a horizontal bar chart: a label on one line, a bar as wide as its share of the longest, its value. */
-type BarRow = { name: string; hover?: string; value: string; share: number; kind: 'forge' | 'est' };
-function Bars({ rows, label }: { rows: BarRow[]; label: string }) {
+export type BarRow = {
+  name: string;
+  hover?: string;
+  /** A second, quieter line under the name (a count that belongs to the row). */
+  sub?: string;
+  value: string;
+  share: number;
+  kind: 'forge' | 'est' | 'ink';
+  /** Set apart from the rows above it by a rule (a row outside the scale, such as "Not counted"). */
+  apart?: boolean;
+};
+export function Bars({ rows, label }: { rows: BarRow[]; label: string }) {
   return (
     <div className="hb" role="img" aria-label={label}>
       {rows.map(row => (
-        <div className="hrow" key={row.name}>
+        <div className="hrow" key={row.name} data-apart={row.apart || undefined}>
           <span className="hlab" title={row.hover}>
             {row.name}
+            {row.sub ? <small>{row.sub}</small> : null}
           </span>
           <span className="hrail">
-            <i className={row.kind} style={{ '--w': row.share } as CSSProperties} />
+            {row.share > 0 ? <i className={row.kind} style={{ '--w': row.share } as CSSProperties} /> : null}
             <b className="hval">{row.value}</b>
           </span>
         </div>

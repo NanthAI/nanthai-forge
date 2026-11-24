@@ -44,7 +44,7 @@ async function fixture(out) {
         const at = start + 8 * 3600000 + i * 4 * min;
         return {id: 'l' + start + '-' + i, who: agents[i % agents.length], submittedAt: at, landedAt: at + 6 * min + (i % 3) * min,
           checkStartedAt: at + 40000, checkEndedAt: at + 40000 + 302000, runnerSeconds: i % 17 === 0 ? null : 250,
-          discardedRunnerSeconds: i % 17 === 0 ? null : (i % 11 === 0 ? 250 : 0), attempts: i % 11 === 0 ? 2 : 1, ranInFull: i % 4 === 0,
+          discardedRunnerSeconds: i % 17 === 0 ? null : (i % 11 === 0 ? 250 : 0), attempts: sample === 'notCounted' && agents[i % agents.length] === 'by hand' ? null : sample === 'dominant' ? (agents[i % agents.length] === 'by hand' ? 2 : 1) : i % 11 === 0 ? 2 : 1, ranInFull: i % 4 === 0,
           ...(sample === 'tokens' && i % 3 === 0 ? {tokens: 2000000 + i * 1000} : {})};
       });
     }
@@ -75,6 +75,10 @@ async function fixture(out) {
       tokens: nov,
       // Today so far (Item 580b1a1a): the open day's provisional row, counted up to 10:00 UTC.
       today: [...nov, [dayAt(2026, 10, 19), 12]],
+      // By agent: one agent whose landings never report their attempts (Not counted); and four agents at 100% with one
+      // under 50%, so the middle buckets are zero.
+      notCounted: [[base, 30]],
+      dominant: [[base, 30]],
       notMeasured: [[dayAt(2026, 9, 31), 30], [base, 30], [base + 86400000, 30]],
     }[sample ?? 'now'];
     // Every check run of a day: each landing's own solo run, a recheck after main moved for every 11th, a failed earlier
@@ -378,7 +382,79 @@ test('stats: short headline, one freshness line, today so far, comparison, table
   const byAgent = await page.getByRole('region', { name: 'By agent' }).textContent();
   assert.match(byAgent, /100%.*75–99%.*50–74%.*Under 50%/, 'four fixed first-try buckets');
   assert.doesNotMatch(byAgent, /amber-fox|still-heron/, 'no list that grows with the agents');
-  assert.equal(await page.locator('.stats-buckets .val').count(), 4);
+  // By agent is horizontal rows, one per bucket from 100% down (not vertical bars that read as dates on an axis).
+  const rows = page.getByRole('region', { name: 'By agent' }).locator('.hb .hrow');
+  assert.equal(await rows.count(), 4);
+  assert.deepEqual(
+    await rows.locator('.hlab').evaluateAll(nodes => nodes.map(n => n.firstChild?.textContent)),
+    ['100%', '75–99%', '50–74%', 'Under 50%'],
+  );
+  assert.match(await rows.first().locator('.hlab small').textContent(), /\d+ landings?/);
+  assert.match(await rows.first().locator('.hlab').getAttribute('title'), /^100% first try: /);
+  const byAgentRows = async (sample, width) => {
+    const p = await open(width, sample);
+    await p.getByRole('button', { name: 'By agent' }).click();
+    return p;
+  };
+  for (const width of [1440, 390]) {
+    const counted = await byAgentRows('notCounted', width);
+    const set = counted.getByRole('region', { name: 'By agent' }).locator('.hb .hrow');
+    assert.equal(await set.count(), 5, `${width}: four buckets and Not counted`);
+    assert.deepEqual(
+      await set.evaluateAll(nodes => nodes.map(n => n.hasAttribute('data-apart'))),
+      [false, false, false, false, true],
+      `${width}: only Not counted is set apart`,
+    );
+    assert.equal(await set.last().locator('i.ink').count(), 1, `${width}: Not counted is ink`);
+    assert.equal(
+      (await set.locator('i.forge').count()) + 1,
+      await set.locator('i').count(),
+      `${width}: the rest are Forge's series`,
+    );
+    assert.equal(
+      await set
+        .last()
+        .locator('.hlab')
+        .evaluate(n => n.firstChild?.textContent),
+      'Not counted',
+    );
+    assert.match(await set.last().locator('.hlab small').textContent(), /^\d+ landings?$/);
+    const hover = await set.last().locator('.hlab').getAttribute('title');
+    assert.match(hover, /^Not counted: \d+ agents?, \d+ landings?$/, 'the row that is no rate says so');
+    assert.match(
+      await counted
+        .getByRole('region', { name: 'By agent' })
+        .locator('[role=img]')
+        .getAttribute('aria-label'),
+      /\. Not counted: \d+ agents?, \d+ landings?$/,
+    );
+    await counted.getByRole('button', { name: 'Table: Agents by first-try rate' }).click();
+    assert.equal(
+      await counted.getByRole('table', { name: 'Agents by first-try rate' }).locator('tbody tr').count(),
+      5,
+    );
+    await counted.getByRole('button', { name: 'Chart: Agents by first-try rate' }).click();
+    if (width === 390)
+      assert.equal(
+        await counted
+          .locator('.hb .hlab')
+          .evaluateAll(nodes => nodes.every(n => n.scrollWidth <= n.clientWidth)),
+        true,
+        'bucket labels are not clipped at 390',
+      );
+    // One bucket holds most agents: the largest bar is the full rail, the smaller one is visible, a zero bucket has no bar.
+    const dom = await byAgentRows('dominant', width);
+    const widths = await dom
+      .getByRole('region', { name: 'By agent' })
+      .locator('.hb .hrow')
+      .evaluateAll(nodes => nodes.map(n => n.querySelector('i')?.getBoundingClientRect().width ?? 0));
+    assert(
+      widths[0] > 0 && widths[3] > 0 && widths[3] < widths[0],
+      `${width}: bars follow the counts ${widths}`,
+    );
+    assert(Math.abs(widths[3] * 4 - widths[0]) < 2, `${width}: one agent is a quarter of four`);
+    assert.deepEqual([widths[1], widths[2]], [0, 0], `${width}: a zero bucket draws no bar`);
+  }
   for (const caption of ['Landings per day', 'Agents by first-try rate']) {
     await page.getByRole('button', { name: `Table: ${caption}` }).click();
     assert.equal(await page.getByRole('table', { name: caption }).count(), 1, `${caption} has its table`);
@@ -541,6 +617,8 @@ test('stats: short headline, one freshness line, today so far, comparison, table
     ['none', ''],
     ['unrecorded', ''],
     ['tokens', ''],
+    ['notCounted', ''],
+    ['dominant', ''],
   ])
     for (const width of [1440, 390])
       for (const theme of ['dark', 'light']) {
@@ -549,6 +627,8 @@ test('stats: short headline, one freshness line, today so far, comparison, table
         if (sample === 'now')
           for (const name of ['How this is worked out', 'Where work waited', 'By agent'])
             await draw.getByRole('button', { name }).click();
+        if (sample === 'notCounted' || sample === 'dominant')
+          await draw.getByRole('button', { name: 'By agent' }).click();
         await draw.addScriptTag({ path: axe });
         const violations = await draw.evaluate(async () =>
           (await axe.run(document, { rules: { 'color-contrast': { enabled: true } } })).violations

@@ -6,6 +6,7 @@
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import { Key, Table } from '../../ds';
 import { A } from '../frames';
+import { Bars } from './Compare';
 import {
   clock,
   dayName,
@@ -173,8 +174,12 @@ export function Waited({ stops }: { stops: StatsWaited['stops'] }) {
 export function ByWho({ r, historyHref }: { r: StatsAgents; historyHref: string }) {
   if (!r.agents) return <p className="stats-note">Nobody landed in this period.</p>;
   const rows = [...r.buckets, ...(r.notCounted.agents ? [{ label: 'Not counted', ...r.notCounted }] : [])];
-  const heights = scale(rows.map(row => row.agents));
+  const buckets = r.buckets.length;
+  const shares = scale(rows.map(row => row.agents));
   type Row = (typeof rows)[number];
+  // "100% first try: 2 agents, 5 landings"; the one row that is not a rate reads "Not counted: 1 agent, 3 landings".
+  const said = (row: Row, i: number) =>
+    `${i === buckets ? row.label : `${row.label} first try`}: ${plural(row.agents, 'agent')}, ${plural(row.landings, 'landing')}`;
   return (
     <>
       <p className="stats-readout">
@@ -197,30 +202,19 @@ export function ByWho({ r, historyHref }: { r: StatsAgents; historyHref: string 
         }
         chart={
           <>
-            <div
-              className="vb stats-buckets"
-              role="img"
-              aria-label={rows
-                .map(
-                  row =>
-                    `${row.label} first try: ${plural(row.agents, 'agent')}, ${plural(row.landings, 'landing')}`,
-                )
-                .join('. ')}
-            >
-              {rows.map((row, i) => (
-                <div key={row.label} className="col">
-                  <span className="val">{int(row.agents)}</span>
-                  <i className="ink" style={{ '--h': heights[i] } as CSSProperties} />
-                </div>
-              ))}
-            </div>
-            <div className="vx stats-bx" aria-hidden="true">
-              {rows.map(row => (
-                <span key={row.label}>
-                  {row.label}
-                  <small>{plural(row.landings, 'landing')}</small>
-                </span>
-              ))}
+            <div className="stats-buckets">
+              <Bars
+                label={rows.map(said).join('. ')}
+                rows={rows.map((row, i) => ({
+                  name: row.label,
+                  sub: plural(row.landings, 'landing'),
+                  hover: said(row, i),
+                  value: int(row.agents),
+                  share: row.agents ? shares[i]! : 0,
+                  kind: i === buckets ? 'ink' : 'forge',
+                  apart: i === buckets,
+                }))}
+              />
             </div>
           </>
         }
