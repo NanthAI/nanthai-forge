@@ -114,15 +114,22 @@ leaving the set with no device that can read it. It cannot make a device remove
 itself, and cannot stop a removal from re-keying.
 
 The rotate list is derived from signed records only: each live name whose value has
-not changed since a removed device's last epoch, with that device's fingerprint.
-`nforge secret list` prints it on standard error until each value is changed, which
-seals it at a later epoch and takes the name off. Nothing is stored for it. A removed
-machine or person key has no former-signer record, so its rotate list is printed
-only when it is removed.
+not changed since a removed device's or machine's last epoch, with that device's
+fingerprint or that machine's id. `nforge secret list` prints it on standard error
+until each value is changed, which seals it at a later epoch and takes the name off.
+Nothing is stored for it beyond the roster's former list: a removed device keeps its
+id, signing key and last epoch there; a removed machine keeps its id and last epoch
+with no signing key, so it can never author a record. A device that pins or re-pins
+after the removal reads the same entries, and the list is kept while a live value is
+old enough to name it, up to 400 entries; at that bound a removal stops with the way
+out and evicts nothing. A removed person key has no former-signer record, so its
+rotate list is printed only when it is removed.
 
-The server's markers reach Development, Checks and Production. Checks and
-Production removal (owner devices and machines, in the cross-set order of design
-d1) arrives with Checks delivery; today only Development converts markers.
+The server's markers reach Development, Checks and Production. Only Development
+converts markers today. Forge never marks a machine; a person removes one with
+`nforge secret machine rm` (see [secrets for checks](#secrets-for-checks)). Removing
+a Checks or Production owner device by marker, in the cross-set order of design
+d1, is not built yet.
 
 Cost: removing a write member adds one indexed read for their grant, one per set
 kind (at most three) and one patch per set it marks; removing a reader adds only the

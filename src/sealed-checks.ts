@@ -105,7 +105,7 @@ async function writeStep(client: SealedClient, state: Verified, reply: SealedRep
   discard(await client.pins.verifyAndSave(reply, client.request(), Date.now()));
   return true;
 }
-const requireOwner = (client: SealedClient, pin: SecretPin) => {
+export const requireOwner = (client: SealedClient, pin: SecretPin) => {
   invariant(
     !client.agent,
     'PERSON_REQUIRED',

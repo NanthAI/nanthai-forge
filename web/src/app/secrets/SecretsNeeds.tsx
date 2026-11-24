@@ -104,7 +104,7 @@ function Rotate({
               <State word="Needs you" state="waiting">
                 To rotate
               </State>{' '}
-              · fp{' '}
+              {row.devices.length ? <> · fp </> : ' · '}
               {row.devices.map((device, i) => (
                 <span key={device.code}>
                   {i ? ', ' : ''}
@@ -112,8 +112,11 @@ function Rotate({
                   {device.handle ? `@${device.handle}` : 'not reported'})
                 </span>
               ))}
-              {row.more ? ` and ${count(row.more, 'more computer')}` : ''} could open v
-              {row.version.toLocaleString()}
+              {row.more ? ` and ${count(row.more, 'more computer')}` : ''}
+              {row.machines?.length
+                ? `${row.devices.length ? ', ' : ''}CI machine ${row.machines.join(', ')}`
+                : ''}{' '}
+              could open v{row.version.toLocaleString()}
             </span>
           </div>
           <div className="btns">

@@ -12,13 +12,14 @@ import { framedHash } from './sealed-format.js';
 import { deviceFingerprint } from './sealed-join.js';
 import { headBytes, type Entry, type Head, type Roster } from './sealed-records.js';
 import { rekeySet } from './sealed-rekey.js';
-import { findEntry, markedEntries, ownerDevice, sameId } from './sealed-roster.js';
+import { findEntry, markedEntries, MAX_FORMER, ownerDevice, sameId } from './sealed-roster.js';
 import { requireConfirmedWriter } from './sealed-anchors.js';
 import { createTransition } from './sealed-transition.js';
 import { sealedRefusal, sealedWrite, sealedWriteArgs } from './sealed-transport.js';
 import { verifySealedReply, type SealedReply } from './sealed-verify.js';
 import { safeSecretName } from './sealed-display.js';
 import { rotateRows } from './sealed-overview.js';
+import { hex } from './sealed-portable.js';
 import type { SealedClient } from './sealed-client.js';
 
 /** What a removal prints: who went, and the names to rotate at their provider. */
@@ -30,7 +31,8 @@ const discard = (result: ReturnType<typeof verifySealedReply> | null | undefined
   result?.key?.fill(0);
   for (const secret of result?.secrets ?? []) secret.value.fill(0);
 };
-const liveNames = (head: Head, lastEpoch: number) =>
+/** The live names a recipient that last held `lastEpoch` could open: no new value since. */
+export const liveNames = (head: Head, lastEpoch: number) =>
   head.names
     .filter(n => n.kind !== 3 && n.valueEpoch <= lastEpoch)
     .map(n => n.name)
@@ -51,13 +53,18 @@ export function droppableFormers(roster: Roster, head: Head): Buffer[] {
     )
     .map(e => e.deviceId);
 }
-/** The rotate list, derived from signed records only: each live name a removed device could open, because its
- * value has not changed since that device's last epoch, with the fingerprints of those devices. A new value
- * (sealed at a later epoch) takes the name off the list. Nothing is stored for it. */
+/** The rotate list: each live name a removed device or machine could open, because its value has not changed since
+ * that recipient's last epoch, with who could open it. Both come from the signed roster's former list, so a device
+ * that pins later, or re-pins, still sees every outstanding rotation. A removed machine never signed, so it has an
+ * id and no fingerprint or label. A new value (sealed at a later epoch) takes the name off the list. */
 export function rotateList(roster: Roster, head: Head) {
   return rotateRows(roster, head).map(row => ({
     name: row.record.name,
     devices: row.former.map(f => deviceFingerprint(f.deviceId)),
+    // Only when a removed machine could open it, so a list without machines keeps its shape.
+    ...(row.machines.length
+      ? { machines: row.machines.map(m => ({ id: hex(m.deviceId).slice(0, 8) })) }
+      : {}),
   }));
 }
 /** The holder notice for markers, shown on every verified read until a person removes the entries. */
@@ -82,6 +89,58 @@ export function markerNotice(roster: Roster, revoked: readonly Uint8Array[], sel
   return lines.length ? lines.join(' ') : null;
 }
 
+/** The signed removal step and its re-key as one reply, for the caller to verify and write in one mutation: the
+ * entries leave, the epoch rises, every live value is re-sealed under a new set key with its version kept, and each
+ * remaining recipient gets a wrap. A Checks removal passes the trusted Development roster. */
+export function removalReply(
+  client: SealedClient,
+  state: Verified,
+  remove: readonly Entry[],
+  options: { development?: Roster } = {},
+): SealedReply {
+  const roster = state.pin.roster;
+  // The bound, checked before anything is signed: removed recipients whose old values still need rotating stay in the
+  // signed roster, so a removal that would pass MAX_FORMER stops here with the way out, never silently evicting one.
+  const staying = roster.former.length - droppableFormers(roster, state.pin.head).length;
+  invariant(
+    staying + remove.filter(e => e.entryKind !== 3).length <= MAX_FORMER,
+    'SECRETS_NOT_ALLOWED',
+    `${MAX_FORMER} removed devices and machines still hold values that were never changed. Change the oldest names first (nforge secret list shows them), then remove again.`,
+  );
+  const { roster: next, transition } = createTransition(
+    roster,
+    {
+      added: [],
+      removed: remove.map(e => e.id),
+      roles: [],
+      droppedFormer: droppableFormers(roster, state.pin.head),
+      newSharingMode: null,
+      newChecksPointer: null,
+      supersede: null,
+      epochBumped: 1,
+    },
+    client.keys,
+    { revoked: state.reply.revoked, ...options },
+  );
+  const rekeyed = rekeySet({
+    from: roster,
+    head: state.pin.head,
+    key: state.key!,
+    ciphertexts: state.reply.ciphertexts,
+    next,
+    signer: client.keys,
+    now: Date.now(),
+  });
+  return {
+    ...state.reply,
+    roster: next,
+    head: rekeyed.head,
+    ciphertexts: rekeyed.ciphertexts,
+    wraps: rekeyed.wraps,
+    transitions: [...state.reply.transitions, transition].slice(-64),
+    proposals: [],
+  };
+}
 /** One removal write, rebuilt from a fresh read after a compare-and-swap loss (three tries). `choose` picks the
  * entries to remove from the verified state, or returns a finished result (nothing to remove). A caller that
  * has just read passes that state (`first`), which this zeroes like its own reads. */
@@ -114,39 +173,7 @@ async function removeAndRekey<T>(
         'SECRETS_ROSTER_REFUSED',
         'A device cannot remove itself. Remove it from another owner device.',
       );
-      const { roster: next, transition } = createTransition(
-        roster,
-        {
-          added: [],
-          removed: chosen.remove.map(e => e.id),
-          roles: [],
-          droppedFormer: droppableFormers(roster, state.pin.head),
-          newSharingMode: null,
-          newChecksPointer: null,
-          supersede: null,
-          epochBumped: 1,
-        },
-        client.keys,
-        { revoked: state.reply.revoked },
-      );
-      const rekeyed = rekeySet({
-        from: roster,
-        head: state.pin.head,
-        key: state.key!,
-        ciphertexts: state.reply.ciphertexts,
-        next,
-        signer: client.keys,
-        now: Date.now(),
-      });
-      const reply: SealedReply = {
-        ...state.reply,
-        roster: next,
-        head: rekeyed.head,
-        ciphertexts: rekeyed.ciphertexts,
-        wraps: rekeyed.wraps,
-        transitions: [...state.reply.transitions, transition].slice(-64),
-        proposals: [],
-      };
+      const reply = removalReply(client, state, chosen.remove);
       discard(verifySealedReply(reply, state.pin, client.request()));
       const out = sealedWrite(reply, randomUUID(), {
         headHash: framedHash(headBytes(state.pin.head)),

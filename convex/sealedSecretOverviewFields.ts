@@ -51,6 +51,7 @@ export const overviewSet = v.object({
         version: v.number(),
         devices: v.array(v.object({ code: v.string(), handle })),
         more: v.number(),
+        machines: v.optional(v.array(v.string())),
       }),
     ),
   ),

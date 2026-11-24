@@ -9,8 +9,17 @@ import { syncDirectory } from './state/durability.js';
 import type { SealedWrite } from './sealed-transport.js';
 
 type Identity = { project: string; name: string; removing: boolean; file: boolean };
-type Pending = Identity & { state: 'unknown'; wire: SealedWrite };
-type Receipt = Identity & { state: 'accepted'; operationId: string; headHash: Buffer; confirmedAt: number };
+/** A machine removal's target, fixed when the request is first sent: the full machine id (hex) and its label then.
+ * Retries and reconciliation use this id only, never a label that another machine may take later. */
+type Target = { id: string; label: string };
+type Pending = Identity & { state: 'unknown'; wire: SealedWrite; target?: Target };
+type Receipt = Identity & {
+  state: 'accepted';
+  operationId: string;
+  headHash: Buffer;
+  confirmedAt: number;
+  target?: Target;
+};
 type Entry = Pending | Receipt;
 // At most 48 MiB, including metadata: 64 private files of at most 768 KiB each.
 const maxEntries = 64,
@@ -116,6 +125,7 @@ export class SealedJournal {
         operationId: id,
         headHash: Buffer.from(entry.wire.headHash),
         confirmedAt: Date.now(),
+        ...(entry.target ? { target: entry.target } : {}),
       };
       atomicPrivate(this.path(id), serialize(receipt));
     });

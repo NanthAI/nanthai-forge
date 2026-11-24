@@ -132,7 +132,8 @@ export function checkSignedHead(h: Head, r: Roster, c: HeadContext): string[] {
       const proposal = n.proposalId.length > 0,
         authorRoster = proposal && r.setKind === 2 ? c.development : r;
       const author = authorRoster && findEntry(authorRoster, n.changedBy),
-        former = authorRoster?.former.find(e => sameId(e.deviceId, n.changedBy));
+        // A removed machine's former entry carries no signing key: it never authors a record.
+        former = authorRoster?.former.find(e => e.signPub.length > 0 && sameId(e.deviceId, n.changedBy));
       const fallback = proposal && r.setKind === 2 && !author && !former;
       const markers = proposal && r.setKind === 2 ? (c.developmentRevoked ?? []) : c.revoked;
       refuse(
@@ -175,7 +176,7 @@ export function checkSignedHead(h: Head, r: Roster, c: HeadContext): string[] {
     refuse(
       (n.proposalId.length > 0 && r.setKind === 2) ||
         findEntry(r, n.changedBy)?.entryKind === 1 ||
-        r.former.some(e => sameId(e.deviceId, n.changedBy)),
+        r.former.some(e => e.signPub.length > 0 && sameId(e.deviceId, n.changedBy)),
       'A record names an author that is neither on the roster nor a former signer.',
     );
   return notices;

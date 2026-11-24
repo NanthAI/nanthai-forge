@@ -21,10 +21,12 @@ const MAX_READERS = 100;
 const machineIn = (roster: Roster, id: ArrayBuffer) =>
   roster.entries.find(e => e.entryKind === 2 && equalBytes(e.id, u8(id)));
 /** Called by sealedSecrets:write after it accepts a head. Only a Checks step or genesis touches readers: it drops the
- * readers whose machine left the roster (or that belong to an older set) and adds at most one new reader. A new
- * reader names a machine entry that this write's step adds (signed by a full owner device: checkAdded), on Checks,
- * by the project owner; its verifier is opaque, and only a holder of that machine's private key can produce its
- * token. One indexed range read of at most 100 small rows, only on those writes. */
+ * readers whose machine left the roster (or that belong to an older set) and adds at most one new reader. A removed
+ * reader stays as a tombstone, and a machine id with any row, live or removed, is never registered again: a stale
+ * retry of an old add cannot bring back a revoked key (review 5b51e7f3). A new reader names a machine entry that this
+ * write's step adds (signed by a full owner device: checkAdded), on Checks, by the project owner; its verifier is
+ * opaque, and only a holder of that machine's private key can produce its token. One indexed range read of at most
+ * 100 live rows, only on those writes, and one more indexed read of the new machine's own id when it adds one. */
 export async function storeMachineReaders(
   ctx: MutationCtx,
   input: {
@@ -46,12 +48,14 @@ export async function storeMachineReaders(
   if (input.kind !== 2 || !(input.stepped || input.genesis)) return;
   const rows = await ctx.db
     .query('sealedMachineReaders')
-    .withIndex('by_project_and_kind_and_machine', q => q.eq('projectId', input.projectId).eq('kind', 2))
+    .withIndex('by_project_and_kind_and_removed', q =>
+      q.eq('projectId', input.projectId).eq('kind', 2).eq('removed', undefined),
+    )
     .take(MAX_READERS + 1);
-  const kept = [];
+  let kept = 0;
   for (const row of rows)
-    if (equalBytes(u8(row.setId), u8(input.setId)) && machineIn(input.roster, row.machineId)) kept.push(row);
-    else await ctx.db.delete(row._id);
+    if (equalBytes(u8(row.setId), u8(input.setId)) && machineIn(input.roster, row.machineId)) kept++;
+    else await ctx.db.patch(row._id, { removed: true, verifier: new ArrayBuffer(0) });
   if (!input.reader) return;
   const reader = input.reader;
   const added = machineIn(input.roster, reader.machineId);
@@ -59,10 +63,15 @@ export async function storeMachineReaders(
     added?.addedAtRosterVersion === input.roster.rosterVersion &&
       reader.machineId.byteLength === 16 &&
       reader.verifier.byteLength === 32 &&
-      kept.length < MAX_READERS &&
-      !kept.some(r => equalBytes(u8(r.machineId), u8(reader.machineId))),
+      kept < MAX_READERS &&
+      !(await ctx.db
+        .query('sealedMachineReaders')
+        .withIndex('by_project_and_kind_and_machine', q =>
+          q.eq('projectId', input.projectId).eq('kind', 2).eq('machineId', reader.machineId),
+        )
+        .unique()),
     'SECRETS_NOT_ALLOWED',
-    'A machine reader is registered by the project owner, in the write that adds that machine to Checks.',
+    'A machine reader is registered by the project owner, in the write that adds that machine to Checks, and a removed machine key is never registered again.',
   );
   await ctx.db.insert('sealedMachineReaders', {
     projectId: input.projectId,
@@ -109,6 +118,7 @@ export const read = query({
           : null;
       refuse(
         reader &&
+          !reader.removed &&
           args.token.byteLength === 32 &&
           equalBytes(machineReaderVerifier(u8(args.token)), u8(reader.verifier)),
       );

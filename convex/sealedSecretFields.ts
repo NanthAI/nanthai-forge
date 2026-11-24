@@ -84,12 +84,17 @@ export const sealedSecretTables = {
   }).index('by_project_and_setId', ['projectId', 'setId']),
   /** Slice 5 (review F4): one Checks machine's read verifier, a hash of the token its key derives
    * (convex/sealedMachines.ts). A machine read checks this small row before it reads the set row. Written in the
-   * owner write that adds the machine; a Checks step that removes the machine deletes it. At most 100 per set. */
+   * owner write that adds the machine. A Checks step that removes the machine keeps the row as a tombstone (`removed`,
+   * verifier emptied): the machine never reads again, and its id is never registered again, however old a retry of
+   * its add is. At most 100 live per set; a tombstone is about 70 bytes and is purged with the project. */
   sealedMachineReaders: defineTable({
     projectId: v.id('hostedProjects'),
     kind: sealedKind,
     setId: v.bytes(),
     machineId: v.bytes(),
     verifier: v.bytes(),
-  }).index('by_project_and_kind_and_machine', ['projectId', 'kind', 'machineId']),
+    removed: v.optional(v.boolean()),
+  })
+    .index('by_project_and_kind_and_machine', ['projectId', 'kind', 'machineId'])
+    .index('by_project_and_kind_and_removed', ['projectId', 'kind', 'removed']),
 };

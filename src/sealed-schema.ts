@@ -55,7 +55,7 @@ const entry = record({
   addedAtRosterVersion: number,
   bindSig: bytes(0, 64),
 });
-const former = record({ deviceId: bytes(16), signPub: bytes(32), lastEpoch: number });
+const former = record({ deviceId: bytes(16), signPub: bytes(0, 32), lastEpoch: number });
 export const roster = record({
   v: oneOf(1),
   projectId: bytes(16),

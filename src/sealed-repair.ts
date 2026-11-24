@@ -96,9 +96,15 @@ export function repairSet(input: {
       added: [],
       removed: gone.map(e => e.id),
       roles: [],
-      // 4.6: former signers that no head record names leave the list in the same step.
+      // 4.6: former signers that no head record names leave the list in the same step. A removed machine stays while a
+      // live value is old enough to still need rotating (it names no signer; it is the rotation record).
       droppedFormer: [
-        ...r.former.map(e => e.deviceId),
+        ...r.former
+          .filter(
+            e =>
+              e.signPub.length > 0 || !view.head.names.some(n => n.kind !== 3 && n.valueEpoch <= e.lastEpoch),
+          )
+          .map(e => e.deviceId),
         ...gone.filter(e => e.entryKind === 1).map(e => e.id),
       ].filter(id => !named.has(hex(id))),
       newSharingMode: null,

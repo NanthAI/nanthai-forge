@@ -35,10 +35,13 @@ history, 32 deletes) and took 62 ms. Local observations, not Convex-billed I/O o
 
 `sealedMachineReaders` (slice 5) holds one row per Checks machine entry: the
 project, set kind and set id, the machine id and a 32-byte hash of the machine's
-read token, about 100 bytes. A set has at most 100 (one per roster entry). The
-owner write that adds a machine inserts its row; a Checks roster step or genesis
-reads the set's rows in one indexed range and deletes those whose machine left
-the roster. A machine read looks up its own row first and reads the set and
+read token, about 100 bytes. A set has at most 100 live rows (one per roster entry).
+The owner write that adds a machine inserts its row after one indexed read of that
+machine id, which refuses an id that already has any row; a Checks roster step or
+genesis reads the set's live rows in one indexed range and turns those whose machine left
+the roster into tombstones (marked removed, hash emptied, about 70 bytes; kept for the life of
+the project and purged with it, so a stale retry of an old add can never bring a
+revoked key back). A machine read looks up its own row first and reads the set and
 history rows only for a matching token, so an unauthenticated caller costs one
 small indexed read.
 

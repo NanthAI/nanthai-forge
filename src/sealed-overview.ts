@@ -12,13 +12,22 @@ export const OVERVIEW_PAGE = { names: 100, rotate: 100, people: 25 } as const;
 
 const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-/** The rotate list, derived from signed records only: each live name a removed device could open, because its value
- * has not changed since that device's last epoch. The one derivation the CLI (`rotateList`) and the page share. */
+/** The rotate list, derived from signed records only: each live name a removed device or machine could open, because
+ * its value has not changed since that recipient's last epoch. `former` holds the devices (they have a signing key and
+ * a fingerprint) and `machines` the removed CI machines (an id only). The one derivation the CLI (`rotateList`) and
+ * the page share. */
 export function rotateRows(roster: Roster, head: Head) {
   return head.names
     .filter(n => n.kind !== 3 && n.valueEpoch <= roster.epoch)
-    .map(record => ({ record, former: roster.former.filter(f => record.valueEpoch <= f.lastEpoch) }))
-    .filter(row => row.former.length)
+    .map(record => {
+      const old = roster.former.filter(f => record.valueEpoch <= f.lastEpoch);
+      return {
+        record,
+        former: old.filter(f => f.signPub.length > 0),
+        machines: old.filter(f => f.signPub.length === 0),
+      };
+    })
+    .filter(row => row.former.length || row.machines.length)
     .sort((a, b) => byName(a.record.name, b.record.name));
 }
 

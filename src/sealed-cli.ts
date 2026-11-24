@@ -13,7 +13,7 @@ import { safeSecretName } from './sealed-display.js';
 import { checkSecretWriteName } from './secret-names.js';
 
 export const sealedUsage =
-  'nforge secret set NAME [--set checks] [--file] [--root ROOT] [--operation-id UUID]   (a piped value loses one trailing newline; --file keeps exact bytes)\nnforge secret list [--set checks] [--root ROOT]\nnforge secret rm NAME [--set checks] [--root ROOT] [--operation-id UUID]\nnforge secret machine add LABEL --set checks [--root ROOT] [--operation-id UUID]   (a person, on a terminal: shows the CI key once)\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID|--marked [--root ROOT]\nnforge secret proposals [--root ROOT]\nnforge secret apply ID [--root ROOT]   (a person, on a terminal)\nnforge secret reject ID [--root ROOT]\nnforge secret import [FILE] [--keep] [--root ROOT]   (FILE defaults to the root .env; removed after a full import unless --keep)\nnforge secret import --restore [FILE] [--root ROOT]   (a person, on a terminal: writes Development values back to a new file)';
+  'nforge secret set NAME [--set checks] [--file] [--root ROOT] [--operation-id UUID]   (a piped value loses one trailing newline; --file keeps exact bytes)\nnforge secret list [--set checks] [--root ROOT]\nnforge secret rm NAME [--set checks] [--root ROOT] [--operation-id UUID]\nnforge secret machine add LABEL --set checks [--root ROOT] [--operation-id UUID]   (a person, on a terminal: shows the CI key once)\nnforge secret machine rm ID --set checks [--root ROOT] [--operation-id UUID]   (a person, on a terminal: removes the machine and re-keys Checks)\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID|--marked [--root ROOT]\nnforge secret proposals [--root ROOT]\nnforge secret apply ID [--root ROOT]   (a person, on a terminal)\nnforge secret reject ID [--root ROOT]\nnforge secret import [FILE] [--keep] [--root ROOT]   (FILE defaults to the root .env; removed after a full import unless --keep)\nnforge secret import --restore [FILE] [--root ROOT]   (a person, on a terminal: writes Development values back to a new file)';
 export function sealedAgent() {
   const source = process.env;
   return (
@@ -149,7 +149,12 @@ export async function sealedCli(args: string[]) {
     'BAD_ARGUMENT',
     sealedUsage,
   );
-  invariant(command !== 'machine' || args.shift() === 'add', 'BAD_ARGUMENT', sealedUsage);
+  const machineCommand = command === 'machine' ? args.shift() : undefined;
+  invariant(
+    command !== 'machine' || machineCommand === 'add' || machineCommand === 'rm',
+    'BAD_ARGUMENT',
+    sealedUsage,
+  );
   const label = command === 'machine' ? args.shift() : undefined;
   const name = ['set', 'rm'].includes(command!) ? args.shift() : undefined;
   const proposalId = ['apply', 'reject'].includes(command!) ? args.shift() : undefined;
@@ -183,12 +188,20 @@ export async function sealedCli(args: string[]) {
   invariant(
     set === 'development' || ['set', 'rm', 'list', 'machine'].includes(command!),
     'BAD_ARGUMENT',
-    'Only set, list, rm and machine add take --set checks.',
+    'Only set, list, rm and machine add or rm take --set checks.',
   );
   invariant(command !== 'machine' || (label && set === 'checks'), 'BAD_ARGUMENT', sealedUsage);
   if (command === 'set' || command === 'rm') invariant(name, 'BAD_ARGUMENT', sealedUsage);
   if (command === 'unshare') invariant(fingerprint, 'BAD_ARGUMENT', sealedUsage);
   if (command === 'apply' || command === 'reject') invariant(proposalId, 'BAD_ARGUMENT', sealedUsage);
+  // Review F3: a person on a terminal removes a machine; an agent never does. Refused before any client is built, so an
+  // agent gets the same answer on any project, set up or not.
+  if (command === 'machine' && machineCommand === 'rm')
+    invariant(
+      !agent && process.stdin.isTTY,
+      'PERSON_REQUIRED',
+      'A person removes a machine on a terminal, not through an agent.',
+    );
   const runRoot = secretRunRoot(resolve(root));
   const development = await sealedClientForRoot(runRoot, agent);
   const client =
@@ -201,6 +214,17 @@ export async function sealedCli(args: string[]) {
         ? await restoreDotenv(development, runRoot, importFile, process.cwd())
         : await importDotenv(development, runRoot, importFile, { keep, cwd: process.cwd() });
       process.stdout.write(`${lines.join('\n')}\n`);
+    } else if (command === 'machine' && machineCommand === 'rm') {
+      const { removeMachine } = await import('./sealed-machine-rm.js');
+      const done = await removeMachine(
+        client as import('./sealed-checks.js').ChecksClient,
+        label!,
+        operationId ? { operationId } : {},
+      );
+      const who = `Machine ${done.label ? `${safeSecretName(done.label)} ` : ''}(id ${done.machineId.slice(0, 8)})`;
+      process.stdout.write(
+        `${done.already ? `${who} was already removed from Checks` : `${who} was removed from Checks, which is re-keyed; Forge no longer serves it and its key opens nothing new`}. Operation ${done.operationId}. Rotate at their provider what its key could open, then set the new values: ${done.rotate.length ? done.rotate.map(safeSecretName).join(', ') : 'nothing'}.\n`,
+      );
     } else if (command === 'machine') {
       // Design 5.7: the key goes to a person's terminal once, never to a pipe, a file or an agent.
       invariant(
@@ -276,20 +300,20 @@ export async function sealedCli(args: string[]) {
             process.stdout.write(
               `${safeSecretName(n.name)}\t${n.kind === 1 ? 'env' : 'file'}\tv${n.valueVersion}\n`,
             );
-        // Design 5.5: what removed devices could open and nobody has changed since, from signed records only.
+        // Design 5.5: what removed devices and machines could open and nobody has changed since, from signed records only.
         const { rotateList } = await import('./sealed-unshare.js');
         const rotate = rotateList(result.pin.roster, result.pin.head);
         // On stderr, so the name table on stdout keeps its shape for scripts.
         if (rotate.length)
           process.stderr.write(
-            `Rotate at their provider, then set the new value (a removed device could open them):\n${rotate
-              .map(
-                r =>
-                  `${safeSecretName(r.name)}\tremoved ${r.devices
-                    .slice(0, 3)
-                    .map(fp => `fp ${fp}`)
-                    .join(', ')}${r.devices.length > 3 ? ` and ${r.devices.length - 3} more` : ''}\n`,
-              )
+            `Rotate at their provider, then set the new value (a removed device or machine could open them):\n${rotate
+              .map(r => {
+                const who = [
+                  ...r.devices.map(fp => `fp ${fp}`),
+                  ...(r.machines ?? []).map(m => `machine id ${m.id}`),
+                ];
+                return `${safeSecretName(r.name)}\tremoved ${who.slice(0, 3).join(', ')}${who.length > 3 ? ` and ${who.length - 3} more` : ''}\n`;
+              })
               .join('')}`,
           );
       } finally {

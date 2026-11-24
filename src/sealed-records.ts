@@ -17,6 +17,9 @@ export type Entry = {
   addedAtRosterVersion: number;
   bindSig: Buffer;
 };
+/** A removed recipient's last epoch. A removed device keeps its signing key, so its old records still verify; a removed
+ * machine never signed and has an empty `signPub`: its entry only carries the rotation obligation (the names it could
+ * open, until each changes). */
 export type Former = { deviceId: Buffer; signPub: Buffer; lastEpoch: number };
 export type ChecksPointer = { checksSetId: Buffer; checksGenesisHash: Buffer };
 export type Roster = {
@@ -134,7 +137,7 @@ export const entryBytes = (e: Entry) =>
     optional(e.bindSig, 64),
   );
 export const formerBytes = (e: Former) =>
-  frame('former', fixed(e.deviceId, 16), fixed(e.signPub, 32), uint(e.lastEpoch));
+  frame('former', fixed(e.deviceId, 16), optional(e.signPub, 32), uint(e.lastEpoch));
 export const rosterBytes = (r: Roster) =>
   frame(
     'roster',

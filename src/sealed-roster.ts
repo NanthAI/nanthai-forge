@@ -79,12 +79,15 @@ export function checkEntry(entry: Entry, crypto = true) {
       'Person key fields are invalid.',
     );
 }
+/** Removed recipients the signed roster remembers: a removed device keeps its signing key, a removed machine only the
+ * epoch it last held. An entry leaves once no live value is old enough to need rotating (droppableFormers). */
+export const MAX_FORMER = 400;
 export function checkRoster(roster: Roster, development?: Roster, { entryCrypto = true } = {}) {
   refuse(
     roster.rosterVersion >= 1 &&
       roster.epoch >= 1 &&
       roster.entries.length <= 100 &&
-      roster.former.length <= 400,
+      roster.former.length <= MAX_FORMER,
     'Roster shape exceeds format bounds.',
   );
   refuse(
@@ -98,7 +101,7 @@ export function checkRoster(roster: Roster, development?: Roster, { entryCrypto 
   for (const entry of roster.entries) checkEntry(entry, entryCrypto);
   for (const former of roster.former)
     refuse(
-      former.signPub.length === 32 &&
+      (former.signPub.length === 32 || former.signPub.length === 0) &&
         former.lastEpoch >= 1 &&
         former.lastEpoch <= roster.epoch &&
         !findEntry(roster, former.deviceId),
@@ -199,7 +202,7 @@ export function rosterAfterDelta(
   prevRosterHash = framedHash(rosterBytes(from)) as Roster['prevRosterHash'],
 ): Roster {
   const created = from.entries
-    .filter(e => e.entryKind === 1 && d.removed.some(id => sameId(id, e.id)))
+    .filter(e => e.entryKind !== 3 && d.removed.some(id => sameId(id, e.id)))
     .map(e => ({ deviceId: e.id, signPub: e.signPub, lastEpoch: from.epoch }));
   return {
     ...from,

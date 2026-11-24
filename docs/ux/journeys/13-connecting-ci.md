@@ -31,6 +31,7 @@ Forge runner's `credentials` do not read Checks yet. See [current guidance](../.
 | Need | Route |
 | --- | --- |
 | A Checks value in a CI step, any provider | The owner runs `nforge secret set NAME --set checks`, then `nforge secret machine add ci --set checks` on a terminal, and stores the printed `FORGE_SECRETS_KEY` as the CI's own secret. The step runs `nforge run --set checks --only NAME -- COMMAND`, with `FORGE_DEPLOYMENT_URL` and `FORGE_PROJECT_ID` outside a Forge checkout. The command gets exactly the declared names. (tests) |
+| A leaked or retired CI key | The owner runs `nforge secret machine rm ID --set checks` on a terminal (`ID` as `machine add` printed it). One write removes the machine, re-keys Checks and stops Forge serving it; the printed rotate list names the values to rotate at their provider. (tests) |
 | A declared name with no value | Setup fails before the command runs: `SECRETS_NOT_SET_UP`, "Check setup failed before the command ran; missing: NAME (no value in Checks)". (tests) |
 | A value printed to the CI log | Always replaced with `[secret:NAME]` on a machine run, in a terminal too; `--show` is refused for Checks. (tests) |
 | A step that runs untrusted code (a fork's pull request) | Never give it `FORGE_SECRETS_KEY`: a command can read its own process's key and open every Checks value. `--only` limits what an honest command gets; it is not a boundary. (docs) |

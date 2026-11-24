@@ -179,7 +179,7 @@ function rotatePage(
   after: string | undefined,
   formerHandle: (id: Uint8Array) => string | null,
 ) {
-  const rows = rotateRows(view.roster, view.head).map(({ record, former }) => ({
+  const rows = rotateRows(view.roster, view.head).map(({ record, former, machines }) => ({
     name: record.name,
     kind: record.kind,
     version: record.valueVersion,
@@ -187,6 +187,8 @@ function rotatePage(
       .slice(0, 3)
       .map(f => ({ code: deviceFingerprint(f.deviceId), handle: formerHandle(f.deviceId) })),
     more: Math.max(0, former.length - 3),
+    // A removed CI machine that could open it: its short id only (it has no sign-in, so no handle).
+    ...(machines.length ? { machines: machines.slice(0, 3).map(f => hex(f.deviceId).slice(0, 8)) } : {}),
   }));
   return slice(rows, after, OVERVIEW_PAGE.rotate, r => r.name);
 }

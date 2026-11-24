@@ -38,14 +38,60 @@ private key and machine id; the server keeps only a hash of that token, in one
 small row per machine entry (`sealedMachineReaders`, at most 100 per set, one per
 roster entry). The hash is registered only by the project owner, on Checks, in the
 same write whose step adds that machine; any other write that offers one is
-refused with `SECRETS_NOT_ALLOWED` before any row changes, and a Checks step that
-removes the machine deletes its row. `sealedMachines:read` checks the token
-against that row before it reads anything else, so a caller without a valid token
+refused with `SECRETS_NOT_ALLOWED` before any row changes. A Checks step that
+removes the machine turns its row into a tombstone in the same write (marked
+removed, hash emptied, about 70 bytes), and a machine id that has any row, live or
+removed, is never registered again: an old `machine add --operation-id` retry, run
+after its local receipt and the server's event have aged out, is refused in the same
+write that would register its reader, so it cannot bring a revoked key back.
+Tombstones are kept for the life of the project and purged with it; at most 100
+readers are live per set. `sealedMachines:read` checks the token
+against that row, which must be live, before it reads anything else, so a caller without a valid token
 costs one indexed read of at most one small row. With a matching token it returns
 the active Checks ciphertext row and its history. Every miss gets the same
 `AUTH_REQUIRED` refusal, so a caller learns nothing about which projects or
 machines exist. The token opens nothing: values open only with the machine's
 private key, through its wrap.
+
+`nforge secret machine rm ID --set checks` removes a machine. `ID` is the id
+`machine add` printed (8 or more hex characters, or all 32) or the machine's label,
+and must name exactly one machine; otherwise nothing is written and the error lists
+the machines in Checks (it never repeats what you typed, so a mistakenly pasted token
+cannot reach a log). One owner-signed Checks step removes the entry and re-keys
+the set: a new set key, every value re-sealed with its version kept, and a wrap for
+each remaining owner device and machine. The same mutation tombstones the machine's
+reader, so Forge refuses its next read with `AUTH_REQUIRED`, and the removed
+key opens nothing written from then on, even from a copy of the database. Re-sealed
+values keep their versions, so a removal counts no changed record against the
+write work cap and is always one write. Only a person on a terminal, on a confirmed
+full owner device, runs it; an agent gets `PERSON_REQUIRED` before any project is
+read. It is journalled like `machine add`, and the journal records the full machine id the
+first send resolved the name to: after an unknown outcome the error names the
+operation id, and repeating with `--operation-id UUID` re-sends the same request, so
+the machine is removed and Checks re-keyed at most once, and always for that id,
+never for a machine that has taken its label since. If the server no longer
+remembers the request, the verified roster decides by that id: a machine already
+gone is reported as removed, and the receipt stays under the same operation id. An
+operation id this device no longer keeps sends nothing and says so; run the command
+again with the machine's id.
+
+What the removed key could already open is the rotate list, kept in the signed
+roster. A removal adds one entry to the roster's former list: the machine's id and
+the epoch it last held, with no signing key (a machine never signs, so the entry can
+never author a record). Every live Checks name whose value was last sealed at or
+before that epoch is on the list, with the machine's id, until a new value for the
+name is set; then it is off. Any holder, including a device that pinned or re-pinned
+after the removal and a machine key that walks the history, reads the same
+obligation from the signed roster, and the server adds no unsigned metadata. A later
+removal drops entries whose names have all changed. The list holds at most 400
+entries (devices and machines together). At the bound a removal stops before anything
+is signed, with `SECRETS_NOT_ALLOWED` and a message to change the oldest names first
+(`nforge secret list --set checks` shows them); no outstanding rotation is evicted.
+The command prints the list when it removes, and `nforge secret list --set checks`
+prints it on standard error until each value is changed. A hostile server can still serve the removed key an older
+genuine head; that holds only values on the rotate list. It cannot make an owner
+device seal a new value under the old key: a served roster older than the device's
+pin is refused with `SECRETS_ROLLBACK` before anything is sent.
 
 Treat `FORGE_SECRETS_KEY` as a CI secret: whoever holds it can read and open
 every Checks value, current and future, until the machine is removed. Give it only
@@ -58,7 +104,11 @@ request from a fork or a `pull_request_target` workflow.
 step `FORGE_SECRETS_KEY`. Outside a Forge checkout the step also gives
 `FORGE_DEPLOYMENT_URL` and `FORGE_PROJECT_ID`, which are addresses, not secrets.
 Each run makes one machine query: the reader row, the project row, the active set
-and its history, with no writes and nothing when idle.
+and its history, with no writes and nothing when idle. A removal by a person is two
+reads and one write on the ordinary path: the Development anchor read, the Checks
+read and the Checks write, which also tombstones the reader (one range read of at
+most 100 live readers) and, when it adds a machine, one more indexed read of that
+machine's own row; a retry adds one read and, when sent again, one write.
 
 The machine verifies from its bundle alone. The roster in the bundle is its pin:
 the server's roster must chain from it, and a head that names an older roster, or
@@ -99,10 +149,8 @@ it.
 
 The Forge runner does not yet resolve `credentials` from Checks, and there are no
 per-check `allow` bindings, public-log rule, CI-provider mask registration or
-push of a machine key into a CI provider's secrets. There is no command that
-removes a machine entry yet (`nforge secret machine rm` is the next step of this
-slice): until it lands, a leaked `FORGE_SECRETS_KEY` cannot be revoked, because
-new values use the same set key. Outside contributors get no Checks values.
+push of a machine key into a CI provider's secrets. Outside contributors get no
+Checks values.
 
 ### Settings and the older store
 

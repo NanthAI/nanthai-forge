@@ -169,7 +169,8 @@ function roster(bytes: Buffer): Roster {
     former: items(f[9]!).map(bytes => {
       const g = fields(bytes, 'former');
       if (g.length !== 3) throw malformed();
-      return { deviceId: copy(g[0], 16), signPub: copy(g[1], 32), lastEpoch: u64(g[2]) };
+      if (g[1]!.length !== 0 && g[1]!.length !== 32) throw malformed();
+      return { deviceId: copy(g[0], 16), signPub: copy(g[1]), lastEpoch: u64(g[2]) };
     }),
   };
 }
