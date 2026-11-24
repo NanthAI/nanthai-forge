@@ -333,6 +333,51 @@ test('expired operations retain latest archived ownership and an updated recover
   assert.equal(retained[0].recovery, ledger);
 });
 
+test('the normal expiry wake archives old pending operations stamped ready instead of rescanning them', async t => {
+  const w = await journalMaintenanceFixture(t);
+  const terminal = [...w.f.tables.projectHostedOperations.values()].find(
+    row => JSON.parse(row.value).terminal,
+  );
+  assert(terminal);
+  await w.drain();
+  const operationId = randomUUID();
+  const value = JSON.parse(terminal.value);
+  value.operationId = value.firstAttempt.operationId = operationId;
+  value.terminal = null;
+  const id = await w.insert('projectHostedOperations', {
+    projectId: w.f.projectId,
+    actor: terminal.actor,
+    operationId,
+    value: JSON.stringify(value),
+  });
+  // Restore a single old pending row; keep the rest of the fixture within the retry window.
+  const operations = w.f.tables.projectHostedOperations;
+  operations.set(id, { ...operations.get(id), _creationTime: w.f.now() - 91 * 86_400_000 });
+  const { pruneExpiredHostedOperations } = await import(moduleUrl('../convex/projectHostedOperations.ts'));
+  const scheduled = new Set(w.f.tables._scheduled_functions.keys());
+  await w.mutate(ctx => pruneExpiredHostedOperations(ctx, w.f.projectId, Date.now()));
+  assert.equal(w.f.tables.projectHostedOperations.get(id).journalReadyAt, w.f.now());
+  const wake = [...w.f.tables._scheduled_functions.values()].find(
+    job => !scheduled.has(job._id) && job.name === 'projectJournalRun:pack' && job.state.kind === 'pending',
+  );
+  assert(wake, 'normal expiry schedules a journal drain');
+  w.f.advanceClock(wake.scheduledTime - w.f.now());
+  await w.drain(wake.args[0]);
+  assert.equal(w.f.tables.projectHostedOperations.has(id), false, 'leaves the ready index');
+  const raw = (await restored(w)).projectHostedOperations.find(text => JSON.parse(text)._id === id);
+  const { journalOperationRecoveryRow } = await import(
+    moduleUrl('../convex/projectJournalOperationRecovery.ts')
+  );
+  assert(raw);
+  const owner = await w.mutate(ctx => journalOperationRecoveryRow(ctx, w.f.projectId, raw));
+  assert.deepEqual(JSON.parse(JSON.parse(owner).value), value, 'the expired operation remains in recovery');
+  const results = await w.drain({ projectId: w.f.projectId, phase: 1, operationId: randomUUID() });
+  assert(
+    results.every(result => result.archived === 0),
+    'future captures do not archive that operation twice',
+  );
+});
+
 test('closed Lane save digests drain in bounded pages while an open Lane keeps its staged rows', async t => {
   const w = await journalMaintenanceFixture(t, { advance: false });
   const closed = [...w.f.tables.projectHostedRecordHeads.values()].find(
@@ -402,7 +447,7 @@ test('a fractional creation-time eligibility wake drains aged detail without ano
     projectId: w.f.projectId,
     actor: 'owner',
     operationId: randomUUID(),
-    at: Date.now(),
+    at: w.f.now(),
     command: { kind: 'change', source: 'work' },
   });
   w.f.advanceClock(14 * 86_400_000);

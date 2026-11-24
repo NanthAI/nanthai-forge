@@ -214,7 +214,9 @@ export async function selectJournal(
           (value.terminal
             ? Math.max(operation._creationTime, Date.parse(value.terminal.at)) + journalGraceMs
             : Infinity);
-        if ((value.terminal && dueAt <= now) || (expired && !operation.journalReadyAt)) {
+        // Expiry stamps even unfinished operations ready so recovery can archive them.
+        // A ready timestamp must not prevent them from leaving this index.
+        if ((value.terminal && dueAt <= now) || (expired && (!value.terminal || !operation.journalReadyAt))) {
           selected.push(['projectHostedOperations', operation]);
           group = {
             category: 'operations',

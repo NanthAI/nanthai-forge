@@ -78,6 +78,11 @@ deduplicated scheduling fact per scope/date; expired facts left by a paused job
 clear in bounded metadata-only pages. Late archived operation-ledger updates
 advance the recovery fence, including while new relocation is disabled.
 
+An unfinished operation that passes the existing 90-day retry window is
+eligible for archival when the expiry writer marks it ready. Verified
+publication removes it from the ready index and retains the original pending
+record for recovery.
+
 Terminal operation transport and its mutable recovery ledger have separate
 ownership during export. A live compact receipt supplies the current recovery
 ledger; after receipt expiry a compact ownership digest selects the last archived
