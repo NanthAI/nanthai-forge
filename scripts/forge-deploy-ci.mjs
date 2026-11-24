@@ -40,6 +40,9 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', 'site-output', 'hosted-web-di
 const DOWNLOAD_BATCH = 200;
 const DOWNLOAD_CONCURRENCY = 12;
 const DIAGNOSTIC_CHARS = 240;
+const BUILD_WAIT_MAX_MS = 120_000;
+const BUILD_INITIAL_DELAY_MS = 2_000;
+const BUILD_MAX_DELAY_MS = 15_000;
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const clampText = value => {
@@ -485,54 +488,288 @@ export async function checkoutForgeState({
   };
 }
 
-/** Post-deploy smoke for the dev site (Item 8b6efb50): verifies the deployed build record, one
- * public-read JSON path, the sitemap, and one old `/-/` 301 redirect. */
+/** Detect when a non-matching `/_forge/build.json` is a wrong-but-newer build rather than the
+ * previous build still draining at the Cloudflare edge (Item ab9f4400). */
+function isWrongNewerBuild({ body, expectedState, expectedSequence, expectedDeployedAt, firstSeen }) {
+  const expShort = expectedState.slice(0, 8);
+  const gotShort = (typeof body.state === 'string' ? body.state : 'none').slice(0, 8);
+  const bodySeq =
+    typeof body.sequence === 'number' && Number.isSafeInteger(body.sequence) && body.sequence > 0
+      ? body.sequence
+      : undefined;
+  const bodyDeployedAtMs = typeof body.deployedAt === 'string' ? Date.parse(body.deployedAt) : Number.NaN;
+  // Monotonic main sequence is clock-independent: any sequence >= expected cannot be an older build.
+  if (expectedSequence !== undefined && bodySeq !== undefined) {
+    if (bodySeq > expectedSequence)
+      return `expected state ${expShort} (#${expectedSequence}), got newer state ${gotShort} (#${bodySeq})`;
+    if (bodySeq === expectedSequence)
+      return `expected state ${expShort} (#${expectedSequence}), got conflicting state ${gotShort} (#${bodySeq})`;
+    return null;
+  }
+  const expectedDeployedAtMs =
+    typeof expectedDeployedAt === 'number'
+      ? expectedDeployedAt
+      : typeof expectedDeployedAt === 'string'
+        ? Date.parse(expectedDeployedAt)
+        : Number.NaN;
+  if (
+    Number.isFinite(expectedDeployedAtMs) &&
+    Number.isFinite(bodyDeployedAtMs) &&
+    bodyDeployedAtMs > expectedDeployedAtMs
+  )
+    return `expected state ${expShort}, got newer state ${gotShort} (deployedAt ${body.deployedAt})`;
+  if (firstSeen?.state && typeof body.state === 'string' && body.state !== firstSeen.state) {
+    const olderSeq =
+      bodySeq !== undefined && firstSeen.sequence !== undefined && bodySeq < firstSeen.sequence;
+    const olderTime =
+      Number.isFinite(bodyDeployedAtMs) &&
+      firstSeen.deployedAtMs !== undefined &&
+      bodyDeployedAtMs < firstSeen.deployedAtMs;
+    if (!olderSeq && !olderTime)
+      return `expected state ${expShort}, edge switched from ${firstSeen.state.slice(0, 8)} to ${gotShort}`;
+  }
+  return null;
+}
+
+/** Read the locally built `/_forge/build.json` from `buildDir` when its state matches `expectedState`,
+ * so CI smoke knows the expected sequence and build time without changing the workflow file. */
+export function readLocalBuiltRecord(expectedState, buildDir = 'site-output') {
+  if (!expectedState) return null;
+  const recordPath = join(buildDir, '.cloudflare/output/v0/workers/default/assets', SITE_RECORD);
+  if (!existsSync(recordPath)) return null;
+  try {
+    const built = JSON.parse(readFileSync(recordPath, 'utf8'));
+    if (built?.state !== expectedState) return null;
+    return {
+      ...(typeof built.sequence === 'number' && Number.isSafeInteger(built.sequence) && built.sequence > 0
+        ? { sequence: built.sequence }
+        : {}),
+      ...(typeof built.deployedAt === 'string' ? { deployedAt: built.deployedAt } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Build the `/deploy/actions` `report` payload from CLI arguments and optional smoke JSON. */
+export function buildDeployReport({
+  state,
+  sequence,
+  status,
+  url,
+  summary,
+  rawSmoke,
+  unchanged = false,
+  liveState,
+  liveSequence,
+}) {
+  const smoke = rawSmoke
+    ? {
+        ok: Boolean(rawSmoke.ok),
+        checks: (rawSmoke.checks ?? []).slice(0, 16).map(check => ({
+          name: String(check.name).slice(0, 64),
+          ok: Boolean(check.ok),
+          ...(check.status !== undefined ? { status: Number(check.status) } : {}),
+          ...(clampText(check.detail) ? { detail: clampText(check.detail) } : {}),
+        })),
+      }
+    : undefined;
+  const isUnchanged = Boolean(unchanged && status === 'succeeded');
+  const liveAfterSeconds =
+    typeof rawSmoke?.liveAfterSeconds === 'number' &&
+    Number.isFinite(rawSmoke.liveAfterSeconds) &&
+    rawSmoke.liveAfterSeconds >= 0
+      ? Math.round(rawSmoke.liveAfterSeconds)
+      : undefined;
+  const resolvedSummary = clampText(
+    summary ||
+      (status === 'succeeded' && !isUnchanged && liveAfterSeconds !== undefined
+        ? `live after ${liveAfterSeconds}s`
+        : undefined),
+  );
+  const rawLiveHead = rawSmoke?.liveState || liveState;
+  const liveHead =
+    typeof rawLiveHead === 'string' && /^[a-f0-9]{64}$/.test(rawLiveHead) ? rawLiveHead : undefined;
+  const rawLiveSeq =
+    typeof rawSmoke?.liveSequence === 'number'
+      ? rawSmoke.liveSequence
+      : liveSequence && /^\d+$/.test(String(liveSequence))
+        ? Number(liveSequence)
+        : undefined;
+  const resolvedLiveSequence =
+    typeof rawLiveSeq === 'number' && Number.isSafeInteger(rawLiveSeq) && rawLiveSeq > 0
+      ? rawLiveSeq
+      : undefined;
+  return {
+    kind: 'report',
+    state,
+    sequence: Number(sequence),
+    status,
+    ...(url ? { url } : {}),
+    ...(resolvedSummary ? { summary: resolvedSummary } : {}),
+    ...(smoke ? { smoke } : {}),
+    ...(isUnchanged ? { unchanged: true } : {}),
+    ...(isUnchanged && liveHead ? { liveHead } : {}),
+    ...(isUnchanged && resolvedLiveSequence !== undefined ? { liveSequence: resolvedLiveSequence } : {}),
+  };
+}
+
+/** Post-deploy smoke for the dev site (Items 8b6efb50, ab9f4400): waits up to `buildWaitMaxMs`
+ * (default 120 s with exponential backoff and a cache-busting query on `/_forge/build.json`) for the
+ * deployed build while failing fast on a wrong-but-newer state or non-200, then verifies one
+ * public-read JSON path, the sitemap, and one old `/-/` 301 redirect with `attempts` tries. */
 export async function runPostDeploySmoke({
   site,
   expectedState,
+  expectedSequence,
+  expectedDeployedAt,
   request = globalThis.fetch,
   attempts = 3,
   wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  now = () => Date.now(),
   retryDelayMs = 3_000,
+  buildWaitMaxMs = BUILD_WAIT_MAX_MS,
+  buildInitialDelayMs = BUILD_INITIAL_DELAY_MS,
+  buildMaxDelayMs = BUILD_MAX_DELAY_MS,
 }) {
   const origin = new URL(site).origin;
-  const runOnce = async () => {
-    const checks = [];
+  const otherAttempts = Math.max(1, attempts);
+
+  // 1. Build version record (/_forge/build.json): dedicated propagation wait (one static GET per retry).
+  const checkBuildVersion = async () => {
+    const startedAt = now();
+    let waitedMs = 0;
+    let delayMs = Math.max(0, buildInitialDelayMs);
+    let attempt = 0;
+    let networkFailures = 0;
+    let firstSeen = null;
+    let lastCheck = null;
     let liveState;
     let liveSequence;
-    // 1. Build version record (/_forge/build.json)
-    try {
-      const res = await request(`${origin}/${SITE_RECORD}`, {
-        redirect: 'error',
-        signal: AbortSignal.timeout(15_000),
-      });
-      const body = res.ok ? await res.json().catch(() => null) : null;
-      if (typeof body?.state === 'string' && /^[a-f0-9]{64}$/.test(body.state)) liveState = body.state;
-      if (typeof body?.sequence === 'number' && Number.isSafeInteger(body.sequence) && body.sequence > 0)
-        liveSequence = body.sequence;
-      const matches = !expectedState || body?.state === expectedState;
-      const ok = Boolean(res.ok && body && typeof body.digest === 'string' && matches);
-      checks.push({
-        name: 'build-version',
-        ok,
-        status: res.status,
-        detail: clampText(
-          ok
-            ? `state ${(body.state ?? body.commit ?? 'unknown').slice(0, 8)}`
-            : !res.ok
-              ? `HTTP ${res.status}`
-              : !matches
-                ? `expected state ${expectedState.slice(0, 8)}, got ${(body?.state ?? 'none').slice(0, 8)}`
-                : 'malformed build.json',
-        ),
-      });
-    } catch (error) {
-      checks.push({
-        name: 'build-version',
-        ok: false,
-        detail: clampText(error.message ?? 'fetch failed'),
-      });
+    for (;;) {
+      attempt++;
+      const url = new URL(`/${SITE_RECORD}`, origin);
+      url.searchParams.set('t', `${now()}-${attempt}`);
+      let retryable = false;
+      let isStaleRetry = false;
+      let retryDelay = delayMs;
+      try {
+        const res = await request(url.toString(), {
+          redirect: 'error',
+          headers: { 'cache-control': 'no-cache' },
+          signal: AbortSignal.timeout(15_000),
+        });
+        const elapsedMs = Math.max(waitedMs, Math.max(0, now() - startedAt));
+        if (res.status !== 200) {
+          lastCheck = {
+            name: 'build-version',
+            ok: false,
+            status: res.status,
+            detail: clampText(`HTTP ${res.status}`),
+          };
+          break;
+        }
+        const body = await res.json().catch(() => null);
+        const validState = typeof body?.state === 'string' && /^[a-f0-9]{64}$/.test(body.state);
+        if (validState) liveState = body.state;
+        if (typeof body?.sequence === 'number' && Number.isSafeInteger(body.sequence) && body.sequence > 0)
+          liveSequence = body.sequence;
+        const malformed =
+          !body ||
+          typeof body.digest !== 'string' ||
+          (body.state !== undefined && !validState) ||
+          (expectedState && !validState && typeof body.commit !== 'string');
+        if (malformed) {
+          lastCheck = {
+            name: 'build-version',
+            ok: false,
+            status: res.status,
+            detail: 'malformed build.json',
+          };
+          break;
+        }
+        if (!expectedState) {
+          lastCheck = {
+            name: 'build-version',
+            ok: true,
+            status: res.status,
+            detail: clampText(`state ${(body.state ?? body.commit ?? 'unknown').slice(0, 8)}`),
+          };
+          break;
+        }
+        if (body.state === expectedState) {
+          const liveAfterSeconds = Math.max(0, Math.round(elapsedMs / 1000));
+          lastCheck = {
+            name: 'build-version',
+            ok: true,
+            status: res.status,
+            detail: clampText(`state ${body.state.slice(0, 8)}, live after ${liveAfterSeconds}s`),
+          };
+          return { check: lastCheck, liveState, liveSequence, liveAfterSeconds };
+        }
+        const newerProblem = isWrongNewerBuild({
+          body,
+          expectedState,
+          expectedSequence,
+          expectedDeployedAt,
+          firstSeen,
+        });
+        if (newerProblem) {
+          lastCheck = {
+            name: 'build-version',
+            ok: false,
+            status: res.status,
+            detail: clampText(newerProblem),
+          };
+          break;
+        }
+        if (!firstSeen) {
+          const bodyDeployedAtMs =
+            typeof body.deployedAt === 'string' ? Date.parse(body.deployedAt) : Number.NaN;
+          firstSeen = {
+            state: validState ? body.state : null,
+            sequence: liveSequence,
+            deployedAtMs: Number.isFinite(bodyDeployedAtMs) ? bodyDeployedAtMs : undefined,
+          };
+        }
+        const elapsedSeconds = Math.max(0, Math.round(elapsedMs / 1000));
+        lastCheck = {
+          name: 'build-version',
+          ok: false,
+          status: res.status,
+          detail: clampText(
+            `expected state ${expectedState.slice(0, 8)}, got ${(body.state ?? 'none').slice(0, 8)}${elapsedSeconds > 0 ? ` after ${elapsedSeconds}s` : ''}`,
+          ),
+        };
+        retryable = true;
+        isStaleRetry = true;
+      } catch (error) {
+        networkFailures++;
+        lastCheck = {
+          name: 'build-version',
+          ok: false,
+          detail: clampText(error.message ?? 'fetch failed'),
+        };
+        if (networkFailures < otherAttempts) {
+          retryable = true;
+          retryDelay = retryDelayMs;
+        }
+      }
+      if (!retryable) break;
+      const elapsedMs = Math.max(waitedMs, Math.max(0, now() - startedAt));
+      const remaining = buildWaitMaxMs - elapsedMs;
+      if (remaining <= 0) break;
+      const sleepMs = Math.min(retryDelay, remaining);
+      if (sleepMs <= 0) break;
+      await wait(sleepMs);
+      waitedMs += sleepMs;
+      if (isStaleRetry) delayMs = Math.min(delayMs * 2, buildMaxDelayMs);
     }
+    return { check: lastCheck, liveState, liveSequence };
+  };
+
+  const runOtherChecks = async () => {
+    const checks = [];
     // 2. Public-read JSON path (/-/public/v1/explore/active.json)
     try {
       const res = await request(`${origin}/-/public/v1/explore/active.json`, {
@@ -595,19 +832,23 @@ export async function runPostDeploySmoke({
         detail: clampText(error.message ?? 'fetch failed'),
       });
     }
-    return {
-      ok: checks.every(c => c.ok),
-      checks,
-      ...(liveState ? { liveState } : {}),
-      ...(liveSequence !== undefined ? { liveSequence } : {}),
-    };
+    return checks;
   };
-  let last = await runOnce();
-  for (let i = 1; !last.ok && i < attempts; i++) {
+
+  const buildResult = await checkBuildVersion();
+  let otherChecks = await runOtherChecks();
+  for (let i = 1; !otherChecks.every(c => c.ok) && i < otherAttempts; i++) {
     await wait(retryDelayMs);
-    last = await runOnce();
+    otherChecks = await runOtherChecks();
   }
-  return last;
+  const checks = [buildResult.check, ...otherChecks];
+  return {
+    ok: checks.every(c => c.ok),
+    checks,
+    ...(buildResult.liveState ? { liveState: buildResult.liveState } : {}),
+    ...(buildResult.liveSequence !== undefined ? { liveSequence: buildResult.liveSequence } : {}),
+    ...(buildResult.liveAfterSeconds !== undefined ? { liveAfterSeconds: buildResult.liveAfterSeconds } : {}),
+  };
 }
 
 function writeOutput(result) {
@@ -680,9 +921,15 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     });
     console.log(`forge checkout: ${JSON.stringify(stats)}`);
   } else if (command === 'smoke') {
+    const expectedState = values.state || undefined;
+    const localBuilt = readLocalBuiltRecord(expectedState);
+    const expectedSequence =
+      values.sequence && /^\d+$/.test(values.sequence) ? Number(values.sequence) : localBuilt?.sequence;
     const result = await runPostDeploySmoke({
       site: values.site,
-      expectedState: values.state || undefined,
+      expectedState,
+      ...(expectedSequence !== undefined ? { expectedSequence } : {}),
+      ...(localBuilt?.deployedAt ? { expectedDeployedAt: localBuilt.deployedAt } : {}),
     });
     if (values.out) writeFileSync(values.out, JSON.stringify(result));
     const failed = clampText(
@@ -691,51 +938,32 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
         .map(c => `${c.name}: ${c.detail ?? 'failed'}`)
         .join('; '),
     );
-    writeOutput({ smoke_ok: result.ok, smoke_summary: failed ?? 'all checks passed' });
+    const liveNote =
+      result.liveAfterSeconds !== undefined ? `live after ${result.liveAfterSeconds}s` : undefined;
+    writeOutput({
+      smoke_ok: result.ok,
+      smoke_summary: failed ?? (liveNote ? `all checks passed (${liveNote})` : 'all checks passed'),
+      ...(result.liveAfterSeconds !== undefined ? { live_after_seconds: result.liveAfterSeconds } : {}),
+    });
     if (!result.ok && !values['no-fail']) process.exitCode = 1;
   } else if (command === 'report') {
     const rawSmoke =
       values['smoke-file'] && existsSync(values['smoke-file'])
         ? JSON.parse(readFileSync(values['smoke-file'], 'utf8'))
         : undefined;
-    const smoke = rawSmoke
-      ? {
-          ok: Boolean(rawSmoke.ok),
-          checks: (rawSmoke.checks ?? []).slice(0, 16).map(check => ({
-            name: String(check.name).slice(0, 64),
-            ok: Boolean(check.ok),
-            ...(check.status !== undefined ? { status: Number(check.status) } : {}),
-            ...(clampText(check.detail) ? { detail: clampText(check.detail) } : {}),
-          })),
-        }
-      : undefined;
-    const summary = clampText(values.summary);
-    const unchanged = Boolean(values.unchanged && values.status === 'succeeded');
-    const rawLiveHead = rawSmoke?.liveState || values['live-state'];
-    const liveHead =
-      typeof rawLiveHead === 'string' && /^[a-f0-9]{64}$/.test(rawLiveHead) ? rawLiveHead : undefined;
-    const rawLiveSeq =
-      typeof rawSmoke?.liveSequence === 'number'
-        ? rawSmoke.liveSequence
-        : values['live-sequence'] && /^\d+$/.test(values['live-sequence'])
-          ? Number(values['live-sequence'])
-          : undefined;
-    const liveSequence =
-      typeof rawLiveSeq === 'number' && Number.isSafeInteger(rawLiveSeq) && rawLiveSeq > 0
-        ? rawLiveSeq
-        : undefined;
-    const reply = await api({
-      kind: 'report',
-      state: values.state,
-      sequence: Number(values.sequence),
-      status: values.status,
-      ...(values.url ? { url: values.url } : {}),
-      ...(summary ? { summary } : {}),
-      ...(smoke ? { smoke } : {}),
-      ...(unchanged ? { unchanged: true } : {}),
-      ...(unchanged && liveHead ? { liveHead } : {}),
-      ...(unchanged && liveSequence !== undefined ? { liveSequence } : {}),
-    });
+    const reply = await api(
+      buildDeployReport({
+        state: values.state,
+        sequence: values.sequence,
+        status: values.status,
+        url: values.url,
+        summary: values.summary,
+        rawSmoke,
+        unchanged: values.unchanged,
+        liveState: values['live-state'],
+        liveSequence: values['live-sequence'],
+      }),
+    );
     console.log(JSON.stringify(reply));
   } else {
     throw new Error('Usage: forge-deploy-ci.mjs plan|checkout|smoke|report ...');

@@ -1212,9 +1212,10 @@ For the dev site, `scripts/site-deploy-plan.mjs` gates every build:
    disaster catch-up, so active-work lag falls from up to 20–180 minutes to at most 5 minutes.
 3. **Compare, upload, smoke and report**: build, upload only when the digest is new (or the live record lacks a Forge `state`),
    then run `scripts/forge-deploy-ci.mjs smoke` against `https://dev.forge.nanthai.tech` checking `/_forge/build.json`
-   (matching the deployed State on upload, or live health on an unchanged rebuild so a prior smoke failure is never
-   cleared without passing smoke), one public-read JSON path (`/-/public/v1/explore/active.json`), `/sitemap.xml` and one
-   old `/-/` 301 redirect (`/-/explore` → `/explore`). `scripts/build-site.mjs` computes the content digest before stamping
+   (on upload, waiting up to 120 s with exponential backoff and a cache-busting query for the deployed State while failing fast
+   on a newer-but-wrong state or non-200 and recording `live after Ns`; on an unchanged rebuild, checking live health so a
+   prior smoke failure is never cleared without passing smoke), followed by one public-read JSON path
+   (`/-/public/v1/explore/active.json`), `/sitemap.xml` and one old `/-/` 301 redirect (`/-/explore` → `/explore`, 3 attempts). `scripts/build-site.mjs` computes the content digest before stamping
    `Build #<seq> · <head8>` into `index.html` and `app.html` (`data-build-version`), so unchanged
    builds keep the same digest and skip Cloudflare upload. Every attempted deploy reports its outcome (`succeeded`, `failed`,
    or `smoke-failed`, keyed per `${run_id}:${run_attempt}`) back to `projectDeploys` via `/deploy/actions` (authorized only

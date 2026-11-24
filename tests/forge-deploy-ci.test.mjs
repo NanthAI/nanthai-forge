@@ -10,9 +10,11 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import {
+  buildDeployReport,
   checkoutForgeState,
   planConvexWithBootstrap,
   planWebDeploy,
+  readLocalBuiltRecord,
   runPostDeploySmoke,
 } from '../scripts/forge-deploy-ci.mjs';
 
@@ -83,14 +85,14 @@ test('Item 8b6efb50: runPostDeploySmoke checks build version, public-read JSON, 
   const origin = 'https://dev.forge.nanthai.tech';
   const okRoutes = new Map([
     [
-      `${origin}/_forge/build.json`,
+      '/_forge/build.json',
       () =>
         new Response(JSON.stringify({ state, digest: 'd1', deployedAt: '2026-11-23T21:00:00Z' }), {
           status: 200,
         }),
     ],
     [
-      `${origin}/-/public/v1/explore/active.json`,
+      '/-/public/v1/explore/active.json',
       () =>
         new Response(JSON.stringify({ projects: [] }), {
           status: 200,
@@ -98,7 +100,7 @@ test('Item 8b6efb50: runPostDeploySmoke checks build version, public-read JSON, 
         }),
     ],
     [
-      `${origin}/sitemap.xml`,
+      '/sitemap.xml',
       () =>
         new Response(
           '<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>',
@@ -108,19 +110,18 @@ test('Item 8b6efb50: runPostDeploySmoke checks build version, public-read JSON, 
           },
         ),
     ],
-    [
-      `${origin}/-/explore`,
-      () => new Response(null, { status: 301, headers: { location: `${origin}/explore` } }),
-    ],
+    ['/-/explore', () => new Response(null, { status: 301, headers: { location: `${origin}/explore` } })],
   ]);
+  const routeFor = url => okRoutes.get(new URL(url).pathname)();
 
   const pass = await runPostDeploySmoke({
     site: origin,
     expectedState: state,
-    request: async url => okRoutes.get(url)(),
+    request: async url => routeFor(url),
     wait: async () => {},
   });
   assert.equal(pass.ok, true);
+  assert.equal(pass.liveAfterSeconds, 0);
   assert.deepEqual(
     pass.checks.map(c => [c.name, c.ok]),
     [
@@ -130,6 +131,7 @@ test('Item 8b6efb50: runPostDeploySmoke checks build version, public-read JSON, 
       ['old-redirect', true],
     ],
   );
+  assert.match(pass.checks[0].detail, /live after 0s/);
 
   // Propagation retry: first attempt sees stale build.json, second sees new state.
   let seen = 0;
@@ -137,9 +139,9 @@ test('Item 8b6efb50: runPostDeploySmoke checks build version, public-read JSON, 
     site: origin,
     expectedState: state,
     request: async url => {
-      if (url === `${origin}/_forge/build.json` && ++seen === 1)
+      if (new URL(url).pathname === '/_forge/build.json' && ++seen === 1)
         return new Response(JSON.stringify({ state: '0'.repeat(64), digest: 'old' }), { status: 200 });
-      return okRoutes.get(url)();
+      return routeFor(url);
     },
     wait: async () => {},
   });
@@ -153,9 +155,9 @@ test('Item 8b6efb50: runPostDeploySmoke checks build version, public-read JSON, 
     expectedState: state,
     attempts: 1,
     request: async url =>
-      url === `${origin}/-/explore`
+      new URL(url).pathname === '/-/explore'
         ? new Response(null, { status: 302, headers: { location: longRedirect } })
-        : okRoutes.get(url)(),
+        : routeFor(url),
     wait: async () => {},
   });
   assert.equal(broken.ok, false);
@@ -169,12 +171,309 @@ test('Item 8b6efb50: runPostDeploySmoke checks build version, public-read JSON, 
     expectedState: state,
     attempts: 1,
     request: async url =>
-      url === `${origin}/-/explore`
+      new URL(url).pathname === '/-/explore'
         ? new Response(null, { status: 301, headers: { location: '/explore' } })
-        : okRoutes.get(url)(),
+        : routeFor(url),
     wait: async () => {},
   });
   assert.equal(relative.ok, true);
+});
+
+test('Item ab9f4400 (deploy 31970 edge propagation): build-version waits with backoff and cache-busting query, records liveAfterSeconds, and runs the other three checks once', async t => {
+  const oldState = 'd'.repeat(64);
+  const newState = '0'.repeat(64);
+  const origin = 'https://dev.forge.nanthai.tech';
+  const buildQueries = [];
+  const counts = new Map();
+  let clock = 1_795_419_600_000;
+  const delays = [];
+
+  const result = await runPostDeploySmoke({
+    site: origin,
+    expectedState: newState,
+    expectedSequence: 31970,
+    now: () => clock,
+    wait: async ms => {
+      delays.push(ms);
+      clock += ms;
+    },
+    request: async (url, init) => {
+      const parsed = new URL(url);
+      counts.set(parsed.pathname, (counts.get(parsed.pathname) ?? 0) + 1);
+      if (parsed.pathname === '/_forge/build.json') {
+        buildQueries.push(parsed.searchParams.get('t'));
+        assert.equal(init?.headers?.['cache-control'], 'no-cache');
+        const tryNum = counts.get('/_forge/build.json');
+        const body =
+          tryNum < 5
+            ? { state: oldState, sequence: 31969, digest: 'old', deployedAt: '2026-11-24T07:20:00Z' }
+            : { state: newState, sequence: 31970, digest: 'new', deployedAt: '2026-11-24T07:35:00Z' };
+        return new Response(JSON.stringify(body), { status: 200 });
+      }
+      if (parsed.pathname === '/-/public/v1/explore/active.json')
+        return new Response(JSON.stringify({ projects: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      if (parsed.pathname === '/sitemap.xml')
+        return new Response('<urlset></urlset>', {
+          status: 200,
+          headers: { 'content-type': 'application/xml' },
+        });
+      if (parsed.pathname === '/-/explore')
+        return new Response(null, { status: 301, headers: { location: '/explore' } });
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(delays, [2_000, 4_000, 8_000, 15_000]);
+  assert.equal(result.liveAfterSeconds, 29);
+  assert.equal(result.checks[0].name, 'build-version');
+  assert.equal(result.checks[0].detail, `state ${newState.slice(0, 8)}, live after 29s`);
+  assert.equal(new Set(buildQueries).size, 5, 'each build.json attempt uses a distinct cache-busting query');
+  assert(buildQueries.every(Boolean), 'cache-busting query param is non-empty');
+  assert.equal(counts.get('/-/public/v1/explore/active.json'), 1);
+  assert.equal(counts.get('/sitemap.xml'), 1);
+  assert.equal(counts.get('/-/explore'), 1);
+
+  // Report payload puts 'live after Ns' into summary and build-version detail while keeping strict smoke shape.
+  const report = buildDeployReport({
+    state: newState,
+    sequence: 31970,
+    status: 'succeeded',
+    url: 'https://github.com/NanthAI/nanthai-forge/actions/runs/45347253584',
+    rawSmoke: result,
+  });
+  assert.equal(report.summary, 'live after 29s');
+  assert.deepEqual(Object.keys(report.smoke).sort(), ['checks', 'ok']);
+  assert.match(report.smoke.checks[0].detail, /live after 29s/);
+
+  // Unchanged reports omit 'live after Ns' summary, and explicit failure summaries win.
+  const unchangedReport = buildDeployReport({
+    state: newState,
+    sequence: 31970,
+    status: 'succeeded',
+    unchanged: true,
+    rawSmoke: result,
+  });
+  assert.equal(unchangedReport.summary, undefined);
+  const failedReport = buildDeployReport({
+    state: newState,
+    sequence: 31970,
+    status: 'smoke-failed',
+    summary: 'build-version: expected state 00000000, got dddddddd after 120s',
+    rawSmoke: { ok: false, checks: result.checks },
+  });
+  assert.equal(failedReport.summary, 'build-version: expected state 00000000, got dddddddd after 120s');
+
+  // Local built record helper extracts sequence and deployedAt only when state matches.
+  const buildDir = temporaryDirectory(t, 'forge-deploy-built-');
+  const recordDir = join(buildDir, '.cloudflare/output/v0/workers/default/assets/_forge');
+  mkdirSync(recordDir, { recursive: true });
+  writeFileSync(
+    join(recordDir, 'build.json'),
+    JSON.stringify({ state: newState, sequence: 31970, deployedAt: '2026-11-24T07:35:00Z' }),
+  );
+  assert.deepEqual(readLocalBuiltRecord(newState, buildDir), {
+    sequence: 31970,
+    deployedAt: '2026-11-24T07:35:00Z',
+  });
+  assert.equal(readLocalBuiltRecord(oldState, buildDir), null);
+});
+
+test('Item ab9f4400: build-version fails after the 120s propagation bound when the edge never switches', async () => {
+  const oldState = 'd'.repeat(64);
+  const newState = '0'.repeat(64);
+  const origin = 'https://dev.forge.nanthai.tech';
+  let clock = 1_795_419_600_000;
+  const delays = [];
+  let buildTries = 0;
+
+  const result = await runPostDeploySmoke({
+    site: origin,
+    expectedState: newState,
+    expectedSequence: 31970,
+    now: () => clock,
+    wait: async ms => {
+      delays.push(ms);
+      clock += ms;
+    },
+    request: async url => {
+      const path = new URL(url).pathname;
+      if (path === '/_forge/build.json') {
+        buildTries++;
+        return new Response(JSON.stringify({ state: oldState, sequence: 31969, digest: 'old' }), {
+          status: 200,
+        });
+      }
+      if (path === '/-/public/v1/explore/active.json')
+        return new Response(JSON.stringify({ projects: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      if (path === '/sitemap.xml')
+        return new Response('<urlset></urlset>', {
+          status: 200,
+          headers: { 'content-type': 'application/xml' },
+        });
+      return new Response(null, { status: 301, headers: { location: '/explore' } });
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.liveAfterSeconds, undefined);
+  assert.equal(
+    delays.reduce((sum, ms) => sum + ms, 0),
+    120_000,
+    'total propagation wait stops at the 120s bound',
+  );
+  assert.equal(buildTries, delays.length + 1);
+  assert.equal(result.checks[0].ok, false);
+  assert.equal(
+    result.checks[0].detail,
+    `expected state ${newState.slice(0, 8)}, got ${oldState.slice(0, 8)} after 120s`,
+  );
+  assert.deepEqual(
+    result.checks.slice(1).map(c => c.ok),
+    [true, true, true],
+  );
+});
+
+test('Item ab9f4400: build-version fails fast on wrong-but-newer state or non-200 while other three checks keep 3 attempts', async () => {
+  const oldState = 'd'.repeat(64);
+  const newState = '0'.repeat(64);
+  const newerState = '9'.repeat(64);
+  const origin = 'https://dev.forge.nanthai.tech';
+  const okOther = path => {
+    if (path === '/-/public/v1/explore/active.json')
+      return new Response(JSON.stringify({ projects: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    if (path === '/sitemap.xml')
+      return new Response('<urlset></urlset>', {
+        status: 200,
+        headers: { 'content-type': 'application/xml' },
+      });
+    return new Response(null, { status: 301, headers: { location: '/explore' } });
+  };
+
+  // 1. Wrong-but-newer sequence fails immediately without waiting.
+  let tries = 0;
+  const delays1 = [];
+  const newerSeq = await runPostDeploySmoke({
+    site: origin,
+    expectedState: newState,
+    expectedSequence: 31970,
+    wait: async ms => delays1.push(ms),
+    request: async url => {
+      const path = new URL(url).pathname;
+      if (path === '/_forge/build.json') {
+        tries++;
+        return new Response(JSON.stringify({ state: newerState, sequence: 31971, digest: 'newer' }), {
+          status: 200,
+        });
+      }
+      return okOther(path);
+    },
+  });
+  assert.equal(newerSeq.ok, false);
+  assert.equal(tries, 1);
+  assert.deepEqual(delays1, []);
+  assert.match(newerSeq.checks[0].detail, /got newer state 99999999 \(#31971\)/);
+
+  // 2. Wrong-but-newer deployedAt (without sequence) fails immediately without waiting.
+  tries = 0;
+  const delays2 = [];
+  const newerTime = await runPostDeploySmoke({
+    site: origin,
+    expectedState: newState,
+    expectedDeployedAt: '2026-11-24T07:35:00Z',
+    wait: async ms => delays2.push(ms),
+    request: async url => {
+      const path = new URL(url).pathname;
+      if (path === '/_forge/build.json') {
+        tries++;
+        return new Response(
+          JSON.stringify({ state: newerState, deployedAt: '2026-11-24T07:36:00Z', digest: 'newer' }),
+          { status: 200 },
+        );
+      }
+      return okOther(path);
+    },
+  });
+  assert.equal(newerTime.ok, false);
+  assert.equal(tries, 1);
+  assert.deepEqual(delays2, []);
+  assert.match(newerTime.checks[0].detail, /got newer state 99999999/);
+
+  // 3. Mid-wait switch from old state to a different non-expected state fails immediately on the switch.
+  tries = 0;
+  const delays3 = [];
+  const switchedWrong = await runPostDeploySmoke({
+    site: origin,
+    expectedState: newState,
+    wait: async ms => delays3.push(ms),
+    request: async url => {
+      const path = new URL(url).pathname;
+      if (path === '/_forge/build.json') {
+        tries++;
+        const state = tries === 1 ? oldState : newerState;
+        return new Response(JSON.stringify({ state, digest: `d${tries}` }), { status: 200 });
+      }
+      return okOther(path);
+    },
+  });
+  assert.equal(switchedWrong.ok, false);
+  assert.equal(tries, 2);
+  assert.deepEqual(delays3, [2_000]);
+  assert.match(switchedWrong.checks[0].detail, /edge switched from dddddddd to 99999999/);
+
+  // 4. Non-200 on build.json fails immediately without waiting.
+  tries = 0;
+  const delays4 = [];
+  const non200 = await runPostDeploySmoke({
+    site: origin,
+    expectedState: newState,
+    wait: async ms => delays4.push(ms),
+    request: async url => {
+      const path = new URL(url).pathname;
+      if (path === '/_forge/build.json') {
+        tries++;
+        return new Response('bad gateway', { status: 502 });
+      }
+      return okOther(path);
+    },
+  });
+  assert.equal(non200.ok, false);
+  assert.equal(tries, 1);
+  assert.deepEqual(delays4, []);
+  assert.equal(non200.checks[0].status, 502);
+  assert.equal(non200.checks[0].detail, 'HTTP 502');
+
+  // 5. Other three checks keep their 3-attempt retry loop without re-running build-version.
+  let buildCount = 0;
+  let sitemapCount = 0;
+  const delays5 = [];
+  const otherRetry = await runPostDeploySmoke({
+    site: origin,
+    expectedState: newState,
+    wait: async ms => delays5.push(ms),
+    request: async url => {
+      const path = new URL(url).pathname;
+      if (path === '/_forge/build.json') {
+        buildCount++;
+        return new Response(JSON.stringify({ state: newState, digest: 'ok' }), { status: 200 });
+      }
+      if (path === '/sitemap.xml' && ++sitemapCount < 3) return new Response('retry', { status: 503 });
+      return okOther(path);
+    },
+  });
+  assert.equal(otherRetry.ok, true);
+  assert.equal(buildCount, 1);
+  assert.equal(sitemapCount, 3);
+  assert.deepEqual(delays5, [3_000, 3_000]);
 });
 
 test('Item 8b6efb50: checkoutForgeState replaces a directory with a file and a file with a directory cleanly', async t => {
