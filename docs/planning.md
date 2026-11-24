@@ -83,6 +83,20 @@ uses open Lanes active within 48 hours. When it does not cover all open Lanes
 reported by Work, the panel shows a lower bound if some agents are known.
 The panel makes no idle calls.
 
+## Read budget
+
+Opening the default Plan uses one bounded Plan view, one count read, and at most one batched workers read.
+The route shares the project's line and Needs me reads; a cold link also resolves the project and viewer.
+Opening an Item already in that Plan keeps those reads. It adds one Work page and bounded discussion reads;
+owner writers also read the comment reactions. A short link or a row outside the loaded Plan can need one
+point lookup. History, further pages and shelf reads are on request, not background work.
+
+For a call-count check, start with a signed-in tab on the board's real project. Count new Convex subscriptions
+and one-shot requests from the cold Plan open, then count the extra calls when clicking one loaded Item in
+that tab. Record the role, visible root count, any capped windows, and the scope of the count. Leave the tabs
+untouched and count new requests separately from server updates: a peer's write can update existing
+subscriptions, but time passing alone does not start a query. Reply bytes are not billed database bytes.
+
 ## Open work and closed history
 
 Plan opens in **Open work**: Proposed, Planned and In progress. Done and dropped Items do not appear there.

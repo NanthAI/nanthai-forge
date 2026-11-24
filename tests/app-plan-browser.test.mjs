@@ -155,6 +155,7 @@ if (window.readItemWork) {
     return query(ref, args);
   };
   window.planSubscriptions = () => [...linkBackend.live.values()].map(entry => entry.name);
+  window.planReadCounts = () => ({ subscriptions: linkBackend.stats.adds, oneShots: window.planQueries.length });
 }
 window.calls = [];
 window.closeUndos = [];
@@ -273,7 +274,15 @@ test('plan views and bulk bar: real components keep the view in the address and 
     await browser.close();
     rmSync(temp, { recursive: true, force: true });
   });
-  const open = async (width, theme, search = '', held = false, livePlan = false, readItemWork) => {
+  const open = async (
+    width,
+    theme,
+    search = '',
+    held = false,
+    livePlan = false,
+    readItemWork,
+    virtualClock = false,
+  ) => {
     // One locale on every machine, so dates read the same locally and on the runner ("1 Nov", never "Nov 1" or "1 ott").
     const context = await browser.newContext({
       locale: 'en-GB',
@@ -293,6 +302,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
       });
     });
     const page = await context.newPage();
+    if (virtualClock) await page.clock.install();
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.route('**/*', async route => {
@@ -1213,21 +1223,29 @@ test('plan views and bulk bar: real components keep the view in the address and 
             [1440, 'light'],
             [390, 'dark'],
           ]) {
-        const { page, context, errors } = await open(width, theme, `/${itemId}`, false, true, async args => {
-          calls.push(args);
-          const start = performance.now();
-          const reply = await workFixture.readRaw({
-            cursor: args.cursor,
-            limit: args.limit,
-            details: args.details,
-          });
-          const { name, ...cost } = workFixture.counts.at(-1);
-          costs.push({ ...cost, responseBytes: Buffer.byteLength(reply) });
-          t.diagnostic(
-            `${width} ${theme}: ${JSON.stringify(costs.at(-1))}, handler ${(performance.now() - start).toFixed(1)} ms`,
-          );
-          return reply;
-        });
+        const { page, context, errors } = await open(
+          width,
+          theme,
+          `/${itemId}`,
+          false,
+          true,
+          async args => {
+            calls.push(args);
+            const start = performance.now();
+            const reply = await workFixture.readRaw({
+              cursor: args.cursor,
+              limit: args.limit,
+              details: args.details,
+            });
+            const { name, ...cost } = workFixture.counts.at(-1);
+            costs.push({ ...cost, responseBytes: Buffer.byteLength(reply) });
+            t.diagnostic(
+              `${width} ${theme}: ${JSON.stringify(costs.at(-1))}, handler ${(performance.now() - start).toFixed(1)} ms`,
+            );
+            return reply;
+          },
+          unrelated === 0 && width === 1440,
+        );
         try {
           const work = page.getByRole('region', { name: 'Work', exact: true });
           const more = work.getByRole('button', { name: 'Show more work' });
@@ -1343,6 +1361,15 @@ test('plan views and bulk bar: real components keep the view in the address and 
           assert.equal(calls.at(-1).limit, 10);
           assert.equal(calls.at(-1).details, true);
           assert(calls.at(-1).cursor?.startsWith('forge-item-work-v2:'));
+          if (unrelated === 0 && width === 1440) {
+            const readsBefore = await page.evaluate(() => window.planReadCounts());
+            await page.clock.fastForward(10 * 60_000);
+            assert.deepEqual(
+              await page.evaluate(() => window.planReadCounts()),
+              readsBefore,
+              'an idle Item tab does not poll or resubscribe when the clock advances',
+            );
+          }
           assert.deepEqual(errors, []);
         } finally {
           await context.close();
