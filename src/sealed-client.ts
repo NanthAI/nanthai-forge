@@ -22,7 +22,7 @@ import {
 import { requireConfirmedWriter, type JourneyAnchor } from './sealed-anchors.js';
 import { afterVerified, firstContactAnchor } from './sealed-auto-client.js';
 import { SecretPins } from './sealed-pins.js';
-import { sealValue } from './sealed-value.js';
+import { makeRoom, nextValueVersion, sealValue } from './sealed-value.js';
 import { checkSecretWriteName } from './secret-names.js';
 import { findEntry, writeDevice } from './sealed-roster.js';
 import { networkFailure } from './network-fetch.js';
@@ -200,14 +200,7 @@ export class SealedClient {
           );
           if (value === null && (!old || old.kind === 3)) return { operationId, name, removed: false };
           // Make room before choosing a version, since compaction can raise the floor.
-          if (!old && reply.head.names.length >= 400) {
-            const tombstone = reply.head.names
-              .filter(n => n.kind === 3)
-              .sort((a, b) => a.changedAt - b.changedAt)[0];
-            invariant(tombstone, 'SECRETS_FORMAT_REFUSED', 'The set has no tombstone to compact.');
-            reply.head.names = reply.head.names.filter(n => n !== tombstone);
-            reply.head.versionFloor = Math.max(reply.head.versionFloor, tombstone.valueVersion);
-          }
+          makeRoom(reply.head, name);
           invariant(
             value === null || old?.kind !== 3 || reply.head.names.filter(n => n.kind !== 3).length < 200,
             'SECRETS_FORMAT_REFUSED',
@@ -216,7 +209,7 @@ export class SealedClient {
           const record: NameRecord = {
             name,
             kind: value === null ? 3 : options.file ? 2 : 1,
-            valueVersion: Math.max(old?.valueVersion ?? 0, reply.head.versionFloor) + 1,
+            valueVersion: nextValueVersion(reply.head, name),
             valueEpoch: reply.roster.epoch,
             sealEpoch: reply.roster.epoch,
             ctHash: Buffer.alloc(0),

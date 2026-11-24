@@ -143,7 +143,8 @@ const transition = record({
   signerId: bytes(16),
   signature: bytes(64),
 });
-const proposal = record({
+/** One proposal record, checked strictly wherever it is read (the reply, the server store, the applier). */
+export const proposal = record({
   proposalId: bytes(16),
   epoch: number,
   op: oneOf(1, 2, 3),
