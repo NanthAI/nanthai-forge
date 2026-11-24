@@ -6,115 +6,22 @@ import { sourceTreeEntries } from '../src/source-tree-index';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { indexReadFailure } from './projectWorkIndexRetry';
 import { parseNativeState } from '../src/native-source';
-import { type ChangedStates, type Pin } from './projectDiffstatProjection';
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import type { WorkData } from '../src/work-types';
 import type { z } from 'zod';
 import type { sourceManifestSchema } from '../src/work-archive-metadata';
 import { sourceParents } from './projectWorkAncestry';
-import { internal } from './_generated/api';
-import { viewContributors } from '../src/view-read-model';
 import { viewIndexEntries } from '../src/view-hosted-index';
-import type { ProvenanceFile } from '../src/view-provenance-plan';
 import { materializeWork, indexBatches } from '../src/work-hosted-index';
 import { ownerProjection } from './projectOwnerProjection';
-import { invariant } from '../src/errors';
 
 type Snapshot = {
   backup: Doc<'projectBackups'>;
   manifest: z.infer<typeof sourceManifestSchema>;
   data: WorkData;
 };
-const derived = new Set(['viewDetails', 'viewFiles', 'laneViews', 'viewAcceptances']);
-
-/** Source bytes live for one State read, not for the retained project closure.
- * Only a View's changed paths survive into save provenance. */
-export async function viewStates(
-  ctx: ActionCtx,
-  snapshot: Snapshot,
-  owner: string,
-  index: number,
-  changedStates?: Map<string, ChangedStates>,
-  sourcePins?: ReadonlyMap<string, Pin>,
-) {
-  const { backup, manifest, data } = snapshot,
-    view = data.views[index]!,
-    pins = sourcePins ?? new Map(manifest.files.map(file => [file.path, file]));
-  function pin(head: string) {
-    const selected = pins.get(sourcePins ? head : `objects/${head}`);
-    invariant(selected?.sha256 === head, 'SOURCE_UNAVAILABLE', 'A View State is not retained.');
-    return { sha256: selected.sha256, size: selected.size };
-  }
-  const states = new Map<string, readonly ProvenanceFile[]>();
-  if (!view.head || view.status === 'conflict') return states;
-  const pending = [
-    ...new Set(
-      viewContributors(data, view).flatMap(c => [
-        c.head,
-        ...c.saves.flatMap(({ save }) => [save.parent, save.head]),
-      ]),
-    ),
-  ].filter(head => head !== view.base && head !== view.head);
-  // Share the first provenance window with the base/head read. The State action
-  // filters extra trees to changed paths before returning them to this heap.
-  const extraPins: { sha256: string; size: number }[] = [];
-  let bytes = pin(view.base).size + pin(view.head).size;
-  for (const head of pending) {
-    let next;
-    try {
-      next = pin(head);
-    } catch (error) {
-      if (indexReadFailure(ctx, error)) throw error;
-      break;
-    }
-    if (extraPins.length >= 98 || bytes + next.size > 2 * 1024 * 1024) break;
-    extraPins.push(next);
-    bytes += next.size;
-  }
-  const key = `${view.base}:${view.head}`;
-  const changed: ChangedStates =
-    changedStates?.get(key) ??
-    (await ctx.runAction(internal.projectWorkAncestry.changedStates, {
-      projectId: backup.projectId,
-      actor: owner,
-      before: pin(view.base),
-      after: pin(view.head),
-      ...(extraPins.length ? { pins: extraPins } : {}),
-    }));
-  changedStates?.set(key, changed);
-  states.set(view.base, changed.before);
-  states.set(view.head, changed.after);
-  for (const state of changed.states ?? []) states.set(state.head, state.files);
-  for (let i = pending.length - 1; i >= 0; i--) if (states.has(pending[i]!)) pending.splice(i, 1);
-  while (pending.length) {
-    const selected: { sha256: string; size: number }[] = [];
-    let bytes = 0;
-    while (pending.length && selected.length < 100) {
-      const next = pin(pending[0]!);
-      if (selected.length && bytes + next.size > 2 * 1024 * 1024) break;
-      pending.shift();
-      selected.push(next);
-      bytes += next.size;
-    }
-    try {
-      const summaries: { head: string; files?: ProvenanceFile[] }[] = await ctx.runAction(
-        internal.projectWorkAncestry.stateBatch,
-        {
-          projectId: backup.projectId,
-          actor: owner,
-          pins: selected,
-          paths: changed.paths,
-        },
-      );
-      for (const summary of summaries) if (summary.files) states.set(summary.head, summary.files);
-    } catch (error) {
-      if (indexReadFailure(ctx, error)) throw error;
-      // Retain the existing incomplete-provenance result for unavailable States.
-    }
-  }
-  return states;
-}
+const derived = 'viewAcceptances';
 
 /** Batches have deterministic positions and boundaries, so a persisted nextBatch
  * is a resumable cursor. No array of all historical State file lists or View
@@ -141,12 +48,11 @@ export async function workProjection(ctx: ActionCtx, snapshot: Snapshot, owner: 
       },
     };
   const entries = projection.entries.filter(
-    entry =>
-      !derived.has(entry.collection) && ![...derived].some(name => entry.collection === `${name}:payload`),
+    entry => entry.collection !== derived && entry.collection !== `${derived}:payload`,
   );
   projection.entries.length = 0;
   const positions = new Map<string, number>();
-  for (const name of derived) projection.metadata.counts[name] = 0;
+  projection.metadata.counts[derived] = 0;
   return {
     metadata: projection.metadata,
     batches: async function* () {
@@ -177,16 +83,8 @@ export async function workProjection(ctx: ActionCtx, snapshot: Snapshot, owner: 
       yield* indexBatches(entries);
       entries.length = 0;
       for (let index = 0; index < snapshot.data.views.length; index++) {
-        let states: Map<string, readonly ProvenanceFile[]> | undefined;
-        try {
-          states = await viewStates(ctx, snapshot, owner, index);
-        } catch (error) {
-          if (indexReadFailure(ctx, error)) throw error;
-          /* unavailable remains explicit */
-        }
-        const rows = viewIndexEntries(snapshot.data, states, { index, positions });
-        for (const name of derived)
-          projection.metadata.counts[name]! += rows.filter(row => row.collection === name).length;
+        const rows = viewIndexEntries(snapshot.data, { index, positions });
+        projection.metadata.counts[derived]! += rows.filter(row => row.collection === derived).length;
         yield* indexBatches(rows);
       }
     },

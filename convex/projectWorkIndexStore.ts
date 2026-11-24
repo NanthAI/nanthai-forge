@@ -540,39 +540,3 @@ export const payload = internalQuery({
     return { values: page.page.map(row => row.value), cursor: page.isDone ? null : page.continueCursor };
   },
 });
-
-/** Bounded provenance replacement; unchanged Views never scan their file rows. */
-export const viewFiles = internalQuery({
-  args: {
-    projectId: v.id('hostedProjects'),
-    owner: v.string(),
-    generationId: v.id('projectWorkGenerations'),
-    viewId: v.string(),
-    cursor: v.union(v.string(), v.null()),
-  },
-  returns: v.object({ entries: v.array(indexEntry), cursor: v.union(v.string(), v.null()) }),
-  handler: async (ctx, input) => {
-    const project = await workProject(ctx, await accessibleProject(ctx, input.projectId, input.owner)),
-      generation = await selectedGeneration(ctx, project);
-    invariant(generation?._id === input.generationId, 'WORK_STALE', 'Hosted source or Work changed.');
-    const page = await ctx.db
-      .query(await workRecordTable(ctx, recordPartition(generation), 'viewFiles'))
-      .withIndex('by_generation_and_collection_and_parent_and_position', q =>
-        q
-          .eq('generationId', recordPartition(generation))
-          .eq('collection', 'viewFiles')
-          .eq('parent', input.viewId),
-      )
-      .paginate({ cursor: input.cursor, numItems: 100, maximumBytesRead: 500000 });
-    return {
-      entries: page.page.map(({ collection, key, parent, position, value }) => ({
-        collection,
-        key,
-        parent,
-        position,
-        value,
-      })),
-      cursor: page.isDone ? null : page.continueCursor,
-    };
-  },
-});

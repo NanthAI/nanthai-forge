@@ -202,16 +202,16 @@ structured degradation code; no permanent UI notice is added.
 
 Changing one never silently changes another. A Candidate pins its base, ordered Lane heads and dependencies. A Channel records which Candidate was accepted. Repeating a mutation with the same operation UUID returns the original result. It never moves a Channel backward or reruns a finished check.
 
-Canonical Candidate pages read `projectViewReads.read` with the
+Canonical Candidate pages read `projectHostedCompose:candidate` with the
 `candidate-source-files` feature. The query selects the immutable canonical
-Candidate before consulting any legacy Work generation. The browser verifies
-its exact R2 State manifests, or a server-pinned source-only file-list object,
-and its ordered composition pages. Continuation cursors bind the Candidate,
-base and head; the existing object reader rechecks current access after IO,
-including cache hits. CLI provenance negotiates
-the same file-list pointer on its existing Candidate query. Legacy indexed
-Views remain readable. A file list does not claim complete save attribution;
-canonical CLI provenance still reads the pinned version history.
+Candidate. The browser verifies its exact R2 State manifests, or a
+server-pinned source-only file-list object, and its ordered composition
+pages. Continuation cursors bind the Candidate, base and head; the existing
+object reader rechecks current access after IO, including cache hits. CLI
+provenance negotiates the same file-list pointer on its existing Candidate
+query. The old per-View detail, Lane-View and file-provenance rows and their
+readers are deleted (Item c0af6cfa). A file list does not claim complete save
+attribution; canonical CLI provenance still reads the pinned version history.
 
 ## Source analysis
 

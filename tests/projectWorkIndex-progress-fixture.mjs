@@ -241,28 +241,13 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
       })
     : undefined;
   for (const [key, bytes] of companion?.objects ?? []) objects.set(key, bytes);
-  const stateFiles = {
-    has: head => heads.includes(head),
-    get: head => {
-      const i = heads.indexOf(head);
-      return i === 0
-        ? paths
-        : paths.map((f, j) =>
-            j < (options.realisticTrees ? 1 + (i % 40) : 40) ? { ...f, blob: changes[j] } : f,
-          );
-    },
-  };
   const ownerViews = options.ownerViews
     ? data.views.map((view, index) => {
         const make = () =>
           Buffer.from(
             JSON.stringify({
               work: records.root.work.sha256,
-              view: [
-                view.id,
-                'f'.repeat(64),
-                viewIndexEntries(data, stateFiles, { index, positions: new Map() }),
-              ],
+              view: [view.id, 'f'.repeat(64), viewIndexEntries(data, { index, positions: new Map() })],
             }),
           );
         const bytes = make(),
@@ -515,7 +500,6 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     maxStepMs: 0,
     maxActionMs: 0,
     actionCalls: 0,
-    stateBatchMs: [],
   };
   const phase = () => {
     const generation = [...s.tables.projectWorkGenerations.values()].find(g => g.ensureCursor);
@@ -628,7 +612,6 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     metrics.calls[name] = (metrics.calls[name] ?? 0) + 1;
     metric('calls');
     const action = {
-      'projectWorkIndexBuildStates:batch': buildStates.batch,
       'projectWorkIndexBuildStates:tree': buildStates.tree,
       'projectWorkIndexBuildDiffstats:compare': buildDiffstats.compare,
       'projectWorkAncestry:changedStates': ancestry.changedStates,
@@ -641,14 +624,6 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
       throw error;
     }
     if (options.treeFiles) {
-      if (name === 'projectWorkIndexBuildStates:batch') {
-        const started = performance.now();
-        try {
-          return await buildStates.batch._handler(s.ctx, args);
-        } finally {
-          metrics.stateBatchMs.push(performance.now() - started);
-        }
-      }
       if (name === 'projectWorkIndexBuildStates:tree') return buildStates.tree._handler(s.ctx, args);
       if (name === 'projectWorkIndexBuildDiffstats:compare')
         return buildDiffstats.compare._handler(s.ctx, args);
@@ -658,8 +633,6 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     if (name === 'projectWorkIndexBuildStates:tree') return [];
     if (name === 'projectWorkIndexBuildDiffstats:compare')
       return args.files.map(() => ({ add: 0, del: 0, exact: true }));
-    if (name === 'projectWorkIndexBuildStates:batch')
-      return args.requests.map(() => ({ before: [], after: [], paths: [], states: [] }));
     if (name === 'projectWorkAncestry:changedStates') return { before: [], after: [], paths: [] };
     if (name === 'projectWorkAncestry:stateBatch')
       return args.pins.map(p => ({

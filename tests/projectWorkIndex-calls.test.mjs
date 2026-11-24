@@ -36,11 +36,6 @@ test('dogfood-shaped summaries bound function calls while reusing owner diffstat
           });
         summaries++;
       }
-      if (name === 'views' && entries.length)
-        assert(
-          entries.some(e => e.collection === 'viewFiles'),
-          'changed-file provenance is retained',
-        );
     }
     const calls = Object.fromEntries(
       Object.entries(f.metrics.calls).map(([k, v]) => [k, v - (prior[k] ?? 0)]),

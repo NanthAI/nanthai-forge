@@ -139,7 +139,6 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
             : { ...cursor, output: { ...output, part: output.part + 1 } };
       } else {
         const after = structuredClone(cursor);
-        after.filesTotal ??= JSON.parse(generation.metadata).counts.viewFiles ?? 0;
         if (cursor.phase === 'journal') {
           const projected = await replayStep(ctx, selected, exchange, backup, generation, project, after);
           entries = projected.entries;

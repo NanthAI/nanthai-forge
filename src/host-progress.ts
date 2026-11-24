@@ -17,10 +17,7 @@ export type HostProgress = {
   bytesTotal: number;
   bytesPerSecond: number;
   etaSeconds: number | null;
-  indexBuild?: IndexBuildProgress & {
-    stepsPerSecond: number;
-    filesPerMinute?: number;
-  };
+  indexBuild?: IndexBuildProgress & { stepsPerSecond: number };
 };
 export type ProgressSink = (event: HostProgress) => void;
 /** Only counters and fixed phase labels cross this boundary; no paths, URLs or credentials. */
@@ -37,7 +34,6 @@ export function hostProgress(sink?: ProgressSink) {
     | {
         at: number;
         done: number;
-        filesDone?: number;
         step: number;
         phase: string;
         field?: string;
@@ -51,22 +47,6 @@ export function hostProgress(sink?: ProgressSink) {
       baseline && indexBuild && now > baseline.at
         ? (indexBuild.done - baseline.done) / ((now - baseline.at) / 1000)
         : 0;
-    const fileRate =
-      baseline?.filesDone !== undefined && indexBuild?.filesDone !== undefined && now > baseline.at
-        ? Math.max(0, indexBuild.filesDone - baseline.filesDone) / ((now - baseline.at) / 1000)
-        : 0;
-    const fileEta =
-      indexBuild?.buildPhase === 'summaries' &&
-      indexBuild.field === 'views' &&
-      indexBuild.filesDone !== undefined &&
-      indexBuild.filesTotal !== undefined
-        ? indexBuild.filesTotalComplete && indexBuild.filesDone >= indexBuild.filesTotal
-          ? 0
-          : fileRate > 0 && indexBuild.filesTotal > indexBuild.filesDone
-            ? (indexBuild.filesTotal - indexBuild.filesDone) / fileRate
-            : null
-        : undefined;
-    if (indexBuild?.filesDone !== undefined) indexBuild.filesPerMinute = fileRate * 60;
     sink?.({
       type: 'host-progress',
       updatedAt: Date.now(),
@@ -78,18 +58,15 @@ export function hostProgress(sink?: ProgressSink) {
       bytesDone,
       bytesTotal,
       bytesPerSecond: rate,
-      etaSeconds:
-        fileEta !== undefined
-          ? fileEta
-          : indexBuild
-            ? indexBuild.done >= indexBuild.total && indexBuild.total > 0
-              ? 0
-              : recordsPerSecond > 0
-                ? Math.max(0, indexBuild.total - indexBuild.done) / recordsPerSecond
-                : null
-            : rate > 0
-              ? Math.max(0, bytesTotal - bytesDone) / rate
-              : null,
+      etaSeconds: indexBuild
+        ? indexBuild.done >= indexBuild.total && indexBuild.total > 0
+          ? 0
+          : recordsPerSecond > 0
+            ? Math.max(0, indexBuild.total - indexBuild.done) / recordsPerSecond
+            : null
+        : rate > 0
+          ? Math.max(0, bytesTotal - bytesDone) / rate
+          : null,
       ...(indexBuild ? { indexBuild } : {}),
     });
   };
@@ -124,15 +101,11 @@ export function hostProgress(sink?: ProgressSink) {
         !baseline ||
         baseline.phase !== next.buildPhase ||
         baseline.field !== next.field ||
-        (indexBuild &&
-          (next.step < indexBuild.step ||
-            next.done < indexBuild.done ||
-            (next.filesDone ?? 0) < (indexBuild.filesDone ?? 0)))
+        (indexBuild && (next.step < indexBuild.step || next.done < indexBuild.done))
       ) {
         baseline = {
           at: now,
           done: next.done,
-          ...(next.filesDone !== undefined ? { filesDone: next.filesDone } : {}),
           step: next.step,
           phase: next.buildPhase,
           ...(next.field ? { field: next.field } : {}),
@@ -154,13 +127,9 @@ export function formatHostProgress(event: HostProgress) {
   const mb = (bytes: number) => (bytes / 1_000_000).toFixed(1);
   if (event.indexBuild) {
     const build = event.indexBuild;
-    const files =
-      build.filesDone !== undefined && build.filesTotal !== undefined
-        ? `, ${build.filesDone}/${build.filesTotal} changed files${build.filesTotalComplete ? '' : ' discovered'}, ${(build.filesPerMinute ?? 0).toFixed(1)} files/min`
-        : '';
     const retry =
       build.retries === undefined ? '' : `, read retry ${build.retries}/${indexPendingResumeLimit}`;
-    return `${event.phase}: ${build.buildPhase}${build.field ? `/${build.field}` : ''}, ${build.done}/${build.total} ${build.buildPhase === 'cleanup' ? 'collections' : 'records'}, ${build.step} steps, ${build.stepsPerSecond.toFixed(1)} steps/s${files}${retry}, ETA ${event.etaSeconds === null ? 'pending' : `${Math.ceil(event.etaSeconds)}s`}`;
+    return `${event.phase}: ${build.buildPhase}${build.field ? `/${build.field}` : ''}, ${build.done}/${build.total} ${build.buildPhase === 'cleanup' ? 'collections' : 'records'}, ${build.step} steps, ${build.stepsPerSecond.toFixed(1)} steps/s${retry}, ETA ${event.etaSeconds === null ? 'pending' : `${Math.ceil(event.etaSeconds)}s`}`;
   }
   return `${event.phase}: ${event.objectsDone}/${event.objectsTotal} objects, ${mb(event.bytesDone)}/${mb(event.bytesTotal)} MB, ${mb(event.bytesPerSecond)} MB/s, ETA ${event.etaSeconds === null ? 'pending' : `${Math.ceil(event.etaSeconds)}s`}`;
 }

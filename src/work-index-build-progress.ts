@@ -41,9 +41,6 @@ export const indexBuildProgressSchema = z.object({
     .optional(),
   done: z.number().safe().nonnegative(),
   total: z.number().safe().nonnegative(),
-  filesDone: z.number().safe().nonnegative().optional(),
-  filesTotal: z.number().safe().nonnegative().optional(),
-  filesTotalComplete: z.boolean().optional(),
   /** Pending resumes already spent at this cursor; present only while a read fault is retried. */
   retries: z.number().int().nonnegative().max(indexPendingResumeLimit).optional(),
   step: z.number().safe().nonnegative(),
@@ -51,5 +48,4 @@ export const indexBuildProgressSchema = z.object({
 export type IndexBuildProgress = z.infer<typeof indexBuildProgressSchema>;
 export const hostIndexProgressSchema = indexBuildProgressSchema.extend({
   stepsPerSecond: z.number().nonnegative(),
-  filesPerMinute: z.number().nonnegative().optional(),
 });

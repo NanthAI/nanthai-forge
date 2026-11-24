@@ -55,11 +55,6 @@ export function buildProgress(generation: Doc<'projectWorkGenerations'>, exchang
     done,
     total,
     step: generation.nextBatch,
-    filesDone: counts.viewFiles ?? 0,
-    filesTotal: Math.max(counts.viewFiles ?? 0, cursor.output?.after.filesTotal ?? cursor.filesTotal ?? 0),
     ...retries(generation),
-    filesTotalComplete:
-      ['trees', 'blobs', 'journal', 'cleanup', 'done'].includes(cursor.phase) ||
-      (cursor.phase === 'summaries' && cursor.field > 1),
   });
 }

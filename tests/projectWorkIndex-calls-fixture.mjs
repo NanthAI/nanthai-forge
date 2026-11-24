@@ -14,7 +14,6 @@ import { buildWorkRecords } from '../dist/work-exchange-records.js';
 const { projectSummaries } = await import(moduleUrl('../convex/projectWorkIndexBuildSummaries.ts'));
 const { exchangeObjectReader } = await import(moduleUrl('../convex/projectExchangeReader.ts'));
 const buildDiffstats = await import(moduleUrl('../convex/projectWorkIndexBuildDiffstats.ts'));
-const states = await import(moduleUrl('../convex/projectWorkIndexBuildStates.ts'));
 const ancestry = await import(moduleUrl('../convex/projectWorkAncestry.ts'));
 const diffstats = await import(moduleUrl('../convex/projectDiffstats.ts'));
 
@@ -152,21 +151,12 @@ export function callsFixture(scale = 1, ownerStats = true) {
     stats: data.views.map(v => [`${v.base}:${v.head}`, { files: 40, add: 40, del: 40 }]),
   });
   for (const [key, bytes] of companion.objects) objects.set(key, bytes);
-  const stateFiles = {
-    has: head => heads.includes(head),
-    get: head =>
-      head === base ? tree : tree.map((f, j) => (j < 40 ? { ...f, blob: changed[j].sha256 } : f)),
-  };
   const ownerViews = data.views.map((view, index) => {
     const make = () =>
       Buffer.from(
         JSON.stringify({
           work: built.root.work.sha256,
-          view: [
-            view.id,
-            'f'.repeat(64),
-            viewIndexEntries(data, stateFiles, { index, positions: new Map() }),
-          ],
+          view: [view.id, 'f'.repeat(64), viewIndexEntries(data, { index, positions: new Map() })],
         }),
       );
     const bytes = make(),
@@ -217,7 +207,6 @@ export function callsFixture(scale = 1, ownerStats = true) {
       metrics.calls[name] = (metrics.calls[name] ?? 0) + 1;
       const action = {
         'projectWorkIndexBuildDiffstats:compare': buildDiffstats.compare,
-        'projectWorkIndexBuildStates:batch': states.batch,
         'projectWorkAncestry:changedStates': ancestry.changedStates,
         'projectWorkAncestry:stateBatch': ancestry.stateBatch,
         'projectDiffstats:compare': diffstats.compare,
@@ -251,12 +240,11 @@ export function callsFixture(scale = 1, ownerStats = true) {
     read: async pin => (await exchangeObjectReader(ctx, false, 0).read('project', 'owner', [pin]))[0],
   };
   const selected = { projectId: 'project', owner: 'owner', generationId: 'generation' };
-  const backup = { _id: 'backup', projectId: 'project', transport: 'objects' };
   return {
     data,
     metrics,
     async page(cursor) {
-      return projectSummaries(ctx, selected, exchange, backup, cursor);
+      return projectSummaries(ctx, selected, exchange, cursor);
     },
   };
 }

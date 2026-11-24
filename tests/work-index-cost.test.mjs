@@ -427,7 +427,7 @@ test('indexed Work writes ratchet per-kind index copies and the projection bytes
   };
   const fixtures = [
     ...Array.from({ length: 128 }, (_, position) => ({
-      collection: 'viewFiles',
+      collection: 'sourceMap',
       key: `candidate:${position}`,
       parent: 'candidate',
       position,
@@ -457,7 +457,7 @@ test('indexed Work writes ratchet per-kind index copies and the projection bytes
   const moved = new Set(['planningItems', 'planningVersions', 'planningComments', 'events']);
   for (const row of fixtures) {
     const group =
-      row.collection === 'viewFiles' || row.collection.endsWith(':payload') || moved.has(row.collection)
+      row.collection === 'sourceMap' || row.collection.endsWith(':payload') || moved.has(row.collection)
         ? 'data'
         : row.collection.startsWith('planning')
           ? 'planning'

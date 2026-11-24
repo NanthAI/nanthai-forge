@@ -163,14 +163,13 @@ test('large record index resumes after a committed step loses its reply without 
   assert.equal(workspace.counts.intents, f.data.intents.length);
   assert.equal(workspace.sourceHead, f.data.nativeHead);
   assert.equal(workspace.counts.views, 2);
-  assert.equal(workspace.counts.viewDetails, 2);
   const detail = JSON.parse(
-    (await index.detail._handler(f.s.ctx, { projectId: 'project', collection: 'viewDetails', id: f.view.id }))
+    (await index.detail._handler(f.s.ctx, { projectId: 'project', collection: 'views', id: f.view.id }))
       .value,
   );
-  assert.equal(detail.viewId, f.view.id);
+  assert.equal(detail.id, f.view.id);
   assert.equal(
-    detail.status,
+    detail.viewStatus,
     'ready',
     'an older family dependency cannot supersede the selected latest View',
   );
@@ -179,7 +178,6 @@ test('large record index resumes after a committed step loses its reply without 
       .value,
   );
   assert.equal(laneDetail.main.included, true);
-  assert.equal(detail.provenanceAvailable, true);
   assert.equal(detail.inputs[0].laneId, f.lane.id);
   assert.equal([...workRecordRows(f.s.tables)].filter(r => r.collection.startsWith('_build')).length, 0);
   assert(maxBytes < 600000, `RPC page was ${maxBytes} bytes`);
@@ -320,28 +318,20 @@ test('a moving snapshot cannot publish an incomplete record generation', async t
   assert([...f.s.tables.projectWorkGenerations.values()].every(g => g.status === 'building'));
 });
 
-test('paged View provenance derives changed source and saved Lane history on the server', async t => {
+test('the paged index writes no legacy View detail, Lane-View or file rows (Item c0af6cfa F1)', async t => {
   const f = await setup(t, 3 * 1024 * 1024, true);
   await continueLongAction('Synthetic index', randomUUID(), continuation =>
     actions.ensure._handler(f.s.ctx, { rebuild: true, projectId: 'project', continuation }),
   );
-  const detail = JSON.parse(
-    (await index.detail._handler(f.s.ctx, { projectId: 'project', collection: 'viewDetails', id: f.view.id }))
-      .value,
+  const collections = new Set([...workRecordRows(f.s.tables)].map(r => r.collection));
+  assert.ok(collections.has('views'));
+  assert.deepEqual(
+    [...collections].filter(name => /^(viewDetails|viewFiles|laneViews)/.test(name)),
+    [],
   );
-  assert.equal(detail.status, 'ready');
-  assert.equal(detail.fileCount, 1);
-  assert.equal(detail.provenanceAvailable, true);
-  const files = await index.records._handler(f.s.ctx, {
-    projectId: 'project',
-    collection: 'viewFiles',
-    parentId: f.view.id,
-    paginationOpts: { cursor: null, numItems: 100 },
-  });
-  const file = JSON.parse(files.page[0].value);
-  assert.equal(file.path, 'a.ts');
-  assert.equal(file.status, 'modified');
-  assert(file.contributors.some(row => row.laneId === f.lane.id && row.saves.length === 1));
+  const workspace = JSON.parse(await index.workspace._handler(f.s.ctx, { projectId: 'project' }));
+  for (const name of ['viewDetails', 'viewFiles', 'laneViews'])
+    assert.equal(workspace.counts[name], undefined);
   const lane = JSON.parse(
     (await index.detail._handler(f.s.ctx, { projectId: 'project', collection: 'lanes', id: f.lane.id }))
       .value,

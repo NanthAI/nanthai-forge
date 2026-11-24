@@ -6,90 +6,14 @@ import type { CheckRun } from '../src/work-types';
 import { hostedText } from '../src/hosted-paths';
 import { blobStore } from './blobStore';
 import { v } from 'convex/values';
-import { paginationOptsValidator } from 'convex/server';
 import { action } from './cliServer';
-import { api, internal } from './_generated/api';
+import { internal } from './_generated/api';
 import { checkLogPage } from '../src/check-log-page';
 import { source } from './projectWorkLoad';
 import { rawMetadata } from './projectObjectContent';
 import { isR2Object } from './projectObjectFields';
-import { exchangeObjectReader } from './projectExchangeReader';
-import { readFileProvenance } from '../src/view-provenance';
-import type { FileProvenancePlan } from '../src/view-provenance-plan';
 import { invariant } from '../src/errors';
 import { report } from './errors';
-
-/** Source bytes are read only for the selected file page; no Work replay. */
-export const read = action({
-  args: {
-    projectId: v.id('hostedProjects'),
-    generationId: v.optional(v.id('projectWorkGenerations')),
-    action: v.union(v.literal('view'), v.literal('provenance'), v.literal('views')),
-    viewId: v.optional(v.string()),
-    laneId: v.optional(v.string()),
-    file: v.optional(v.string()),
-    lines: v.optional(v.boolean()),
-    paginationOpts: paginationOptsValidator,
-  },
-  returns: v.string(),
-  handler: async (ctx, input): Promise<string> => {
-    try {
-      const user = await ctx.auth.getUserIdentity();
-      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read project provenance.');
-      const { lines, ...selection } = input;
-      const result = JSON.parse(await ctx.runQuery(api.projectViewReads.read, selection));
-      if (input.action === 'views') return JSON.stringify(result);
-      const pins = new Map<string, { sha256: string; size: number }>(
-        result.blobPins.filter(Boolean).map((pin: { sha256: string; size: number }) => [pin.sha256, pin]),
-      );
-      delete result.blobPins;
-      if (!result.provenanceAvailable || result.sourceTransport !== 'objects')
-        return JSON.stringify({
-          ...result,
-          available: false,
-          reason:
-            result.sourceStatus === 'conflict'
-              ? 'Conflicted View has no composed file version.'
-              : 'Source provenance requires the retained native object checkpoint; local reads remain available.',
-        });
-      const reader = exchangeObjectReader(ctx);
-      const read = async (blob: string) => {
-        const pin = pins.get(blob);
-        invariant(pin, 'SOURCE_UNAVAILABLE', 'Selected provenance blob is unavailable.');
-        return (await reader.read(input.projectId, user.subject, [pin]))[0]!;
-      };
-      result.files.items = await Promise.all(
-        result.files.items.map(async (file: FileProvenancePlan & { why: unknown }) => {
-          const resolved = await readFileProvenance(file, read, lines ?? false, blob => {
-            const pin = pins.get(blob);
-            invariant(pin, 'SOURCE_UNAVAILABLE', 'Selected provenance blob metadata is unavailable.');
-            return pin.size;
-          });
-          return input.action === 'view'
-            ? {
-                path: resolved.path,
-                status: resolved.status,
-                additions: resolved.additions,
-                deletions: resolved.deletions,
-              }
-            : { ...resolved, why: file.why };
-        }),
-      );
-      const current = await ctx.runQuery(internal.projectWorkIndexStore.current, {
-        projectId: input.projectId,
-        owner: user.subject,
-      });
-      invariant(
-        current && current._id === result.generationId && current.revision === result.revision,
-        'WORK_STALE',
-        'Hosted Work changed while reading provenance.',
-      );
-      return JSON.stringify({ ...result, available: true });
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
 
 /** Retained bytes from the selected checkpoint; never implies the local runner is online. */
 export const log = action({

@@ -64,8 +64,7 @@ export async function ownerProjection(
   ];
   const counts: Record<string, number> = {};
   for (const row of entries) {
-    if (['viewDetails', 'laneViews', 'viewAcceptances'].includes(row.collection))
-      row.position = counts[row.collection] ?? 0;
+    if (row.collection === 'viewAcceptances') row.position = counts[row.collection] ?? 0;
     counts[row.collection] = (counts[row.collection] ?? 0) + 1;
   }
   projection.metadata.counts = counts;

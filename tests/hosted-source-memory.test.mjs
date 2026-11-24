@@ -5,12 +5,10 @@ import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
-import { provenancePlan } from '../dist/view-provenance-plan.js';
 import { hostedActionError } from '../dist/hosted-action-error.js';
 import { ConvexError } from 'convex/values';
 const ancestry = await import(moduleUrl('../convex/projectWorkAncestry.ts'));
 const { sourceParents } = ancestry;
-const { viewStates } = await import(moduleUrl('../convex/projectSourceProjection.ts'));
 
 function synthetic(count, width) {
   const heads = [],
@@ -108,7 +106,7 @@ function synthetic(count, width) {
   };
 }
 
-test('large synthetic history retains parent pins and only changed-path save provenance', async t => {
+test('large synthetic history retains parent pins and no historical file lists', async t => {
   const s = synthetic(100, 500),
     budget = 1024 * 1024,
     logical = s.manifest.files.reduce((sum, pin) => sum + pin.size, 0);
@@ -120,30 +118,13 @@ test('large synthetic history retains parent pins and only changed-path save pro
   const parents = await sourceParents(s.ctx, s.backup, s.manifest, s.data, 'owner', false);
   assert.equal(parents.size, 100);
   assert.equal(parents.files.size, 0, 'ancestry keeps no historical file lists');
-  const states = await viewStates(s.ctx, s, 'owner', 0);
-  assert.equal(states.size, 100);
-  assert.equal(
-    [...states.values()].reduce((sum, files) => sum + files.length, 0),
-    100,
-  );
-  const retained = Buffer.byteLength(JSON.stringify([...states]));
-  assert(retained < budget);
-  const files = provenancePlan(s.data, s.data.views[0], states);
-  assert.equal(files.length, 1);
-  assert.equal(files[0].contributors[0].saves.length, 99);
-  assert.equal(files[0].historyComplete, true);
-  assert(s.invocation().count >= 6, 'large history is split across action invocations');
+  assert(s.invocation().count >= 3, 'large history is split across action invocations');
   assert(
     s.invocation().bytes <= 2 * 1024 * 1024,
     'each parse invocation stays inside the source-byte budget',
   );
   t.diagnostic(
-    JSON.stringify({
-      logicalStateBytes: logical,
-      beforeRetainedBytes,
-      retainedProvenanceBytes: retained,
-      rss: process.memoryUsage().rss,
-    }),
+    JSON.stringify({ logicalStateBytes: logical, beforeRetainedBytes, rss: process.memoryUsage().rss }),
   );
 });
 
@@ -190,7 +171,7 @@ test('streamed multi-View projection equals complete source provenance and stabl
   assert.deepEqual(projection.metadata, expected.metadata);
 });
 
-test('398-View history exceeds one Node action lifetime even when every child RPC is bounded', async () => {
+test('398-View archive projection adds no per-View source reads (Item c0af6cfa F1)', async () => {
   const { workProjection } = await import(moduleUrl('../convex/projectSourceProjection.ts'));
   const s = synthetic(120, 500);
   Object.assign(s.data, {
@@ -230,14 +211,8 @@ test('398-View history exceeds one Node action lifetime even when every child RP
     }));
   };
   const projection = await workProjection(s.ctx, s, 'owner');
-  let exceeded = false;
-  for await (const _batch of projection.batches()) {
-    if (elapsedMs > 10 * 60 * 1000) {
-      exceeded = true;
-      break;
-    }
-  }
-  assert(exceeded, `one coordinator crosses the documented ten-minute lifetime: ${elapsedMs}`);
+  for await (const _batch of projection.batches());
+  assert(elapsedMs < 10 * 60 * 1000, `projection stays inside one action lifetime: ${elapsedMs}`);
   assert(maxInputBytes <= 2 * 1024 * 1024);
-  assert(calls > 1000, 'small child invocations do not bound the parent action lifetime');
+  assert(calls < 20, `398 Views add no source calls: ${calls}`);
 });

@@ -2,8 +2,6 @@
 // Copyright 2026 Ferdinando Valsecchi
 'use node';
 import type { ActionCtx } from './_generated/server';
-import { internal } from './_generated/api';
-import type { Doc } from './_generated/dataModel';
 import {
   rowsRef,
   rowBatchRef,
@@ -21,10 +19,7 @@ import { indexedRecord, type IndexEntry } from '../src/work-hosted-index';
 import { viewReadModels } from '../src/view-read-model';
 import { viewIndexEntries } from '../src/view-hosted-index';
 import { viewSummary, laneSummary, runSummary } from '../src/work-hosted-summary';
-import { indexReadContext, indexTransient } from './projectWorkIndexRetry';
-import { summaryStates } from './projectWorkIndexBuildStates';
-import { viewStates } from './projectSourceProjection';
-import type { ChangedStates } from './projectDiffstatProjection';
+import { indexReadContext } from './projectWorkIndexRetry';
 import { ownerDerivedRows } from './projectOwnerDerived';
 import type { WorkView } from '../src/work-types';
 /** A bounded summary page shares source resolution and diffstat work. */
@@ -32,7 +27,6 @@ export async function projectSummaries(
   ctx: ActionCtx,
   selected: Selected,
   exchange: Exchange,
-  backup: Doc<'projectBackups'>,
   c: Cursor,
   context: BuildContext = buildContext(ctx, selected, exchange),
 ): Promise<IndexEntry[]> {
@@ -125,7 +119,6 @@ export async function projectSummaries(
     );
   }
   const result: IndexEntry[] = [];
-  const changedStates = new Map<string, ChangedStates>();
   const suppliedViews = new Map<string, IndexEntry[]>();
   const contexts = new Map<string, Awaited<ReturnType<typeof viewContext>>>();
   if (field === 'views') {
@@ -160,14 +153,6 @@ export async function projectSummaries(
       );
       if ('rows' in rows) suppliedViews.set(id, rows.rows);
     }
-    await summaryStates(
-      ctx,
-      context,
-      backup,
-      selected.owner,
-      [...contexts].filter(([id]) => !suppliedViews.has(id)).map(([, data]) => data),
-      changedStates,
-    );
   }
   const stats = await context.ownerStats(
     await Promise.all(
@@ -213,25 +198,9 @@ export async function projectSummaries(
         supersededBy: model.supersededBy,
         inputs: model.inputs,
       };
-      const supplied = suppliedViews.get(view.id);
-      if (supplied) derived.push(...supplied);
-      else {
-        let states;
-        try {
-          states = await viewStates(
-            ctx,
-            { backup, manifest: e.manifest, data },
-            selected.owner,
-            0,
-            changedStates,
-            context.pins,
-          );
-        } catch (error) {
-          if (indexTransient(error)) throw error;
-          await ctx.runQuery(internal.projectBackups.get, { id: backup._id, owner: selected.owner });
-        }
-        derived.push(...viewIndexEntries(data, states, { index: 0, positions: new Map() }));
-      }
+      derived.push(
+        ...(suppliedViews.get(view.id) ?? viewIndexEntries(data, { index: 0, positions: new Map() })),
+      );
     }
     const entries = [
       ...indexedRecord(
@@ -258,7 +227,5 @@ export async function projectSummaries(
     if (!result.some(row => row.collection === 'diffstats' && row.key === key))
       result.push({ collection: 'diffstats', key, parent: '', position: 0, value: JSON.stringify(changes) });
   }
-  if (field === 'views')
-    c.filesTotal = (c.filesTotal ?? 0) + result.filter(row => row.collection === 'viewFiles').length;
   return result;
 }

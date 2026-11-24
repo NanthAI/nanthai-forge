@@ -487,10 +487,9 @@ export function* workIndexRows(
     counts.sourceStateParents = sourceParents.size;
     counts.sourceStateParentChunks = chunks;
   }
-  const derived = deferDerived ? [] : viewIndexEntries(data, sourceParents.files);
+  const derived = deferDerived ? [] : viewIndexEntries(data);
   yield* derived;
-  for (const name of ['viewDetails', 'viewFiles', 'laneViews', 'viewAcceptances'])
-    counts[name] = derived.filter(entry => entry.collection === name).length;
+  counts.viewAcceptances = derived.filter(entry => entry.collection === 'viewAcceptances').length;
   let blobPosition = 0;
   for (const file of manifest.files)
     if (/^objects\/[a-f0-9]{64}$/.test(file.path)) {

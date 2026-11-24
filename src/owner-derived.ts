@@ -5,7 +5,7 @@ import { COORDINATION_LIMITS } from './coordination-types.js';
 import { digest } from './hash.js';
 import { reviewPaths } from './native-source-review.js';
 import { contextualHunks } from './review-hunks.js';
-import { viewIndexEntries } from './view-hosted-index.js';
+import { isLegacyViewCollection, viewIndexEntries } from './view-hosted-index.js';
 import { workSourcePins } from './work-archive-metadata.js';
 import { viewReadModels, viewContributors } from './view-read-model.js';
 import type { WorkData } from './work-types.js';
@@ -164,22 +164,10 @@ export function computeOwnerDerived(
       cached = cachedViews.get(view.id);
     if (priorViews.get(view.id) === fingerprint) return;
     if (cached?.fingerprint === fingerprint) {
-      addView([view.id, fingerprint, cached.rows]);
+      addView([view.id, fingerprint, cached.rows.filter(r => !isLegacyViewCollection(r.collection))]);
       return;
     }
-    const files = new Map<string, ReturnType<NativeSource['state']>['files']>();
-    if (view.head && view.status !== 'conflict')
-      for (const head of [
-        view.base,
-        view.head,
-        ...viewContributors(data, view).flatMap(c => [
-          c.head,
-          ...c.saves.flatMap(({ save }) => [save.parent, save.head]),
-        ]),
-      ])
-        files.set(head, cachedTrees.get(head) ?? state(head).files);
-    addView([view.id, fingerprint, viewIndexEntries(data, files, { index, positions: new Map() })]);
-    states.clear();
+    addView([view.id, fingerprint, viewIndexEntries(data, { index, positions: new Map() })]);
   });
   return {
     schema: 3,

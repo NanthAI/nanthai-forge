@@ -8,14 +8,12 @@ import { moduleUrl } from './convex-module.mjs';
 import { progressFixture } from './projectWorkIndex-progress-fixture.mjs';
 import { digest } from '../dist/hash.js';
 import { ForgeError } from '../dist/errors.js';
-import { hostProgress, formatHostProgress } from '../dist/host-progress.js';
 const { pending, pendingResumeLimit } = await import(moduleUrl('../convex/projectWorkIndexBuildFailure.ts'));
 const { buildLookups } = await import(moduleUrl('../convex/projectWorkIndexBuildLookup.ts'));
 const { rawContent } = await import(moduleUrl('../convex/projectObjectContent.ts'));
 const { indexReadContext } = await import(moduleUrl('../convex/projectWorkIndexRetry.ts'));
 const buildStates = await import(moduleUrl('../convex/projectWorkIndexBuildStates.ts'));
 const buildDiffstats = await import(moduleUrl('../convex/projectWorkIndexBuildDiffstats.ts'));
-const { buildProgress } = await import(moduleUrl('../convex/projectWorkIndexBuildProgress.ts'));
 const generation = f => [...f.s.tables.projectWorkGenerations.values()][0];
 const complete = async f => {
   let result;
@@ -271,51 +269,6 @@ test('diffstat and State child actions retry the same read rather than repeating
     pin: treePin,
   });
   assert.equal(calls, 2);
-});
-
-test('heavy View output exposes discovered file totals and a files-based resume-relative ETA', async () => {
-  const cursor = {
-    phase: 'summaries',
-    field: 1,
-    record: 1,
-    source: 0,
-    filesTotal: 1000,
-    output: {
-      key: 'page',
-      part: 1,
-      parts: 10,
-      after: {
-        phase: 'summaries',
-        field: 1,
-        record: 2,
-        source: 0,
-        filesTotal: 11000,
-      },
-    },
-  };
-  const g = {
-    ensureCursor: JSON.stringify(cursor),
-    metadata: JSON.stringify({ counts: { views: 100, viewFiles: 1000 } }),
-    nextBatch: 10,
-  };
-  const events = [],
-    progress = hostProgress(event => events.push(event));
-  progress.phase('building Work index');
-  progress.index(buildProgress(g));
-  assert.equal(events.at(-1).etaSeconds, null);
-  await new Promise(resolve => setTimeout(resolve, 10));
-  g.nextBatch++;
-  g.metadata = JSON.stringify({ counts: { views: 100, viewFiles: 2000 } });
-  progress.index(buildProgress(g));
-  const event = events.at(-1);
-  assert.equal(event.indexBuild.done, 1, 'one heavy View is still staging');
-  assert.equal(event.indexBuild.filesTotal, 11000);
-  assert(event.indexBuild.filesPerMinute > 0);
-  assert(
-    event.etaSeconds > 0 && event.etaSeconds < 5,
-    'file throughput advances ETA even with unchanged Views',
-  );
-  assert.match(formatHostProgress(event), /2000\/11000 changed files discovered.*files\/min.*ETA \d+s/);
 });
 
 test('R2 index reads share the three-attempt budget for HTTP and connection faults', async t => {

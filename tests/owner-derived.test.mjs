@@ -113,7 +113,7 @@ function fixture() {
   };
   return { source, states, objects, data, derived, cursor, base, head };
 }
-test('owner rows match hosted parent, merge ancestry, View provenance and tree computation', async () => {
+test('owner rows match hosted parent, merge ancestry, View acceptance and tree computation', async () => {
   const f = fixture(),
     rows = ownerDerivedRows(f.cursor, f.derived).rows;
   assert.ok(rows);
@@ -144,7 +144,7 @@ test('owner rows match hosted parent, merge ancestry, View provenance and tree c
     );
   const files = new Map([...f.states].map(([h, s]) => [h, s.files]));
   for (const expected of [
-    ...viewIndexEntries(f.data, files, { index: 0, positions: new Map() }),
+    ...viewIndexEntries(f.data, { index: 0, positions: new Map() }),
     ...sourceTreeEntries(f.head, files.get(f.head)),
   ])
     assert.deepEqual(
@@ -208,7 +208,7 @@ for (const missing of ['parents', 'stats', 'views', 'trees'])
       cache,
     );
     assert.deepEqual(result, f.derived);
-    assert.ok(reads > 0);
+    assert.equal(reads > 0, missing !== 'views', 'View rows need no source State since Item c0af6cfa F1');
   });
 
 for (const [name, mutate] of [
@@ -239,16 +239,9 @@ for (const [name, mutate] of [
     },
   ],
   [
-    'wrong View key',
+    'wrong acceptance parent',
     d => {
-      d.views[0][2][0].key = 'other';
-    },
-  ],
-  [
-    'inconsistent file count',
-    d => {
-      const row = d.views[0][2].find(r => r.collection === 'viewDetails');
-      row.value = JSON.stringify({ ...JSON.parse(row.value), fileCount: 99 });
+      d.views[0][2][0].parent = 'other';
     },
   ],
   [
@@ -268,23 +261,48 @@ for (const [name, mutate] of [
       'wrong pair key': 'stats-pin-missing',
       'negative counts': 'schema-invalid',
       'missing View': 'view-missing:view',
-      'wrong View key': 'view-detail-key-invalid',
-      'inconsistent file count': 'view-summary-invalid',
+      'wrong acceptance parent': 'view-acceptance-parent-invalid',
       'unrelated collection': 'view-collection-invalid',
     }[name];
     assert.equal(ownerDerivedRows(f.cursor, f.derived).reason, expected);
   });
 
-test('chunked provenance payloads retain parity and reject corrupt chunks', () => {
+test('chunked acceptance payloads retain parity and reject corrupt chunks', () => {
   const f = fixture();
-  f.data.lanes[0].checkpoints[0].message = 'large synthetic save '.repeat(4000);
+  f.data.channelMoves[0].acceptedBy = 'large synthetic actor '.repeat(2000);
   const derived = computeOwnerDerived(f.data, f.source);
-  assert.ok(derived.views[0][2].some(r => r.collection === 'viewFiles:payload'));
+  assert.ok(derived.views[0][2].some(r => r.collection === 'viewAcceptances:payload'));
   f.cursor.final.command = JSON.stringify({ workSha256: derived.work });
   f.cursor.snapshot.manifest.files.find(file => file.path === 'work.json').sha256 = derived.work;
   assert.ok(ownerDerivedRows(f.cursor, derived).rows);
-  derived.views[0][2].find(r => r.collection === 'viewFiles:payload').value += 'changed';
+  derived.views[0][2].find(r => r.collection === 'viewAcceptances:payload').value += 'changed';
   assert.match(ownerDerivedRows(f.cursor, derived).reason, /^payload-invalid:/);
+});
+
+test('legacy View rows from an older CLI or cache are dropped, never stored or refused (Item c0af6cfa F1)', () => {
+  const f = fixture();
+  assert.deepEqual(
+    [...new Set(f.derived.views[0][2].map(r => r.collection))],
+    ['viewAcceptances'],
+    'the CLI sends only acceptance rows',
+  );
+  const legacy = ['viewDetails', 'viewFiles', 'laneViews', 'viewDetails:payload'].map(
+    (collection, position) => ({
+      collection,
+      key: `legacy-${position}`,
+      parent: 'unchecked',
+      position,
+      value: '{}',
+    }),
+  );
+  f.derived.views[0][2].push(...legacy);
+  const rows = ownerDerivedRows(f.cursor, f.derived).rows;
+  assert.ok(rows);
+  assert.deepEqual(
+    rows.filter(r => /^(viewDetails|viewFiles|laneViews)/.test(r.collection)),
+    [],
+  );
+  assert.equal(rows.filter(r => r.collection === 'viewAcceptances').length, 1);
 });
 
 test('exact owner totals include deletion and a mode-only file without extra lines', async () => {

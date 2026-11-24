@@ -140,7 +140,7 @@ export async function projectStep(
       );
     return entries;
   }
-  if (c.phase === 'summaries') return projectSummaries(ctx, selected, e, backup, c, context);
+  if (c.phase === 'summaries') return projectSummaries(ctx, selected, e, c, context);
   if (c.phase === 'trees') {
     const [hosted, main] = await context.main();
     const heads = [...new Set([e.manifest.head, ...(main ? [main] : []), ...(hosted ? [hosted] : [])])];

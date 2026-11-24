@@ -117,38 +117,3 @@ test('new closures follow a legacy receipt boundary without replaying historical
   assert.equal(await sourceMembership(s.ctx, 'generation', 'new', 'accepted'), true);
   assert.equal(await sourceMembership(s.ctx, 'generation', 'new', 'newer'), false);
 });
-
-test('summary-only refresh preserves provenance in chunked View detail payloads', async () => {
-  const { viewIndexEntries } = await import('../dist/view-hosted-index.js');
-  const data = {
-    lanes: [],
-    intents: [],
-    channelMoves: [],
-    views: [
-      {
-        id: 'view',
-        intentId: 'intent',
-        base: 'base',
-        head: 'head',
-        status: 'clean',
-        at: 'now',
-        inputs: Array.from({ length: 1000 }, (_, i) => ({ laneId: `lane-${i}`, head: 'a'.repeat(64) })),
-      },
-    ],
-  };
-  const rows = viewIndexEntries(data, undefined, {
-    index: 0,
-    positions: new Map(),
-    cachedProvenance: { fileCount: 7, provenanceAvailable: true },
-  });
-  const header = JSON.parse(rows.find(r => r.collection === 'viewDetails').value);
-  assert(header.payloadParts > 0);
-  const payload = JSON.parse(
-    rows
-      .filter(r => r.collection === 'viewDetails:payload')
-      .map(r => r.value)
-      .join(''),
-  );
-  assert.equal(payload.fileCount, 7);
-  assert.equal(payload.provenanceAvailable, true);
-});

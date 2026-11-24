@@ -20,7 +20,6 @@ test('all post-parent index phases fit the dogfood call and action memory budget
   assert.equal(result.rejected, 0, 'every batched action call passes its Convex argument validator');
   assert(result.recipeBindings > 500);
   assert.deepEqual(result.treeShape, { files: 2500, directories: 304, depth: 6 });
-  assert(result.stateBatchP50Ms < 2000, JSON.stringify(result));
   assert.equal(result.calls['projectWorkIndexBuildDiffstats:compare'] ?? 0, 0);
   assert.equal(result.sourceFileReads, 0);
   assert.equal(result.sourceFileResolves, 0);
@@ -52,19 +51,6 @@ test('a resumed dogfood coordinator action stays below 512 MiB without retaining
   t.diagnostic(JSON.stringify(result));
 });
 
-test('the maximum State comparison pin window fits the action memory and resolve byte budgets', async t => {
-  const { stdout } = await promisify(execFile)(
-    process.execPath,
-    ['tests/projectWorkIndex-phases-worker.mjs', 'state-memory'],
-    { env: { ...process.env, FORGE_TEST_PRECOMPILED: '1' }, maxBuffer: 1024 * 1024 },
-  );
-  const result = JSON.parse(stdout.match(/ACTION_RESULT (.+)/)[1]);
-  assert.equal(result.selectedStates, 100);
-  assert(result.maxRssBytes < 512 * 1024 * 1024, JSON.stringify(result));
-  assert(result.maxSourceWindowBytes <= 2 * 1024 * 1024);
-  t.diagnostic(JSON.stringify(result));
-});
-
 const { randomUUID } = await import('node:crypto');
 const { getFunctionName } = await import('convex/server');
 const { moduleUrl } = await import('./convex-module.mjs');
@@ -74,7 +60,6 @@ const { replayStep } = await import(moduleUrl('../convex/projectWorkIndexBuildJo
 const buildStore = await import(moduleUrl('../convex/projectWorkIndexBuildStore.ts'));
 const { state } = await import('./hosted-fixture.mjs');
 const { fixture, upload } = await import('./project-exchange-fixture.mjs');
-const states = await import(moduleUrl('../convex/projectWorkIndexBuildStates.ts'));
 const diffstats = await import(moduleUrl('../convex/projectWorkIndexBuildDiffstats.ts'));
 const { viewContext } = await import(moduleUrl('../convex/projectWorkIndexBuildProjection.ts'));
 
@@ -186,46 +171,17 @@ test('build lookup windows retain current authority and project isolation', asyn
   );
 });
 
-test('batched State and file reads preserve exact pins, incomplete bytes, and fresh authority', async () => {
+test('batched file reads preserve exact pins, incomplete bytes, and fresh authority', async () => {
   const s = fixture();
   const before = await upload(s, Buffer.from('old\n')),
     after = await upload(s, Buffer.from('new\n'));
-  const makeState = async blob =>
-    upload(
-      s,
-      Buffer.from(
-        JSON.stringify({
-          schema: 1,
-          kind: 'forge-source-state',
-          parents: [],
-          files: [{ path: 'one', blob: blob.sha256, mode: 'file' }],
-          message: '',
-          at: 'now',
-        }),
-      ),
-    );
-  const a = await makeState(before),
-    b = await makeState(after);
-  const request = { projectId: 'project', actor: 'owner', requests: [{ before: a, after: b, pins: [] }] };
-  const [changed] = await states.batch._handler(s.ctx, request);
-  assert.deepEqual(changed.paths, ['one']);
   const files = { projectId: 'project', actor: 'owner', files: [{ before, after }, { after }, { before }] };
   assert.deepEqual(await diffstats.compare._handler(s.ctx, files), [
     { add: 1, del: 1, exact: true },
     { add: 1, del: 0, exact: true },
     { add: 0, del: 1, exact: true },
   ]);
-  await assert.rejects(
-    states.batch._handler(s.ctx, {
-      ...request,
-      requests: [{ before: { ...a, size: a.size + 1 }, after: b, pins: [] }],
-    }),
-  );
   s.tables.hostedProjects.get('project').removal = 'deleting';
-  await assert.rejects(
-    states.batch._handler(s.ctx, request),
-    e => (e.data?.code ?? e.code) === 'PROJECT_UNAVAILABLE',
-  );
   await assert.rejects(
     diffstats.compare._handler(s.ctx, files),
     e => (e.data?.code ?? e.code) === 'PROJECT_UNAVAILABLE',
@@ -370,7 +326,7 @@ test('MiB recipe-stored files make the former eager comparison exceed the zero-b
   );
 });
 
-test('transient storage failures retry three times, retain the summary cursor, and resume identical rows', async t => {
+test('transient storage failures retry three times, retain the cursor, and resume identical rows', async t => {
   const { progressFixture } = await import('./projectWorkIndex-progress-fixture.mjs');
   const options = { treeFiles: 2500, realisticTrees: true, recipes: true };
   const baseline = progressFixture(0.02, undefined, undefined, options);
@@ -396,7 +352,7 @@ test('transient storage failures retry three times, retain the summary cursor, a
     savedCursor,
     savedBatch;
   resumed.s.ctx.runAction = async (ref, args) => {
-    const selected = getFunctionName(ref) === 'projectWorkIndexBuildStates:batch' && armed;
+    const selected = getFunctionName(ref) === 'projectWorkIndexBuildStates:tree' && armed;
     if (selected) {
       inBatch = true;
       const g = [...resumed.s.tables.projectWorkGenerations.values()][0];

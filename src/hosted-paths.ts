@@ -40,5 +40,3 @@ export function hostedPaths<T>(value: T, parent = ''): T {
     ) as T;
   return value;
 }
-
-export const hostedJson = (value: unknown) => JSON.stringify(hostedPaths(value));

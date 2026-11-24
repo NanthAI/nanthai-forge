@@ -8,6 +8,7 @@ import { sourceTreeEntries } from '../src/source-tree-index';
 import { invariant, ForgeError } from '../src/errors';
 import { resolveOwnerDerived } from '../src/owner-derived-pages';
 import { safeRelative } from '../src/files';
+import { isLegacyViewCollection } from '../src/view-hosted-index';
 import type { WorkData } from '../src/work-types';
 import type { sourceManifestSchema } from '../src/work-archive-metadata';
 import type { z } from 'zod';
@@ -109,36 +110,20 @@ export function ownerDerivedRows(
         supplied = views.get(view.id);
       if (!supplied || !/^[a-f0-9]{64}$/.test(supplied.fingerprint))
         return { reason: `view-missing:${view.id}` };
-      const ids = new Set<string>();
+      const ids = new Set<string>(),
+        kept: IndexEntry[] = [];
       for (const row of supplied.rows) {
+        // Older CLIs still send View detail, Lane-View and file rows; nothing reads them.
+        // Dropped without CLI_UPGRADE_REQUIRED. Remove by 2026-12-31 with the minimum-CLI bump (Item c0af6cfa F13).
+        if (isLegacyViewCollection(row.collection)) continue;
         const identity = JSON.stringify([row.collection, row.key]);
         if (ids.has(identity)) return { reason: 'view-row-duplicate' };
         ids.add(identity);
-        if (
-          ![
-            'viewDetails',
-            'viewFiles',
-            'laneViews',
-            'viewAcceptances',
-            'viewDetails:payload',
-            'viewFiles:payload',
-            'laneViews:payload',
-            'viewAcceptances:payload',
-          ].includes(row.collection)
-        )
+        if (!['viewAcceptances', 'viewAcceptances:payload'].includes(row.collection))
           return { reason: 'view-collection-invalid' };
-        if (row.collection.startsWith('viewFiles') && !row.key.startsWith(`${view.id}:`))
-          return { reason: 'view-file-key-invalid' };
         if (Buffer.byteLength(row.value) > 500000) return { reason: 'view-row-too-large' };
-        if (row.collection === 'viewDetails' && (row.key !== view.id || row.parent !== view.intentId))
-          return { reason: 'view-detail-key-invalid' };
         if (row.collection === 'viewAcceptances' && row.parent !== view.id)
           return { reason: 'view-acceptance-parent-invalid' };
-        if (
-          row.collection === 'laneViews' &&
-          !view.inputs.some(input => row.key === `${input.laneId}:${view.id}` && row.parent === input.laneId)
-        )
-          return { reason: 'view-lane-invalid' };
         if (row.collection.endsWith(':payload')) {
           if (
             !supplied.rows.some(
@@ -149,54 +134,9 @@ export function ownerDerivedRows(
           )
             return { reason: 'view-payload-header-missing' };
         } else if (!validPins(unpack(row, supplied.rows), pins)) return { reason: 'view-pin-missing' };
+        kept.push(row);
       }
-      const detail = supplied.rows.find(r => r.collection === 'viewDetails' && r.key === view.id);
-      if (!detail) return { reason: 'view-detail-missing' };
-      const summary = unpack(detail, supplied.rows);
-      const fileRows = supplied.rows.filter(r => r.collection === 'viewFiles');
-      if (
-        summary.viewId !== view.id ||
-        summary.intentId !== view.intentId ||
-        summary.base !== view.base ||
-        summary.head !== (view.head ?? null) ||
-        !Array.isArray(summary.inputs) ||
-        !['accepted', 'superseded', 'ready', 'conflict'].includes(summary.status) ||
-        typeof summary.provenanceAvailable !== 'boolean' ||
-        (summary.fileCount !== null &&
-          (!Number.isSafeInteger(summary.fileCount) ||
-            summary.fileCount < 0 ||
-            summary.fileCount !== fileRows.length))
-      )
-        return { reason: 'view-summary-invalid' };
-      if (
-        view.status === 'conflict'
-          ? summary.fileCount !== null || summary.provenanceAvailable
-          : !summary.provenanceAvailable
-      )
-        return { reason: 'view-provenance-invalid' };
-      for (const fileRow of fileRows) {
-        const file = unpack(fileRow, supplied.rows);
-        if (
-          fileRow.parent !== view.id ||
-          fileRow.key !== `${view.id}:${file.path}` ||
-          !['added', 'deleted', 'modified'].includes(file.status) ||
-          typeof file.path !== 'string' ||
-          !safeRelative(file.path) ||
-          typeof file.historyComplete !== 'boolean' ||
-          !Array.isArray(file.contributors)
-        )
-          return { reason: 'view-file-invalid' };
-        for (const version of [file.before, file.after])
-          if (
-            version !== null &&
-            (!version ||
-              typeof version.path !== 'string' ||
-              !pins.has(version.blob) ||
-              !['file', 'executable', 'symlink', 'gitlink'].includes(version.mode))
-          )
-            return { reason: 'view-version-invalid' };
-      }
-      rows.push(...supplied.rows);
+      rows.push(...kept);
     }
     const main = c.snapshot.manifest.head;
     for (const head of new Set([

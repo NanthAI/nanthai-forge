@@ -98,7 +98,6 @@ test('local derivation retains oversized Views, bounds its cache and ignores ove
   assert.ok(ownerDerivedBytes(f.w.store, data));
   assert.ok(statSync(cache).size <= OWNER_DERIVED_MAX_BYTES);
   const lane = data.lanes[0];
-  data.intents[0].outcome = 'Synthetic '.repeat(OWNER_DERIVED_MAX_BYTES / 5);
   data.views.push({
     id: 'large',
     intentId: lane.intentId,
@@ -107,6 +106,18 @@ test('local derivation retains oversized Views, bounds its cache and ignores ove
     inputs: [{ laneId: lane.id, head: lane.head }],
     status: 'clean',
     at: 'a',
+  });
+  // Only acceptance rows are derived per View now (Item c0af6cfa F1), so the oversized View is an accepted one.
+  data.channelMoves ??= [];
+  data.channelMoves.push({
+    id: 'large-move',
+    channel: 'main',
+    viewId: 'large',
+    head: lane.head,
+    previous: lane.base,
+    at: 'a',
+    status: 'accepted',
+    acceptedBy: 'Synthetic '.repeat(OWNER_DERIVED_MAX_BYTES / 5),
   });
   const partial = JSON.parse(ownerDerivedBytes(f.w.store, data));
   assert.ok(partial.parents.length > 0, 'oversized View retains usable State facts');

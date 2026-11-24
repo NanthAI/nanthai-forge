@@ -12,7 +12,7 @@ console.log = (...args) => {
   if (typeof args[0] === 'string' && args[0].startsWith('FORGE_PROJECT_EXECUTION ')) return;
   measuredLog(...args);
 };
-if (['action', 'state-action'].includes(process.argv[2])) {
+if (process.argv[2] === 'action') {
   // Only the action lives here. The fake database and storage live in the parent,
   // as they do outside a real Convex action; producer RSS is measured separately.
   let sequence = 0;
@@ -49,13 +49,9 @@ if (['action', 'state-action'].includes(process.argv[2])) {
   global.gc();
   const baseline = { ...process.memoryUsage(), maxRssBytes: process.resourceUsage().maxRSS * 1024 };
   const started = performance.now();
-  const states = await import(moduleUrl('../convex/projectWorkIndexBuildStates.ts'));
-  const result =
-    process.argv[2] === 'state-action'
-      ? await states.batch._handler(ctx, JSON.parse(process.argv[3]))
-      : await ensure._handler(ctx, { rebuild: true, projectId: 'project' });
+  const result = await ensure._handler(ctx, { rebuild: true, projectId: 'project' });
   console.log(
-    `ACTION_RESULT ${JSON.stringify({ pending: result.pending, selectedStates: process.argv[2] === 'state-action' ? new Set(JSON.parse(process.argv[3]).requests.flatMap(r => [r.before, r.after, ...r.pins].map(p => p.sha256))).size : undefined, baseline, memory: process.memoryUsage(), maxRssBytes: process.resourceUsage().maxRSS * 1024, elapsedMs: performance.now() - started, maxSourceWindowBytes: await rpc('window') })}`,
+    `ACTION_RESULT ${JSON.stringify({ pending: result.pending, baseline, memory: process.memoryUsage(), maxRssBytes: process.resourceUsage().maxRSS * 1024, elapsedMs: performance.now() - started, maxSourceWindowBytes: await rpc('window') })}`,
   );
   process.exit(0);
 }
@@ -69,7 +65,7 @@ const f = progressFixture(process.argv[2] === 'sample' ? 0.04 : 1, undefined, un
   journal: 5000,
   objects: 32000,
 });
-if (['memory', 'state-memory'].includes(process.argv[2])) {
+if (process.argv[2] === 'memory') {
   await f.s.ctx.runMutation(makeFunctionReference('projectWorkIndexStore:begin'), {
     projectId: 'project',
     owner: 'owner',
@@ -86,21 +82,7 @@ if (['memory', 'state-memory'].includes(process.argv[2])) {
     }),
     cursor: JSON.stringify({ phase: 'summaries', field: 1, record: 403, source: 2495 }),
   });
-  const args =
-    process.argv[2] === 'state-memory'
-      ? [
-          'state-action',
-          JSON.stringify({
-            projectId: 'project',
-            actor: 'owner',
-            requests: Array.from({ length: 10 }, (_, i) => ({
-              before: f.sourcePins[i * 10],
-              after: f.sourcePins[i * 10 + 1],
-              pins: f.sourcePins.slice(i * 10 + 2, i * 10 + 10),
-            })),
-          }),
-        ]
-      : ['action'];
+  const args = ['action'];
   const child = fork(fileURLToPath(import.meta.url), args, {
     execArgv: ['--expose-gc', '--max-old-space-size=128'],
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -146,10 +128,6 @@ const generation = f.s.tables.projectWorkGenerations.get(result);
 console.log(
   `PHASE_RESULT ${JSON.stringify({
     ...f.metrics,
-    stateBatchMs: undefined,
-    stateBatchP50Ms: f.metrics.stateBatchMs.sort((a, b) => a - b)[
-      Math.floor(f.metrics.stateBatchMs.length / 2)
-    ],
     treeShape: f.treeShape,
     remaining,
     recipeBindings: f.recipeBindings.size,

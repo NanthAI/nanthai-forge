@@ -113,7 +113,6 @@ function lastSaveIndex(lane: Lane, head: string, at: string) {
   }
   return -1;
 }
-export type ViewReadModel = ReturnType<typeof viewReadModels>[number];
 export function viewContributors(data: WorkData, view: WorkView) {
   const views = new Map(data.views.map(value => [value.id, value])),
     lanes = new Map(data.lanes.map(value => [value.id, value])),
@@ -145,19 +144,4 @@ export function viewContributors(data: WorkData, view: WorkView) {
   }
   visit(view);
   return result;
-}
-export function whyNotes(data: WorkData, intentId: string, path?: string) {
-  return (data.intents.find(intent => intent.id === intentId)?.notes ?? []).flatMap((note, index) =>
-    path && note.anchor && note.anchor.file !== path
-      ? []
-      : [
-          {
-            id: `${intentId}:${index}`,
-            kind: note.kind,
-            excerpt: note.text.slice(0, 500),
-            at: note.at,
-            ...(note.anchor ? { anchor: note.anchor } : {}),
-          },
-        ],
-  );
 }
