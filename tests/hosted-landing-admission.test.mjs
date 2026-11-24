@@ -204,6 +204,11 @@ test('interaction replay: two admitted members fail together, split at once, and
   const receipts = [...f.tables.projectHostedAcceptances.values()].map(r => JSON.parse(r.value));
   const [one, two] = f.entries.map(e => receipts.find(r => r.submissionId === e.state.id));
   assert.equal(one.check.runId, f.runs()[0].id);
+  // Item 1018d0f8 (review b0144034): the first member was bound to its admission run, the shared run,
+  // then its admission run again. It threw away one run (the shared one), not two.
+  const samples = [...f.tables.projectLandingSpeed.values()].flatMap(row => JSON.parse(row.value).samples);
+  const firstReceipt = states(f).find(s => s.id === f.entries[0].state.id).acceptance.receiptId;
+  assert.equal(samples.find(sample => sample[3] === firstReceipt)[7][7], 1, 'one discarded run');
   assert.equal(two.previous.head, one.candidate.head, 'checked on main including the first');
   assert(files(f, two.candidate.head).includes('member-0'));
 });

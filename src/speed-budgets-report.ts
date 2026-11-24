@@ -3,7 +3,9 @@
 import type { MetricPeriod, MetricRecords } from './self-metrics-types.js';
 import { during } from './self-metrics-joins.js';
 import {
+  discardedMinutesBeside,
   landingBudgets,
+  minutesWindow,
   ratchetStatus,
   windowValue,
   type LandingMetric,
@@ -83,6 +85,7 @@ export function speedBudgetRows(
           c?.runnerDiscarded == null ? null : c.runnerDiscarded * 60,
           c?.runnerAccepted == null || !auditsProjected ? null : (audits.get(row.id) ?? 0),
           c?.runnerFull == null ? null : c.runnerFull * 60,
+          c?.discardedRuns ?? null,
         ],
         row.saveMs ?? null,
         row.preflightMs ?? null,
@@ -162,13 +165,13 @@ export function speedBudgetRows(
       row => windowValue([row], b.metric as LandingMetric, b.stat!, 1) !== null,
     ).length;
     const line = auto && auto.line < b.max ? { line: auto.line } : {};
-    const minutes =
-      b.metric === 'discardedChecks'
-        ? windowValue(rows, 'runnerDiscarded', 'mean', budgets.window.landings)
-        : null;
-    // Minutes stay visible beside the count (owner 2026-11-23); they judge nothing.
+    // Minutes stay visible beside the count (owner 2026-11-23), over the landings it read; they judge nothing.
+    const beside =
+      b.metric === 'discardedChecks' ? discardedMinutesBeside(rows, budgets.window.landings) : null;
     const secondary =
-      minutes === null ? '' : `; secondary: ${minutes} runner min of discarded checks per landing`;
+      beside === null
+        ? ''
+        : `; secondary: ${beside.minutes} runner min of discarded checks per landing ${minutesWindow(beside.of, budgets.window.landings)}`;
     return value === null
       ? {
           ...base,

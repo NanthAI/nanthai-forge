@@ -108,3 +108,54 @@ export function bindRunnerAccounting(
   void _previous;
   return retained;
 }
+
+/** Distinct run ids kept for the count. A landing that binds more distinct runs than this is far over the
+ * budget (4 per 20 landings) already; a rebind of a run older than the last 8 would count once more. */
+export const COUNTED_RUN_IDS = 8;
+
+/** Count a run once when it is bound to this work (Item 1018d0f8, root cause 3a5737c4): the
+ * discarded-check budget reads distinct runs, not attempts. A check carried to a resubmission, or bound
+ * again after another one (a failed cohort splits back onto a member's admission run), is the same run.
+ * Returns the same object when nothing changes, so the caller can skip the write. */
+export function countRunnerRun(
+  accounting: RunnerAccounting,
+  runId: string | null | undefined,
+): RunnerAccounting {
+  const key = runId && countedRunKey(runId);
+  if (!accounting || !key || accounting.runs === undefined || accounting.runIds?.includes(key))
+    return accounting;
+  return {
+    ...accounting,
+    runs: accounting.runs + 1,
+    runIds: [...(accounting.runIds ?? []), key].slice(-COUNTED_RUN_IDS),
+  };
+}
+
+/** A run id's last 8 characters: enough to tell apart the few runs of one landing, and 28 bytes per run
+ * less on the request row (landing storage budget). */
+export const countedRunKey = (runId: string) => runId.slice(-8);
+
+/** The store's bind: main's cancel-marker rule (a different run than the bound one clears it), then the
+ * run count, kept apart so runner-minute accounting does not change (review b0144034 P3). */
+export function bindRunnerRun(
+  accounting: RunnerAccounting,
+  boundRunId: string | null | undefined,
+  runId: string | null | undefined,
+): RunnerAccounting {
+  const bound =
+    accounting && runId && runId !== boundRunId ? bindRunnerAccounting(accounting, runId) : accounting;
+  return countRunnerRun(bound, runId);
+}
+
+/** Fresh accounting for new work. The run count starts only for a new lineage: a retry of a predecessor
+ * without accounting cannot know that predecessor's runs, so its count stays unknown (review b0144034 P2). */
+export const freshRunnerAccounting = (root: string, supersedes: unknown): NonNullable<RunnerAccounting> => ({
+  root,
+  pending: 0,
+  ...(supersedes ? {} : { runs: 0 }),
+});
+
+/** Check runs this landing threw away: every run bound to its work but the accepted one. Null when
+ * the count started after its first run (accounting older than the count). */
+export const discardedRunCount = (accounting: RunnerAccounting, acceptedRunId: string | null | undefined) =>
+  accounting?.runs === undefined ? null : Math.max(0, accounting.runs - (acceptedRunId ? 1 : 0));

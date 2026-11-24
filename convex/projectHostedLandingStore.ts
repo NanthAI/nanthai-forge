@@ -52,7 +52,7 @@ import { recordLandingSpeed } from './projectLandingSpeed';
 import { recordGuardFailureOffMainRed } from './projectGuardMainRed';
 import { PASS_HELD, keepsPassStamp, passToLandMinutes } from '../src/landing-speed-alerts';
 import { failureDetail, recordFailure } from './projectFailureLog';
-import { bindRunnerAccounting, bindSupersededCheck } from './projectHostedLandingRunnerCosts';
+import { bindRunnerRun, bindSupersededCheck, discardedRunCount } from './projectHostedLandingRunnerCosts';
 import { invariant } from '../src/errors';
 import { settleEndedBatch } from './projectHostedLandingBatchSettle';
 import { reviewState } from './projectHostedOwnerReview';
@@ -301,6 +301,7 @@ export async function writeLanding(
           : ('full' as const)
       : row.checkKind;
   const carried = bindSupersededCheck(state.counts, row.supersededCheck, runId);
+  const runnerAccounting = bindRunnerRun(row.runnerAccounting, row.runId, runId);
   if (carried.counts) state.counts = carried.counts;
   // Solo checking/ready tails can own speculative descendants too. Retire the
   // old generation in the mutation that changes its pins or stops its proof.
@@ -509,9 +510,7 @@ export async function writeLanding(
         ? row.pipelineRetiredAttemptId
         : undefined,
     runId,
-    ...(row.runnerAccounting && runId && runId !== row.runId
-      ? { runnerAccounting: bindRunnerAccounting(row.runnerAccounting, runId) }
-      : {}),
+    ...(runnerAccounting !== row.runnerAccounting ? { runnerAccounting } : {}),
     supersededCheck: carried.supersededCheck,
     checkWakeVersion: row.runId === runId ? row.checkWakeVersion : undefined,
     ...(checkKind !== row.checkKind ? { checkKind } : {}),
@@ -591,6 +590,7 @@ export async function writeLanding(
       attempt.number + 1,
       firstPass,
       checkKind,
+      discardedRunCount(runnerAccounting, runId),
     );
     const project = await ctx.db.get(row.projectId);
     if (project?.needsFix)

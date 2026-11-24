@@ -222,6 +222,8 @@ test('metrics projects every live cost budget from existing landing and run page
       timing: { ...state.timing, committedAt: at(n * 10 + 2), ciEndedAt: at(n * 10 + 1), ms: [15000, 49779] },
       counts: { r2: [3, 12, 1000000], runnerSeconds: 3000 },
     });
+    // Item 1018d0f8: the record counted its one run, the accepted one (without a count it is unknown).
+    row.runnerAccounting = { root: row.submissionId, pending: 0, runs: row.runId ? 1 : 0 };
   }
   f.run('audit', at(15), at(18), 1200, { gate: { mode: 'audit' }, execution: { seconds: 1200 } });
   const calls = f.meter.calls;

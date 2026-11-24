@@ -40,6 +40,7 @@ import {
   landingCosts,
   landingRecomposeCount,
 } from '../src/hosted-landings-view';
+import { discardedRunCount } from './projectHostedLandingRunnerCosts';
 
 type AttemptProgress = {
   phase?: HostedLandingState['phase'];
@@ -234,7 +235,12 @@ async function evidence(
         : null,
       // A check binding replaces an attempt without composing again: count distinct Candidates.
       recomposeCount: landingRecomposeCount(attempts, last?.number),
-      costs: landingCosts(state, last?.number, request?.runnerAccounting?.pending),
+      costs: landingCosts(
+        state,
+        last?.number,
+        request?.runnerAccounting?.pending,
+        discardedRunCount(request?.runnerAccounting, request?.runId),
+      ),
       // Each attempt restamps timing.composeStartedAt; the first compose is the first attempt's (19328518).
       firstComposeStartedAt: progress[0]?.timing?.composeStartedAt ?? state?.timing?.composeStartedAt ?? null,
       heldAfterCheck: heldAfterCheck(attempts, progress),

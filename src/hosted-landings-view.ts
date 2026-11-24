@@ -30,9 +30,16 @@ export const landingCostsSchema = z.object({
   runnerDiscardedPending: z.literal(true).optional(),
   /** The accepted run's minutes when it was a full check; absent when scoped or unknown (Issue a217b83e). */
   runnerFull: z.number().nonnegative().optional(),
+  /** Check runs the landing threw away: runs bound to its record minus the accepted one (Item 1018d0f8). Absent: unknown. */
+  discardedRuns: z.number().int().nonnegative().optional(),
 });
 /** Same units as the ledger: runner seconds become minutes. No source or run lookup. */
-export function landingCosts(state: HostedLandingState | null, attempt: number | undefined, pending = 0) {
+export function landingCosts(
+  state: HostedLandingState | null,
+  attempt: number | undefined,
+  pending = 0,
+  discardedRuns: number | null = null,
+) {
   const discarded = pending > 0 ? null : discardedRunnerSeconds(state);
   return {
     attempts: attempt === undefined ? null : attempt + 1,
@@ -46,6 +53,7 @@ export function landingCosts(state: HostedLandingState | null, attempt: number |
     ...(state?.counts?.runnerFull && state.counts.runnerSeconds !== undefined
       ? { runnerFull: state.counts.runnerSeconds / 60 }
       : {}),
+    ...(discardedRuns === null ? {} : { discardedRuns }),
   };
 }
 

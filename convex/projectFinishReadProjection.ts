@@ -97,6 +97,21 @@ export function finishReadProjection(kind: FinishReadKind, row: Record<string, u
       row.capsule as import('../src/hosted-landing').LandingCapsulePointer;
     result.capsule = { protocol, sha256, size, rawSize, version, tables: '', tablesDigest: digest(tables) };
   }
+  if (
+    (kind === 'projectHostedLandingRequests' || kind === 'projectHostedLandingDesired') &&
+    result.runnerAccounting
+  ) {
+    // The observer prices pending cost only. The discarded run count (Item 1018d0f8) is read at landing
+    // from the row itself, so the copies neither carry it nor rewrite when a run is counted.
+    const {
+      runs: _runs,
+      runIds: _runIds,
+      ...observed
+    } = result.runnerAccounting as NonNullable<Doc<'projectHostedLandingRequests'>['runnerAccounting']>;
+    void _runs;
+    void _runIds;
+    result.runnerAccounting = observed;
+  }
   if (kind === 'projectHostedFinishes') {
     result.value = canonicalPayload({
       pending: finishPendingForReader(JSON.parse(row.value as string).pending),

@@ -20,7 +20,7 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 | Attempts and landing-state writes per landing, mean (cost drift, Issue 3e3f9fe6) | every landing | attempts 1.6 over the 36 landings of 2026-11-10 (2.3 over 285 landings 11-08 to 11-10; worst 20-landing window 3.55); writes 11.1 live (8, 12, 20 to 22 for one, two, three attempts); budget 4 / 22 |
 | R2 request dollars and bytes put by a landing's composes, mean (Issue 3e3f9fe6) | every recomposed landing | Latest 20 jointly stamped dev landings at 2026-11-12 23:20Z: 2.55 A / 1.00 B, or $0.000011835 per landing; request budget $0.000018 (about 1.5x, rounded up to a microdollar, absolute floor $0.000010). Separate bytes budget remains 1.35 MB; missing stamps are skipped |
 | GitHub runner minutes of a landing's checks, mean: accepted / audit (Issue 3e3f9fe6) | every landing | 54.4 / 18.8 shard minutes over the 36 landings of 2026-11-10 (rolling 20-landing means 49 to 57 / 13 to 23); budget 70 / 32 min |
-| Discarded checks (checks a landing's attempts threw away), sum over the last 20 landings (Issue 1018d0f8, owner 2026-11-23) | every landing | 3 discarded runs in the 36 landings of 2026-11-10 (1.7 in 20); budget 4 checks. Counts queue waste only: check length has its own budgets. Runner minutes of the same checks (4.7 a landing then) stay beside it in the report and the alert, secondary, never judged ([below](#discarded-checks-budget)) |
+| Discarded checks (check runs a landing threw away), sum over the last 20 landings (Issue 1018d0f8, owner 2026-11-23) | every landing | 3 discarded runs in the 36 landings of 2026-11-10 (1.7 in 20); budget 4 checks. Counts queue waste only: check length has its own budgets. Runner minutes of the same checks (4.7 a landing then) stay beside it in the report and the alert, secondary, never judged ([below](#discarded-checks-budget)) |
 | Runner minutes per full check, p50 (shard execution of the accepted run when it ran in full) | every landing with a full check | 76.4 min over the first 8 full checks after d5de1c98 (121.6 over 34 before it); budget 92 min |
 | Cancelled or discarded runner minutes per UTC day (Item a217b83e) | the Stats day close, once per closed day | live 2026-11-11 to 11-19: 0 to 1,620 on ordinary days, 6,613 on the 11-17 incident day, 7,945 on 11-19; budget 2,100 min ([below](#daily-waste-tripwire)) |
 | Save / preflight, p90 | every landing with a recorded duration | initial budgets 30 / 120 s; sources and calibration below |
@@ -222,25 +222,31 @@ by a few bytes per young file, and the receipt and landing state by a few hundre
 ## Discarded checks budget
 
 `landing-runner-discarded-mean` (Issue 1018d0f8, owner 2026-11-23) counts **checks**, not minutes: the sum over the
-last 20 landings of the checks each landing's attempts threw away, at most **4**. That is the original intent of the
+last 20 landings of the check runs each landing threw away, at most **4**. That is the original intent of the
 first 12-minute line (one full check was about 3 minutes of the mean, 12 was four of them), kept at four whatever a
 check costs (86 runner-min by 2026-11-22). Check length has its own budgets (runner minutes per full check, check
 minutes), so this one measures queue waste only. The id keeps its old name so the one P0 Issue and its history stay
 one record.
 
-- **Per landing**, from stamps the landing sample already holds, no new stamp, call or read: no discarded runner
-  seconds is nothing thrown away (a reused check is kept); known seconds mean `max(1, attempts - 1)` checks (each
-  attempt after the first replaced a check; a batch member's share of a failed cohort run is one). It is an
-  estimate: it runs high when an attempt reused its check beside a discard, and low when resubmissions carried
-  discarded seconds but restarted the attempt ordinal (a later submission landing on its first attempt counts one).
-  An exact per-landing stamp is a follow-up. Unknown seconds (usage still pending, or a row from before the stamp)
-  stay unknown and are excluded, never counted as zero: the sum then reaches back to the newest 20 landings that
-  know it, and the alert says so and names discarded runner seconds as the missing stamp. This is a count over a
-  window, not a percentile: one landing estimated at five discards breaks it, which is the intent (four in 20 is
-  the line).
-- **Secondary number**: the same window's mean discarded runner minutes per landing is shown beside the count in
-  the `metrics` row note and in the break and recovery messages. It judges nothing.
-- A count never ratchets. `src/landing-speed-alerts.ts` (`discardedChecks`, stat `sum`) judges it; tests
+- **Per landing**, the real number of discarded check runs (Item 1018d0f8, step 2): every distinct run bound to
+  the landing record, minus the accepted run, stamped on the landing sample (`counts` slot 8). The record counts a
+  run when it binds it (`countRunnerRun`, on the bind write it already makes), so it costs no new call or read. It
+  keeps the last 8 distinct run ids, so a run bound again after another one (a failed cohort splits back onto a
+  member's admission run) counts once. The count starts only with a new lineage: a retry of a predecessor that had
+  no run accounting stays unknown. The cancel marker (`lastCancelled`) clears on a new binding exactly as before,
+  so runner-minute accounting does not change. It replaced the old estimate
+  (`attempts - 1` for any landing with discarded seconds), which gave 26 where 15 runs were really thrown away over
+  the 60 landings of 2026-11-24 04:47Z to 19:12Z; two of its breaks were the estimate moving, not the queue. A
+  landing without the stamp (recorded before it, or a record with no run accounting) stays unknown and is
+  excluded, never counted as zero: the sum then reaches back to the newest 20 landings that know it, and the alert
+  names the discarded run count as the missing stamp. Nothing is backfilled; the window rolls over by itself. This
+  is a count over a window, not a percentile: one landing with five discarded runs breaks it, which is the intent
+  (four in 20 is the line).
+- **Secondary number**: the mean discarded runner minutes per landing over the same landings the count reads (the
+  newest 20 with a run count) is shown beside the count in the `metrics` row note and in the break and recovery
+  messages (`discardedMinutesBeside`). A landing among them without minutes yet (a delayed usage report) is
+  excluded, and the text says "over 15 of the same 20 landings". It judges nothing.
+- A count never ratchets. `src/landing-speed-alerts.ts` (metric `discardedChecks`, stat `sum`) judges it; tests
   `tests/landing-speed-alerts.test.mjs` ("Item 1018d0f8") cover the unit, the break at the fifth check in the
   window, the single quiet repeat, and the recovery at four.
 - Baseline: 3 discarded runs in the 36 landings of 2026-11-10 to 08:31Z (1.7 per 20). The Item's cause fix (hold a

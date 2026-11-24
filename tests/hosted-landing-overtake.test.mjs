@@ -398,10 +398,12 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // (and at 4,000 files), with unchanged calls.
   // Item 8b7ab7a9: the cold metadata pair shares one upload drive and callback.
   // Four fewer calls, 123,394 fewer read bytes and 26,132 fewer write bytes.
+  // Item 1018d0f8: the request rows' discarded run count (`runs` and short run keys) adds 3,699 read and 491
+  // write bytes for the pair, with unchanged calls.
   const measured = canonicalReplayCost(pair);
   assert.deepEqual(
     measured,
-    { calls: 103, readBytes: 1_699_839, writeBytes: 568_050 },
+    { calls: 103, readBytes: 1_703_538, writeBytes: 568_541 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -463,10 +465,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item 411727ba (bucketed overlap changes): the same +286 read and +182 write bytes at 4,000 files.
   // Item 8b7ab7a9: the grouped upload still removes four calls at 4,000 files,
   // with 123,656 fewer read bytes and 26,216 fewer write bytes.
+  // Item 1018d0f8: the same discarded run count adds 3,699 read and 491 write bytes at 4,000 files.
   const measured = canonicalReplayCost(after);
   assert.deepEqual(
     measured,
-    { calls: 103, readBytes: 1_704_434, writeBytes: 570_243 },
+    { calls: 103, readBytes: 1_708_133, writeBytes: 570_734 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

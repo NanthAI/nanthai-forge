@@ -25,6 +25,7 @@ import { report } from './errors';
 import { logIoAttribution } from './ioAttribution';
 import { metricReceiptCoverage } from '../src/self-metric-receipts';
 import { landingClientHoldSeconds, landingCosts } from '../src/hosted-landings-view';
+import { discardedRunCount } from './projectHostedLandingRunnerCosts';
 import {
   dayBudgetStateSchema,
   landingSpeedSample,
@@ -430,6 +431,7 @@ export const page = query({
                 submitted,
                 attempt?.number ?? selected?.number,
                 request?.runnerAccounting?.pending,
+                discardedRunCount(request?.runnerAccounting, request?.runId),
               ),
               ...(submitted?.timing?.ms?.[0] == null ? {} : { saveMs: submitted.timing.ms[0] }),
               ...(submitted?.timing?.ms?.[1] == null ? {} : { preflightMs: submitted.timing.ms[1] }),

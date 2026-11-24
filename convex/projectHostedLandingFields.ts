@@ -39,6 +39,12 @@ export const runnerAccounting = v.optional(
     root: v.string(),
     pending: v.number(),
     lastCancelled: v.optional(v.string()),
+    // Check runs bound to this work so far (Item 1018d0f8): at landing, all but the accepted one were
+    // thrown away. Absent on accounting started before the count, which stays unknown.
+    runs: v.optional(v.number()),
+    // The distinct runs counted (last 8 characters of each id, at most the last 8 runs), so a carried or
+    // rebound check is never counted twice.
+    runIds: v.optional(v.array(v.string())),
     // Last applied Stats contribution after a derived day write or read failed.
     // Retained only until the day can be corrected or a newer close includes the current state.
     statsBaseline: v.optional(

@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import {
   addAuditSeconds,
   carriedCostCounts,
+  discardedMinutesBeside,
   longestStage,
   landingSpeedSample,
   observeLandingSpeed,
@@ -504,11 +505,13 @@ test('live cost counts: R2 requests and runner minutes are stamped on the landin
       excessiveB = Math.ceil(byId('landing-r2-request-usd-mean').max / 0.36e-6) + 1;
     // Three of the twenty landings threw a check away (about 4.7 runner minutes a landing, 3 checks).
     for (let i = 0; i < WINDOW; i++)
-      assert.deepEqual(feed([classA, classB, bytesPut, 3260, i < 3 ? 1880 : 0, 1120]), []);
+      assert.deepEqual(
+        feed([classA, classB, bytesPut, 3260, i < 3 ? 1880 : 0, 1120, null, i < 3 ? 1 : 0]),
+        [],
+      );
     assert.equal(windowValue(rows.samples, 'runnerAccepted', 'mean', WINDOW), 54.3);
     assert.equal(windowValue(rows.samples, 'runnerDiscarded', 'mean', WINDOW), 4.7);
-    // Minutes stay as a secondary number; the budget judges checks (a landing with discarded seconds and
-    // two attempts threw one check away).
+    // Minutes stay as a secondary number; the budget judges the stamped discarded run count.
     assert.equal(windowValue(rows.samples, 'discardedChecks', 'sum', WINDOW), 3);
     assert.equal(windowValue(rows.samples, 'runnerAudit', 'mean', WINDOW), 18.7);
     assert.equal(windowValue(rows.samples, 'r2ClassB', 'mean', WINDOW), classB);
@@ -660,6 +663,8 @@ test('a landing that breaks a budget alerts once on the stall-alert channel and 
   // Live cost counts ride in the same row write: one attempt, the landing state's seven writes.
   // (Found by its receipt id: the fixture's clock can place it before the seeded samples.)
   assert.deepEqual(stored.samples.find(sample => sample[3].length === 36).slice(5, 7), [1, 7]);
+  // Item 1018d0f8: the landing record counted its one run, the accepted one, so none was thrown away.
+  assert.equal(stored.samples.find(sample => sample[3].length === 36)[7][7], 0);
   // The Issue write: one scheduled action as the project owner, carrying the fixed per-budget Issue id.
   assert.equal(f.metrics.speedIssueWrites.length, 1);
   const [write] = f.metrics.speedIssueWrites;
@@ -802,23 +807,27 @@ test('incident f5c45985: discarded operation stamp survives a missing accepted-r
       { ...sample, at: noon + n * minute, id: `sample-${n++}`, counts },
       budgets,
     ).state);
-  for (let i = 0; i < WINDOW - 1; i++) feed([null, null, null, null, 600, null]);
-  feed(sample.counts);
+  for (let i = 0; i < WINDOW - 1; i++) feed([null, null, null, null, 600, null, null, 1]);
+  feed([...sample.counts, null, 1]);
   assert.equal(
     windowValue(history.samples, 'runnerDiscarded', 'mean', WINDOW),
     Math.round((((WINDOW - 1) * 600 + 3317) / 60 / WINDOW) * 10) / 10,
   );
-  // Each of these landings (two attempts, discarded seconds known) threw one check away.
+  // Each of these landings stamped one discarded run.
   assert.equal(windowValue(history.samples, 'discardedChecks', 'sum', WINDOW), WINDOW);
   const unknown = landingSpeedSample({ ...state, counts: undefined });
   assert.equal(unknown.counts[4], null);
+  assert.equal(unknown.counts[7], undefined, 'no run count passed: the stamp is unknown');
   feed(unknown.counts);
   const records = {
     finishTimings: history.samples.map(row => ({
       id: row[3],
       at: new Date(row[0]).toISOString(),
       minutes: row[1],
-      costs: { runnerDiscarded: row[7][4] === null ? null : row[7][4] / 60 },
+      costs: {
+        runnerDiscarded: row[7][4] === null ? null : row[7][4] / 60,
+        ...(row[7][7] == null ? {} : { discardedRuns: row[7][7] }),
+      },
     })),
     runs: [],
   };
@@ -834,23 +843,68 @@ test('incident f5c45985: discarded operation stamp survives a missing accepted-r
   const previous = { ...history, broken: {} };
   previous.samples = previous.samples.map(row => {
     const next = structuredClone(row);
-    if (next[7][4] !== null) next[7][4] = 6000;
+    if (next[7][7] != null) next[7][7] = 5;
     return next;
   });
   const { events } = observeLandingSpeed(
     previous,
-    { ...sample, at: noon + n++ * minute, id: 'crossing' },
+    { ...sample, at: noon + n++ * minute, id: 'crossing', counts: [...sample.counts, null, 1] },
     budgets,
   );
   const event = events.find(e => e.budget.metric === 'discardedChecks');
   assert.equal(event.unknown, 1);
   assert.match(
     speedBudgetMessage(event, 'synthetic', budgets).text,
-    /unknown discarded runner seconds stamp; excluded, never counted as zero \(the sum reaches back/,
+    /unknown discarded run count stamp; excluded, never counted as zero \(the sum reaches back/,
   );
 });
 
-test('Item 1018d0f8: the discarded budget counts thrown-away checks per window of landings (limit 4), minutes beside it', () => {
+test('Item 1018d0f8: the minutes beside the discarded count read the same landings the count reads', () => {
+  // Review b0144034 P4: five older landings threw an hour away each; the newest five have no minutes yet
+  // (a delayed usage report). The count reads the newest WINDOW stamped landings, so the minutes must too.
+  const row = (runs, seconds) => [
+    noon,
+    1,
+    1,
+    'c',
+    1,
+    1,
+    1,
+    [null, null, null, null, seconds, null, null, runs],
+  ];
+  const samples = [
+    ...Array.from({ length: 5 }, () => row(1, 3600)),
+    ...Array.from({ length: WINDOW - 5 }, () => row(0, 0)),
+    ...Array.from({ length: 5 }, () => row(0, null)),
+  ];
+  assert.equal(windowValue(samples, 'discardedChecks', 'sum', WINDOW), 0);
+  assert.equal(windowValue(samples, 'runnerDiscarded', 'mean', WINDOW), 15, 'a separate minutes window');
+  assert.deepEqual(discardedMinutesBeside(samples, WINDOW), { minutes: 0, of: WINDOW - 5 });
+  const text = speedBudgetMessage(
+    {
+      kind: 'broken',
+      budget: byId('landing-runner-discarded-mean'),
+      value: 5,
+      line: 4,
+      landing: 'landing0',
+      since: 'since',
+      minutes: 0,
+      minutesOf: WINDOW - 5,
+    },
+    'synthetic',
+    budgets,
+  ).text;
+  assert.match(
+    text,
+    new RegExp(`over ${WINDOW - 5} of the same ${WINDOW} landings \\(5 have unknown minutes`),
+  );
+  assert.doesNotMatch(text, /same window/);
+  assert.equal(discardedMinutesBeside(samples.slice(0, WINDOW - 1), WINDOW), null, 'no full count window');
+});
+
+test('Item 1018d0f8: the discarded budget counts real discarded check runs per window of landings (limit 4), minutes beside it', async () => {
+  const { COUNTED_RUN_IDS, bindRunnerRun, countRunnerRun, discardedRunCount, freshRunnerAccounting } =
+    await import(moduleUrl('../convex/projectHostedLandingRunnerCosts.ts'));
   const budget = byId('landing-runner-discarded-mean');
   assert.deepEqual(
     [budget.metric, budget.stat, budget.unit, budget.max],
@@ -858,27 +912,118 @@ test('Item 1018d0f8: the discarded budget counts thrown-away checks per window o
     'four checks in 20 landings, the original intent of the 12-minute line',
   );
   assert.match(budget.source, /Unit changed from runner minutes to checks/);
+  assert.match(budget.source, /real number of discarded check runs/);
+  assert.doesNotMatch(budget.source, /it is an estimate/);
   assert.match(budget.reason, /Four discarded checks in 20 landings/);
-  // Per landing: no discarded seconds is none thrown away (a reused check is kept); unknown stays unknown.
-  const checks = (attempts, seconds) =>
+  // Per landing: the stamped run count (slot 8), never attempts or seconds. Root cause 3a5737c4: attempt 0 is
+  // usually the Lane check being bound (no new run), so attempts - 1 gave 5 where 3 runs were thrown away.
+  const checks = (attempts, seconds, runs) =>
     windowValue(
-      [[noon, 1, 1, 'c', 1, attempts, 1, [null, null, null, null, seconds, null]]],
+      [
+        [
+          noon,
+          1,
+          1,
+          'c',
+          1,
+          attempts,
+          1,
+          [null, null, null, null, seconds, null, null, ...(runs === undefined ? [] : [runs])],
+        ],
+      ],
       'discardedChecks',
       'sum',
       1,
     );
-  assert.equal(checks(1, 0), 0);
-  assert.equal(checks(3, 0), 0, 'attempts that reused their check threw nothing away');
-  assert.equal(checks(2, 3000), 1);
-  assert.equal(checks(4, 9000), 3);
-  assert.equal(checks(1, 600), 1, "a batch member's share of a failed cohort run is one check");
-  assert.equal(checks(null, 600), 1);
-  assert.equal(checks(2, null), null, 'unknown seconds are excluded, never counted as zero');
+  assert.equal(checks(1, 0, 0), 0);
+  assert.equal(checks(4, 9000, 1), 1, 'four attempts that threw one run away count one');
+  assert.equal(checks(2, 3000, 3), 3);
+  assert.equal(
+    checks(4, 9000, undefined),
+    null,
+    'a row from before the stamp stays unknown, never estimated',
+  );
+  assert.equal(checks(2, 3000, null), null);
+  // The landing record counts each distinct run it binds; the accepted run is not discarded.
+  let accounting = { root: 'r', pending: 0, runs: 0 };
+  let bound;
+  for (const run of ['run-a', 'run-b', 'run-c']) {
+    accounting = bindRunnerRun(accounting, bound, run);
+    bound = run;
+  }
+  assert.equal(accounting.runs, 3);
+  assert.equal(
+    countRunnerRun(accounting, 'run-c'),
+    accounting,
+    'the same run bound again (a carried check) counts once',
+  );
+  // Review b0144034 P1: a failed cohort splits back onto a member's admission run (A, shared B, A again).
+  assert.equal(countRunnerRun(accounting, 'run-a'), accounting, 'an earlier run bound again counts once');
+  assert.equal(bindRunnerRun(accounting, 'run-c', 'run-a').runs, 3);
+  assert.equal(
+    countRunnerRun({ root: 'r', pending: 0 }, 'run-a').runs,
+    undefined,
+    'no count started: stays unknown',
+  );
+  let many = { root: 'r', pending: 0, runs: 0 };
+  for (let i = 0; i < 12; i++) many = countRunnerRun(many, `run-${i}`);
+  assert.deepEqual([many.runs, many.runIds.length], [12, COUNTED_RUN_IDS], 'the id list stays bounded');
+  // Review b0144034 P3: binding a different run clears the cancel marker exactly as before, also on
+  // accounting without a count and when the run was already counted.
+  assert.deepEqual(bindRunnerRun({ root: 'r', pending: 0, lastCancelled: 'run-x' }, 'run-x', 'run-y'), {
+    root: 'r',
+    pending: 0,
+  });
+  assert.deepEqual(
+    bindRunnerRun(
+      { root: 'r', pending: 0, runs: 1, runIds: ['run-y'], lastCancelled: 'run-x' },
+      'run-x',
+      'run-y',
+    ),
+    { root: 'r', pending: 0, runs: 1, runIds: ['run-y'] },
+  );
+  assert.equal(
+    bindRunnerRun(
+      { root: 'r', pending: 0, runs: 1, runIds: ['run-y'], lastCancelled: 'run-x' },
+      'run-y',
+      'run-y',
+    ).lastCancelled,
+    'run-x',
+    'the same bound run keeps the marker, as before',
+  );
+  assert.equal(
+    bindRunnerRun({ root: 'r', pending: 0, runs: 0, lastCancelled: 'run-x' }, 'run-y', 'run-x').lastCancelled,
+    'run-x',
+    'binding the cancelled run itself keeps the marker, as before',
+  );
+  // Review b0144034 P2: the count starts only for a new lineage.
+  assert.deepEqual(freshRunnerAccounting('s', undefined), { root: 's', pending: 0, runs: 0 });
+  assert.deepEqual(freshRunnerAccounting('s', 'older'), { root: 's', pending: 0 });
+  assert.equal(discardedRunCount(accounting, 'run-c'), 2);
+  assert.equal(discardedRunCount(accounting, null), 3, 'no accepted run: every bound run was discarded');
+  assert.equal(
+    discardedRunCount({ root: 'r', pending: 0 }, 'run-c'),
+    null,
+    'accounting from before the count',
+  );
+  assert.equal(
+    discardedRunCount({ root: 'r', pending: 0, runs: 1 }, 'run-a'),
+    0,
+    'the Lane check bound and accepted',
+  );
+  const sample = landingSpeedSample(
+    { id: 's', timing: { submittedAt: '2026-11-24T10:00:00.000Z', committedAt: '2026-11-24T10:12:00.000Z' } },
+    3,
+    undefined,
+    undefined,
+    2,
+  );
+  assert.deepEqual(sample.counts.slice(6), [null, 2], 'not a full check: slot 7 null, slot 8 the run count');
 
   // Break and recover: a window of clean landings, then four discards are within the budget, the fifth breaks.
   let state = null,
     index = 0;
-  const feed = (attempts, seconds) => {
+  const feed = (runs, seconds) => {
     const out = observeLandingSpeed(
       state,
       {
@@ -887,9 +1032,9 @@ test('Item 1018d0f8: the discarded budget counts thrown-away checks per window o
         toMain: 10,
         check: 5,
         settle: 8.5,
-        attempts,
+        attempts: runs + 1,
         writes: 8,
-        counts: [1, 1, 1000, 3000, seconds, 1000],
+        counts: [1, 1, 1000, 3000, seconds, 1000, null, runs],
         stages: { queue: 4, check: 5, settle: 0.1 },
       },
       budgets,
@@ -897,11 +1042,11 @@ test('Item 1018d0f8: the discarded budget counts thrown-away checks per window o
     state = out.state;
     return out.events.filter(e => e.budget.id === budget.id);
   };
-  for (let i = 0; i < WINDOW; i++) assert.deepEqual(feed(1, 0), []);
+  for (let i = 0; i < WINDOW; i++) assert.deepEqual(feed(0, 0), []);
   for (let i = 0; i < 4; i++)
-    assert.deepEqual(feed(2, 3000), [], `discard ${i + 1} of 4 is within the budget`);
+    assert.deepEqual(feed(1, 3000), [], `discard ${i + 1} of 4 is within the budget`);
   assert.equal(windowValue(state.samples, 'discardedChecks', 'sum', WINDOW), 4);
-  const broke = feed(2, 3000);
+  const broke = feed(1, 3000);
   assert.deepEqual(
     broke.map(e => [e.kind, e.value, e.line]),
     [['broken', 5, 4]],
@@ -913,10 +1058,10 @@ test('Item 1018d0f8: the discarded budget counts thrown-away checks per window o
   const issue = speedBudgetIssue(broke[0], 'p', budgets);
   assert.match(issue.title, /^P0 speed budget broken: discarded checks/);
   assert.match(issue.body, /discarded checks over the last 20 landings must stay at or under 4 checks\./);
-  assert.deepEqual(feed(2, 3000), [], 'stays quiet while broken');
+  assert.deepEqual(feed(1, 3000), [], 'stays quiet while broken');
   // Clean landings push the discards out of the window; at four it recovers, once.
   const recovered = [];
-  for (let i = 0; i < WINDOW; i++) recovered.push(...feed(1, 0));
+  for (let i = 0; i < WINDOW; i++) recovered.push(...feed(0, 0));
   assert.deepEqual(
     recovered.map(e => [e.kind, e.value]),
     [['recovered', 4]],

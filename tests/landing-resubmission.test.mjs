@@ -135,6 +135,28 @@ for (const mode of ['direct', 'desired']) {
     assert.equal(statsLanding({ id: 'receipt', at: landed.at }, landed).discardedRunnerSeconds, null);
   });
 
+  test(`${mode} retry of a predecessor without run accounting keeps the discarded run count unknown (Item 1018d0f8)`, async t => {
+    const { f, base, send, first } = await setup(t, mode);
+    await f.drain();
+    const run = await f.rawChecks.activate(f.runs()[0].id);
+    await f.rawChecks.callback(f.rawChecks.complete(run, 'failed'));
+    await f.drain();
+    assert.equal(states(f).find(s => s.id === first.id).phase, 'terminal-failed');
+    // A predecessor written before run accounting existed (review b0144034 P2).
+    for (const table of ['projectHostedLandingRequests', 'projectHostedLandingDesired'])
+      for (const row of f.tables[table].values())
+        if (row.submissionId === first.id) f.patch(table, row._id, { runnerAccounting: undefined });
+    const next = await send({ ...base, operationId: randomUUID() });
+    await f.drain();
+    await pass(f, 300, true);
+    await f.drain();
+    const landed = states(f).find(s => s.id === next.id);
+    assert.equal(landed.phase, 'landed');
+    const samples = [...f.tables.projectLandingSpeed.values()].flatMap(row => JSON.parse(row.value).samples);
+    const sample = samples.find(entry => entry[3] === landed.acceptance.receiptId);
+    assert.equal(sample[7][7] ?? null, null, 'the legacy failed run is not counted, so the count is unknown');
+  });
+
   for (const history of [0, 575, 1150]) {
     const deferred = history > 0;
     test(`${mode} resubmission lands from a retained ${deferred ? 'deferred' : 'immediate'} pass with ${history} historical landings`, async t => {

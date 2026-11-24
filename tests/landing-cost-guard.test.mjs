@@ -1609,6 +1609,9 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
   // 411727ba row 5: the capsule's attempt and plan pins move from the 11-copy pointer row to a
   // 3-copy body row: retained projectFinishReadRows -3,270 B fresh / -4,023 B dogfood,
   // projectHostedLandingBodies +2,840 / +3,352 (about -34 KB per landing at modelled copies).
+  // Item 1018d0f8: the real discarded run count rides existing writes. The request row's runnerAccounting keeps
+  // `runs` and the last 8 characters of each distinct run id (+31 B fresh, +42/+35 B dogfood); the landing-speed
+  // sample stamps it in counts slot 8 (+7 B). The finish-read copies leave it out, so they do not grow.
   for (const [name, scenario] of Object.entries(scenarios)) {
     const indexBudget = storageBudgets[name].indexes;
     const aliasBudget = storageBudgets[name].metricAliases;

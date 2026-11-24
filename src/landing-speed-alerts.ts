@@ -330,19 +330,6 @@ const isLanding = (b: SpeedBudget): b is SpeedBudget & { metric: LandingMetric; 
 /** The budgets a landing's own stamps can judge. */
 export const landingBudgets = (budgets: SpeedBudgets) => budgets.budgets.filter(isLanding);
 
-/** Checks a landing's attempts threw away (Issue 1018d0f8, owner 2026-11-23: the unit of the discarded
- * budget is checks, not minutes), from stamps the sample already holds. A landing with no discarded
- * runner seconds threw nothing away (a reused check is kept); one that did threw away at least one, and
- * each attempt after the first replaced a check, so `attempts - 1` is the count (a batch member's share of
- * a failed cohort run has one attempt and counts one). It is an estimate from existing stamps: it runs high
- * when an attempt reused its check beside a discard, and low when resubmissions carried discarded seconds
- * but restarted the attempt ordinal (a later submission landing on its first attempt counts one). Unknown
- * seconds stay unknown, never zero. An exact per-landing stamp is a follow-up (Item 1018d0f8). */
-export const discardedChecks = (
-  attempts: number | null | undefined,
-  discardedSeconds: number | null | undefined,
-) => (discardedSeconds == null ? null : discardedSeconds > 0 ? Math.max(1, (attempts ?? 0) - 1) : 0);
-
 const minute = 60_000;
 /** Retained samples per project (about 3.7 KB with counts): the window plus gaps where a stamp was missing. */
 const MAX_SAMPLES = 40;
@@ -383,8 +370,9 @@ export const currentRecheckSample = (row: LandingSpeedState['samples'][number]) 
 export const speedWindow = <T>(samples: readonly T[]) => samples.slice(-MAX_SAMPLES);
 /** R2 requests signed by its composes (class A, class B, bytes put), then the shard execution seconds of
  * the accepted check run, of the runs its attempts discarded, and of the main audit run that followed it;
- * last, the accepted run's seconds again when it was a full check (null for a scoped check), absent on
- * rows written before that budget (Issue a217b83e). */
+ * then the accepted run's seconds again when it was a full check (null for a scoped check), absent on
+ * rows written before that budget (Issue a217b83e); last, the number of check runs it threw away
+ * (Item 1018d0f8), absent on rows written before that count. */
 const countsSchema = z.tuple([
   z.number().int().min(0).nullable(),
   z.number().int().min(0).nullable(),
@@ -393,6 +381,7 @@ const countsSchema = z.tuple([
   z.number().min(0).nullable(),
   z.number().min(0).nullable(),
   z.number().min(0).nullable().optional(),
+  z.number().int().min(0).nullable().optional(),
 ]);
 export type LandingCounts = z.infer<typeof countsSchema>;
 /** The accepted check's kind: a whole run, a scoped recheck, a scoped recheck that fell back to the
@@ -559,8 +548,10 @@ export type SpeedBudgetEvent = {
   stage?: string;
   /** Missing stamps in the newest landing window, excluded rather than charged as zero. */
   unknown?: number;
-  /** Discarded-check budget: the same window's runner minutes of those checks per landing, shown beside the count. */
+  /** Discarded-check budget: runner minutes of those checks per landing over the landings the count read,
+   * shown beside the count; `minutesOf` of them knew their minutes. */
   minutes?: number;
+  minutesOf?: number;
   /** Day budgets: the closed UTC day judged, and its landings. */
   day?: string;
   landings?: number;
@@ -611,6 +602,7 @@ export function landingSpeedSample(
   attempts: number | null = null,
   passedAt?: number,
   checkKind?: 'full' | 'scoped' | 'batch',
+  discardedRuns: number | null = null,
 ): LandingSpeedSample | null {
   const timing = state.timing;
   const at = Date.parse(timing?.committedAt ?? timing?.settledAt ?? '');
@@ -635,8 +627,11 @@ export function landingSpeedSample(
       state.counts?.runnerSeconds ?? null,
       discardedRunnerSeconds(state),
       0,
-      // Only a full check adds the seventh slot, so other samples keep their shape and bytes.
-      ...(state.counts?.runnerFull ? [state.counts.runnerSeconds ?? null] : []),
+      // Only a full check fills the seventh slot; the eighth is the discarded run count, when known.
+      ...(state.counts?.runnerFull || discardedRuns !== null
+        ? [state.counts?.runnerFull ? (state.counts.runnerSeconds ?? null) : null]
+        : []),
+      ...(discardedRuns === null ? [] : [discardedRuns]),
     ] as LandingCounts,
     stages: {
       queue: span(timing.submittedAt, timing.checkReservedAt),
@@ -677,9 +672,11 @@ export function windowValue(
           b = row[7]?.[1];
         return a == null || b == null ? [] : [(a * 4.5 + b * 0.36) / 1e6];
       }
+      // Check runs the landing threw away (counts slot 7, Item 1018d0f8 root cause 3a5737c4): every run
+      // bound to its work but the accepted one. Rows without the stamp are unknown, never estimated.
       if (metric === 'discardedChecks') {
-        const checks = discardedChecks(row[5], row[7]?.[4]);
-        return checks === null ? [] : [checks];
+        const runs = row[7]?.[7];
+        return runs == null ? [] : [runs];
       }
       const value: number | null | undefined = count ? row[7]?.[count[0]] : (row[index!] as number | null);
       return value == null ? [] : [value / (count?.[1] ?? 1)];
@@ -695,6 +692,24 @@ export function windowValue(
   // Dollar fractions must survive judgment and reporting; other metrics keep their precision.
   return metric === 'r2RequestUsd' ? Math.round(value * 1e12) / 1e12 : round(value);
 }
+
+/** The discarded-check budget's secondary number (owner 2026-11-23, review b0144034 P4): runner minutes of
+ * discarded checks per landing over the same landings the count reads (the newest `window` with a run count
+ * stamp). A landing among them without minutes is excluded, never zero; `of` says how many knew them. */
+export function discardedMinutesBeside(samples: LandingSpeedState['samples'], window: number) {
+  const cohort = samples.filter(row => row[7]?.[7] != null).slice(-window);
+  if (cohort.length < window) return null;
+  const known = cohort.filter(row => windowValue([row], 'runnerDiscarded', 'mean', 1) !== null);
+  return known.length
+    ? { minutes: windowValue(known, 'runnerDiscarded', 'mean', known.length)!, of: known.length }
+    : null;
+}
+
+/** "over the same 20 landings", or the share of them that knew their minutes. */
+export const minutesWindow = (of: number, window: number) =>
+  of === window
+    ? `over the same ${window} landings`
+    : `over ${of} of the same ${window} landings (${window - of} have unknown minutes, excluded)`;
 
 /** Pure: append one landing and report each budget it breaks or recovers. A budget alerts once when
  * it breaks and once when it recovers; while it stays broken nothing repeats. */
@@ -823,11 +838,9 @@ export function observeLandingSpeed(
         ...(step?.undone ? { flow: { landed: step.undone.landed, changed: step.undone.changed } } : {}),
       });
     const open = broken[budget.id];
-    const minutes =
-      budget.metric === 'discardedChecks'
-        ? windowValue(samples, 'runnerDiscarded', 'mean', budgets.window.landings)
-        : null;
-    const secondary = minutes === null ? {} : { minutes };
+    const beside =
+      budget.metric === 'discardedChecks' ? discardedMinutesBeside(samples, budgets.window.landings) : null;
+    const secondary = beside === null ? {} : { minutes: beside.minutes, minutesOf: beside.of };
     if (value > line && !open) {
       const stage = longestStage(sample.stages);
       broken[budget.id] = { since, landing: sample.id, value, ...(stage ? { stage } : {}) };
@@ -1129,9 +1142,8 @@ const NEXT: Record<LandingMetric, string> = {
 };
 const lastLandings = (budgets: SpeedBudgets) => `the last ${budgets.window.landings} landings`;
 
-/** The stamp a budget's unknown rows lack: the discarded-check count is read from discarded runner seconds. */
-const stampName = (b: SpeedBudget) =>
-  b.metric === 'discardedChecks' ? 'discarded runner seconds' : b.metric;
+/** The stamp a budget's unknown rows lack. */
+const stampName = (b: SpeedBudget) => (b.metric === 'discardedChecks' ? 'discarded run count' : b.metric);
 /** The owner-facing message: which budget, which landing crossed it, where to look, the next step. */
 export function speedBudgetMessage(event: SpeedBudgetEvent, project: string, budgets: SpeedBudgets) {
   const b = event.budget;
@@ -1150,7 +1162,7 @@ export function speedBudgetMessage(event: SpeedBudgetEvent, project: string, bud
       : '') +
     (event.minutes === undefined
       ? ''
-      : ` Secondary: ${event.minutes} runner min of discarded checks per landing over the same window (minutes are not judged here).`);
+      : ` Secondary: ${event.minutes} runner min of discarded checks per landing ${minutesWindow(event.minutesOf ?? budgets.window.landings, budgets.window.landings)} (minutes are not judged here).`);
   if (event.kind === 'ratcheted')
     return {
       subject: `[Forge] Speed budget tightened: ${describe(b)}: ${project}`,

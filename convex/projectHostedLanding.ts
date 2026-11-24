@@ -30,8 +30,9 @@ import { readWouldConflict, syncRequiredQueue } from './projectHostedLandingWoul
 import { latestStallAlert } from './projectHostedLandingStallAlert';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
 import {
-  bindRunnerAccounting,
+  bindRunnerRun,
   bindSupersededCheck,
+  freshRunnerAccounting,
   type SupersededCheck,
 } from './projectHostedLandingRunnerCosts';
 import { startLandingAdmission } from './projectHostedLandingAdmission';
@@ -597,8 +598,11 @@ export async function enqueueHostedLanding(
           },
         }
       : {}),
-    runnerAccounting: bindRunnerAccounting(
-      reserved?.runnerAccounting ?? reused.runnerAccounting ?? { root: submissionId, pending: 0 },
+    runnerAccounting: bindRunnerRun(
+      reserved?.runnerAccounting ??
+        reused.runnerAccounting ??
+        freshRunnerAccounting(submissionId, reserved?.supersedes ?? reused.supersedes),
+      undefined,
       attempt.check?.runId ?? admission,
     ),
     ...(carried.supersededCheck ? { supersededCheck: carried.supersededCheck } : {}),

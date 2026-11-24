@@ -1725,9 +1725,9 @@ one P0 Issue per break, a recovery message, nothing while it stays broken
   (a solo fixture, a batch member) carries none and is skipped, never counted as zero. Check shard
   logs and saves are not in these counts.
 - `landing-runner-discarded-mean` counts discarded **checks**, not minutes: the sum over the last 20 landings, limit 4
-  (Issue 1018d0f8; [speed budgets](agents/speed-budgets.md#discarded-checks-budget)). Per landing it reads the stamps below: no
-  discarded seconds is none, known seconds are at least one and at most attempts minus one; unknown stays unknown.
-  The runner minutes of those checks stay visible beside it, secondary.
+  (Issue 1018d0f8; [speed budgets](agents/speed-budgets.md#discarded-checks-budget)). Per landing it reads the real discarded run
+  count the landing record stamps (distinct runs bound to it, minus the accepted run); a landing without it stays
+  unknown. The runner minutes of those same landings stay visible beside it, secondary.
 - `landing-runner-accepted-mean`, `-discarded-mean` (minutes, secondary), `-audit-mean`: GitHub runner minutes, from the
   shard execution seconds the check run row stores (`execution.seconds`, summed over shards). The
   accepted run's seconds are stamped when the landing sees the run end; a recompose that cannot reuse

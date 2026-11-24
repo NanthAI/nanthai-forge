@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { latestCancelledRun, supersededCheckCosts } from './projectHostedLandingRunnerCosts';
+import {
+  freshRunnerAccounting,
+  latestCancelledRun,
+  supersededCheckCosts,
+} from './projectHostedLandingRunnerCosts';
 import { withoutAuthorship, personStampValid } from '../src/work-actor-types';
 import { cancelPendingTask } from './schedulerCancel';
 import { recordLandingFeed } from './projectFeedTerminal';
@@ -344,7 +348,7 @@ export async function submitDesiredLanding(
   });
   const key = await ctx.db.insert('projectHostedLandingDesired', {
     ...(githubProof ? { githubProof: canonicalPayload(githubProof) } : {}),
-    runnerAccounting: previousAccounting ?? { root: id, pending: 0 },
+    runnerAccounting: previousAccounting ?? freshRunnerAccounting(id, previous),
     ...(carried?.supersededCheck ? { supersededCheck: carried.supersededCheck } : {}),
     preparing: true,
     projectId: input.projectId,
