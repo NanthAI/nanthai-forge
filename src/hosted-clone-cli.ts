@@ -12,7 +12,8 @@ import { join, resolve } from 'node:path';
 import { lstatSync, readdirSync } from 'node:fs';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
-import { deploymentUrl, readAuth } from './auth-store.js';
+import { deploymentUrl, readAuth, resolveAuthToken } from './auth-store.js';
+import { publicProjectLogin } from './public-project-commands.js';
 import { ConvexExchange } from './exchange-client.js';
 import { checkoutHostedMain, type MainTransport } from './hosted-main-checkout.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
@@ -137,12 +138,14 @@ export async function hostedCloneCli(
     );
   }
   const selected = flags[1] ?? process.env.FORGE_DEPLOYMENT_URL ?? readAuth().defaultDeployment ?? origin;
-  invariant(
-    selected,
-    'AUTH_REQUIRED',
-    'Run nforge login DEPLOYMENT_URL before cloning, or pass --deployment.',
-  );
-  const url = deploymentUrl(selected);
+  const url = selected ? deploymentUrl(selected) : undefined;
+  if (!url || (!dependencies && !resolveAuthToken(url))) {
+    const next = url ? publicProjectLogin(url) : 'nforge login';
+    throw new ForgeError('SIGN_IN_REQUIRED', `Nothing was copied. Run ${next} before cloning.`, undefined, {
+      nothingChanged: true,
+      next,
+    });
+  }
   if (beforeRun && !(await beforeRun())) return;
   const client = dependencies?.client ?? new ConvexExchange(url, undefined, '', '', null).client;
   // A clone by project ID reads main alongside the route lookup (two reads at once, same calls);

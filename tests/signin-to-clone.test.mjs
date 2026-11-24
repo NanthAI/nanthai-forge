@@ -180,6 +180,7 @@ test('CLI clone without a login refuses before network or local checkout IO', as
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const { hostedCloneCli } = await import('../dist/hosted-clone-cli.js');
+  const { describeFailure } = await import('../dist/system-errors.js');
   const directory = mkdtempSync(join(tmpdir(), 'forge-signedout-clone-'));
   const keys = ['XDG_CONFIG_HOME', 'FORGE_AUTH_TOKEN', 'FORGE_DEPLOYMENT_URL'];
   const prior = keys.map(key => process.env[key]);
@@ -196,8 +197,19 @@ test('CLI clone without a login refuses before network or local checkout IO', as
     rmSync(directory, { recursive: true, force: true });
   });
   await assert.rejects(
-    hostedCloneCli(['public-project', join(directory, 'clone'), '--deployment', 'https://forge.example']),
-    error => error.code === 'AUTH_REQUIRED' && /login/i.test(error.message),
+    hostedCloneCli(
+      ['public-project', join(directory, 'clone'), '--deployment', 'https://forge.example'],
+      undefined,
+      () => assert.fail('anonymous clone reached CLI preparation'),
+    ),
+    error => {
+      const refusal = describeFailure(error, { topLevel: true });
+      assert.equal(refusal.code, 'SIGN_IN_REQUIRED');
+      assert.match(refusal.message, /Nothing was copied/);
+      assert.equal(refusal.recovery?.nothingChanged, true);
+      assert.equal(refusal.next, "nforge login 'https://forge.example'");
+      return true;
+    },
   );
   assert.equal(existsSync(join(directory, 'clone')), false);
 });

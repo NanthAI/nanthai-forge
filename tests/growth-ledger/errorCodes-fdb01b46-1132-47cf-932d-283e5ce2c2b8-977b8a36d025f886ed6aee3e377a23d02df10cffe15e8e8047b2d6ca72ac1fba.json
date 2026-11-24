@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "8947a779: Give an anonymous CLI clone one structured device sign-in recovery before checkout or network; reuse the associated auth help topic.",
+  "date": "2026-11-24"
+}
