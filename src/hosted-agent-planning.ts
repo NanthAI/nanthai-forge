@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { memberDataNotice, systemCommentNotice } from './member-data-notice.js';
-import { planningSummary, planningSearchTerms } from './planning-search.js';
+import { planningSummary, planningSearchTerms, proseDoneWhenLines } from './planning-search.js';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -587,24 +587,7 @@ export const openDoneWhenLines = (body: string): string[] => {
   const boxes = body.match(/^[ \t>]*(?:(?:[-*+]|\d+[.)])\s+)?\[([ xX])\].*$/gm) ?? [];
   if (boxes.length)
     return boxes.filter(line => /^[ \t>]*(?:(?:[-*+]|\d+[.)])\s+)?\[ \]/.test(line)).map(lineText);
-  const heading = /^[ \t>#*_]*done[- ]when\b/im.exec(body);
-  if (!heading) return [];
-  const lines = body
-    .slice(heading.index + heading[0].length)
-    .split('\n')
-    .map(line => line.trim());
-  const bullets: string[] = [];
-  let first = lines[0]?.replace(/^[:*_\s]+/, '') ?? '';
-  let text = /\w/.test(first);
-  for (const line of lines.slice(1)) {
-    if (/^#{1,6}\s/.test(line) || /^\*\*[^*]+\*\*:?$/.test(line)) break;
-    if (/^(?:[-*+]|\d+[.)])\s+\S/.test(line)) bullets.push(lineText(line));
-    else if (/\w/.test(line)) {
-      text = true;
-      if (!/\w/.test(first)) first = line;
-    }
-  }
-  return bullets.length ? bullets : text ? [first || 'Done-when text'] : [];
+  return proseDoneWhenLines(body);
 };
 
 /** What a builder needs after a landing that left Done-when lines open: which lines (at most five, 100

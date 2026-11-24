@@ -40,6 +40,34 @@ export function doneWhenCounts(body: string): [number, number] | null {
   return total ? [ticked, total] : null;
 }
 
+/** The legacy prose gate: use only when there is no structured checklist. Prose needs a manual decision. */
+export function proseDoneWhenLines(body: string): string[] {
+  const heading = /^[ \t>#*_]*done[- ]when\b/im.exec(body);
+  if (!heading) return [];
+  const lines = body
+    .slice(heading.index + heading[0].length)
+    .split('\n')
+    .map(line => line.trim());
+  const bullets: string[] = [];
+  let first = lines[0]?.replace(/^[:*_\s]+/, '') ?? '';
+  let text = /\w/.test(first);
+  for (const line of lines.slice(1)) {
+    if (/^#{1,6}\s/.test(line) || /^\*\*[^*]+\*\*:?$/.test(line)) break;
+    if (/^(?:[-*+]|\d+[.)])\s+\S/.test(line))
+      bullets.push(
+        line
+          .replace(/^[ \t>]*(?:(?:[-*+]|\d+[.)])\s+)?(?:\[[ xX]\]\s*)?/, '')
+          .replace(/\s+/g, ' ')
+          .trim(),
+      );
+    else if (/\w/.test(line)) {
+      text = true;
+      if (!/\w/.test(first)) first = line;
+    }
+  }
+  return bullets.length ? bullets : text ? [first || 'Done-when text'] : [];
+}
+
 /** The planning model fields a row carries when set (src/planning-model.ts); absent keys keep older rows' bytes. */
 export const planningModelRow = (item: Partial<PlanningItem>) => ({
   ...(item.order ? { order: item.order } : {}),

@@ -231,8 +231,10 @@ For an initial, lead-approved **dev-only** run on a Plan of about 1,300 roots, b
 root reads before point reads and status appends), at most one status append per changed root, and a cumulative
 stop of **0.10 GB billed Convex database I/O ($0.02 at $0.20/GB)**, including index I/O, retries and a reserve for
 the final page. Pilot one page within **0.01 GB** of that total. Run a read-only preview first and record the would-be
-changes by kind and from/to status. Do not apply if even one pinned or Proposed row would move. Compare provider
-usage before allowing the next batch, and stop if the next batch plus the reserve will not fit. Function reply byte
+changes by kind and from/to status. The preview reads a single Plan revision and returns compact facts, not Item text
+or pin attribution. Fragmented or unreadable facts and cycles are reported as incomplete; do not apply an incomplete
+preview. The apply pass must recheck linked Intent stamps as well as the Plan revision: a Lane can move without an
+Item edit. Do not apply if even one pinned or Proposed row would move. Compare provider usage before allowing the next batch, and stop if the next batch plus the reserve will not fit. Function reply byte
 estimates are not billing ceilings. Verify the resulting Initiative statuses with the owner on dev; this does not
 authorize a production run.
 
