@@ -15,6 +15,11 @@
       "path": "hosted-agent-contract#hostedAgentCapabilitiesSchema.agentDefaults.overlapGate",
       "change": "5a727105d7b6135af63c58288790ab680c8014e7a9bb973426fe93108eeb215e",
       "reason": "retired (Issue 853fcde3): the server still always sends overlapGate:\"off\" (RETIRED_WIRE in src/agent-parallel-defaults.ts), so released CLIs keep parsing"
+    },
+    {
+      "path": "hosted-agent-contract#hostedAgentCapabilitiesSchema.agentDefaults.stallAlerts.email",
+      "change": "576256270e88080d44296c7ce704895cfc94d39fceb5c47a03b3908ff98c9b41",
+      "reason": "read compatibility (Issue 8c53a7f5): the CLI accepts a missing field from older deployments; current capabilities still emit the required array for released CLIs"
     }
   ]
 }

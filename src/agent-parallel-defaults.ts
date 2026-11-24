@@ -105,7 +105,11 @@ export const wireAgentDefaults = (effective: EffectiveAgentDefaults, extended: b
  * parse again. A key added after the freeze must take a `.default()` here (an older server omits it). */
 export const effectiveAgentDefaultsWireSchema = z.object({
   ...effectiveAgentDefaultsSchema.shape,
-  stallAlerts: z.object(effectiveAgentDefaultsSchema.shape.stallAlerts.shape),
+  stallAlerts: z.object({
+    ...effectiveAgentDefaultsSchema.shape.stallAlerts.shape,
+    // Older deployments did not send email; the current server still emits the array.
+    email: effectiveAgentDefaultsSchema.shape.stallAlerts.shape.email.default([]),
+  }),
   /** RETIRED_WIRE: kept through the server's own reply parse for installed CLIs; this CLI ignores it. */
   overlapGate: z.enum(['off', 'warn', 'block']).optional(),
 });

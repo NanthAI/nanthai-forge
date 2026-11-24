@@ -959,4 +959,5 @@ The Forge development project uses the `ntfy` webhook preset in
 `FORGE_ALERT_WEBHOOK_URL`. No topic or recipient address belongs in source.
 The owner confirmed a forced-stall notification end to end. Email recipients
 are configured through `agentDefaults.stallAlerts.email`; email delivery from
-development is not available yet.
+development is not available yet. The CLI treats an older capabilities reply
+that omits `stallAlerts.email` as an empty recipient list.

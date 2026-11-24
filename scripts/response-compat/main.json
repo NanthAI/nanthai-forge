@@ -318,6 +318,7 @@
                   "maximum": 9007199254740991
                 },
                 "email": {
+                  "default": [],
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -339,7 +340,6 @@
                 "enabled",
                 "notifyAfterMinutes",
                 "repeatAfterMinutes",
-                "email",
                 "webhook"
               ]
             },

@@ -142,6 +142,15 @@ test('guard: a server reply with extra unknown fields parses on the current CLI'
   assert.deepEqual(parsed, hostedAgentCapabilitiesSchema.parse(reply));
 });
 
+test('incident 8c53a7f5: the CLI accepts an older capabilities reply with no stall alert email field', async () => {
+  const current = await candidateCapabilities();
+  // Current server replies keep the array for already-released CLIs that require it.
+  assert.deepEqual(current.agentDefaults.stallAlerts.email, []);
+  const { email: _email, ...olderAlerts } = current.agentDefaults.stallAlerts;
+  const replay = { ...current, agentDefaults: { ...current.agentDefaults, stallAlerts: olderAlerts } };
+  assert.deepEqual(parseHostedResponse(hostedAgentCapabilitiesSchema, replay), current);
+});
+
 test('the reply boundary still rejects missing, wrong-typed and unknown-enum fields', async () => {
   const reply = await candidateCapabilities();
   const { actor: _actor, ...missing } = reply;
