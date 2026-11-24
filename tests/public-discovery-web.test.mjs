@@ -67,6 +67,11 @@ const project = ({ plan = 'public', titles = false, upstream } = {}) => ({
   starLookup: true,
   project: { id: 'p1', handle: 'ada', slug: 'atlas', name: 'atlas', since: NOW - 60 * DAY, upstream },
   stars: 310,
+  overview: {
+    readme: { path: 'README.md', text: '# Atlas\n\nMaps for everyone.', bytes: 27, truncated: false },
+    license: null,
+    landings: [{ id: '00000000-0000-4000-8000-000000000001', at: NOW, message: 'Draw the coastline' }],
+  },
   activity: { landings: 42, days: [3, 6, 4, 8, 7, 9, 5], main: 'passing', lastAt: NOW - 3_600_000 },
   lanes: {
     open: 3,
@@ -305,7 +310,31 @@ const signed = {
   'publicDiscovery:myStarred': { projects: [projects[2]], more: false },
   'publicDiscovery:myStars': [projects[2].id],
 };
+const worstHandle = `a${'long-name-'.repeat(3)}testingx`;
+const worstSlug = `x${'long-name-'.repeat(9)}testingxx`;
+const worstPath = `/${worstHandle}/${worstSlug}`;
+const worstReadme = [
+  '# x',
+  'جداول المد والجزر ونوافذ الإرشاد البحري من بيانات المقاييس العامة.',
+  '潮汐表と水先案内の時間帯を公開データから作ります。',
+  `https://example.test/${'unbroken'.repeat(60)}`,
+  '![External badge](https://img.example.test/test.svg)',
+  '<script>window.untrusted = true</script>',
+  '| Port | Gauge | Datum | Mean spring range | Mean neap range | Updated | Licence of the data |\n| - | - | - | - | - | - | - |\n| Llanfairpwllgwyngyll harbour | 0042-0042-0042 | Chart datum | 5.92 m | 3.10 m | hourly | Open Government Licence v3.0 |',
+  'Preview paragraph. '.repeat(2460),
+].join('\n\n');
 const reads = {
+  [`/-/public/v1/project${worstPath}.json`]: {
+    ...project({ upstream: null }),
+    project: { ...project().project, handle: worstHandle, slug: worstSlug, name: worstSlug },
+    stars: 128_400,
+    activity: { landings: 1, days: [0, 0, 0, 0, 0, 0, 1], main: 'unchecked' },
+    overview: {
+      readme: { path: '.nforge/home.md', text: worstReadme, bytes: 412 * 1024, truncated: true },
+      license: null,
+      landings: [{ id: '00000000-0000-4000-8000-000000000001', at: NOW, message: 'تحديث جداول المد والجزر' }],
+    },
+  },
   '/-/public/v1/profile/kit.json': { v: 1, asOf: NOW, handle: 'kit', projects: [], contributions: nothing },
   '/-/public/v1/explore/active.json': explore('active'),
   '/-/public/v1/explore/stars.json': explore('stars'),
@@ -595,7 +624,7 @@ test('public discovery screens: explore, a profile signed out and as its person,
 
   // A public project page: what was done, what is in progress, what is left; Next is derived from the plan.
   const pp = await open('/ada/atlas');
-  const glance = await pp.locator('.glance p').textContent();
+  const glance = await pp.locator('.phead .say').textContent();
   assert.match(
     glance,
     /Main is passing\. 42 changes landed this week\. 3 Lanes are open now and 3 Items are left\./,
@@ -604,11 +633,21 @@ test('public discovery screens: explore, a profile signed out and as its person,
     await pp.locator('nav.pstate').textContent(),
     /42.*landings this week.*3.*open Lanes.*3.*open Items/s,
   );
+  assert.equal(await pp.locator('.row.item').count(), 0);
+  assert.equal(
+    await pp.getByRole('link', { name: 'Code', exact: true }).getAttribute('href'),
+    '/ada/atlas/code/files',
+  );
+  await pp.getByText('Maps for everyone.').waitFor();
+  assert.match(await pp.getByRole('region', { name: 'Recent landings' }).textContent(), /Draw the coastline/);
+  await pp.getByRole('link', { name: 'Plan 3' }).click();
   assert.equal(await pp.locator('.row.item').count(), 2);
   assert.match(
     await pp.getByRole('region', { name: 'Next' }).textContent(),
     /first 2 Planned Items of 3 left/,
   );
+  await pp.goBack();
+  await pp.getByRole('region', { name: 'README' }).waitFor();
   assert.match(
     await pp.getByRole('region', { name: 'Open Lanes' }).textContent(),
     /shows open Lanes as counts/,
@@ -701,12 +740,15 @@ test('public discovery screens: explore, a profile signed out and as its person,
   );
   const members = await open('/ada/members');
   const membersText = await members.locator('main').textContent();
-  assert.match(membersText, /plan is for its members/);
+  assert.equal(
+    await members.getByRole('navigation', { name: 'Project' }).getByRole('link', { name: 'Plan' }).count(),
+    0,
+  );
   assert.doesNotMatch(membersText, /Items? (are|is) left|open Items|Index rebuild/);
   assert.equal(await members.locator('nav.pstate').count(), 0);
 
   const partial = await open('/ada/partial');
-  assert.match(await partial.locator('.glance').textContent(), /42 changes recorded this week/);
+  assert.match(await partial.locator('.phead .say').textContent(), /42 changes recorded this week/);
   assert.match(await partial.locator('nav.pstate').textContent(), /recorded since/);
   assert.match(await partial.getByRole('region', { name: 'Open Lanes' }).textContent(), /Recorded/);
 
@@ -788,12 +830,15 @@ test('public discovery screens: explore, a profile signed out and as its person,
   for (const [name, path] of [
     ['explore', '/explore'],
     ['project', '/ada/atlas'],
+    ['project-worst', worstPath],
     ['profile', '/ada'],
     ['profile-self', '/ada?as=self'],
   ])
     for (const width of [1440, 390])
       for (const theme of ['dark', 'light']) {
         const page = await open(path, width, theme);
+        if (name === 'project-worst') await page.getByRole('table').waitFor();
+        if (name === 'project') await page.getByText('Maps for everyone.').waitFor();
         const scroll = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
         assert.ok(scroll <= 0, `${name} ${width}/${theme}: no sideways scroll`);
         if (name === 'explore') {
@@ -803,6 +848,25 @@ test('public discovery screens: explore, a profile signed out and as its person,
             return handle.getBoundingClientRect().right - text.getBoundingClientRect().right;
           });
           assert.ok(gap < 1, `one-letter handle ends at the slash at ${width}/${theme}`);
+        }
+        if (name === 'project-worst') {
+          const readme = page.getByRole('region', { name: 'README', exact: true });
+          const landing = page.getByRole('region', { name: 'Recent landings' });
+          const a = await readme.boundingBox();
+          const b = await landing.boundingBox();
+          assert.ok(
+            width === 390 ? b.y >= a.y + a.height : b.x >= a.x + a.width - 1 && Math.abs(b.y - a.y) < 1,
+          );
+          assert.match(await readme.textContent(), /潮汐表/);
+          assert.match(await landing.textContent(), /تحديث جداول المد والجزر/);
+          assert.match(await readme.textContent(), /412 KB/);
+          assert.equal(
+            await readme.getByRole('link', { name: 'Read the rest in Code' }).getAttribute('href'),
+            `${worstPath}/code/files/.nforge/home.md`,
+          );
+          assert.equal(await readme.locator('img').count(), 0);
+          assert.equal(await page.evaluate(() => window.untrusted), undefined);
+          assert.match(await page.getByRole('button', { name: /128\.4K.*128,400/ }).textContent(), /128\.4K/);
         }
         await page.addScriptTag({ path: axe });
         const violations = await page.evaluate(async () =>

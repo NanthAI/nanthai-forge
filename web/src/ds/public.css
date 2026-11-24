@@ -104,6 +104,15 @@
   .nums.sig .cnt2 .av { width: 18px; height: 18px; }
   .asof { margin-left: auto; color: var(--text-3); font-weight: var(--w-regular); font-size: var(--t-meta); white-space: nowrap; }
   @container (max-width: 760px) { .nums.sig { grid-template-columns: repeat(2, minmax(0, 1fr)); } .nums.sig > div:nth-child(3) { border-left: 0; } .nums.sig > div:nth-child(n+3) { border-top: var(--rule) solid var(--line); } .nums.sig b { font-size: var(--t-sit); } }
+  .pp-tabs { display: flex; padding-inline: calc(var(--gut-head) - var(--s-3)); border-bottom: var(--rule) solid var(--line); }
+  .pp-tabs a { display: flex; align-items: center; gap: var(--s-2); min-height: var(--ph-h); padding-inline: var(--s-3); color: var(--text-2); font-size: var(--t-small); }
+  .pp-tabs a[aria-current] { color: var(--text); font-weight: var(--w-bold); box-shadow: inset 0 -2px 0 var(--brand); }
+  @media (max-width: 860px) { .pp-tabs { padding-inline: calc(var(--gut) - var(--s-3)); } .pp-tabs a { min-height: 44px; } }
+  .pp-readme .ph h2 { font-family: var(--font-mono); overflow-wrap: anywhere; }
+  .pp-readme .md { padding-top: var(--s-5); }
+  .pp-readme .pp-wide { max-width: none; overflow-x: auto; }
+  .pp-readme .pp-wide table { width: max-content; }
+  .pp-cutnote { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4); padding: var(--s-3) var(--gut); border-top: var(--rule) solid var(--line); color: var(--text-2); }
   .pframe { display: grid; grid-template-columns: minmax(0, 1fr) 372px; align-items: start; }
   .pframe > * { min-width: 0; container-type: inline-size; }
   .pframe > .doc { border-right: var(--rule) solid var(--line); align-self: stretch; }
@@ -117,7 +126,8 @@
   .kv.about .sub { color: var(--text-2); font-size: var(--t-meta); }
   .row.tl.pub { grid-template-columns: 52px minmax(0, 1fr) auto; }
   .row.tl.pub .by { display: block; color: var(--text-2); font-size: var(--t-meta); }
-  .row.tl.pub .ttl { font-weight: var(--w-medium); }
+  .row.tl.pub .ttl { font-weight: var(--w-medium); overflow-wrap: anywhere; }
+  @container (max-width: 460px) { .pframe .row.tl.pub { grid-template-columns: 46px minmax(0, 1fr) auto; gap: var(--s-2); } }
   .md { padding: var(--s-6) var(--gut-head) var(--s-12); font-size: var(--t-read); line-height: var(--lh-read); overflow-wrap: anywhere; min-width: 0; }
   .md > * { max-width: var(--m-read); }
   .md h1 { font: var(--w-bold) var(--t-figure)/var(--lh-tight) var(--font-sans); letter-spacing: var(--head-track); margin-bottom: var(--s-3); }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Public read-only code and history (Item 4c164732), the real screens signed out on synthetic cached public reads: from
-// the public project page's "Browse the code", a visitor opens folders, a file and the history with its receipts; every
+// the public project page's Code tab, a visitor opens folders, a file and the history with its receipts; every
 // read is one GET of the cached public route and nothing reaches Convex; no write control or Lane/Item link appears; a
 // private project and a missing one look the same; each page is axe-clean at 1440 and 390 in both themes.
 // FORGE_PUBLIC_CODE_SHOTS=<dir> also writes the screenshots.
@@ -286,9 +286,9 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
     assert.deepEqual(await view.evaluate(() => window.asked), [], `${where}: no Convex call`);
   };
 
-  // From the public project page: Browse the code opens the files at main.
+  // From the public project page: the Code tab opens the files at main.
   const home = await open('/ada/atlas');
-  await home.getByRole('link', { name: 'Browse the code' }).click();
+  await home.getByRole('link', { name: 'Code', exact: true }).click();
   await home.waitForURL('**/ada/atlas/code/files');
   await home.waitForFunction(() => !document.querySelector('[aria-busy="true"]'));
   const tree = home.getByRole('region', { name: 'Files' });

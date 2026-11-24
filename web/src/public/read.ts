@@ -75,7 +75,20 @@ export type ProjectPage = {
     upstream?: { handle: string; slug: string } | null;
   };
   stars: number;
-  activity: { landings: number; days: number[]; main: MainCheck; lastAt?: number; recordedSince?: number };
+  /** Optional while older snapshots are still cached. A null file is an observed absence on main. */
+  overview?: {
+    readme: { path: string; text: string; bytes: number; truncated: boolean } | null;
+    license: { path: string } | null;
+    landings: { id: string; at: number; message?: string }[];
+  };
+  activity: {
+    landings: number;
+    days: number[];
+    main: MainCheck;
+    lastAt?: number;
+    recordedSince?: number;
+    timeToMain?: number;
+  };
   lanes: {
     open: number;
     more: boolean;

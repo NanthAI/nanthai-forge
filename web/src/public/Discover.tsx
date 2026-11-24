@@ -23,7 +23,8 @@ import type { Id } from '../../../convex/_generated/dataModel';
 import type { FunctionReturnType } from 'convex/server';
 import { Avatar, Glyph, Sheet, Standing, State, initials } from '../ds';
 import { ForgeMark } from '../ui/brand';
-import { followLink } from '../app/router';
+import { followLink, useSearch } from '../app/router';
+import { ProjectReadme, RecentLandings, projectCode } from './Overview';
 import { stopWords } from '../app/lane-state';
 import { lineStops, type LineStage } from '../app/Line';
 import { hrefFor, publicProjectHref, type AppRoute } from '../app/paths';
@@ -54,10 +55,7 @@ const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFra
 /** A count in a narrow column: exact below 100,000, then 1.2M; the exact number stays in the label. */
 const big = (n: number) => (n >= 100_000 ? compact.format(n) : nf.format(n));
 const day = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-const clock = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
 const projectHref = publicProjectHref;
-const codeHref = (handle: string, slug: string) =>
-  hrefFor({ frame: 'project', handle, project: slug, place: 'code', section: 'files', rest: '' });
 const profileHref = (handle: string) => hrefFor({ frame: 'discover', page: 'profile', handle });
 const signInHref = (next = location.pathname + location.search) =>
   `${hrefFor({ frame: 'public', page: 'signin' })}?next=${encodeURIComponent(next)}`;
@@ -698,6 +696,7 @@ function Project({
     `project/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}.json`,
   );
   const [sheet, setSheet] = useState<'star' | 'clone' | 'share' | 'stargazers' | null>(null);
+  const section = useSearch().get('section');
   const data = read.state === 'ok' ? read.data : null;
   const id = data ? (data.project.id as Id<'hostedProjects'>) : null;
   const mineList = useQuery(
@@ -708,7 +707,9 @@ function Project({
   if (read.state === 'loading') return <Loading what={`${handle}/${slug}`} />;
   if (read.state === 'missing') return <NotFound what="No public project at this address" />;
   if (read.state !== 'ok') return <Failed what={`${handle}/${slug}`} retry={retry} />;
-  const { project, activity, lanes, plan, stars } = read.data;
+  const { project, activity, lanes, plan, stars, overview } = read.data;
+  const front = projectHref(project.handle, project.slug);
+  const showPlan = plan.shown && section === 'plan';
   const workspace = `${location.origin}${hrefFor({
     frame: 'project',
     handle: project.handle,
@@ -742,7 +743,15 @@ function Project({
             {project.name}
             <span className="kind">Public</span>
           </h1>
+          <p className="say">{facts}</p>
           <div className="fl">
+            {overview?.license ? (
+              <a href={projectCode(project, 'files', overview.license.path)} onClick={followLink}>
+                License
+              </a>
+            ) : overview ? (
+              <span>No license file</span>
+            ) : null}
             <span>On Forge since {day.format(project.since)}</span>
             {project.upstream ? (
               <span>
@@ -765,9 +774,6 @@ function Project({
             signedIn={signedIn}
             onGate={() => setSheet('star')}
           />
-          <a className="btn" href={codeHref(project.handle, project.slug)} onClick={followLink}>
-            Browse the code
-          </a>
           <button type="button" className="btn" onClick={() => setSheet('share')}>
             Share
           </button>
@@ -781,10 +787,6 @@ function Project({
           ) : null}
           {signedIn && !owner && id ? <ReportKey projectId={id} target={{ target: 'project' }} /> : null}
         </div>
-      </div>
-      <div className="glance">
-        <p>{facts}</p>
-        <span className="asof">as of {clock.format(read.data.asOf)}</span>
       </div>
       {read.data.moreCount ? (
         <p className="quietline">{nf.format(read.data.moreCount)} more public entries are not shown.</p>
@@ -805,92 +807,118 @@ function Project({
           }}
         />
       ) : null}
-      <div className="pframe">
-        <div className="doc">
-          <PlanSections plan={plan} />
-          <section aria-label="Open Lanes">
-            <div className="ph">
-              <h2>Open Lanes</h2>
-              <span className="cnt">{lanes.more ? '100+' : lanes.open}</span>
-              <span className="hint">where each one is on its way to main</span>
-            </div>
-            <div className="pstops">
-              {STOPS.map(([stop, label, of]) => {
-                const n = of.reduce((sum, stage) => sum + (lanes[stage] ?? 0), 0);
-                return (
-                  <div key={stop} className={n ? undefined : 'z'}>
-                    {label}
-                    <b>{nf.format(n)}</b>
-                  </div>
-                );
-              })}
-              <div className="mn">
-                {activity.recordedSince ? 'Recorded' : 'Landed'}
-                <b
-                  title={
-                    activity.recordedSince
-                      ? `Recorded since ${new Date(activity.recordedSince).toLocaleDateString()}`
-                      : undefined
-                  }
-                >
-                  {nf.format(activity.landings)}
-                </b>
-              </div>
-            </div>
-            {lanes.titles.length ? (
-              lanes.titles.map((lane, i) => (
-                <div className="row" key={i}>
-                  <span className="ttl" dir="auto">
-                    {lane.title ?? 'A Lane'}
-                  </span>
-                  <span className="meta">
-                    {isStop(lane.stage) ? `${stopWords[lane.stage]}${lane.held ? ', held' : ''}` : lane.stage}
-                  </span>
-                </div>
-              ))
-            ) : lanes.open ? (
-              <p className="quietline">This project shows open Lanes as counts.</p>
-            ) : (
-              <p className="quietline">No Lane is open now.</p>
-            )}
-          </section>
+      <nav className="pp-tabs" aria-label="Project">
+        <a href={front} aria-current={showPlan ? undefined : 'page'} onClick={followLink}>
+          Overview
+        </a>
+        <a href={projectCode(project)} onClick={followLink}>
+          Code
+        </a>
+        {plan.shown ? (
+          <a href={`${front}&section=plan`} aria-current={showPlan ? 'page' : undefined} onClick={followLink}>
+            Plan <span className="cnt">{nf.format(plan.left)}</span>
+          </a>
+        ) : null}
+      </nav>
+      {showPlan ? (
+        <div className="pframe">
+          <div className="doc">
+            <PlanSections plan={plan} />
+          </div>
         </div>
-        <aside aria-label="About">
-          <section>
-            <div className="ph">
-              <h2>About</h2>
-            </div>
-            <dl className="kv about">
-              <dt>Owner</dt>
-              <dd>
-                <a href={profileHref(project.handle)} onClick={followLink} translate="no">
-                  @{project.handle}
-                </a>
-              </dd>
-              <dt>Since</dt>
-              <dd>{day.format(project.since)}</dd>
-              <dt>{activity.recordedSince ? 'Recorded this week' : 'This week'}</dt>
-              <dd>
-                {plural(activity.landings, 'landing')} <Week days={activity.days} />
-              </dd>
-              <dt>Main</dt>
-              <dd>
-                <Main main={activity.main} />
-              </dd>
-              {owner ? (
-                <>
-                  <dt>Stars</dt>
-                  <dd>
-                    <button type="button" className="btn sm" onClick={() => setSheet('stargazers')}>
-                      Who starred
-                    </button>
-                  </dd>
-                </>
-              ) : null}
-            </dl>
-          </section>
-        </aside>
-      </div>
+      ) : (
+        <div className="pframe">
+          <ProjectReadme project={project} overview={overview} />
+          <aside aria-label="Activity and about">
+            <RecentLandings project={project} overview={overview} />
+            <section aria-label="About">
+              <div className="ph plain">
+                <h2>About</h2>
+              </div>
+              <dl className="kv about">
+                <dt>Owner</dt>
+                <dd>
+                  <a href={profileHref(project.handle)} onClick={followLink} translate="no">
+                    @{project.handle}
+                  </a>
+                </dd>
+                <dt>Since</dt>
+                <dd>{day.format(project.since)}</dd>
+                <dt>{activity.recordedSince ? 'Recorded this week' : 'This week'}</dt>
+                <dd>
+                  {plural(activity.landings, 'landing')} <Week days={activity.days} />
+                </dd>
+                <dt>Time to main</dt>
+                <dd>
+                  {activity.main === 'unchecked'
+                    ? 'Not checked'
+                    : activity.timeToMain === undefined
+                      ? 'Not reported'
+                      : flowDuration(activity.timeToMain)}
+                </dd>
+                {owner ? (
+                  <>
+                    <dt>Stars</dt>
+                    <dd>
+                      <button type="button" className="btn sm" onClick={() => setSheet('stargazers')}>
+                        Who starred
+                      </button>
+                    </dd>
+                  </>
+                ) : null}
+              </dl>
+            </section>
+            <section aria-label="Open Lanes">
+              <div className="ph">
+                <h2>Open Lanes</h2>
+                <span className="cnt">{lanes.more ? '100+' : lanes.open}</span>
+                <span className="hint">where each one is on its way to main</span>
+              </div>
+              <div className="pstops">
+                {STOPS.map(([stop, label, of]) => {
+                  const n = of.reduce((sum, stage) => sum + (lanes[stage] ?? 0), 0);
+                  return (
+                    <div key={stop} className={n ? undefined : 'z'}>
+                      {label}
+                      <b>{nf.format(n)}</b>
+                    </div>
+                  );
+                })}
+                <div className="mn">
+                  {activity.recordedSince ? 'Recorded' : 'Landed'}
+                  <b
+                    title={
+                      activity.recordedSince
+                        ? `Recorded since ${new Date(activity.recordedSince).toLocaleDateString()}`
+                        : undefined
+                    }
+                  >
+                    {nf.format(activity.landings)}
+                  </b>
+                </div>
+              </div>
+              {lanes.titles.length ? (
+                lanes.titles.map((lane, i) => (
+                  <div className="row" key={i}>
+                    <span className="ttl" dir="auto">
+                      {lane.title ?? 'A Lane'}
+                    </span>
+                    <span className="meta">
+                      {isStop(lane.stage)
+                        ? `${stopWords[lane.stage]}${lane.held ? ', held' : ''}`
+                        : lane.stage}
+                    </span>
+                  </div>
+                ))
+              ) : lanes.open ? (
+                <p className="quietline">This project shows open Lanes as counts.</p>
+              ) : (
+                <p className="quietline">No Lane is open now.</p>
+              )}
+            </section>
+          </aside>
+        </div>
+      )}
       {sheet === 'star' || (sheet === 'clone' && !signedIn) ? (
         <Gate
           what={sheet}
@@ -1074,16 +1102,7 @@ function Code({ route }: { route: Extract<AppRoute, { frame: 'project' }> }) {
 }
 
 /** What is left: the next Items in the project's order and the Initiatives with Items left. */
-function PlanSections({ plan }: { plan: ProjectPage['plan'] }) {
-  if (!plan.shown)
-    return (
-      <section aria-label="Plan">
-        <div className="ph">
-          <h2>Plan</h2>
-        </div>
-        <p className="quietline">This project’s plan is for its members.</p>
-      </section>
-    );
+function PlanSections({ plan }: { plan: Extract<ProjectPage['plan'], { shown: true }> }) {
   return (
     <>
       <section aria-label="Next">

@@ -112,14 +112,27 @@ export function SafeMarkdown({
   label,
   idPrefix,
   repo,
+  scrollTables = false,
 }: {
   text: string;
   label?: string;
   idPrefix?: string;
   repo?: RepoMarkdown;
+  scrollTables?: boolean;
 }) {
   const prefix = idPrefix?.replace(/[^\w-]/g, '');
-  const repoParts = useMemo(() => (repo ? repoComponents(repo) : components), [repo]);
+  const repoParts = useMemo(() => {
+    const parts = repo ? repoComponents(repo) : components;
+    if (!scrollTables) return parts;
+    return {
+      ...parts,
+      table: ({ children }: { children?: ReactNode }) => (
+        <div className="pp-wide" role="region" aria-label="README table" tabIndex={0}>
+          <table>{children}</table>
+        </div>
+      ),
+    };
+  }, [repo, scrollTables]);
   return (
     <Prose {...(label ? { label } : {})}>
       <Markdown
