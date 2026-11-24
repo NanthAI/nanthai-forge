@@ -264,3 +264,18 @@ evidence, including evidence that cannot be read within the snapshot budget. Sto
 inspect those Items; don't skip the blocked key. A fresh pass from `cursor: null` must reach
 `nextCursor: null` with no `headCursor`, zero `filled` and no `blocked` before considering
 any removal of the fallback.
+
+## Weekly database export cost
+
+Convex takes a snapshot export of the dev deployment on Mondays at 03:00Z (the system job `_system_job/snapshot_export`). The export reads the whole database, so its billed read I/O follows stored document bytes, not traffic. It is not in the repo's function-log meter ([convex-spend](convex-spend.md)); the only source is the Convex dashboard usage page for the billing period. Never start an extra export for a measurement: every manual dispatch needs the lead's approval.
+
+Record each weekly run here, with the stored size of the same day, so the ratio can be checked:
+
+| Run | Billed read I/O | Stored size (dashboard) | I/O per stored GB | Source |
+| --- | --- | --- | --- | --- |
+| 2026-11-10, three manual exports | 3.94 GB in all (about 1.3 GB each) | about 6.5 GB (2026-11-13 reading) | about 0.2 | [convex-spend](convex-spend.md); Item 411727ba comment 67059b19 |
+| 2026-11-16 and 2026-11-23, two weekly exports, together | 7.37 GB (about 3.7 GB each, about $0.74 at $0.20/GB) | 8.8 GB on 2026-11-23 | about 0.42 | Owner dashboard, billing period 2026-11-10 to 12-10; Item 411727ba comments 94b21a92 and 67059b19 |
+
+The weekly pair is one dashboard total, not two records, and the export file's own size is recorded nowhere. The two ratios differ by a factor of two while stored size grew only by about a third, so I/O per run does not yet follow stored size in a way we can plan with. Fill the next row from the 2026-11-30 run: read that run's own usage line and the stored size on the same dashboard day. Until then use 0.2 to 0.4 GB of export I/O per stored GB.
+
+What moves it: every stored GB removed lowers the next export by about 0.2 to 0.4 GB, $0.04 to $0.08 per run, so about $0.04 to $0.08 per 1,000 landings at about 1,000 landings a week. The whole export costs about $0.7 per 1,000 landings at the current 3.7 GB per run. Expiring finished check runs (the 30-day rule, first rows from 2026-11-27, about 1.0 GB) and the planning and Work row moves (about 0.4 GB) are the two reductions in motion; legacy `viewFiles` (about 1.4 GB) and finished source jobs (about 0.4 GB) are not decided. Row sizes and decisions are in Item 411727ba.
