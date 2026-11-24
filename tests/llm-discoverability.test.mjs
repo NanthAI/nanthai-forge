@@ -173,7 +173,9 @@ test('llms.txt answers the public page prompt explain-first and states the devel
     '/ada',
     '/ada/atlas',
     '/-/public/v1/project/ada/atlas.json',
+    '/-/public/v1/profile/ada.json',
     '/-/public/v1/explore/active.json',
+    '/-/public/v1/explore/active/2.json',
     '/sitemap.xml',
   ])
     assert.ok(crawlable(robots, url), url);
@@ -187,6 +189,9 @@ test('llms.txt answers the public page prompt explain-first and states the devel
     '/device',
     '/new',
     '/ada/atlas?view=public',
+    '/-/public/v1/project/ada/atlas.json?view=public',
+    '/-/public/v1/code/ada/atlas/history.json',
+    '/-/public/v1/search/1.json',
     '/-/ada/atlas',
     '/-/explore',
     '/-',

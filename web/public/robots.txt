@@ -1,6 +1,6 @@
 # Crawlable: static public pages ("/", the discovery files, docs and assets) and the public discovery pages (/explore,
-# profiles /HANDLE, public project front pages /HANDLE/PROJECT, their cached reads under /-/public/v1/ and
-# /sitemap.xml), served from the site's cache (site/public-read.ts). No Sitemap line: this file is the
+# profiles /HANDLE, public project front pages /HANDLE/PROJECT, their cached snapshot reads and /sitemap.xml).
+# Search shards and Code/History data are not crawler entry points. No Sitemap line: this file is the
 # same on every site, the sitemap is not. Deeper places, query links, signed-in places and old app routes (/projects,
 # /settings, /app.html) stay closed: they would consume Convex reads. Each closed name is closed exactly and as a
 # folder, so a handle that starts with it (/newton) stays open. Crawlers rank a rule by its full length, "*" and "$"
@@ -29,7 +29,9 @@ Allow: /forge-badge-256.png$
 Allow: /maskable-512.png$
 Allow: /site.webmanifest$
 Allow: /sitemap.xml$
-Allow: /-/public/v1/
+Allow: /-/public/v1/project/*.json$
+Allow: /-/public/v1/profile/*.json$
+Allow: /-/public/v1/explore/*.json$
 Disallow: /*?
 Disallow: /*/*/
 Disallow: /-$
