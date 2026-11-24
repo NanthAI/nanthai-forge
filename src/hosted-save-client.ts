@@ -1284,9 +1284,13 @@ function saveSecretScan(
   staged: string,
 ): SecretScanResult | null {
   const after = new Map<string, string>();
+  const before = new Map<string, string>();
   for (const change of changes)
-    if (change.after && change.after.mode !== 'symlink' && change.after.mode !== 'gitlink')
+    if (change.after && change.after.mode !== 'symlink' && change.after.mode !== 'gitlink') {
       after.set(change.path, change.after.blob);
+      if (change.before && change.before.mode !== 'symlink' && change.before.mode !== 'gitlink')
+        before.set(change.path, change.before.blob);
+    }
   if (!after.size) return null;
   const read = (path: string) => {
     const blob = after.get(path);
@@ -1299,7 +1303,13 @@ function saveSecretScan(
       return localObjects(root, SECRET_SCAN_MAX_FILE_BYTES)(blob) ?? undefined;
     }
   };
-  const result = scanSecretPaths([...after.keys()], read, { baseAllow: baseAllow(root, marker) });
+  // Unchanged lines of a touched file are not this save's: the file's prior bytes are read only
+  // for a file that has a finding, from this machine's object store.
+  const readBase = (path: string) => {
+    const blob = before.get(path);
+    return blob ? (localObjects(root, SECRET_SCAN_MAX_FILE_BYTES)(blob) ?? undefined) : undefined;
+  };
+  const result = scanSecretPaths([...after.keys()], read, { baseAllow: baseAllow(root, marker), readBase });
   return result.findings.length ? result : null;
 }
 

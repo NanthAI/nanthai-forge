@@ -97,14 +97,37 @@ export async function machineSecretScan(
     ...(baseAllowFile ? [baseAllowFile.blob] : []),
   ]);
   signal.throwIfAborted();
-  const scan = scanSecretPaths(
-    changed,
-    path => {
-      const file = inventory.get(path);
-      return file && file.mode !== 'symlink' ? readFileSync(join(cache.objects, file.blob)) : undefined;
-    },
-    { baseAllow: baseAllowFile ? readFileSync(join(cache.objects, baseAllowFile.blob)) : undefined },
-  );
+  const scanOptions = {
+    baseAllow: baseAllowFile ? readFileSync(join(cache.objects, baseAllowFile.blob)) : undefined,
+  };
+  const readNew = (path: string) => {
+    const file = inventory.get(path);
+    return file && file.mode !== 'symlink' ? readFileSync(join(cache.objects, file.blob)) : undefined;
+  };
+  let scan = scanSecretPaths(changed, readNew, scanOptions);
+  if (scan.findings.length && before) {
+    // Lines the change did not touch are not its findings: fetch the base bytes of the files
+    // that have findings (rare) and drop findings the base file already holds.
+    const baseFiles = new Map(before.map(file => [file.path, file]));
+    const bases = [...new Set(scan.findings.map(finding => finding.path))].flatMap(path => {
+      const file = baseFiles.get(path);
+      return file && file.mode !== 'symlink' ? [file.blob] : [];
+    });
+    try {
+      await cache.ensure(bases);
+      signal.throwIfAborted();
+      scan = scanSecretPaths(changed, readNew, {
+        ...scanOptions,
+        readBase: path => {
+          const file = baseFiles.get(path);
+          return file && file.mode !== 'symlink' ? readFileSync(join(cache.objects, file.blob)) : undefined;
+        },
+      });
+    } catch (error) {
+      if (signal.aborted) throw error;
+      /* Base bytes unreadable: the whole-file findings stand. */
+    }
+  }
   // The scan needs new bytes only. Queue proof also covers paths absent from this State.
   let queueProof;
   if (pinQueueProof && before) {

@@ -86,7 +86,14 @@ export function reportPreflightChecks(
           return undefined;
         return read(file);
       },
-      { baseAllow },
+      {
+        baseAllow,
+        // Lines the Lane did not touch are not its findings: main's bytes of a file with a finding.
+        readBase: path => {
+          const file = current.get(path);
+          return file && file.mode !== 'symlink' ? read(file) : undefined;
+        },
+      },
     );
     if (!scan.findings.length) return preview;
     const findings = scan.findings.slice(0, 5);

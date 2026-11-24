@@ -501,3 +501,36 @@ test('machine runner: an unreadable base State fails closed for core paths, neve
   assert.equal(run.signal, 'SIGTERM');
   assert.match(run.stderr, /QueueProofUnavailable: .*Next: retry/);
 });
+
+test('573ae136: a reference on the right of a secret-named assignment is not a secret; literals still are', () => {
+  const name = join('R2_ACCESS_', 'KEY_ID'),
+    ref = `${name}: fakeR2Config.accessKeyId,\nconst ${join('tok', 'en')} = process.env.SERVICE_TOKEN_VALUE1;`;
+  assert.deepEqual(scanSecretText('scripts/drill.mjs', ref), []);
+  // Quoted, bare-word and JWT-shaped values stay literals.
+  assert.equal(scanSecretText('scripts/drill.mjs', `${name}=${fake.random}`).length, 1);
+  assert.equal(
+    scanSecretText('deploy.env', `${name}=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkw`).length,
+    1,
+  );
+  assert.equal(
+    scanSecretText('scripts/drill.mjs', `${join('api_', 'key')}: "fakeR2Config.accessKeyId"`).length,
+    1,
+  );
+  assert.equal(scanSecretText('scripts/drill.mjs', `client_secret = "${fake.random}"`).length, 1);
+});
+
+test('573ae136: findings on lines the base file already holds are not the change; moved literals are', () => {
+  const old = `client_secret = "${fake.random}"\n`;
+  const text = `${old}const added = 1;\n`;
+  const base = files({ 'a.mjs': old });
+  const run = (entries, readBase) =>
+    scanSecretPaths(Object.keys(entries), files(entries), { baseAllow: undefined, readBase });
+  assert.equal(run({ 'a.mjs': text }).findings.length, 1, 'no base: whole file scanned');
+  assert.equal(run({ 'a.mjs': text }, base).findings.length, 0, 'unchanged line is not reported');
+  assert.equal(
+    run({ 'a.mjs': `${text}api_key = "${fake.random}x"\n` }, base).findings.length,
+    1,
+    'new literal caught',
+  );
+  assert.equal(run({ 'b.mjs': text }, base).findings.length, 1, 'moved into a new file: caught');
+});

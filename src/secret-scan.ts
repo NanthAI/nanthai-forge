@@ -41,6 +41,10 @@ export type SecretScanOptions = {
   baseAllow: Buffer | undefined;
   /** Future private-file audience (Issue 6bd7ddb1): a private path is never scanned. */
   isPrivate?: (path: string) => boolean;
+  /** The same path's bytes in the base (main) State. A finding whose fingerprint (path, kind and
+   * value) the base file already has is an unchanged line, not part of this change, and is not
+   * reported. A path new to the change has no base bytes, so moved literals are still caught. */
+  readBase?: (path: string) => Buffer | undefined;
 };
 
 // Known credential shapes. Prefixes are fixed by each provider; bodies are random.
@@ -75,7 +79,11 @@ const patterns: { kind: string; pattern: RegExp }[] = [
 ];
 // A secret-named assignment whose value looks random: `API_KEY=…`, `token: "…"`.
 const assignment =
-  /(?:secret|token|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|credential)[A-Za-z0-9_-]{0,64}['"]?[ \t]{0,64}[:=][ \t]{0,64}['"`]?([A-Za-z0-9+/_=.:|-]{24,})/iy;
+  /(?:secret|token|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|credential)[A-Za-z0-9_-]{0,64}['"]?[ \t]{0,64}[:=][ \t]{0,64}(['"`]?)([A-Za-z0-9+/_=.:|-]{24,})/iy;
+// A property access (`fakeR2Config.accessKeyId`, `process.env.X`) on the right of `=`/`:` is a
+// reference, not a literal. Quoted values, bare words and JWTs (`eyJ…` segments look like
+// identifiers) stay candidates.
+const reference = /^(?!eyJ)[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)+$/;
 
 /** Shannon entropy in bits per character. */
 export function entropy(text: string) {
@@ -191,11 +199,13 @@ export function scanSecretText(path: string, text: string, work?: { assignmentCh
           continue;
         }
         cursor = assignment.lastIndex;
-        const value = match[1]!,
+        const quote = match[1]!,
+          value = match[2]!,
           from = start + match.index,
           index = from + match[0].length - value.length;
         while (knownIndex < knownStarts.length && knownStarts[knownIndex]! < from) knownIndex++;
         if (
+          (!quote && reference.test(value)) ||
           !randomLooking(value) ||
           placeholder(value) ||
           (knownStarts[knownIndex] !== undefined && knownStarts[knownIndex]! <= index + value.length)
@@ -249,7 +259,16 @@ export function scanSecretPaths(
       continue;
     }
     scannedFiles++;
-    for (const finding of scanSecretText(path, bytes.toString('utf8'))) {
+    let found0 = scanSecretText(path, bytes.toString('utf8'));
+    if (found0.length && options.readBase) {
+      // Only a file with findings pays for the base read and scan.
+      const old = options.readBase(path);
+      if (old && old.length <= SECRET_SCAN_MAX_FILE_BYTES) {
+        const had = new Set(scanSecretText(path, old.toString('utf8')).map(f => f.fingerprint));
+        found0 = found0.filter(f => !had.has(f.fingerprint));
+      }
+    }
+    for (const finding of found0) {
       const key = `${path}\0${finding.fingerprint}`;
       if (allow.has(key)) {
         allowed++;
