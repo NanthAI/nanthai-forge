@@ -96,6 +96,61 @@ test('the deployment census reports incomplete projects on later pages; a finish
   assert.deepEqual(await census(first.next), { checked: 1, covered: 1, next: null, incomplete: [] });
 });
 
+async function projectWithoutGeneration(s) {
+  const { projectId } = await s.setup();
+  await s.ctx.db.patch(projectId, {
+    work: { backupId: 'fixture-backup', operationId: randomUUID(), initialRevision: 0, revision: 0 },
+  });
+  return projectId;
+}
+
+test('a project without a Work generation is covered once both hosted head ranges are empty', async t => {
+  deployment(t);
+  const s = recordsFixture(),
+    projectId = await projectWithoutGeneration(s);
+  const census = () => s.call('census', repair.coverage, { after: null });
+  const run = () => s.call('repair', repair.run, { projectId, after: null });
+  assert.equal((await census()).covered, 0);
+  const result = await run();
+  assert.equal(result.next, null);
+  assert.equal(result.scanned, 0);
+  assert.equal(result.patched, 0);
+  const { documents, ranges, writes } = s.counts.at(-1);
+  // Includes the standard writer's possible first legacy project companion.
+  assert(documents <= 5 && ranges <= 5 && writes <= 2);
+  assert.deepEqual(await census(), { checked: 1, covered: 1, next: null, incomplete: [] });
+  assert.deepEqual(await run(), { scanned: 0, patched: 0, next: null });
+  assert.equal(s.counts.at(-1).writes, 0);
+});
+
+for (const kind of ['intent', 'lane']) {
+  test(`membership repair refuses a missing Work index when a hosted ${kind} head exists`, async t => {
+    deployment(t);
+    const s = recordsFixture(),
+      projectId = await projectWithoutGeneration(s);
+    await s.ctx.db.insert('projectHostedRecordHeads', {
+      projectId,
+      kind,
+      key: randomUUID(),
+      parent: '',
+      version: 0,
+      status: 'completed',
+      recordId: 'fixture-record',
+    });
+    await assert.rejects(
+      s.call('repair', repair.run, { projectId, after: null }),
+      error => error.code === 'PROJECT_WORK_INDEX_MISSING',
+    );
+    assert.equal(s.counts.at(-1).writes, 0);
+    assert.deepEqual(await s.call('census', repair.coverage, { after: null }), {
+      checked: 1,
+      covered: 0,
+      next: null,
+      incomplete: [{ projectId, after: null }],
+    });
+  });
+}
+
 test('membership repair and its census refuse non-dev deployments without writing', async t => {
   deployment(t, 'https://fixture-prod.convex.cloud');
   const s = recordsFixture(),

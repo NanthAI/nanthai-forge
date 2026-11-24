@@ -40,13 +40,30 @@ export const run = internalMutation({
       'WORK_STALE',
       'Finish active Item purges before continuing membership repair.',
     );
-    const current: Frontier = after?.startsWith('{') ? JSON.parse(after) : { phase: 'roots', key: null };
     const generation = await selectedGeneration(ctx, project);
-    invariant(
-      !project.work || generation,
-      'PROJECT_WORK_INDEX_MISSING',
-      'Rebuild the Work index before repairing Item membership.',
-    );
+    if (project.work && !generation) {
+      const firstHead = (kind: 'intent' | 'lane') =>
+        ctx.db
+          .query('projectHostedRecordHeads')
+          .withIndex('by_project_and_kind_and_key', q => q.eq('projectId', projectId).eq('kind', kind))
+          .first();
+      const [intent, lane] = await Promise.all([firstHead('intent'), firstHead('lane')]);
+      invariant(
+        !intent && !lane,
+        'PROJECT_WORK_INDEX_MISSING',
+        'Rebuild the Work index before repairing Item membership.',
+      );
+      // Certify the empty ranges and write the checkpoint in the same transaction.
+      await ctx.db.patch(projectId, { itemLaneMembership: true });
+      return {
+        scanned: 0,
+        patched: 0,
+        next: null,
+        readBytes: bytes(project),
+        writeBytes: bytes(project) + 1024,
+      };
+    }
+    const current: Frontier = after?.startsWith('{') ? JSON.parse(after) : { phase: 'roots', key: null };
     const workItem = (id: string) =>
       generation
         ? record(ctx, recordPartition(generation), 'planningSearch', id)

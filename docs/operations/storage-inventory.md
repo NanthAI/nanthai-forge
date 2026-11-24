@@ -117,7 +117,10 @@ It does not enable the staged index, change the selected readers or remove the s
 `projectItemLaneBackfill:run` with a project id and `after` (`null` initially), then use the returned
 `next` until complete. Retrying a previously committed frontier returns the durable position. The
 repair processes at most 62 steps in one transaction, with at most 192 reads, 132 ranges, 64 writes,
-8 MiB read and 4 MiB patch payload. It makes no R2 calls and schedules no idle work.
+8 MiB read and 4 MiB patch payload. With Work metadata but no valid selected index, repair
+certifies coverage only if two indexed reads in the checkpoint transaction find neither a hosted
+Intent head nor a hosted Lane head. If either exists, repair refuses with `PROJECT_WORK_INDEX_MISSING`
+and leaves coverage unchanged. It makes no R2 calls and schedules no idle work.
 
 Before switching readers, drain the dev census `projectItemLaneBackfill:coverage`, passing its `next`
 as `after`. Record that the sum of `covered` equals the sum of `checked` over all pages. Use returned
