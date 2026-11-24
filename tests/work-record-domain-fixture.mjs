@@ -8,7 +8,6 @@ export function fixtureWorkRecordTable(collection) {
   if (
     collection.endsWith(':payload') ||
     collection.startsWith('source') ||
-    collection === 'viewFiles' ||
     collection.startsWith('_workStore')
   )
     return 'projectWorkDataRecords';

@@ -51,7 +51,7 @@ The index reader map (repository-relative paths):
 | `by_generation_and_actor` | Any collection with imported `actor` metadata; `convex/projectActorNames.ts:67`; retained on all three tables |
 | `by_generation_and_collection_and_key` | Every collection; `convex/projectWorkRecordTables.ts:40` selected lookup; planning id resolution in `convex/projectHostedPlanning.ts` |
 | `by_generation_and_collection_and_position` | Every collection, including source/payload/comparison pages; `convex/projectWorkIndex.ts:170`, `convex/projectWorkIndexBuildStore.ts:50`, `convex/projectWorkStoreDigests.ts:161` |
-| `by_generation_and_collection_and_parent_and_position` | Payload chunks, `viewFiles`, `laneViews`, `viewAcceptances`, `runs`, `notes`, planning history and other parent-selected collections; `convex/hostedRecordValue.ts:27`, `convex/projectWorkIndex.ts:175` |
+| `by_generation_and_collection_and_parent_and_position` | Payload chunks, `viewAcceptances`, `runs`, `notes`, planning history and other parent-selected collections; `convex/hostedRecordValue.ts:27`, `convex/projectWorkIndex.ts:175` |
 | `by_generation_and_collection_and_status_and_position` | `intents`, `landingEntries`, `landingBatches`; `convex/projectWork.ts:395`, `convex/projectWorkIndexBuildStore.ts:202`, `convex/projectSourceAuthorityDrain.ts:24` |
 | `by_project` | Every collection; dynamic permanent purge, `convex/projectPurgeRows.ts:26` and `convex/projectPurgeInventory.ts` |
 | `by_generation` | Every collection; generation retirement in `convex/projectWorkIndexStore.ts:344` and explicit `convex/projectWorkRecordMigration.ts:103` |

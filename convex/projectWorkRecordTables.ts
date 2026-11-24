@@ -25,7 +25,6 @@ export function splitRecordTable(collection: string): WorkRecordTable {
   if (
     collection.endsWith(':payload') ||
     collection.startsWith('source') ||
-    collection === 'viewFiles' ||
     collection.startsWith('_workStore')
   )
     return 'projectWorkDataRecords';
