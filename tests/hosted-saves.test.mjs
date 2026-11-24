@@ -169,6 +169,28 @@ test('current contributor revocation and authority epochs are checked on staging
     code('PROJECT_UNAVAILABLE'),
   );
 });
+test('publication and result download refuse a rolled epoch; publication loads its save once and a completed receipt replays', async t => {
+  const s = await saveFixture(),
+    x = await s.prepare([s.change()]);
+  await s.stage(x);
+  await s.submit(x);
+  const output = await s.work(x);
+  const download = () =>
+    s.call('resultDownload', jobApi.resultDownload, { projectId: s.projectId, jobId: output.jobId });
+  s.patch('hostedProjects', s.projectId, { sourceAuthority: { mode: 'server', epoch: 2 } });
+  await assert.rejects(download(), code('SOURCE_AUTHORITY_CHANGED'));
+  await assert.rejects(s.publish(output), code('SOURCE_AUTHORITY_CHANGED'));
+  s.patch('hostedProjects', s.projectId, { sourceAuthority: { mode: 'server', epoch: 1 } });
+  const terminal = await s.publish(output);
+  assert.equal(terminal.outcome.status, 'completed');
+  const io = s.counts.findLast(row => row.name === 'publish');
+  // The job-index lookup and one loadSave; a second loadSave after terminal replay was the duplicate.
+  assert.equal(io.readDocumentsByTable.projectHostedSaves, 2, 'publication loads its save once');
+  t.diagnostic(`publish reads ${JSON.stringify(io.readDocumentsByTable)}`);
+  s.patch('hostedProjects', s.projectId, { sourceAuthority: { mode: 'server', epoch: 2 } });
+  assert.equal(await download(), null, 'a completed save has no result to download, whatever the epoch');
+  assert.deepEqual(await s.publish(output), terminal, 'a completed receipt replays across epochs');
+});
 test('250 changed paths stage in bounded pages and final publication has constant reads', async t => {
   const s = await saveFixture(),
     changes = Array.from({ length: 250 }, (_, i) => {
@@ -232,6 +254,9 @@ test('callback finalizer completes without an editing client and reconciles a lo
     await jobApi.complete._handler(ctx, { projectId: s.projectId, jobId: output.jobId }),
   );
   assert.equal(terminal.outcome.status, 'completed');
+  // The job-index lookup and one loadSave (a second loadSave after the terminal check was the duplicate).
+  const download = s.counts.findLast(row => row.name === 'resultDownload');
+  assert.equal(download.readDocumentsByTable.projectHostedSaves, 2, 'a result download loads its save once');
   assert.equal(gets, 1);
   assert.equal(await jobApi.complete._handler(ctx, { projectId: s.projectId, jobId: output.jobId }), null);
   assert.equal(gets, 1);

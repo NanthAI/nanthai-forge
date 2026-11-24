@@ -12,6 +12,7 @@ import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import { splitLandingBatch } from './projectHostedLandingBatchSplit';
 import { releaseUnstartedBatchForPriority } from './projectHostedLandingBatchPriority';
 import type { Doc } from './_generated/dataModel';
+import type { HostedLandingState } from '../src/hosted-landing';
 import type { MutationCtx } from './_generated/server';
 import type { FinishIdentity } from './projectHostedFinishControl';
 import { settleMemberBatchConflict } from './projectHostedLandingBatchConflict';
@@ -44,11 +45,12 @@ export async function batchFinishStep(
   ctx: MutationCtx,
   input: FinishIdentity,
   originalRow: Doc<'projectHostedFinishes'>,
+  /** The caller's landing state, loaded in this transaction with no landing write since. */
+  state: HostedLandingState,
 ): Promise<{
   handled: boolean;
   command: FinishCommand | null;
 }> {
-  const { state } = await loadLanding(ctx, input);
   const batchId = state.batchId ?? state.batchOriginId;
   if (!batchId) return { handled: false, command: null };
   const key = { projectId: input.projectId, batchId };

@@ -292,10 +292,13 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // Item 1018d0f8 (discarded run count): request rows carry `runs` and short run keys (about 31 B) on every read,
 // and the finish-read copies leave them out; the arms read different numbers of each, so carry moves by -738,
 // scoped recheck by +282 and red by -1,176 read bytes. No call is added; writes stay within the band.
+// Item 411727ba (settle): the finish step hands its loaded landing to the cohort step, so each finish wake reads one
+// landing row fewer. The arms run different numbers of wakes, so carry moves by -2,165, scoped recheck by -3,145 and
+// red by +4,158 read bytes against their retires. No call or write changes.
 export const WIRED = {
-  carry: { calls: -2, readBytes: 189_377, writeBytes: 18_883 },
-  'scoped-recheck': { calls: 8, readBytes: 329_089, writeBytes: 89_950 },
-  red: { calls: -17, readBytes: -387_669, writeBytes: -141_605 },
+  carry: { calls: -2, readBytes: 187_212, writeBytes: 18_883 },
+  'scoped-recheck': { calls: 8, readBytes: 325_944, writeBytes: 89_950 },
+  red: { calls: -17, readBytes: -383_511, writeBytes: -141_605 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

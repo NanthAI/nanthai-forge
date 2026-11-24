@@ -400,10 +400,12 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // Four fewer calls, 123,394 fewer read bytes and 26,132 fewer write bytes.
   // Item 1018d0f8: the request rows' discarded run count (`runs` and short run keys) adds 3,699 read and 491
   // write bytes for the pair, with unchanged calls.
+  // Item 411727ba (settle): the finish step hands its loaded landing to the cohort step, one landing row
+  // read fewer per finish wake: 37,384 fewer read bytes for the pair, with unchanged calls and writes.
   const measured = canonicalReplayCost(pair);
   assert.deepEqual(
     measured,
-    { calls: 103, readBytes: 1_703_538, writeBytes: 568_541 },
+    { calls: 103, readBytes: 1_666_154, writeBytes: 568_541 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -466,10 +468,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item 8b7ab7a9: the grouped upload still removes four calls at 4,000 files,
   // with 123,656 fewer read bytes and 26,216 fewer write bytes.
   // Item 1018d0f8: the same discarded run count adds 3,699 read and 491 write bytes at 4,000 files.
+  // Item 411727ba (settle): the same landing-row read saved per finish wake at 4,000 files: 37,467 fewer read bytes.
   const measured = canonicalReplayCost(after);
   assert.deepEqual(
     measured,
-    { calls: 103, readBytes: 1_708_133, writeBytes: 570_734 },
+    { calls: 103, readBytes: 1_670_666, writeBytes: 570_734 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

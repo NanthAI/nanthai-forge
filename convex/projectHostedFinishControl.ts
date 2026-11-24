@@ -55,7 +55,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
   const { row: landing, state } = await loadLanding(ctx, input);
   try {
     if (!value.pending?.precompose) {
-      const batchStep = await batchFinishStep(ctx, input, row);
+      const batchStep = await batchFinishStep(ctx, input, row, state);
       if (batchStep.handled) return batchStep.command;
     }
     if (state.phase === 'landed' || state.phase === 'terminal-failed') return null;

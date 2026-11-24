@@ -193,9 +193,9 @@ export const resultDownload = internalMutation({
   handler: async (ctx, input) => {
     const row = await saveForJob(ctx, input.projectId, input.jobId);
     if (!row) return null;
-    const { operation, state } = await loadSave(ctx, row, false);
+    const { operation, state, project } = await loadSave(ctx, row, false);
     if (operation.terminal) return null;
-    await loadSave(ctx, row);
+    requireWriteEpoch(project, state.request.authorityEpoch);
     const job = await loadSourceJob(ctx, input.projectId, input.jobId);
     if (job.status === 'failed' || job.status === 'cancelled') {
       const code = job.control.failureCode ?? 'SOURCE_JOB_CANCELLED';

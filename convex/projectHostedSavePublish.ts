@@ -17,7 +17,7 @@ import {
 } from './projectHostedSaveStore';
 import { finishHostedOperation } from './projectHostedOperations';
 import { revertPendingSaveOverlap } from './projectHostedSavePendingOverlap';
-import { writeHostedRecord } from './projectHostedRecords';
+import { requireWriteEpoch, writeHostedRecord } from './projectHostedRecords';
 import { loadSourceJob } from './projectSourceJobs';
 import { sourceServerTiming } from './projectSourceStepTiming';
 import { hostedSaveInput } from './projectHostedSaves';
@@ -44,8 +44,9 @@ export async function publishHostedSave(
   const loaded = await loadSave(ctx, input, false),
     { row, state, operation, project } = loaded;
   if (operation.terminal) return operation.terminal;
-  // Recheck current epoch even after external work; completed replays above remain immutable.
-  await loadSave(ctx, input);
+  // Recheck the epoch even after external work; completed replays above remain immutable. The project
+  // read above is this transaction's snapshot, so a second load would return the same rows.
+  requireWriteEpoch(project, state.request.authorityEpoch);
   let head = state.request.expected.head,
     size = state.baseline.object.size;
   if (state.request.pages) {
