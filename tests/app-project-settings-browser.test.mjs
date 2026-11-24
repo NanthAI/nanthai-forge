@@ -43,16 +43,20 @@ const extra = (
     {owner ? <ImportsView rows={imports} failed={false} more={false} showMore={noop} retry={noop} remove={async row => { window.calls.push({ name: 'remove', id: row.id }); }} /> : null}
   </>
 );
-createRoot(document.getElementById('root')).render(
-  <ProjectFrame route={{ frame: 'project', handle: 'sample-owner', project: 'docs-site', place: 'settings', section: 'project', rest: '' }} name="Docs site" feed={undefined} needs={undefined} projects={null}
+let failTrack = q.get('trackfail') === '1';
+function Settings() {
+  const [track, setTrack] = React.useState(undefined);
+  return (<ProjectFrame route={{ frame: 'project', handle: 'sample-owner', project: 'docs-site', place: 'settings', section: 'project', rest: '' }} name="Docs site" feed={undefined} needs={undefined} projects={null}
     controls={{ viewerHandle: owner ? 'sample-owner' : 'sample-peer', onPicker() {}, onPalette() {}, onKeys() {} }}>
-    <ProjectSettingsView facts={facts} owner={owner} trail={trail} lanes={{ n: 3, atLeast: false }} now={now}
+    <ProjectSettingsView facts={{ ...facts, autoCreatePlanningItem: track }} owner={owner} trail={trail} lanes={{ n: 3, atLeast: false }} now={now}
       rename={async input => { window.calls.push({ ...input, name: 'rename' }); if (failOnce) { failOnce = false; throw new Error('The project changed. Reload and try again.'); } }}
       moveToTrash={async () => { window.calls.push({ name: 'trash' }); }}
       setPlanVisibility={async plan => { window.calls.push({ name: 'plan', plan }); if (q.get('planfail') === '1') throw new Error('Only the owner person can change what visitors see; open Forge in a browser.'); }}
+      setTrackWork={async (enabled, id) => { window.calls.push({ name: 'track', enabled, id }); if (failTrack) { failTrack = false; throw new Error('The reply was lost.'); } setTrack(enabled); }}
       setVisibility={async change => { window.calls.push({ name: 'visibility', visibility: change.visibility, confirm: change.confirm, op: change.operationId, rev: change.expectedRevision }); if (q.get('visfail') === '1') throw new Error('Only the owner person can change who can see the project; open Forge in a browser.'); }} extra={extra} />
-  </ProjectFrame>,
-);
+  </ProjectFrame>);
+}
+createRoot(document.getElementById('root')).render(<Settings />);
 `;
 
 test('settings project: facts, rename keeps one operation across a failed save, trash sheet, backups, imports, member sees no controls, axe', async t => {
@@ -63,6 +67,24 @@ test('settings project: facts, rename keeps one operation across a failed save, 
   const { open, check } = fx;
   if (shots) mkdirSync(shots, { recursive: true });
   const path = '/sample-owner/docs-site/settings/project';
+  {
+    const { page, errors, context } = await open(390, 'light', 'trackfail=1', path);
+    const track = page.getByRole('switch', { name: 'Link work to Items' });
+    assert.equal(await track.getAttribute('aria-checked'), 'true');
+    await track.click();
+    await page.getByRole('alert').filter({ hasText: 'The reply was lost.' }).waitFor();
+    assert.equal(await track.getAttribute('aria-checked'), 'true');
+    await track.click();
+    await page.getByRole('switch', { name: 'Link work to Items', checked: false }).waitFor();
+    const tracked = (await page.evaluate(() => window.calls)).filter(call => call.name === 'track');
+    assert.deepEqual(
+      tracked.map(call => call.enabled),
+      [false, false],
+    );
+    assert.equal(tracked[0].id, tracked[1].id);
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
   {
     const { page, errors, context } = await open(1440, 'light', 'who=owner&fail=1', path);
     const main = page.locator('main');

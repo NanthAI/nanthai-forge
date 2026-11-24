@@ -110,6 +110,8 @@ export const autonomyPolicySchema = z.object({
     .optional(),
   integrationPreview: z.object({ auto: z.boolean() }).optional(),
   ownerRootUpdates: z.boolean().optional(),
+  /** Hosted agent starts capture a plain Item unless the owner turns tracking off. */
+  autoCreatePlanningItem: z.boolean().optional(),
   /** Debounced local snapshots of open native Lanes; absent means on. */
   /** Expand-only C1 rollout settings; absent is off until the later writers are enabled. */
   accessIdentities: z
@@ -239,6 +241,7 @@ export const policyWriteObject = z
     checks: autonomyPolicySchema.shape.checks.unwrap().partial().optional(),
     integrationPreview: autonomyPolicySchema.shape.integrationPreview,
     ownerRootUpdates: autonomyPolicySchema.shape.ownerRootUpdates,
+    autoCreatePlanningItem: autonomyPolicySchema.shape.autoCreatePlanningItem,
     accessIdentities: autonomyPolicySchema.shape.accessIdentities,
     mainAudit: autonomyPolicySchema.shape.mainAudit,
     autoSnapshot: autonomyPolicySchema.shape.autoSnapshot,
@@ -318,6 +321,9 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     ...(mainAudit ? { mainAudit } : {}),
     integrationPreview: command.integrationPreview ?? base.integrationPreview ?? { auto: false },
     ownerRootUpdates: command.ownerRootUpdates ?? base.ownerRootUpdates,
+    ...((command.autoCreatePlanningItem ?? previous.autoCreatePlanningItem) !== undefined
+      ? { autoCreatePlanningItem: command.autoCreatePlanningItem ?? previous.autoCreatePlanningItem }
+      : {}),
     ...((command.accessIdentities ?? previous.accessIdentities) !== undefined
       ? { accessIdentities: { ...previous.accessIdentities, ...command.accessIdentities } }
       : {}),

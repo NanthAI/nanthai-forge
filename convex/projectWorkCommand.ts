@@ -40,6 +40,8 @@ export async function executeCommand(
   options: {
     purge?: true;
     planning?: PlanningWriteContext | undefined;
+    /** A start has already checked that this generation is ready, in the same transaction. */
+    startGeneration?: NonNullable<Awaited<ReturnType<typeof selectedGeneration>>>;
     planningClose?: string | undefined;
     planningRestore?: string | undefined;
     onPlanningBatchState?: (state: { replayed: true } | { before: PlanningItem | null }) => void;
@@ -165,7 +167,8 @@ export async function executeCommand(
       record: { ...intent, version: intent.version + 1, status: command.status },
     });
   }
-  const selected = options.planning?.selected ?? (await selectedGeneration(ctx, project));
+  const selected =
+    options.planning?.selected ?? options.startGeneration ?? (await selectedGeneration(ctx, project));
   invariant(selected, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before writing.');
   const generation = options.planning?.generation ?? (await generationHead(ctx, selected));
   const backup = options.planning?.backup ?? (await ctx.db.get(generation.backupId));

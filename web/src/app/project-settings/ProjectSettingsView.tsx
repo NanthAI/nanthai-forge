@@ -39,6 +39,7 @@ export function ProjectSettingsView({
   moveToTrash,
   setVisibility,
   setPlanVisibility,
+  setTrackWork,
   extra,
 }: {
   facts: ProjectFacts;
@@ -52,6 +53,7 @@ export function ProjectSettingsView({
   setVisibility: (change: VisibilityChange) => Promise<void>;
   /** Owner person only: the server refuses anyone else. One reversible write; repeating it changes nothing. */
   setPlanVisibility: (plan: ProjectFacts['planVisibility'], operationId: string) => Promise<void>;
+  setTrackWork?: (enabled: boolean, operationId: string) => Promise<void>;
   /** Further regions of the page (backups, transfer, imports), after the lifecycle. */
   extra?: ReactNode;
 }) {
@@ -113,7 +115,14 @@ export function ProjectSettingsView({
           </Row>
         </Region>
       ) : null}
-      {owner ? <PlanSwitch facts={facts} set={setPlanVisibility} /> : null}
+      {owner ? (
+        <Region title="Plan" weight="ref">
+          <PlanSwitch facts={facts} set={setPlanVisibility} />
+          {setTrackWork ? (
+            <TrackWork enabled={facts.autoCreatePlanningItem !== false} set={setTrackWork} />
+          ) : null}
+        </Region>
+      ) : null}
       {owner ? (
         <Region title="Trash" weight="ref">
           <Row cols="minmax(0, 1fr) auto">
@@ -201,7 +210,7 @@ function PlanSwitch({
     }
   };
   return (
-    <Region title="Plan" weight="ref">
+    <>
       <Row cols="minmax(0, 1fr) auto">
         <span className="nm">
           <span className="ttl">{members ? 'Make the plan public' : 'Keep the plan to members'}</span>
@@ -223,7 +232,60 @@ function PlanSwitch({
           {error}
         </p>
       ) : null}
-    </Region>
+    </>
+  );
+}
+
+function TrackWork({
+  enabled,
+  set,
+}: {
+  enabled: boolean;
+  set: NonNullable<Parameters<typeof ProjectSettingsView>[0]['setTrackWork']>;
+}) {
+  const attempt = useRef<{ enabled: boolean; id: string } | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const change = async () => {
+    const next = attempt.current ?? { enabled: !enabled, id: crypto.randomUUID() };
+    attempt.current = next;
+    setPending(true);
+    setError('');
+    try {
+      await set(next.enabled, next.id);
+      attempt.current = null;
+    } catch (failure) {
+      setError(hostedError(failure));
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <>
+      <Row cols="minmax(0, 1fr) auto">
+        <span className="nm">
+          <span className="ttl">Link work to Items</span>
+          <span className="meta">
+            When an agent starts unplanned work, its outcome becomes an Item for project members.
+          </span>
+        </span>
+        <Key
+          size="sm"
+          role="switch"
+          aria-label="Link work to Items"
+          aria-checked={enabled}
+          disabled={pending}
+          onClick={() => void change()}
+        >
+          {enabled ? 'On' : 'Off'}
+        </Key>
+      </Row>
+      {error ? (
+        <p className="pf" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </>
   );
 }
 

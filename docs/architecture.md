@@ -1333,7 +1333,11 @@ the existing creator/assignee authority rule for contributors; the project owner
 can start any hosted Intent. Concurrent new or sibling starts write distinct
 resource and operation rows and the Intent-scoped child revision used by
 lifecycle cascades; they do not update the Intent record or global Work revision
-merely to add a Lane.
+merely to add a Lane. The exception is a new agent outcome with Plan capture on:
+in the same mutation as the Intent and Lane, it publishes a versioned Item through
+the normal Work writer. Concurrent Item writes share that Work head. Capture is
+skipped if the planning index is not ready; starts that already name an Item or
+Intent take no new planning path.
 
 `projectHostedLanes:head` returns the current head and record/source/lifecycle
 versions. `detail` hydrates one current or exact historical canonical record.

@@ -9,6 +9,7 @@ export type ProjectFacts = {
   visibility: 'public' | 'private';
   /** Whether a public project's plan is open to visitors or kept to members (convex/publicDiscovery.ts). */
   planVisibility: 'public' | 'members';
+  autoCreatePlanningItem?: boolean | undefined;
   createdAt: number;
   revision: number;
   removal: string | undefined;

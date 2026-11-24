@@ -36,6 +36,8 @@ import { findObject } from './projectObjectFind';
 import { openSiblingLanes } from './projectHostedStartPeers';
 import { dormantCutoff } from './projectHostedDormancy';
 import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
+import { executeCommand } from './projectWorkCommand';
+import { selectedGeneration } from './projectWorkIndexStore';
 
 const args = {
   projectId: v.id('hostedProjects'),
@@ -332,6 +334,15 @@ async function execute(
     intentId = first.ids.intent!,
     laneId = first.ids.lane!;
   const base = { head: main.head, receiptId: main.receipt.id };
+  // Source-only projects have no Plan to write to. Do not make those starts depend on a Work backup.
+  const capture =
+    action === 'start' &&
+    payload.intent.kind === 'new' &&
+    authorship?.kind === 'agent' &&
+    project.autonomyPolicy?.autoCreatePlanningItem !== false
+      ? await selectedGeneration(ctx, project)
+      : null;
+  if (capture) planningItemId = intentId;
   // From the pin on, hosted paths own the Intent's status; the journal copy leaves it (projectWorkStore).
   const pin = action === 'start' ? unpinned : undefined;
   if (pin)
@@ -446,6 +457,32 @@ async function execute(
         authorityEpoch: expected.authorityEpoch,
       },
     });
+  // The existing versioned Work writer publishes the Item and its search rows in this transaction.
+  // No caller can observe a linked Lane before its Item exists; retry returns the original receipt above.
+  if (capture && payload.intent.kind === 'new')
+    await executeCommand(
+      ctx,
+      {
+        projectId,
+        operationId: first.id,
+        command: JSON.stringify({
+          action: 'put-planning-item',
+          operationId: first.id,
+          itemId: intentId,
+          expectedVersion: 0,
+          kind: 'issue',
+          title: payload.intent.outcome,
+          status: 'in-progress',
+          // An unplanned outcome was not an explicit publication to the public Plan.
+          hidden: true,
+          reason: 'Captured on Lane start',
+          agent,
+          agentClient,
+        }),
+      },
+      project.owner,
+      { server: true, startGeneration: capture },
+    );
   const pendingFixes = needsFix(project);
   // A new Intent has no other Lanes: no read.
   const openLanes =

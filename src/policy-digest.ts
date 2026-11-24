@@ -20,6 +20,7 @@ function landingPolicy(policy: AutonomyPolicy) {
   delete kept.notify;
   delete kept.githubMirror;
   delete kept.mainAudit;
+  delete kept.autoCreatePlanningItem;
   delete kept.preset;
   if (!policy.trust?.enabled) delete kept.trust;
   return kept;
@@ -49,6 +50,7 @@ const legacyDigest = (policy: AutonomyPolicy) => {
   const legacy: Partial<AutonomyPolicy> = { ...policy, acceptance: pinnedAcceptance(policy) };
   delete legacy.agentDefaults;
   delete legacy.mainAudit;
+  delete legacy.autoCreatePlanningItem;
   return digest(canonicalPayload(legacy));
 };
 /** True when an attempt pinned to `pinned` is still valid under `policy`. */
@@ -107,6 +109,7 @@ const timing = 'alert timing, capped by the schema (first alert within 24 h, rep
  * until it is listed (tests/public-governance.test.mjs). */
 export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
   mainAudit: 'gated',
+  autoCreatePlanningItem: { exempt: 'a members-only Plan record for future starts, not landing authority' },
   preset: { exempt: 'a label: an edit that changes behaviour also changes a gated field' },
   'githubMirror.repo': 'gated',
   'githubMirror.autoPush': 'gated',

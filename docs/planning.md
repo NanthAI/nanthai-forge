@@ -17,6 +17,17 @@ The stored kind of an Item is `issue`, so every older operation replays exactly.
 Each Item has one type label. The defaults are Idea, Task and Bug; a project may use its own labels of up to 32
 characters.
 
+## Link work to Items
+
+Hosted projects with a prepared Plan capture a title-only Item when an agent starts a new Lane from an
+outcome instead of an existing Item or Intent. The Item is already In progress, shares its ID with the
+Intent, and is visible to project members, not visitors. Forge copies only the outcome, not the
+constraints, and uses no model. Retrying the start returns the same Lane and does not add another Item.
+
+**Link work to Items** is on by default. Owners can turn it off in Settings → Project → Plan, or with
+`nforge agent ROOT set-policy '{"autoCreatePlanningItem":false}'`. Pass `true` to re-enable it. This changes
+future starts only. Archive a captured Item to remove it from the Plan without stopping its Lane.
+
 ## Item Work
 
 Open an Item from the Plan, including its Done and Dropped lists. Work lists open Lanes

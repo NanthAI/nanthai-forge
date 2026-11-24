@@ -1,0 +1,1 @@
+- [Link work to Items](../../planning.md#link-work-to-items) is on by default. An agent's new unplanned Lane captures a plain, members-only Item in a project with a ready Plan. Owners can turn future capture off; no model or polling runs.

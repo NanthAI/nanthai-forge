@@ -33,6 +33,7 @@ export default function ProjectSettings(props: PlaceProps) {
           handle: route.handle,
           visibility: project.visibility === 'public' ? 'public' : 'private',
           planVisibility: project.planVisibility === 'members' ? 'members' : 'public',
+          autoCreatePlanningItem: project.autonomyPolicy?.autoCreatePlanningItem,
           createdAt: project._creationTime,
           revision: project.revision,
           removal: project.removal,
@@ -90,6 +91,15 @@ export default function ProjectSettings(props: PlaceProps) {
       setPlanVisibility={async (planVisibility, operationId) => {
         await client.mutation(api.publicDiscovery.setSettings, { projectId, planVisibility, operationId });
         read();
+      }}
+      setTrackWork={async (enabled, operationId) => {
+        const result = await client.mutation(api.projectAutonomy.set, {
+          projectId,
+          command: JSON.stringify({ action: 'set-policy', operationId, autoCreatePlanningItem: enabled }),
+        });
+        setFacts(
+          current => current && { ...current, autoCreatePlanningItem: result.policy.autoCreatePlanningItem },
+        );
       }}
       extra={
         <>
