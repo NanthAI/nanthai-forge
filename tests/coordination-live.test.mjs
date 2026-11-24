@@ -361,3 +361,91 @@ test('Needs you excludes a directed session the account cannot acknowledge', asy
   assert.equal((await f.as('owner', { action: 'unacked' })).items.length, 0);
   await assert.rejects(f.as('owner', { action: 'ack', messageId: message.operationId }), /recipient session/);
 });
+
+test('a1e71a48: live-session acknowledge rules stay unchanged while completed/deleted sessions reject choices and allow human dismiss', async () => {
+  const f = fixture(),
+    liveSession = randomUUID(),
+    otherLiveSession = randomUUID(),
+    askerSession = randomUUID();
+  f.tables.cliCredentials.set('device', {
+    _id: 'device',
+    _creationTime: 1,
+    credentialId: 'device',
+    owner: 'owner',
+    scope: 'coordination',
+    expiresAt: 4_102_444_800_000,
+  });
+  await announce(f, 'owner', liveSession, { name: 'civic-ox' });
+  await announce(f, 'owner', otherLiveSession, { name: 'calm-fox' });
+  await announce(f, 'other', askerSession, { name: 'solar-husky' });
+  const asDevice = async (who, input) => {
+    const run = (ref, args) => {
+      const [module, name] = getFunctionName(ref).split(':');
+      return modules[module][name]._handler(f.ctx, args);
+    };
+    const prev = f.ctx.auth.getUserIdentity;
+    f.ctx.auth.getUserIdentity = async () => ({ subject: who, forgeCredential: 'device' });
+    try {
+      return await dispatchCoordination({ query: run, mutation: run }, 'project', input);
+    } finally {
+      f.ctx.auth.getUserIdentity = prev;
+    }
+  };
+
+  // Live session: human owner can ack with a choice; device must match exact sessionId; other account is refused.
+  const liveQuestion = await f.browser('other', {
+    kind: 'message',
+    sessionId: askerSession,
+    recipient: liveSession,
+    text: 'Live choice?',
+    choices: ['A', 'B'],
+    context: {},
+  });
+  await assert.rejects(
+    asDevice('owner', {
+      action: 'ack',
+      sessionId: otherLiveSession,
+      messageId: liveQuestion.operationId,
+      choice: 'A',
+    }),
+    /recipient session/,
+  );
+  await assert.rejects(
+    f.as('other', { action: 'ack', messageId: liveQuestion.operationId, choice: 'A' }),
+    /recipient session/,
+  );
+  await f.as('owner', { action: 'ack', messageId: liveQuestion.operationId, choice: 'A', text: 'Human ok' });
+  assert.equal(f.tables.projectCoordinationReceipts.size, 1);
+
+  // Completed session: publishing status 'completed' notifies asker, rejects choices with WORK_STALE, allows human dismiss.
+  const endedQuestion = await f.browser('other', {
+    kind: 'message',
+    sessionId: askerSession,
+    recipient: otherLiveSession,
+    text: 'Before completion?',
+    choices: ['X', 'Y'],
+    context: {},
+  });
+  await f.as('owner', {
+    action: 'publish',
+    operationId: randomUUID(),
+    command: {
+      ...activity(otherLiveSession, { name: 'calm-fox', sequence: 2 }),
+      status: 'completed',
+    },
+  });
+  const notice = (await f.as('other', { action: 'unacked', sessionId: askerSession })).items.find(
+    item => item.kind === 'session-ended' && item.messageId === endedQuestion.operationId,
+  );
+  assert.ok(notice, 'completing a session with a pending question notifies the asker');
+  await assert.rejects(
+    f.as('owner', { action: 'ack', messageId: endedQuestion.operationId, choice: 'X' }),
+    error => error.code === 'WORK_STALE',
+  );
+  await assert.rejects(
+    asDevice('owner', { action: 'ack', sessionId: liveSession, messageId: endedQuestion.operationId }),
+    /recipient session/,
+  );
+  await f.as('owner', { action: 'ack', messageId: endedQuestion.operationId, text: 'Dismissed' });
+  assert.equal(f.tables.projectCoordinationReceipts.size, 2);
+});

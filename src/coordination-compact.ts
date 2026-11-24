@@ -42,7 +42,9 @@ export function compactEvent(event: StoredEvent) {
         : command.kind === 'handoff' && command.handBack
           ? 'hand-back'
           : command.kind === 'ack' && event.resumePrompt
-            ? 'answer'
+            ? command.choice === undefined
+              ? 'session-ended'
+              : 'answer'
             : command.kind,
     from: event.actor,
     fromDisplayName: event.actorDisplayName,

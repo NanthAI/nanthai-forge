@@ -23,7 +23,7 @@ import { shareQueryRoles } from './projectRole';
 import { finishRow } from './projectHostedFinishWake';
 import { culpritOf } from './projectMainRed';
 import { landingRow } from './projectHostedLandingStore';
-import { openLaneForCoordination, receipt, session } from './coordinationWrite';
+import { openLaneForCoordination, receipt, recipientLabel, session } from './coordinationWrite';
 import { storedLandingStateSchema } from '../src/hosted-landing';
 import { discardedRunnerSeconds } from '../src/cost-budgets';
 import { report } from './errors';
@@ -88,7 +88,7 @@ export async function messagesTo(
   const [messages, handoffs] = await Promise.all([recent('message'), asks ? recent('handoff') : []]);
   const rows = [...messages, ...handoffs];
   const readConversation = await canReadConversation(ctx, project, actor, rows);
-  const out = [];
+  const eligible = [];
   for (const row of rows) {
     const command = row.command;
     if (row.conversation && !readConversation) continue;
@@ -97,11 +97,43 @@ export async function messagesTo(
     const question = command.kind === 'message' && !!command.choices?.length;
     if ((!handBack && command.kind !== 'message') || Boolean(question || handBack) !== asks) continue;
     if (row.actor === actor && !row.conversation) continue;
+    // Line 2 (Item a1e71a48, friction ff0a29a3): a session-directed message between two agents on the same account
+    // stays in the recipient session's coordination inbox and in the Lane/Item thread, never in the human's Needs you
+    // or FYI. Skipping before per-row reads also avoids extra I/O on Needs you load.
+    if (row.recipientSession && row.actor === actor) continue;
     const acked = await receipt(ctx, projectId, row.operationId, actor);
     if (acked && (!row.conversation || acked.choice !== undefined)) continue;
     const laneId = row.laneId ?? (command.kind === 'message' ? command.context.laneId : command.laneId);
     if (laneId && !(await openLaneForCoordination(ctx, projectId, laneId))) continue;
-    const sender = command.sessionId ? await session(ctx, projectId, command.sessionId) : null;
+    eligible.push({ row, command, acked, laneId, handBack });
+  }
+
+  // Resolve one page's sender and recipient labels together, with one indexed read per distinct session.
+  const ids = new Set<string>();
+  for (const { row, command } of eligible) {
+    if (row.recipientSession) ids.add(row.recipientSession);
+    if (command.sessionId) ids.add(command.sessionId);
+  }
+  const sessions = new Map(
+    await Promise.all([...ids].map(async id => [id, await session(ctx, projectId, id)] as const)),
+  );
+  const out = [];
+  for (const { row, command, acked, laneId, handBack } of eligible) {
+    let to: string | undefined;
+    let recipientEnded = false;
+    if (row.recipientSession) {
+      const target = sessions.get(row.recipientSession);
+      if (target && target.actor !== actor) continue;
+      recipientEnded = !target || target.status === 'completed';
+      if (recipientEnded && acked) continue;
+      to = recipientLabel(
+        command.kind === 'message' ? command.recipient : command.to,
+        row.recipientActor,
+        row.recipientSession,
+        target,
+      );
+    }
+    const sender = command.sessionId ? sessions.get(command.sessionId) : null;
     out.push({
       id: row.operationId,
       at: row.at,
@@ -118,6 +150,9 @@ export async function messagesTo(
       ...(command.kind === 'handoff' && handBack
         ? { handBack: { head: command.head, left: handBack.left, to: actor } }
         : {}),
+      ...(row.recipientSession ? { recipientSession: row.recipientSession } : {}),
+      ...(to ? { to } : {}),
+      ...(recipientEnded ? { recipientEnded: true as const } : {}),
     });
   }
   return { rows: out, more: messages.length === FYI_MESSAGES || handoffs.length === FYI_MESSAGES };

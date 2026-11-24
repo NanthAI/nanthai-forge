@@ -86,6 +86,9 @@ export type Ask = {
   planningItemId?: string;
   ahead?: true;
   handBack?: { head: string; left: string; to: string };
+  recipientSession?: string;
+  to?: string;
+  recipientEnded?: true;
 };
 /** A shared-state decision a person settles (convex/projectNeedsMe.ts `notices`, Items 12fde646, 8b6efb50): work
  * reverted from main, work that still needs a fix, a GitHub mirror that stopped, or a failed deploy / post-deploy smoke.
@@ -176,7 +179,7 @@ export function needsCount(
     waitsOnPerson(lane, asked.has(lane.laneId ?? ''), read.canDecide),
   ).length;
   const parked = (read.parked ?? []).filter(row => parkShown(row, now)).length;
-  const asks = (read.asks ?? []).filter(row => !row.ahead).length;
+  const asks = (read.asks ?? []).filter(row => !row.ahead && !row.recipientSession).length;
   const blocked = blockedRequestIds(read.approvals, now, read.canDecide).size;
   return {
     n: held + asks + parked + blocked + (read.notices?.length ?? 0),

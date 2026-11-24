@@ -60,8 +60,13 @@ export async function sessionStructure(
   };
 }
 
-const { credentialId: _credentialId, ...visibleFields } = sessionFields;
+const {
+  credentialId: _credentialId,
+  hasDirectedQuestions: _hasDirectedQuestions,
+  ...visibleFields
+} = sessionFields;
 void _credentialId;
+void _hasDirectedQuestions;
 export const sessionView = v.object({
   _id: v.id('projectCoordinationSessions'),
   _creationTime: v.number(),
@@ -72,7 +77,10 @@ export const sessionView = v.object({
   // Children are read through independently paginated session queries.
   subagents: v.array(v.any()),
 });
-export type SessionTree = Omit<Doc<'projectCoordinationSessions'>, 'credentialId' | 'kind' | 'harness'> & {
+export type SessionTree = Omit<
+  Doc<'projectCoordinationSessions'>,
+  'credentialId' | 'hasDirectedQuestions' | 'kind' | 'harness'
+> & {
   kind: 'agent' | 'subagent' | 'person';
   harness: 'claude-code' | 'codex' | 'cursor' | 'pi' | 'other';
   stale: boolean;
@@ -84,8 +92,13 @@ export async function sessionTree(
   row: Doc<'projectCoordinationSessions'>,
   now: number,
 ): Promise<SessionTree> {
-  const { credentialId: _credentialId, ...visible } = await withActorName(ctx, projectId, row);
+  const {
+    credentialId: _credentialId,
+    hasDirectedQuestions: _hasDirectedQuestions,
+    ...visible
+  } = await withActorName(ctx, projectId, row);
   void _credentialId;
+  void _hasDirectedQuestions;
   return {
     ...visible,
     kind: row.kind ?? 'agent',

@@ -119,6 +119,8 @@ export const sessionFields = {
   lastActivity: v.optional(v.number()),
   activityKind: v.optional(v.string()),
   operationId: v.string(),
+  /** True once a question has been directed at this session; lets close notify askers without reading on ordinary Lanes. */
+  hasDirectedQuestions: v.optional(v.boolean()),
 };
 export const eventFields = {
   projectId: v.id('hostedProjects'),
@@ -188,6 +190,7 @@ export const coordinationTables = {
     .index('by_project_and_at', ['projectId', 'at'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_project_and_recipientActor', ['projectId', 'recipientActor'])
+    .index('by_project_and_recipientSession_and_kind', ['projectId', 'recipientSession', 'kind'])
     .index('by_project_and_kind_and_recipientActor', ['projectId', 'kind', 'recipientActor'])
     .index('by_project_and_intentId', ['projectId', 'intentId'])
     .index('by_project_and_laneId', ['projectId', 'laneId'])

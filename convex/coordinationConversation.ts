@@ -54,7 +54,17 @@ async function ensureLaneSession(
     intentId: presence.intentId,
     at: presence.at,
   });
+  const enrolled = await session(ctx, projectId, presence.laneId);
+  if (enrolled && !enrolled.hasDirectedQuestions)
+    await ctx.db.patch(enrolled._id, { hasDirectedQuestions: true });
   return presence.laneId;
+}
+
+async function markDirectedQuestion(
+  ctx: MutationCtx,
+  target: Pick<Doc<'projectCoordinationSessions'>, '_id' | 'hasDirectedQuestions'>,
+) {
+  if (!target.hasDirectedQuestions) await ctx.db.patch(target._id, { hasDirectedQuestions: true });
 }
 
 async function isSessionLive(
@@ -94,7 +104,10 @@ async function findAgentSession(
       return (b.lastActivity ?? b.lastSeen) - (a.lastActivity ?? a.lastSeen);
     });
     for (const candidate of matching)
-      if (await isSessionLive(ctx, projectId, candidate)) return candidate.sessionId;
+      if (await isSessionLive(ctx, projectId, candidate)) {
+        await markDirectedQuestion(ctx, candidate);
+        return candidate.sessionId;
+      }
   }
   // Miss fallback: an open Lane on the same Intent that predates automatic session enrolment.
   if (scope.intentId) {
@@ -125,6 +138,7 @@ async function askRecipient(
     const existing = await session(ctx, project._id, id);
     if (existing && (await isSessionLive(ctx, project._id, existing))) {
       invariant(await hasWriteRole(ctx, project, existing.actor), 'BAD_ARGUMENT', notMember);
+      await markDirectedQuestion(ctx, existing);
       return { recipientActor: existing.actor, recipientSession: existing.sessionId };
     }
     const presence = await ctx.db

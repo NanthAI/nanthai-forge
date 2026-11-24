@@ -856,7 +856,18 @@ design-system behaviour layer out of the first paint.
   messages together. The scoped thread read takes one page of 20 entries;
   earlier pages subscribe when requested. Questions that hold work are pinned among the
   loaded entries. Answers use the same coordination acknowledgement from the
-  thread and Needs you. Asked-ahead questions appear separately from the count.
+  thread and Needs you. Asked-ahead questions appear separately from the count;
+  same-account rows carrying a recipient session stay in coordination and the
+  thread rather than the human's Needs you or FYI, including questions, FYI notes
+  and hand-backs. Account-directed questions still have live answer keys.
+  Needs you reuses its existing page and resolves sender and recipient sessions
+  together in one batch: at most one indexed read per distinct session, no
+  session read for excluded rows, and no new client call or idle work. The
+  existing identity projection resolves the reader's handle at most once for
+  cross-account recipient labels on the page.
+  At close, a session marked by a directed question scans its newest 20 incoming
+  messages (not replies or hand-backs) and notifies askers of unanswered questions
+  in that window. A question outside the window does not send a close notice.
   The thread reads delivery from recorded acknowledgements and offers the saved
   resume prompt to copy while an answer is waiting. Opening Changes alone does
   not subscribe to the thread.

@@ -78,6 +78,8 @@ export type NeedsView = {
   /** Questions with choices for the reader: they wait on the reader, so they are counted. */
   asks: AskRow[];
   askedAhead?: AskRow[];
+  /** Questions directed at an agent session (live or ended): never live answer keys here, never counted. */
+  sessionAsks?: AskRow[];
   /** Lanes parked for the reader that show now (count.ts `parkShown`): counted. */
   parked: ParkedRow[];
   /** Shared-state decisions (work reverted from main, a stopped mirror): counted, and kept until the state changes. */
@@ -284,8 +286,9 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
   const messageRows = (read.asks ?? [])
     .map(ask => ({ ...ask, who: whoOf(ask.actor, ask.agent) }))
     .sort((a, b) => a.at - b.at);
-  const asks = messageRows.filter(row => !row.ahead);
-  const askedAhead = messageRows.filter(row => row.ahead);
+  const asks = messageRows.filter(row => !row.ahead && !row.recipientSession);
+  const askedAhead = messageRows.filter(row => Boolean(row.ahead) && !row.recipientSession);
+  const sessionAsks = messageRows.filter(row => Boolean(row.recipientSession));
   const parked = (read.parked ?? [])
     .filter(row => parkShown(row, now))
     .map(parkedRow)
@@ -304,6 +307,7 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
     now: waiting,
     asks,
     ...(askedAhead.length ? { askedAhead } : {}),
+    ...(sessionAsks.length ? { sessionAsks } : {}),
     parked,
     notices: (read.notices ?? []).map(noticeRow),
     fyi,

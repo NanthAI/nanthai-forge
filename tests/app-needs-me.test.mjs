@@ -491,3 +491,78 @@ test('8b6efb50: a failed deploy or post-deploy smoke notice counts in Needs you 
   assert.equal(view.notices[0].word, 'Check failed');
   assert.match(view.notices[0].head, /Dev web post-deploy smoke failed/);
 });
+
+test('a1e71a48: session-directed and ended-session questions stay out of actionable asks and count; AnswerKeys maps error codes to plain words', async () => {
+  const { ConvexError } = await import('convex/values');
+  const { answerFailureReason } = await import(moduleUrl('../web/src/app/discussion/conversation.ts'));
+  const base = {
+    at: 3,
+    actor: 'sample-one',
+    agent: 'solar-husky',
+    text: 'Paging first or Hierarchy first?',
+    choices: ['Paging first', 'Hierarchy first'],
+    laneId: 'lane-a',
+  };
+  const input = {
+    ...read([], []),
+    asks: [
+      { ...base, id: 'human', text: 'Ship v2?', choices: ['Yes', 'No'] },
+      {
+        ...base,
+        id: 'ended',
+        ahead: true,
+        recipientSession: '505af613-0000-4000-8000-000000000001',
+        to: 'thevarsek/civic-ox',
+        recipientEnded: true,
+      },
+      {
+        ...base,
+        id: 'live-session',
+        recipientSession: '505af613-0000-4000-8000-000000000002',
+        to: 'thevarsek/calm-fox',
+      },
+    ],
+  };
+  const view = needsView(input);
+  assert.deepEqual(
+    view.asks.map(row => row.id),
+    ['human'],
+  );
+  assert.equal(view.askedAhead, undefined);
+  assert.deepEqual(
+    (view.sessionAsks ?? []).map(row => [row.id, row.recipientEnded ?? false]),
+    [
+      ['ended', true],
+      ['live-session', false],
+    ],
+  );
+  assert.equal(view.count, 1);
+  assert.equal(needsCount(input).n, 1);
+
+  assert.match(
+    answerFailureReason(new ConvexError({ code: 'WORK_STALE', message: 'raw' })),
+    /recipient session has ended/i,
+  );
+  assert.match(
+    answerFailureReason(new ConvexError({ code: 'WORK_OPERATION_CHANGED', message: 'raw' })),
+    /already has a recorded answer/i,
+  );
+  assert.match(
+    answerFailureReason(new ConvexError({ code: 'BAD_ARGUMENT', message: 'raw' })),
+    /check who can answer and which choices are available/i,
+  );
+  assert.match(
+    answerFailureReason(new ConvexError({ code: 'PROJECT_UNAVAILABLE', message: 'raw' })),
+    /write access/i,
+  );
+  assert.equal(
+    answerFailureReason(new ConvexError({ code: 'NOT_FOUND', message: 'raw server detail' })),
+    'Forge refused the answer. Open the thread to check the question.',
+  );
+  assert.match(answerFailureReason(new Error('network down')), /Could not reach Forge/i);
+  assert.doesNotMatch(
+    answerFailureReason(new ConvexError({ code: 'WORK_STALE', message: 'secret-raw-detail' })),
+    /secret-raw-detail/,
+    'maps by code only, never echoing raw server wording',
+  );
+});

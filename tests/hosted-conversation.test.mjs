@@ -515,6 +515,7 @@ test('the question on a closed Lane is historical and a legacy handoff remains d
 test('Item 3f76a3df replay: two builders on one Item coordinate by ask (agent handle and Lane UUID)', async t => {
   const f = await fixture(t);
   f.insert('accountHandles', { owner: 'owner', handle: 'thevarsek' });
+  f.insert('forgeAccounts', { owner: 'owner', handle: 'thevarsek' });
   const planningItemId = randomUUID();
   // Two builders under the same account working on the same Item (frictions 35ae7725, c4399c23, e6834fdd).
   const laneA = await f.addLane({ actor: 'owner', intentId: planningItemId });
@@ -680,6 +681,7 @@ test('Item 3f76a3df replay: two builders on one Item coordinate by ask (agent ha
 test('Item 3f76a3df: ask Lane+Item mix is BAD_ARGUMENT naming both and bad targets refuse with cause and next command', async t => {
   const f = await fixture(t);
   f.insert('accountHandles', { owner: 'owner', handle: 'thevarsek' });
+  f.insert('forgeAccounts', { owner: 'owner', handle: 'thevarsek' });
   const planningItemId = randomUUID();
   const mix = {
     laneId: f.lane.id,
@@ -779,5 +781,238 @@ test('Item 3f76a3df: ask Lane+Item mix is BAD_ARGUMENT naming both and bad targe
       error.code === 'BAD_ARGUMENT' &&
       /not a valid agent handle/i.test(error.message) &&
       /lanes '\{\}'/.test(error.recovery?.command ?? ''),
+  );
+});
+
+test('Incident a1e71a48 replay: recipient Lane lands, owner opens Needs you with no failing keys, Dismiss clears it and asker learns session ended', async t => {
+  const f = await fixture(t);
+  const presence = await import(moduleUrl('../convex/projectHostedPresence.ts'));
+  const { needsView } = await import(moduleUrl('../web/src/app/needs/model.ts'));
+  const { needsCount } = await import(moduleUrl('../web/src/app/needs/count.ts'));
+  f.insert('accountHandles', { owner: 'owner', handle: 'thevarsek' });
+  f.insert('forgeAccounts', { owner: 'owner', handle: 'thevarsek' });
+  const planningItemId = randomUUID();
+  const laneA = await f.addLane({ actor: 'owner', intentId: planningItemId });
+  const laneB = await f.addLane({ actor: 'owner', intentId: planningItemId });
+  const enroll = (laneId, slug) => {
+    const existing = [...f.tables.projectCoordinationSessions.values()].find(row => row.sessionId === laneId);
+    assert(existing, 'addLane auto-enrols a coordination session for the open Lane');
+    f.patch('projectCoordinationSessions', existing._id, { name: slug });
+  };
+  enroll(laneA.id, 'solar-husky');
+  enroll(laneB.id, 'civic-ox');
+  f.insert('cliCredentials', {
+    owner: 'owner',
+    name: 'fixture-device',
+    scope: 'cli',
+    credentialId: 'cred-1',
+    tokenHash: 'synthetic-hash',
+    issuedAt: 100,
+    expiresAt: 4_102_444_800_000,
+    revoked: false,
+  });
+  const deviceInvoke = (actor, name, args) => {
+    const [module, method] = name.split(':');
+    return f.transaction(
+      name,
+      modules[module][method],
+      { projectId: f.projectId, ...args },
+      { subject: actor, forgeCredential: 'cred-1' },
+    );
+  };
+  const deviceCoord = (actor, input) => {
+    const run = (ref, { projectId: _, ...args }) => deviceInvoke(actor, getFunctionName(ref), args);
+    return dispatchCoordination({ query: run, mutation: run }, f.projectId, input);
+  };
+  t.mock.method(f.transport, 'mutation', (name, args) => deviceInvoke('owner', name, args));
+
+  // Scale baseline: ordinary person-directed question adds no recipient-session lookup on Needs you.
+  const humanAsk = await f.cli('ask', {
+    laneId: laneA.id,
+    to: '@thevarsek',
+    text: 'Ship v2?',
+    choices: ['Yes', 'No'],
+  });
+  const beforeDirected = await f.invoke('owner', 'projectNeedsMe:read', {});
+  assert.equal(beforeDirected.asks.find(row => row.id === humanAsk.operationId).recipientSession, undefined);
+  assert.equal(needsCount(beforeDirected).n, 1);
+
+  // Builder solar-husky asks civic-ox an Asked-ahead question (choices Paging first / Hierarchy first).
+  const question = await f.cli('ask', {
+    laneId: laneA.id,
+    to: 'thevarsek/civic-ox',
+    text: 'Paging first or Hierarchy first?',
+    choices: ['Paging first', 'Hierarchy first'],
+    holdsWork: false,
+  });
+  assert.equal(question.result.to, laneB.id);
+
+  // While Lane B is still live: same-account agent-to-agent question stays out of human Needs you (line 2),
+  // remains in Lane B's inbox and the Lane thread (with mayAnswer: false and recipient label).
+  const needsWhileLive = await f.invoke('owner', 'projectNeedsMe:read', {});
+  assert.equal(
+    needsWhileLive.asks.some(row => row.id === question.operationId),
+    false,
+    'same-account agent-to-agent session-directed question stays out of human Needs you',
+  );
+  assert.equal(needsCount(needsWhileLive).n, 1, 'only the human-directed ask counts');
+  assert.equal(
+    (await deviceCoord('owner', { action: 'unacked', sessionId: laneB.id })).items.some(
+      item => item.id === question.operationId,
+    ),
+    true,
+    'recipient session inbox still receives the question',
+  );
+  const liveThread = await f.invoke('owner', 'projectDiscussionThread:read', { scope: 'lane', id: laneA.id });
+  const liveEntry = liveThread.entries.find(row => row.id === question.operationId);
+  assert.equal(liveEntry.mayAnswer, false);
+  assert.equal(liveEntry.to, 'thevarsek/civic-ox');
+  assert.equal(liveEntry.recipientEnded, undefined);
+
+  // Lane B lands (presence deleted and Lane session released via syncLaneSession(..., null)).
+  await f.transaction(
+    'landLaneB',
+    {
+      _handler: async ctx => {
+        const row = await ctx.db
+          .query('projectHostedPresence')
+          .withIndex('by_project_and_lane', q => q.eq('projectId', f.projectId).eq('laneId', laneB.id))
+          .unique();
+        if (row) await ctx.db.delete(row._id);
+        await presence.releaseLaneSession(ctx, f.projectId, laneB.id);
+      },
+    },
+    {},
+  );
+  assert.equal(
+    [...f.tables.projectCoordinationSessions.values()].some(row => row.sessionId === laneB.id),
+    false,
+    'recipient session is removed when its Lane lands',
+  );
+
+  // Asker (solar-husky on Lane A) learns immediately in its coordination inbox/unacked that civic-ox ended.
+  const askerUnacked = await deviceCoord('owner', { action: 'unacked', sessionId: laneA.id });
+  const endedNotices = askerUnacked.items.filter(
+    item => item.kind === 'session-ended' && item.messageId === question.operationId,
+  );
+  assert.equal(endedNotices.length, 1);
+  assert.match(endedNotices[0].resumePrompt, /thevarsek\/civic-ox/);
+  assert.match(endedNotices[0].resumePrompt, /ended without answering/i);
+  await deviceCoord('owner', { action: 'ack', sessionId: laneA.id, messageId: endedNotices[0].id });
+  assert.equal(
+    (await deviceCoord('owner', { action: 'unacked', sessionId: laneA.id })).items.some(
+      item => item.id === endedNotices[0].id,
+    ),
+    false,
+  );
+
+  // Owner opens Needs you and the Lane thread after Lane B lands: no failing keys in Needs you,
+  // and the thread shows who it was for and that the session ended without live answer keys.
+  const needsAfterLand = await f.invoke('owner', 'projectNeedsMe:read', {});
+  assert.equal(
+    needsAfterLand.asks.some(row => row.id === question.operationId),
+    false,
+    'same-account agent-to-agent question never appears in human Needs you',
+  );
+  assert.equal(needsCount(needsAfterLand).n, 1, 'only the human-directed ask counts in Needs you');
+  const endedThread = await f.invoke('owner', 'projectDiscussionThread:read', {
+    scope: 'lane',
+    id: laneA.id,
+  });
+  const endedEntry = endedThread.entries.find(row => row.id === question.operationId);
+  assert.equal(endedEntry.mayAnswer, false);
+  assert.equal(endedEntry.recipientEnded, true);
+  assert.equal(endedEntry.to, 'thevarsek/civic-ox');
+
+  // Cross-account session-directed question whose recipient session lands: shown in Needs you without live
+  // answer keys, names who it was for, offers Dismiss, notifies the asker once, and rejects choices with WORK_STALE.
+  const laneC = await f.addLane({ actor: 'owner', intentId: planningItemId });
+  enroll(laneC.id, 'calm-fox');
+  const crossAskId = randomUUID();
+  await f.invoke('writer', 'projectCoordination:publish', {
+    operationId: crossAskId,
+    command: {
+      kind: 'message',
+      recipient: 'thevarsek/calm-fox',
+      text: 'Can we share the parser fixture?',
+      choices: ['Share it', 'Keep separate'],
+      question: { holdsWork: false },
+      context: { laneId: f.lane.id },
+    },
+  });
+  await f.transaction(
+    'landLaneC',
+    {
+      _handler: async ctx => {
+        const row = await ctx.db
+          .query('projectHostedPresence')
+          .withIndex('by_project_and_lane', q => q.eq('projectId', f.projectId).eq('laneId', laneC.id))
+          .unique();
+        if (row) await ctx.db.delete(row._id);
+        await presence.releaseLaneSession(ctx, f.projectId, laneC.id);
+      },
+    },
+    {},
+  );
+  const writerNotices = (await f.coord('writer', { action: 'unacked' })).items.filter(
+    item => item.kind === 'session-ended' && item.messageId === crossAskId,
+  );
+  assert.equal(writerNotices.length, 1, 'cross-account asker learns the recipient session ended');
+  const needsCross = await f.invoke('owner', 'projectNeedsMe:read', {});
+  const endedRow = needsCross.asks.find(row => row.id === crossAskId);
+  assert.ok(endedRow, 'cross-account ended question surfaces with ended metadata until dismissed');
+  assert.equal(endedRow.recipientEnded, true);
+  assert.equal(endedRow.to, 'thevarsek/calm-fox');
+  const view = needsView(needsCross);
+  assert.equal(
+    view.asks.some(row => row.id === crossAskId),
+    false,
+    'never in actionable Holding work now',
+  );
+  assert.equal(
+    (view.askedAhead ?? []).some(row => row.id === crossAskId),
+    false,
+    'never in actionable Asked ahead',
+  );
+  assert.equal(
+    (view.sessionAsks ?? []).some(row => row.id === crossAskId && row.recipientEnded === true),
+    true,
+    'placed in non-counted sessionAsks with recipientEnded: true',
+  );
+  assert.equal(needsCount(needsCross).n, 1, 'ended cross-account question does not inflate Needs you count');
+
+  // Attempting to answer an ended question with a choice fails with structured WORK_STALE.
+  await assert.rejects(
+    f.coord('owner', {
+      action: 'ack',
+      messageId: crossAskId,
+      choice: 'Share it',
+      text: 'Stale click',
+    }),
+    error => error.code === 'WORK_STALE' && /session.*ended/i.test(error.message),
+  );
+  // A device cannot dismiss an ended session without a choice either.
+  await assert.rejects(
+    deviceCoord('owner', { action: 'ack', messageId: crossAskId, sessionId: laneA.id }),
+    error => error.code === 'BAD_ARGUMENT' && /recipient session/i.test(error.message),
+  );
+
+  // Owner clicks Dismiss (human ack without choice): clears from Needs you and emits no duplicate asker notice.
+  const eventsBeforeDismiss = f.tables.projectCoordinationEvents.size;
+  await f.coord('owner', {
+    action: 'ack',
+    messageId: crossAskId,
+    text: 'Dismissed (recipient session ended).',
+  });
+  assert.equal(
+    f.tables.projectCoordinationEvents.size,
+    eventsBeforeDismiss + 1,
+    'only the dismissal ack is written; the asker notice is idempotent and not duplicated',
+  );
+  const afterDismiss = await f.invoke('owner', 'projectNeedsMe:read', {});
+  assert.equal(
+    afterDismiss.asks.some(row => row.id === crossAskId),
+    false,
+    'dismissed ended-session question leaves Needs you',
   );
 });

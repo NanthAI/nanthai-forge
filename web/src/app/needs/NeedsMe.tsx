@@ -45,8 +45,8 @@ import { StationDrawer, type DrawerProps } from '../flow/Drawer';
 import { isDrawerStop, type DrawerStop } from '../flow/drawer-model';
 import { navigate, useSearch } from '../router';
 import { AnswerKeys, HandBackDetails } from '../discussion/ConversationEntry';
-import type { Answer } from '../discussion/conversation';
-import { useAnswer } from '../discussion/useConversation';
+import { answerFailureReason, type Answer, type DismissAsk } from '../discussion/conversation';
+import { useAnswer, useDismissAsk } from '../discussion/useConversation';
 import { needsRead } from './count';
 import { focusHref, fyiView, type FyiRead, type FyiState } from './fyi';
 import { Capped, CAP } from './Capped';
@@ -128,6 +128,7 @@ function NeedsMeScreen({ route, projectId, projectName, feed, feedError, feedRea
   });
   const decide = useProjectDecide(projectId);
   const answer = useAnswer(projectId);
+  const dismissAsk = useDismissAsk(projectId);
   // Each Conflict Lane's notices for its hover on the picture: read only while a Lane is in conflict (Item 9b9057a9).
   const conflicts = useConflictNotes(projectId, !!feed?.lanes.some(lane => isConflict(lane)));
   const dismissMutation = useMutation(fyiDismiss);
@@ -146,6 +147,7 @@ function NeedsMeScreen({ route, projectId, projectName, feed, feedError, feedRea
       counts={counts}
       decide={decide}
       answer={answer}
+      dismissAsk={dismissAsk}
       dismiss={input => dismissMutation({ projectId, ...input })}
       loose={open => (
         <LooseFold
@@ -187,6 +189,7 @@ export function NeedsMeView({
   counts,
   decide,
   answer,
+  dismissAsk,
   dismiss,
   loose,
   setup,
@@ -200,6 +203,7 @@ export function NeedsMeView({
   counts: PlanCountsRead | undefined;
   decide: Decide;
   answer: Answer;
+  dismissAsk?: DismissAsk;
   dismiss: Dismiss;
   /** The Loose ends body (LooseFold), given whether its region is open so it reads only then. */
   loose?: (open: boolean) => ReactNode;
@@ -265,6 +269,7 @@ export function NeedsMeView({
       ]
     : [];
   const asksAhead = view?.askedAhead ?? [];
+  const sessionAsks = view?.sessionAsks ?? [];
   const conversationHref = (row: AskRow) =>
     row.laneId
       ? at({ place: 'lanes', rest: `${row.laneId}/thread` })
@@ -511,7 +516,34 @@ export function NeedsMeView({
                     </Capped>
                   </div>
                 ) : null}
-                {!waiting && !view.ahead.length && !asksAhead.length && !view.countAtLeast ? (
+                {sessionAsks.length ? (
+                  <div className="grp" data-weight="watch">
+                    <Band
+                      title="For another session"
+                      count={sessionAsks.length}
+                      hint="directed at an agent session; not counted in Needs you"
+                    />
+                    <Capped rows={sessionAsks} more={0} atLeast={false}>
+                      {row => (
+                        <Question
+                          project={route}
+                          key={row.id}
+                          row={row}
+                          drawnAt={drawnAt}
+                          answer={answer}
+                          dismissAsk={dismissAsk}
+                          contextHref={conversationHref(row)}
+                          announce={announce}
+                        />
+                      )}
+                    </Capped>
+                  </div>
+                ) : null}
+                {!waiting &&
+                !view.ahead.length &&
+                !asksAhead.length &&
+                !sessionAsks.length &&
+                !view.countAtLeast ? (
                   <div className="quietline">Nothing waits on you. Agents go on without you.</div>
                 ) : null}
                 {read?.asksMore ? (
@@ -807,6 +839,7 @@ function Question({
   project,
   drawnAt,
   answer,
+  dismissAsk,
   contextHref,
   announce,
 }: {
@@ -814,17 +847,45 @@ function Question({
   project: WhoProject;
   drawnAt: number;
   answer: Answer;
+  dismissAsk?: DismissAsk | undefined;
   contextHref: string | undefined;
   announce: (text: string) => void;
 }) {
   const [later, setLater] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
+  const [dismissError, setDismissError] = useState<string | null>(null);
   if (later) return <Later head={row.text} onShow={() => setLater(false)} />;
+  const ended = Boolean(row.recipientEnded);
+  const directed = Boolean(row.recipientSession);
+  const onDismiss = async () => {
+    if (!dismissAsk || dismissing) return;
+    setDismissing(true);
+    setDismissError(null);
+    try {
+      await dismissAsk(row);
+      announce('Dismissed.');
+    } catch (error) {
+      setDismissError(answerFailureReason(error));
+    } finally {
+      setDismissing(false);
+    }
+  };
   return (
     <div className="dec">
       <div className="dtop">
-        <State word="Needs you">{row.handBack ? 'Handed back' : 'Question'}</State>
+        <State word={ended ? 'Stopped' : directed ? 'Waiting its turn' : 'Needs you'}>
+          {ended
+            ? 'Session ended'
+            : directed
+              ? 'For another session'
+              : row.handBack
+                ? 'Handed back'
+                : 'Question'}
+        </State>
         <span>
-          {row.ahead ? `asked ${waited(row.at, drawnAt)} ago` : `waiting ${waited(row.at, drawnAt)}`}
+          {row.ahead || directed
+            ? `asked ${waited(row.at, drawnAt)} ago`
+            : `waiting ${waited(row.at, drawnAt)}`}
         </span>
         {row.who ? (
           <RecordedWho
@@ -839,21 +900,57 @@ function Question({
         {row.handBack ? `Hand-back for Lane ${row.laneId?.slice(0, 8) ?? ''}` : row.text}
       </h3>
       {row.handBack ? <HandBackDetails {...row.handBack} tried={row.text} /> : null}
-      <AnswerKeys
-        entry={row}
-        choices={row.choices}
-        answer={answer}
-        onAnswered={choice => announce(`Answered “${choice}”.`)}
-      />
+      {ended ? (
+        <>
+          <p className="why" dir="auto">
+            For {row.to ?? 'another session'} — that session ended.
+          </p>
+          {row.choices.length ? (
+            <p className="t2" dir="auto">
+              {row.choices.join(' · ')}
+            </p>
+          ) : null}
+          {dismissError ? (
+            <p role="alert" className="err">
+              {dismissError}
+            </p>
+          ) : null}
+        </>
+      ) : directed ? (
+        <>
+          <p className="why" dir="auto">
+            For {row.to ?? 'another session'} — waiting on that session.
+          </p>
+          {row.choices.length ? (
+            <p className="t2" dir="auto">
+              {row.choices.join(' · ')}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <AnswerKeys
+          entry={row}
+          choices={row.choices}
+          answer={answer}
+          onAnswered={choice => announce(`Answered “${choice}”.`)}
+        />
+      )}
       <div className="btns">
+        {ended && dismissAsk ? (
+          <Key size="sm" disabled={dismissing} onClick={() => void onDismiss()}>
+            Dismiss
+          </Key>
+        ) : null}
         {contextHref ? (
           <A className="btn ghost sm" href={contextHref}>
             Open the thread
           </A>
         ) : null}
-        <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
-          Later
-        </Key>
+        {!ended ? (
+          <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
+            Later
+          </Key>
+        ) : null}
       </div>
     </div>
   );

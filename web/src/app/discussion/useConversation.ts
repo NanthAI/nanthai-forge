@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueries } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
-import type { Answer, ThreadPage } from './conversation';
+import type { Answer, DismissAsk, ThreadPage } from './conversation';
 import { useSafeQuery } from '../../safe-query';
 
 type Cursor = NonNullable<ThreadPage['before']>;
@@ -87,6 +87,25 @@ export function useAnswer(projectId: Id<'hostedProjects'>): Answer {
         projectId,
         operationId,
         command: { kind: 'ack', messageId: id, choice, text: reason },
+      });
+      attempts.current.delete(id);
+    },
+    [projectId, publish],
+  );
+}
+
+/** Dismiss a question whose recipient session ended; retrying reuses the same operation id. */
+export function useDismissAsk(projectId: Id<'hostedProjects'>): DismissAsk {
+  const publish = useMutation(api.projectCoordination.publish);
+  const attempts = useRef(new Map<string, string>());
+  return useCallback(
+    async ({ id }) => {
+      const operationId = attempts.current.get(id) ?? crypto.randomUUID();
+      attempts.current.set(id, operationId);
+      await publish({
+        projectId,
+        operationId,
+        command: { kind: 'ack', messageId: id, text: 'Dismissed (recipient session ended).' },
       });
       attempts.current.delete(id);
     },

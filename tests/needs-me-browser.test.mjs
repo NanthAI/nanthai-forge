@@ -680,8 +680,42 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       },
     );
 
+    await t.test(
+      'a1e71a48: ended-session question shows who it was for and Dismiss with no answer keys; AnswerKeys maps server error code to plain words',
+      async t => {
+        const page = await open(t, DESK, 'ended-ask', 'dark', {
+          query: { answerError: 'WORK_STALE' },
+        });
+        const needs = region(page, 'Needs you');
+        const endedCard = needs.locator('.dec', { hasText: 'Paging first or Hierarchy first?' });
+        await endedCard.waitFor();
+        assert.match(await endedCard.textContent(), /Session ended/);
+        assert.match(await endedCard.textContent(), /For sample-one\/civic-ox — that session ended\./);
+        assert.equal(
+          await endedCard.getByRole('button', { name: 'Paging first' }).count(),
+          0,
+          'no live answer button on an ended session',
+        );
+        assert.equal(
+          await endedCard.getByRole('button', { name: 'Hierarchy first' }).count(),
+          0,
+          'no live answer button on an ended session',
+        );
+        await endedCard.getByRole('button', { name: 'Dismiss', exact: true }).click();
+        await page.waitForFunction(() => window.writes.some(([kind]) => kind === 'dismissAsk'));
+        // Live human-directed question still offers answer keys and maps server error codes to plain words.
+        const liveCard = needs.locator('.dec', { hasText: 'Which endpoint should we keep?' });
+        await liveCard.getByRole('button', { name: 'Keep v1', exact: true }).click();
+        const alert = liveCard.getByRole('alert');
+        await alert.waitFor();
+        assert.match(await alert.textContent(), /recipient session has ended/i);
+        assert.doesNotMatch(await alert.textContent(), /Could not confirm the answer/);
+        assert.doesNotMatch(await alert.textContent(), /raw server wording/);
+      },
+    );
+
     await t.test('axe and widths: busy and first day, both themes, desk and phone', async t => {
-      for (const data of ['busy', 'first', 'connect', 'notices'])
+      for (const data of ['busy', 'first', 'connect', 'notices', 'ended-ask'])
         for (const viewport of [DESK, PHONE]) {
           const page = await open(t, viewport, data); // Loose ends is open by default
           await page.addScriptTag({ path: axePath });

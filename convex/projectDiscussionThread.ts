@@ -4,7 +4,13 @@ import { getPage, type IndexKey } from 'convex-helpers/server/pagination';
 import { v, type Infer } from 'convex/values';
 import { query } from './cliServer';
 import type { Doc } from './_generated/dataModel';
-import { eventByOperation, openLaneForCoordination, receipt, session } from './coordinationWrite';
+import {
+  eventByOperation,
+  openLaneForCoordination,
+  receipt,
+  recipientLabel,
+  session,
+} from './coordinationWrite';
 import { accessibleProject } from './projectAuthority';
 import { hasWriteRole } from './projectRole';
 import { isAgentSlug } from '../src/agent-slug';
@@ -32,6 +38,7 @@ const entry = v.object({
   choices: v.optional(v.array(v.string())),
   ahead: v.optional(v.boolean()),
   ended: v.optional(v.literal(true)),
+  recipientEnded: v.optional(v.literal(true)),
   mayAnswer: v.optional(v.boolean()),
   head: v.optional(v.string()),
   left: v.optional(v.string()),
@@ -206,7 +213,11 @@ export const read = query({
             actor: row.actor,
             ...agentName(await observed(command.sessionId)),
           };
-          const mayAnswer = open && row.recipientActor === user.subject;
+          const recipient = row.recipientSession ? await observed(row.recipientSession) : null;
+          const recipientEnded = Boolean(
+            row.recipientSession && (!recipient || recipient.status === 'completed'),
+          );
+          const mayAnswer = open && row.recipientActor === user.subject && !row.recipientSession;
           if (command.kind === 'handoff') {
             const answer = command.handBack ? await answerOf(row) : undefined;
             return {
@@ -222,14 +233,19 @@ export const read = query({
           }
           const choices = command.choices ?? [];
           const answer = choices.length ? await answerOf(row) : undefined;
+          const to = row.recipientSession
+            ? recipientLabel(command.recipient, row.recipientActor, row.recipientSession, recipient)
+            : undefined;
           return {
             ...base,
             type: choices.length ? ('question' as const) : ('note' as const),
             text: command.text,
+            ...(to ? { to } : {}),
             ...(choices.length
               ? { choices, ahead: command.question?.holdsWork === false, mayAnswer: mayAnswer && !answer }
               : {}),
             ...(!open && choices.length ? { ended: true as const } : {}),
+            ...(recipientEnded && choices.length ? { recipientEnded: true as const } : {}),
             ...(answer ? { answer } : {}),
           };
         }),

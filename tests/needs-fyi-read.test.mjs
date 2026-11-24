@@ -61,7 +61,7 @@ function fixture() {
       pathCount: 0,
       at: DAY,
     });
-  const message = (laneId, text, extra = {}) => {
+  const message = (laneId, text, extra = {}, recipientSession) => {
     const operationId = randomUUID();
     s.insert('projectCoordinationEvents', {
       projectId,
@@ -71,6 +71,7 @@ function fixture() {
       command: { kind: 'message', recipient: 'owner', text, context: { laneId }, ...extra },
       kind: 'message',
       recipientActor: 'owner',
+      ...(recipientSession ? { recipientSession } : {}),
       laneId,
     });
     return operationId;
@@ -317,4 +318,85 @@ test('an idle FYI view re-runs nothing, and one read stays bounded', async () =>
   );
   const unchanged = f.s.readSet();
   assert.equal(unchanged(), true, 'nothing it read changed, so nothing re-runs');
+});
+
+test('a1e71a48 (friction ff0a29a3): same-account session-directed questions stay out of human Needs you and add no session reads', async () => {
+  const f = fixture();
+  f.lane('lane-a');
+  const humanAsk = f.message('lane-a', 'Ship v2?', { choices: ['Yes', 'No'] });
+  const before = await f.s.call('needsRead', needs.read, { projectId: f.projectId }, 'owner');
+  const docsBefore = f.s.counts.at(-1).documents;
+  assert.deepEqual(
+    before.asks.map(row => row.id),
+    [humanAsk],
+  );
+  // Insert a same-account session-directed question (two agents on owner's account).
+  const peerSession = randomUUID();
+  f.s.insert('projectCoordinationEvents', {
+    projectId: f.projectId,
+    operationId: randomUUID(),
+    actor: 'owner',
+    at: DAY + 6 * 60_000,
+    command: {
+      kind: 'message',
+      recipient: 'owner/civic-ox',
+      text: 'Paging first or Hierarchy first?',
+      choices: ['Paging first', 'Hierarchy first'],
+      question: { holdsWork: false },
+      context: { laneId: 'lane-a' },
+    },
+    kind: 'message',
+    recipientActor: 'owner',
+    recipientSession: peerSession,
+    laneId: 'lane-a',
+    conversation: true,
+  });
+  const after = await f.s.call('needsRead', needs.read, { projectId: f.projectId }, 'owner');
+  const docsAfter = f.s.counts.at(-1).documents;
+  assert.deepEqual(
+    after.asks.map(row => row.id),
+    [humanAsk],
+    'same-account agent-to-agent question stays out of Needs you',
+  );
+  // Only the one extra event row from the existing index scan is read — no receipt, presence or session lookup.
+  assert.equal(docsAfter, docsBefore + 1);
+  assert.deepEqual((await f.read()).messages, [], 'also excluded from FYI');
+});
+
+test('Needs you looks up a cross-account recipient session once per page, not once per question', async () => {
+  const read = async directed => {
+    const f = fixture();
+    const sessionId = randomUUID();
+    f.s.insert('projectCoordinationSessions', {
+      projectId: f.projectId,
+      sessionId,
+      actor: 'owner',
+      name: 'civic-ox',
+      environment: 'Lane',
+      status: 'completed',
+      sequence: 1,
+      summary: 'Synthetic session',
+      context: {},
+      lastSeen: DAY,
+      operationId: randomUUID(),
+    });
+    f.lane('lane-a');
+    for (const text of ['Ship v2?', 'Update the docs?'])
+      f.message('lane-a', text, { choices: ['Yes', 'No'] }, directed ? sessionId : undefined);
+    const result = await f.s.call('needsRead', needs.read, { projectId: f.projectId }, 'owner');
+    return { rows: result.asks, reads: f.s.counts.at(-1).readDocumentsByTable };
+  };
+  const account = await read(false);
+  const session = await read(true);
+  assert.equal(account.rows.length, 2);
+  assert.deepEqual(
+    session.rows.map(row => row.recipientEnded),
+    [true, true],
+  );
+  assert.deepEqual(session.reads, {
+    ...account.reads,
+    projectCoordinationSessions: 1,
+    // The viewer's handle is mapped once by publicPeople for both recipient labels.
+    forgeAccounts: account.reads.forgeAccounts + 1,
+  });
 });

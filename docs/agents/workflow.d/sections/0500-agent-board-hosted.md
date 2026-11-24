@@ -10,7 +10,7 @@ nforge agent ROOT hand-back '{"laneId":"LANE_UUID","to":"@owner","head":"SAVED_H
 ```
 
 - Set `planningItemId` in place of `laneId` to ask on an Item (pass one, never both). Inside a Lane, the
-  checkout supplies `laneId` when both are omitted. `to` accepts a member `@handle`, an active agent handle (`handle/slug`), or an open Lane/session UUID; an agent or session target delivers directly to that session (or refuses with its cause and a next command when no open session matches). Set `holdsWork:false` for a
+  checkout supplies `laneId` when both are omitted. `to` accepts a member `@handle`, an active agent handle (`handle/slug`), or an open Lane/session UUID; an agent or session target delivers directly to that session (or refuses with its cause and a next command when no open session matches). Session-directed questions between two agents on the same account stay out of the human's Needs you (they remain in the recipient session's coordination inbox and the Lane/Item thread). Set `holdsWork:false` for a
   decision asked ahead. Tell your user in your app after you send a question to a person or a hand-back.
 - Hand-back names the Lane's person or the project owner. Save any drafts you want
   included first, then pass the exact saved head. Forge releases the holder and
@@ -22,7 +22,12 @@ nforge agent ROOT hand-back '{"laneId":"LANE_UUID","to":"@owner","head":"SAVED_H
 - Answer with `nforge coordination ROOT '{"action":"ack","messageId":"QUESTION_UUID","choice":"EXACT_LABEL","text":"Reason"}'`
   or `forge_ack` in the coordination MCP. The sender reads the retained answer
   and its resume prompt through `nforge coordination ROOT '{"action":"inbox"}'`
-  or `forge_inbox`. Acknowledging the answer marks it read. Use
+  or `forge_inbox`. If a question's recipient session closes or completes before
+  answering, Forge records a `session-ended` notice in the asker's inbox so they
+  can re-ask an open session or a project member; choosing an answer on an ended
+  session is refused with `WORK_STALE`, and web views show who it was for with
+  Dismiss instead of live answer keys. Acknowledging the answer or notice marks
+  it read. Use
   `forge_inbox {all:true}` to read it again. A person can give the prompt to a stopped agent.
   Forge never starts it. The existing coordination feed can select the recorded
   `laneId` or `planningItemId`.

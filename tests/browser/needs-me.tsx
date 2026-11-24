@@ -10,6 +10,7 @@
 // The shell's Needs you count comes from the same rule as the page (needs/count.ts).
 import { useState } from 'react';
 import { ConvexProvider, type ConvexReactClient } from 'convex/react';
+import { ConvexError } from 'convex/values';
 import { getFunctionName, type FunctionReference } from 'convex/server';
 import { createRoot } from 'react-dom/client';
 import '../../web/src/ds';
@@ -427,47 +428,82 @@ const noticesRead: NeedsRead = {
     },
   ],
 };
+// Incident a1e71a48: a session-directed question whose recipient session ended shows no live answer keys,
+// names who it was for with Dismiss, and a refused answer key shows the mapped error reason.
+const endedAskRead: NeedsRead = {
+  held: [],
+  more: 0,
+  moreIsLowerBound: false,
+  approvals: JSON.stringify({ requests: [], complete: true }),
+  canDecide: true,
+  asks: [
+    {
+      id: uuid(81),
+      at: ago(5),
+      actor: 'sample-one',
+      agent: 'solar-husky',
+      text: 'Paging first or Hierarchy first?',
+      choices: ['Paging first', 'Hierarchy first'],
+      laneId: uuid(801),
+      ahead: true,
+      recipientSession: uuid(802),
+      to: 'sample-one/civic-ox',
+      recipientEnded: true,
+    },
+    {
+      id: uuid(82),
+      at: ago(3),
+      actor: 'sample-two',
+      agent: 'amber-fox',
+      text: 'Which endpoint should we keep?',
+      choices: ['Keep v1', 'Use v2'],
+      laneId: uuid(803),
+    },
+  ],
+};
 const read: NeedsRead =
-  variant === 'notices'
-    ? noticesRead
-    : variant === 'conversation'
-      ? conversationRead
-      : variant === 'held-more'
-        ? extraRead
-        : worst || variant === 'towers'
-          ? worstRead
-          : calm || quiet || unavailable
-            ? {
-                held: [],
-                more: 0,
-                moreIsLowerBound: false,
-                approvals: JSON.stringify({ requests: [], complete: true }),
-                canDecide: true,
-                asks: [],
-              }
-            : connect
+  variant === 'ended-ask'
+    ? endedAskRead
+    : variant === 'notices'
+      ? noticesRead
+      : variant === 'conversation'
+        ? conversationRead
+        : variant === 'held-more'
+          ? extraRead
+          : worst || variant === 'towers'
+            ? worstRead
+            : calm || quiet || unavailable
               ? {
                   held: [],
                   more: 0,
                   moreIsLowerBound: false,
-                  approvals: JSON.stringify({
-                    requests: [
-                      {
-                        ...approval(
-                          'setting:github-connect',
-                          'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
-                          4,
-                        ),
-                        kind: 'setting',
-                        setting: { origin: 'github-connect' },
-                      },
-                    ],
-                    complete: true,
-                  }),
+                  approvals: JSON.stringify({ requests: [], complete: true }),
                   canDecide: true,
                   asks: [],
                 }
-              : baseRead;
+              : connect
+                ? {
+                    held: [],
+                    more: 0,
+                    moreIsLowerBound: false,
+                    approvals: JSON.stringify({
+                      requests: [
+                        {
+                          ...approval(
+                            'setting:github-connect',
+                            'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
+                            4,
+                          ),
+                          kind: 'setting',
+                          setting: { origin: 'github-connect' },
+                        },
+                      ],
+                      complete: true,
+                    }),
+                    canDecide: true,
+                    asks: [],
+                  }
+                : baseRead;
 type Mark = LineFeed['lanes'][number];
 const moving = (n: number, stage: Mark['stage'], minutes: number, check?: string): Mark => ({
   laneId: uuid(400 + n),
@@ -704,7 +740,12 @@ function Fixture() {
           closedToday: null,
         }}
         decide={record('decide')}
-        answer={async (ask, choice, reason) => void writes.push(['answer', ask.id, choice, reason])}
+        answer={async (ask, choice, reason) => {
+          writes.push(['answer', ask.id, choice, reason]);
+          if (params.get('answerError'))
+            throw new ConvexError({ code: params.get('answerError')!, message: 'raw server wording' });
+        }}
+        dismissAsk={async ask => void writes.push(['dismissAsk', ask.id])}
         dismiss={record('dismiss')}
         loose={open =>
           open ? (

@@ -11,7 +11,14 @@ import { paginationOptsValidator, paginationResultValidator } from 'convex/serve
 import { coordinationMutation as mutation, coordinationQuery as query } from './cliServer';
 import { activeProject, coordinationProject } from './projectAuthority';
 import { command, eventDocument } from './coordinationFields';
-import { applyCommand, canonical, denormalized, eventByOperation, session } from './coordinationWrite';
+import {
+  applyCommand,
+  canonical,
+  denormalized,
+  eventByOperation,
+  notifyEndedSessionQuestions,
+  session,
+} from './coordinationWrite';
 import { invariant } from '../src/errors';
 import { COORDINATION_TOUCH_MIN_MS, coordinationCommandSchema } from '../src/coordination-types';
 import { report } from './errors';
@@ -134,8 +141,14 @@ export const publish = mutation({
             at,
           )),
         };
-        if (current) await ctx.db.patch(current._id, value);
-        else await ctx.db.insert('projectCoordinationSessions', value);
+        if (current) {
+          await ctx.db.patch(current._id, {
+            ...value,
+            ...(parsed.status === 'completed' ? { hasDirectedQuestions: undefined } : {}),
+          });
+          if (parsed.status === 'completed' && current.hasDirectedQuestions)
+            await notifyEndedSessionQuestions(ctx, input.projectId, current, at);
+        } else await ctx.db.insert('projectCoordinationSessions', value);
       } else {
         const isAsk = parsed.kind === 'message' && parsed.question;
         invariant(

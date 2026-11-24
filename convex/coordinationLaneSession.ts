@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import type { Id } from './_generated/dataModel';
 import type { MutationCtx } from './server';
-import { session } from './coordinationWrite';
+import { notifyEndedSessionQuestions, session } from './coordinationWrite';
 import { COORDINATION_LIMITS as L } from '../src/coordination-types';
 
 /** The operation id that marks a session a Lane wrote. An announced session that happens to reuse
@@ -34,7 +34,10 @@ export async function syncLaneSession(
   const ours = row?.operationId === laneOperation(laneId);
   if (!value) {
     // Close releases the Lane's session, also when an agent later announced over it for this Lane.
-    if (row && (ours || row.context?.laneId === laneId)) await ctx.db.delete(row._id);
+    if (row && (ours || row.context?.laneId === laneId)) {
+      if (row.hasDirectedQuestions) await notifyEndedSessionQuestions(ctx, projectId, row, Date.now());
+      await ctx.db.delete(row._id);
+    }
     return;
   }
   // An announced session is the agent's own: Lane writes never overwrite it.

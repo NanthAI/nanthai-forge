@@ -119,7 +119,7 @@ function DiscussionContent({
   ]);
   const pending = all.filter(({ root }) => {
     const row = root.conversation;
-    return row?.type === 'question' && !row.answer && !row.ahead && !row.ended;
+    return row?.type === 'question' && !row.answer && !row.ahead && !row.ended && !row.recipientEnded;
   });
   // Comments and the conversation are paged apart, newest first. While either has earlier pages, a thread older than
   // the oldest entry that stream has read could sit before unread newer ones, so it waits until both reach it, unless

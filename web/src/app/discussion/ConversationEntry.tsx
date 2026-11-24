@@ -6,7 +6,7 @@ import { COORDINATION_LIMITS } from '../../../../src/coordination-types';
 import './conversation.css';
 import { RecordedWho } from '../RecordedWho';
 import { recordedIdentity, type WhoProject } from '../who-links';
-import type { Answer, ThreadEntry } from './conversation';
+import { answerFailureReason, type Answer, type ThreadEntry } from './conversation';
 
 const time = (at: number) =>
   new Date(at).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
@@ -58,17 +58,17 @@ export function AnswerKeys({
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [answered, setAnswered] = useState('');
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const pick = async (choice: string) => {
     if (busy) return;
     setBusy(true);
-    setFailed(false);
+    setFailed(null);
     try {
       await answer(entry, choice, reason.trim());
       setAnswered(choice);
       onAnswered?.(choice);
-    } catch {
-      setFailed(true);
+    } catch (error) {
+      setFailed(answerFailureReason(error));
     } finally {
       setBusy(false);
     }
@@ -95,7 +95,7 @@ export function AnswerKeys({
       </div>
       {failed ? (
         <p role="alert" className="err">
-          Could not confirm the answer. Try again or check the thread.
+          {failed}
         </p>
       ) : null}
     </>
@@ -184,12 +184,23 @@ export function ConversationEntry({
             </>
           ) : null}
         </div>
-      ) : row.mayAnswer && answer ? (
+      ) : row.mayAnswer && !row.recipientEnded && answer ? (
         <AnswerKeys entry={row} choices={choice} answer={answer} />
       ) : row.type === 'question' ? (
-        <p className="t2" dir="auto">
-          {choice.join(' · ')}
-        </p>
+        <>
+          {row.recipientEnded ? (
+            <p className="t2" dir="auto">
+              For {row.to ?? 'another session'} — that session ended.
+            </p>
+          ) : row.to ? (
+            <p className="t2" dir="auto">
+              For {row.to} — directed to that session.
+            </p>
+          ) : null}
+          <p className="t2" dir="auto">
+            {choice.join(' · ')}
+          </p>
+        </>
       ) : null}
     </>
   );
