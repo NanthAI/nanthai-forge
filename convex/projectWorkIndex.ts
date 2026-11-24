@@ -28,11 +28,12 @@ import {
   initiativeCloseHistory,
   planningHistoryBudget,
   planningHistoryResult,
+  planningTimesFallbackReporter,
   withPlanningTimes,
 } from './projectPlanningHistory';
 import { countedInitiative, planningFilter, planningPage } from './projectPlanningList';
 import { readsStore, storeItem, storeItemRow, storePage } from './projectWorkStoreReads';
-import type { PlanningTimes } from './projectPlanningTimes';
+import type { PlanningTimesRead } from './projectPlanningTimes';
 import { linkedLandingCursor, withLandingNotes } from './projectWorkIndexLandingNotes';
 const selection = {
   projectId: v.id('hostedProjects'),
@@ -160,7 +161,7 @@ export const detail = query({
         input.planningHistory &&
         input.collection === 'planningItems' &&
         (await readProjectRole(ctx, project, user.subject));
-      const decorate = (value: string, pinned?: PlanningTimes) =>
+      const decorate = (value: string, pinned?: PlanningTimesRead) =>
         planningHistory
           ? withPlanningTimes(
               ctx,
@@ -169,6 +170,7 @@ export const detail = query({
               value,
               planningHistoryBudget(),
               pinned,
+              project.workStore === 'records' ? planningTimesFallbackReporter() : undefined,
             )
           : value;
       if (input.collection === 'planningItems' && readsStore(project, input.collection)) {
@@ -363,13 +365,23 @@ export async function journalWorkRecordsRead(
       ...(end ? { endCursor: end.recordsCursor } : {}),
     };
     const decorateRows = async (
-      rows: { id: string; position: number; value: string; planningTimes?: PlanningTimes }[],
+      rows: { id: string; position: number; value: string; planningTimes?: PlanningTimesRead }[],
     ) => {
       const charge = planningHistoryBudget();
+      const fallback =
+        store && planningHistory && !input.counts ? planningTimesFallbackReporter() : undefined;
       const result = [];
       for (const { planningTimes, ...row } of rows) {
         if (planningHistory && !input.counts)
-          row.value = await withPlanningTimes(ctx, project, partition, row.value, charge, planningTimes);
+          row.value = await withPlanningTimes(
+            ctx,
+            project,
+            partition,
+            row.value,
+            charge,
+            planningTimes,
+            fallback,
+          );
         result.push(row);
       }
       return result;

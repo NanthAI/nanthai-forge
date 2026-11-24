@@ -188,7 +188,19 @@ cost per 1,000 landings has not risen.
 Record-store Item heads keep optional version-pinned `planningTimes`. The existing Item
 write computes them without a history read. Planning list and detail read the pin only
 when it matches the returned version. A missing or stale pin uses the bounded history
-walk. Legacy projects and ranked search previews continue to use the walk.
+walk. Record-store list/detail queries that need this fallback log one
+label-only `planning/history-fallback-missing` or `planning/history-fallback-stale` attribution
+for the first fallback. No Item identifier or request data is logged: DEV query logs can reach
+clients. Legacy projects and ranked search previews continue to use history; their intentional
+history reads are not counted as record-store fallback.
+
+A write that publishes or advances an Item head in record-store mode must derive a pin in the
+same transaction, without a history read. A purge tombstone pins the intentional absence of
+both dates. An exact-value refresh keeps a matching pin; a missing predecessor or unproved
+pin leaves the write unapplied with `WORK_STALE`. Complete the backfill first, or stage
+out-of-order copies in legacy/dual mode and then verify before exposing them. Switching a
+staged project to record-store mode does not verify or backfill the old heads by itself;
+keep the history fallback until the deployment's release verification is in place.
 
 After deploying the writer, an authorized operator can fill older heads in one
 record-store project at a time. Estimate for the dogfood project: **40 MB**;

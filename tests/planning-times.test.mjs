@@ -4,15 +4,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getDocumentSize } from 'convex/values';
+import { spendEvent } from '../scripts/convex-spend-model.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { setup } from './hosted-planning-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { setWorkRecord } from './hosted-fixture.mjs';
+import { meterReads } from './hosted-read-set.mjs';
 import { indexedRecord } from '../dist/work-hosted-index.js';
 import { hostedRecordValue } from '../dist/hosted-records.js';
 import { workStoreRecord } from '../dist/work-store-records.js';
 
-const { storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
+const { copy, storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
+const { writeHostedRecord } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const { withPlanningTimes, planningHistoryBudget } = await import(
   moduleUrl('../convex/projectPlanningHistory.ts')
 );
@@ -29,10 +32,11 @@ async function fixture(t) {
   const project = s.tables.hostedProjects.get(s.projectId);
   await s.ctx.db.patch(s.projectId, { workStore: 'records' });
   const { generationId } = project.work;
-  const put = item =>
+  // Stage historical fixtures through the legacy/dual copy path; reads exercise published records.
+  const put = (item, workStore = 'dual') =>
     storeVersion(
       s.ctx,
-      s.projectId,
+      { _id: s.projectId, workStore },
       hostedRecordValue(workStoreRecord('planningVersions', item)),
       undefined,
       false,
@@ -82,13 +86,180 @@ function snapshot(id, version, status, extra) {
   };
 }
 const times = ({ lastStatusChangeAt, closedAt }) => ({ lastStatusChangeAt, closedAt });
-const endpoints = (s, id) => {
-  const selection = { projectId: s.projectId, collection: 'planningItems', planningHistory: true };
+const workStale = error => (error.data?.code ?? error.code) === 'WORK_STALE';
+const transactions = s => {
+  const store = lanesFixture();
+  for (const [table, rows] of Object.entries(store.tables))
+    for (const [id, row] of s.tables[table] ?? []) rows.set(id, structuredClone(row));
+  return store;
+};
+const endpoints = (s, id, includeHistory = true) => {
+  const selection = {
+    projectId: s.projectId,
+    collection: 'planningItems',
+    ...(includeHistory ? { planningHistory: true } : {}),
+  };
   return Promise.all([
     index.records._handler(s.ctx, { ...selection, paginationOpts: { cursor: null, numItems: 50 } }),
     index.detail._handler(s.ctx, { ...selection, id }),
   ]);
 };
+
+test('record-store copy publishes only with proved times and preserves the pin on an exact refresh', async t => {
+  const s = await fixture(t);
+  const id = randomUUID();
+  const first = snapshot(id, 1, 'closed');
+  const second = snapshot(id, 2, 'closed');
+  await s.ctx.db.patch(s.projectId, { sourceAuthority: { mode: 'server', epoch: 1 } });
+  const generation = s.tables.projectWorkGenerations.get(
+    s.tables.hostedProjects.get(s.projectId).work.generationId,
+  );
+  const retain = item => {
+    for (const entry of indexedRecord('planningVersions', item.operationId, id, item.version, item))
+      setWorkRecord(s.tables, `copy-${entry.key}`, {
+        ...entry,
+        _id: `copy-${entry.key}`,
+        _creationTime: 1,
+        projectId: s.projectId,
+        generationId: recordPartition(generation),
+      });
+  };
+  const runCopy = () =>
+    copy._handler(s.ctx, { projectId: s.projectId, collection: 'planningVersions', cursor: null });
+  retain(second);
+  await assert.rejects(runCopy(), workStale);
+  assert.equal(s.head(id), undefined);
+  assert.equal([...s.tables.projectHostedRecords.values()].filter(row => row.key === id).length, 0);
+  retain(first);
+  assert.equal(JSON.parse(await runCopy()).copied, 2);
+  const before = s.head(id).planningTimes;
+  assert.deepEqual(before, {
+    version: 2,
+    lastStatusChangeAt: first.at,
+    closedAt: first.at,
+    closeKept: first.at,
+  });
+  await s.ctx.db.patch(s.head(id)._id, { value: undefined });
+  assert.equal(JSON.parse(await runCopy()).refreshed, 1);
+  assert.deepEqual(s.head(id).planningTimes, before);
+
+  const staged = randomUUID();
+  await s.put(snapshot(staged, 2, 'open'), 'dual');
+  await assert.rejects(s.put(snapshot(staged, 1, 'open'), 'records'), workStale);
+  assert.equal(s.head(staged).version, 2);
+  assert.equal(s.head(staged).planningTimes, undefined);
+  // The same out-of-order copy still works while staging in dual mode.
+  assert.equal(await s.put(snapshot(staged, 1, 'open'), 'dual'), 'copied');
+});
+
+test('a record-store copy page rolls back earlier versions when a later head is unproved', async t => {
+  const s = await fixture(t);
+  await s.ctx.db.patch(s.projectId, { sourceAuthority: { mode: 'server', epoch: 1 } });
+  const generation = s.tables.projectWorkGenerations.get(
+    s.tables.hostedProjects.get(s.projectId).work.generationId,
+  );
+  const accepted = snapshot(randomUUID(), 1, 'open');
+  const refused = snapshot(randomUUID(), 2, 'closed');
+  for (const item of [accepted, refused]) {
+    for (const entry of indexedRecord('planningVersions', item.operationId, item.id, item.version, item))
+      setWorkRecord(s.tables, `copy-${entry.key}`, {
+        ...entry,
+        _id: `copy-${entry.key}`,
+        _creationTime: 1,
+        projectId: s.projectId,
+        generationId: recordPartition(generation),
+      });
+  }
+  const store = transactions(s);
+  const args = { projectId: s.projectId, collection: 'planningVersions', cursor: null };
+  const before = structuredClone(store.tables);
+  await assert.rejects(store.call('copy page', copy, args), workStale);
+  assert.deepEqual(store.tables, before, 'neither the preceding version nor its head or digests survive');
+  // Once the blocked row is removed from this source page, the same copy starts fresh.
+  for (const rows of Object.values(store.tables)) rows.delete(`copy-${refused.operationId}`);
+  const copied = JSON.parse(await store.call('copy page retry', copy, args));
+  assert.equal(copied.copied, 1);
+});
+
+test('the generic canonical writer cannot bypass Item pinning', async t => {
+  const s = await fixture(t);
+  const id = randomUUID();
+  const project = s.tables.hostedProjects.get(s.projectId);
+  await s.ctx.db.patch(s.projectId, { sourceAuthority: { mode: 'server', epoch: 1 } });
+  await assert.rejects(
+    writeHostedRecord(s.ctx, {
+      projectId: s.projectId,
+      actor: project.owner,
+      authorityEpoch: 1,
+      expectedVersion: null,
+      record: workStoreRecord('planningVersions', snapshot(id, 1, 'open')),
+    }),
+    { code: 'BAD_ARGUMENT' },
+  );
+  assert.equal(s.head(id), undefined);
+});
+
+test('list and detail emit only the missing or stale fallback label, with unchanged reads and replies', async t => {
+  const s = await fixture(t);
+  const ids = Array.from({ length: 2 }, randomUUID);
+  const current = ids.map(id => snapshot(id, 2, 'closed'));
+  for (const item of current) {
+    await s.put(snapshot(item.id, 1, 'open'), 'records');
+    await s.put(item, 'records');
+  }
+  const logs = [];
+  t.mock.method(console, 'log', line => {
+    if (typeof line === 'string') logs.push(line);
+  });
+  const fallback = () => logs.filter(line => line.includes('planning/history-fallback'));
+  const warm = await endpoints(s, ids[0]);
+  assert.equal(fallback().length, 0);
+  for (const id of ids) await s.ctx.db.patch(s.head(id)._id, { planningTimes: undefined });
+  const meter = meterReads(s.ctx);
+  const plain = await meter.cost(() => endpoints(s, ids[0], false));
+  const project = s.tables.hostedProjects.get(s.projectId);
+  const generation = s.tables.projectWorkGenerations.get(project.work.generationId);
+  const walk = await meter.cost(async () => {
+    for (const item of [...current, current[0]])
+      await withPlanningTimes(
+        s.ctx,
+        project,
+        recordPartition(generation),
+        JSON.stringify(item),
+        planningHistoryBudget(),
+      );
+  });
+  const cold = await meter.cost(async () => {
+    assert.deepEqual(await endpoints(s, ids[0]), warm);
+  });
+  assert.ok(walk.documents > 0, 'the fixture actually reads history');
+  assert.deepEqual(cold, { documents: plain.documents + walk.documents, bytes: plain.bytes + walk.bytes });
+  const only = reason => {
+    const label = `planning/history-fallback-${reason}`;
+    const line = `FORGE_IO_ATTRIBUTION ${JSON.stringify({ label })}`;
+    assert.deepEqual(fallback(), [line, line], 'list and detail each emit exactly a static label');
+    const entry = spendEvent(
+      {
+        kind: 'Completion',
+        identifier: 'projectWorkIndex:records',
+        timestamp: 1,
+        requestId: 'synthetic-request',
+        executionId: 'synthetic-execution',
+        logLines: [line],
+      },
+      'synthetic-deployment',
+    );
+    assert.equal(entry.attribution, label);
+  };
+  only('missing');
+  logs.length = 0;
+  for (const id of ids)
+    await s.ctx.db.patch(s.head(id)._id, {
+      planningTimes: { version: 1, lastStatusChangeAt: null, closedAt: null, closeKept: null },
+    });
+  assert.deepEqual(await endpoints(s, ids[0]), warm);
+  only('stale');
+});
 
 test('backfilling an old Item preserves full list and detail replies when its times are already known', async t => {
   const s = await fixture(t);
@@ -209,11 +380,11 @@ test('backfill verification visits every head despite byte splits, including hea
 });
 
 for (const first of ['backfill', 'status']) {
-  test(`concurrent backfill and status mutation pin the final head when ${first} starts first`, async t => {
+  test(`an unpinned head rolls back the ${first === 'backfill' ? 'retained' : 'journal-backed'} planning write until backfill`, async t => {
     const s = await fixture(t);
     await s.ctx.db.patch(s.projectId, {
       sourceAuthority: { mode: 'server', epoch: 1 },
-      workStoreWriters: ['planning'],
+      ...(first === 'backfill' ? { workStoreWriters: ['planning'] } : {}),
     });
     const open = s.item();
     const projectId = s.projectId;
@@ -221,18 +392,15 @@ for (const first of ['backfill', 'status']) {
     await command._handler(s.ctx, args(open));
     const headId = s.head(open.itemId)._id;
     await s.ctx.db.patch(headId, { planningTimes: undefined });
-    const store = lanesFixture();
-    for (const [table, rows] of Object.entries(store.tables))
-      for (const [id, row] of s.tables[table] ?? []) rows.set(id, structuredClone(row));
+    const store = transactions(s);
     const close = { ...open, expectedVersion: 1, status: 'closed', operationId: randomUUID() };
     const reached = Promise.withResolvers(),
       release = Promise.withResolvers();
     let held = false;
     store.decorateContext((ctx, _, name) => {
-      if (name !== first) return;
-      const method = first === 'backfill' ? 'patch' : 'replace';
-      const write = ctx.db[method];
-      ctx.db[method] = async (id, value) => {
+      if (name !== 'backfill') return;
+      const write = ctx.db.patch;
+      ctx.db.patch = async (id, value) => {
         await write(id, value);
         if (id === headId && !held) {
           held = true;
@@ -245,17 +413,29 @@ for (const first of ['backfill', 'status']) {
       name === 'backfill'
         ? store.call(name, backfill.page, { projectId, cursor: null })
         : store.call(name, command, args(close));
-    const pending = call(first);
+    const refused = async () => {
+      const before = structuredClone(store.tables);
+      await assert.rejects(call('status'), workStale);
+      assert.deepEqual(store.tables, before, 'projection, event and head remain unchanged');
+    };
+    if (first === 'status') await refused();
+    const pending = call('backfill');
     try {
       await Promise.race([
         reached.promise,
-        pending.then(() => assert.fail('mutation committed before the race')),
+        pending.then(() => assert.fail('backfill committed before the race')),
       ]);
-      await call(first === 'backfill' ? 'status' : 'backfill');
+      if (first === 'backfill') await refused();
+      assert.equal(store.tables.projectHostedRecordHeads.get(headId).version, 1);
     } finally {
       release.resolve();
       await pending;
     }
+    await call('status'); // Same operation ID: the refused write retained no outcome or body.
+    if (first === 'status')
+      assert.ok(
+        [...store.tables.projectWorkEvents.values()].some(row => row.operationId === close.operationId),
+      );
     const head = store.tables.projectHostedRecordHeads.get(headId);
     assert.equal(head.version, 2);
     assert.equal(head.status, 'closed');
@@ -265,7 +445,6 @@ for (const first of ['backfill', 'status']) {
       closedAt: JSON.parse(head.value).at,
       closeKept: JSON.parse(head.value).at,
     });
-    assert.ok(store.counts.some(row => row.name === first && row.retries > 0));
   });
 }
 

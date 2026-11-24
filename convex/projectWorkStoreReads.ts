@@ -11,9 +11,9 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { PaginationOptions } from 'convex/server';
 import { hostedRecordBody, recordHead, recordVersion } from './projectHostedRecords';
 import { noteRecordId } from '../src/work-store-records';
-import { pinnedPlanningTimes, type PlanningTimes } from './projectPlanningTimes';
+import { pinnedPlanningTimes, type PlanningTimesRead } from './projectPlanningTimes';
 
-type Row = { id: string; position: number; value: unknown; planningTimes?: PlanningTimes };
+type Row = { id: string; position: number; value: unknown; planningTimes?: PlanningTimesRead };
 type Page = { page: Row[]; isDone: boolean; continueCursor: string };
 
 /** Whether this read comes from the record store. Other collections, and shapes the store does not
@@ -124,8 +124,8 @@ export async function storeItem(ctx: QueryCtx, projectId: Id<'hostedProjects'>, 
 }
 
 const planningHeadTimes = (head: Doc<'projectHostedRecordHeads'>) => {
-  const planningTimes = pinnedPlanningTimes(head);
-  return planningTimes ? { planningTimes } : {};
+  if (!head.planningTimes) return {};
+  return { planningTimes: pinnedPlanningTimes(head) ?? ('stale' as const) };
 };
 
 export async function storeItemRow(ctx: QueryCtx, projectId: Id<'hostedProjects'>, id: string) {

@@ -678,7 +678,7 @@ test('generic Work metadata copies cannot publish a clean Candidate outside comp
     { storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
   await assert.rejects(
     s.run('copy Candidate refusal', () =>
-      storeVersion(s.ctx, s.auth.projectId, hostedRecordValue(candidate()), null),
+      storeVersion(s.ctx, { _id: s.auth.projectId }, hostedRecordValue(candidate()), null),
     ),
     code('BAD_ARGUMENT'),
   );

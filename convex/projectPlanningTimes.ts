@@ -5,6 +5,7 @@ import { planningStatusTransition } from '../src/work-planning-state';
 import { isShelved } from '../src/work-planning-types';
 
 export type PlanningTimes = NonNullable<Doc<'projectHostedRecordHeads'>['planningTimes']>;
+export type PlanningTimesRead = PlanningTimes | 'stale';
 
 type Item = { version: number; status: string; at?: string; was?: string; purged?: unknown };
 type Head = { version: number; status: string; value?: string; planningTimes?: PlanningTimes };
@@ -25,9 +26,10 @@ export function pinnedPlanningTimes(head: Pick<Head, 'version' | 'planningTimes'
   return head.planningTimes?.version === head.version ? head.planningTimes : undefined;
 }
 
-/** No history read on writes. Missing or out-of-order evidence leaves the head for the backfill. */
+/** No history read on writes. The caller must stage or refuse an unproved visible head. */
 export function advancePlanningTimes(item: Item, head?: Head): PlanningTimes | undefined {
-  if (item.purged) return;
+  if (item.purged)
+    return { version: item.version, lastStatusChangeAt: null, closedAt: null, closeKept: null };
   const at = planningTime(item.at);
   if (item.version === 1 && !head) {
     const closedAt = item.status === 'closed' ? at : null;

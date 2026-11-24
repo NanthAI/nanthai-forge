@@ -23,8 +23,9 @@ test('Work projection replay reuses compact original command facts and rejects c
     command: canonicalPayload(command),
   };
   const id = await f.ctx.db.insert('projectHostedRecordBodies', { ...provenance, value: '' });
+  const project = { _id: auth.projectId, owner: 'owner' };
   const before = await f.run('original projection reply', () =>
-    work.storeProjection(f.ctx, auth.projectId, 'owner', [], undefined, provenance),
+    work.storeProjection(f.ctx, project, [], undefined, provenance),
   );
   await f.ctx.db.patch(id, {
     command: undefined,
@@ -32,7 +33,7 @@ test('Work projection replay reuses compact original command facts and rejects c
     journalCommand: canonicalPayload({ action: 'note' }),
   });
   const replay = await f.run('compact projection reply', () =>
-    work.storeProjection(f.ctx, auth.projectId, 'owner', [], undefined, provenance),
+    work.storeProjection(f.ctx, project, [], undefined, provenance),
   );
   assert.deepEqual(
     { ...replay, command: JSON.parse(replay.command) },
@@ -40,7 +41,7 @@ test('Work projection replay reuses compact original command facts and rejects c
   );
   await assert.rejects(
     f.run('changed projection command', () =>
-      work.storeProjection(f.ctx, auth.projectId, 'owner', [], undefined, {
+      work.storeProjection(f.ctx, project, [], undefined, {
         ...provenance,
         command: canonicalPayload({ ...command, text: 'Changed rationale' }),
       }),

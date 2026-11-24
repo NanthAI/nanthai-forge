@@ -8,7 +8,7 @@ import { planningStatusTransition } from '../src/work-planning-state';
 import { digest } from '../src/state/hash';
 import { hostedRecordBody } from './projectHostedRecords';
 import { workRecordTable } from './projectWorkRecordTables';
-import { instant, planningTime, type PlanningTimes } from './projectPlanningTimes';
+import { instant, planningTime, type PlanningTimesRead } from './projectPlanningTimes';
 
 export { instant } from './projectPlanningTimes';
 
@@ -225,22 +225,35 @@ async function itemTimes(item: Snapshot, history: AsyncIterable<VersionRead>, ma
   };
 }
 
+/** One code-chosen label per authorized record-store list/detail query. DEV forwards query
+ * logs to clients, so this must never include an Item id or any data from the request or head. */
+export function planningTimesFallbackReporter() {
+  let noted = false;
+  return (reason: 'missing' | 'stale') => {
+    if (noted) return;
+    noted = true;
+    console.log(`FORGE_IO_ATTRIBUTION ${JSON.stringify({ label: `planning/history-fallback-${reason}` })}`);
+  };
+}
+
 export async function withPlanningTimes(
   ctx: QueryCtx,
   project: Project,
   partition: Id<'projectWorkGenerations'>,
   value: string,
   charge: ReturnType<typeof planningHistoryBudget>,
-  pinned?: PlanningTimes,
+  pinned?: PlanningTimesRead,
+  reportFallback?: ReturnType<typeof planningTimesFallbackReporter>,
 ) {
   const item = JSON.parse(value) as Snapshot;
   if (item.purged) return JSON.stringify({ ...item, lastStatusChangeAt: null, closedAt: null });
-  if (pinned?.version === item.version)
+  if (pinned && pinned !== 'stale' && pinned.version === item.version)
     return JSON.stringify({
       ...item,
       lastStatusChangeAt: pinned.lastStatusChangeAt,
       closedAt: pinned.closedAt,
     });
+  reportFallback?.(pinned ? 'stale' : 'missing');
   const { lastStatusChangeAt, closeKept } = await itemTimes(
     item,
     earlierVersions(ctx, project, partition, item, charge),

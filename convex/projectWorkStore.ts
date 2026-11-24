@@ -25,7 +25,7 @@ import { workProject } from './projectWorkHead';
 import { workStoreMigrationActive } from './projectWorkStoreFingerprintWrites';
 import { v } from 'convex/values';
 import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { invariant, ForgeError } from '../src/errors';
 import { report } from './errors';
 import { accessibleProject } from './projectAuthority';
@@ -41,7 +41,11 @@ import {
   type WorkStoreSource,
 } from '../src/work-store-records';
 import { sameValue, storeReadOf } from './projectWorkStoreReads';
-import { advancePlanningTimes } from './projectPlanningTimes';
+import { advancePlanningTimes, pinnedPlanningTimes } from './projectPlanningTimes';
+
+type WorkStoreProject = Pick<Doc<'hostedProjects'>, '_id' | 'workStore'>;
+const pinRequired =
+  'This Item has unproved planning times. Complete the planning-times backfill before advancing its record-store head.';
 
 /** Rows per page: a copy page writes at most 3 documents per row (body, version, head). */
 export const WORK_STORE_PAGE = 100;
@@ -145,36 +149,41 @@ const note = (bucket: { count: number; keys: string[] }, key: string) => {
 };
 
 /** Store one record version unless it is already there. A version stored with other bytes is left
- * as it is and reported. History can arrive in any order: the head only moves to a newer version. */
+ * as it is and reported. Legacy/dual history can arrive out of order before record-store publication. */
 export async function storeVersion(
   ctx: MutationCtx,
-  projectId: Id<'hostedProjects'>,
+  project: WorkStoreProject,
   encoded: ReturnType<typeof hostedRecordValue>,
   provenance?: WorkProvenance,
   migrationDigests = true,
 ): Promise<'copied' | 'same' | 'refreshed' | 'different'> {
+  const projectId = project._id;
   const { record, ref } = encoded;
+  const requirePin = project.workStore === 'records' && record.kind === 'issue';
   const old = await recordVersion(ctx, projectId, record.kind, record.id, record.version);
   // A purged version keeps its original digest while the index holds its tombstone: the purge vouches for it.
   if (old?.purged !== undefined) return 'same';
   if (old && (old.digest !== ref.digest || old.bytes !== ref.bytes)) return 'different';
   const head = await recordHead(ctx, projectId, record.kind, record.id);
   if (!old) {
-    await insertVersion(ctx, projectId, encoded, head, provenance, migrationDigests);
+    await insertVersion(ctx, projectId, encoded, head, provenance, migrationDigests, undefined, requirePin);
     return 'copied';
   }
   // A head stored before heads kept their value (and notes their own status) is brought up to date.
   const indexed = hostedRecordIndex(record),
     value = inlineValue(encoded);
   if (head?.recordId !== old._id || (head.value === value && head.status === indexed.status)) return 'same';
+  // The immutable body digest matched. Rehydrating the same status can keep its proof.
+  // Do not expose an unpinned or status-mismatched refresh in record-store mode.
+  invariant(
+    !requirePin || (head.status === indexed.status && pinnedPlanningTimes(head)),
+    'WORK_STALE',
+    pinRequired,
+  );
   await ctx.db.patch(head._id, {
     value,
     status: indexed.status,
-    ...(record.kind === 'issue' &&
-    head.planningTimes &&
-    (head.status !== indexed.status || head.value !== value)
-      ? { planningTimes: undefined }
-      : {}),
+    ...(record.kind === 'issue' && !requirePin && head.planningTimes ? { planningTimes: undefined } : {}),
   });
   if (old.status !== indexed.status) await ctx.db.patch(old._id, { status: indexed.status });
   return 'refreshed';
@@ -202,9 +211,20 @@ async function insertVersion(
   provenance?: WorkProvenance,
   migrationDigests = true,
   planningItemId = head?.planningItemId,
+  requirePin = false,
 ) {
   const { record, ref, value } = encoded;
   invariant(record.kind !== 'candidate', 'BAD_ARGUMENT', 'Work metadata copies cannot publish a Candidate.');
+  const planningTimes =
+    record.kind === 'issue' ? advancePlanningTimes(record.item, head ?? undefined) : undefined;
+  if (requirePin) {
+    invariant(
+      !head || record.version > head.version,
+      'WORK_STALE',
+      'Copy missing Item versions in order before publishing the record-store history.',
+    );
+    invariant(planningTimes, 'WORK_STALE', pinRequired);
+  }
   const indexed = { ...hostedRecordIndex(record), version: record.version },
     identity = { projectId, kind: record.kind, key: record.id };
   const bodyId = await ctx.db.insert(
@@ -227,8 +247,6 @@ async function insertVersion(
   if (record.kind === 'issue' && head?.planningTimes && record.version < head.version)
     await ctx.db.patch(head._id, { planningTimes: undefined });
   const inline = inlineValue(encoded),
-    planningTimes =
-      record.kind === 'issue' ? advancePlanningTimes(record.item, head ?? undefined) : undefined,
     pointer = {
       ...identity,
       ...indexed,
@@ -291,13 +309,13 @@ export async function storeIntent(
  * projection. */
 export async function storeProjection(
   ctx: MutationCtx,
-  projectId: Id<'hostedProjects'>,
-  owner: string,
+  project: WorkStoreProject & Pick<Doc<'hostedProjects'>, 'owner'>,
   entries: { collection: string; key: string; parent: string; position: number; value: string }[],
   partition?: Id<'projectWorkGenerations'>,
   provenance?: WorkProvenance,
   createdIntentId?: string,
 ): Promise<StoredWorkEvent | null> {
+  const { _id: projectId, owner } = project;
   const command = provenance ? JSON.parse(provenance.command) : null;
   const primary = !command
     ? null
@@ -339,13 +357,13 @@ export async function storeProjection(
       else if (entry.collection !== 'planningItems')
         await storeVersion(
           ctx,
-          projectId,
+          project,
           hostedRecordValue(workStoreRecord(collection, value)),
           audit,
           Boolean(partition),
         );
     } catch (error) {
-      if (audit) throw error;
+      if (audit || (project.workStore === 'records' && collection === 'planningVersions')) throw error;
       // A failed dual write is observable by its independently updated source fingerprint below.
     }
     if (partition) {
@@ -537,7 +555,7 @@ export const copy = mutation({
           note(invalid, row.key);
           continue;
         }
-        const stored = await storeVersion(ctx, input.projectId, encoded);
+        const stored = await storeVersion(ctx, project, encoded);
         if (stored === 'copied') copied++;
         else if (stored === 'same') same++;
         else if (stored === 'refreshed') refreshed++;

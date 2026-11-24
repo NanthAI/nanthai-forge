@@ -8,7 +8,7 @@ import type { PaginationOptions } from 'convex/server';
 import { record, recordPartition } from './projectWorkIndexStore';
 import { hostedRecordValue } from './hostedRecordValue';
 import { readsStore, storeItemRow } from './projectWorkStoreReads';
-import type { PlanningTimes } from './projectPlanningTimes';
+import type { PlanningTimesRead } from './projectPlanningTimes';
 import { planningWaitingKinds } from '../src/work-planning-types';
 import {
   coveredInitiativeTallies,
@@ -227,7 +227,7 @@ export async function planningPage(
           maximumRowsRead: input.counts ? 1000 : 100,
           maximumBytesRead: 1000000,
         });
-  const rows: { id: string; position: number; value: unknown; planningTimes?: PlanningTimes }[] = [];
+  const rows: { id: string; position: number; value: unknown; planningTimes?: PlanningTimesRead }[] = [];
   const roots: string[] = [];
   for (const root of page.page) {
     if (input.counts) {

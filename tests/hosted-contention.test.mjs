@@ -125,6 +125,8 @@ test('hosted note contention and reactive read-set measurement', async t => {
 // Issue is also an Intent row, and the one page holding the written item.
 test('flip 5 re-run meter: Work queries one tab re-runs per planning write', async t => {
   const s = await setup(t);
+  // Stage the canonical records with the journal writes before switching the reader.
+  await s.ctx.db.patch(s.projectId, { workStore: 'dual' });
   const initial = await s.read(),
     intentId = randomUUID();
   await actions.command._handler(s.ctx, {

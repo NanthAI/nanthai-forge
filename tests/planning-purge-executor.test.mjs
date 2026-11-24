@@ -612,6 +612,15 @@ test('records mode (work store primary): a purge of an Item with an alias-writte
   assert.equal(typeof done.purgedAt, 'number');
   assert.deepEqual(done.ids, [itemId, alias].sort(), 'the Item id and its alias');
   assert.ok(done.rows >= 7, 'puts, comments, the alias comment, note and the Deleted put are listed');
+  const tombstone = [...s.tables.projectHostedRecordHeads.values()].find(
+    row => row.kind === 'issue' && row.key === itemId,
+  );
+  assert.deepEqual(tombstone.planningTimes, {
+    version: tombstone.version,
+    lastStatusChangeAt: null,
+    closedAt: null,
+    closeKept: null,
+  });
   assert.deepEqual(secretRows(s), [], 'no table holds the purged words, the alias-written comment included');
   // The store readers return the tombstone and no words; the kept Item reads as before.
   const page = (collection, extra = {}) =>
@@ -840,7 +849,7 @@ test('purge Lane 3: a work-store lifecycle version (a status move, with its reas
     const { storeVersion } = workStore;
     await storeVersion(
       s.ctx,
-      s.projectId,
+      s.tables.hostedProjects.get(s.projectId),
       hostedRecordValue(
         workStoreRecord('lifecycle', {
           intentId: itemId,

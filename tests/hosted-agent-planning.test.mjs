@@ -2799,6 +2799,8 @@ test('shelf counts keep independent byte bounds and overflow into exact root-pag
 test('indexed planning preserves all filter combinations, record-store bodies, paging and reconciliation (5a85cb5f)', async t => {
   const s = await setup(t),
     p = port(s);
+  // Stage both copies before exposing the record-store read path in this compatibility fixture.
+  await s.ctx.db.patch(s.projectId, { workStore: 'dual' });
   const initiativeId = (await put(p, { kind: 'initiative', title: 'Group' })).result.itemId;
   const first = (await put(p, { kind: 'issue', title: 'First', initiativeId, body: 'Done when:\n- [x] Met' }))
     .result.itemId;

@@ -468,8 +468,7 @@ export async function appendWork(
       if (project.workStore || frozen)
         retained = await storeProjection(
           ctx,
-          project._id,
-          project.owner,
+          project,
           input.projection.entries,
           workStoreMigrationActive(project) ? recordPartition(generation) : undefined,
           frozen

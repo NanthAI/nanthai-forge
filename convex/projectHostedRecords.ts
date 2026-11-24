@@ -162,6 +162,7 @@ export async function writeHostedRecord(
 ) {
   const project = await activeProject(ctx, input.projectId, input.actor);
   let { record, ref, value } = hostedRecordValue(input.record);
+  invariant(record.kind !== 'issue', 'BAD_ARGUMENT', 'Publish Item versions through the Work store writer.');
   if (record.kind === 'intent' && ['completed', 'abandoned'].includes(record.status) && record.needsFix) {
     const { needsFix: handledNotice, ...closed } = record;
     void handledNotice;
