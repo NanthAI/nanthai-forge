@@ -485,7 +485,9 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
                 const rows = queryRead(all => {
                   const result = [];
                   let total = 0;
-                  for (const row of match(all).slice(
+                  const ordered = match(all);
+                  if (descending) ordered.reverse();
+                  for (const row of ordered.slice(
                     start,
                     start + Math.min(numItems, maximumRowsRead ?? numItems),
                   )) {

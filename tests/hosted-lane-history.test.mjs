@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs } from './convex-args.mjs';
+import { syncFixture } from './hosted-sync-fixture.mjs';
 
 const api = await import(moduleUrl('../convex/projectHostedLaneHistory.ts'));
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
@@ -135,6 +136,57 @@ function fixture() {
   return { tables, meter, read, resolve, version, laneId, intentId, ctx };
 }
 const main = (c, r) => ({ head: hex(c), receiptId: r });
+
+test('History pages one Lane’s saves in newest-first order without fetching source, and checks current read access', async () => {
+  const s = await syncFixture();
+  let lane = await s.lane(s.baseline);
+  const heads = [];
+  for (let n = 0; n < 9; n++) {
+    lane = await s.save(lane, [s.file('a.txt', `Revision ${n}\n`), s.hidden]);
+    heads.unshift(lane.head);
+  }
+  const other = await s.lane(s.baseline);
+  await s.save(other, [s.file('private-to-other-lane.txt', 'Different Lane\n'), s.hidden]);
+  const read = (cursor, actor = 'owner') =>
+    s.call('save-history', api.saves, { projectId: s.projectId, laneId: lane.laneId, cursor }, actor);
+  await assert.rejects(read(null, 'outsider'), error => error.data?.code === 'PROJECT_UNAVAILABLE');
+  const started = performance.now();
+  const first = await read(null);
+  const io = s.counts.at(-1);
+  assert.deepEqual(first.expected, s.pins(lane));
+  assert.equal(first.refusal, null);
+  assert.equal(first.waiting, false);
+  assert(first.nextCursor);
+  assert.deepEqual(
+    first.items.map(save => save.head),
+    heads.slice(0, 8),
+  );
+  assert(
+    first.items.every(
+      save =>
+        save.summary === 'Save resolution bytes' && save.fileCount === 1 && save.paths.join() === 'a.txt',
+    ),
+  );
+  const tail = await read(first.nextCursor);
+  assert.deepEqual(
+    tail.items.map(save => save.head),
+    heads.slice(8),
+  );
+  assert.equal(tail.nextCursor, null);
+  assert.equal(io.writes, 0);
+  assert(!io.touched.includes('projectHostedObjects') && !io.touched.includes('projectHostedSavePages'));
+  console.log(
+    '8-save History page fixture',
+    JSON.stringify({
+      ranges: io.ranges,
+      documents: io.documents,
+      readBytes: io.readBytes,
+      writes: io.writes,
+      wallMs: Math.round(performance.now() - started),
+      processMaxRssKiB: process.resourceUsage().maxRSS,
+    }),
+  );
+});
 
 test('lane history: open time, start and last synced base, landing stamp, from stored rows', async () => {
   const f = fixture();

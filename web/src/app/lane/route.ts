@@ -7,7 +7,7 @@ export default [
   {
     place: 'lanes',
     section: '',
-    match: route => /^[^/]+(?:\/thread)?$/.test(route.rest),
+    match: route => /^[^/]+(?:\/(?:thread|history))?$/.test(route.rest),
     load: () => import('./LaneReview'),
   },
 ] satisfies ScreenRoutes;

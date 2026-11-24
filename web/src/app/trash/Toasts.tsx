@@ -41,27 +41,29 @@ export function Toasts({ toast, onGone }: { toast: ToastWords | null; onGone: (k
     const timer = setTimeout(onGone, 10_000);
     return () => clearTimeout(timer);
   }, [toast, busy, onGone]);
-  if (!toast) return null;
+  // Mount the live region before the first message so assistive tech hears the update.
   return (
-    <div className="toasts" role="status">
-      <div className="toast" key={toast.key}>
-        <span dir="auto">{toast.words}</span>
-        {toast.undo ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              void Promise.resolve(toast.undo?.()).finally(() => {
-                setBusy(false);
-                onGone(toast.key);
-              });
-            }}
-          >
-            Undo
-          </button>
-        ) : null}
-      </div>
+    <div className="toasts" role="status" aria-atomic="true">
+      {toast ? (
+        <div className="toast" key={toast.key}>
+          <span dir="auto">{toast.words}</span>
+          {toast.undo ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                void Promise.resolve(toast.undo?.()).finally(() => {
+                  setBusy(false);
+                  onGone(toast.key);
+                });
+              }}
+            >
+              Undo
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

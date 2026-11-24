@@ -21,10 +21,12 @@ import { PlaceScreen } from '../../web/src/app/screens';
 import { useRoute } from '../../web/src/app/router';
 import { ReviewPage } from '../../web/src/app/lane/LaneReview';
 import type { Reply } from '../../web/src/app/lane/review-model';
+import { laneHistoryFixture } from './lane-history';
 
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
 const scenario = params.get('s') ?? 'review';
+const history = laneHistoryFixture(scenario);
 const routed = params.has('routes');
 const unattended = scenario.startsWith('save-');
 const saveFailure =
@@ -71,10 +73,20 @@ const parserMine = parserMain
 const calls: string[] = [];
 const listeners = new Map<string, Set<() => void>>();
 const client = {
-  mutation: async (ref: unknown, args: { digests: string[] }) => {
+  query: async (ref: unknown, { cursor }: { cursor: string | null }) => {
+    if (getFunctionName(ref as never) === 'projectHostedLaneHistory:saves') return history.read(cursor);
+    throw new Error('Unexpected fixture query');
+  },
+  action: async (ref: unknown, args: { projectId: string; request: string }) => {
+    if (getFunctionName(ref as never) === 'projectHostedUndoArchive:returnToSave')
+      return history.return(args.projectId, args.request, true);
+    throw new Error('Unexpected fixture action');
+  },
+  mutation: async (ref: unknown, args: { digests: string[]; projectId: string; request: string }) => {
     const name = getFunctionName(ref as never);
     calls.push(name);
     (window as unknown as { __calls: string[] }).__calls = calls;
+    if (name === 'projectHostedUndo:returnToSave') return history.return(args.projectId, args.request);
     if (
       name === 'projectHostedApprovals:decide' ||
       name === 'projectHostedAcceptance:approve' ||
@@ -389,6 +401,7 @@ function Routed() {
 }
 
 void reply().then(data => {
+  history.start(data.lane);
   if (scenario === 'linked')
     reads.set('projectNeedsMe:read', {
       held: ['older', 'newer'].map((which, index) => ({

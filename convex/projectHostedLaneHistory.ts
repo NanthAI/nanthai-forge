@@ -4,8 +4,16 @@ import { JournalNeeded, journalReadReply, journalDependency } from './projectJou
 import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
 import { query, type QueryCtx } from './cliServer';
-import { readHostedRecord } from './projectHostedRecords';
-import { accessibleProject, authorizedReadProject } from './projectAuthority';
+import { hostedRecordBody, readHostedRecord } from './projectHostedRecords';
+import { accessibleProject, authorizedReadProject, readProjectRole } from './projectAuthority';
+import { isDeviceIdentity } from './cliServer';
+import { mayReturnLaneSave } from './projectLaneAuthority';
+import { saveRow } from './projectHostedSaveStore';
+import { liveLaneFinish } from './projectHostedLaneFinish';
+import { sourceAuthority } from '../src/hosted-source-authority';
+import { hostedRecordSchema } from '../src/hosted-records';
+import { saveExpectedSchema, saveRequestSchema } from '../src/hosted-save';
+import type { OverlapChange } from '../src/hosted-overlap';
 import { laneHolderFor } from './projectAudience';
 import { deploysForSequence } from './projectDeployStore';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -21,6 +29,130 @@ export const read = query({
   args: { projectId: v.id('hostedProjects'), laneId: v.string() },
   returns: v.string(),
   handler: journalLaneHistoryRead,
+});
+
+/** Open History only: eight save headers, bodies and original save metadata, no source objects.
+ * The overlap preview is already capped at save time; only the first three paths leave the server. */
+const SAVE_PAGE = 8;
+export const saves = query({
+  args: { projectId: v.id('hostedProjects'), laneId: v.string(), cursor: v.union(v.string(), v.null()) },
+  returns: v.object({
+    authorityEpoch: v.number(),
+    expected: v.object({
+      head: v.string(),
+      version: v.number(),
+      sourceVersion: v.number(),
+      lifecycleVersion: v.number(),
+    }),
+    refusal: v.union(v.null(), v.literal('closed'), v.literal('native'), v.literal('not-yours')),
+    waiting: v.boolean(),
+    nextCursor: v.union(v.string(), v.null()),
+    items: v.array(
+      v.object({
+        id: v.string(),
+        head: v.string(),
+        at: v.string(),
+        summary: v.union(v.string(), v.null()),
+        fileCount: v.union(v.number(), v.null()),
+        paths: v.array(v.string()),
+      }),
+    ),
+  }),
+  handler: async (ctx, { projectId, laneId, cursor }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read this Lane’s saves.');
+      const actor = user.subject;
+      const current = await readHostedRecord(ctx, { projectId, actor, kind: 'lane', key: laneId });
+      invariant(current, 'NOT_FOUND', 'This Lane is not on this project.');
+      const lane = hostedLaneSchema.parse(JSON.parse(current.value));
+      const project = authorizedReadProject(ctx, projectId);
+      invariant(
+        project,
+        'PROJECT_UNAVAILABLE',
+        'This Forge project is unavailable with the current account.',
+      );
+      const authority = sourceAuthority(project);
+      const role = await readProjectRole(ctx, project, actor);
+      const refusal: 'closed' | 'native' | 'not-yours' | null =
+        lane.state !== 'active'
+          ? 'closed'
+          : authority.mode === 'native-owner'
+            ? 'native'
+            : isDeviceIdentity(user) ||
+                (role !== 'owner' && role !== 'write') ||
+                !mayReturnLaneSave(project, lane, actor)
+              ? 'not-yours'
+              : null;
+      const page = await ctx.db
+        .query('projectHostedRecordHeads')
+        .withIndex('by_project_and_kind_and_parent', q =>
+          q.eq('projectId', projectId).eq('kind', 'save').eq('parent', laneId),
+        )
+        .order('desc')
+        .paginate({ cursor, numItems: SAVE_PAGE, maximumRowsRead: SAVE_PAGE, maximumBytesRead: 16 * 1024 });
+      const [items, live] = await Promise.all([
+        Promise.all(
+          page.page.map(async head => {
+            const row = await ctx.db.get(head.recordId);
+            invariant(
+              row?.projectId === projectId &&
+                row.kind === 'save' &&
+                row.parent === laneId &&
+                row.key === head.key,
+              'SOURCE_UNAVAILABLE',
+              'A selected Lane save is unavailable.',
+            );
+            const save = hostedRecordSchema.options[2].parse(JSON.parse(await hostedRecordBody(ctx, row)));
+            const metadata = await saveRow(ctx, {
+              projectId,
+              actor: save.actor,
+              operationId: save.operationId,
+            });
+            const stored = metadata
+              ? (JSON.parse(metadata.value) as { request?: unknown; overlapChanges?: string })
+              : null;
+            const request = saveRequestSchema.safeParse(stored?.request);
+            const pins =
+              request.success &&
+              request.data.laneId === laneId &&
+              request.data.expected.head === save.expectedHead &&
+              request.data.expected.sourceVersion === save.expectedSourceVersion
+                ? request.data
+                : null;
+            const preview: OverlapChange[] =
+              pins && stored?.overlapChanges ? JSON.parse(stored.overlapChanges) : [];
+            return {
+              id: save.id,
+              head: save.head,
+              at: save.at,
+              summary:
+                pins?.message
+                  .split('\n')
+                  .find(line => line.trim())
+                  ?.trim()
+                  .slice(0, 240) ?? null,
+              fileCount: pins?.changeCount ?? null,
+              paths: preview.slice(0, 3).map(change => change.path),
+            };
+          }),
+        ),
+        !refusal && (cursor !== null || page.page.length > 1 || !page.isDone)
+          ? liveLaneFinish(ctx, { projectId, laneId, headWrittenAt: lane.at })
+          : null,
+      ]);
+      return {
+        authorityEpoch: authority.epoch,
+        expected: saveExpectedSchema.parse(lane),
+        refusal,
+        waiting: Boolean(live),
+        nextCursor: page.isDone ? null : page.continueCursor,
+        items,
+      };
+    } catch (error) {
+      return report(error);
+    }
+  },
 });
 
 /** Full ids of this project's Lanes whose id starts with `prefix` (8 to 35 lowercase hex), for a short

@@ -270,6 +270,169 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
       }
     });
 
+    async function checkHistoryThemes(page, viewport, scenario) {
+      await page.addScriptTag({ path: axePath });
+      for (const theme of ['dark', 'light']) {
+        await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+        const [fits, violations] = await page.evaluate(async () => [
+          document.documentElement.scrollWidth <= innerWidth,
+          (
+            await window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] } })
+          ).violations.map(v => v.id),
+        ]);
+        const label = `${scenario}-${viewport.width}-${theme}`;
+        assert.equal(fits, true, label);
+        assert.deepEqual(violations, [], label);
+        await shot(page, label);
+      }
+    }
+
+    await t.test(
+      'Lane History loads only on open, keeps later saves, and can undo a return by keyboard',
+      async t => {
+        const lane = '/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+        for (const viewport of [DESK, PHONE]) {
+          const page = await open(t, viewport, 'routes&s=history-loading', lane);
+          const history = page
+            .getByRole('navigation', { name: 'Lane sections' })
+            .getByRole('link', { name: 'History', exact: true });
+          await history.focus();
+          assert.equal(await page.evaluate(() => window.__saveHistory.reads), 0);
+          await page.keyboard.press('Enter');
+          const section = page.getByRole('region', { name: 'Saves', exact: true });
+          const reserved = section.locator('.sk-rows');
+          await reserved.getByRole('status').getByText('Loading saves').waitFor();
+          assert.equal(await reserved.locator('.row').count(), 4);
+          await page.evaluate(() => window.__showSaveHistory());
+          const earlier = section.getByRole('listitem').filter({ hasText: 'Record parser baseline' });
+          const later = section.getByRole('listitem').filter({ hasText: 'Add marker' });
+          await later.getByText('Current save').waitFor();
+          assert.equal(await section.getByRole('listitem').first().textContent(), await later.textContent());
+          assert.match(await earlier.textContent(), /1 file changed[\s\S]*long-path-/);
+          await earlier.getByText('Drops 1 later save from the current Lane. It stays in History.').waitFor();
+          assert.equal(await earlier.locator('time').getAttribute('datetime'), '2026-11-24T09:00:00.000Z');
+          const action = earlier.getByRole('button', { name: /^Return to this save/ });
+          await action.focus();
+          await page.keyboard.press('Enter');
+          await earlier.getByText('Current save').waitFor();
+          assert.equal(await later.getByRole('button', { name: /^Return to this save/ }).isEnabled(), true);
+          assert.equal(
+            await section
+              .getByRole('heading', { name: 'Saves' })
+              .evaluate(el => el === document.activeElement),
+            true,
+          );
+          const status = section.getByRole('status');
+          await status.getByText('Returned to this save. All saves are still in History.').waitFor();
+          const undo = status.getByRole('button', { name: 'Undo', exact: true });
+          await page.keyboard.press('Tab');
+          assert.equal(await undo.evaluate(el => el === document.activeElement), true);
+          await page.keyboard.press('Enter');
+          await later.getByText('Current save').waitFor();
+          await section.getByText('Return undone. All saves are still in History.').waitFor();
+          const historyCalls = await page.evaluate(() => ({
+            reads: window.__saveHistory.reads,
+            watches: window.__watches,
+          }));
+          assert.equal(historyCalls.reads, 1);
+          assert(!historyCalls.watches.includes('projectHostedLaneHistory:saves'));
+          await checkHistoryThemes(page, viewport, 'lane-saves');
+        }
+      },
+    );
+
+    await t.test(
+      'Lane History explains unavailable returns and retains exact pins for network and archive retries',
+      async t => {
+        const lane = '/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d/history';
+        const readOnly = {
+          'history-one': null,
+          'history-reader': /Only the holder, author/,
+          'history-closed': /This Lane is closed/,
+          'history-native': /This project manages Lane changes outside the browser/,
+          'history-read-refused': /This Lane is not on this project/,
+        };
+        for (const viewport of [DESK, PHONE]) {
+          for (const scenario of [
+            ...Object.keys(readOnly),
+            'history-wait',
+            'history-refused',
+            'history-retry',
+            'history-press-wait',
+            'history-archive',
+          ]) {
+            await t.test(`${scenario} at ${viewport.width}px`, async t => {
+              const page = await open(t, viewport, `routes&s=${scenario}`, lane);
+              const section = page.getByRole('region', { name: 'Saves', exact: true });
+              const action = section.getByRole('button', {
+                name: 'Return to this save: Record parser baseline',
+                exact: true,
+              });
+              const undo = section.getByRole('button', { name: 'Undo', exact: true });
+              if (scenario in readOnly) {
+                if (readOnly[scenario]) await section.getByText(readOnly[scenario]).waitFor();
+                else await section.getByText('Current save').waitFor();
+                assert.equal(await section.getByRole('button', { name: /^Return to this save/ }).count(), 0);
+                if (scenario === 'history-read-refused')
+                  assert.equal(await section.getByRole('button', { name: 'Retry' }).count(), 0);
+                await checkHistoryThemes(page, viewport, scenario);
+                return;
+              }
+              if (scenario === 'history-wait') {
+                await section.getByText(/Wait for it to finish/).waitFor();
+                assert.equal(await action.isEnabled(), false);
+                await section.getByRole('button', { name: 'Show earlier saves' }).click();
+                const draft = section.getByRole('listitem').filter({ hasText: 'Draft parser' });
+                await draft
+                  .getByText('Drops 2 later saves from the current Lane. They stay in History.')
+                  .waitFor();
+                await checkHistoryThemes(page, viewport, scenario);
+                await section.getByRole('button', { name: 'Check again' }).click();
+                await action.click();
+                await undo.waitFor();
+                await draft.waitFor();
+                return;
+              }
+              await action.focus();
+              await page.keyboard.press('Enter');
+              if (scenario === 'history-archive') {
+                await undo.waitFor();
+                await checkHistoryThemes(page, viewport, scenario);
+              } else {
+                const alert = section.getByRole('alert');
+                if (scenario === 'history-refused') {
+                  const pending = section.getByRole('button', { name: 'Returning: Record parser baseline' });
+                  await pending.waitFor();
+                  assert.equal(await pending.evaluate(el => el === document.activeElement), true);
+                  await page.keyboard.press('Enter');
+                  assert.equal(await page.evaluate(() => window.__saveHistory.writes.length), 1);
+                  await page.evaluate(() => window.__finishSaveReturn());
+                  await alert.getByText(/Only this Lane’s holder/).waitFor();
+                  assert.equal(await action.evaluate(el => el === document.activeElement), true);
+                  assert.equal(await undo.count(), 0);
+                  await checkHistoryThemes(page, viewport, scenario);
+                  return;
+                }
+                await alert
+                  .getByText(
+                    scenario === 'history-press-wait'
+                      ? /Wait for it to finish/
+                      : /Could not confirm the return/,
+                  )
+                  .waitFor();
+                assert.equal(await action.evaluate(el => el === document.activeElement), true);
+                await checkHistoryThemes(page, viewport, scenario);
+                await alert.getByRole('button', { name: 'Retry return' }).click();
+                await undo.waitFor();
+              }
+              const [first, retry] = await page.evaluate(() => window.__saveHistory.writes);
+              assert.deepEqual(retry, first);
+            });
+          }
+        }
+      },
+    );
+
     await t.test(
       '954afe8c: unavailable titles use the short Item id, and recorded titles are retained',
       async t => {

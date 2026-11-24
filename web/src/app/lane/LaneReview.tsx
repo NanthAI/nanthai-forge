@@ -55,11 +55,13 @@ import { uniqueBy } from '../../ui/unique';
 import { usePageCritical } from '../../ui/page-critical';
 import { CopyKey } from '../start/parts';
 import { PurgeFile } from './PurgeFile';
+import { LaneSaveLoading } from './LaneSaveLoading';
 import './lane.css';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
 type Props = PlaceProps;
 const LaneDiscussion = lazy(() => import('../discussion/LaneDiscussion'));
+const LaneHistory = lazy(() => import('./LaneHistory'));
 
 /** Files drawn per band before "Show N more". */
 const LIMIT = 8;
@@ -129,8 +131,8 @@ function Review({ route, projectId, projectName, feed }: Props) {
   const laneId = route.rest.split('/')[0]!;
   const text = useQuery(api.projectLaneReview.read, { projectId, laneId });
   const reply = useMemo(() => (text ? (JSON.parse(text) as Reply) : undefined), [text]);
-  const [more, setMore] = useState<ReviewFile[]>([]);
-  const [nextPage, setNextPage] = useState<number | null>(null);
+  const [extra, setExtra] = useState<{ head: string; items: ReviewFile[] }>();
+  const [nextPage, setNextPage] = useState<{ head: string; offset: number }>();
   const trail = crumbsFor(route, projectName);
   if (!reply) {
     return (
@@ -144,7 +146,9 @@ function Review({ route, projectId, projectName, feed }: Props) {
       </>
     );
   }
-  const files = [...reply.files.items, ...more];
+  const head = reply.lane.head;
+  // Returning to a save changes the head; never mix pages from the former head into its review.
+  const files = [...reply.files.items, ...(extra?.head === head ? extra.items : [])];
   const lastLoaded = reply.files.offset + files.length;
   const nextOffset = lastLoaded < reply.files.total ? lastLoaded : null;
   const who = handleOf(reply.lane, `Lane ${short(laneId)}`);
@@ -159,17 +163,20 @@ function Review({ route, projectId, projectName, feed }: Props) {
       trail={trail}
       who={who}
       nextOffset={nextOffset}
-      onMore={() => setNextPage(nextOffset)}
+      onMore={() => nextOffset !== null && setNextPage({ head, offset: nextOffset })}
       loader={
-        nextPage !== null && nextPage === nextOffset ? (
+        nextPage?.head === head && nextPage.offset === nextOffset ? (
           <MorePage
             projectId={projectId}
             laneId={laneId}
-            offset={nextPage}
-            head={reply.lane.head}
+            offset={nextPage.offset}
+            head={head}
             onItems={items => {
-              setMore(current => [...current, ...items]);
-              setNextPage(null);
+              setExtra(current => ({
+                head,
+                items: [...(current?.head === head ? current.items : []), ...items],
+              }));
+              setNextPage(undefined);
             }}
           />
         ) : null
@@ -221,6 +228,7 @@ export function ReviewPage({
 }) {
   const { lane } = reply;
   const thread = route.rest.endsWith('/thread');
+  const history = route.rest.endsWith('/history');
   const laneHref = hrefFor({ ...route, rest: lane.laneId });
   const entries = useMemo(() => entriesOf(reply, files), [reply, files]);
   const ticks = useReadTicks(lane.laneId);
@@ -272,7 +280,7 @@ export function ReviewPage({
           </>
         }
       >
-        {thread || nothing || !reply.files.current || closed ? null : (
+        {thread || history || nothing || !reply.files.current || closed ? null : (
           <div className="seg" role="group" aria-label="Order">
             <button type="button" aria-pressed={order === 'eyes'} onClick={() => setOrder('eyes')}>
               Needs eyes first
@@ -351,14 +359,21 @@ export function ReviewPage({
       ) : null}
       <Stops reply={reply} stop={stop} heldWhy={heldRow?.why ?? null} />
       <nav className="strip" aria-label="Lane sections">
-        <A href={laneHref} aria-current={thread ? undefined : 'page'}>
+        <A href={laneHref} aria-current={thread || history ? undefined : 'page'}>
           Changes
+        </A>
+        <A href={laneHref + '/history'} aria-current={history ? 'page' : undefined}>
+          History
         </A>
         <A href={laneHref + '/thread'} aria-current={thread ? 'page' : undefined}>
           Thread
         </A>
       </nav>
-      {thread ? (
+      {history ? (
+        <Suspense fallback={<LaneSaveLoading />}>
+          <LaneHistory key={lane.laneId} projectId={projectId} laneId={lane.laneId} />
+        </Suspense>
+      ) : thread ? (
         <Suspense
           fallback={
             <p className="quietline" aria-busy="true">

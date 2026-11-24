@@ -187,7 +187,7 @@ test('trash: forms per phase, restore with Undo, typed delete, owner-only menu a
       '/sample-owner/docs-site/settings/project',
     );
     await page.getByRole('menuitem', { name: 'Move to trash' }).click();
-    const sheet = page.getByRole('dialog');
+    const sheet = page.getByRole('dialog', { name: 'Move to trash', exact: true });
     assert.match(await sheet.textContent(), /Move docs-site to the trash\?/);
     assert.match(
       await sheet.textContent(),
@@ -234,7 +234,7 @@ test('trash: forms per phase, restore with Undo, typed delete, owner-only menu a
         if (state === 'projects') {
           await page.getByRole('button', { name: 'More for docs-site' }).click();
           await page.getByRole('menuitem', { name: 'Move to trash' }).click();
-          await page.getByRole('dialog').waitFor();
+          await page.getByRole('dialog', { name: 'Move to trash', exact: true }).waitFor();
           await check(page, `move sheet ${width} ${theme}`);
         }
         if (shots)

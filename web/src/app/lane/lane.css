@@ -30,4 +30,12 @@
   .lr-purge { display: grid; gap: var(--s-3); padding: var(--s-3) var(--gut); }
   .lr-purge label { display: grid; gap: var(--s-1); }
   .lr-more { width: 100%; justify-content: flex-start; border-radius: 0; border-bottom: var(--rule) solid var(--line); }
+  .lane-save-list { margin: 0; padding: 0; list-style: none; }
+  .lane-save-row > div:first-child { min-width: 0; }
+  .lane-save-row .sk { width: min(40ch, 85%); margin-block: var(--s-1); }
+  .lane-save-row .sk + .sk { width: min(24ch, 65%); }
+  @media (max-width: 560px) {
+    .lane-save-row { --lane-save-cols: minmax(0, 1fr); align-items: start; }
+    .lane-save-row > :last-child:not(:first-child) { justify-self: start; }
+  }
 }
