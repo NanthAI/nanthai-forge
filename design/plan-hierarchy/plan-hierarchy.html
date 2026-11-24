@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en" data-ds data-theme="dark">
+<head>
+<!-- Design mock with synthetic example data (project, people, Items and numbers are invented). It shows intended layout
+     and wording only; it does not describe behaviour that ships. Decisions: design/plan-hierarchy/README.md (Item 5907e992). -->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Plan hierarchy mock</title>
+<link rel="stylesheet" href="../../web/src/ds/tokens.css" />
+<link rel="stylesheet" href="../../web/src/ds/base.css" />
+<link rel="stylesheet" href="../../web/src/ds/core.css" />
+<link rel="stylesheet" href="../../web/src/ds/parts.css" />
+<link rel="stylesheet" href="../../web/src/ds/figures.css" />
+<link rel="stylesheet" href="../../web/src/app/plan/plan.css" />
+<style>
+/* Page-only parts of the hierarchy mock. Every value is a token; system classes are used as the system draws them.
+   Page classes start with hz-. */
+[data-ds] {
+  body { background: var(--bg); color: var(--text); font: var(--w-regular) var(--t-body)/1.45 var(--font-sans); margin: 0; }
+  .hz-mockbar { display: flex; gap: var(--s-3); align-items: center; flex-wrap: wrap; padding: var(--s-2) var(--gut); border-bottom: var(--rule) dashed var(--line-strong); color: var(--text-3); font-size: var(--t-meta); }
+  .hz-mockbar .btn { margin-left: auto; }
+  .hz-top { display: flex; align-items: center; gap: var(--s-3); height: var(--top-h); padding: 0 var(--gut); background: var(--surface); border-bottom: var(--rule) solid var(--line); font-weight: var(--w-strong); }
+  .hz-top .hz-f { width: 20px; height: 20px; border-radius: var(--r); background: var(--brand); flex: none; }
+  .hz-top .t3 { font-weight: var(--w-regular); }
+  .hz-cap { padding: var(--s-6) var(--gut-head) var(--s-2); color: var(--text-3); font-size: var(--t-meta); max-width: var(--m-wide); }
+  .hz-cap b { color: var(--text-2); }
+
+  /* A plan row: the handle, then the row's own columns (rows.tsx COLS). */
+  .hz-row { grid-template-columns: 22px var(--plan-cols, 2.2em minmax(0, 1fr) auto auto auto); }
+  .hz-row .grip { margin-left: calc(-1 * var(--s-1)); }
+
+  /* A sub-item: its number is the parent's and its own place ("3.1"); in Tree an elbow joins it to the row above. */
+  .hz-kid .rk { color: var(--text-2); }
+  .hz-tree .hz-kid .tt.sub { position: relative; padding-left: var(--s-6); }
+  .hz-tree .hz-kid .tt.sub::before { content: ""; position: absolute; left: 7px; top: -22px; height: 32px; width: 11px; border-left: var(--rule) solid var(--text-3); border-bottom: var(--rule) solid var(--text-3); }
+  .hz-tree .hz-kid:not(.hz-last) .tt.sub::after { content: ""; position: absolute; left: 7px; top: 10px; bottom: -22px; border-left: var(--rule) solid var(--text-3); }
+  .hz-under { color: var(--text-3); font-size: var(--t-meta); white-space: nowrap; }
+  .hz-under a.lk { color: var(--text-2); }
+
+  /* Drag: a line between rows reorders (its start shows the level it lands on); a row outlined in orange takes the
+     dragged Item as its sub-item; a refused row says why in ink. */
+  .hz-drop { padding-left: calc(var(--gut) + 22px + 2.2em + var(--s-3)); }
+  .hz-drop.hz-in { padding-left: calc(var(--gut) + 22px + 2.2em + var(--s-3) + var(--s-6)); }
+  .hz-drop .dropline span { right: var(--gut); }
+  .hz-onto { background: var(--accent-bg); box-shadow: inset 0 0 0 2px var(--brand); }
+  .hz-tag { justify-self: end; font-size: var(--t-micro); font-weight: var(--w-strong); color: var(--accent); white-space: nowrap; }
+  .hz-no { cursor: not-allowed; }
+  .hz-no .hz-tag { color: var(--text-2); font-weight: var(--w-regular); }
+  .hz-ghost { opacity: 0.5; }
+  .hz-toastwrap { padding: var(--s-3) var(--gut-head) var(--s-4); }
+
+  /* The capped Done-when bar: at most 12 blocks (today's shards); past 12 lines a block is a share of the lines and
+     fills from the bottom in thirds. Full only when every line it holds is ticked. */
+  .hz-bars { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 1px; background: var(--line); border-block: var(--rule) solid var(--line); }
+  .hz-bars > div { background: var(--surface); padding: var(--s-3) var(--gut-head); display: grid; gap: var(--s-2); align-content: start; min-width: 0; }
+  .hz-bars .hz-n { font-size: var(--t-meta); color: var(--text-3); }
+  .shards i.hz-p1, .shards i.hz-p2 { position: relative; }
+  .shards i.hz-p1::after, .shards i.hz-p2::after { content: ""; position: absolute; inset: auto 0 0 0; background: var(--passed); }
+  .shards i.hz-p1::after { height: 4px; }
+  .shards i.hz-p2::after { height: 7px; }
+  .hz-big .shards i { width: 10px; height: 22px; }
+  .hz-big .shards { gap: 3px; }
+  .hz-big .shards i.hz-p1::after { height: 8px; }
+  .hz-big .shards i.hz-p2::after { height: 15px; }
+
+  /* Item page: the narrow column of design/item-page with Parent, Children and Relations. */
+  .hz-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); align-items: start; border-block: var(--rule) solid var(--line); }
+  .hz-cols > .hz-main { border-right: var(--rule) solid var(--line); min-width: 0; }
+  .hz-cols > .hz-side { min-width: 0; }
+  .hz-main > .region:last-child, .hz-side > .region:last-child { border-bottom: 0; }
+  .hz-stub { padding: var(--s-3) var(--gut-head); color: var(--text-3); font-size: var(--t-meta); }
+  .hz-kv dd { min-width: 0; }
+  .hz-parent { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); align-items: baseline; min-width: 0; }
+  .hz-parent a.lk { overflow-wrap: anywhere; }
+  .hz-k { display: grid; grid-template-columns: 2.6em minmax(0, 1fr) auto; gap: 2px var(--s-3); align-items: baseline; padding: 9px var(--gut); border-bottom: var(--rule) solid var(--line); min-width: 0; }
+  .hz-k .rk { color: var(--text-2); font: var(--w-medium) var(--t-meta)/1 var(--font-mono); text-align: right; }
+  .hz-k .ttl { font-weight: var(--w-strong); overflow-wrap: anywhere; min-width: 0; }
+  .hz-k > .hz-meta { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 2px var(--s-3); align-items: center; font-size: var(--t-meta); color: var(--text-2); }
+  .hz-k .btn { justify-self: end; }
+  .hz-adds { display: flex; flex-wrap: wrap; gap: var(--s-2); padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
+  .hz-newkid { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--s-2); padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); background: var(--surface-2); }
+  .hz-newkid .hz-hint { grid-column: 1 / -1; color: var(--text-3); font-size: var(--t-meta); }
+  .hz-rel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--s-3); align-items: baseline; padding: 9px var(--gut); border-bottom: var(--rule) solid var(--line); min-width: 0; }
+  .hz-rel .ttl { font-weight: var(--w-strong); overflow-wrap: anywhere; }
+  .hz-rel > .hz-meta { grid-column: 1; font-size: var(--t-meta); color: var(--text-2); }
+  .hz-rel > .btn { grid-row: 1 / span 2; grid-column: 2; align-self: center; }
+  .hz-addrel { display: grid; gap: var(--s-2); padding: var(--s-3) var(--gut); border-bottom: var(--rule) solid var(--line); background: var(--surface-2); }
+  .hz-addrel .seg { justify-self: start; max-width: 100%; flex-wrap: wrap; }
+
+  /* The search picker: an input with the shared menu's surface under it; results from the loaded plan first. */
+  .hz-pick { position: relative; display: grid; gap: var(--s-1); }
+  .hz-list { background: var(--surface-2); border: var(--rule) solid var(--line-strong); box-shadow: var(--shadow); padding: var(--s-1) 0; }
+  .hz-list [role="option"] { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px var(--s-3); padding: 7px var(--s-3); min-height: 32px; font-size: var(--t-small); cursor: default; }
+  .hz-list [role="option"] .hz-o { font-weight: var(--w-strong); overflow-wrap: anywhere; min-width: 0; }
+  .hz-list [role="option"] .hz-om { grid-column: 1 / -1; color: var(--text-3); font-size: var(--t-meta); }
+  .hz-list [role="option"][aria-selected="true"] { background: var(--accent-bg); }
+  .hz-list [role="option"][aria-disabled="true"] .hz-o { color: var(--text-3); font-weight: var(--w-regular); }
+  .hz-list [role="option"][aria-disabled="true"] .hz-why { color: var(--text-2); font-size: var(--t-meta); }
+  .hz-list hr { border: 0; border-top: var(--rule) solid var(--line); margin: var(--s-1) 0; }
+  .hz-list .hz-more { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; justify-content: space-between; padding: 6px var(--s-3); font-size: var(--t-meta); color: var(--text-3); }
+
+  /* New Item: the shared sheet, drawn in place. */
+  .hz-sheets { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: var(--s-6); padding: 0 var(--gut-head) var(--s-6); align-items: start; }
+  .hz-sheets .sheet { width: 100%; }
+  .hz-sh { display: flex; align-items: center; min-height: var(--ph-h); padding: 0 var(--gut); border-bottom: var(--rule) solid var(--line); font-weight: var(--w-bold); }
+  .hz-sb { display: grid; gap: var(--s-3); padding: var(--gut); }
+  .hz-sb label, .hz-sb .hz-field { display: grid; gap: var(--s-1); font-size: var(--t-small); color: var(--text-2); }
+  .hz-sb textarea { resize: vertical; min-height: 4.5em; }
+  .hz-sb .hz-hint { color: var(--text-3); font-size: var(--t-meta); }
+  .hz-chosen { display: flex; gap: var(--s-2); align-items: center; min-height: 34px; padding: 0 var(--s-1) 0 var(--s-2); border: var(--rule) solid var(--line-strong); border-radius: var(--r); background: var(--bg); color: var(--text); min-width: 0; }
+  .hz-chosen > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hz-sf { display: flex; justify-content: flex-end; gap: var(--s-2); padding: var(--s-3) var(--gut); border-top: var(--rule) solid var(--line); }
+
+  /* States drawn beside each other. */
+  .hz-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 1px; background: var(--line); border-block: var(--rule) solid var(--line); }
+  .hz-grid > section { background: var(--surface); min-width: 0; padding-bottom: var(--s-3); }
+  .hz-grid .hz-gc { padding: var(--s-3) var(--gut-head) var(--s-2); color: var(--text-3); font-size: var(--t-meta); }
+  .hz-grid .menu { position: static; box-shadow: none; margin: 0 var(--gut-head); max-width: 280px; }
+  .hz-grid .hz-pad { padding: 0 var(--gut-head); }
+
+  .hz-phone { padding: var(--s-6) var(--gut-head) var(--s-12); display: grid; gap: var(--s-2); justify-items: start; }
+  .hz-phone iframe { width: 390px; max-width: 100%; height: 844px; border: var(--rule) solid var(--line-strong); background: var(--bg); }
+
+  @media (max-width: 860px) {
+    .hz-row { grid-template-columns: 34px var(--plan-cols); }
+    .hz-drop { padding-left: calc(var(--gut) + 34px + 2.2em + var(--s-2)); }
+    .hz-drop.hz-in { padding-left: calc(var(--gut) + 34px + 2.2em + var(--s-2) + var(--s-6)); }
+    .hz-tag { grid-column: 3; justify-self: start; }
+    .hz-cols { grid-template-columns: minmax(0, 1fr); }
+    .hz-cols > .hz-main { border-right: 0; }
+    .hz-newkid { grid-template-columns: minmax(0, 1fr); }
+    .hz-phone { display: none; }
+  }
+  .hz-embedded .hz-mockbar, .hz-embedded .hz-phone, .hz-embedded .hz-desk { display: none; }
+}
+</style>
+<script>
+  // Inside the phone frame the mock shows only the screens, not the desktop-only states.
+  if (window.self !== window.top) document.documentElement.classList.add('hz-embedded');
+</script>
+</head>
+<body>
+<div class="hz-mockbar">
+  <span>Plan hierarchy mock (Item 5907e992). Sample data. Desktop above; the phone at 390 px is at the bottom.</span>
+  <button type="button" class="btn sm" onclick="var r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'light':'dark'">Light / dark</button>
+</div>
+<div class="hz-top"><span class="hz-f" aria-hidden="true"></span>Forge <span class="t3">demo-project</span></div>
+
+<main>
+<!-- ============ 1. The list and the tree ============ -->
+<header class="head">
+  <nav class="crumb" aria-label="Breadcrumb">Plan</nav>
+  <p class="sit"><b>9 Items are left; next is Brief template reads real free space.</b> 3 in progress.</p>
+  <span class="tools"><button type="button" class="btn primary sm">New Item</button></span>
+</header>
+
+<p class="hz-cap"><b>1. Tree, by hand.</b> A sub-item is numbered from its parent ("3.1"), indented, and joined to the row above by an elbow. The parent says how many it holds. A child never looks like a top-level Item.</p>
+<section class="region plan hz-tree" aria-label="Plan, Tree layout">
+  <div class="grp plan-grp" data-fold="">
+    <div class="band plan-gh"><span class="plan-gsp" aria-hidden="true"></span><a class="plan-gn" href="#">Release 1 close</a><span class="cnt">9</span><span class="plan-prog"><span class="roll" role="img" aria-label="9 Items: 2 done, 3 in progress, 4 planned" style="width:142px"><i class="ok"></i><i class="ok"></i><i class="run"></i><i class="run"></i><i class="run"></i><i></i><i></i><i></i><i></i></span></span><button type="button" class="tw" aria-expanded="true" aria-label="Items of Release 1 close"></button></div>
+    <div role="list" aria-label="Release 1 close, open Items in order">
+      <div class="row ds-row hz-row" role="listitem">
+        <button type="button" class="grip" aria-label="Move Brief template reads real free space">⋮⋮</button>
+        <span class="rk">1</span>
+        <span class="tt"><a class="ttl" href="#">Brief template reads real free space</a><span class="nextmark">next</span><span class="flag">task</span></span>
+        <span class="plan-wide"><span class="dw"><span class="shards" aria-hidden="true"><i></i><i></i><i></i></span><span class="num">0/3</span></span></span>
+        <span class="plan-wide"><span class="t3">no one yet</span></span>
+        <span class="state"><span class="st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="5"/></svg>Planned</span></span>
+      </div>
+      <div class="row ds-row hz-row" role="listitem">
+        <button type="button" class="grip" aria-label="Move Windows runners: disk hygiene">⋮⋮</button>
+        <span class="rk">2</span>
+        <span class="tt"><a class="ttl" href="#">Windows runners: disk hygiene</a><span class="flag">bug</span></span>
+        <span class="plan-wide"><span class="dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i></i><i></i><i></i></span><span class="num">5/8</span></span></span>
+        <span class="plan-wide"><span class="who" data-kind="person"><span class="av" aria-hidden="true">M</span><span class="a-run mono">@mara</span></span></span>
+        <span class="state"><span class="st" data-st="active"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>In progress</span></span>
+      </div>
+      <div class="row ds-row hz-row" role="listitem">
+        <button type="button" class="grip" aria-label="Move Cache stops growing after a week of use">⋮⋮</button>
+        <span class="rk">3</span>
+        <span class="tt"><a class="ttl" href="#">Cache stops growing after a week of use</a><span class="flag" title="2 sub-items, listed under it">2 sub-items</span><span class="flag">bug</span></span>
+        <span class="plan-wide"><span class="dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i></i><i></i><i></i><i></i></span><span class="num">2/6</span></span></span>
+        <span class="plan-wide"><span class="who" data-kind="person"><span class="av" aria-hidden="true">A</span><span class="a-run mono">@alex</span></span></span>
+        <span class="state"><span class="st" data-st="active"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>In progress</span></span>
+      </div>
+      <div class="row ds-row hz-row hz-kid" role="listitem" aria-label="Sub-item 3.1 of Cache stops growing after a week of use">
+        <button type="button" class="grip" aria-label="Move Temp folders under Lane scratch">⋮⋮</button>
+        <span class="rk">3.1</span>
+        <span class="tt sub"><a class="ttl" href="#">Temp folders under Lane scratch</a><span class="flag">task</span></span>
+        <span class="plan-wide"><span class="dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i></i></span><span class="num">1/2</span></span></span>
+        <span class="plan-wide"><span class="who" data-kind="agent"><span class="av ag" aria-hidden="true">AL</span><span class="a-run mono">alex/brisk-heron</span></span></span>
+        <span class="state"><span class="st" data-st="active"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>In progress</span></span>
+      </div>
+      <div class="row ds-row hz-row hz-kid hz-last" role="listitem" aria-label="Sub-item 3.2 of Cache stops growing after a week of use">
+        <button type="button" class="grip" aria-label="Move Landed Lanes close themselves">⋮⋮</button>
+        <span class="rk">3.2</span>
+        <span class="tt sub"><a class="ttl" href="#">Landed Lanes close themselves</a><span class="flag">task</span></span>
+        <span class="plan-wide"><span class="dw none" title="no checklist"><span class="sr">no checklist</span></span></span>
+        <span class="plan-wide"><span class="t3">no one yet</span></span>
+        <span class="state"><span class="st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="5"/></svg>Planned</span></span>
+      </div>
+      <div class="row ds-row hz-row" role="listitem">
+        <button type="button" class="grip" aria-label="Move Fix the cache key on renamed files">⋮⋮</button>
+        <span class="rk">4</span>
+        <span class="tt"><a class="ttl" href="#">Fix the cache key on renamed files</a><span class="flag">bug</span></span>
+        <span class="plan-wide"><span class="dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="hz-p1"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="num">10/27</span></span></span>
+        <span class="plan-wide"><span class="t3">no one yet</span></span>
+        <span class="state"><span class="st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="5"/></svg>Planned</span></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<p class="hz-cap"><b>2. List, sorted by Updated.</b> No hand numbers, so a sub-item names its parent in the row: "under 3 · Cache stops…" links to it. In List by hand the same row keeps its number "3.1" and sits under its parent, unindented.</p>
+<section class="region plan" aria-label="Plan, List layout sorted by Updated">
+  <div class="grp plan-grp" data-fold="">
+    <div class="band plan-gh"><a class="plan-gn" href="#">Release 1 close</a><span class="cnt">9</span><span class="plan-pl t3">sorted by Updated</span><button type="button" class="tw" aria-expanded="true" aria-label="Items of Release 1 close"></button></div>
+    <div role="list" aria-label="Release 1 close, by Updated">
+      <div class="row ds-row" role="listitem" style="grid-template-columns: var(--plan-cols, 2.2em minmax(0, 1fr) auto auto auto)">
+        <span class="rk"></span>
+        <span class="tt"><a class="ttl" href="#">Temp folders under Lane scratch</a><span class="hz-under">under 3 · <a class="lk" href="#" title="Cache stops growing after a week of use">Cache stops growing…</a></span><span class="flag">task</span></span>
+        <span class="plan-wide"><span class="dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i></i></span><span class="num">1/2</span></span></span>
+        <span class="plan-wide"><span class="who" data-kind="agent"><span class="av ag" aria-hidden="true">AL</span><span class="a-run mono">alex/brisk-heron</span></span></span>
+        <span class="state"><span class="st" data-st="active"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>In progress</span></span>
+      </div>
+      <div class="row ds-row" role="listitem" style="grid-template-columns: var(--plan-cols, 2.2em minmax(0, 1fr) auto auto auto)">
+        <span class="rk"></span>
+        <span class="tt"><a class="ttl" href="#">Windows runners: disk hygiene</a><span class="flag">bug</span></span>
+        <span class="plan-wide"><span class="dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i></i><i></i><i></i></span><span class="num">5/8</span></span></span>
+        <span class="plan-wide"><span class="who" data-kind="person"><span class="av" aria-hidden="true">M</span><span class="a-run mono">@mara</span></span></span>
+        <span class="state"><span class="st" data-st="active"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>In progress</span></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2. Drag ============ -->
+<p class="hz-cap"><b>3. Drag, in Tree by hand (the moment before the drop).</b> The dragged row is faded. Between rows an orange line reorders; where it starts shows the level it lands on (indented: a sub-item of the row above). Over the middle of a row, the row is outlined and takes the Item as its sub-item. A row that cannot take it says why in ink. One drop is one batch with Undo.</p>
+<section class="region plan hz-tree" aria-label="Dragging Fix the cache key on renamed files">
+  <div class="grp plan-grp" data-fold="">
+    <div class="band plan-gh"><span class="plan-gsp" aria-hidden="true"></span><a class="plan-gn" href="#">Release 1 close</a><span class="cnt">9</span><button type="button" class="tw" aria-expanded="true" aria-label="Items of Release 1 close"></button></div>
+    <div role="list" aria-label="Release 1 close, open Items in order">
+      <div class="row ds-row hz-row" role="listitem">
+        <button type="button" class="grip" aria-hidden="true" tabindex="-1">⋮⋮</button>
+        <span class="rk">1</span>
+        <span class="tt"><span class="ttl">Brief template reads real free space</span></span>
+        <span class="plan-wide"></span><span class="plan-wide"></span><span class="state"></span>
+      </div>
+      <div class="hz-drop" aria-hidden="true"><div class="dropline"><span>Top level · 2nd</span></div></div>
+      <div class="row ds-row hz-row hz-onto" role="listitem">
+        <button type="button" class="grip" aria-hidden="true" tabindex="-1">⋮⋮</button>
+        <span class="rk">2</span>
+        <span class="tt"><span class="ttl">Windows runners: disk hygiene</span></span>
+        <span class="plan-wide"></span><span class="plan-wide"></span>
+        <span class="hz-tag">Put under · becomes 2.1</span>
+      </div>
+      <div class="row ds-row hz-row" role="listitem">
+        <button type="button" class="grip" aria-hidden="true" tabindex="-1">⋮⋮</button>
+        <span class="rk">3</span>
+        <span class="tt"><span class="ttl">Cache stops growing after a week of use</span><span class="flag">2 sub-items</span></span>
+        <span class="plan-wide"></span><span class="plan-wide"></span><span class="state"></span>
+      </div>
+      <div class="row ds-row hz-row hz-kid hz-no" role="listitem">
+        <button type="button" class="grip" aria-hidden="true" tabindex="-1">⋮⋮</button>
+        <span class="rk">3.1</span>
+        <span class="tt sub"><span class="ttl">Temp folders under Lane scratch</span></span>
+        <span class="plan-wide"></span><span class="plan-wide"></span>
+        <span class="hz-tag">One level only: 3.1 is a sub-item</span>
+      </div>
+      <div class="hz-drop hz-in" aria-hidden="true"><div class="dropline"><span>Under 3 · becomes 3.2</span></div></div>
+      <div class="row ds-row hz-row hz-kid hz-last" role="listitem">
+        <button type="button" class="grip" aria-hidden="true" tabindex="-1">⋮⋮</button>
+        <span class="rk">3.2</span>
+        <span class="tt sub"><span class="ttl">Landed Lanes close themselves</span></span>
+        <span class="plan-wide"></span><span class="plan-wide"></span><span class="state"></span>
+      </div>
+      <div class="row ds-row hz-row hz-ghost" role="listitem">
+        <button type="button" class="grip" aria-hidden="true" tabindex="-1">⋮⋮</button>
+        <span class="rk">4</span>
+        <span class="tt"><span class="ttl">Fix the cache key on renamed files</span></span>
+        <span class="plan-wide"></span><span class="plan-wide"></span><span class="state"></span>
+      </div>
+    </div>
+  </div>
+  <div class="band plan-gh"><span class="plan-gsp" aria-hidden="true"></span><span class="plan-gn">Release 2</span><span class="cnt">4</span></div>
+  <div class="hz-drop" aria-hidden="true"><div class="dropline"><span>Moves to Release 2 · top level · 1st</span></div></div>
+  <div class="row ds-row hz-row" role="listitem">
+    <button type="button" class="grip" aria-hidden="true" tabindex="-1">⋮⋮</button>
+    <span class="rk">1</span>
+    <span class="tt"><span class="ttl">Public plan shows sub-items</span></span>
+    <span class="plan-wide"></span><span class="plan-wide"></span><span class="state"></span>
+  </div>
+  <div class="hz-toastwrap">
+    <div class="toast" role="status">Put “Fix the cache key on renamed files” under “Windows runners: disk hygiene” (2.1). <button type="button">Undo</button></div>
+  </div>
+</section>
+
+<div class="hz-desk">
+<p class="hz-cap"><b>4. The handle's menu (keyboard and phone), and a drop that did not take.</b></p>
+<div class="hz-grid">
+  <section aria-label="Handle menu of a sub-item">
+    <p class="hz-gc">The handle of 3.1. "Put under…" opens the picker (5); "Out of 3" makes it top level right after its parent.</p>
+    <div class="menu" role="menu">
+      <button type="button" role="menuitem">To the top</button>
+      <button type="button" role="menuitem">Up one</button>
+      <button type="button" role="menuitem">Down one</button>
+      <button type="button" role="menuitem">To the bottom</button>
+      <hr />
+      <button type="button" role="menuitem">Put under…</button>
+      <button type="button" role="menuitem">Out of 3 · Cache stops growing…</button>
+    </div>
+  </section>
+  <section aria-label="Stale drop">
+    <p class="hz-gc">Someone changed the Item after this page read it: nothing moved, and the row is back.</p>
+    <div class="hz-pad"><div class="toast" role="alert">“Fix the cache key on renamed files” changed since this page read it (version 4). Nothing moved. <button type="button">Try again</button></div></div>
+  </section>
+</div>
+</div>
+
+<!-- ============ 3. Item page: Parent, Children, Relations ============ -->
+<p class="hz-cap"><b>5. Item page (design/item-page, narrow column).</b> The wide column is unchanged except that the Done-when header carries the bar. Parent is a fact with Change and Clear; Children and Relations are regions above Work. Work's Related band moves into Relations. Readers see the same facts and lists with no keys.</p>
+<header class="head">
+  <nav class="crumb" aria-label="Breadcrumb"><a class="lk" href="#">Plan</a> › <a class="lk" href="#">Release 1 close</a></nav>
+  <p class="sit"><b>Cache stops growing after a week of use</b> is in progress: 2 of 6 Done-when lines ticked, 2 sub-items.</p>
+</header>
+<div class="hz-cols">
+  <div class="hz-main">
+    <section class="region" aria-label="Text"><div class="ph plain"><h2>Text</h2><span class="hint">as in design/item-page</span></div><p class="hz-stub">Text, as designed for Item c79cd08f.</p></section>
+    <section class="region" aria-label="Done when"><div class="ph plain"><h2>Done when</h2><span class="dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i></i><i></i><i></i><i></i></span></span><span class="cnt" aria-label="2 of 6 ticked">2/6</span><span class="hint">in the Item's own order</span></div><p class="hz-stub">Done-when lines, as designed for Item c79cd08f.</p></section>
+    <section class="region" aria-label="Comments"><div class="ph plain"><h2>Comments</h2></div><p class="hz-stub">Comments, as designed for Item c79cd08f.</p></section>
+  </div>
+  <div class="hz-side">
+    <section class="region" aria-label="Item">
+      <div class="ph plain"><h2>Item</h2></div>
+      <dl class="kv hz-kv">
+        <dt>Status</dt><dd><span class="st" data-st="active"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>In progress</span></dd>
+        <dt>In</dt><dd>Release 1 close, 3 of 9 in order</dd>
+        <dt>Parent</dt><dd class="hz-parent"><span class="t3">none, top level</span><button type="button" class="btn sm">Set parent…</button></dd>
+        <dt>Owner</dt><dd><span class="who" data-kind="person"><span class="av" aria-hidden="true">A</span><span class="a-run mono">@alex</span></span></dd>
+        <dt>Type</dt><dd>bug</dd>
+      </dl>
+    </section>
+
+    <section class="region" aria-label="Children">
+      <div class="ph plain"><h2>Children</h2><span class="cnt">2</span><span class="hint">in hand order</span></div>
+      <div class="hz-k">
+        <span class="rk">3.1</span><a class="lk ttl" href="#">Temp folders under Lane scratch</a>
+        <button type="button" class="btn sm ghost" aria-label="More for Temp folders under Lane scratch">⋯</button>
+        <span class="hz-meta"><span class="st" data-st="active"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>In progress</span><span class="dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i></i></span><span class="num">1/2</span></span></span>
+      </div>
+      <div class="hz-k">
+        <span class="rk">3.2</span><a class="lk ttl" href="#">Landed Lanes close themselves</a>
+        <button type="button" class="btn sm ghost" aria-label="More for Landed Lanes close themselves">⋯</button>
+        <span class="hz-meta"><span class="st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="5"/></svg>Planned</span><span class="t3">no checklist</span></span>
+      </div>
+      <form class="hz-newkid" onsubmit="return false">
+        <label class="sr" for="hz-kid">Title of the new sub-item</label>
+        <input id="hz-kid" class="inp" value="Test runs remove their temp folders" />
+        <button type="submit" class="btn sm">Add child</button>
+        <button type="button" class="btn sm ghost">Cancel</button>
+        <span class="hz-hint">Planned, in Release 1 close, as 3.3 · Enter adds, the field stays open for the next</span>
+      </form>
+      <div class="hz-adds"><button type="button" class="btn sm">New child</button><button type="button" class="btn sm">Add existing…</button></div>
+    </section>
+
+    <section class="region" aria-label="Relations">
+      <div class="ph plain"><h2>Relations</h2><span class="cnt">3</span><span class="hint">3 of 20 set here</span></div>
+      <div class="band"><span>Depends on</span><span class="cnt">1</span></div>
+      <div class="hz-rel"><a class="lk ttl" href="#">Brief template reads real free space</a><button type="button" class="btn sm ghost" aria-label="Remove: depends on Brief template reads real free space">×</button><span class="hz-meta">1 · Planned · blocks this Item until done</span></div>
+      <div class="band"><span>Blocks</span><span class="cnt">1</span><span class="hint">set on the other Item</span></div>
+      <div class="hz-rel"><a class="lk ttl" href="#">Public plan shows sub-items</a><button type="button" class="btn sm ghost" aria-label="Remove: Public plan shows sub-items depends on this Item">×</button><span class="hz-meta">Release 2 · 1 · Planned</span></div>
+      <div class="band"><span>Related</span><span class="cnt">2</span></div>
+      <div class="hz-rel"><a class="lk ttl" href="#">Windows runners: disk hygiene</a><button type="button" class="btn sm ghost" aria-label="Remove: related to Windows runners: disk hygiene">×</button><span class="hz-meta">2 · In progress</span></div>
+      <div class="hz-rel"><a class="lk ttl" href="#">Disk floor reads purgeable space</a><button type="button" class="btn sm ghost" aria-label="Remove: related to Disk floor reads purgeable space">×</button><span class="hz-meta">Done · split from this Item</span></div>
+
+      <form class="hz-addrel" onsubmit="return false" aria-label="Add a relation">
+        <div class="seg" role="radiogroup" aria-label="Kind">
+          <button type="button" role="radio" aria-checked="true">Depends on</button>
+          <button type="button" role="radio" aria-checked="false">Duplicate of</button>
+          <button type="button" role="radio" aria-checked="false">Related</button>
+        </div>
+        <div class="hz-pick">
+          <label class="sr" for="hz-q">Find an Item by title or id</label>
+          <input id="hz-q" class="inp" value="cache" role="combobox" aria-expanded="true" aria-controls="hz-res" />
+          <div class="hz-list" id="hz-res" role="listbox" aria-label="Open Items matching cache">
+            <div role="option" aria-selected="true"><span class="hz-o">Fix the cache key on renamed files</span><span class="t3">4</span><span class="hz-om">Release 1 close · Planned</span></div>
+            <div role="option" aria-selected="false"><span class="hz-o">Cache warm-up on first open</span><span class="t3">2</span><span class="hz-om">Release 2 · Proposed</span></div>
+            <div role="option" aria-disabled="true" aria-selected="false"><span class="hz-o">Cache stops growing after a week of use</span><span class="hz-why">this Item</span></div>
+            <hr />
+            <div class="hz-more"><span>3 matches in the loaded plan</span><button type="button" class="btn sm">Search all open Items</button></div>
+          </div>
+        </div>
+        <span class="hz-hint t3">Enter adds the chosen Item · Escape closes</span>
+      </form>
+    </section>
+
+    <section class="region" aria-label="Work">
+      <div class="ph plain"><h2>Work</h2><span class="hint">Lanes, Landings, History as in design/item-page</span></div>
+      <p class="hz-stub">Related is now its own region above.</p>
+    </section>
+  </div>
+</div>
+
+<div class="hz-desk">
+<p class="hz-cap"><b>6. The parent picker, and a sub-item's Parent fact.</b></p>
+<div class="hz-grid">
+  <section aria-label="Parent picker">
+    <p class="hz-gc">Set parent… on "Fix the cache key on renamed files". Only top-level open Items are offered; the rest say why.</p>
+    <div class="hz-pad hz-pick">
+      <label class="sr" for="hz-pq">Find a parent by title or id</label>
+      <input id="hz-pq" class="inp" value="disk" role="combobox" aria-expanded="true" aria-controls="hz-pres" />
+      <div class="hz-list" id="hz-pres" role="listbox" aria-label="Possible parents matching disk">
+        <div role="option" aria-selected="true"><span class="hz-o">Windows runners: disk hygiene</span><span class="t3">2</span><span class="hz-om">Release 1 close · In progress</span></div>
+        <div role="option" aria-selected="false"><span class="hz-o">Disk usage on the Stats page</span><span class="t3">3</span><span class="hz-om">Release 2 · Planned · also moves this Item to Release 2</span></div>
+        <div role="option" aria-disabled="true" aria-selected="false"><span class="hz-o">Temp folders keep disk free</span><span class="hz-why">one level only: it is 3.1</span></div>
+        <hr />
+        <div class="hz-more"><span>All open Items are loaded</span></div>
+      </div>
+    </div>
+  </section>
+  <section aria-label="Parent fact of a sub-item">
+    <p class="hz-gc">On a sub-item the fact links its parent. Clear makes it top level in its own Initiative, with Undo. An Item that has children of its own cannot take a parent.</p>
+    <dl class="kv hz-kv hz-pad">
+      <dt>Parent</dt><dd class="hz-parent"><a class="lk" href="#">3 · Cache stops growing after a week of use</a><button type="button" class="btn sm">Change…</button><button type="button" class="btn sm ghost">Clear</button></dd>
+    </dl>
+    <dl class="kv hz-kv hz-pad">
+      <dt>Parent</dt><dd class="hz-parent"><span class="t3">none, top level</span><button type="button" class="btn sm" disabled aria-describedby="hz-why">Set parent…</button><span id="hz-why" class="t3">has 2 sub-items; one level only</span></dd>
+    </dl>
+    <div class="hz-pad"><div class="toast" role="status">“Temp folders under Lane scratch” is top level now (5). <button type="button">Undo</button></div></div>
+  </section>
+</div>
+</div>
+
+<!-- ============ 4. New Item ============ -->
+<p class="hz-cap"><b>7. New Item.</b> The sheet starts with what to make: an Item or an Initiative. Choosing a parent puts the Item in the parent's Initiative.</p>
+<div class="hz-sheets">
+  <div class="sheet" role="dialog" aria-label="New Item">
+    <div class="hz-sh">New Item</div>
+    <form class="hz-sb" onsubmit="return false">
+      <div class="seg" role="radiogroup" aria-label="Make">
+        <button type="button" role="radio" aria-checked="true">Item</button>
+        <button type="button" role="radio" aria-checked="false">Initiative</button>
+      </div>
+      <label><span>Title</span><input class="inp" value="Test runs remove their temp folders" /></label>
+      <label><span>Description</span><textarea class="inp" rows="2"></textarea></label>
+      <div class="hz-field"><span id="hz-pl">Parent</span><div class="hz-chosen" aria-labelledby="hz-pl"><span>3 · Cache stops growing after a week of use</span><button type="button" class="btn sm ghost" aria-label="Clear parent">×</button></div></div>
+      <label><span>Initiative</span><select class="inp" disabled><option>Release 1 close</option></select><span class="hz-hint">from its parent</span></label>
+      <label><span>Type</span><select class="inp"><option>Task</option></select></label>
+      <label><span>Done when (one line each)</span><textarea class="inp" rows="2"></textarea></label>
+    </form>
+    <div class="hz-sf"><button type="button" class="btn">Cancel</button><button type="button" class="btn primary">Plan it</button></div>
+  </div>
+  <div class="sheet" role="dialog" aria-label="New Initiative">
+    <div class="hz-sh">New Initiative</div>
+    <form class="hz-sb" onsubmit="return false">
+      <div class="seg" role="radiogroup" aria-label="Make">
+        <button type="button" role="radio" aria-checked="false">Item</button>
+        <button type="button" role="radio" aria-checked="true">Initiative</button>
+      </div>
+      <label><span>Title</span><input class="inp" value="Release 2" /></label>
+      <label><span>Text</span><textarea class="inp" rows="4">What this Initiative is for and how we will know it is done.</textarea></label>
+      <span class="hz-hint">Lands last among the Initiatives; move it on the Plan.</span>
+    </form>
+    <div class="hz-sf"><button type="button" class="btn">Cancel</button><button type="button" class="btn primary">Create Initiative</button></div>
+  </div>
+</div>
+
+<!-- ============ 5. The capped Done-when bar ============ -->
+<p class="hz-cap"><b>8. The Done-when bar.</b> At most 12 blocks, never wider than 82 px. Up to 12 lines a block is one line, as today. Past 12 a block is a twelfth of the lines and fills from the bottom in thirds; it is full only when every line in it is ticked, and any ticked line shows at least a third. The count beside it always gives the exact figure. Drawn at row size and at 2× below.</p>
+<div class="hz-bars">
+  <div><span class="dw" title="2 of 3 Done-when lines ticked"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i></i></span><span class="num">2/3</span></span><span class="hz-big dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i></i></span></span><span class="hz-n">3 lines · 3 blocks of 1</span></div>
+  <div><span class="dw" title="5 of 8 Done-when lines ticked"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i></i><i></i><i></i></span><span class="num">5/8</span></span><span class="hz-big dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i></i><i></i><i></i></span></span><span class="hz-n">8 lines · 8 blocks of 1</span></div>
+  <div><span class="dw" title="7 of 12 Done-when lines ticked"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i></i><i></i><i></i><i></i><i></i></span><span class="num">7/12</span></span><span class="hz-big dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i></i><i></i><i></i><i></i><i></i></span></span><span class="hz-n">12 lines · 12 blocks of 1, the widest bar</span></div>
+  <div><span class="dw" title="10 of 27 Done-when lines ticked · a block is 2¼ lines"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="hz-p1"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="num">10/27</span></span><span class="hz-big dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="hz-p1"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></span><span class="hz-n">27 lines · a block is 2¼ lines · 4 full, the 5th a third</span></div>
+  <div><span class="dw" title="44 of 60 Done-when lines ticked · a block is 5 lines"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="hz-p2"></i><i></i><i></i><i></i></span><span class="num">44/60</span></span><span class="hz-big dw"><span class="shards" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="ok"></i><i class="hz-p2"></i><i></i><i></i><i></i></span></span><span class="hz-n">60 lines · a block is 5 lines · 8 full, the 9th two thirds</span></div>
+  <div><span class="dw" title="1 of 60 Done-when lines ticked · a block is 5 lines"><span class="shards" aria-hidden="true"><i class="hz-p1"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="num">1/60</span></span><span class="hz-big dw"><span class="shards" aria-hidden="true"><i class="hz-p1"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></span><span class="hz-n">1 of 60 still shows: any ticked line is at least a third</span></div>
+</div>
+
+<div class="hz-phone">
+  <p class="sample">Phone, 390 px: the same screens. Rows keep the number and the elbow; Done-when sits on the Item page, as today.</p>
+  <iframe src="plan-hierarchy.html" title="Plan hierarchy at phone width"></iframe>
+</div>
+</main>
+</body>
+</html>
