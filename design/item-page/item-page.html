@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en" data-ds data-theme="dark">
+<head>
+<!-- Design mock with synthetic example data (project, people, Items and numbers are invented). It shows intended layout
+     and wording only; it does not describe behaviour that ships. Decisions: design/item-page/README.md (Item c79cd08f). -->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Item page mock</title>
+<link rel="stylesheet" href="../../web/src/ds/tokens.css" />
+<link rel="stylesheet" href="../../web/src/ds/base.css" />
+<link rel="stylesheet" href="../../web/src/ds/core.css" />
+<link rel="stylesheet" href="../../web/src/ds/parts.css" />
+<link rel="stylesheet" href="../../web/src/app/discussion/discussion.css" />
+<style>
+/* Page-only parts of the Item page mock. Every value is a token; system classes are used as the system draws them. */
+[data-ds] {
+  body { background: var(--bg); color: var(--text); font: var(--w-regular) var(--t-body)/1.45 var(--font-sans); margin: 0; }
+  .ip-mockbar { display: flex; gap: var(--s-3); align-items: center; flex-wrap: wrap; padding: var(--s-2) var(--gut); border-bottom: var(--rule) dashed var(--line-strong); color: var(--text-3); font-size: var(--t-meta); }
+  .ip-mockbar .btn { margin-left: auto; }
+  .ip-top { display: flex; align-items: center; gap: var(--s-3); height: var(--top-h); padding: 0 var(--gut); background: var(--surface); border-bottom: var(--rule) solid var(--line); font-weight: var(--w-strong); }
+  .ip-top .ip-f { width: 20px; height: 20px; border-radius: var(--r); background: var(--brand); flex: none; }
+  .ip-top .t3 { font-weight: var(--w-regular); }
+
+  /* The frame: the Item in the wide column, its facts and work in the narrow one. One column at 860 px. */
+  .ip-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); align-items: start; border-bottom: var(--rule) solid var(--line); }
+  .ip-cols > .ip-main { border-right: var(--rule) solid var(--line); min-width: 0; }
+  .ip-cols > .ip-side { min-width: 0; }
+  .ip-main > .region:last-child, .ip-side > .region:last-child { border-bottom: 0; }
+
+  /* Item text: the comments' Markdown at the reading measure, cut at about twelve lines with the rest one press away. */
+  .ip-text { padding: var(--s-3) var(--gut-head) var(--s-4); }
+  .ip-text .md { max-width: var(--m-read); font-size: var(--t-body); line-height: 1.55; overflow-wrap: anywhere; }
+  .ip-text .md p, .ip-text .md ul { margin: 0 0 var(--s-2); }
+  .ip-text .md ul { padding-left: var(--s-5); list-style: disc; }
+  .ip-text .md h3 { font-size: var(--t-body); font-weight: var(--w-bold); margin: var(--s-3) 0 var(--s-1); }
+  .ip-text .md code { font-family: var(--font-mono); font-size: 0.93em; }
+  .ip-text.ip-cut .md { max-height: calc(12 * 1.55em); overflow: hidden; }
+  .ip-text .ip-more { margin-top: var(--s-2); }
+  .ip-edit { display: grid; gap: var(--s-2); padding: var(--s-3) var(--gut-head) var(--s-4); }
+  .ip-edit textarea.inp { min-height: 180px; font-family: var(--font-mono); font-size: var(--t-small); max-width: var(--m-wide); }
+  .ip-edit .btns { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+  .ip-edit .ip-hint { color: var(--text-3); font-size: var(--t-meta); }
+
+  /* Done-when lines: a tick box per line; ticked, open and moved differ in the box's shape and in a word. */
+  .ip-dw { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 4px var(--s-3); align-items: start; min-height: 44px; padding: 10px var(--gut-head); border-bottom: var(--rule) solid var(--line); }
+  .ip-dw > .ip-box { margin-top: 1px; }
+  .ip-dw .ip-line { min-width: 0; overflow-wrap: anywhere; }
+  .ip-dw .ip-src { grid-column: 2; color: var(--text-2); font-size: var(--t-meta); display: flex; flex-wrap: wrap; gap: 2px var(--s-2); align-items: center; }
+  .ip-dw .ip-acts { display: flex; gap: var(--s-1); align-items: center; }
+  .ip-dw.ip-done .ip-line { color: var(--text-2); }
+  .ip-dw.ip-moved .ip-line { color: var(--text-3); }
+  .ip-dw.ip-editing { background: var(--surface-2); }
+  .ip-dw.ip-editing .ip-src { grid-column: 2 / -1; }
+  .ip-word { font-size: var(--t-meta); font-weight: var(--w-strong); white-space: nowrap; }
+  .ip-box { width: 16px; height: 16px; border-radius: var(--r); border: 1.5px solid var(--text-3); display: inline-grid; place-items: center; background: transparent; padding: 0; color: var(--surface); }
+  .ip-box svg { width: 11px; height: 11px; }
+  .ip-box.ip-on { background: var(--passed); border-color: var(--passed); }
+  .ip-box.ip-mv { border-style: dashed; color: var(--text-3); }
+  .ip-add { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: var(--s-3); align-items: center; padding: 8px var(--gut-head); border-bottom: var(--rule) solid var(--line); }
+  .ip-add .ip-plus { color: var(--text-3); text-align: center; font-weight: var(--w-bold); }
+  .ip-tickform { grid-column: 2 / -1; display: grid; gap: var(--s-2); margin-top: var(--s-1); }
+  .ip-tickform .btns { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+
+  /* Work parts: top three rows, then Show more from the rows already read. */
+  .ip-wrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--s-3); padding: 9px var(--gut); border-bottom: var(--rule) solid var(--line); min-width: 0; }
+  .ip-wrow > .meta { grid-column: 1 / -1; font-size: var(--t-meta); color: var(--text-2); min-width: 0; }
+  .ip-wrow .ttl { font-weight: var(--w-strong); overflow-wrap: anywhere; }
+  .ip-showmore { padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
+
+  /* Comments: the filter bar and the pager around the existing comment list. */
+  .ip-com .tbar { padding-inline: var(--gut-head); }
+  .ip-com .pager { padding-inline: var(--gut-head); }
+  .ip-filterline { padding: var(--s-2) var(--gut-head); color: var(--text-2); font-size: var(--t-meta); border-bottom: var(--rule) solid var(--line); }
+  .ip-com .compose { border-bottom: 0; }
+
+  /* States sheet under the page: the edit flow in its other steps. */
+  .ip-states { padding: var(--s-6) 0 var(--s-12); }
+  .ip-states > h2 { padding: 0 var(--gut-head) var(--s-2); font-size: var(--t-title); }
+  .ip-states .ip-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 1px; background: var(--line); border-block: var(--rule) solid var(--line); }
+  .ip-states .ip-grid > section { background: var(--surface); min-width: 0; }
+  .ip-states .ip-cap { padding: var(--s-3) var(--gut-head) 0; color: var(--text-3); font-size: var(--t-meta); }
+
+  /* Phone preview: the same file in a 390 px frame. */
+  .ip-phone { padding: var(--s-6) var(--gut-head) var(--s-12); display: grid; gap: var(--s-2); justify-items: start; }
+  .ip-phone iframe { width: 390px; max-width: 100%; height: 844px; border: var(--rule) solid var(--line-strong); background: var(--bg); }
+
+  @media (max-width: 860px) {
+    .ip-cols { grid-template-columns: minmax(0, 1fr); }
+    .ip-cols > .ip-main { border-right: 0; display: contents; }
+    .ip-cols > .ip-side { display: contents; }
+    /* Phone order: text, Done when, facts, work, comments. */
+    #ip-r-text { order: 1; } #ip-r-dw { order: 2; } #ip-r-facts { order: 3; } #ip-r-work { order: 4; } #ip-r-com { order: 5; }
+    .ip-cols > * > .region { border-bottom: var(--rule) solid var(--line); }
+    .ip-text, .ip-edit, .ip-dw, .ip-add { padding-inline: var(--gut); }
+    .ip-dw { grid-template-columns: 18px minmax(0, 1fr); }
+    .ip-dw .ip-acts, .ip-dw .ip-word { grid-column: 2; justify-self: start; }
+    .ip-box { width: 20px; height: 20px; }
+    .ip-com .tbar, .ip-com .pager, .ip-filterline { padding-inline: var(--gut); }
+    .ip-phone { display: none; }
+  }
+  .ip-embedded .ip-mockbar, .ip-embedded .ip-phone, .ip-embedded .ip-states { display: none; }
+}
+</style>
+<script>
+  // Inside the phone frame the mock shows only the page.
+  if (window.self !== window.top) document.documentElement.classList.add('ip-embedded');
+</script>
+</head>
+<body>
+<div class="ip-mockbar">
+  <span>Item page mock (Item c79cd08f). Sample data. Desktop above; phone at 390 px and the edit states below.</span>
+  <button type="button" class="btn sm" onclick="var r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'light':'dark'">Light / dark</button>
+</div>
+<div class="ip-top"><span class="ip-f" aria-hidden="true"></span>Forge <span class="t3">demo-project</span></div>
+
+<main>
+  <!-- Page head: crumb, the sentence that is the answer, the page's keys. -->
+  <header class="head">
+    <nav class="crumb" aria-label="Breadcrumb"><a class="lk" href="#">Plan</a> › <a class="lk" href="#">Release 1 close</a></nav>
+    <p class="sit"><b>Cache stops growing after a week of use</b> is in progress: 2 of 6 Done-when lines ticked, 1 moved.</p>
+    <span class="tools">
+      <button type="button" class="btn sm">Versions</button>
+      <button type="button" class="btn sm">Split into several…</button>
+      <button type="button" class="btn ghost sm" aria-label="More actions">⋯</button>
+    </span>
+  </header>
+
+  <div class="ip-cols">
+    <div class="ip-main">
+      <!-- 1. The Item text: the body without its Done-when lines, drawn by the comments' Markdown. -->
+      <section class="region" id="ip-r-text" aria-label="Text">
+        <div class="ph plain"><h2>Text</h2><span class="hint">version 6 · edited 2 h ago by @alex</span><span class="tools"><button type="button" class="btn sm">Edit text</button></span></div>
+        <div class="ip-text ip-cut">
+          <div class="md" dir="auto">
+            <p>Free disk shrinks by about 3 GB a day on a busy machine. Three causes, all ours:</p>
+            <ul>
+              <li>copies of finished Lanes are never removed;</li>
+              <li>landed Lanes stay open, so their copies look in use;</li>
+              <li>test runs leave their temp folders behind.</li>
+            </ul>
+            <p>Fix each at its root. The one-time cleanup on the demo machine is done by hand and is not part of this Item.</p>
+            <h3>Decisions</h3>
+            <p>2026-11-20 · Keep the current, previous and rollback releases; remove the rest after 3 h idle.</p>
+            <p>2026-11-21 · Temp folders go under the Lane's own scratch, so removing a Lane removes them.</p>
+            <p>2026-11-22 · Copies are counted per machine, never per project.</p>
+          </div>
+          <div class="ip-more"><button type="button" class="btn sm ghost" aria-expanded="false">Show all text · 14 more lines</button></div>
+        </div>
+      </section>
+
+      <!-- 2. Done-when lines: every task line of the body with its state. -->
+      <section class="region" id="ip-r-dw" aria-label="Done when">
+        <div class="ph plain"><h2>Done when</h2><span class="cnt" aria-label="2 of 6 ticked">2/6</span><span class="hint">in the Item's own order · 1 moved</span></div>
+
+        <div class="ip-dw ip-done">
+          <span class="ip-box ip-on" role="img" aria-label="Ticked"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg></span>
+          <span class="ip-line" dir="auto">Copies of finished Lanes are removed within 3 h of their last use.</span>
+          <span class="ip-word st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Done</span>
+          <span class="ip-src">Ticked by landing <a class="lk" href="#">8c1e2f40</a> · <time title="2026-11-23 14:02">yesterday</time> · <span class="who" data-kind="agent"><span class="av ag" aria-hidden="true">AL</span><span class="a-run mono">quiet-otter</span></span> · <a class="lk" href="#comment-c12">evidence</a></span>
+        </div>
+
+        <div class="ip-dw ip-done">
+          <span class="ip-box ip-on" role="img" aria-label="Ticked"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg></span>
+          <span class="ip-line" dir="auto">A landed Lane closes itself, so its copy no longer counts as in use.</span>
+          <span class="ip-word st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Done</span>
+          <span class="ip-src">Ticked <time title="2026-11-22 09:40">2 days ago</time> by <span class="who" data-kind="person"><span class="av" aria-hidden="true">A</span><span class="a-run mono">@alex</span></span> · landing not reported · <a class="lk" href="#comment-c07">evidence</a></span>
+        </div>
+
+        <!-- An open line, in the middle of an inline edit of its wording. -->
+        <div class="ip-dw ip-editing">
+          <span class="ip-box" role="img" aria-label="Open"></span>
+          <span class="ip-line"><label class="sr" for="ip-e3">Edit this line</label><input id="ip-e3" class="inp" value="Test runs remove their temp folders on exit, also when a run is stopped." /></span>
+          <span class="ip-acts"><button type="button" class="btn sm" disabled>Save</button><button type="button" class="btn sm ghost">Cancel</button></span>
+          <span class="ip-src">Enter saves · Escape cancels · saves as version 7</span>
+        </div>
+
+        <div class="ip-dw">
+          <span class="ip-box" role="img" aria-label="Open"></span>
+          <span class="ip-line" dir="auto">Free disk holds within 5 GB of its start over a week of normal use, with no manual pass.</span>
+          <span class="ip-acts"><button type="button" class="btn sm">Tick…</button><button type="button" class="btn sm ghost" aria-label="More for this line">⋯</button></span>
+        </div>
+
+        <div class="ip-dw">
+          <span class="ip-box" role="img" aria-label="Open"></span>
+          <span class="ip-line" dir="auto">The disk floor in the brief template reads the real free space, purgeable included.</span>
+          <span class="ip-acts"><button type="button" class="btn sm">Tick…</button><button type="button" class="btn sm ghost" aria-label="More for this line">⋯</button></span>
+        </div>
+
+        <div class="ip-dw ip-moved">
+          <span class="ip-box ip-mv" role="img" aria-label="Moved"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h8M9 5l3 3-3 3"/></svg></span>
+          <span class="ip-line" dir="auto">Windows runners get the same clean-up.</span>
+          <span class="ip-word st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 8h8"/></svg>Moved</span>
+          <span class="ip-src">to <a class="lk" href="#">Windows runners: disk hygiene</a> · not counted</span>
+        </div>
+
+        <form class="ip-add" onsubmit="return false">
+          <span class="ip-plus" aria-hidden="true">+</span>
+          <span><label class="sr" for="ip-add">Add a Done-when line</label><input id="ip-add" class="inp" placeholder="Add a line: what shows it is done" /></span>
+          <button type="submit" class="btn sm">Add</button>
+        </form>
+      </section>
+
+      <!-- 5. Comments: 20 a page, filters over the loaded ones. -->
+      <section class="region ip-com" id="ip-r-com" aria-label="Comments">
+        <div class="ph plain"><h2>Comments</h2><span class="cnt">312</span><span class="hint">newest first · 20 loaded</span></div>
+        <div class="tbar" role="toolbar" aria-label="Filter comments">
+          <span class="chip"><span>Decisions</span><button type="button" aria-label="Clear Decisions">×</button></span>
+          <button type="button" class="chip off"><span>Review findings <i>any</i></span></button>
+          <button type="button" class="chip off"><span>Author <i>any</i></span></button>
+          <span class="n">4 of 20 loaded</span>
+        </div>
+        <div class="ip-filterline">Filters look at the 20 comments loaded so far. <button type="button" class="btn sm ghost">Load 20 earlier</button></div>
+
+        <div class="discussion">
+          <article class="cmt" id="comment-c12" data-kind="agent">
+            <div class="by"><span class="who" data-kind="agent"><span class="av ag" aria-hidden="true">AL</span><span class="a-run mono">quiet-otter</span><span class="a-model mono">model-a</span><span class="a-for"><span class="w">for </span><span class="mono">@alex</span></span></span><time title="2026-11-23 14:02">yesterday</time><span class="chip"><span>Decision</span></span></div>
+            <div class="md" dir="auto"><p>Line 1 done: landing 8c1e2f40 removes copies idle more than 3 h; replayed on the 40-Lane fixture, 0 copies left after the window.</p></div>
+          </article>
+          <article class="cmt" data-kind="person">
+            <div class="by"><span class="who" data-kind="person"><span class="av" aria-hidden="true">A</span><span class="a-run mono">@alex</span></span><time title="2026-11-22 09:41">2 days ago</time><span class="chip"><span>Decision</span></span></div>
+            <div class="md" dir="auto"><p>Copies are counted per machine, never per project.</p></div>
+          </article>
+          <article class="cmt" data-kind="person">
+            <div class="by"><span class="who" data-kind="person"><span class="av" aria-hidden="true">A</span><span class="a-run mono">@alex</span></span><time title="2026-11-21 18:10">3 days ago</time><span class="chip"><span>Decision</span></span></div>
+            <div class="md" dir="auto"><p>Temp folders go under the Lane's own scratch, so removing a Lane removes them.</p></div>
+          </article>
+          <article class="cmt" data-kind="person">
+            <div class="by"><span class="who" data-kind="person"><span class="av" aria-hidden="true">A</span><span class="a-run mono">@alex</span></span><time title="2026-11-20 11:02">4 days ago</time><span class="chip"><span>Decision</span></span></div>
+            <div class="md" dir="auto"><p>Keep the current, previous and rollback releases; remove the rest after 3 h idle.</p></div>
+          </article>
+          <form class="cmt compose" onsubmit="return false">
+            <label class="sr" for="ip-c">Comment</label>
+            <textarea id="ip-c" class="inp" rows="2" placeholder="Comment"></textarea>
+            <div class="btns"><button type="submit" class="btn sm" disabled>Comment <kbd>⌘↵</kbd></button><label class="t2 decide"><input type="checkbox" /> This is a decision: keep it in the body, with today’s date</label></div>
+          </form>
+        </div>
+        <div class="pager"><span class="n">20 of 312 comments loaded</span><button type="button" class="btn sm">Show 20 earlier</button></div>
+      </section>
+    </div>
+
+    <div class="ip-side">
+      <!-- 3. Facts: the existing key and value list. -->
+      <section class="region" id="ip-r-facts" aria-label="Item">
+        <div class="ph plain"><h2>Item</h2></div>
+        <dl class="kv">
+          <dt>Status</dt><dd><span class="st" data-st="active"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>In progress</span></dd>
+          <dt>In</dt><dd>Release 1 close, 3 of 9 in order</dd>
+          <dt>Owner</dt><dd><span class="who" data-kind="person"><span class="av" aria-hidden="true">A</span><span class="a-run mono">@alex</span></span></dd>
+          <dt>Type</dt><dd>bug</dd>
+        </dl>
+      </section>
+
+      <!-- 4. Work: Lanes, Landings and Related open with their top 3; History last, open, one page of 25. -->
+      <section class="region" id="ip-r-work" aria-label="Work">
+        <div class="ph plain"><h2>Work</h2></div>
+
+        <div class="grp" data-fold="">
+          <div class="band"><span>Lanes</span><span class="cnt">7</span><span class="hint">newest first</span><button type="button" class="tw" aria-expanded="true" aria-label="Lanes"></button></div>
+          <div class="ip-wrow"><a class="lk ttl" href="#">Temp folders under Lane scratch</a><span class="st" data-st="active"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>Working</span><span class="meta"><span class="who one" data-kind="agent"><span class="av ag" aria-hidden="true">AL</span><span class="a-run mono">brisk-heron</span><span class="a-model mono">model-b</span></span></span><span class="meta">4 saves · last save 12 min ago · <a class="lk" href="#">Thread</a></span></div>
+          <div class="ip-wrow"><a class="lk ttl" href="#">Landed Lanes close themselves</a><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span><span class="meta"><span class="who one" data-kind="person"><span class="av" aria-hidden="true">A</span><span class="a-run mono">@alex</span></span></span><span class="meta">2 saves · last save 2 days ago · <a class="lk" href="#">Thread</a></span></div>
+          <div class="ip-wrow"><a class="lk ttl" href="#">Remove idle Lane copies after 3 h</a><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span><span class="meta"><span class="who one" data-kind="agent"><span class="av ag" aria-hidden="true">AL</span><span class="a-run mono">quiet-otter</span><span class="a-model mono">model-a</span></span></span><span class="meta">9 saves · last save yesterday · <a class="lk" href="#">Thread</a></span></div>
+          <div class="ip-showmore"><button type="button" class="btn sm ghost" aria-expanded="false">Show 4 more</button></div>
+        </div>
+
+        <div class="grp" data-fold="">
+          <div class="band"><span>Landings</span><span class="cnt">5</span><span class="hint">newest first</span><button type="button" class="tw" aria-expanded="true" aria-label="Landings"></button></div>
+          <div class="ip-wrow"><a class="lk" href="#">Landing 8c1e2f40</a><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Passed</span><span class="meta">6 files changed · yesterday · ticked line 1</span></div>
+          <div class="ip-wrow"><a class="lk" href="#">Landing 41b09ad7</a><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Passed</span><span class="meta">2 files changed · 2 days ago</span></div>
+          <div class="ip-wrow"><a class="lk" href="#">Landing 0f7c3e12</a><span class="t2">Not checked</span><span class="meta">1 file changed · 3 days ago</span></div>
+          <div class="ip-showmore"><button type="button" class="btn sm ghost" aria-expanded="false">Show 2 more</button></div>
+        </div>
+
+        <div class="grp" data-fold="">
+          <div class="band"><span>Related</span><span class="cnt">2</span><button type="button" class="tw" aria-expanded="true" aria-label="Related"></button></div>
+          <div class="ip-wrow"><a class="lk ttl" href="#">Windows runners: disk hygiene</a><span class="t2">follow-up</span></div>
+          <div class="ip-wrow"><a class="lk ttl" href="#">Brief template reads real free space</a><span class="t2">blocks</span></div>
+        </div>
+
+        <div class="grp" data-fold="">
+          <div class="band"><span>History</span><span class="hint">25 newest changes read</span><button type="button" class="tw" aria-expanded="true" aria-label="History"></button></div>
+          <div class="ip-wrow"><span>Done-when line 3 edited</span><time class="t2" title="2026-11-24 08:10">2 h ago</time><span class="meta"><span class="who" data-kind="person"><span class="av" aria-hidden="true">A</span><span class="a-run mono">@alex</span></span></span></div>
+          <div class="ip-wrow"><span>Lane “Temp folders under Lane scratch” opened</span><time class="t2" title="2026-11-24 07:55">2 h ago</time><span class="meta"><span class="who one" data-kind="agent"><span class="av ag" aria-hidden="true">AL</span><span class="a-run mono">brisk-heron</span><span class="a-model mono">model-b</span></span></span></div>
+          <div class="ip-wrow"><span>Landing 8c1e2f40</span><time class="t2" title="2026-11-23 14:02">yesterday</time><span class="meta"><span class="who one" data-kind="agent"><span class="av ag" aria-hidden="true">AL</span><span class="a-run mono">quiet-otter</span><span class="a-model mono">model-a</span></span></span></div>
+          <div class="ip-showmore"><button type="button" class="btn sm ghost" aria-expanded="false">Show 22 more</button></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- The edit flow's other steps, drawn beside each other. -->
+  <div class="ip-states">
+    <h2>Edit flow: the other steps</h2>
+    <div class="ip-grid">
+      <section aria-label="Editing the text">
+        <p class="ip-cap">A. Edit text: the body without its Done-when lines, in place.</p>
+        <div class="ip-edit">
+          <label class="sr" for="ip-t">Item text, Markdown</label>
+          <textarea id="ip-t" class="inp">Free disk shrinks by about 3 GB a day on a busy machine. Three causes, all ours:
+
+- copies of finished Lanes are never removed;
+- landed Lanes stay open, so their copies look in use;
+- test runs leave their temp folders behind.</textarea>
+          <div class="btns"><button type="button" class="btn sm">Save text <kbd>⌘↵</kbd></button><button type="button" class="btn sm ghost">Cancel</button><span class="ip-hint">Markdown · Done-when lines stay as they are</span></div>
+        </div>
+      </section>
+
+      <section aria-label="Stale edit">
+        <p class="ip-cap">B. Someone saved first: nothing is overwritten and the draft stays.</p>
+        <div class="notice" data-st="waiting" role="alert"><p><b>@alex saved version 7 while you edited.</b> Nothing was overwritten; your draft is below.</p><button type="button" class="btn sm rec">Compare and redo</button><button type="button" class="btn sm ghost">Discard my draft</button></div>
+        <div class="ip-edit">
+          <label class="sr" for="ip-t2">Your draft</label>
+          <textarea id="ip-t2" class="inp" aria-invalid="true">Free disk shrinks by about 3 GB a day on a busy machine…</textarea>
+        </div>
+      </section>
+
+      <section aria-label="Ticking a line">
+        <p class="ip-cap">C. Tick… asks for the evidence, then ticks and posts it as one step.</p>
+        <div class="ip-dw ip-editing">
+          <span class="ip-box" role="img" aria-label="Open"></span>
+          <span class="ip-line" dir="auto">Free disk holds within 5 GB of its start over a week of normal use, with no manual pass.</span>
+          <span></span>
+          <form class="ip-tickform" onsubmit="return false">
+            <label class="sr" for="ip-ev">What shows it is done</label>
+            <input id="ip-ev" class="inp" placeholder="What shows it is done: a landing, a check, a link" />
+            <div class="btns"><button type="submit" class="btn sm" disabled>Tick and post</button><button type="button" class="btn sm ghost">Cancel</button></div>
+          </form>
+        </div>
+      </section>
+
+      <section aria-label="Line menu and read-only">
+        <p class="ip-cap">D. A line's ⋯ menu, and what a reader without write access sees.</p>
+        <div class="menu" role="menu" style="position:static;box-shadow:none;margin:var(--s-3) var(--gut-head);max-width:240px">
+          <button type="button" role="menuitem">Edit wording</button>
+          <button type="button" role="menuitem">Mark moved…</button>
+          <button type="button" role="menuitem">Reopen</button>
+          <button type="button" role="menuitem" class="danger">Remove line</button>
+        </div>
+        <div class="ip-dw">
+          <span class="ip-box" role="img" aria-label="Open"></span>
+          <span class="ip-line" dir="auto">The disk floor in the brief template reads the real free space, purgeable included.</span>
+          <span class="ip-word st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="5"/></svg>Open</span>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="ip-phone">
+    <p class="sample">Phone, 390 px: text, Done when, facts, work, comments.</p>
+    <iframe src="item-page.html" title="Item page at phone width"></iframe>
+  </div>
+</main>
+</body>
+</html>
