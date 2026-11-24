@@ -115,6 +115,7 @@ test("M3: removing the owner's own second owner device marks it, and the owner's
   const base = { headHash: Buffer.from(genesis.headHash), rosterVersion: 1 };
   f.bump();
   f.transition({ added: [f.entry(second, { role: 1, how: 4, addedAtRosterVersion: 2 })] });
+  f.wrap();
   const step = sealedWrite(f.reply, randomUUID(), base);
   assert.equal(
     (

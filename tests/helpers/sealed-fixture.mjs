@@ -146,7 +146,7 @@ export function fixture(seed = 17, project = 'fixture-project', kind = 1) {
     f.signHead();
     return n;
   };
-  f.rekey = (delta = { epochBumped: 1 }) => {
+  f.rekey = (delta = { epochBumped: 1 }, signer = keys) => {
     const opened = reply.head.names
       .filter(n => n.kind !== 3)
       .map(n => ({
@@ -159,7 +159,7 @@ export function fixture(seed = 17, project = 'fixture-project', kind = 1) {
         ),
       }));
     f.bump();
-    f.transition(delta);
+    f.transition(delta, signer);
     f.key = random(32);
     for (const { n, opened: o } of opened) {
       n.sealEpoch = reply.roster.epoch;

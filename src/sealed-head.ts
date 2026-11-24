@@ -169,6 +169,15 @@ export function checkSignedHead(h: Head, r: Roster, c: HeadContext): string[] {
       );
     }
   }
+  // Gate B3a review M2: a reader with no pin or an older one re-checks every record's author, so each must still be a
+  // device on the roster or a former signer, tombstones included (a Checks proposal is authored in Development).
+  for (const n of h.names)
+    refuse(
+      (n.proposalId.length > 0 && r.setKind === 2) ||
+        findEntry(r, n.changedBy)?.entryKind === 1 ||
+        r.former.some(e => sameId(e.deviceId, n.changedBy)),
+      'A record names an author that is neither on the roster nor a former signer.',
+    );
   return notices;
 }
 

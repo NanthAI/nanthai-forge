@@ -11,7 +11,7 @@ import { readFileSync as read } from 'node:fs';
 import { serialize, deserialize } from 'node:v8';
 import { CodeApprover, CodeRequester, parseWords } from '../dist/sealed-code.js';
 import { codeWords } from '../dist/sealed-words.js';
-import { requireConfirmedBase, requireConfirmedOwner } from '../dist/sealed-anchors.js';
+import { requireConfirmedBase, requireConfirmedWriter } from '../dist/sealed-anchors.js';
 import { createTransition } from '../dist/sealed-transition.js';
 import { forgeSecretId, framedHash } from '../dist/sealed-format.js';
 import { deviceKeys, signBytes } from '../dist/sealed-keys.js';
@@ -482,15 +482,15 @@ test('T95 re-pin by code restores a lost or too-old pin with the holder head as 
 
 test('Gate B2 L7 an owner write, removal or share on a trust-on-first-use pin needs the device own code first', () => {
   const root = new URL('../', import.meta.url);
-  assert.throws(() => requireConfirmedOwner({ confirmed: 'tofu', holder: false }), {
+  assert.throws(() => requireConfirmedWriter({ confirmed: 'tofu', holder: false }), {
     code: 'SECRETS_CODE_NEEDED',
   });
   for (const confirmed of ['code', 'holder', 'none', 'machine'])
-    requireConfirmedOwner({ confirmed, holder: false });
+    requireConfirmedWriter({ confirmed, holder: false });
   // The owner paths that rest on a pin all check it; a new owner write path must be reviewed against L7 first.
   const read = path => readFileSync(new URL(path, root), 'utf8');
-  assert.match(read('src/sealed-client.ts'), /requireConfirmedOwner\(state\.pin\)/);
-  assert.match(read('src/sealed-unshare.ts'), /requireConfirmedOwner\(state\.pin\)/);
+  assert.match(read('src/sealed-client.ts'), /requireConfirmedWriter\(state\.pin\)/);
+  assert.match(read('src/sealed-unshare.ts'), /requireConfirmedWriter\(state\.pin\)/);
   assert.match(read('src/sealed-auto-client.ts'), /pinConfirmation\(result\.pin\) === 'tofu'/);
 });
 test('d4/C6 every proposal or join builder in src and convex checks the confirmed base first', () => {
@@ -698,4 +698,27 @@ test('Gate B2 H1 after a re-pin by code, a head by a device removed since is ref
   await assert.rejects(c.pins.verifyAndSave(current, request, 1), { code: 'SECRETS_ROSTER_REFUSED' });
   assert.deepEqual(c.files(), pinned);
   assert.equal((await c.pins.load(request.forgeProjectId, 1)).pin.confirmed, 'code');
+});
+
+test('Stage 3b review M1: a device on a trust-on-first-use pin approves no code, to add a device or to re-pin', async t => {
+  const f = fixture(),
+    second = deviceKeys(f.account, f.random);
+  f.transition({ added: [f.entry(second, { how: 4, addedAtRosterVersion: 2 })] });
+  f.wrap();
+  const joining = newAccountDevice(f);
+  for (const [purpose, device] of [
+    [1, codeDevice(joining.keys, joining.accountId)],
+    [4, codeDevice(second, f.account, 'second-device')],
+  ]) {
+    // Each fresh read approves once.
+    const pin = await freshPin(t, f),
+      tofu = { ...(await freshPin(t, f)), confirmed: 'tofu' };
+    const requester = new CodeRequester(purpose, f.reply.roster, device);
+    assert.throws(
+      () => new CodeApprover({ request: requester.request, pin: tofu, signer: f.keys, person: true }),
+      { code: 'SECRETS_CODE_NEEDED' },
+    );
+    // The same request on the holder's confirmed pin is approvable.
+    new CodeApprover({ request: requester.request, pin, signer: f.keys, person: true });
+  }
 });

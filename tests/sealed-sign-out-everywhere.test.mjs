@@ -149,6 +149,7 @@ async function twoOwnerDevices(h, { coOwner = false, ownMember = false } = {}) {
         : []),
     ],
   });
+  f.wrap();
   const step = sealedWrite(f.reply, randomUUID(), {
     headHash: Buffer.from(genesis.headHash),
     rosterVersion: 1,

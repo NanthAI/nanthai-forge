@@ -293,7 +293,9 @@ const bundled = await build({
   stdin: {
     contents: [
       "export { checkAgreementKey } from './src/sealed-portable.ts';",
-      "export { sealedWriteFacts, nextSealedState } from './convex/sealedSecretGate.ts';",
+      "export { sealedWriteFacts, nextSealedState, SEALED_WRITE_WORK } from './convex/sealedSecretGate.ts';",
+      "export { checkSignedHead, checkSealedContents } from './src/sealed-head.ts';",
+      "export { walkTransition } from './src/sealed-roster.ts';",
       "export { decodeSealedWire } from './src/sealed-wire.ts';",
     ].join('\n'),
     resolveDir: root,
@@ -367,77 +369,171 @@ test('C22 the fixed X25519 probe refuses every low-order point and accepts a rea
   assert.deepEqual([...outcomes], [...lowOrder.map(() => 'SECRETS_WRAP_REFUSED'), 'ok']);
 });
 
-test('C20/C23 measured server gate at 100 recipients and 200 names: a 99-device step and a value write', async t => {
+test('C20/C23 measured server gate at 100 recipients and 200 names: the capped worst writes, and the two uncapped shapes it refuses', async t => {
   const h = harness(t),
     f = h.f;
-  const members = Array.from({ length: 99 }, (_, i) => {
+  const member = i => {
     const account = forgeSecretId('account', `fixture-member-${i}`);
     return f.entry(deviceKeys(account, f.random), {
       accountId: account,
       role: 2,
       how: 2,
-      addedAtRosterVersion: 2,
+      addedAtRosterVersion: f.reply.roster.rosterVersion + 1,
     });
-  });
-  for (let i = 0; i < 200; i++) f.name(`TOKEN_${i}`, Buffer.alloc(128, 65 + (i % 20)));
-  const first = await h.publish(null),
-    firstSet = clone(h.set());
+  };
+  const value = i => Buffer.alloc(128, 65 + (i % 20));
+  // Honest writes under the cap: a genesis of 98 names, then 102 more names, then 99 devices in two steps.
+  for (let i = 0; i < 98; i++) f.name(`TOKEN_${i}`, value(i));
+  let last = await h.publish(null);
+  const genesis = last.args.genesis;
   f.bump();
-  f.transition({ added: members });
+  for (let i = 98; i < 198; i++) f.name(`TOKEN_${i}`, value(i));
+  last = await h.publish(last.base);
+  f.bump();
+  for (let i = 198; i < 200; i++) f.name(`TOKEN_${i}`, value(i));
+  last = await h.publish(last.base);
+  assert.equal(last.result.accepted, true);
+  const stored = () => ({ set: clone(h.set()), transitions: clone(h.history().transitions) });
+  const restore = reply => {
+    for (const key of Object.keys(f.reply)) delete f.reply[key];
+    Object.assign(f.reply, clone(reply));
+  };
+  /** Builds a write without storing it, then puts the fixture back. */
+  const shape = change => {
+    const keep = clone(f.reply);
+    f.bump();
+    change();
+    const args = {
+      ...sealedWriteArgs(sealedWrite(f.reply, randomUUID(), last.base)),
+      kind: 1,
+      projectId: h.project,
+    };
+    restore(keep);
+    return args;
+  };
+  /** The server refuses it before any signature check, and stores nothing. */
+  const overCap = async args => {
+    const rows = h.rows();
+    await assert.rejects(
+      h.s.transaction(() => server.write._handler(h.s.ctx, args)),
+      code('SECRETS_FORMAT_REFUSED'),
+    );
+    assert.deepEqual(h.rows(), rows);
+  };
+  const renameAll = () => {
+    for (let i = 0; i < 200; i++) f.name(`TOKEN_${i}`, Buffer.alloc(128, 97 + (i % 20)));
+  };
+  const at = { owner: stored() };
+  // Uncapped shape B: 99 added devices and 200 changed values in one write, on the owner-only set.
+  const addAll = shape(() => {
+    f.transition({ added: Array.from({ length: 99 }, (_, i) => member(i)) });
+    f.wrap();
+    renameAll();
+  });
+  await overCap(addAll);
+  // Capped: a 50-device step (100 units), then 49 more devices.
+  f.bump();
+  f.transition({ added: Array.from({ length: 50 }, (_, i) => member(i)) });
   f.wrap();
+  last = await h.publish(last.base);
+  assert.equal(last.result.accepted, true);
+  const fifty = last.args;
+  f.bump();
+  f.transition({ added: Array.from({ length: 49 }, (_, i) => member(50 + i)) });
+  f.wrap();
+  last = await h.publish(last.base);
+  assert.equal(last.result.accepted, true);
   assert.equal(f.reply.roster.entries.length, 100);
   assert.equal(f.reply.wraps.length, 100);
+  at.full = stored();
+  // Uncapped shape A: 200 changed values at 100 recipients.
+  const changeAll = shape(renameAll);
+  await overCap(changeAll);
+  // Capped: 100 changed values (100 units) at 100 recipients, through the server with its I/O counted.
+  f.bump();
+  for (let i = 0; i < 100; i++) f.name(`TOKEN_${i}`, Buffer.alloc(128, 97 + (i % 20)));
   const before = { ...h.io },
     began = performance.now();
-  const step = await h.publish(first.base);
+  const hundred = await h.publish(last.base);
   const handlerMs = performance.now() - began;
-  assert.equal(step.result.accepted, true);
+  assert.equal(hundred.result.accepted, true);
   const io = Object.fromEntries(Object.keys(before).map(k => [k, h.io[k] - before[k]]));
   assert.equal(io.writes, 2);
-  const stepSet = clone(h.set()),
-    stepRing = clone(h.history().transitions);
-  f.bump();
-  f.name('TOKEN_0', Buffer.alloc(128, 90));
-  const value = await h.publish(step.base);
-  assert.equal(value.result.accepted, true);
-  // Same bytes, inside the V8 bundle: the stage 3 gate as built (it runs the reader's public verifier).
+  // Inside the V8 bundle, where Convex runs code.
   const context = runtime();
   context.input = {
     projectId: h.project,
     accountId: Uint8Array.from(f.account),
-    genesis: first.args.genesis,
-    step: {
-      payload: step.args.payload,
-      transition: step.args.transition,
-      set: firstSet,
-      transitions: [],
+    genesis,
+    capped: {
+      step: { payload: fifty.payload, transition: fifty.transition, ...at.owner },
+      value: { payload: hundred.args.payload, transition: null, ...at.full },
     },
-    value: { payload: value.args.payload, transition: null, set: stepSet, transitions: stepRing },
+    uncapped: {
+      addAll: { payload: addAll.payload, transition: addAll.transition, ...at.owner },
+      changeAll: { payload: changeAll.payload, transition: null, ...at.full },
+    },
   };
   const timings = vm.runInContext(
     `(() => {
-      const runs = [];
-      const run = w => {
+      const stored = w => gate.decodeSealedWire(new Uint8Array(w.set.payload));
+      const gated = w => {
         const t0 = performance.now();
         const facts = gate.sealedWriteFacts(input.projectId, 1, w.payload);
         const state = gate.nextSealedState({ set: w.set, facts, genesis: null, transition: w.transition, stored: { genesis: input.genesis, transitions: w.transitions }, accountId: input.accountId });
         return { ms: performance.now() - t0, ok: !!state };
       };
-      for (let i = 0; i < 5; i++) runs.push({ step: run(input.step), value: run(input.value) });
-      return runs;
+      // The same public checks the gate runs, called directly so the cap does not stop them.
+      const direct = w => {
+        const t0 = performance.now();
+        const facts = gate.sealedWriteFacts(input.projectId, 1, w.payload);
+        const current = stored(w), revoked = [];
+        if (w.transition) gate.walkTransition(current.roster, gate.decodeSealedWire(new Uint8Array(w.transition)), revoked);
+        gate.checkSignedHead(facts.head, facts.roster, { pinned: current, revoked });
+        gate.checkSealedContents(facts.head, facts.roster, facts.ciphertexts, facts.wraps);
+        return { ms: performance.now() - t0, ok: true };
+      };
+      const capRefusal = w => {
+        const t0 = performance.now();
+        let code = null;
+        try { gated(w); } catch (e) { code = e.code; }
+        return { ms: performance.now() - t0, ok: code === 'SECRETS_FORMAT_REFUSED' };
+      };
+      const runs = [];
+      for (let i = 0; i < 5; i++)
+        runs.push({
+          step50: gated(input.capped.step),
+          value100: gated(input.capped.value),
+          add99value200: direct(input.uncapped.addAll),
+          value200: direct(input.uncapped.changeAll),
+          refuse: capRefusal(input.uncapped.addAll),
+        });
+      return { runs, cap: gate.SEALED_WRITE_WORK };
     })()`,
     context,
   );
-  assert(timings.every(r => r.step.ok && r.value.ok));
-  const median = key => [...timings].map(r => r[key].ms).sort((a, b) => a - b)[2];
+  assert(timings.runs.every(r => Object.values(r).every(x => x.ok)));
   const round = n => Math.round(n * 10) / 10;
+  const stat = key => {
+    const ms = timings.runs.map(r => r[key].ms);
+    return { first: round(ms[0]), median: round([...ms].sort((a, b) => a - b)[2]) };
+  };
+  const budget = {
+    cap: timings.cap,
+    step50: stat('step50'),
+    value100: stat('value100'),
+    add99value200Uncapped: stat('add99value200'),
+    value200Uncapped: stat('value200'),
+    capRefusal: stat('refuse'),
+  };
+  // The capped worst writes stay well under the 1 s mutation limit, first run included.
+  assert(budget.step50.first < 500 && budget.value100.first < 500, JSON.stringify(budget));
   console.log(
     'SEALED_GATE_BUDGET ' +
       JSON.stringify({
         recipients: 100,
         names: 200,
-        payloadBytes: step.args.payload.byteLength,
-        transitionBytes: step.args.transition.byteLength,
+        payloadBytes: hundred.args.payload.byteLength,
         setBytes: getConvexSize(h.set()),
         historyBytes: getConvexSize(h.history()),
         mutationCalls: 1,
@@ -446,10 +542,7 @@ test('C20/C23 measured server gate at 100 recipients and 200 names: a 99-device 
         dbDocumentsRead: io.documents,
         dbReadBytes: io.readBytes,
         dbWrites: io.writes,
-        v8StepGateMsFirst: round(timings[0].step.ms),
-        v8StepGateMsMedian: round(median('step')),
-        v8ValueGateMsFirst: round(timings[0].value.ms),
-        v8ValueGateMsMedian: round(median('value')),
+        v8Ms: budget,
       }),
   );
 });

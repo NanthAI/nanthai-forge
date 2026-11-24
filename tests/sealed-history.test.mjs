@@ -250,7 +250,11 @@ test('T93 dropped former signers, re-addition and Checks proposal fallback retai
   f.bump();
   f.transition({ droppedFormer: [author.id] });
   await refuse(f, early, 'SECRETS_ROSTER_REFUSED');
-  assert.equal(verifySealedReply(f.reply, saw, pub(f)).pin.head.names.length, 1);
+  // Gate B3a review M2: a record's author stays on the roster or the former list, so a holder that already saw the
+  // record refuses the dropped signer too (honest steps drop only former signers no record names).
+  await refuse(f, saw, 'SECRETS_ROSTER_REFUSED');
+  // Stage 3b review L3: a fresh reader with no pin walks from genesis and refuses it as well.
+  await refuse(f, null, 'SECRETS_ROSTER_REFUSED');
   const g = fixture(),
     second = addOwner(g);
   g.rekey({ removed: [second.id], epochBumped: 1 });

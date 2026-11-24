@@ -10,6 +10,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
+import { serialize } from 'node:v8';
 import { clone, server, setup } from './helpers/sealed-hosted.mjs';
 import { device, owner } from './helpers/sealed-devices.mjs';
 import { fixture } from './helpers/sealed-fixture.mjs';
@@ -109,6 +110,11 @@ test('Done-when: a new write member on Automatic runs nforge run in a fresh Lane
   // Scale budget: owner 1 read + 1 write for the share; no owner-side call while the member waits.
   const ownerCalls = h.calls.slice(calls).map(c => c.action);
   assert.deepEqual(ownerCalls, ['read', 'write']);
+  // Server gate stage 3: write members may store heads, but a device trusting Development on first use seals no
+  // new value (the set could be one a compromised server built for it) until its own code journey.
+  const before = serialize([...h.s.tables.sealedSecretSets.values()]);
+  await assert.rejects(m.client.write('MEMBER_TOKEN', VALUE), code('SECRETS_CODE_NEEDED'));
+  assert.deepEqual(serialize([...h.s.tables.sealedSecretSets.values()]), before);
 });
 
 test('Done-when: a Checks recipient always needs a person: no join, anchor or automatic wrap exists for Checks', async t => {

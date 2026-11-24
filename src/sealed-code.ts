@@ -20,7 +20,12 @@ import {
 } from './sealed-records.js';
 import { findEntry, ownerDevice, sameId, walkTransition, writeDevice } from './sealed-roster.js';
 import { createTransition } from './sealed-transition.js';
-import { codeConfirmedAnchor, requireConfirmedBase, type JourneyAnchor } from './sealed-anchors.js';
+import {
+  codeConfirmedAnchor,
+  requireConfirmedBase,
+  requireConfirmedWriter,
+  type JourneyAnchor,
+} from './sealed-anchors.js';
 import { codeWords } from './sealed-words.js';
 import { takeFreshRead } from './sealed-pins.js';
 import type { SecretPin } from './sealed-verify.js';
@@ -296,6 +301,8 @@ export class CodeApprover {
     );
     // GB-08 d4: what a holder signs on a match is a base for a wrap or a Checks head.
     requireConfirmedBase(pin, 'approve');
+    // Stage 3b review M1: for every purpose, a holder approves only on a view it confirmed itself.
+    requireConfirmedWriter(pin);
     const self = findEntry(r, signer.id),
       target = findEntry(r, device.id),
       dev = input.development?.roster;

@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { v, getConvexSize } from 'convex/values';
 import { query, mutation } from './cliServer';
-import { activeOwnedProject, activeProject, memberProject } from './projectAuthority';
+import { activeProject, memberProject } from './projectAuthority';
 import { currentCredential } from './deviceFields';
 import { sealedKind } from './sealedSecretFields';
 import { invariant } from '../src/errors';
@@ -14,6 +14,7 @@ import {
   nextJoinRequests,
   nextSealedState,
   sealedWriteFacts,
+  storedRoster,
 } from './sealedSecretGate';
 import { linkSealedDevice } from './sealedSecretMarkers';
 
@@ -105,9 +106,10 @@ export const write = mutation({
           forgeDevice.settings?.projects.kind === 'all' &&
           forgeDevice.settings.source === 'write',
         'AUTH_SCOPE_DENIED',
-        'Sealed secret writes need an unrestricted stable owner device from nforge login.',
+        'Sealed secret writes need an unrestricted stable device from nforge login.',
       );
-      await activeOwnedProject(Object.assign(ctx, { forgeDevice }), args.projectId, user.subject);
+      // Gate B1 C24: current write access, re-read in this mutation, so a removed or lowered member is refused at once.
+      const project = await activeProject(Object.assign(ctx, { forgeDevice }), args.projectId, user.subject);
       invariant(
         (args.genesis?.byteLength ?? 0) <= 128 * 1024 && (args.transition?.byteLength ?? 0) <= 128 * 1024,
         'SECRETS_FORMAT_REFUSED',
@@ -123,6 +125,13 @@ export const write = mutation({
           q.eq('projectId', args.projectId).eq('kind', args.kind).eq('active', true),
         )
         .unique();
+      // Gate B1 C21: a genesis is the project owner's. A later head may come from any write member; it must extend the
+      // stored head and pass the public verifier below (signer of the caller's own account, authority per shape).
+      invariant(
+        set || project.owner === user.subject,
+        'SECRETS_NOT_SET_UP',
+        'This set is not set up yet. The project owner runs nforge secret set NAME first.',
+      );
       const previous = await ctx.db
         .query('sealedSecretHistory')
         .withIndex('by_project_and_setId', q => q.eq('projectId', args.projectId).eq('setId', setId))
@@ -137,6 +146,17 @@ export const write = mutation({
         return { accepted: true, replay: true };
       }
       if (!extendsStored(set, facts)) return { accepted: false, replay: false };
+      // Review M1: a Checks or Production genesis or step meets the cross-set owner rule on the stored Development
+      // roster (one indexed read, only on those writes).
+      const development =
+        args.kind !== 1 && (args.transition || !set)
+          ? await ctx.db
+              .query('sealedSecretSets')
+              .withIndex('by_project_and_kind_and_active', q =>
+                q.eq('projectId', args.projectId).eq('kind', 1).eq('active', true),
+              )
+              .unique()
+          : null;
       const state = nextSealedState({
         set,
         facts,
@@ -145,6 +165,7 @@ export const write = mutation({
         stored: previous ? { genesis: previous.genesis, transitions: previous.transitions } : null,
         // The head signer must be a device of this sign-in's account (the CLI derives the same id from its token).
         accountId: forgeSecretId('account', user.subject),
+        ...(development ? { development: storedRoster(development) } : {}),
       });
       if (!state) return { accepted: false, replay: false };
       const next = {

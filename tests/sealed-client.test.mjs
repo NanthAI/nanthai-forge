@@ -125,11 +125,14 @@ test('a direct write advances a retained live version past the compacted floor',
   f.bump();
   f.name('OLDEST_TOKEN', Buffer.alloc(0), { kind: 3, valueVersion: 7 });
   const withOldest = await publishFixture(initial);
-  f.bump();
-  for (let index = 0; index < 398; index++) {
-    f.name(`REMOVED_TOKEN_${index}`, Buffer.alloc(0), { kind: 3 });
+  // One write changes at most SEALED_WRITE_WORK records, so the 398 tombstones go in four writes.
+  let previous = withOldest;
+  for (let start = 0; start < 398; start += 100) {
+    f.bump();
+    for (let index = start; index < Math.min(start + 100, 398); index++)
+      f.name(`REMOVED_TOKEN_${index}`, Buffer.alloc(0), { kind: 3 });
+    previous = await publishFixture(previous);
   }
-  await publishFixture(withOldest);
   clear(await client.read());
 
   await client.write('NEW_TOKEN', Buffer.from('synthetic-value-for-new-name'));
@@ -568,10 +571,21 @@ test('20/200-name record and request budgets stay bounded with zero idle/landing
   for (const names of [20, 200]) {
     const { s, f, project, transport } = setup(t),
       began = performance.now();
-    for (let i = 0; i < names; i++) f.name(`TOKEN_${i}`, Buffer.alloc(128, 65 + (i % 20)));
-    const sealed = sealedWrite(f.reply, randomUUID(), null),
+    // One write changes at most SEALED_WRITE_WORK records (a genesis also adds its device): batches of 98.
+    let sealed = null,
+      wire;
+    for (let start = 0; start < names; start += 98) {
+      if (sealed) f.bump();
+      for (let i = start; i < Math.min(start + 98, names); i++)
+        f.name(`TOKEN_${i}`, Buffer.alloc(128, 65 + (i % 20)));
+      sealed = sealedWrite(
+        f.reply,
+        randomUUID(),
+        sealed && { headHash: Buffer.from(sealed.headHash), rosterVersion: 1 },
+      );
       wire = { ...sealedWriteArgs(sealed), kind: 1, projectId: project };
-    await s.transaction(() => server.write._handler(s.ctx, wire));
+      assert.equal((await s.transaction(() => server.write._handler(s.ctx, wire))).accepted, true);
+    }
     const set = [...s.tables.sealedSecretSets.values()][0],
       history = [...s.tables.sealedSecretHistory.values()][0];
     const full = await transport.read({ kind: 1 });

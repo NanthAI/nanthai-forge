@@ -19,12 +19,12 @@ import {
   type SealedReadWire,
   type SealedTransport,
 } from './sealed-transport.js';
-import { requireConfirmedOwner, type JourneyAnchor } from './sealed-anchors.js';
+import { requireConfirmedWriter, type JourneyAnchor } from './sealed-anchors.js';
 import { afterVerified, firstContactAnchor } from './sealed-auto-client.js';
 import { SecretPins } from './sealed-pins.js';
 import { sealValue } from './sealed-value.js';
 import { checkSecretWriteName } from './secret-names.js';
-import { findEntry, ownerDevice } from './sealed-roster.js';
+import { findEntry, writeDevice } from './sealed-roster.js';
 import { networkFailure } from './network-fetch.js';
 import { removeMarkedFirst } from './sealed-unshare.js';
 
@@ -185,12 +185,13 @@ export class SealedClient {
         }
         try {
           invariant(
-            ownerDevice(findEntry(reply.roster, this.keys.id)),
+            writeDevice(findEntry(reply.roster, this.keys.id), reply.roster.setKind),
             'SECRETS_NOT_ALLOWED',
-            'This slice writes from an owner device.',
+            'Only a device of a write member or owner holding Development writes its values.',
           );
-          // Gate B2 L7: an owner write rests on a roster this device confirmed, not one it only trusted on first use.
-          if (state) requireConfirmedOwner(state.pin);
+          // Gate B2 L7: a write rests on a roster this device confirmed, not one it only trusted on first use. A value
+          // sealed into a set a compromised server built for a tofu device would reach that server.
+          if (state) requireConfirmedWriter(state.pin);
           const old = reply.head.names.find(n => n.name === name);
           invariant(
             !this.agent || !old,

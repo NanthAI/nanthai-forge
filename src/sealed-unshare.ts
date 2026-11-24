@@ -13,7 +13,7 @@ import { deviceFingerprint } from './sealed-join.js';
 import { headBytes, type Entry, type Head, type Roster } from './sealed-records.js';
 import { rekeySet } from './sealed-rekey.js';
 import { findEntry, markedEntries, ownerDevice, sameId } from './sealed-roster.js';
-import { requireConfirmedOwner } from './sealed-anchors.js';
+import { requireConfirmedWriter } from './sealed-anchors.js';
 import { createTransition } from './sealed-transition.js';
 import { sealedRefusal, sealedWrite, sealedWriteArgs } from './sealed-transport.js';
 import { verifySealedReply, type SealedReply } from './sealed-verify.js';
@@ -112,7 +112,7 @@ async function removeAndRekey<T>(
         'SECRETS_NOT_ALLOWED',
         'Removing a device needs an owner device of Development in this slice.',
       );
-      requireConfirmedOwner(state.pin);
+      requireConfirmedWriter(state.pin);
       invariant(
         !chosen.remove.some(e => sameId(e.id, client.keys.id)),
         'SECRETS_ROSTER_REFUSED',
@@ -236,11 +236,13 @@ export function removeMarked(
 export async function removeMarkedFirst(client: SealedClient, state: Verified | null, already: boolean) {
   if (!state || !markedEntries(state.pin.roster, state.reply.revoked, client.keys.id).remove.length)
     return false;
-  if (client.agent || already) {
+  // Only an owner device removes another account's entry (Gate B2 M1). A member device waits for one whatever is
+  // marked, its own account's other devices included: the owner's step removes them all and re-keys once.
+  if (client.agent || already || !ownerDevice(findEntry(state.pin.roster, client.keys.id))) {
     discard(state);
     throw new ForgeError(
       'SECRETS_REKEY_PENDING',
-      'Forge marked Development entries for removal. A person runs nforge secret unshare --marked (it removes them and re-keys), then repeats this change.',
+      'Forge marked Development entries for removal. Only an owner device removes them, including your own other devices: a person on an owner device runs nforge secret unshare --marked (it removes them and re-keys), then this change is repeated.',
     );
   }
   const done = await removeMarked(

@@ -7,7 +7,7 @@
 // holds no key. Clients verify everything themselves and rely on none of this.
 import { invariant } from '../src/errors';
 import { checkSealedContents, checkSignedHead } from '../src/sealed-head';
-import { checkRoster, findEntry, walkTransition } from '../src/sealed-roster';
+import { checkRoster, findEntry, ownerDevice, walkTransition } from '../src/sealed-roster';
 import { checkSealedPart } from '../src/sealed-schema';
 import { decodeSealedWire } from '../src/sealed-wire';
 import { equalBytes, forgeSecretId, framedHash, hex } from '../src/sealed-portable';
@@ -69,6 +69,20 @@ export const extendsStored = (set: StoredSealedSet | null, facts: SealedWriteFac
     ? equalBytes(u8(set.headHash), facts.head.prevHeadHash)
     : facts.head.prevHeadHash.every(byte => byte === 0);
 
+/** The signature checks one write may cost: an added entry takes two curve operations (agreement probe and binding),
+ * a changed name record one. 100 units is about 0.2 s in the V8 bundle, well under the 1 s mutation limit; the largest
+ * honest write today is an automatic share of 32 devices (64). A bigger change is split into several writes. */
+export const SEALED_WRITE_WORK = 100;
+function checkWork(facts: SealedWriteFacts, stored: Head | null, added: number) {
+  const changed = facts.head.names.filter(n => {
+    const old = stored?.names.find(o => o.name === n.name);
+    return !old || old.valueVersion !== n.valueVersion;
+  }).length;
+  refuse(
+    2 * added + changed <= SEALED_WRITE_WORK,
+    'This write changes too many records at once. Split it into smaller writes.',
+  );
+}
 /** Gate B1 C20: the head is signed by a device of the caller's own account, and passes the reader's head and
  * contents rules on the roster after this write against the stored head, as every reader pinned there checks it. */
 function checkWriteHead(
@@ -83,8 +97,21 @@ function checkWriteHead(
     'SECRETS_ROSTER_REFUSED',
     'The head must be signed by a device of the signed-in account.',
   );
+  // Review M1: a proposal record's author is in Development, which this gate does not read. Forge stores no
+  // proposals yet, so a head carrying one is refused until the server-owned proposal store checks it.
+  invariant(
+    facts.head.names.every(n => n.proposalId.length === 0),
+    'SECRETS_NOT_ALLOWED',
+    'Proposal records are not accepted yet.',
+  );
   checkSignedHead(facts.head, facts.roster, { pinned, revoked });
   checkSealedContents(facts.head, facts.roster, facts.ciphertexts, facts.wraps);
+  // Review L1: distinct wraps of roster recipients, one per entry, so no holder is left without its wrap.
+  invariant(
+    facts.wraps.length === facts.roster.entries.length,
+    'SECRETS_WRAP_REFUSED',
+    'Every roster entry needs its set-key wrap.',
+  );
 }
 
 /** The history and side records after an accepted write. The server appends the one transition the
@@ -99,8 +126,16 @@ export function nextSealedState(input: {
   transition: ArrayBuffer | null;
   stored: { genesis: ArrayBuffer; transitions: ArrayBuffer[] } | null;
   accountId: Uint8Array;
+  /** Checks and Production steps and genesis: the active Development roster, for the cross-set owner rule (GB-08 d2,
+   * applied to the roster this write leaves, which is the final one). */
+  development?: Roster;
 }) {
-  const { set, facts, genesis, transition, stored, accountId } = input;
+  const { set, facts, genesis, transition, stored, accountId, development } = input;
+  invariant(
+    facts.roster.setKind === 1 || (!transition && set) || development,
+    'SECRETS_ROSTER_REFUSED',
+    'Set up Development before Checks.',
+  );
   refuse(facts.head.headVersion === (set?.headVersion ?? 0) + 1, 'The signed head is not the next version.');
   invariant(
     !set || equalBytes(u8(set.setId), facts.head.setId),
@@ -121,7 +156,9 @@ export function nextSealedState(input: {
       'A set keeps its first genesis permanently.',
     );
     // A genesis has one owner device, checked in full like every reader's genesis.
-    checkRoster(first);
+    // Review L2: a genesis roster is checked in full, so every entry's key checks count.
+    checkWork(facts, null, first.entries.length);
+    checkRoster(first, development);
     checkWriteHead(facts, null, [], accountId);
     // A first head starts its own ring; it never inherits steps from an older history row.
     return { genesis: genesis!, transitions: [], revoked, joinRequests };
@@ -137,6 +174,7 @@ export function nextSealedState(input: {
       facts.roster.rosterVersion === set.rosterVersion && equalBytes(facts.rosterHash, current.rosterHash),
       'A roster change needs its signed transition.',
     );
+    checkWork(facts, current, 0);
     checkWriteHead(facts, pinned, markers, accountId);
     return { genesis: stored.genesis, transitions: stored.transitions, revoked, joinRequests };
   }
@@ -159,8 +197,23 @@ export function nextSealedState(input: {
     t.delta.removed.every(id => !member(id)) && t.delta.added.every(e => member(e.id)),
     'The transition delta does not match the signed roster.',
   );
+  // Review N1: the step, like the head, is signed by the signed-in account (a device, or its person key).
+  const stepSigner = findEntry(currentRoster, t.signerId);
+  invariant(
+    stepSigner && stepSigner.entryKind !== 2 && equalBytes(stepSigner.accountId, accountId),
+    'SECRETS_ROSTER_REFUSED',
+    'The roster step must be signed by the signed-in account.',
+  );
+  // Stage 3b review L1: a first device of another account (how 2) is bound to it only by its own key, so until the
+  // code journey binds the joining account on the server, only an owner device adds one.
+  invariant(
+    ownerDevice(stepSigner) || t.delta.added.every(e => e.how !== 2 || equalBytes(e.accountId, accountId)),
+    'SECRETS_ROSTER_REFUSED',
+    "Only an owner device adds another account's first device.",
+  );
+  checkWork(facts, current, t.delta.added.length);
   // The step's signer, its authority for this shape and the rebuilt roster, with the stored markers (4.8).
-  walkTransition(currentRoster, t, markers);
+  walkTransition(currentRoster, t, markers, development);
   checkWriteHead(facts, pinned, markers, accountId);
   revoked = revoked.filter(id => !t.delta.removed.some(removed => equalBytes(removed, u8(id))));
   // A roster step also drops requests it made stale: every request once the set leaves Automatic, and one whose
@@ -181,6 +234,8 @@ export function nextSealedState(input: {
   };
 }
 
+/** The roster of a stored set, which passed this gate when it was written. */
+export const storedRoster = (set: StoredSealedSet) => (decodeSealedWire(u8(set.payload)) as Payload).roster;
 /** GB-10: when a person leaves the project, Forge asks holders to remove that account's entries (they see it).
  * Marks each of the account's entries in this set once and drops its waiting join request; a marker lasts until
  * the holder step that removes the entry. Null when nothing changes. Markers only ever name listed entries, so

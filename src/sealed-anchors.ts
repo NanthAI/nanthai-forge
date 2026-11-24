@@ -69,13 +69,14 @@ export function requireConfirmedBase(pin: SecretPin, use: keyof typeof route) {
   );
 }
 
-/** Gate B2 L7: a device on a `tofu` pin (it joined Development automatically) that was raised to owner since has
- * not confirmed that roster with a holder; it writes as an owner only after its own code journey. */
-export function requireConfirmedOwner(pin: SecretPin) {
+/** Gate B2 L7: a device on a `tofu` pin (it joined Development automatically) has not confirmed that roster with a
+ * holder; it writes, removes, shares or approves a code, as a member or an owner, only after its own code journey
+ * (stage 3b review M1: a code a tofu holder approved would turn its unconfirmed view into another device's pin). */
+export function requireConfirmedWriter(pin: SecretPin) {
   invariant(
     pinConfirmation(pin) !== 'tofu',
     'SECRETS_CODE_NEEDED',
-    'This device joined Development automatically and has not confirmed it with a holder, so it does not write, remove or share as an owner yet. Confirming by code is not available in this CLI build.',
+    'This device joined Development automatically and has not confirmed it with a holder, so it does not write, remove or share yet. Confirming by code is not available in this CLI build.',
   );
 }
 
