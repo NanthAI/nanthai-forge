@@ -284,10 +284,13 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // +2,251 read bytes. No call or write changes.
 // Item 5e3c3a3c (recompose cap): the retire arm's re-checked request row carries `mainRaces: 1` (14 B)
 // on every read of it, so the carry delta moves by -609 read bytes. No call or write changes.
+// Item 3c01e736: the compose state stores its compact server steps (about 225 bytes), so each read or write of
+// a compose row moves by that much: carry +675 read/-98 write, scoped recheck +742 read/+4 write, red -917 read/-309 write.
+// No call is added.
 export const WIRED = {
-  carry: { calls: -2, readBytes: 188_120, writeBytes: 14_836 },
-  'scoped-recheck': { calls: 8, readBytes: 326_875, writeBytes: 85_765 },
-  red: { calls: -17, readBytes: -386_052, writeBytes: -145_358 },
+  carry: { calls: -2, readBytes: 188_795, writeBytes: 14_738 },
+  'scoped-recheck': { calls: 8, readBytes: 327_617, writeBytes: 85_769 },
+  red: { calls: -17, readBytes: -386_969, writeBytes: -145_667 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

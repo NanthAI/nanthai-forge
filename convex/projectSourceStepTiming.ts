@@ -102,7 +102,7 @@ export function recordSourceStep(
       if (key === 'phase')
         merged.phase = `${String(a ?? b).split('>')[0]}>${String(b ?? a)
           .split('>')
-          .pop()}`;
+          .pop()}`.slice(0, 40);
       else if (key === 'stop') merged.stop = (b ?? a) as string;
       else merged[key] = ((a as number | undefined) ?? 0) + ((b as number | undefined) ?? 0);
     }

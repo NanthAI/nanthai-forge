@@ -1,0 +1,235 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedComposePublish.ts": "6eede5033e199f7d28018ca2c14873bbc64b63cf7ebfb800ae829a54dacf7c18",
+    "convex/projectHostedComposeStore.ts": "c03ae109276f3f1463c022a27e231e5327bfc91af573375d8d8c2d16f6069307"
+  },
+  "replay": {
+    "incident": "ced8e98f",
+    "test": "attempt replay records the mover and checked prefix, links a conflict recheck and censors a withdrawn follower",
+    "receipt": "22cf8685-699c-4190-8703-3c708e75e9f3"
+  },
+  "authorModel": "claude-sonnet-5-5",
+  "authorSession": "claude-session:6f3e888a-1f86-4cfa-b29d-cfa35a0a9299",
+  "review": {
+    "model": "claude-sonnet-5-5",
+    "session": "subagent:a3fb0f793c4885abe",
+    "receipt": "1a7661c9-64bb-4810-820a-abf280950153"
+  },
+  "exercised": {
+    "convex/projectHostedComposePublish.ts": {
+      "executed": [
+        "publishComposeJob",
+        "publishHostedCompose"
+      ],
+      "digest": "0a498a86ba6d4c31d2ac6b118d5ca95a8a3a301b698e3487d3744e03355928d1",
+      "units": [
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "composeForJob",
+          "4bcaf8adb274ac505a4da4f6563bba93c1abae095dd0d20459cea4daeb843173"
+        ],
+        [
+          "composeResultSchema",
+          "b04c371b6b518bf0dd023bfd1aa5b6d221f193390fe12d079da04dba59307447"
+        ],
+        [
+          "digest",
+          "5f605f8606bb3242a28c6a44a95e70e8b39f3555b7f0838c11f4e606795a3e50"
+        ],
+        [
+          "finishHostedOperation",
+          "241d16baeaede23d314192e7e47c686b8dc870c2eba959b1bd25a7c24a3b9048"
+        ],
+        [
+          "hostedComposeInput",
+          "f714b6f1f2e1c0826e6d209123a866aa8723fb156e37354cb6f55b68513093e9"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "loadCompose",
+          "e095ddabe4cb65b45c7b9f000a39aa14399f606c990cca259c7b66aca8503257"
+        ],
+        [
+          "loadSourceJob",
+          "1dce57657028da1eae48acfb549a41808b56cea8c709a08ea84e2ca4abcff15d"
+        ],
+        [
+          "makeFunctionReference",
+          "90760cdb0f99f8303180da5ca3bbe536fdac31c89e78b170e62dbf914920e3e4"
+        ],
+        [
+          "publishComposeJob",
+          "c3aaef861bece03400de730015b4fd106ed35db66ee3443f71ca58f86baa7c71"
+        ],
+        [
+          "publishHostedCompose",
+          "7db12262f65bb92aba0ab18440f1b6c873dc2d15045a2359c35307f02c40406e"
+        ],
+        [
+          "saveObjects",
+          "25b3bb71dade672f46ba3feff11606121a56b67d6b95ce280898b935edc52dbc"
+        ],
+        [
+          "savePin",
+          "e5b9c59bb3ad5963b9afbcfc3a1070b9f60c113e75b09cf0bee8a0e08cb77788"
+        ],
+        [
+          "semanticPayload",
+          "9566e6a72ec87c00eb0fe6294bb2c7f917bfbb20db70f7a6fc9538d4f7a06023"
+        ],
+        [
+          "sourceR2Counts",
+          "c04dd473d174bea5804a313fa9f53b7663b92c7e10feec82619220486b077b88"
+        ],
+        [
+          "sourceServerTiming",
+          "23545f9beefa6856f51da158c38aee0187ab35719b5ab39cc3a55353651bd6ba"
+        ],
+        [
+          "writeComposeState",
+          "9cfdc083419fa4630c29b95df878dcfe6b29d179d8c2dcb31d114aba4d469b54"
+        ],
+        [
+          "writeHostedRecord",
+          "fc8651df82e1fc039dedf06d867148f410393e198d708a05ff5017b7966dfe4f"
+        ]
+      ]
+    },
+    "convex/projectHostedComposeStore.ts": {
+      "executed": [
+        "composeForJob",
+        "composeRow",
+        "hostedComposeInput",
+        "loadCompose",
+        "writeComposeState"
+      ],
+      "digest": "32ed483bed23baa11d9977bb2fb52135da2a3a3316ff905ac32283927a4147ff",
+      "units": [
+        [
+          "COMPOSE_ALGORITHM",
+          "ef23f8530926cf12e5ded7dd6ebb9fe4bb593d73e7ddeb765131872db0683835"
+        ],
+        [
+          "activeProject",
+          "d18cc6b641cd45a0e474d0afe7700101c46cef8057b70e172637d1e1d30d2be9"
+        ],
+        [
+          "batchComposeSchema",
+          "1763b9a2afa47e044afe2a8ec89f1c23e4c8327d8edceb91d9c21812da74ae96"
+        ],
+        [
+          "batchDroppedSchema",
+          "a228281b996ce2d8118e47b481bc30330cd4806256f63eaae33b238ca48ca8b9"
+        ],
+        [
+          "composeForJob",
+          "cf43882efb693d4f176f7219b074cb43410b6206683d3bf368db010c366e62b2"
+        ],
+        [
+          "composeInputSchema",
+          "94ff392bf6f8cc73ea75a1d9c8b892c2547f93a1754ad243c673a49e5a2005aa"
+        ],
+        [
+          "composeRequestSchema",
+          "248bbc60638a4930df78f05fd802b4195ee36848e9ccc77d580ced309f00a80b"
+        ],
+        [
+          "composeRow",
+          "fc2bfe8afc4c9844aa5c0b981ae86d2e1a766a0a9a0d19186597a6290d4e1c68"
+        ],
+        [
+          "composeStateSchema",
+          "1f69f91f6531ed119c8f547529fe3c371579f991f65e8a8d7be77f77b02b92ba"
+        ],
+        [
+          "count",
+          "23cf46109fc897cdf68be3dbb4320ef709a78228b23c102fef72c4d6eed259f4"
+        ],
+        [
+          "earlyResolutionSchema",
+          "a281e43b23b30fab054111c57abbc5fa7bee7e1d421b4458b18a5cd11c695359"
+        ],
+        [
+          "hostedComposeInput",
+          "d958f628dbf278dfb15fbeabcc8776eb4fc8a4bb76e08801f7463d9b15a99fb7"
+        ],
+        [
+          "hostedOperationRow",
+          "ee7e2a160495859d4314eb653ae41935074ff132cd68cad10cfdfdf4eab2eb76"
+        ],
+        [
+          "hostedOperationSchema",
+          "a4a0088654440a511e5aaa4e2a3ee4d6be0692ef3e8f63a027c6e4e73a38ca96"
+        ],
+        [
+          "hostedWriteProject",
+          "3a2dcfd149cab0cc00290a015bc2bf96315135dd3f5c0643e4bb3178451cd869"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "loadCompose",
+          "7c6284484dde119f10b410af23b8ce83ebe5368a0c8a86a979146422769ce55e"
+        ],
+        [
+          "notifyDesiredCompose",
+          "a71353136a20909dec874c83d8681fa1b6a2dd17af18d2a61b3b6bdcab4c93d4"
+        ],
+        [
+          "notifyFinishCompose",
+          "9c97c67541f2afbc24bb3374d082fc9318da2319597c9209c30ef10f86e55e85"
+        ],
+        [
+          "notifyPullCompose",
+          "8c2b9a1e4a53ee7d06184d33aacb2c3f2d35fe8d2df2f41511394da1a3802263"
+        ],
+        [
+          "progress",
+          "774634369f18d957956299e0cd1f29cf4f6562bfeafd238c14931646402b06d7"
+        ],
+        [
+          "saveObjectSchema",
+          "5f5e984856f967a7e5e071df0b63fd29846990ace2890a5f7bff2a505150bad8"
+        ],
+        [
+          "saveWorkerObjectSchema",
+          "6232ac0489679930d1c4ce05a2a8272c376a68fbcdbff1d7579ab59648d53f66"
+        ],
+        [
+          "semanticPayload",
+          "9566e6a72ec87c00eb0fe6294bb2c7f917bfbb20db70f7a6fc9538d4f7a06023"
+        ],
+        [
+          "semanticPlanSchema",
+          "7455790c29ae6c3ac9f65fe6d2af3ef6ffc1da31546f7683e897bcf4e7a3abc2"
+        ],
+        [
+          "sourcePhaseTimingSchema",
+          "ea000da412b5e2ba6ccd54589177d328dab271659841fbc9cb72c7451ff416b6"
+        ],
+        [
+          "sourceServerTimingSchema",
+          "094fcd0e36fffe346e3e58ac5cebd744c1e0f516d7eff6a82a4182ff430ba279"
+        ],
+        [
+          "writeComposeState",
+          "e5b391ae67cde91d93b9160b84e8f61f867203d2574313a8dd261e653b91f2b2"
+        ],
+        [
+          "z",
+          "0be8b14a719fbad954f3dc9bb19b1716bed3a588afba2e97f0a99e168ee0a700"
+        ]
+      ]
+    }
+  }
+}

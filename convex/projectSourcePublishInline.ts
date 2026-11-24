@@ -46,6 +46,7 @@ export async function publishSourceResult(
             source: {
               r2: sourceR2Counts(timing),
               ...(timing?.summary ? { timing: timing.summary } : {}),
+              ...(timing ? { serverTiming: { ...timing, publishedAt: Date.now() } } : {}),
             },
           });
   if (terminal === null) return null;

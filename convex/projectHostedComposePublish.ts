@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { makeFunctionReference } from 'convex/server';
+import type { z } from 'zod';
 import type { Id } from './_generated/dataModel';
 import { composeForJob } from './projectHostedComposeStore';
 import { semanticPayload } from '../src/semantic-payload';
@@ -11,7 +12,7 @@ import { writeHostedRecord } from './projectHostedRecords';
 import { saveObjects, type SaveIdentity } from './projectHostedSaveStore';
 import { loadSourceJob } from './projectSourceJobs';
 import type { SourcePhaseTiming } from '../src/hosted-source-retry';
-import { sourceR2Counts, sourceServerTiming } from './projectSourceStepTiming';
+import { sourceR2Counts, sourceServerTiming, type sourceServerTimingSchema } from './projectSourceStepTiming';
 import { composeResultSchema } from '../src/hosted-compose';
 import { savePin } from '../src/hosted-save';
 import { digest } from '../src/state/hash';
@@ -25,7 +26,11 @@ export async function publishHostedCompose(
   input: SaveIdentity & {
     result: string;
     /** R2 requests the job's steps signed, when the committing step already holds its step row. */
-    source?: { r2: [number, number, number]; timing?: SourcePhaseTiming };
+    source?: {
+      r2: [number, number, number];
+      timing?: SourcePhaseTiming;
+      serverTiming?: z.infer<typeof sourceServerTimingSchema>;
+    };
   },
 ) {
   const { row, state, operation, project } = await loadCompose(ctx, input, false);
@@ -138,10 +143,26 @@ export async function publishHostedCompose(
   const timing = input.source ? undefined : await sourceServerTiming(ctx, input.projectId, row.jobId);
   const r2 = input.source?.r2 ?? sourceR2Counts(timing);
   const sourceTiming = input.source?.timing ?? timing?.summary;
+  // Stored compactly: the summary and R2 counts already sit in this state as `sourceTiming` and `r2`.
+  const full = input.source?.serverTiming ?? timing;
+  const serverTiming = full && {
+    queuedAt: full.queuedAt,
+    scheduledAt: full.scheduledAt,
+    ...(full.doneAt === undefined ? {} : { doneAt: full.doneAt }),
+    publishedAt: full.publishedAt,
+    steps: full.steps.map(step =>
+      Object.fromEntries(
+        ['phase', 'stop', 'bootMs', 'runMs', 'reads', 'writes'].flatMap(key =>
+          step[key] === undefined ? [] : [[key, step[key]]],
+        ),
+      ),
+    ),
+  };
   await writeComposeState(ctx, row._id, {
     ...state,
     ...(r2.some(Boolean) ? { r2 } : {}),
     ...(sourceTiming ? { sourceTiming } : {}),
+    ...(serverTiming ? { serverTiming } : {}),
     ...(output.dropped ? { dropped: output.dropped } : {}),
     ...(result.status === 'conflict' && result.paths
       ? { conflictSummary: { paths: result.paths, more: result.more ?? 0 } }
@@ -157,7 +178,11 @@ export async function publishComposeJob(
     projectId: Id<'hostedProjects'>;
     jobId: string;
     result: string;
-    source?: { r2: [number, number, number]; timing?: SourcePhaseTiming };
+    source?: {
+      r2: [number, number, number];
+      timing?: SourcePhaseTiming;
+      serverTiming?: z.infer<typeof sourceServerTimingSchema>;
+    };
   },
 ) {
   const row = await composeForJob(ctx, input.projectId, input.jobId);

@@ -7,6 +7,7 @@ import { semanticPlanSchema } from '../src/intent-semantic-conflict';
 import { notifyDesiredCompose } from './projectHostedLandingDesiredWake';
 import { notifyPullCompose } from './projectGithubPullQueue';
 import { z } from 'zod';
+import { sourceServerTimingSchema } from './projectSourceStepTiming';
 import { earlyResolutionSchema } from '../src/early-resolution';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -44,6 +45,8 @@ export const composeStateSchema = z
      * bytes put (Issue 3e3f9fe6). The landing that adopts this compose adds them to its own counts. */
     r2: z.tuple([count, count, count]).optional(),
     sourceTiming: sourcePhaseTimingSchema.optional(),
+    /** The execution's per-step split (steps, bootMs, runMs, reads, writes), as a save or sync carries it. */
+    serverTiming: sourceServerTimingSchema.optional(),
     request: composeRequestSchema,
     main: saveWorkerObjectSchema,
     inputs: progress,

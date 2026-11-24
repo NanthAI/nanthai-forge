@@ -394,10 +394,12 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // resolve call): 2,088 fewer read bytes for the pair, with unchanged calls and writes.
   // Item 411727ba (bucketed overlap changes): each Lane's saved list is a bucket row beside a slim overlap row: +286 read
   // and +182 write bytes for the pair, with unchanged calls.
+  // Item 3c01e736: the compose state stores its compact server steps: +714 read and +238 write bytes for the pair
+  // (and at 4,000 files), with unchanged calls.
   const measured = canonicalReplayCost(pair);
   assert.deepEqual(
     measured,
-    { calls: 107, readBytes: 1_822_519, writeBytes: 593_944 },
+    { calls: 107, readBytes: 1_823_233, writeBytes: 594_182 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -460,7 +462,7 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   const measured = canonicalReplayCost(after);
   assert.deepEqual(
     measured,
-    { calls: 107, readBytes: 1_827_376, writeBytes: 596_221 },
+    { calls: 107, readBytes: 1_828_090, writeBytes: 596_459 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

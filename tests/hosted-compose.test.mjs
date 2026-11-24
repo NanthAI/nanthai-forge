@@ -300,3 +300,43 @@ test('same-position independent additions preserve exact declared Lane order', a
   }
   assert.deepEqual(heads, ['a\nleft\nright\nz\n', 'a\nright\nleft\nz\n']);
 });
+
+test('a compose reply carries the execution server steps like a save or sync does (friction 13299eaa)', async () => {
+  const s = await composeFixture(),
+    x = await selected(s);
+  await s.prepare(x);
+  await s.stage(x);
+  const submitted = await s.submit(x);
+  const output = await s.work(x);
+  s.insert('projectSourceSteps', {
+    projectId: s.projectId,
+    jobId: submitted.jobId,
+    dispatch: 'd',
+    executionId: 'e',
+    step: 0,
+    cursor: null,
+    timing: {
+      queuedAt: 1,
+      scheduledAt: 2,
+      steps: [
+        {
+          waitMs: 1,
+          runMs: 5,
+          readMs: 1,
+          writeMs: 1,
+          callMs: 1,
+          calls: 2,
+          reads: 3,
+          writes: 2,
+          stop: 'done',
+        },
+      ],
+    },
+  });
+  await s.publish(output);
+  const { state } = await s.progress(x);
+  assert.equal(state.serverTiming.steps.length, 1);
+  assert.equal(state.serverTiming.steps[0].reads, 3);
+  assert.equal(state.serverTiming.steps[0].stop, 'done');
+  assert.equal(typeof state.serverTiming.publishedAt, 'number');
+});
