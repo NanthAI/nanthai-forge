@@ -62,7 +62,7 @@
   .xrow .pj { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 2px var(--s-3); align-items: center; min-width: 0; }
   .xrow .pj .av { grid-row: 1 / span 2; align-self: start; margin-top: 1px; }
   .xrow .pjn { min-width: 0; display: flex; white-space: nowrap; font-weight: var(--w-bold); }
-  .xrow .pjn .ow { color: var(--text-2); font-weight: var(--w-regular); flex: 0 20 auto; min-width: 5ch; overflow: hidden; text-overflow: ellipsis; }
+  .xrow .pjn .ow { color: var(--text-2); font-weight: var(--w-regular); flex: 0 20 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .xrow .pjn .sl { color: var(--text-2); font-weight: var(--w-regular); flex: none; }
   .xrow .pjn b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .xrow .pjd { grid-column: 2; color: var(--text-2); font-size: var(--t-meta); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -212,5 +212,10 @@
   .row.item { grid-template-columns: 18px minmax(0, 1fr) auto; }
   .row.init { grid-template-columns: minmax(0, 1fr) minmax(80px, 200px) auto; }
   /* The project table with only the signals the public read carries: project, landings this week, main, stars. */
-  @container (min-width: 821px) { .xrow.lean { grid-template-columns: minmax(0, 1fr) 150px 128px 92px; } }
+  @container (min-width: 821px) {
+    .xrow.lean { grid-template-columns: minmax(0, 1fr) 150px 128px 92px; }
+    .xrow.lean.pp-x { grid-template-columns: minmax(0, 1fr) 150px 112px 128px 92px; }
+  }
+  .xrow.pp-x .tm { color: var(--text-2); }
+  .xrow.pp-x .tm .nr { color: var(--text-3); font-family: var(--font-sans); }
 }

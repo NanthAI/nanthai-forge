@@ -38,10 +38,10 @@ const listed = (handle, slug, landings, stars, main = 'passing', name = slug) =>
   main,
 });
 const projects = [
-  listed('ada', 'atlas', 42, 310),
+  { ...listed('ada', 'atlas', 42, 310), timeToMain: 11 * 60_000 },
   listed('ada', 'ledger', 12, 18),
   listed('kestrel-works', 'tern', 27, 96),
-  listed('wren', 'quiet-tool', 0, 4, 'unchecked'),
+  listed('q', 'x', 0, 1, 'unchecked'),
   listed(
     'a-very-long-organisation-handle-for-testing',
     'an-unusually-long-project-name-that-must-wrap-or-cut',
@@ -539,6 +539,13 @@ test('public discovery screens: explore, a profile signed out and as its person,
   assert.match(sit, /5 public projects\. 4 of them landed something this week\./);
   assert.equal(await ex.locator('.row.xrow').count(), 5);
   assert.match(await ex.locator('.tbar .n').textContent(), /^5 projects$/);
+  assert.equal(await ex.getByText('Time to main', { exact: true }).count(), 1);
+  assert.deepEqual((await ex.locator('.row.xrow .tm').allTextContents()).slice(0, 4), [
+    '11 min',
+    'not reported',
+    'not reported',
+    'not checked',
+  ]);
   await ex.getByRole('searchbox').fill('ada');
   assert.equal(await ex.locator('.row.xrow').count(), 2);
   assert.equal(await ex.locator('.row.hitrow').count(), 1, 'the person is found too');
@@ -789,6 +796,14 @@ test('public discovery screens: explore, a profile signed out and as its person,
         const page = await open(path, width, theme);
         const scroll = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
         assert.ok(scroll <= 0, `${name} ${width}/${theme}: no sideways scroll`);
+        if (name === 'explore') {
+          const gap = await page.locator('.pjn[title="q/x"] .ow').evaluate(handle => {
+            const text = document.createRange();
+            text.selectNodeContents(handle);
+            return handle.getBoundingClientRect().right - text.getBoundingClientRect().right;
+          });
+          assert.ok(gap < 1, `one-letter handle ends at the slash at ${width}/${theme}`);
+        }
         await page.addScriptTag({ path: axe });
         const violations = await page.evaluate(async () =>
           (await axe.run(document, { rules: { 'color-contrast': { enabled: true } } })).violations.map(

@@ -12,7 +12,7 @@ A visitor can open Explore at `/explore`, search by name or handle, or follow a 
 
 Public project stars follow the account (I42). Forge drops old public browser stars from the public Projects view and count. A person can star the project again from any browser. Private project bookmarks in the legacy Projects list still live in that browser. Source bookmarks are account-backed.
 
-The site currently caches public responses for 30 seconds. The existing Explore ranking has no time-to-main signal and refreshes each project's activity summary when the public project page is read. On-change materialisation and R2 delivery are tracked by 6a60e89a. The fork action and its sign-in prompt depend on Item d1303286.
+The site caches public responses for 30 seconds. The dormant R2 path ranks Explore from snapshot activity and Forge stars. Explore can show a reported time to main from the snapshot and otherwise says “not reported” or “not checked”; the weekly save-to-main aggregation is not wired yet. The fork action and its sign-in prompt depend on Item d1303286.
 
 ## Decisions
 

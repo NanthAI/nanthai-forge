@@ -25,6 +25,8 @@ export type ListedProject = {
   landings: number;
   days: number[];
   main: MainCheck;
+  /** Median save-to-main time in milliseconds; absent when not reported. */
+  timeToMain?: number;
 };
 export type ExplorePage = {
   asOf: number;

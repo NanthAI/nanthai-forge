@@ -30,6 +30,7 @@ import { hrefFor, publicProjectHref, type AppRoute } from '../app/paths';
 import { shellQuote } from '../../../src/shell-quote';
 import { explorePagePath, explorePageSize, orderSearchRows } from '../../../src/public-explore-pages';
 import { publicProjectClone, publicProjectLogin } from '../../../src/public-project-commands';
+import { flowDuration } from '../../../src/flow-text';
 import {
   useExploreDirectory,
   usePublicRead,
@@ -299,12 +300,14 @@ function Rows({
   projects,
   visibleProjects = projects,
   ownStarredList = false,
+  showTiming = false,
   signedIn,
   starLookup,
 }: {
   projects: readonly ListedProject[];
   visibleProjects?: readonly ListedProject[];
   ownStarredList?: boolean;
+  showTiming?: boolean;
   signedIn: boolean;
   starLookup?: true;
 }) {
@@ -316,20 +319,22 @@ function Rows({
   const mine = useMemo(() => (mineList ? new Set<string>(mineList) : null), [mineList]);
   const [gate, setGate] = useState<ListedProject | null>(null);
   if (!visibleProjects.length) return null;
+  const layout = showTiming ? 'xrow lean pp-x' : 'xrow lean';
   return (
     <>
-      <div className="th xrow lean">
+      <div className={`th ${layout}`}>
         <span>Project</span>
         <span className="r" title="Changes accepted onto main in the last 7 days, and each day’s share">
           Landings, 7 days
         </span>
+        {showTiming ? <span className="r">Time to main</span> : null}
         <span title="Whether the check on main passes">Main</span>
         <span className="r">Stars</span>
       </div>
       {visibleProjects.map(project => {
         const n = project.landings;
         return (
-          <div className="row xrow lean" key={`${project.handle}/${project.slug}`}>
+          <div className={`row ${layout}`} key={`${project.handle}/${project.slug}`}>
             <div className="pj">
               <Avatar handle={`@${project.handle}`} large />
               <a
@@ -355,6 +360,17 @@ function Rows({
                 </span>
                 <Week days={project.days} />
               </span>
+              {showTiming ? (
+                <span className="tm r" title="Median time from save to main this week">
+                  {project.main === 'unchecked' || project.timeToMain === undefined ? (
+                    <span className="nr">
+                      {project.main === 'unchecked' ? 'not checked' : 'not reported'}
+                    </span>
+                  ) : (
+                    <span className="num">{flowDuration(project.timeToMain)}</span>
+                  )}
+                </span>
+              ) : null}
               <span className="hl">
                 <Main main={project.main} />
               </span>
@@ -557,7 +573,7 @@ function Explore({ signedIn }: { signedIn: boolean }) {
           </>
         ) : null}
         {shown.length ? (
-          <Rows projects={shown} signedIn={signedIn} starLookup={read.data.starLookup} />
+          <Rows projects={shown} showTiming signedIn={signedIn} starLookup={read.data.starLookup} />
         ) : null}
         {searchHits.map(([handle, slug, name]) => (
           <a
