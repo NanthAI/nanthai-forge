@@ -240,8 +240,10 @@ export function recordsFixture() {
           },
           take: async n => read((direction === 1 ? selected : selected.toReversed()).slice(0, n)),
           paginate: async ({ cursor, numItems, maximumBytesRead, maximumRowsRead }) => {
-            assert(selected, 'indexed reads only');
-            const rows = direction === 1 ? selected : selected.toReversed();
+            // The explicit deployment census pages the built-in creation order.
+            const matching = selected ?? (table === 'hostedProjects' ? [...tables[table].values()] : null);
+            assert(matching, 'indexed reads only');
+            const rows = direction === 1 ? matching : matching.toReversed();
             const start = Number(cursor ?? 0),
               page = [];
             let bytes = 0;

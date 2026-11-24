@@ -847,6 +847,119 @@ test('incident 846c635b: the legacy continuation boundary refuses before any Lan
   }
 });
 
+function purgingFixture(s, itemId) {
+  s.patch('hostedProjects', s.projectId, {
+    itemPurges: [
+      { operationId: randomUUID(), itemId, ids: [itemId], version: 1, decisions: [], rows: 1, startedAt: 1 },
+    ],
+  });
+}
+
+test('an explicit existing-Intent start cannot join an Intent-born Item during its purge', async () => {
+  const s = await setup();
+  const first = await s.begin();
+  purgingFixture(s, first.intentId);
+  await assert.rejects(
+    s.begin(s.input({ kind: 'existing', intentId: first.intentId })),
+    code('INTENT_CLOSED'),
+  );
+  assert.equal(s.tables.projectHostedOverlapLanes.size, 1);
+});
+
+async function knownItemLane() {
+  const s = await setup();
+  const itemId = randomUUID();
+  const backupId = 'fixture-backup';
+  const generationId = s.insert('projectWorkGenerations', {
+    projectId: s.projectId,
+    backupId,
+    format: 11,
+    status: 'ready',
+    initialRevision: 0,
+    revision: 0,
+    nextBatch: 0,
+    metadata: '{"schema":24}',
+  });
+  s.patch('hostedProjects', s.projectId, {
+    work: {
+      backupId,
+      generationId,
+      operationId: randomUUID(),
+      initialRevision: 0,
+      revision: 0,
+    },
+  });
+  s.insert('projectPlanningRecords', {
+    projectId: s.projectId,
+    generationId,
+    collection: 'planningSearch',
+    key: itemId,
+    parent: '',
+    position: 1,
+    value: JSON.stringify({ id: itemId, kind: 'issue', status: 'open', title: 'Pending purge' }),
+    planning: { text: 'Pending purge', kind: 'issue', status: 'open', open: true, initiativeId: '' },
+  });
+  const first = await s.begin(s.input({ kind: 'planned', intentId: itemId, outcome: 'Pending purge' }));
+  const read = () =>
+    s.invoke('lane', reads.detail, { projectId: s.projectId, laneId: first.lane.laneId }).then(JSON.parse);
+  const write = (record, expectedVersion, reopened) =>
+    s.call('lane-write', {
+      _handler: ctx =>
+        records.writeHostedRecord(ctx, {
+          projectId: s.projectId,
+          actor: 'owner',
+          authorityEpoch: 1,
+          expectedVersion,
+          record,
+          ...(reopened ? { reopened: true } : {}),
+        }),
+    });
+  const membership = laneId =>
+    [...s.tables.projectHostedRecordHeads.values()].find(head => head.key === laneId)?.planningItemId;
+  return { s, itemId, lane: await read(), read, write, membership };
+}
+
+test('a new Resolution Lane inherits Item membership and cannot publish after the purge fence', async () => {
+  const { s, itemId, lane, write, membership } = await knownItemLane();
+  const resolution = {
+    ...lane,
+    id: randomUUID(),
+    version: 0,
+    resolution: {
+      candidateId: null,
+      conflicts: { sha256: 'c'.repeat(64), size: 1 },
+      left: lane.head,
+      right: lane.head,
+      draftHead: lane.head,
+      origin: { laneId: lane.id, head: lane.head, sourceVersion: lane.sourceVersion },
+      status: 'pending',
+    },
+  };
+  await write(resolution, null);
+  assert.equal(membership(resolution.id), itemId);
+  purgingFixture(s, itemId);
+  await assert.rejects(write({ ...resolution, id: randomUUID() }, null), code('INTENT_CLOSED'));
+  assert.equal(s.tables.projectHostedOverlapLanes.size, 2);
+});
+
+test('reopening stamps the Item on an older Lane but cannot reopen it during permanent purge', async () => {
+  const { s, itemId, lane, read, write, membership } = await knownItemLane();
+  const closed = { ...lane, version: 1, lifecycleVersion: 1, state: 'abandoned' };
+  const reopened = { ...lane, version: 2, lifecycleVersion: 2 };
+  await write(closed, 0);
+  const head = [...s.tables.projectHostedRecordHeads.values()].find(head => head.key === lane.id);
+  s.patch('projectHostedRecordHeads', head._id, { planningItemId: undefined });
+  await write(reopened, 1, true);
+  assert.equal(membership(lane.id), itemId);
+  await write({ ...closed, version: 3, lifecycleVersion: 3 }, 2);
+  purgingFixture(s, itemId);
+  await assert.rejects(
+    write({ ...reopened, version: 4, lifecycleVersion: 4 }, 3, true),
+    code('INTENT_CLOSED'),
+  );
+  assert.equal((await read()).state, 'abandoned');
+});
+
 // Flip 5 (Issue 0695ab24): an Intent copied from the Work journal is owned by the journal until a Lane
 // starts on it. That start pins it exactly as the old start created it: same id, active, the Lane's base
 // and receipt, open to any project member. Until then Issue states never report its planning status.

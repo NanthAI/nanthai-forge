@@ -27,6 +27,8 @@ export async function createProject(
       visibility: input.visibility ?? 'private',
       currentBackup: null,
       revision: 0,
+      // Fresh projects have no pre-projection execution history to repair.
+      itemLaneMembership: true,
     });
     project = (await ctx.db.get(id))!;
     // A public project can be found from its first moment (explore, profiles); private ones get no row.

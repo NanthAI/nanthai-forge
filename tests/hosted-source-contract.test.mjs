@@ -381,6 +381,15 @@ test('first attempt pins cannot drift; named child attempts and failed terminal 
   assert.deepEqual(replay.operation.terminal, failed.terminal);
 });
 
+test('new projects have no legacy membership to repair, but a creation retry never certifies old rows', async () => {
+  const s = state([]);
+  const input = { owner: 'owner', key: randomUUID(), name: 'Membership coverage' };
+  const project = await creation.createProject(s.ctx, input);
+  assert.equal(project.itemLaneMembership, true);
+  await s.ctx.db.patch(project._id, { itemLaneMembership: undefined });
+  assert.equal((await creation.createProject(s.ctx, input)).itemLaneMembership, undefined);
+});
+
 test('creation retry preserves explicit project authority rather than resetting its epoch', async () => {
   const s = state([]);
   const input = { owner: 'owner', key: randomUUID(), name: 'Existing' };

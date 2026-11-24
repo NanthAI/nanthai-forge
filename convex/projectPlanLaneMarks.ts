@@ -5,6 +5,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { PlanRow } from '../src/planning-model';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { workRecordLookup } from './projectWorkRecordTables';
+import { invariant } from '../src/errors';
 
 const kind = (status: string) => `plan-item-lanes:${status}`;
 type Source = { id: string; status: string; kind: string; purged?: unknown };
@@ -94,6 +95,7 @@ export async function planLaneItem(
   ctx: MutationCtx,
   project: Doc<'hostedProjects'>,
   itemId: string,
+  starting = false,
 ): Promise<Placement | null> {
   if (!itemId) return null; // The Intent was explicitly created independently.
   const generation = await selectedGeneration(ctx, project);
@@ -101,6 +103,11 @@ export async function planLaneItem(
   const root = await workRecordLookup(ctx, recordPartition(generation), 'planningSearch', itemId);
   if (!root) return null;
   const item = JSON.parse(root.value) as Source;
+  invariant(
+    !starting || (!item.purged && item.status !== 'deleted'),
+    'INTENT_CLOSED',
+    'A deleted Item cannot start work.',
+  );
   return item.kind === 'issue' && !item.purged ? { ...item, position: root.position } : null;
 }
 

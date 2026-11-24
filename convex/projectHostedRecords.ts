@@ -4,6 +4,8 @@ import { readyJournalRecord, wakeJournal, journalGraceMs } from './projectJourna
 import { journalDependency, journalRecord, loadedJournalRows, journalBody } from './projectJournalStore';
 import { fingerprintHostedIntent } from './projectWorkStoreFingerprintWrites';
 import { trackHostedOverlapLane } from './projectHostedOverlapStore';
+import { planLaneItem } from './projectPlanLaneMarks';
+import { purgeOwnsIntent } from './projectItemPurgeFence';
 import type { OverlapChange } from '../src/hosted-overlap';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -217,6 +219,31 @@ export async function writeHostedRecord(
       : record.kind === 'candidate' && input.ownerOnly !== undefined
         ? { ownerOnly: input.actor === project.owner && input.ownerOnly === true }
         : {};
+  const reopened =
+    input.reopened === true ||
+    Boolean(record.kind === 'lane' && head && head.status !== 'active' && record.state === 'active');
+  const opening = record.kind === 'lane' && record.state === 'active' && (!head || reopened);
+  let itemId =
+    input.planningItemId === null ? independentIntentItem : (input.planningItemId ?? head?.planningItemId);
+  let openingItem: Awaited<ReturnType<typeof planLaneItem>> | undefined;
+  if (record.kind === 'lane' && opening) {
+    // Source-only projects have no Item membership to infer. A retained purge or Work
+    // can supply one; an explicit binding already came from the caller's selected Intent.
+    if (itemId === undefined && (project.work || project.itemPurges?.length))
+      itemId = (await recordHead(ctx, input.projectId, 'intent', record.intentId))?.planningItemId;
+    invariant(
+      !project.itemPurges?.some(purge => purgeOwnsIntent(purge, record.intentId, itemId)),
+      'INTENT_CLOSED',
+      'A permanently deleted Item cannot open a Lane.',
+    );
+    // One lookup, reused by the Lane head and overlap/Plan mark. A new independent start
+    // already knows it has no existing Item; an Intent-born Item must check its same-ID root.
+    openingItem =
+      input.planningItemId !== null && project.work?.generationId
+        ? await planLaneItem(ctx, project, itemId || record.intentId, true)
+        : null;
+    itemId = openingItem?.id ?? itemId;
+  }
   const indexed = { ...hostedRecordIndex(record), version: record.version, ...ownerOnly },
     identity = { projectId: input.projectId, kind: record.kind, key: record.id };
   const bodyId = await ctx.db.insert('projectHostedRecordBodies', { projectId: input.projectId, value });
@@ -235,15 +262,15 @@ export async function writeHostedRecord(
     digest: ref.digest,
     bytes: ref.bytes,
   });
-  const itemId =
-    input.planningItemId === null ? independentIntentItem : (input.planningItemId ?? head?.planningItemId);
   const pointer = {
     ...identity,
     ...indexed,
     ...(record.kind === 'save' ? { status: indexedSaveStatus } : {}),
     recordId: id,
     ...(record.kind === 'lane' && head?.saveFailure ? { saveFailure: head.saveFailure } : {}),
-    ...(record.kind === 'intent' && itemId !== undefined ? { planningItemId: itemId } : {}),
+    ...(itemId !== undefined && (record.kind === 'intent' || (record.kind === 'lane' && itemId))
+      ? { planningItemId: itemId }
+      : {}),
   };
   if (head) {
     await readyJournalRecord(ctx, input.projectId, head.recordId, head.kind);
@@ -261,10 +288,10 @@ export async function writeHostedRecord(
     await touchLifecycleIntent(ctx, input.projectId, record.intentId);
     await trackHostedOverlapLane(ctx, input.projectId, record, input.overlap, {
       project,
-      itemId: input.planningItemId,
+      itemId: input.planningItemId === null ? null : itemId,
+      openingItem,
       newLane: !head,
-      reopened:
-        input.reopened === true || Boolean(head && head.status !== 'active' && record.state === 'active'),
+      reopened,
     });
   }
   const saved = (await ctx.db.get(id))!;

@@ -6,7 +6,8 @@ import { mutation, query } from './cliServer';
 import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { sourceAuthority } from '../src/hosted-source-authority';
-import { requireWriteEpoch } from './projectHostedRecords';
+import { recordHead, requireWriteEpoch } from './projectHostedRecords';
+import { purgeOwnsIntent } from './projectItemPurgeFence';
 import { beginHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import { lifecycleGuard } from './projectHostedLifecycleOverlay';
 import { sameSaveLane, loadSave } from './projectHostedSaveStore';
@@ -95,7 +96,7 @@ export async function transitionLifecycle(
       await scheduleLifecycle(ctx, plan._id);
     return canonicalPayload(lifecycleResult(plan));
   }
-  const { record } = await lifecycleTarget(
+  const { row, record } = await lifecycleTarget(
     ctx,
     input.projectId,
     actor,
@@ -145,6 +146,14 @@ export async function transitionLifecycle(
       'Hosted Intent changed from its lifecycle pins.',
     );
   const intentId = record.kind === 'lane' ? record.intentId : record.id;
+  const purges = prepared.project.itemPurges?.filter(
+    purge => !purge.commentId && purge.purgedAt === undefined,
+  );
+  const itemId =
+    purges?.length && record.kind === 'lane' && !row.planningItemId
+      ? (await recordHead(ctx, input.projectId, 'intent', intentId))?.planningItemId
+      : row.planningItemId;
+  const redacting = purges?.some(purge => purgeOwnsIntent(purge, intentId, itemId));
   let guard = await lifecycleGuard(ctx, input.projectId, intentId);
   if (!guard) {
     const id = await ctx.db.insert('projectHostedLifecycleGuards', {
@@ -162,11 +171,7 @@ export async function transitionLifecycle(
     receiptId: first.ids.receipt!,
     authorityEpoch: request.authorityEpoch,
     request: canonicalPayload(
-      prepared.project.itemPurges?.some(
-        purge => purge.intentKeys?.includes(intentId) && purge.purgedAt === undefined,
-      )
-        ? { ...request, reason: purgedLifecycleReason(request.action) }
-        : request,
+      redacting ? { ...request, reason: purgedLifecycleReason(request.action) } : request,
     ),
     at: first.at,
     revision: guard.revision,

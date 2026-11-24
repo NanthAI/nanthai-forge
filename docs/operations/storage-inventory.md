@@ -109,6 +109,20 @@ measurements, excluding system/search indexes and provider B-tree overhead; they
 are not billed physical index storage. Live row counts come from the read-only
 inventory above, and physical reclamation needs provider storage evidence.
 
+### Item membership repair
+
+New and reopened Lanes carry verified Item membership on their existing head. The explicit dev-only
+repair follows verified successor IDs from each root, then fills Lane heads from their parent Intent.
+It does not enable the staged index, change the selected readers or remove the start cap. Run
+`projectItemLaneBackfill:run` with a project id and `after` (`null` initially), then use the returned
+`next` until complete. Retrying a previously committed frontier returns the durable position. The
+repair processes at most 62 steps in one transaction, with at most 192 reads, 132 ranges, 64 writes,
+8 MiB read and 4 MiB patch payload. It makes no R2 calls and schedules no idle work.
+
+Before switching readers, drain the dev census `projectItemLaneBackfill:coverage`, passing its `next`
+as `after`. Record that the sum of `covered` equals the sum of `checked` over all pages. Use returned
+incomplete frontiers to resume; a partial repair does not qualify for the reader switch.
+
 ## Plan projection storage budget
 
 The current partition's `_workStorePlan` collection shares `projectWorkDataRecords`; it is disposable metadata,

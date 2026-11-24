@@ -110,6 +110,7 @@ export async function trackHostedOverlapLane(
   planning?: {
     project: Doc<'hostedProjects'>;
     itemId: string | null | undefined;
+    openingItem?: Awaited<ReturnType<typeof planLaneItem>> | undefined;
     newLane: boolean;
     reopened: boolean;
   },
@@ -234,13 +235,18 @@ export async function trackHostedOverlapLane(
     itemId !== null &&
     (planning.newLane || planning.reopened || (planningItemId && !sameHead))
   ) {
-    if (!planningItemId) {
-      const intent = await recordHead(ctx, projectId, 'intent', lane.intentId);
-      planningItemId = intent?.planningItemId ?? lane.intentId;
+    let item = planning.openingItem;
+    if (item === undefined) {
+      if (!planningItemId) {
+        const intent = await recordHead(ctx, projectId, 'intent', lane.intentId);
+        planningItemId = intent?.planningItemId || lane.intentId;
+      }
+      item = await planLaneItem(ctx, planning.project, planningItemId);
     }
-    const item = await planLaneItem(ctx, planning.project, planningItemId);
-    if (item) planLaneMark = await addPlanLane(ctx, projectId, item);
-    else planningItemId = undefined;
+    if (item) {
+      planningItemId = item.id;
+      planLaneMark = await addPlanLane(ctx, projectId, item);
+    }
   }
   const value = {
     projectId,
