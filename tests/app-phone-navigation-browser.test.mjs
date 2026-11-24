@@ -372,6 +372,40 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
     await nav.getByRole('button', { name: 'Collapse sidebar' }).waitFor();
   });
 
+  for (const [width, height] of [
+    [1440, 800],
+    [390, 844],
+  ]) {
+    await t.test(`the build stamp is in the palette, not the navigation, at ${width}px`, async t => {
+      const context = await browser.newContext({ viewport: { width, height } });
+      t.after(() => context.close());
+      const page = await context.newPage();
+      const stamp = 'Build #31957 · 58ef692f';
+      await page.addInitScript(stamp => {
+        document.addEventListener('DOMContentLoaded', () => {
+          document.documentElement.dataset.buildVersion = stamp;
+        });
+      }, stamp);
+      await assets(page);
+      await page.goto(origin + project);
+      await page.locator('.shell').waitFor();
+      assert.equal(
+        await page.locator('a[href="/_forge/build.json"]').count(),
+        0,
+        'no nav link to the record',
+      );
+      assert.equal(await page.locator('nav').getByText('Build #').count(), 0, 'navigation holds only places');
+      await page.getByRole('button', { name: 'Go to or run' }).click();
+      const item = page.getByRole('dialog', { name: 'Go to or run' }).getByRole('menuitem', {
+        name: `Deployed build record: ${stamp}`,
+      });
+      await item.waitFor();
+      const box = await item.boundingBox();
+      assert.ok(await item.evaluate(node => node.scrollWidth <= node.clientWidth + 1), 'full text, not cut');
+      assert.ok(box.x >= 0 && box.x + box.width <= width);
+    });
+  }
+
   for (const { name, base, tabs, more } of frames) {
     for (const theme of ['dark', 'light']) {
       await t.test(`${name} navigation in ${theme} theme`, async t => {

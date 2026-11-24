@@ -36,6 +36,12 @@ export function useFrameKeys(go: Go) {
   }, [go.route]);
 }
 
+/** The deployed build stamped onto `<html data-build-version>` by scripts/build-site.mjs; a diagnostic, so it lives in
+ * the palette (reachable at every width), never in the sidebar's list of places. */
+function buildStamp() {
+  return typeof document === 'undefined' ? null : (document.documentElement.dataset.buildVersion ?? null);
+}
+
 function useGroups(go: Go): PaletteGroup[] {
   const groups: PaletteGroup[] = [];
   const { route } = go;
@@ -73,6 +79,15 @@ function useGroups(go: Go): PaletteGroup[] {
               label: rail.shut ? 'Expand sidebar' : 'Collapse sidebar',
               keys: '[',
               onAction: rail.toggle,
+            },
+          ]
+        : []),
+      ...(buildStamp()
+        ? [
+            {
+              id: 'build',
+              label: `Deployed build record: ${buildStamp()}`,
+              onAction: () => location.assign('/_forge/build.json'),
             },
           ]
         : []),
