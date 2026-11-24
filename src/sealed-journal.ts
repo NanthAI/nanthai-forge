@@ -60,6 +60,19 @@ export class SealedJournal {
       return entry;
     });
   }
+  /** The project's retained unknown requests, for an import to settle (review L4). Local files only. */
+  async unknown(project: string) {
+    return secretLocked(this.lock, () => {
+      if (!existsSync(this.directory)) return [];
+      return readdirSync(this.directory)
+        .filter(n => /^[0-9a-f-]{36}\.bin$/i.test(n))
+        .flatMap(n => {
+          const id = n.slice(0, -4),
+            entry = this.load(id);
+          return entry?.state === 'unknown' && entry.project === project ? [{ id, entry }] : [];
+        });
+    });
+  }
   async retain(id: string, entry: Pending) {
     return secretLocked(this.lock, () => {
       const existing = this.load(id);

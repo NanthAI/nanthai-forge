@@ -26,7 +26,7 @@ The process boundary enforces these rules:
   shared name validator. Its value-free write boundary prints one line for each
   exempt publish-token name written to Development: it is a publish token and
   belongs in Checks. `NODE_ENV`, ordinary names and writes to Checks produce no
-  such notice; using a token through `run` produces none. Set uses this boundary; import and proposal apply remain pending.
+  such notice; using a token through `run` produces none. Set and import use this boundary; proposal apply remains pending.
 - The inherited environment wins, including case-insensitive comparison on
   Windows. Before injection the child loses Forge credentials and session
   material: every `FORGE_*` and `NFORGE_*` name and known agent session id, except

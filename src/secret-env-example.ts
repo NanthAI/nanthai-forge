@@ -35,11 +35,17 @@ export function parseSecretExample(text: string) {
 /** Exact case and a real regular file keep the allow-list under the protected path.
  * O_NOFOLLOW plus inode comparison also refuses a link substituted between lookup/open. */
 export function readSecretExample(root: string) {
+  const { names, notices } = readSecretExampleFile(root);
+  return { names, notices };
+}
+/** readSecretExample plus the exact text it parsed ('' when there is no file), so a writer replaces what it read. */
+export function readSecretExampleFile(root: string) {
   let fd: number | undefined;
   try {
     const entries = readdirSync(root);
     if (!entries.includes('.env.example')) {
       return {
+        text: '',
         names: [],
         notices: entries
           .filter(name => name.toLowerCase() === '.env.example')
@@ -62,7 +68,8 @@ export function readSecretExample(root: string) {
       throw new ForgeError('SECRETS_ENV_EXAMPLE_NOT_FILE', '.env.example must be a regular file.');
     if (opened.ino !== before.ino || opened.dev !== before.dev)
       throw new ForgeError('UNSAFE_PATH', '.env.example changed while opening it; run again.');
-    return parseSecretExample(readFileSync(fd, 'utf8'));
+    const text = readFileSync(fd, 'utf8');
+    return { text, ...parseSecretExample(text) };
   } catch (error) {
     if (error instanceof ForgeError) throw error;
     if ((error as NodeJS.ErrnoException).code === 'ELOOP')

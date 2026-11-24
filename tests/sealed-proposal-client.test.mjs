@@ -60,6 +60,8 @@ test('an agent proposes a change and a removal; a person lists and applies them 
   assert(!lines[0].includes('synthetic-value'), 'a listing never shows a value');
   // An agent never applies, even its own proposal.
   await assert.rejects(applyWaiting(h.agent, proposed.proposed.slice(0, 8)), code('PERSON_REQUIRED'));
+  // Review: a yes from a terminal does not make an agent a person.
+  await assert.rejects(applyWaiting(h.agent, proposed.proposed.slice(0, 8), yes), code('PERSON_REQUIRED'));
   const done = await applyWaiting(h.person, proposed.proposed.slice(0, 8), yes);
   assert.deepEqual([done.mode, done.op, done.name], ['kept', 'change', 'API_TOKEN']);
   assert.equal(await value(h.person, 'API_TOKEN'), 'synthetic-value-two');
@@ -237,6 +239,12 @@ test('review F2: a stale proposal the server still lists teaches reject; one no 
   );
   assert.equal(reject(refused).next, 'nforge secret proposals', refused.message);
   assert.match(reject(refused).learn, /retry/);
+  // A proposal from before a re-key is never applied; the next step is a new one.
+  const rekeyed = {
+    code: 'WORK_CONFLICT',
+    message: 'This proposal was made before the set was re-keyed. Ask for a new proposal.',
+  };
+  assert.equal(reject(rekeyed).next, 'nforge secret proposals');
 });
 
 test('review F1: apply shows the exact proposal and signs only it; no stores nothing, a swap after the prompt is a conflict', async t => {
@@ -245,7 +253,7 @@ test('review F1: apply shows the exact proposal and signs only it; no stores not
   const { pin } = await h.person.pins.load(h.project, 1);
   const id = Buffer.alloc(16, 0xab);
   // A hand-built proposer picks its own id: the change and a removal under the same id.
-  const sealed = value =>
+  const sealed = (value, now = pin.head.signedAt) =>
     Uint8Array.from(
       encodeSealedWire(
         sealProposal({
@@ -253,7 +261,7 @@ test('review F1: apply shows the exact proposal and signs only it; no stores not
           proposer: { id: h.keys.id, sign: h.keys.sign },
           name: 'API_TOKEN',
           value,
-          now: pin.head.signedAt,
+          now,
           random: n => (n === 16 ? id : randomBytes(n)),
         }).proposal,
       ),
@@ -288,6 +296,13 @@ test('review F1: apply shows the exact proposal and signs only it; no stores not
     ),
   );
   assert(!shown[0].includes('synthetic-value'));
+  // The age is in the Secrets page's relative words (slice 4 design), not raw minutes.
+  listing[0] = sealed(null, pin.head.signedAt - 3 * 86400000);
+  await assert.rejects(
+    applyWaiting(person, 'abababab', async summary => (shown.push(summary), false)),
+    code('CANCELLED'),
+  );
+  assert.match(shown[1], /, proposed \d+ d ago, id /);
   assert.equal(h.s.tables.sealedSecretHistory.size, history, 'nothing was written');
   // A yes signs the shown change only: when a lost race makes it list again and the bytes changed, it is a conflict.
   listing[0] = change;

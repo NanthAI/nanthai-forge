@@ -13,7 +13,7 @@ import { safeSecretName } from './sealed-display.js';
 import { checkSecretWriteName } from './secret-names.js';
 
 export const sealedUsage =
-  'nforge secret set NAME [--set checks] [--file] [--root ROOT] [--operation-id UUID]   (a piped value loses one trailing newline; --file keeps exact bytes)\nnforge secret list [--set checks] [--root ROOT]\nnforge secret rm NAME [--set checks] [--root ROOT] [--operation-id UUID]\nnforge secret machine add LABEL --set checks [--root ROOT] [--operation-id UUID]   (a person, on a terminal: shows the CI key once)\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID|--marked [--root ROOT]\nnforge secret proposals [--root ROOT]\nnforge secret apply ID [--root ROOT]   (a person, on a terminal)\nnforge secret reject ID [--root ROOT]';
+  'nforge secret set NAME [--set checks] [--file] [--root ROOT] [--operation-id UUID]   (a piped value loses one trailing newline; --file keeps exact bytes)\nnforge secret list [--set checks] [--root ROOT]\nnforge secret rm NAME [--set checks] [--root ROOT] [--operation-id UUID]\nnforge secret machine add LABEL --set checks [--root ROOT] [--operation-id UUID]   (a person, on a terminal: shows the CI key once)\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID|--marked [--root ROOT]\nnforge secret proposals [--root ROOT]\nnforge secret apply ID [--root ROOT]   (a person, on a terminal)\nnforge secret reject ID [--root ROOT]\nnforge secret import [FILE] [--keep] [--root ROOT]   (FILE defaults to the root .env; removed after a full import unless --keep)\nnforge secret import --restore [FILE] [--root ROOT]   (a person, on a terminal: writes Development values back to a new file)';
 export function sealedAgent() {
   const source = process.env;
   return (
@@ -133,9 +133,19 @@ export async function sealedCli(args: string[]) {
   }
   const command = args.shift();
   invariant(
-    ['set', 'list', 'rm', 'repin', 'resolve', 'unshare', 'proposals', 'apply', 'reject', 'machine'].includes(
-      command!,
-    ),
+    [
+      'set',
+      'list',
+      'rm',
+      'repin',
+      'resolve',
+      'unshare',
+      'proposals',
+      'apply',
+      'reject',
+      'machine',
+      'import',
+    ].includes(command!),
     'BAD_ARGUMENT',
     sealedUsage,
   );
@@ -148,14 +158,20 @@ export async function sealedCli(args: string[]) {
   let root = '.',
     file = false,
     set = 'development' as 'development' | 'checks',
-    operationId: string | undefined;
+    operationId: string | undefined,
+    importFile: string | undefined,
+    keep = false,
+    restore = false;
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
+    const arg = args[i]!;
     if (arg === '--file' && command === 'set') file = true;
+    else if (command === 'import' && arg === '--keep') keep = true;
+    else if (command === 'import' && arg === '--restore') restore = true;
+    else if (command === 'import' && !arg.startsWith('-') && importFile === undefined) importFile = arg;
     else if (arg === '--root' && args[i + 1]) root = args[++i]!;
     else if (arg === '--set' && ['development', 'checks'].includes(args[i + 1]!))
       set = args[++i] as 'development' | 'checks';
-    else if (arg === '--operation-id' && args[i + 1]) operationId = args[++i];
+    else if (arg === '--operation-id' && args[i + 1] && command !== 'import') operationId = args[++i];
     else
       throw new ForgeError(
         command === 'set' ? 'SECRET_IN_ARGUMENT' : 'BAD_ARGUMENT',
@@ -173,12 +189,19 @@ export async function sealedCli(args: string[]) {
   if (command === 'set' || command === 'rm') invariant(name, 'BAD_ARGUMENT', sealedUsage);
   if (command === 'unshare') invariant(fingerprint, 'BAD_ARGUMENT', sealedUsage);
   if (command === 'apply' || command === 'reject') invariant(proposalId, 'BAD_ARGUMENT', sealedUsage);
-  const development = await sealedClientForRoot(secretRunRoot(resolve(root)), agent);
+  const runRoot = secretRunRoot(resolve(root));
+  const development = await sealedClientForRoot(runRoot, agent);
   const client =
     set === 'checks' ? await (await import('./sealed-checks.js')).checksClient(development) : development;
   const where = client.setName;
   try {
-    if (command === 'machine') {
+    if (command === 'import') {
+      const { importDotenv, restoreDotenv } = await import('./secret-import.js');
+      const lines = restore
+        ? await restoreDotenv(development, runRoot, importFile, process.cwd())
+        : await importDotenv(development, runRoot, importFile, { keep, cwd: process.cwd() });
+      process.stdout.write(`${lines.join('\n')}\n`);
+    } else if (command === 'machine') {
       // Design 5.7: the key goes to a person's terminal once, never to a pipe, a file or an agent.
       invariant(
         !agent && process.stdin.isTTY && process.stdout.isTTY,

@@ -44,42 +44,56 @@ function transportOf(client: SealedClient) {
   return { propose, proposals, reject };
 }
 
-/** An agent's change or removal of an existing Development value: sealed to the set's inbox key on this device's
- * verified view and stored for a person to apply. Takes ownership of `state` and zeroes it. */
-export async function proposeChange(
+/** An agent's change or removal of a Development name that exists or existed: sealed to the set's inbox key on this
+ * device's verified view and stored for a person to apply. The caller keeps and zeroes `state`. Null when there is
+ * nothing to remove. */
+export async function proposeValue(
   client: SealedClient,
   state: Verified,
   name: string,
   value: Buffer | null,
   file: boolean,
-  operationId: string,
 ) {
+  const old = state.pin.head.names.find(n => n.name === name);
+  if (value === null && (!old || old.kind === 3)) return null;
+  const { proposal, r } = sealProposal({
+    pin: state.pin,
+    proposer: { id: client.keys.id, sign: client.keys.sign },
+    name,
+    value,
+    file,
+    now: Date.now(),
+  });
+  // Recognising an adopted value by r is not offered yet, so it is not kept.
+  r.fill(0);
   try {
-    const old = state.pin.head.names.find(n => n.name === name);
-    if (value === null && (!old || old.kind === 3)) return { operationId, name, removed: false };
-    const { proposal, r } = sealProposal({
-      pin: state.pin,
-      proposer: { id: client.keys.id, sign: client.keys.sign },
-      name,
-      value,
-      file,
-      now: Date.now(),
-    });
-    // Recognising an adopted value by r is not offered yet, so it is not kept.
-    r.fill(0);
-    try {
-      await transportOf(client).propose({ kind: 1, proposal: buffer(encodeSealedWire(proposal)) });
-    } catch (error) {
-      throw sealedRefusal(error) ?? error;
-    }
-    const id = hex(proposal.proposalId);
-    client.notice(
-      `Proposed ${OPS[proposal.op]} ${safeSecretName(name)}; a person applies it with nforge secret apply ${id.slice(0, 8)}.`,
-    );
-    return { operationId, name, removed: false, proposed: id, op: OP[proposal.op] };
-  } finally {
-    wipe(state);
+    await transportOf(client).propose({ kind: 1, proposal: buffer(encodeSealedWire(proposal)) });
+  } catch (error) {
+    throw sealedRefusal(error) ?? error;
   }
+  const id = hex(proposal.proposalId);
+  client.notice(
+    `Proposed ${OPS[proposal.op]} ${safeSecretName(name)}; a person applies it with nforge secret apply ${id.slice(0, 8)}.`,
+  );
+  return { id, op: OP[proposal.op] };
+}
+
+/** The server's waiting limits (convex/sealedSecretGate.ts SEALED_PROPOSALS): per proposing device and per set. */
+export const PROPOSAL_LIMITS = { perDevice: 8, perSet: 32 };
+/** Review L5: refuses, before any proposal or write, an agent change whose proposals for `names` would pass the
+ * waiting limits. A device's new proposal for a name replaces its waiting one, as on the server. One listing call. */
+export async function checkProposalRoom(client: SealedClient, state: Verified, names: readonly string[]) {
+  if (!names.length) return;
+  const rows = await waiting(client, state);
+  const mine = (row: Listed) => !!row.proposal && sameId(row.proposal.proposerId, client.keys.id);
+  const kept = rows.filter(row => !(mine(row) && names.includes(row.proposal!.name)));
+  const own = kept.filter(mine).length + names.length,
+    all = kept.length + names.length;
+  invariant(
+    own <= PROPOSAL_LIMITS.perDevice && all <= PROPOSAL_LIMITS.perSet,
+    'SECRETS_NOT_ALLOWED',
+    `${names.length} names exist in Development, so each needs a proposal, but at most ${PROPOSAL_LIMITS.perDevice} proposals wait per device and ${PROPOSAL_LIMITS.perSet} per set (this would make ${own} from this device, ${all} in all). Nothing was proposed or written. A person applies or rejects the waiting ones (nforge secret proposals) or sets these names.`,
+  );
 }
 
 /** `hash` is the SHA-256 of the exact bytes the server listed: apply signs only the proposal a person was shown. */
@@ -132,7 +146,7 @@ export async function listProposals(client: SealedClient) {
     const now = Date.now();
     return (await waiting(client, state)).map(({ id, proposal: p, problem }) =>
       p
-        ? `${id.slice(0, 8)}\t${OP[p.op]}\t${safeSecretName(p.name)}\tfp ${deviceFingerprint(p.proposerId)}\t${Math.max(0, Math.round((now - p.proposedAt) / 60000))} min ago${problem ? `\tnot valid (${problem})` : ''}`
+        ? `${id.slice(0, 8)}\t${OP[p.op]}\t${safeSecretName(p.name)}\tfp ${deviceFingerprint(p.proposerId)}\t${ageWords(now - p.proposedAt)}${problem ? `\tnot valid (${problem})` : ''}`
         : `${id}\tnot valid (${problem})`,
     );
   } finally {
@@ -140,9 +154,16 @@ export async function listProposals(client: SealedClient) {
   }
 }
 
+/** Relative age in the Secrets page's words (design/secrets-page/README.md): `12 min ago`, `5 h ago`, `3 d ago`. */
+function ageWords(ms: number) {
+  const minutes = Math.max(0, Math.round(ms / 60000));
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 24 * 60) return `${Math.round(minutes / 60)} h ago`;
+  return `${Math.round(minutes / (24 * 60))} d ago`;
+}
 /** What a person approves before apply signs: operation, name, kind, proposer, age and the full id (review F1). */
 function applySummary(p: SealedProposal, now: number) {
-  return `Apply ${OP[p.op]} ${safeSecretName(p.name)} (${p.kind === 2 ? 'file' : p.kind === 1 ? 'env' : 'removal'}) from fp ${deviceFingerprint(p.proposerId)}, proposed ${Math.max(0, Math.round((now - p.proposedAt) / 60000))} min ago, id ${hex(p.proposalId)}?`;
+  return `Apply ${OP[p.op]} ${safeSecretName(p.name)} (${p.kind === 2 ? 'file' : p.kind === 1 ? 'env' : 'removal'}) from fp ${deviceFingerprint(p.proposerId)}, proposed ${ageWords(now - p.proposedAt)}, id ${hex(p.proposalId)}?`;
 }
 
 /** A person applies a waiting proposal in a signed head write on its fresh verified view (Gate B2 L7: a confirmed,
@@ -212,7 +233,7 @@ export async function applyWaiting(
         { id: client.keys.id, sign: client.keys.sign },
         reply.head.signedAt,
       );
-      signNext(client, reply, state, out.record, out.stored);
+      signNext(client, reply, state, [{ record: out.record, stored: out.stored }]);
       const wire = sealedWrite(reply, randomUUID(), {
         headHash: previous,
         rosterVersion: state.reply.roster.rosterVersion,

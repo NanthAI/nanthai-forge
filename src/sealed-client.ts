@@ -29,6 +29,13 @@ import { networkFailure } from './network-fetch.js';
 import { removeMarkedFirst } from './sealed-unshare.js';
 
 type Verified = NonNullable<Awaited<ReturnType<SealedClient['read']>>>;
+export type SealedChange = { name: string; value: Buffer | null; file?: boolean };
+/** The server's work cap is 100 units: 1 per changed record and 2 per added roster entry, and a first write adds one. */
+const FIRST_WRITE_NAMES = 98;
+const wipeState = (state: Verified) => {
+  state.key?.fill(0);
+  for (const secret of state.secrets) secret.value.fill(0);
+};
 /** A copy of the verified state's reply whose head this device signs next. The caller zeroes the state's key. */
 export function nextReply(client: SealedClient, state: Verified) {
   const reply: SealedReply = deserialize(serialize(state.reply));
@@ -41,18 +48,18 @@ export function nextReply(client: SealedClient, state: Verified) {
   };
   return reply;
 }
-/** Puts `record` (and its ciphertext) in the next head, checks the format bounds, signs the head and verifies it as
- * every reader pinned at `state` will, before anything is sent. */
+/** Puts each record (and its ciphertext) in the next head, checks the format bounds, signs the head and verifies it
+ * as every reader pinned at `state` will, before anything is sent. */
 export function signNext(
   client: SealedClient,
   reply: SealedReply,
   state: Verified | null,
-  record: NameRecord,
-  stored: Buffer | null,
+  changes: readonly { record: NameRecord; stored: Buffer | null }[],
 ) {
-  reply.ciphertexts = reply.ciphertexts.filter(c => c.name !== record.name);
-  if (stored) reply.ciphertexts.push({ name: record.name, stored });
-  reply.head.names = reply.head.names.filter(n => n.name !== record.name).concat(record);
+  const names = new Set(changes.map(c => c.record.name));
+  reply.ciphertexts = reply.ciphertexts.filter(c => !names.has(c.name));
+  for (const { record, stored } of changes) if (stored) reply.ciphertexts.push({ name: record.name, stored });
+  reply.head.names = reply.head.names.filter(n => !names.has(n.name)).concat(changes.map(c => c.record));
   invariant(
     reply.head.names.filter(n => n.kind !== 3).length <= 200 &&
       reply.ciphertexts.reduce((n, c) => n + c.stored.length, 0) <= 256 * 1024,
@@ -172,13 +179,38 @@ export class SealedClient {
     return this.verifyFetched(reply, current, false, wire);
   }
   async write(name: string, value: Buffer | null, options: { file?: boolean; operationId?: string } = {}) {
+    const done = await this.writeMany([{ name, value, file: Boolean(options.file) }], options);
+    const proposal = done.proposed[0];
+    if (proposal)
+      return { operationId: done.operationId, name, removed: false, proposed: proposal.id, op: proposal.op };
+    if (!done.written.length && !done.replay) return { operationId: done.operationId, name, removed: false };
+    return { operationId: done.operationId, name, removed: value === null, replay: done.replay };
+  }
+  /** One signed head write for up to 100 changes, 98 for the first write (the server's work cap; slice 3 import). An
+   * agent's change or removal of a name the head holds or held becomes a proposal, one per name, and fails before
+   * anything is proposed or written when the proposals would pass the waiting limits. For a person, `skipUnchanged`
+   * leaves a value that already has these exact bytes and kind as it is; an agent is never told whether a value it
+   * sent equals the stored one (review M1). A retained operation id names exactly one change. */
+  async writeMany(
+    changes: readonly SealedChange[],
+    options: { operationId?: string; skipUnchanged?: boolean } = {},
+  ) {
     const operationId = options.operationId ?? randomUUID();
     invariant(/^[0-9a-f-]{36}$/i.test(operationId), 'BAD_ARGUMENT', 'Use a UUID operation id.');
-    checkSecretWriteName(name, {
-      set: this.kind === 1 ? 'development' : 'checks',
-      agent: this.agent,
-      writeLine: this.notice,
-    });
+    invariant(
+      changes.length >= 1 &&
+        changes.length <= 100 &&
+        new Set(changes.map(c => c.name)).size === changes.length &&
+        (changes.length === 1 || (!options.operationId && changes.every(c => c.value !== null))),
+      'BAD_ARGUMENT',
+      'Write 1 to 100 distinct names; several names take values and a fresh operation.',
+    );
+    for (const c of changes)
+      checkSecretWriteName(c.name, {
+        set: this.kind === 1 ? 'development' : 'checks',
+        agent: this.agent,
+        writeLine: this.notice,
+      });
     // Owner decision 3: a person changes Checks values; agents run checks, they never write their secrets.
     invariant(
       this.kind === 1 || !this.agent,
@@ -186,10 +218,21 @@ export class SealedClient {
       'A person sets Checks values: run nforge secret set NAME --set checks on a terminal.',
     );
     const journal = new SealedJournal(this.pins.directory, this.pins.lock);
-    const identity = { project: this.project, name, removing: value === null, file: Boolean(options.file) };
+    // A single change keeps its original journal identity; several names are joined by a line break no name holds.
+    const identity = {
+      project: this.project,
+      name: changes.map(c => c.name).join('\n'),
+      removing: changes.length === 1 && changes[0]!.value === null,
+      file: changes.length === 1 && Boolean(changes[0]!.file),
+    };
+    const unchanged: string[] = [],
+      proposed: { name: string; id: string; op: 'add' | 'change' | 'remove' }[] = [];
+    let todo = [...changes],
+      written: string[] = [];
     let pending = await journal.read(operationId, identity);
     let replaying = Boolean(pending),
       removedMarked = false;
+    const result = (replay: boolean) => ({ operationId, written, unchanged, proposed, replay });
     const unknown = () =>
       new ForgeError(
         'SECRETS_WRITE_UNKNOWN',
@@ -197,19 +240,26 @@ export class SealedClient {
         undefined,
         { operationId },
       );
+    const sameValues = (secrets: readonly { name: string; value: Buffer }[]) =>
+      changes.every(
+        c =>
+          c.value === null ||
+          equalBytes(secrets.find(s => s.name === c.name)?.value ?? Buffer.alloc(0), c.value),
+      );
     for (;;) {
       if (pending?.state === 'accepted') {
         const current = await this.read(); // Recheck current access using the local creator-only anchor.
         try {
-          if (value !== null)
-            invariant(
-              current &&
+          invariant(
+            changes.every(c => c.value === null) ||
+              (current &&
                 equalBytes(framedHash(headBytes(current.reply.head)), pending.headHash) &&
-                equalBytes(current.secrets.find(s => s.name === name)?.value ?? Buffer.alloc(0), value),
-              'WORK_OPERATION_REUSED',
-              'A confirmed operation cannot be replayed with another value or after its head changed. Use secret resolve to read its receipt, or a new operation for a new change.',
-            );
-          return { operationId, name, removed: identity.removing, replay: true };
+                sameValues(current.secrets)),
+            'WORK_OPERATION_REUSED',
+            'A confirmed operation cannot be replayed with another value or after its head changed. Use secret resolve to read its receipt, or a new operation for a new change.',
+          );
+          written = changes.map(c => c.name);
+          return result(true);
         } finally {
           current?.key?.fill(0);
           for (const secret of current?.secrets ?? []) secret.value.fill(0);
@@ -222,20 +272,64 @@ export class SealedClient {
           removedMarked = true;
           continue;
         }
-        // Item 6466c6a5: an agent never changes or removes an existing value; it asks a person with a proposal.
-        if (this.agent && state) {
-          const old = state.pin.head.names.find(n => n.name === name);
-          if (old || value === null) {
-            const { proposeChange } = await import('./sealed-proposal-client.js');
-            return proposeChange(this, state, name, value, Boolean(options.file), operationId);
-          }
-        }
         const previous = state ? framedHash(headBytes(state.reply.head)) : null;
         let reply: SealedReply, key: Buffer;
         if (!state) {
-          if (value === null) throw this.notSetUp();
+          if (!todo.every(c => c.value !== null)) throw this.notSetUp();
+          // The server counts 2 for the first roster entry and 1 per record, within its cap of 100.
+          invariant(
+            todo.length <= FIRST_WRITE_NAMES,
+            'BAD_ARGUMENT',
+            `The first ${this.setName} write sets at most ${FIRST_WRITE_NAMES} names; write the rest next.`,
+          );
           ({ reply, key } = await this.genesis());
         } else {
+          // Review M1: only a person learns that a value is already stored. For an agent every name that exists or
+          // existed becomes a proposal below, whatever its value, so its output never depends on the stored bytes.
+          if (options.skipUnchanged && !this.agent)
+            todo = todo.filter(c => {
+              const old = state.pin.head.names.find(n => n.name === c.name);
+              const same =
+                c.value !== null &&
+                old?.kind === (c.file ? 2 : 1) &&
+                equalBytes(state.secrets.find(s => s.name === c.name)?.value ?? Buffer.alloc(0), c.value);
+              if (same) unchanged.push(c.name);
+              return !same;
+            });
+          // Item 6466c6a5: an agent never changes or removes an existing value; it asks a person with a proposal.
+          if (this.agent) {
+            const existing = todo.filter(
+              c => c.value === null || state.pin.head.names.some(n => n.name === c.name),
+            );
+            if (existing.length) {
+              const { checkProposalRoom, proposeValue } = await import('./sealed-proposal-client.js');
+              try {
+                // Review L5: refused before anything is proposed or written when they would not all fit.
+                await checkProposalRoom(
+                  this,
+                  state,
+                  existing
+                    .filter(
+                      c =>
+                        c.value !== null || state.pin.head.names.some(n => n.name === c.name && n.kind !== 3),
+                    )
+                    .map(c => c.name),
+                );
+                for (const c of existing) {
+                  const made = await proposeValue(this, state, c.name, c.value, Boolean(c.file));
+                  if (made) proposed.push({ name: c.name, ...made });
+                }
+              } catch (error) {
+                wipeState(state);
+                throw error;
+              }
+              todo = todo.filter(c => !existing.includes(c));
+            }
+          }
+          if (!todo.length) {
+            wipeState(state);
+            return result(false);
+          }
           reply = nextReply(this, state);
           key = state.key!;
           for (const secret of state.secrets) secret.value.fill(0);
@@ -249,53 +343,70 @@ export class SealedClient {
           // Gate B2 L7: a write rests on a roster this device confirmed, not one it only trusted on first use. A value
           // sealed into a set a compromised server built for a tofu device would reach that server.
           if (state) requireConfirmedWriter(state.pin);
-          const old = reply.head.names.find(n => n.name === name);
-          if (value === null && (!old || old.kind === 3)) return { operationId, name, removed: false };
-          // Make room before choosing a version, since compaction can raise the floor.
-          makeRoom(reply.head, name);
-          invariant(
-            value === null || old?.kind !== 3 || reply.head.names.filter(n => n.kind !== 3).length < 200,
-            'SECRETS_FORMAT_REFUSED',
-            'The set exceeds its live-name bound.',
-          );
-          const record: NameRecord = {
-            name,
-            kind: value === null ? 3 : options.file ? 2 : 1,
-            valueVersion: nextValueVersion(reply.head, name),
-            valueEpoch: reply.roster.epoch,
-            sealEpoch: reply.roster.epoch,
-            ctHash: Buffer.alloc(0),
-            valueCommit: Buffer.alloc(0),
-            changedBy: this.keys.id,
-            changedAt: reply.head.signedAt,
-            proposalId: Buffer.alloc(0),
-            changeSig: Buffer.alloc(64),
-            flags: this.agent ? 4 : 0,
-            allowedChecks: [],
-          };
-          let stored: Buffer | null = null;
-          if (value !== null) {
-            const sealed = sealValue(
-              key,
-              {
-                projectId: reply.roster.projectId,
-                setId: reply.roster.setId,
-                epoch: reply.roster.epoch,
-                name: record.name,
-                kind: record.kind as 1 | 2,
-                valueVersion: record.valueVersion,
-                valueEpoch: record.valueEpoch,
-                sealEpoch: record.sealEpoch,
-              },
-              value,
-            );
-            record.ctHash = sealed.ctHash;
-            record.valueCommit = sealed.valueCommit;
-            stored = sealed.stored;
+          const live = todo.filter(c => {
+            const old = reply.head.names.find(n => n.name === c.name);
+            return c.value !== null || (old && old.kind !== 3);
+          });
+          if (!live.length) return result(false);
+          // Make room for every new name before choosing a version, since compaction can raise the floor. A held slot
+          // stands for each new name so the next one's compaction counts it.
+          const held: NameRecord[] = [];
+          for (const c of live) {
+            makeRoom(reply.head, c.name);
+            if (!reply.head.names.some(n => n.name === c.name)) {
+              const slot = {
+                name: c.name,
+                kind: 1,
+                valueVersion: 0,
+                changedAt: Infinity,
+              } as unknown as NameRecord;
+              held.push(slot);
+              reply.head.names.push(slot);
+            }
           }
-          record.changeSig = signBytes(changeBytes(reply.head, record), this.keys.sign);
+          reply.head.names = reply.head.names.filter(n => !held.includes(n));
+          const sealed = live.map(c => {
+            const record: NameRecord = {
+              name: c.name,
+              kind: c.value === null ? 3 : c.file ? 2 : 1,
+              valueVersion: nextValueVersion(reply.head, c.name),
+              valueEpoch: reply.roster.epoch,
+              sealEpoch: reply.roster.epoch,
+              ctHash: Buffer.alloc(0),
+              valueCommit: Buffer.alloc(0),
+              changedBy: this.keys.id,
+              changedAt: reply.head.signedAt,
+              proposalId: Buffer.alloc(0),
+              changeSig: Buffer.alloc(64),
+              flags: this.agent ? 4 : 0,
+              allowedChecks: [],
+            };
+            let stored: Buffer | null = null;
+            if (c.value !== null) {
+              const value = sealValue(
+                key,
+                {
+                  projectId: reply.roster.projectId,
+                  setId: reply.roster.setId,
+                  epoch: reply.roster.epoch,
+                  name: record.name,
+                  kind: record.kind as 1 | 2,
+                  valueVersion: record.valueVersion,
+                  valueEpoch: record.valueEpoch,
+                  sealEpoch: record.sealEpoch,
+                },
+                c.value,
+              );
+              record.ctHash = value.ctHash;
+              record.valueCommit = value.valueCommit;
+              stored = value.stored;
+            }
+            record.changeSig = signBytes(changeBytes(reply.head, record), this.keys.sign);
+            return { record, stored };
+          });
           // Verify before sending; no key or plaintext is retained in the retry journal.
-          signNext(this, reply, state, record, stored);
+          signNext(this, reply, state, sealed);
+          written = live.map(c => c.name);
           pending = {
             ...identity,
             state: 'unknown',
@@ -315,7 +426,7 @@ export class SealedClient {
           key.fill(0);
         }
       }
-      if (replaying && value !== null) {
+      if (replaying && changes.some(c => c.value !== null)) {
         const check = verifySealedReply(sealedRead(pending.wire), null, {
           ...this.request(),
           firstContact: true,
@@ -323,7 +434,7 @@ export class SealedClient {
         });
         try {
           invariant(
-            equalBytes(check.secrets.find(s => s.name === name)?.value ?? Buffer.alloc(0), value),
+            sameValues(check.secrets),
             'WORK_OPERATION_REUSED',
             'This operation already sealed a different value. Use a new operation for a new change.',
           );
@@ -331,6 +442,7 @@ export class SealedClient {
           check.key?.fill(0);
           for (const secret of check.secrets) secret.value.fill(0);
         }
+        written = changes.map(c => c.name);
       }
       let receipt: { accepted: boolean; replay: boolean };
       try {
@@ -348,6 +460,7 @@ export class SealedClient {
         if (replaying) throw unknown();
         await journal.refuse(operationId);
         pending = null;
+        written = [];
         continue;
       }
       // If compaction fails, preserve the exact request and report its recoverable unknown state.
@@ -377,7 +490,7 @@ export class SealedClient {
         verified.key?.fill(0);
         for (const secret of verified.secrets) secret.value.fill(0);
       }
-      return { operationId, name, removed: value === null, replay: receipt.replay };
+      return result(receipt.replay);
     }
   }
   /** The first head of this client's set: Development's genesis; ChecksClient overrides it. */

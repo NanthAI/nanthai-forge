@@ -1361,9 +1361,18 @@ function secretFoundError(
   const self = result.selfAllowed
     ? ` ${result.selfAllowed} finding(s) match an allow entry this Lane adds; it counts only once it is on main.`
     : '';
+  // Slice 3 of Item 41a0df87: a credential in a .env file moves into sealed secrets in one step.
+  // A new .env is never captured (files.ts), so this is a tracked one such as .env.development.
+  const dotenv = findings.find(
+    item =>
+      /(?:^|\/)\.env(?:\.[^/]+)?$/.test(item.path) && !/\.env\.(?:example|sample|template)$/i.test(item.path),
+  )?.path;
+  const move = dotenv
+    ? `Move it into sealed secrets with nforge secret import ${shellQuote(join(root, dotenv))} (it removes the file)`
+    : 'Remove it (keep the value in sealed secrets with nforge secret set NAME)';
   const instruction =
     `Save refused before upload: credential found in ${listed.join('; ')}${more}. Nothing was stored. ` +
-    `Remove it and rotate it at its provider, then run: ${command}. ` +
+    `${move} and rotate it at its provider, then run: ${command}. ` +
     `Only if it is not a secret: add its entry from allowEntries, with a reason, to ${SECRET_SCAN_ALLOW_FILE} in its own landing first, then sync this Lane and save.${self}`;
   return new ForgeError('SECRET_FOUND', instruction, undefined, {
     root,

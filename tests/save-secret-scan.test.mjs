@@ -57,6 +57,8 @@ for (const visibility of ['public', 'private'])
     await assert.rejects(s.transport().dispatch('save', command), error =>
       refused((cli = error), value, 'config.ts'),
     );
+    // Not a dotenv file: the value belongs in sealed secrets by name (Item 41a0df87 slice 3).
+    assert.match(cli.message, /Remove it \(keep the value in sealed secrets with nforge secret set NAME\)/);
     // MCP runs the same client: the same code, finding, next step and value-free text.
     const tools = new Map();
     t.after(
@@ -124,6 +126,25 @@ test('J29-2: a fixture allowed on main saves; the same entry added only by the L
     error => {
       refused(error, self.value, self.path);
       assert.match(error.message, /1 finding\(s\) match an allow entry this Lane adds/);
+      return true;
+    },
+  );
+});
+
+test('Item 41a0df87 slice 3: a credential in a tracked dotenv file names nforge secret import as the next step', async t => {
+  // A new .env is never captured by name; a tracked one (here .env.development) is saved and scanned.
+  const s = await resolutionFixture(t, { baselineFiles: [['.env.development', 'APP_NAME=app\n']] });
+  await s.transport().dispatch('open', { laneId: s.f.lane.laneId });
+  const value = githubToken();
+  writeFileSync(join(s.root, '.env.development'), `APP_NAME=app\nGITHUB_TOKEN=${value}\n`);
+  await assert.rejects(
+    s.transport().dispatch('save', { operationId: randomUUID(), message: 'Add env' }),
+    error => {
+      refused(error, value, '.env.development');
+      assert.match(
+        error.message,
+        /Move it into sealed secrets with nforge secret import '?\S*\/\.env\.development'? \(it removes the file\)/,
+      );
       return true;
     },
   );
