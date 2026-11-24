@@ -310,6 +310,59 @@ test('the hook read does not grow with the peer: 5 files and 540 files read abou
   assert(Math.abs(costs[1] - costs[0]) < 3_000, `peer growth moved the read by ${costs[1] - costs[0]} B`);
 });
 
+test('replaying identical pending overlap evidence writes no subscribed row; restoring it still changes advice', async t => {
+  const { s, lane: mine, peer } = await setup(t);
+  const update = async (metadata, record = peer) => {
+    await s.transaction(
+      'pending-overlap',
+      { _handler: ctx => tracking.trackHostedOverlapLane(ctx, s.projectId, record, metadata) },
+      {},
+    );
+    return s.counts.at(-1);
+  };
+  const pending = { pending: true, changes: [delta('a.txt', 9)] };
+  const first = await update(pending);
+  assert(first.writeBytesByTable.projectHostedOverlapLanes > 0);
+  const before = await read(s, mine.id, { path: 'a.txt' });
+  assert.equal(before.reply.peerEvidence.count, 1);
+
+  const replay = await update(pending);
+  const replayBytes = replay.writeBytesByTable.projectHostedOverlapLanes ?? 0;
+  t.diagnostic(`identical pending replay: ${replay.readBytes} B read; ${replayBytes} B slim row written`);
+  assert.equal(replayBytes, 0);
+  assert.equal(replay.writeBytesByTable.projectHostedOverlapChanges ?? 0, 0);
+  assert.deepEqual((await read(s, mine.id, { path: 'a.txt' })).reply, before.reply);
+
+  // A missing Live Line marker is still repaired; the overlap no-op must not return early.
+  const mark = [...s.tables.projectLiveLineLanes.values()].find(row => row.laneId === peer.id);
+  const owner = [...s.tables.projectFinishReadRows.values()].find(
+    row => row.kind === 'projectLiveLineOwner' && row.sourceId === peer.id,
+  );
+  s.tables.projectLiveLineLanes.delete(mark._id);
+  s.tables.projectFinishReadRows.delete(owner._id);
+  const repaired = await update(pending);
+  assert.equal(repaired.writeBytesByTable.projectHostedOverlapLanes ?? 0, 0);
+  assert([...s.tables.projectLiveLineLanes.values()].some(row => row.laneId === peer.id));
+
+  const restored = await update({ restorePending: [] });
+  assert(restored.writeBytesByTable.projectHostedOverlapLanes > 0);
+  assert.equal(rowOf(s, peer.id).settled, undefined);
+  assert.equal((await read(s, mine.id, { path: 'a.txt' })).reply.peerEvidence.count, 0);
+
+  // A record pin change alone may not be skipped even when head, paths and activity stay the same.
+  const version = peer.version + 1;
+  const pinned = await update(undefined, { ...peer, version });
+  assert(pinned.writeBytesByTable.projectHostedOverlapLanes > 0);
+  assert.equal(pinned.readDocumentsByTable.projectHostedOverlapChanges ?? 0, 0);
+  assert.equal(rowOf(s, peer.id).head, peer.head);
+  assert.equal(rowOf(s, peer.id).recordVersion, version);
+  assert.equal(rowOf(s, peer.id).lastActivityAt, Date.parse(peer.at));
+
+  const at = '2026-10-01T12:00:00.000Z';
+  await update(undefined, { ...peer, version, at });
+  assert.equal(rowOf(s, peer.id).lastActivityAt, Date.parse(at));
+});
+
 test('a record write that keeps the saved list touches no bucket; a save of one path rewrites only its bucket', async t => {
   const { s, lane: mine, peer } = await setup(t);
   await trackChange(s, peer, sweep(300), 'Peer sweep');

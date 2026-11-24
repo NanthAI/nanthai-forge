@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { convexToJson } from 'convex/values';
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { z } from 'zod';
@@ -366,7 +367,18 @@ export async function trackHostedOverlapLane(
   if (old?.passedMark && value.passedMark !== old.passedMark) await ctx.db.delete(old.passedMark);
   const stored = { ...value, ...slim, ...(presenceRow ? { presenceRow } : {}) };
   const sourceId = old ? old._id : await ctx.db.insert('projectHostedOverlapLanes', stored);
-  if (old) await ctx.db.replace(old._id, stored);
+  if (old) {
+    const { _id, _creationTime, ...previous } = old;
+    void _creationTime;
+    // A record version change must publish even at the same head: readers check this pin.
+    // For a same-version replay compare the entire persisted projection, not just the path summary.
+    // Convex serialization ignores key insertion order and treats omitted fields like undefined.
+    if (
+      previous.recordVersion !== stored.recordVersion ||
+      JSON.stringify(convexToJson(previous)) !== JSON.stringify(convexToJson(stored))
+    )
+      await ctx.db.replace(_id, stored);
+  }
   await trackLineLane(ctx, sourceId, stored, old, false);
   const feedLane = { projectId, laneId: lane.id, actor: lane.holder?.actor ?? lane.actor };
   if (old && !sameHead)

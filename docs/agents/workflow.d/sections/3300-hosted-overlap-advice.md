@@ -7,7 +7,10 @@ Lane, actor, Intent and shared saved path, with `class:"blocking"|"advisory"` an
 no polling, subscriptions or idle work are added.
 
 Save staging retains a bounded path projection and publishes it with the Lane
-head. Blocking means intersecting or immediately adjacent line ranges with a
+head. Replaying identical evidence does not rewrite the path buckets or Lane
+projection. A change to the Lane record version, activity, lifecycle or pending
+save evidence can still update the projection at the same head. Blocking means
+intersecting or immediately adjacent line ranges with a
 shared exact base, distinct additions at the same path, or delete/rename versus
 another change. Symbol names alone do not block. Identical resulting bytes/modes
 and two deletions are clean. Disjoint saved changes produce no automatic notice;
