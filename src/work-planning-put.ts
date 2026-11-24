@@ -89,7 +89,7 @@ export type PlanningPut = Extract<PlanningWrite, { action: 'put-planning-item' }
 export function resolvePlanningPut(
   command: PlanningPut,
   current?: Pick<PlanningItem, 'kind' | 'title' | 'body' | 'status' | 'intentIds' | 'initiativeId'> &
-    Partial<Pick<PlanningItem, (typeof planningModelPutKeys)[number] | 'was'>>,
+    Partial<Pick<PlanningItem, (typeof planningModelPutKeys)[number] | 'was' | 'statusPin'>>,
 ) {
   invariant(
     current || (command.kind && command.title),
@@ -106,7 +106,11 @@ export function resolvePlanningPut(
     intentIds: [...new Set(command.intentIds ?? current?.intentIds ?? [])].sort(),
     initiativeId: command.initiativeId === null ? undefined : (command.initiativeId ?? current?.initiativeId),
     reason: command.reason,
-    model: { ...resolveModelFields(command, current), ...shelfFrom(status, current) },
+    model: {
+      ...resolveModelFields(command, current),
+      ...shelfFrom(status, current),
+      ...(current?.statusPin ? { statusPin: current.statusPin } : {}),
+    },
     agent: putAgentFields(command),
   };
 }

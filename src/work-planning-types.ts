@@ -66,6 +66,14 @@ const modelFields = {
   /** Hidden from public reads of a public plan (with its sub-items, or an Initiative's Items). Stored only when true. */
   hidden: z.literal(true).optional(),
   imported: planningImportSchema.optional(),
+  /** Retained public attribution of a manual status override. Older Items have no pin. */
+  statusPin: z
+    .object({
+      by: z.string().regex(/^@?[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?(?:\/[a-z]{2,10}-[a-z]{2,10})?$/),
+      at: z.iso.datetime({ offset: true }),
+    })
+    .strict()
+    .optional(),
   /** On an Archived or Deleted version only: the status it left, which Unarchive and Restore put back. Set by the
    * reducer, never sent by a client. */
   was: z.enum(unshelvedStatuses).optional(),

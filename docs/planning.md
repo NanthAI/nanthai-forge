@@ -137,16 +137,18 @@ body retains every annotation, including dates that have been checked off.
 ### Status roll-up (design; not yet active)
 
 - **Start.** A Lane start moves its unpinned Item to In progress. An In progress descendant moves every unpinned
-  Planned ancestor Item and the applicable Planned Initiatives to In progress. Proposed Items still require
-  planning; a Proposed or pinned ancestor does not stop the start signal from reaching the next level.
+  Planned ancestor Item and the applicable Planned Initiatives to In progress. Completed work is also evidence
+  of starting when there is still open work in the scope. Proposed Items still require planning; a Proposed or
+  pinned ancestor does not stop the start signal from reaching the next level.
 - **Done.** An Item closes when its own Done-when lines are met and its children are settled (Done or Abandoned).
   An Item with linked work still needs that work to finish. A parent without its own Lane can close after its
   last child settles. An unstarted leaf without a checklist does not close merely because it has nothing to tick.
   After the last child settles, a parent with unchecked lines stays open and the Item shows the remaining lines.
-  An Initiative closes when it has at least one Item and every Item in it is settled, even if all were Abandoned.
-  Its reason says the last Item settled, not that work landed. Archived and Deleted rows are outside the live
-  Plan, so they neither block closure nor count as completed work. Initiative membership is the Item's stored
-  `initiativeId`, counted once even when that Item is nested.
+  An Initiative closes when it has at least one Item, every Item in it is settled and its own Done-when lines are
+  met. It becomes Abandoned if all its Items were Abandoned, or Done if any Item was Done. The reason names the
+  rule that moved it. Archived and Deleted rows are outside the live Plan, so they neither block closure nor count
+  as completed work. Initiative membership is the Item's stored `initiativeId`, counted once even when that Item
+  is nested.
 - **Reopen.** New or reopened work under a settled parent or Initiative reopens it. It becomes In progress if
   work in its scope has started, or Planned if none has. A Lane start or recorded completed work is evidence of
   starting; abandoning an unstarted Item is not. A reopen does not reopen any settled children or recreate Lanes.
@@ -226,9 +228,11 @@ coverage. An incomplete pass supplies no zero counts and cannot produce an autom
 For an initial, lead-approved **dev-only** run on a Plan of about 1,300 roots, budget two root passes (about 2,600
 root reads before point reads and status appends), at most one status append per changed root, and a cumulative
 stop of **0.10 GB billed Convex database I/O ($0.02 at $0.20/GB)**, including index I/O, retries and a reserve for
-the final page. Pilot one page within **0.01 GB** of that total. Compare provider usage before allowing the next
-batch, and stop if the next batch plus the reserve will not fit. Function reply byte estimates are not billing
-ceilings. Verify the resulting Initiative statuses with the owner on dev; this does not authorize a production run.
+the final page. Pilot one page within **0.01 GB** of that total. Run a read-only preview first and record the would-be
+changes by kind and from/to status. Do not apply if even one pinned or Proposed row would move. Compare provider
+usage before allowing the next batch, and stop if the next batch plus the reserve will not fit. Function reply byte
+estimates are not billing ceilings. Verify the resulting Initiative statuses with the owner on dev; this does not
+authorize a production run.
 
 ### Archive and Deleted
 

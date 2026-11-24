@@ -68,7 +68,7 @@ export function applyPlanningPurge(
   if (initiative) {
     // Same in-place update a put makes, so selected-record callers see the tombstone and no stale field survives.
     for (const key of planningModelPutKeys) delete (initiative as Partial<PlanningItem>)[key];
-    for (const key of ['was', 'reason', 'initiativeId', 'author'] as const)
+    for (const key of ['was', 'reason', 'initiativeId', 'author', 'statusPin'] as const)
       delete (initiative as Partial<PlanningItem>)[key];
     Object.assign(initiative, tombstone, { kind: 'initiative' });
   }
@@ -95,7 +95,8 @@ function scrubItemWords(data: WorkData, historyId: string) {
     if (item.id !== historyId) continue;
     item.title = PURGED_ITEM_TITLE;
     item.body = '';
-    for (const key of ['reason', 'type', 'owner', 'waitingOn', 'imported'] as const) delete item[key];
+    for (const key of ['reason', 'type', 'owner', 'waitingOn', 'imported', 'statusPin'] as const)
+      delete item[key];
   }
   for (const comment of data.planningComments) if (comment.itemId === historyId) scrubComment(comment);
 }
@@ -160,7 +161,7 @@ export function purgedIndexValue(
     Object.assign(row, { title: PURGED_ITEM_TITLE, body: '' });
     // A large record's header also carries its body's length, Done-when flag and the file paths it names.
     if ('bodyLength' in row) Object.assign(row, { bodyLength: 0, hasDoneWhen: false });
-    drop('reason', 'type', 'owner', 'waitingOn', 'imported', 'paths');
+    drop('reason', 'type', 'owner', 'waitingOn', 'imported', 'statusPin', 'paths');
     if (request(row.operationId)) row.request = request(row.operationId);
   } else if (collection === 'planningSearch') {
     // The search preview (src/planning-search.ts planningSearchEntry): the same fields as the tombstone's row.
@@ -180,6 +181,7 @@ export function purgedIndexValue(
       'owner',
       'waitingOn',
       'imported',
+      'statusPin',
       'payloadKey',
       'payloadParts',
     );
