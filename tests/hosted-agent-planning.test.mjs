@@ -3240,6 +3240,74 @@ test('planning model fields (order, type, parent, owner, relations, hidden) stor
   assert.equal(hostedAgentCommandSchemas['put-planning-item'].safeParse({ order: 'AV' }).success, false);
 });
 
+test('CLI and MCP can group a bounded hierarchy page by a field without another Convex call', async t => {
+  const s = await setup(t);
+  const p = port(s);
+  const initiative = (await put(p, { kind: 'initiative', title: 'Shipment' })).result.itemId;
+  const parent = (await put(p, { kind: 'issue', initiativeId: initiative, title: 'Parser parent' })).result
+    .itemId;
+  const child = (
+    await put(p, {
+      kind: 'issue',
+      initiativeId: initiative,
+      title: 'Parser child',
+      fields: { parentId: parent, owner: '@mara/amber-fox', type: 'Bug' },
+    })
+  ).result.itemId;
+  const other = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Parser independent',
+      fields: { owner: 'mara/amber-fox', type: 'bug' },
+    })
+  ).result.itemId;
+  const filter = { status: 'active', kind: 'issue', reconcile: false };
+  p.calls.length = 0;
+  const plain = await list(p, filter);
+  const calls = [...p.calls];
+  p.calls.length = 0;
+  const { groupBy, groups, ...grouped } = await list(p, { ...filter, groupBy: 'owner' });
+  assert.deepEqual(grouped, plain);
+  assert.deepEqual(p.calls, calls);
+  assert.equal(groupBy, 'owner');
+  assert.deepEqual(
+    groups.map(bucket => bucket.key),
+    ['mara/amber-fox', null],
+  );
+  assert.deepEqual(new Set(groups[0].itemIds), new Set([child, other]));
+  assert.deepEqual(groups[1].itemIds, [parent]);
+  for (const [by, key, ids] of [
+    ['type', 'bug', [child, other]],
+    ['initiative', initiative, [parent, child]],
+    ['status', 'open', [parent, child, other]],
+    ['kind', 'issue', [parent, child, other]],
+    ['none', null, [parent, child, other]],
+  ]) {
+    const first = (await list(p, { ...filter, groupBy: by })).groups[0];
+    assert.equal(first.key, key);
+    assert.deepEqual(new Set(first.itemIds), new Set(ids));
+  }
+  for (const args of [
+    { counts: true },
+    { id: parent },
+    { history: { from: '2026-11-20' } },
+    { transfer: {} },
+  ])
+    assert.equal(hostedAgentCommandSchemas.planning.safeParse({ groupBy: 'owner', ...args }).success, false);
+  assert.equal(hostedAgentCommandSchemas.planning.safeParse({ groupBy: 'body' }).success, false);
+  const selection = { ...filter, groupBy: 'parent', search: 'Parser' };
+  const cli = await list(p, selection);
+  assert.deepEqual(cli.groups[0], { key: parent, itemIds: [child] });
+  const { transport: agent } = transport(s, { planning: true, features: p.serverFeatures });
+  const tools = new Map();
+  t.after(
+    registerHostedAgentWorkflow({ registerTool: (name, _schema, call) => tools.set(name, call) }, agent),
+  );
+  const mcp = await tools.get('forge_planning')({ command: { action: 'planning', ...selection } });
+  assert.ok(!mcp.isError, JSON.stringify(mcp.content));
+  assert.deepEqual(JSON.parse(mcp.content[0].text).result.groups, cli.groups);
+});
+
 test('the CLI refuses planning model fields, with zero calls, on a server that does not advertise planning-model', async t => {
   const s = await setup(t),
     p = port(

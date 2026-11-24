@@ -627,6 +627,14 @@ export const hostedAgentCommandSchemas = {
           message: 'relation: depends-on, duplicate-of, related or none.',
         })
         .optional(),
+      /** Group the returned page by an already-loaded field. A checked string keeps MCP tools/list compact. */
+      groupBy: z
+        .string()
+        .refine(
+          value => ['initiative', 'parent', 'type', 'owner', 'status', 'kind', 'none'].includes(value),
+          'groupBy: initiative, parent, type, owner, status, kind or none.',
+        )
+        .optional(),
       /** Return stored state counts in one bounded read; continue with the returned cursor. */
       counts: z.boolean().optional(),
       /** true: 14 UTC days of Initiative closes (with counts:true), or one Item's paged audit timeline (with planningItemId). {from,to?,change?}: Items closed, reopened or changed in a UTC window. */
@@ -696,6 +704,19 @@ export const hostedAgentCommandSchemas = {
           !input.relation &&
           !input.kind),
       'Use history:{from,to?,change?} with optional initiativeId, limit and cursor only.',
+    )
+    .refine(
+      input =>
+        !input.groupBy ||
+        !(
+          input.id ||
+          input.itemId ||
+          input.planningItemId ||
+          input.counts ||
+          input.history ||
+          input.transfer
+        ),
+      'Use groupBy on an Item list or search page.',
     )
     .refine(input => !(input.id && input.search), 'Use planningItemId or search, not both.')
     .refine(input => !(input.id && input.waitingOn), 'Use waitingOn with a list or search read.')

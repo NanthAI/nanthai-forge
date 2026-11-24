@@ -15,7 +15,15 @@ The stored kind of an Item is `issue`, so every older operation replays exactly.
 `"kind":"item"` and stores it as `issue`. "Issue" stays only as a search alias in help.
 
 Each Item has one type label. The defaults are Idea, Task and Bug; a project may use its own labels of up to 32
-characters.
+characters. In CLI and MCP writes, set the Initiative via `initiativeId` and a sub-item's parent and type
+via `fields.parentId` and `fields.type` on `put-planning-item`.
+
+A `planning` list or search can group the returned page without another read. For example,
+`nforge agent ROOT planning '{"status":"active","groupBy":"owner","reconcile":false}'` (MCP: `forge_planning`
+with command `action: "planning"` and the same fields). Group by `initiative`, `parent`, `owner`, `type`,
+`status`, `kind`, or `none`. The reply keeps `items` and adds `groups: [{key,itemIds}]` for that page; a
+null key is the last group and includes Items without the field. The cursor is unchanged; the same
+key on successive pages is the same group. Grouping doesn't fetch unseen parents or Initiatives.
 
 ## Link work to Items
 

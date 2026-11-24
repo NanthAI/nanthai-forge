@@ -96,7 +96,7 @@ test('the hosted tool list stays inside its context budget', async t => {
   // uses. tools/list 5781 -> 5772 bytes (ceiling 5790).
   // 340 -> 320 (Item 687d1eda): forge_wait drops 'under tool timeout' (its help says it), paying for the
   // wait's new `main=green` field (friction 1e94d000).
-  assert.equal(descriptionBytes, 376, 'per-session MCP description bytes');
+  assert.equal(descriptionBytes, 365, 'per-session descriptions shortened to pay for groupBy');
   assert(listBytes <= LIST_CHARS, 'tool list UTF-8 byte budget');
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);

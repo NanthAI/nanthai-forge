@@ -1153,6 +1153,32 @@ async function flushComments(port: PlanningPort, actor: string) {
   return posted;
 }
 
+/** Group just this page, without repeating Item bodies or looking up labels from other pages. */
+function groupPage(items: readonly { id: string }[], field: string) {
+  const buckets = new Map<string | null, string[]>();
+  for (const item of items) {
+    const name = field === 'initiative' ? 'initiativeId' : field === 'parent' ? 'parentId' : field;
+    const value = (item as Record<string, unknown>)[name];
+    const key =
+      field === 'none' || typeof value !== 'string'
+        ? null
+        : (field === 'owner'
+            ? value.trim().replace(/^@/, '').toLowerCase()
+            : field === 'type'
+              ? value.trim().toLowerCase()
+              : value) || null;
+    const group = buckets.get(key);
+    if (group) group.push(item.id);
+    else buckets.set(key, [item.id]);
+  }
+  const ungrouped = buckets.get(null);
+  buckets.delete(null);
+  return [
+    ...Array.from(buckets, ([key, itemIds]) => ({ key, itemIds })),
+    ...(ungrouped ? [{ key: null, itemIds: ungrouped }] : []),
+  ];
+}
+
 export async function executeHostedPlanning(
   port: PlanningPort,
   actor: string,
@@ -1172,9 +1198,13 @@ export async function executeHostedPlanning(
   if (action === 'planning') {
     const read = hostedAgentCommandSchemas.planning.parse(input);
     const result = marked(await readPlanning(port, read));
+    const grouped =
+      read.groupBy && 'items' in result && Array.isArray(result.items)
+        ? { ...result, groupBy: read.groupBy, groups: groupPage(result.items, read.groupBy) }
+        : result;
     return {
       operationId: null,
-      result: recovered.length ? { ...result, recoveredComments: recovered } : result,
+      result: recovered.length ? { ...grouped, recoveredComments: recovered } : grouped,
     };
   }
   const journal = new HostedAgentJournal(port.root, port.address, actor, action, input, operationId);
