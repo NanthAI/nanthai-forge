@@ -810,6 +810,13 @@ export default defineSchema({
   ...planningReactionTables,
   ...indexTables,
   ...hostedRecordTables,
+  // Disposable Item History summaries; not journal or exported source records.
+  projectPlanningAudit: defineTable({
+    projectId: v.id('hostedProjects'),
+    itemId: v.string(),
+    version: v.number(),
+    value: v.string(),
+  }).index('by_project_and_item_and_version', ['projectId', 'itemId', 'version']),
   ...hostedSaveTables,
   ...hostedComposeTables,
   ...hostedSyncTables,

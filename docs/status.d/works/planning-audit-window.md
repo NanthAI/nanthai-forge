@@ -1,0 +1,1 @@
+Item History reads bounded, version-pinned [summaries](../../data-placement.md#item-history-summaries) for recent covered pages on record-store projects. Older or uncovered pages keep the exact history reader. Item deletion and decision-comment purge remove the affected summaries.

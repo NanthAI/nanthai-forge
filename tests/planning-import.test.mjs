@@ -412,6 +412,7 @@ test('1,000 and 2,000 historical Items use ten and twenty bounded apply pages, n
     operationId: plain.operationId,
     command: JSON.stringify(plain),
   });
+  assert.equal(baseline.tables.projectPlanningAudit.size, 1, 'a live creation can seed History');
   const measurements = [];
   for (const size of [1000, 2000]) {
     const s = await fixture(t),
@@ -446,6 +447,7 @@ test('1,000 and 2,000 historical Items use ten and twenty bounded apply pages, n
       assert.equal(result.result.pages, size / 100);
     });
     assert.equal(s.calls.length, size / 100);
+    assert.equal(s.tables.projectPlanningAudit.size, 0, 'historical imports do not backfill audit summaries');
     assert(maxPageWrites <= 2100, `bounded completed-primary page writes: ${maxPageWrites}`);
     assert(
       maxPageWrites <= ordinaryWrites * 100 + 2,

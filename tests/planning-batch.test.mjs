@@ -22,6 +22,8 @@ import {
 import { planFilterMatch } from '../dist/planning-filter.js';
 import { planningSearchEntry } from '../dist/planning-search.js';
 import { indexedRecord, intentHeader } from '../dist/work-hosted-index.js';
+import { workStoreRecord } from '../dist/work-store-records.js';
+import { hostedRecordValue } from '../dist/hosted-records.js';
 import { setup } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { meterReads, meterWorkIO } from './hosted-read-set.mjs';
@@ -36,7 +38,8 @@ const { emptyPlanCounts, planCountsBirth, planRootFacts, PLAN_COUNTS, tallyGroup
   moduleUrl('../convex/projectPlanCountsStore.ts')
 );
 const { planView, PLAN_LIVE_LIMIT } = await import(moduleUrl('../convex/projectPlanView.ts'));
-const { recordPartition } = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
+const { record, recordPartition } = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
+const { storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
 const { runBatch } = await import(moduleUrl('../web/src/app/plan/batch.ts'));
 const id = () => randomUUID();
@@ -433,7 +436,7 @@ async function transactionCost(s, run, failAfterVersions = Infinity) {
   }
 }
 
-test('100 Items can replace 20 Related pairs each without exhausting one batch transaction', async t => {
+test('100 long-lived Items can replace 20 Related pairs each and evict expired audit summaries in one batch', async t => {
   const targets = Array.from({ length: 40 }, id);
   const sources = Array.from({ length: 100 }, id);
   const links = ids => ids.map(id => ({ kind: 'related', id }));
@@ -455,10 +458,43 @@ test('100 Items can replace 20 Related pairs each without exhausting one batch t
         local.status().revision,
       );
   });
+  // Seed the retained v33 heads directly. The batch only needs the current snapshots,
+  // not 3,200 unrelated historical puts in fixture setup.
+  const project = s.tables.hostedProjects.get(s.projectId);
+  const partition = recordPartition(s.tables.projectWorkGenerations.get(project.work.generationId));
+  const currentVersion = 33;
+  for (const itemId of sources) {
+    const root = await record(s.ctx, partition, 'planningItems', itemId);
+    assert(root);
+    const item = { ...JSON.parse(root.value), version: currentVersion, previousVersion: currentVersion - 1 };
+    await s.ctx.db.patch(root._id, { value: JSON.stringify(item) });
+    assert.equal(
+      await storeVersion(s.ctx, project, hostedRecordValue(workStoreRecord('planningVersions', item))),
+      'copied',
+    );
+    const head = [...s.tables.projectHostedRecordHeads.values()].find(
+      row => row.kind === 'issue' && row.key === item.id,
+    );
+    await s.ctx.db.patch(head._id, {
+      planningTimes: {
+        version: currentVersion,
+        lastStatusChangeAt: item.at,
+        closedAt: null,
+        closeKept: null,
+      },
+    });
+    await s.ctx.db.insert('projectPlanningAudit', {
+      projectId: s.projectId,
+      itemId: item.id,
+      version: 2,
+      value: '{}',
+    });
+  }
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
   const writes = sources.map(itemId => ({
     action: 'put-planning-item',
     itemId,
-    expectedVersion: 1,
+    expectedVersion: currentVersion,
     relations: after,
   }));
   let result;
@@ -473,7 +509,10 @@ test('100 Items can replace 20 Related pairs each without exhausting one batch t
   );
   assert.equal(projected.length, 2000);
   assert(projected.every(row => targets.slice(20).includes(row.parent.slice('live:'.length))));
-  t.diagnostic(`100 replacements: ${cost.indexRanges} ranges`);
+  const audits = [...s.tables.projectPlanningAudit.values()];
+  assert.equal(audits.length, 100);
+  assert(audits.every(row => row.version === currentVersion + 1));
+  t.diagnostic(`100 replacements with audit eviction: ${cost.indexRanges} ranges`);
 });
 
 async function pressureRollsBack(s, run) {

@@ -21,6 +21,7 @@ import { legacyVersions, legacyVersionValue, planningHistoryBudget } from './pro
 import { record } from './projectWorkIndexStore';
 import { workRecordTable } from './projectWorkRecordTables';
 import { storeItem } from './projectWorkStoreReads';
+import { auditPrefix, auditVersion, type AuditVersion } from './projectPlanningAuditWindow';
 
 const AUDIT_CURSOR = 'forge-item-audit-v1:';
 const MAX_LIMIT = 100;
@@ -469,118 +470,129 @@ export async function readItemAuditHistory(
         });
       }
     } else {
-      const loaded: { item: PlanningItem; actor?: string }[] = [];
-      if (recordsMode) {
-        // Lifecycle-plan rows share a key and version with the real row: page by raw rows, never by a filtered take.
-        const rows = ctx.db
-          .query('projectHostedRecords')
-          .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
-            q
-              .eq('projectId', project._id)
-              .eq('kind', 'issue')
-              .eq('key', input.itemId)
-              .lte('version', state.v!),
-          )
-          .order('desc');
-        let raw = 0;
-        for await (const row of rows) {
-          if (loaded.length > pageLimit) {
-            versionHasMore = true;
-            break;
-          }
-          if (raw++ >= 4 * (pageLimit + 1)) {
-            versionHasMore = true;
-            versionBudgetHit = true;
-            if (!loaded.length) versionNextFloor = row.version;
-            break;
-          }
-          if (row.lifecyclePlanId !== undefined || row.purged !== undefined) continue;
-          if (!charge.record(row)) {
-            versionBudgetHit = true;
-            versionHasMore = true;
-            break;
-          }
-          const snap = await loadVersionSnapshot(ctx, project._id, partition, row, charge);
-          if (!snap) {
-            versionBudgetHit = true;
-            versionHasMore = true;
-            break;
-          }
-          loaded.push(snap);
+      const cached = recordsMode
+        ? await auditPrefix(ctx, project._id, current, state.v, pageLimit, PAGE_BYTES - charge.readBytes)
+        : null;
+      let versions: AuditVersion[];
+      if (cached) {
+        charge.spend(cached.bytes);
+        versions = cached.versions;
+        versionHasMore = cached.more;
+        // A decision-derived version has no envelope of its own. Keep the same legacy actor lookup.
+        for (const version of versions) {
+          if (version.actor || version.statusSource === 'work') continue;
+          const actor = await lookupEventActor(ctx, project._id, version.operationId, charge);
+          if (actor) version.actor = actor;
         }
-      } else if (partition) {
-        let skipped = 0;
-        for await (const row of legacyVersions(ctx, partition, input.itemId)) {
-          if (!charge.record(row)) {
-            versionBudgetHit = true;
-            versionHasMore = true;
-            break;
+      } else {
+        const loaded: { item: PlanningItem; actor?: string }[] = [];
+        if (recordsMode) {
+          // Lifecycle-plan rows share a key and version with the real row: page by raw rows, never by a filtered take.
+          const rows = ctx.db
+            .query('projectHostedRecords')
+            .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
+              q
+                .eq('projectId', project._id)
+                .eq('kind', 'issue')
+                .eq('key', input.itemId)
+                .lte('version', state.v!),
+            )
+            .order('desc');
+          let raw = 0;
+          for await (const row of rows) {
+            if (loaded.length > pageLimit) {
+              versionHasMore = true;
+              break;
+            }
+            if (raw++ >= 4 * (pageLimit + 1)) {
+              versionHasMore = true;
+              versionBudgetHit = true;
+              if (!loaded.length) versionNextFloor = row.version;
+              break;
+            }
+            if (row.lifecyclePlanId !== undefined || row.purged !== undefined) continue;
+            if (!charge.record(row)) {
+              versionBudgetHit = true;
+              versionHasMore = true;
+              break;
+            }
+            const snap = await loadVersionSnapshot(ctx, project._id, partition, row, charge);
+            if (!snap) {
+              versionBudgetHit = true;
+              versionHasMore = true;
+              break;
+            }
+            loaded.push(snap);
           }
-          const header = JSON.parse(row.value) as PlanningItem;
-          if (header.version > state.v) {
-            if (++skipped > 4096) {
+        } else if (partition) {
+          let skipped = 0;
+          for await (const row of legacyVersions(ctx, partition, input.itemId)) {
+            if (!charge.record(row)) {
+              versionBudgetHit = true;
+              versionHasMore = true;
+              break;
+            }
+            const header = JSON.parse(row.value) as PlanningItem;
+            if (header.version > state.v) {
+              if (++skipped > 4096) {
+                versionBudgetHit = true;
+                break;
+              }
+              continue;
+            }
+            if (header.purged) break;
+            if (loaded.length >= pageLimit + 1) {
+              versionHasMore = true;
+              break;
+            }
+            const value = await legacyVersionValue(ctx, partition, row, charge);
+            if (value === null) {
+              versionHasMore = true;
               versionBudgetHit = true;
               break;
             }
-            continue;
+            const item = JSON.parse(value) as PlanningItem;
+            const actor = await lookupEventActor(ctx, project._id, item.operationId, charge);
+            loaded.push({ item, actor });
           }
-          if (header.purged) break;
-          if (loaded.length >= pageLimit + 1) {
-            versionHasMore = true;
-            break;
-          }
-          const value = await legacyVersionValue(ctx, partition, row, charge);
-          if (value === null) {
-            versionHasMore = true;
-            versionBudgetHit = true;
-            break;
-          }
-          const item = JSON.parse(value) as PlanningItem;
-          const actor = await lookupEventActor(ctx, project._id, item.operationId, charge);
-          loaded.push({ item, actor });
         }
+        // With more to come, the oldest loaded version is only the predecessor that the oldest shown one diffs against
+        // (a budget cut too); a lone version still shows, with an unavailable predecessor, so paging moves on.
+        const shownCount = versionHasMore && loaded.length >= 2 ? loaded.length - 1 : loaded.length;
+        const shown = loaded.slice(0, shownCount);
+        const predecessor = loaded[shownCount]?.item ?? null;
+        versions = shown.map(({ item, actor }, i) =>
+          auditVersion(shown[i + 1]?.item ?? predecessor, item, actor),
+        );
       }
-      // With more to come, the oldest loaded version is only the predecessor that the oldest shown one diffs against
-      // (a budget cut too); a lone version still shows, with an unavailable predecessor, so paging moves on.
-      const shownCount = versionHasMore && loaded.length >= 2 ? loaded.length - 1 : loaded.length;
-      const shown = loaded.slice(0, shownCount);
-      const predecessor = loaded[shownCount]?.item ?? null;
-      if (shown.length) {
-        const oldest = shown.at(-1)!.item;
-        if (!firstVersion || oldest.version < firstVersion) {
-          if (!completeFromCreation) {
-            firstVersion = oldest.version;
-            historyStartsAt = oldest.at;
-          }
+      const oldest = versions.at(-1);
+      if (oldest) {
+        if (!completeFromCreation && (!firstVersion || oldest.version < firstVersion)) {
+          firstVersion = oldest.version;
+          historyStartsAt = oldest.at;
         }
         if (versionHasMore) versionNextFloor = oldest.version - 1;
       }
-      for (let i = 0; i < shown.length; i++) {
-        const { item, actor } = shown[i]!;
-        const prev = i + 1 < shown.length ? shown[i + 1]!.item : predecessor;
-        const diff = diffPlanningVersion(prev, item);
-        const decision = decisionByOp.get(item.operationId);
-        const bodyAuthorFallback =
-          item.author && (item.version === 1 || (prev && prev.body !== item.body)) ? item.author : undefined;
-        const resolvedActor = actor ?? decision?.author ?? bodyAuthorFallback;
+      for (const version of versions) {
+        const decision = decisionByOp.get(version.operationId);
         const who =
-          item.statusSource === 'work'
+          version.statusSource === 'work'
             ? { actor: 'Forge', actorKind: 'system' as const, model: null }
             : writerIdentity(
-                resolvedActor,
-                item.agent ?? decision?.agent,
-                item.agentClient ?? decision?.agentClient,
+                version.actor ?? decision?.author ?? version.bodyAuthor,
+                version.agent ?? decision?.agent,
+                version.agentClient ?? decision?.agentClient,
               );
         versionEntries.push({
-          version: item.version,
+          version: version.version,
           event: {
             kind: 'version',
-            id: item.operationId,
-            version: item.version,
-            at: item.at,
+            id: version.operationId,
+            version: version.version,
+            at: version.at,
             ...who,
-            summary: diff.summary,
-            changes: diff.changes,
+            summary: version.summary,
+            changes: version.changes,
             ...(decision ? { decisionCommentId: decision.id } : {}),
           },
         });

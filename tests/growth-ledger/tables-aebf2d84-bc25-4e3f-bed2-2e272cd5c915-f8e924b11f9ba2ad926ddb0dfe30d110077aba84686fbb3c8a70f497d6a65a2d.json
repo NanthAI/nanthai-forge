@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Item 411727ba: add one slim record-store audit table to replace full snapshot and envelope reads on covered History pages. It replaces no canonical table: exact deep history, legacy readers and journal replay still need source snapshots; do not put summaries on hot heads or in copied Work partitions.",
+  "date": "2026-11-24"
+}

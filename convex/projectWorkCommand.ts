@@ -21,6 +21,7 @@ import { invariant } from '../src/errors';
 import { serverCommentWriter, serverPutWriter } from './planningCommentWriter';
 import { report } from './errors';
 import { activeProject } from './projectAuthority';
+import { clearAuditVersions } from './projectPlanningAuditWindow';
 import { planningTarget } from '../src/work-planning-unified';
 import { wakePlanWrite } from './projectPlanRollupWake';
 import { publicActorLabel } from './publicPeople';
@@ -557,6 +558,11 @@ export async function executeCommand(
       planBefore,
       JSON.parse(planned.value),
     );
+  if (command.action === 'purge-planning-item') {
+    const itemId = projection.entries.find(entry => entry.collection === 'planningVersions')?.parent;
+    // Keep the tombstone and erasure of all derived excerpts in the same mutation.
+    if (itemId) await clearAuditVersions(ctx, input.projectId, itemId);
+  }
   if (shift && current && command.action === 'put-planning-item') {
     // A writer can move an Item to its parent's Initiative but cannot post arbitrary Initiative comments.
     const initiatives = commandValues(rows, 'initiatives') as PlanningItem[];

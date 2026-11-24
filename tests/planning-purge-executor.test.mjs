@@ -608,8 +608,14 @@ test('records mode (work store primary): a purge of an Item with an alias-writte
   assert.ok(stored.length >= 3, 'the store holds the comments and the note');
   // Every Issue is also an Intent, and the store keeps that Intent's versions (the Item's Intent copy).
   assert.ok(storeIntents(s, itemId).length > 1, 'the store keeps several Intent versions');
+  const summaries = () => [...s.tables.projectPlanningAudit.values()].filter(row => row.itemId === itemId);
+  assert(
+    summaries().some(row => row.version > 1),
+    'the live Deleted write was summarized after record-store cutover',
+  );
   const done = await executor(s).run(itemId, randomUUID());
   assert.equal(typeof done.purgedAt, 'number');
+  assert.deepEqual(summaries(), []);
   assert.deepEqual(done.ids, [itemId, alias].sort(), 'the Item id and its alias');
   assert.ok(done.rows >= 7, 'puts, comments, the alias comment, note and the Deleted put are listed');
   const tombstone = [...s.tables.projectHostedRecordHeads.values()].find(

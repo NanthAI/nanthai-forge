@@ -39,6 +39,7 @@ import {
   type DecisionLines as Lines,
 } from '../src/work-planning-purge';
 import { executeCommand } from './projectWorkCommand';
+import { clearAuditVersions } from './projectPlanningAuditWindow';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { settledLayout } from './projectWorkRecordLayout';
 import { hostedRecordBody, recordHead } from './projectHostedRecords';
@@ -496,6 +497,7 @@ async function decisionBodyEdit(
  * the purged comment gives it: the line replaced and the request derived from the comment's. Every record partition's
  * version record and the work-store version body. A fixed point. */
 async function decisionVersion(ctx: MutationCtx, input: Input, lines: Lines, request: string) {
+  await clearAuditVersions(ctx, input.projectId, input.itemId);
   const key = decisionOperationId(input.commentId);
   const rewrite = (value: unknown) => decisionVersionValue(value, lines, request);
   let version: number | undefined;

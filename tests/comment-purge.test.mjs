@@ -290,8 +290,22 @@ for (const mode of ['journal', 'records', 'primary-writer'])
       records: mode === 'records',
       primary: mode === 'primary-writer',
     });
+    const summaries = () => [...s.tables.projectPlanningAudit.values()].filter(row => row.itemId === itemId);
+    if (mode === 'records') {
+      const excerpt = summaries().find(row => row.value.includes(SECRET));
+      assert(excerpt);
+      // Simulate an older writer leaving more than one page of derived excerpts.
+      for (let version = 10; version < 45; version++)
+        await s.ctx.db.insert('projectPlanningAudit', {
+          projectId: s.projectId,
+          itemId,
+          version,
+          value: excerpt.value,
+        });
+    }
     const operationId = randomUUID();
     assert.equal(await purge(s, itemId, reported.operationId, operationId), 1);
+    assert.deepEqual(summaries(), [], 'the in-place decision rewrite invalidates the entire audit window');
     assert.deepEqual(intentHistoryOnly(s), [], 'only Intent history copies of the body keep the line');
     const check = async label => {
       const data = (await s.read()).data;

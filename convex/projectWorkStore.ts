@@ -42,6 +42,7 @@ import {
 } from '../src/work-store-records';
 import { sameValue, storeReadOf } from './projectWorkStoreReads';
 import { advancePlanningTimes, pinnedPlanningTimes } from './projectPlanningTimes';
+import { retainAuditVersion } from './projectPlanningAuditWindow';
 
 type WorkStoreProject = Pick<Doc<'hostedProjects'>, '_id' | 'workStore'>;
 const pinRequired =
@@ -156,6 +157,7 @@ export async function storeVersion(
   encoded: ReturnType<typeof hostedRecordValue>,
   provenance?: WorkProvenance,
   migrationDigests = true,
+  liveProjection = false,
 ): Promise<'copied' | 'same' | 'refreshed' | 'different'> {
   const projectId = project._id;
   const { record, ref } = encoded;
@@ -166,7 +168,17 @@ export async function storeVersion(
   if (old && (old.digest !== ref.digest || old.bytes !== ref.bytes)) return 'different';
   const head = await recordHead(ctx, projectId, record.kind, record.id);
   if (!old) {
-    await insertVersion(ctx, projectId, encoded, head, provenance, migrationDigests, undefined, requirePin);
+    await insertVersion(
+      ctx,
+      projectId,
+      encoded,
+      head,
+      provenance,
+      migrationDigests,
+      undefined,
+      requirePin,
+      liveProjection,
+    );
     return 'copied';
   }
   // A head stored before heads kept their value (and notes their own status) is brought up to date.
@@ -212,6 +224,7 @@ async function insertVersion(
   migrationDigests = true,
   planningItemId = head?.planningItemId,
   requirePin = false,
+  liveProjection = false,
 ) {
   const { record, ref, value } = encoded;
   invariant(record.kind !== 'candidate', 'BAD_ARGUMENT', 'Work metadata copies cannot publish a Candidate.');
@@ -224,6 +237,10 @@ async function insertVersion(
       'Copy missing Item versions in order before publishing the record-store history.',
     );
     invariant(planningTimes, 'WORK_STALE', pinRequired);
+    // Historical backlog import uses the ordinary projection too. Its creation
+    // must not backfill summaries or add per-Item writes to an import page.
+    if (liveProjection && record.kind === 'issue' && !(record.version === 1 && record.item.imported))
+      await retainAuditVersion(ctx, projectId, head, record.item, provenance?.actor);
   }
   const indexed = { ...hostedRecordIndex(record), version: record.version },
     identity = { projectId, kind: record.kind, key: record.id };
@@ -361,6 +378,7 @@ export async function storeProjection(
           hostedRecordValue(workStoreRecord(collection, value)),
           audit,
           Boolean(partition),
+          true,
         );
     } catch (error) {
       if (audit || (project.workStore === 'records' && collection === 'planningVersions')) throw error;
