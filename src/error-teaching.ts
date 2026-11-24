@@ -129,6 +129,11 @@ const teachingByMessage: readonly (readonly [RegExp, Entry])[] = [
     /^(?:Agent |No open Lane or active session |Recipient .* (?:is not a write member|is not a valid agent handle))/,
     { learn: 'board', next: `nforge agent <root> lanes '{}'` },
   ],
+  // Item 6466c6a5: a proposal that is no longer current is not a Lane conflict.
+  [
+    /Ask for a new proposal|List the proposals again|Make a new proposal|the proposal is no longer current/i,
+    { learn: 'retry', next: 'nforge secret proposals' },
+  ],
 ];
 
 export function teachingEntry(code: string): Entry | undefined {

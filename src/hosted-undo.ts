@@ -9,7 +9,7 @@ const target = {
   version: saveExpectedSchema.shape.version.optional(),
 };
 
-export const undoRequestSchema = z
+const undoInput = z
   .object({
     kind: z.literal('undo'),
     laneId: z.uuid(),
@@ -22,8 +22,21 @@ export const undoRequestSchema = z
     authorityEpoch: z.number().int().nonnegative(),
     expected: saveExpectedSchema.strict(),
   })
-  .strict()
-  .refine(request => request.saveId === undefined || request.version === undefined);
+  .strict();
+
+export const undoRequestSchema = undoInput.refine(
+  request => request.saveId === undefined || request.version === undefined,
+);
+
+/** Only a retained save or the exact stopped point of a completed browser return. */
+export const browserUndoRequestSchema = undoInput
+  .omit({ holderSessionId: true })
+  .extend({ returnOperationId: z.uuid().optional() })
+  .refine(request =>
+    request.saveId !== undefined
+      ? request.version === undefined && request.returnOperationId === undefined
+      : request.version !== undefined && request.returnOperationId !== undefined,
+  );
 
 export const undoReceiptSchema = z
   .object({

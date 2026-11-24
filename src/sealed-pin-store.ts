@@ -11,6 +11,8 @@ export type PinFile = {
   counter: number;
   lostKinds?: number[];
   kinds: Partial<Record<1 | 2 | 3, { pin: SecretPin; cache: SealedReply; fetchedAt: number }>>;
+  /** Review L1 (Item 6466c6a5): proposal ids this device applied or rejected, per set kind, newest last. */
+  resolvedProposals?: Partial<Record<1 | 2 | 3, Buffer[]>>;
 };
 export type Index = { counter: number; files: Record<string, { counter: number; kinds: number[] }> };
 export const lost = (ok: unknown) =>

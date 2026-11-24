@@ -16,6 +16,13 @@ import { mayTakeLane } from './accessPolicy';
 export const mayActFor = (actor: string, author: string, owner: string | undefined) =>
   actor === author || actor === owner;
 
+/** A person can return their own Lane without matching its holder session. Project Write is checked separately. */
+export const mayReturnLaneSave = (
+  project: { owner: string },
+  lane: { actor: string; holder?: { actor: string } },
+  actor: string,
+) => actor === lane.holder?.actor || mayActFor(actor, lane.actor, project.owner);
+
 export type MemberRecord = 'Lane' | 'landing' | 'Candidate';
 
 export function requireMemberAuthority(

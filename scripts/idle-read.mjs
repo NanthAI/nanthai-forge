@@ -4,9 +4,11 @@
 // Usage: node scripts/idle-read.mjs --project PROJECT_ID --path HANDLE/SLUG [--minutes 30] [--settle 30] [--item ITEM_ID]
 // With --item (full id) it also clicks that Item's row on the page (use the Plan path) and reports the Item open.
 // Attribution: every project function logs FORGE_PROJECT_EXECUTION with its projectId; each completion carries
-// usageStats. Use a quiet scratch project so no other tab shares it. Prints counts and bytes only.
+// usageStats. Rows are keyed `function [caller]`: browser queries are Client, agents HttpApi, jobs Scheduler/Action,
+// so a busy project's other traffic is separable. Use a quiet project when you can. Prints counts and bytes only.
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { idleReadOptions } from './idle-read-options.mjs';
 import { openBotCredentialStore } from './ui-shots/bot-credential-store.mjs';
@@ -27,15 +29,31 @@ const { data } = await openBotCredentialStore(homedir());
 const credential = botPasskey(data.passkey, data.passkey.origin);
 
 const rows = [];
-const logs = spawn('npx', ['convex', 'logs', '--jsonl', '--success'], {
-  cwd: data.convexCwd,
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+// Name the deployment the bot signs in to, so the log stream needs no project folder or CONVEX_DEPLOYMENT.
+const deploymentName = new URL(credential.deployment).hostname.split('.')[0];
+const logs = spawn(
+  process.execPath,
+  [
+    resolve('node_modules/convex/bin/main.js'),
+    'logs',
+    '--deployment',
+    deploymentName,
+    '--history',
+    '0',
+    '--jsonl',
+    '--success',
+  ],
+  { stdio: ['ignore', 'pipe', 'pipe'] },
+);
 // A dead log stream would read as a quiet project, so its exit invalidates the whole measurement.
 let logsEnded = null;
 let logLines = 0;
-logs.stderr.resume();
-logs.on('exit', code => (logsEnded = `exit ${code}`));
+let logsError = '';
+logs.stderr.on('data', chunk => (logsError = `${logsError}${chunk}`.slice(-300)));
+logs.on(
+  'exit',
+  code => (logsEnded = `exit ${code}${logsError ? `: ${logsError.trim().split('\n').pop()}` : ''}`),
+);
 logs.on('error', () => (logsEnded = 'spawn error'));
 createInterface({ input: logs.stdout }).on('line', line => {
   logLines++;
@@ -49,7 +67,7 @@ createInterface({ input: logs.stdout }).on('line', line => {
     if (!mine) return;
     rows.push({
       at: row.timestamp * 1000,
-      fn: row.identifier,
+      fn: `${row.identifier} [${row.caller ?? '?'}]`,
       type: row.udfType,
       bytes: row.usageStats?.databaseIoReadBytes ?? row.usageStats?.databaseReadBytes ?? Number.NaN,
       docs: row.usageStats?.databaseReadDocuments ?? Number.NaN,
@@ -74,6 +92,9 @@ try {
   if (values.item) {
     // The Plan row links by full Item id; a hidden row fails loudly instead of measuring a different click.
     const link = page.locator(`main a[href$="/${values.item}"]`).first();
+    await link.waitFor({ state: 'attached', timeout: 15_000 });
+    // A row inside a folded Initiative group is in the page but hidden: Expand all is the user's own key for it.
+    if (!(await link.isVisible())) await page.getByRole('button', { name: 'Expand all' }).first().click();
     await link.waitFor({ state: 'visible', timeout: 15_000 });
     clicked = Date.now();
     await link.click();
@@ -87,7 +108,7 @@ try {
     ? `the log stream ended early (${logsEnded})`
     : !logLines
       ? 'the log stream delivered no lines'
-      : !open.some(row => row.fn === 'projectLiveLine:read')
+      : !open.some(row => row.fn.startsWith('projectLiveLine:read '))
         ? 'the opening burst never showed projectLiveLine:read for this project (wrong project/path, or the tab did not load it)'
         : open.some(row => !Number.isFinite(row.bytes))
           ? 'a completion carried no usage data'

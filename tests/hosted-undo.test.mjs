@@ -14,7 +14,7 @@ import { encodeArchiveBytes } from '../dist/landing-capsule-bytes.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
-import { syncFixture, code } from './hosted-sync-fixture.mjs';
+import { syncFixture, code, records } from './hosted-sync-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
 const api = await import(moduleUrl('../convex/projectHostedUndo.ts'));
@@ -30,6 +30,15 @@ const request = (s, lane, target = {}) => ({
 const undo = (s, input, actor = 'owner') =>
   s
     .call('undo', api.undo, { projectId: s.projectId, request: JSON.stringify(input) }, actor)
+    .then(JSON.parse);
+const returnToSave = (s, input, actor, caller = {}) =>
+  s
+    .call(
+      'returnToSave',
+      api.returnToSave,
+      { projectId: s.projectId, request: JSON.stringify(input), ...caller },
+      actor,
+    )
     .then(JSON.parse);
 const saves = (s, lane) =>
   [...s.tables.projectHostedRecordHeads.values()]
@@ -153,6 +162,152 @@ test('undo refuses a save from another Lane and a contributor writing someone el
   await assert.rejects(undo(s, request(s, start, { saveId })), code('NOT_FOUND'));
   await assert.rejects(undo(s, request(s, start, { version: 0 }), 'writer'), code('PROJECT_UNAVAILABLE'));
   assert.equal((await s.readLane(start.laneId)).entry.head, start.head);
+});
+
+async function browserReturnFixture() {
+  const s = await syncFixture();
+  const original = await s.lane(s.baseline, { actor: 'author' });
+  const first = await s.save(original, [s.file('a.txt', 'good save\n'), s.hidden]);
+  const second = await s.save(first, [s.file('a.txt', 'later save\n'), s.hidden]);
+  const [firstSave, secondSave] = saves(s, original);
+  const { record } = await s.readLane(original.laneId);
+  const at = Date.parse(record.at);
+  const holder = { actor: 'holder', sessionId: 'a'.repeat(64), since: at, lastSeen: at };
+  const held = { ...record, holder, version: record.version + 1 };
+  await s.run('seedHolder', records.writeHostedRecord, {
+    ...s.auth,
+    record: held,
+    expectedVersion: record.version,
+  });
+  const current = { ...second, ...s.pins(held) };
+  const members = new Map(
+    ['author', 'writer', 'holder'].map(contributor => [
+      contributor,
+      s.insert('projectContributors', { projectId: s.projectId, contributor }),
+    ]),
+  );
+  return { s, original, first, second, current, firstSave, secondSave, holder, members };
+}
+
+test('the Lane author can return to a save in one CAS and the holder is notified once', async () => {
+  const { s, original, first, second, current, firstSave, secondSave, holder } = await browserReturnFixture();
+  const before = { calls: s.counts.length, objects: s.objects.size, main: main(s) };
+  const op = request(s, current, { saveId: firstSave });
+  const restored = await returnToSave(s, op, 'author');
+  const [io] = s.counts.slice(before.calls);
+  assert.equal(s.counts.length, before.calls + 1, 'one Convex mutation');
+  assert.equal(restored.lane.head, first.head);
+  assert.equal(restored.from.head, second.head);
+  assert.equal(restored.lane.version, current.version + 1);
+  assert.equal(restored.lane.sourceVersion, current.sourceVersion + 1);
+  assert.equal(s.objects.size, before.objects, 'no new source bytes');
+  assert.equal(main(s), before.main);
+  assert.deepEqual(saves(s, original), [firstSave, secondSave]);
+  assert.deepEqual(await returnToSave(s, op, 'author'), restored);
+  await assert.rejects(undo(s, op, 'author'), code('WORK_OPERATION_CHANGED'));
+  const [notice] = s.tables.projectCoordinationEvents.values();
+  assert.equal(s.tables.projectCoordinationEvents.size, 1, 'a retry posts one notice');
+  assert.equal(notice.actor, 'author');
+  assert.equal(notice.recipientActor, holder.actor);
+  assert.equal(notice.laneId, original.laneId);
+  assert.match(notice.command.text, /All saves are still in History/);
+  console.log(
+    'browser return fixture',
+    JSON.stringify({
+      ranges: io.ranges,
+      readBytes: io.readBytes,
+      writes: io.writes,
+      writeBytes: io.writeBytes,
+    }),
+  );
+
+  assert.deepEqual((await s.readLane(original.laneId)).record.holder, holder);
+});
+
+for (const actor of ['holder', 'owner'])
+  test(`the Lane ${actor} can return without matching the device session or taking over`, async () => {
+    const { s, original, current, first, firstSave, holder } = await browserReturnFixture();
+    const result = await returnToSave(s, request(s, current, { saveId: firstSave }), actor);
+    assert.equal(result.lane.head, first.head);
+    assert.deepEqual((await s.readLane(original.laneId)).record.holder, holder);
+    assert.equal(s.tables.projectCoordinationEvents.size, actor === 'holder' ? 0 : 1, 'no self-notice');
+  });
+
+for (const actor of ['writer', 'reader', 'removed author'])
+  test(`browser return refuses ${actor === 'writer' ? 'another writer' : `a ${actor}`} on this Lane`, async () => {
+    const { s, original, current, firstSave, members } = await browserReturnFixture();
+    s.insert('projectReaders', { projectId: s.projectId, reader: 'reader' });
+    if (actor === 'removed author') s.tables.projectContributors.delete(members.get('author'));
+    const op = request(s, current, { saveId: firstSave });
+    await assert.rejects(
+      returnToSave(s, op, actor === 'removed author' ? 'author' : actor),
+      error =>
+        code('PROJECT_UNAVAILABLE')(error) &&
+        (actor !== 'writer' || /holder, its author or the project owner/.test(error.data.message)),
+    );
+    assert.equal((await s.readLane(original.laneId)).entry.head, current.head);
+    assert(![...s.tables.projectHostedOperations.values()].some(row => row.operationId === op.operationId));
+    assert.equal(s.tables.projectCoordinationEvents.size, 0);
+  });
+
+test('a signed-in agent token cannot use the person-only browser return, including archive fallback', async t => {
+  const now = Date.parse('2026-11-24T00:00:00.000Z');
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const { s, original, current, firstSave } = await browserReturnFixture();
+  const op = request(s, current, { saveId: firstSave });
+  const credentialId = randomUUID();
+  s.insert('cliCredentials', {
+    owner: 'owner',
+    name: 'Synthetic device',
+    scope: 'cli',
+    credentialId,
+    tokenHash: 'synthetic-hash',
+    issuedAt: now,
+    expiresAt: now + 60_000,
+    revoked: false,
+  });
+  const device = { subject: 'owner', forgeCredential: credentialId };
+  await assert.rejects(returnToSave(s, op, device, { forgeCaller: 'agent' }), code('AUTH_SCOPE_DENIED'));
+  await assert.rejects(
+    s.call(
+      'archiveDevice',
+      api.archived,
+      {
+        projectId: s.projectId,
+        request: JSON.stringify(op),
+        segments: [],
+        browser: true,
+      },
+      device,
+    ),
+    code('AUTH_SCOPE_DENIED'),
+  );
+  await assert.rejects(
+    returnToSave(s, { ...op, holderSessionId: 'a'.repeat(64) }, 'owner'),
+    code('BAD_ARGUMENT'),
+  );
+  assert.equal((await s.readLane(original.laneId)).entry.head, current.head);
+  assert(![...s.tables.projectHostedOperations.values()].some(row => row.operationId === op.operationId));
+  assert.equal(s.tables.projectCoordinationEvents.size, 0);
+});
+
+test('browser Undo only restores the exact from.version of its completed return on this Lane', async () => {
+  const { s, original, current, first, second, firstSave } = await browserReturnFixture();
+  const owner = 'owner';
+  const ask = (lane, target) => returnToSave(s, request(s, lane, target), owner);
+  await assert.rejects(ask(current, { version: original.version }), code('BAD_ARGUMENT'));
+  const returned = await ask(current, { saveId: firstSave });
+  await assert.rejects(
+    ask(returned.lane, { version: original.version, returnOperationId: returned.operationId }),
+    code('BAD_ARGUMENT'),
+  );
+  const undoOf = { version: current.version, returnOperationId: returned.operationId };
+  const other = await s.lane(s.baseline);
+  await assert.rejects(ask(other, undoOf), code('BAD_ARGUMENT'));
+  assert.equal((await s.readLane(original.laneId)).entry.head, first.head);
+  const undone = await ask(returned.lane, undoOf);
+  assert.equal(undone.lane.head, second.head);
+  await assert.rejects(ask(undone.lane, undoOf), code('WORK_STALE'));
 });
 
 test('undo restores an archived Lane version through the same exact Lane guard', async () => {

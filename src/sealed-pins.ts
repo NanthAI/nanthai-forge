@@ -16,6 +16,8 @@ import { knownKinds, lost, packed, unpack, type Index, type PinFile } from './se
 // Gate B2 H1: pins from a server read (`fresh`) that this process verified and saved. A code holder approves only
 // on one of these, once: never on a pin loaded from disk, from the offline cache or from this device's own write.
 const freshReads = new WeakSet<SecretPin>();
+/** How many applied or rejected proposal ids a pin file keeps per set kind (review L1). */
+const RESOLVED_PROPOSALS = 256;
 /** True once per fresh read: the approval that uses it reads again before the next one. */
 export const takeFreshRead = (pin: SecretPin | undefined) => !!pin && freshReads.delete(pin);
 function discard(result: ReturnType<typeof verifySealedReply> | undefined) {
@@ -101,41 +103,65 @@ export class SecretPins {
           if (fresh) freshReads.add(result.pin);
           return result;
         }
-        // Repair a permitted +1 crash state before beginning another publication.
-        if (
-          s.file.counter !== (s.index.files[s.name]?.counter ?? 0) ||
-          s.index.counter !== s.keys.pinCounter
-        ) {
-          s.index.files[s.name] = { counter: s.file.counter, kinds: knownKinds(s.file) };
-          s.index.counter = Math.max(s.index.counter, s.keys.pinCounter) + 1;
-          atomicPrivate(this.indexPath, packed('pin-index', s.keys, s.index.counter, serialize(s.index)));
-          s.keys.pinCounter = s.index.counter;
-          this.store.save(s.keys);
-        }
-        const file: PinFile = {
-          ...s.file,
-          counter: s.file.counter + 1,
-          kinds: { ...s.file.kinds, [request.setKind]: next },
-        };
-        const index: Index = {
-          counter: Math.max(s.index.counter, s.keys.pinCounter) + 1,
-          files: {
-            ...s.index.files,
-            [s.name]: { counter: file.counter, kinds: knownKinds(file) },
-          },
-        };
-        atomicPrivate(s.path, packed('pins', s.keys, file.counter, serialize(file), s.id));
-        atomicPrivate(this.indexPath, packed('pin-index', s.keys, index.counter, serialize(index)));
-        this.store.save({
-          ...s.keys,
-          pinCounter: index.counter,
-          pinned: { ...s.keys.pinned, [s.name]: knownKinds(file) },
-        });
+        this.publish(s, { kinds: { ...s.file.kinds, [request.setKind]: next } });
         if (fresh) freshReads.add(result.pin);
         return result;
       } catch (error) {
         discard(result);
         throw error;
+      } finally {
+        wipeDeviceKeys(s.keys);
+      }
+    });
+  }
+  /** Publishes the next pin file (`change` over the current one) and its index under the lock the caller holds. */
+  private publish(s: ReturnType<SecretPins['snapshot']>, change: Partial<PinFile>) {
+    // Repair a permitted +1 crash state before beginning another publication.
+    if (s.file.counter !== (s.index.files[s.name]?.counter ?? 0) || s.index.counter !== s.keys.pinCounter) {
+      s.index.files[s.name] = { counter: s.file.counter, kinds: knownKinds(s.file) };
+      s.index.counter = Math.max(s.index.counter, s.keys.pinCounter) + 1;
+      atomicPrivate(this.indexPath, packed('pin-index', s.keys, s.index.counter, serialize(s.index)));
+      s.keys.pinCounter = s.index.counter;
+      this.store.save(s.keys);
+    }
+    const file: PinFile = { ...s.file, ...change, counter: s.file.counter + 1 };
+    const index: Index = {
+      counter: Math.max(s.index.counter, s.keys.pinCounter) + 1,
+      files: {
+        ...s.index.files,
+        [s.name]: { counter: file.counter, kinds: knownKinds(file) },
+      },
+    };
+    atomicPrivate(s.path, packed('pins', s.keys, file.counter, serialize(file), s.id));
+    atomicPrivate(this.indexPath, packed('pin-index', s.keys, index.counter, serialize(index)));
+    this.store.save({
+      ...s.keys,
+      pinCounter: index.counter,
+      pinned: { ...s.keys.pinned, [s.name]: knownKinds(file) },
+    });
+  }
+  /** Review L1: the proposal ids this device applied or rejected in this project's set, under the pin MAC. */
+  async resolvedProposals(project: string, kind: 1 | 2 | 3) {
+    return secretLocked(this.lock, () => {
+      const s = this.snapshot(project, kind);
+      try {
+        return [...(s.file.resolvedProposals?.[kind] ?? [])];
+      } finally {
+        wipeDeviceKeys(s.keys);
+      }
+    });
+  }
+  /** Review L1: records proposal ids this device applied or rejected; the newest 256 are kept. A proposal served
+   * again after its set compacted the name away is then refused here, not re-applied. */
+  async rememberProposals(project: string, kind: 1 | 2 | 3, ids: readonly Uint8Array[]) {
+    if (!ids.length) return;
+    return secretLocked(this.lock, () => {
+      const s = this.snapshot(project, kind);
+      try {
+        const kept = [...(s.file.resolvedProposals?.[kind] ?? []), ...ids.map(id => Buffer.from(id))];
+        this.publish(s, {
+          resolvedProposals: { ...s.file.resolvedProposals, [kind]: kept.slice(-RESOLVED_PROPOSALS) },
+        });
       } finally {
         wipeDeviceKeys(s.keys);
       }
@@ -341,6 +367,8 @@ export class SecretPins {
         ...previous.kinds,
         [request.setKind]: { pin: result.pin, cache: reply, fetchedAt: Date.now() },
       },
+      // A rebuild keeps the applied-proposal journal when the old file still verified.
+      ...(previous.resolvedProposals ? { resolvedProposals: previous.resolvedProposals } : {}),
     };
     index.counter = counter;
     index.files[name] = { counter: file.counter, kinds: knownKinds(file) };

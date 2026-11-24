@@ -8,9 +8,11 @@ import { saveFixture, api } from './hosted-saves-fixture.mjs';
 import { landingFixture, store } from './hosted-landing-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { hostedLandingStateSchema } from '../dist/hosted-landing.js';
+import { syncFixture } from './hosted-sync-fixture.mjs';
 
 const order = await import(moduleUrl('../convex/projectHostedLandingOrder.ts'));
 const wake = await import(moduleUrl('../convex/projectHostedLandingWake.ts'));
+const undo = await import(moduleUrl('../convex/projectHostedUndo.ts'));
 const code = value => error => (error.data?.code ?? error.code) === value;
 
 /** A landing request row for the Lane, shaped like the 2026-10-30 cost-writer
@@ -109,6 +111,30 @@ test('623efc0a replay: a changed checkpoint is refused while the Lane has a live
   // Refused before any operation exists: nothing to reconcile and no Lane write.
   assert.equal(s.tables.projectHostedSaves.size, 0);
   assert.equal(s.tables.projectHostedOperations?.size ?? 0, 0);
+});
+
+test('browser return waits for a landing and leaves both the head and the Lane thread untouched', async () => {
+  const s = await syncFixture();
+  const original = await s.lane(s.baseline);
+  const first = await s.save(original, [s.file('a.txt', 'good save\n'), s.hidden]);
+  const [firstSave] = [...s.tables.projectHostedRecordHeads.values()].filter(row => row.kind === 'save');
+  const current = await s.save(first, [s.file('a.txt', 'later save\n'), s.hidden]);
+  const { record } = await s.readLane(original.laneId);
+  await liveFinish({ ...s, laneId: original.laneId }, { composeStartedAt: record.at });
+  const request = {
+    kind: 'undo',
+    operationId: randomUUID(),
+    laneId: original.laneId,
+    authorityEpoch: 1,
+    expected: s.pins(current),
+    saveId: firstSave.key,
+  };
+  await assert.rejects(
+    s.call('returnToSave', undo.returnToSave, { projectId: s.projectId, request: JSON.stringify(request) }),
+    error => code('LANE_FINISH_ACTIVE')(error) && /Wait for it to finish/.test(error.data.message),
+  );
+  assert.equal((await s.readLane(original.laneId)).entry.head, current.head);
+  assert.equal(s.tables.projectCoordinationEvents.size, 0);
 });
 
 test('each live phase freezes the Lane; terminal finishes and finishes on an older head do not', async () => {

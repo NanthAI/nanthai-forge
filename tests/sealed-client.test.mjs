@@ -344,12 +344,16 @@ test('sealed reads and writes refuse stable devices without a current approval',
   assert.equal(s.tables.sealedSecretSets.size, 0);
   assert.equal(s.tables.sealedSecretHistory.size, 0);
 });
-test('agent entry points add new names but cannot change or remove any existing record', async t => {
+test('agent entry points add new names; a change or removal of an existing record is only proposed', async t => {
   const { client, project, account, keys, pins, transport } = setup(t),
     agent = new SealedClient(project, account, keys, pins, transport, true);
   await agent.write('API_TOKEN', Buffer.from('agent-new-synthetic-value'));
-  await assert.rejects(agent.write('API_TOKEN', Buffer.from('agent-changed-value')), code('PERSON_REQUIRED'));
-  await assert.rejects(agent.write('API_TOKEN', null), code('PERSON_REQUIRED'));
+  // Item 6466c6a5: the change and the removal wait as proposals; the stored value is unchanged.
+  assert.match(
+    (await agent.write('API_TOKEN', Buffer.from('agent-changed-value'))).proposed,
+    /^[0-9a-f]{32}$/,
+  );
+  assert.match((await agent.write('API_TOKEN', null)).proposed, /^[0-9a-f]{32}$/);
   await assert.rejects(
     agent.write('PIP_INDEX_URL', Buffer.from('https://synthetic.invalid')),
     code('PERSON_REQUIRED'),

@@ -28,6 +28,46 @@ import { findEntry, writeDevice } from './sealed-roster.js';
 import { networkFailure } from './network-fetch.js';
 import { removeMarkedFirst } from './sealed-unshare.js';
 
+type Verified = NonNullable<Awaited<ReturnType<SealedClient['read']>>>;
+/** A copy of the verified state's reply whose head this device signs next. The caller zeroes the state's key. */
+export function nextReply(client: SealedClient, state: Verified) {
+  const reply: SealedReply = deserialize(serialize(state.reply));
+  reply.head = {
+    ...reply.head,
+    headVersion: reply.head.headVersion + 1,
+    prevHeadHash: framedHash(headBytes(state.reply.head)),
+    signedAt: Date.now(),
+    signerId: client.keys.id,
+  };
+  return reply;
+}
+/** Puts `record` (and its ciphertext) in the next head, checks the format bounds, signs the head and verifies it as
+ * every reader pinned at `state` will, before anything is sent. */
+export function signNext(
+  client: SealedClient,
+  reply: SealedReply,
+  state: Verified | null,
+  record: NameRecord,
+  stored: Buffer | null,
+) {
+  reply.ciphertexts = reply.ciphertexts.filter(c => c.name !== record.name);
+  if (stored) reply.ciphertexts.push({ name: record.name, stored });
+  reply.head.names = reply.head.names.filter(n => n.name !== record.name).concat(record);
+  invariant(
+    reply.head.names.filter(n => n.kind !== 3).length <= 200 &&
+      reply.ciphertexts.reduce((n, c) => n + c.stored.length, 0) <= 256 * 1024,
+    'SECRETS_FORMAT_REFUSED',
+    'Sealed values exceed the format bounds.',
+  );
+  reply.head.signature = signBytes(headBytes(reply.head), client.keys.sign);
+  const check = verifySealedReply(reply, state?.pin ?? null, {
+    ...client.request(),
+    firstContact: !state,
+    ...(!state ? { anchor: { kind: 'own-genesis' as const, deviceId: client.keys.id } } : {}),
+  });
+  check.key?.fill(0);
+  for (const secret of check.secrets) secret.value.fill(0);
+}
 export class SealedClient {
   constructor(
     readonly project: string,
@@ -60,6 +100,10 @@ export class SealedClient {
       const anchor = current ? undefined : await firstContactAnchor(this, reply, wire);
       const result = await this.pins.verifyAndSave(reply, this.request(anchor), Date.now(), true);
       for (const line of result.notices) this.notice(line);
+      if (wire.proposals && !this.agent)
+        this.notice(
+          `${wire.proposals} proposal${wire.proposals === 1 ? ' waits' : 's wait'} in Development: nforge secret proposals`,
+        );
       try {
         for (const line of await afterVerified(this, reply, result, current?.pin ?? null, anchor, wire))
           this.notice(line);
@@ -120,11 +164,6 @@ export class SealedClient {
     const operationId = options.operationId ?? randomUUID();
     invariant(/^[0-9a-f-]{36}$/i.test(operationId), 'BAD_ARGUMENT', 'Use a UUID operation id.');
     checkSecretWriteName(name, { set: 'development', agent: this.agent, writeLine: this.notice });
-    invariant(
-      value !== null || !this.agent,
-      'PERSON_REQUIRED',
-      'Removing a secret needs a person until proposals are available.',
-    );
     const journal = new SealedJournal(this.pins.directory, this.pins.lock);
     const identity = { project: this.project, name, removing: value === null, file: Boolean(options.file) };
     let pending = await journal.read(operationId, identity);
@@ -162,6 +201,14 @@ export class SealedClient {
           removedMarked = true;
           continue;
         }
+        // Item 6466c6a5: an agent never changes or removes an existing value; it asks a person with a proposal.
+        if (this.agent && state) {
+          const old = state.pin.head.names.find(n => n.name === name);
+          if (old || value === null) {
+            const { proposeChange } = await import('./sealed-proposal-client.js');
+            return proposeChange(this, state, name, value, Boolean(options.file), operationId);
+          }
+        }
         const previous = state ? framedHash(headBytes(state.reply.head)) : null;
         let reply: SealedReply, key: Buffer;
         if (!state) {
@@ -172,16 +219,9 @@ export class SealedClient {
           );
           ({ reply, key } = newSealedSet(this.project, this.account, this.keys, Date.now()));
         } else {
-          reply = deserialize(serialize(state.reply));
+          reply = nextReply(this, state);
           key = state.key!;
           for (const secret of state.secrets) secret.value.fill(0);
-          reply.head = {
-            ...reply.head,
-            headVersion: reply.head.headVersion + 1,
-            prevHeadHash: previous!,
-            signedAt: Date.now(),
-            signerId: this.keys.id,
-          };
         }
         try {
           invariant(
@@ -193,11 +233,6 @@ export class SealedClient {
           // sealed into a set a compromised server built for a tofu device would reach that server.
           if (state) requireConfirmedWriter(state.pin);
           const old = reply.head.names.find(n => n.name === name);
-          invariant(
-            !this.agent || !old,
-            'PERSON_REQUIRED',
-            'Changing an existing secret needs a person until proposals are available.',
-          );
           if (value === null && (!old || old.kind === 3)) return { operationId, name, removed: false };
           // Make room before choosing a version, since compaction can raise the floor.
           makeRoom(reply.head, name);
@@ -221,7 +256,7 @@ export class SealedClient {
             flags: this.agent ? 4 : 0,
             allowedChecks: [],
           };
-          reply.ciphertexts = reply.ciphertexts.filter(c => c.name !== name);
+          let stored: Buffer | null = null;
           if (value !== null) {
             const sealed = sealValue(
               key,
@@ -239,25 +274,11 @@ export class SealedClient {
             );
             record.ctHash = sealed.ctHash;
             record.valueCommit = sealed.valueCommit;
-            reply.ciphertexts.push({ name, stored: sealed.stored });
+            stored = sealed.stored;
           }
           record.changeSig = signBytes(changeBytes(reply.head, record), this.keys.sign);
-          reply.head.names = reply.head.names.filter(n => n.name !== name).concat(record);
-          invariant(
-            reply.head.names.filter(n => n.kind !== 3).length <= 200 &&
-              reply.ciphertexts.reduce((n, c) => n + c.stored.length, 0) <= 256 * 1024,
-            'SECRETS_FORMAT_REFUSED',
-            'Sealed values exceed the format bounds.',
-          );
-          reply.head.signature = signBytes(headBytes(reply.head), this.keys.sign);
           // Verify before sending; no key or plaintext is retained in the retry journal.
-          const check = verifySealedReply(reply, state?.pin ?? null, {
-            ...this.request(),
-            firstContact: !state,
-            ...(!state ? { anchor: { kind: 'own-genesis' as const, deviceId: this.keys.id } } : {}),
-          });
-          check.key?.fill(0);
-          for (const secret of check.secrets) secret.value.fill(0);
+          signNext(this, reply, state, record, stored);
           pending = {
             ...identity,
             state: 'unknown',

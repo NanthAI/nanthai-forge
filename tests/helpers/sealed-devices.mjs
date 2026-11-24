@@ -53,6 +53,11 @@ export function device(h, t, account, { member = true, terminal = false, agent =
       as(() => h.s.transaction(() => server.join._handler(h.s.ctx, { projectId: h.project, ...input }))),
     link: input =>
       as(() => h.s.transaction(() => server.link._handler(h.s.ctx, { projectId: h.project, ...input }))),
+    propose: input =>
+      as(() => h.s.transaction(() => server.propose._handler(h.s.ctx, { projectId: h.project, ...input }))),
+    proposals: input => as(() => server.proposals._handler(h.s.ctx, { projectId: h.project, ...input })),
+    reject: input =>
+      as(() => h.s.transaction(() => server.reject._handler(h.s.ctx, { projectId: h.project, ...input }))),
   };
   const notices = [];
   const make = (options = {}) =>

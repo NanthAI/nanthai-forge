@@ -2,13 +2,15 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { ConvexError, v } from 'convex/values';
 import type { z } from 'zod';
-import { guard, receiptMutation, type MutationCtx } from './cliServer';
+import { accountMutation, guard, isDeviceIdentity, receiptMutation, type MutationCtx } from './cliServer';
+import { denormalized } from './coordinationWrite';
+import { readProjectRole } from './projectAuthority';
 import { internalMutation } from './server';
 import { report } from './errors';
 import { laneFinishActiveMessage, laneFinishes, supersedeLaneFinishes } from './projectHostedLaneFinish';
 import { laneSession, requireLaneHolder } from './projectLaneHolder';
-import { requireLaneSourceAuthority } from './projectLaneAuthority';
-import { beginHostedOperation, finishHostedOperation } from './projectHostedOperations';
+import { mayReturnLaneSave, requireLaneSourceAuthority } from './projectLaneAuthority';
+import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import { hostedRecordBody, readHostedRecord, recordVersion, writeHostedRecord } from './projectHostedRecords';
 import {
   saveLaneRecord,
@@ -22,8 +24,8 @@ import { JournalNeeded, parseLoadedJournalSegment } from './projectJournalStore'
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { saveRequestSchema } from '../src/hosted-save';
-import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
-import { undoReceiptSchema, undoRequestSchema } from '../src/hosted-undo';
+import { canonicalPayload, hostedOperationSchema, hostedPayloadHash } from '../src/hosted-source-operation';
+import { browserUndoRequestSchema, undoReceiptSchema, undoRequestSchema } from '../src/hosted-undo';
 import { invariant } from '../src/errors';
 import { decodeRequest } from './publicWorkReads';
 
@@ -35,27 +37,37 @@ const args = { projectId: v.id('hostedProjects'), request: v.string() };
 export const undo = receiptMutation({
   args,
   returns: v.string(),
-  handler: async (ctx, input) => {
-    try {
-      return await restore(ctx, input);
-    } catch (error) {
-      // Throwing rolls back the operation reservation. The action reads the archive privately,
-      // then retries the same payload and CAS.
-      if (error instanceof JournalNeeded)
-        throw new ConvexError({
-          code: 'SOURCE_UNAVAILABLE',
-          message: 'The undo target needs a retained history read.',
-          undoHistory: true,
-        });
-      return report(error);
-    }
-  },
+  handler: (ctx, input) => directRestore(ctx, input, false),
 });
 
-export const archived = internalMutation({
-  args: { ...args, segments: v.array(v.string()) },
+export const returnToSave = accountMutation('person')({
+  args,
   returns: v.string(),
-  handler: async (ctx, { segments, ...input }) => {
+  handler: (ctx, input) => directRestore(ctx, input, true),
+});
+
+type Input = { projectId: SaveIdentity['projectId']; request: string };
+
+async function directRestore(ctx: MutationCtx, input: Input, browser: boolean) {
+  try {
+    return await restore(ctx, input, browser);
+  } catch (error) {
+    // Throwing rolls back the operation reservation. The action reads the archive privately,
+    // then retries the same payload and CAS.
+    if (error instanceof JournalNeeded)
+      throw new ConvexError({
+        code: 'SOURCE_UNAVAILABLE',
+        message: 'The undo target needs a retained history read.',
+        undoHistory: true,
+      });
+    return report(error);
+  }
+}
+
+export const archived = internalMutation({
+  args: { ...args, segments: v.array(v.string()), browser: v.optional(v.literal(true)) },
+  returns: v.string(),
+  handler: async (ctx, { segments, browser, ...input }) => {
     const selected = {
       ...ctx,
       ...(await guard(ctx, 'cli')),
@@ -63,7 +75,7 @@ export const archived = internalMutation({
       journalLoaded: segments.map(parseLoadedJournalSegment),
     };
     try {
-      return await restore(selected, input);
+      return await restore(selected, input, browser === true);
     } catch (error) {
       if (error instanceof JournalNeeded) throw new ConvexError({ index: canonicalPayload(error.index) });
       return report(error);
@@ -71,12 +83,26 @@ export const archived = internalMutation({
   },
 });
 
-async function restore(ctx: MutationCtx, input: { projectId: SaveIdentity['projectId']; request: string }) {
+async function restore(ctx: MutationCtx, input: Input, browser: boolean) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to undo a Lane save.');
-  const parsed = undoRequestSchema.safeParse(decodeRequest(input.request));
-  invariant(parsed.success, 'BAD_ARGUMENT', 'Select the exact Lane pins and an optional saved target.');
-  const request = parsed.data;
+  invariant(
+    !browser || !isDeviceIdentity(user),
+    'AUTH_SCOPE_DENIED',
+    'Return to a save in your Forge browser.',
+  );
+  const schema = browser ? browserUndoRequestSchema : undoRequestSchema;
+  const parsed = schema.safeParse(decodeRequest(input.request));
+  invariant(
+    parsed.success,
+    'BAD_ARGUMENT',
+    browser
+      ? 'Choose a save from this Lane or undo a completed return.'
+      : 'Select the exact Lane pins and an optional saved target.',
+  );
+  const request: z.infer<typeof undoRequestSchema> & { returnOperationId?: string } = parsed.data;
+  // Browser Write authority and CLI holder authority must not share a replay identity.
+  const payload = browser ? { ...request, browser: true } : request;
   const auth = { projectId: input.projectId, actor: user.subject, operationId: request.operationId };
   const expected = {
     authorityEpoch: request.authorityEpoch,
@@ -87,8 +113,8 @@ async function restore(ctx: MutationCtx, input: { projectId: SaveIdentity['proje
   };
   const prepared = await beginHostedOperation(ctx, {
     ...auth,
-    payload: request,
-    request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(request, expected) },
+    payload,
+    request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(payload, expected) },
     firstAttempt: {
       projectId: auth.projectId,
       operationId: auth.operationId,
@@ -96,10 +122,17 @@ async function restore(ctx: MutationCtx, input: { projectId: SaveIdentity['proje
       parentAttemptId: null,
       at: new Date().toISOString(),
       expected,
-      ids: {},
+      ids: browser ? { browserReturn: request.operationId } : {},
     },
   });
   const { firstAttempt, terminal } = prepared.operation;
+  const selected = browser ? await saveLaneRecord(ctx, { ...auth, laneId: request.laneId }) : undefined;
+  if (selected)
+    invariant(
+      mayReturnLaneSave(prepared.project, selected.lane, auth.actor),
+      'PROJECT_UNAVAILABLE',
+      'Only this Lane’s holder, its author or the project owner can return it to a save.',
+    );
   if (prepared.replayed) {
     invariant(
       terminal?.outcome.status === 'completed',
@@ -108,15 +141,20 @@ async function restore(ctx: MutationCtx, input: { projectId: SaveIdentity['proje
     );
     return canonicalPayload(terminal.outcome.result);
   }
-  const { lane, ownerOnly } = await saveLaneRecord(ctx, { ...auth, laneId: request.laneId });
-  requireLaneSourceAuthority(prepared.project, lane, auth.actor);
-  requireLaneHolder(lane, auth.actor, await laneSession(ctx, request.holderSessionId));
+  const { lane, ownerOnly } = selected ?? (await saveLaneRecord(ctx, { ...auth, laneId: request.laneId }));
+  // A browser return does not take over the holder’s session.
+  if (!browser) {
+    requireLaneSourceAuthority(prepared.project, lane, auth.actor);
+    requireLaneHolder(lane, auth.actor, await laneSession(ctx, request.holderSessionId));
+  }
   invariant(lane.state === 'active', 'LANE_NOT_ACTIVE', 'Open this Lane before restoring an earlier save.');
   invariant(
     sameSaveLane(lane, request.expected),
     'WORK_STALE',
     'The Lane changed. Open its latest head, then start undo with a fresh operation ID.',
   );
+  if (request.returnOperationId)
+    await requireBrowserReturn(ctx, auth, lane, request.returnOperationId, request.version);
   const target = await undoTarget(ctx, auth, lane, request);
   invariant(target.version <= lane.version, 'NOT_FOUND', 'Select a retained version of this Lane.');
   const row = await recordVersion(ctx, auth.projectId, 'lane', lane.id, target.version);
@@ -135,7 +173,14 @@ async function restore(ctx: MutationCtx, input: { projectId: SaveIdentity['proje
       laneId: id,
       headWrittenAt: lane.at,
     });
-    if (finishes.live) invariant(false, 'LANE_FINISH_ACTIVE', laneFinishActiveMessage(id, finishes.live));
+    if (finishes.live)
+      invariant(
+        false,
+        'LANE_FINISH_ACTIVE',
+        browser
+          ? 'A landing is in progress for this Lane. Wait for it to finish before returning to a save.'
+          : laneFinishActiveMessage(id, finishes.live),
+      );
     await saveObject(ctx, auth.projectId, { sha256: previous.head });
     updated = {
       ...lane,
@@ -163,6 +208,27 @@ async function restore(ctx: MutationCtx, input: { projectId: SaveIdentity['proje
         head: updated.head,
         submissionIds: finishes.syncRequired,
       });
+    const holder = lane.holder?.actor ?? lane.actor;
+    if (browser && holder !== auth.actor) {
+      const role = await readProjectRole(ctx, prepared.project, holder);
+      const command = {
+        kind: 'message' as const,
+        text: `Returned this Lane to ${previous.head.slice(0, 8)}. All saves are still in History.`,
+        context: { laneId: id },
+      };
+      // One retained event serves the Lane thread and the holder's existing inbox/FYI.
+      // Do not send to a holder who no longer has Write access.
+      await ctx.db.insert('projectCoordinationEvents', {
+        projectId: auth.projectId,
+        operationId: firstAttempt.id,
+        actor: auth.actor,
+        at: Date.parse(firstAttempt.at),
+        command,
+        ...denormalized(command),
+        conversation: true,
+        ...(role === 'owner' || role === 'write' ? { recipientActor: holder } : {}),
+      });
+    }
   }
   const result = undoReceiptSchema.parse({
     operationId: auth.operationId,
@@ -191,6 +257,37 @@ const sourceContext = (lane: HostedLane) => ({
   ...(lane.earlyResolution ? { earlyResolution: lane.earlyResolution } : {}),
   ...(lane.restoreBase ? { restoreBase: lane.restoreBase } : {}),
 });
+
+/** A bare Lane version may be a start, sync or resolution, not a save. The browser can only use
+ * a version through Undo against the exact current pins produced by its own completed return. */
+async function requireBrowserReturn(
+  ctx: MutationCtx,
+  auth: SaveIdentity,
+  lane: HostedLane,
+  returnOperationId: string,
+  version: number | undefined,
+) {
+  const row = await hostedOperationRow(ctx, auth.projectId, auth.actor, returnOperationId);
+  const operation = row ? hostedOperationSchema.parse(JSON.parse(row.value)) : null;
+  const outcome = operation?.terminal?.outcome;
+  const receipt = outcome?.status === 'completed' ? undoReceiptSchema.safeParse(outcome.result) : null;
+  invariant(
+    operation?.firstAttempt.ids.browserReturn === returnOperationId &&
+      receipt?.success &&
+      receipt.data.operationId === returnOperationId &&
+      receipt.data.from.laneId === lane.id &&
+      receipt.data.lane.laneId === lane.id &&
+      receipt.data.from.version === version &&
+      receipt.data.from.version < receipt.data.lane.version,
+    'BAD_ARGUMENT',
+    'Undo needs the completed browser return for this Lane.',
+  );
+  invariant(
+    sameSaveLane(lane, receipt.data.lane),
+    'WORK_STALE',
+    'The Lane changed after the return. Open History to choose a saved version.',
+  );
+}
 
 async function undoTarget(
   ctx: MutationCtx,

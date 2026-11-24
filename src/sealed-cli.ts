@@ -13,7 +13,7 @@ import { safeSecretName } from './sealed-display.js';
 import { checkSecretWriteName } from './secret-names.js';
 
 export const sealedUsage =
-  'nforge secret set NAME [--file] [--root ROOT] [--operation-id UUID]   (a piped value loses one trailing newline; --file keeps exact bytes)\nnforge secret list [--root ROOT]\nnforge secret rm NAME [--root ROOT] [--operation-id UUID]\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID|--marked [--root ROOT]';
+  'nforge secret set NAME [--file] [--root ROOT] [--operation-id UUID]   (a piped value loses one trailing newline; --file keeps exact bytes)\nnforge secret list [--root ROOT]\nnforge secret rm NAME [--root ROOT] [--operation-id UUID]\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID|--marked [--root ROOT]\nnforge secret proposals [--root ROOT]\nnforge secret apply ID [--root ROOT]   (a person, on a terminal)\nnforge secret reject ID [--root ROOT]';
 export function sealedAgent() {
   const source = process.env;
   return (
@@ -133,11 +133,12 @@ export async function sealedCli(args: string[]) {
   }
   const command = args.shift();
   invariant(
-    ['set', 'list', 'rm', 'repin', 'resolve', 'unshare'].includes(command!),
+    ['set', 'list', 'rm', 'repin', 'resolve', 'unshare', 'proposals', 'apply', 'reject'].includes(command!),
     'BAD_ARGUMENT',
     sealedUsage,
   );
   const name = ['set', 'rm'].includes(command!) ? args.shift() : undefined;
+  const proposalId = ['apply', 'reject'].includes(command!) ? args.shift() : undefined;
   const fingerprint = command === 'unshare' ? args.shift() : undefined,
     marked = fingerprint === '--marked';
   let root = '.',
@@ -158,14 +159,18 @@ export async function sealedCli(args: string[]) {
   if (name) checkSecretWriteName(name, { set: 'development', agent, writeLine: () => {} });
   if (command === 'set' || command === 'rm') invariant(name, 'BAD_ARGUMENT', sealedUsage);
   if (command === 'unshare') invariant(fingerprint, 'BAD_ARGUMENT', sealedUsage);
+  if (command === 'apply' || command === 'reject') invariant(proposalId, 'BAD_ARGUMENT', sealedUsage);
   const client = await sealedClientForRoot(secretRunRoot(resolve(root)), agent);
   try {
     if (command === 'set' || command === 'rm') {
       const value = command === 'set' ? await readValue(file) : null;
       try {
         const receipt = await client.write(name!, value, { file, ...(operationId ? { operationId } : {}) });
+        const proposed = 'proposed' in receipt ? receipt.proposed?.slice(0, 8) : undefined;
         process.stdout.write(
-          `${receipt.replay ? 'Confirmed original operation for' : command === 'rm' ? 'Removed' : 'Set'} ${name} in Development. Operation ${receipt.operationId}.\n`,
+          proposed
+            ? `Proposed a ${command === 'rm' ? 'removal of' : 'change to'} ${name} in Development: proposal ${proposed} waits for a person (nforge secret apply ${proposed}).\n`
+            : `${'replay' in receipt && receipt.replay ? 'Confirmed original operation for' : command === 'rm' ? 'Removed' : 'Set'} ${name} in Development. Operation ${receipt.operationId}.\n`,
         );
       } finally {
         value?.fill(0);
@@ -182,6 +187,20 @@ export async function sealedCli(args: string[]) {
         process.stdout.write(
           `${result.already ? `Device ${result.removed} was already removed from Development. Rotate at their provider what it could open: ${result.rotate.length ? result.rotate.map(safeSecretName).join(', ') : 'nothing'}.` : removalLine([result.removed], result.rotate)}\n`,
         );
+      }
+    } else if (command === 'proposals' || command === 'apply' || command === 'reject') {
+      const proposals = await import('./sealed-proposal-client.js');
+      if (command === 'proposals') {
+        const lines = await proposals.listProposals(client);
+        process.stdout.write(lines.length ? `${lines.join('\n')}\n` : 'No proposals wait in Development.\n');
+      } else if (command === 'apply') {
+        const done = await proposals.applyWaiting(client, proposalId!);
+        process.stdout.write(
+          `Applied proposal ${done.id.slice(0, 8)} (${done.op} ${safeSecretName(done.name)}) in Development${done.mode === 'adopted' ? ', signed by this device after a compaction' : ''}.\n`,
+        );
+      } else {
+        const done = await proposals.rejectWaiting(client, proposalId!);
+        process.stdout.write(`Rejected proposal ${done.id.slice(0, 8)}.\n`);
       }
     } else if (command === 'resolve') {
       invariant(operationId, 'BAD_ARGUMENT', 'Use nforge secret resolve --operation-id UUID.');

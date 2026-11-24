@@ -96,6 +96,9 @@ export function setup(t) {
       writes = result.catch(() => {});
       return result;
     },
+    propose: input => s.transaction(() => server.propose._handler(s.ctx, { projectId: project, ...input })),
+    proposals: input => server.proposals._handler(s.ctx, { projectId: project, ...input }),
+    reject: input => s.transaction(() => server.reject._handler(s.ctx, { projectId: project, ...input })),
   };
   const store = new FileKeyStore(join(directory, 'device.bin'));
   store.save({ ...f.keys, pinCounter: 0 });

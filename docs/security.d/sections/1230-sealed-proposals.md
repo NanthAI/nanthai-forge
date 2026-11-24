@@ -3,9 +3,20 @@
 A proposal is how a device that may not change a value directly asks a person to
 change it. The format and its checks are local functions (`src/sealed-proposal.ts`);
 the public checks that need no key are shared with the server
-(`src/sealed-proposal-check.ts`). Forge stores Development proposals; no command or
-agent tool creates or applies one yet, so agents and member devices are still refused
-when they change an existing value.
+(`src/sealed-proposal-check.ts`). Forge stores Development proposals.
+
+Commands (`src/sealed-proposal-client.ts`). An agent that changes or removes an existing
+Development value with `nforge secret set` or `nforge secret rm` makes a proposal
+instead; adding a new name stays a direct write. `nforge secret proposals` lists the
+waiting proposals by id, operation, name, proposer fingerprint and age, never a value,
+and marks one that fails the public checks on this device's verified view. A person
+on a terminal applies one with `nforge secret apply ID` in an ordinary signed head
+write, and `nforge secret reject ID` rejects one; an id is at least 8 hex characters.
+Apply works only from a confirmed view (a device that trusted Development on first use
+applies nothing) on a write device, and retries a lost compare-and-swap race up to
+three times. The device keeps the ids it applied or rejected (the last 256 per set) in
+its pin file, under the pin MAC, and refuses one it has seen, whatever the server
+lists. A proposal that is no longer current teaches `nforge secret proposals`.
 
 Storing. `sealedSecrets:propose` takes one record for the active Development set from
 a stable CLI device sign-in with write access. Before it stores anything, the server
@@ -69,7 +80,8 @@ keeps that signature and its proposal id. The value commitment must then match t
 value, and readers name the proposer and the head's signer. When
 compaction has raised the floor since the proposal, the signed version is stale. In
 Development the applier then adopts the value: an ordinary change it signs, with the
-same `r` and no proposal id. The proposer recognises its value by the `r` it kept. A
+same `r` and no proposal id. The proposer can recognise its value by the `r`; the CLI
+does not keep `r` yet, so it does not offer that check. A
 stale Checks proposal needs a new one, because its proposer cannot open the value to
 recognise an adoption. In both cases the value is re-sealed under the set key with
 the proposer's `r`. Reader floor checks are unchanged.
@@ -84,5 +96,7 @@ absent and the base is at or under the floor. That check cannot tell "absent eve
 since" from "added, removed and compacted since". A hostile server could serve an
 applied Development addition again after the name was removed and its tombstone
 compacted in the same epoch. A person who approves it would bring the removed value
-back as their own change. The applying device's journal of applied proposal ids,
-built with the command that applies proposals, closes this.
+back as their own change. The applying device's journal of applied and rejected
+proposal ids closes this for that device. Another device of the same person has its
+own journal; the server's list of the last 64 resolved ids covers it only while the
+server is honest.
