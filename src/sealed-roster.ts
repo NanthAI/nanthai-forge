@@ -36,8 +36,10 @@ export const writeDevice = (entry: Entry | undefined, kind: Roster['setKind']) =
   entry?.entryKind === 1 && (entry.role === 1 || (kind === 1 && entry.role === 2));
 const refuse = (condition: unknown, rule: string) => invariant(condition, 'SECRETS_ROSTER_REFUSED', rule);
 const unique = (ids: Uint8Array[]) => new Set(ids.map(hex)).size === ids.length;
-export function checkEntry(entry: Entry) {
-  checkAgreementKey(entry.encPub);
+/** `crypto: false` skips the two curve operations (agreement-key probe, binding signature) for an entry whose
+ * keys a verified roster already carried unchanged; every structural rule still runs (Gate B1 C23). */
+export function checkEntry(entry: Entry, crypto = true) {
+  if (crypto) checkAgreementKey(entry.encPub);
   refuse([1, 2, 3].includes(entry.entryKind), 'Unknown recipient kind.');
   refuse(
     (entry.entryKind === 1 && [1, 2].includes(entry.role)) ||
@@ -57,11 +59,13 @@ export function checkEntry(entry: Entry) {
   if (entry.entryKind === 1)
     refuse(
       entry.accountId.length === 16 &&
-        verifyBytes(
-          bindingBytes(entry.accountId, entry.id, entry.signPub, entry.encPub),
-          entry.bindSig,
-          entry.signPub,
-        ),
+        entry.bindSig.length === 64 &&
+        (!crypto ||
+          verifyBytes(
+            bindingBytes(entry.accountId, entry.id, entry.signPub, entry.encPub),
+            entry.bindSig,
+            entry.signPub,
+          )),
       'Device binding signature is invalid.',
     );
   if (entry.entryKind === 2)
@@ -75,7 +79,7 @@ export function checkEntry(entry: Entry) {
       'Person key fields are invalid.',
     );
 }
-export function checkRoster(roster: Roster, development?: Roster) {
+export function checkRoster(roster: Roster, development?: Roster, { entryCrypto = true } = {}) {
   refuse(
     roster.rosterVersion >= 1 &&
       roster.epoch >= 1 &&
@@ -91,7 +95,7 @@ export function checkRoster(roster: Roster, development?: Roster) {
     unique(roster.entries.map(e => e.id)) && unique(roster.former.map(e => e.deviceId)),
     'Duplicate recipient or former signer.',
   );
-  for (const entry of roster.entries) checkEntry(entry);
+  for (const entry of roster.entries) checkEntry(entry, entryCrypto);
   for (const former of roster.former)
     refuse(
       former.signPub.length === 32 &&
@@ -216,7 +220,7 @@ export function rosterAfterDelta(
 export function walkTransition(
   from: Roster,
   t: Transition,
-  revoked: readonly Buffer[],
+  revoked: readonly Uint8Array[],
   development?: Roster,
 ) {
   invariant(
@@ -298,7 +302,9 @@ export function walkTransition(
     );
   const next = rosterAfterDelta(from, d, t.fromHash);
   // The cross-set rule is the caller's: readers pass Development for the final roster only (GB-08 d2).
-  checkRoster(next, development);
+  // Gate B1 C23: checkAdded ran the entry crypto on every added entry, and `from` is a verified roster (the caller's
+  // checked anchor or the previous step), so carried entries keep keys already checked: structural rules only.
+  checkRoster(next, development, { entryCrypto: false });
   invariant(
     sameId(framedHash(rosterBytes(next)), t.toHash),
     'SECRETS_FORK',

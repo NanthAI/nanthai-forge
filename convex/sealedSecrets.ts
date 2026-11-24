@@ -143,6 +143,8 @@ export const write = mutation({
         genesis: args.genesis,
         transition: args.transition,
         stored: previous ? { genesis: previous.genesis, transitions: previous.transitions } : null,
+        // The head signer must be a device of this sign-in's account (the CLI derives the same id from its token).
+        accountId: forgeSecretId('account', user.subject),
       });
       if (!state) return { accepted: false, replay: false };
       const next = {

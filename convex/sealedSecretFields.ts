@@ -4,7 +4,7 @@ import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 export const sealedKind = v.union(v.literal(1), v.literal(2), v.literal(3));
 /** Client records contain public signed metadata and ciphertext only. The server never opens a value
- * or holds a key; it checks the public binding of each write before storing it (sealedSecretGate).
+ * or holds a key; it checks public signatures and bindings before storing a write (sealedSecretGate).
  * Clients rely on none of this. */
 export const sealedSetFields = {
   projectId: v.id('hostedProjects'),

@@ -1,16 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // The server's checks on a sealed head write. Every stored fact is derived from the signed payload
-// with the shared portable format code; mutation arguments are never trusted. The server opens no
-// value and holds no key. Clients verify everything themselves and rely on none of this.
+// with the shared portable format code; mutation arguments are never trusted. Before storing, the server runs
+// the public part of the reader's verifier (Gate B1 C20): the roster step, the head signer and its account, the
+// per-name rules against the stored head, and the ciphertext and wrap bindings. The server opens no value and
+// holds no key. Clients verify everything themselves and rely on none of this.
 import { invariant } from '../src/errors';
+import { checkSealedContents, checkSignedHead } from '../src/sealed-head';
+import { checkRoster, findEntry, walkTransition } from '../src/sealed-roster';
 import { checkSealedPart } from '../src/sealed-schema';
 import { decodeSealedWire } from '../src/sealed-wire';
 import { equalBytes, forgeSecretId, framedHash, hex } from '../src/sealed-portable';
 import { headBytes, rosterBytes, type Head, type Roster, type Transition } from '../src/sealed-records';
 import { AUTOMATIC_SET_KIND, decodeJoinRequest, type JoinRequest } from '../src/sealed-join';
 
-type Payload = { head: Head; roster: Roster; revoked: Uint8Array[]; proposals: unknown[] };
+type Payload = {
+  head: Head;
+  roster: Roster;
+  revoked: Uint8Array[];
+  proposals: unknown[];
+  ciphertexts: { name: string; stored: Uint8Array }[];
+  wraps: { recipientId: Uint8Array }[];
+};
 export type SealedJoinRequest = { deviceId: ArrayBuffer; request: ArrayBuffer; at: number };
 export type StoredSealedSet = {
   setId: ArrayBuffer;
@@ -34,7 +45,7 @@ function part<T>(kind: 'payload' | 'roster' | 'transition', bytes: ArrayBuffer):
 /** The head, its hash and its roster hash, bound to this project and kind. */
 export function sealedWriteFacts(projectId: string, kind: 1 | 2 | 3, payload: ArrayBuffer) {
   refuse(payload.byteLength <= 512 * 1024, 'Sealed record exceeds format bounds.');
-  const { head, roster, revoked, proposals } = part<Payload>('payload', payload);
+  const { head, roster, revoked, proposals, ciphertexts, wraps } = part<Payload>('payload', payload);
   const project = forgeSecretId('project', projectId),
     rosterHash = framedHash(rosterBytes(roster));
   refuse(
@@ -49,7 +60,7 @@ export function sealedWriteFacts(projectId: string, kind: 1 | 2 | 3, payload: Ar
     !revoked.length && !proposals.length,
     'Markers and proposals are server-owned, never part of a head.',
   );
-  return { head, roster, rosterHash, headHash: framedHash(headBytes(head)) };
+  return { head, roster, rosterHash, headHash: framedHash(headBytes(head)), ciphertexts, wraps };
 }
 export type SealedWriteFacts = ReturnType<typeof sealedWriteFacts>;
 /** The compare-and-swap precondition: the signed head extends the stored head (or none at genesis). */
@@ -58,18 +69,38 @@ export const extendsStored = (set: StoredSealedSet | null, facts: SealedWriteFac
     ? equalBytes(u8(set.headHash), facts.head.prevHeadHash)
     : facts.head.prevHeadHash.every(byte => byte === 0);
 
+/** Gate B1 C20: the head is signed by a device of the caller's own account, and passes the reader's head and
+ * contents rules on the roster after this write against the stored head, as every reader pinned there checks it. */
+function checkWriteHead(
+  facts: SealedWriteFacts,
+  pinned: { head: Head; roster: Roster } | null,
+  revoked: readonly Uint8Array[],
+  accountId: Uint8Array,
+) {
+  const signer = findEntry(facts.roster, facts.head.signerId);
+  invariant(
+    signer?.entryKind === 1 && equalBytes(signer.accountId, accountId),
+    'SECRETS_ROSTER_REFUSED',
+    'The head must be signed by a device of the signed-in account.',
+  );
+  checkSignedHead(facts.head, facts.roster, { pinned, revoked });
+  checkSealedContents(facts.head, facts.roster, facts.ciphertexts, facts.wraps);
+}
+
 /** The history and side records after an accepted write. The server appends the one transition the
- * write introduces after checking that it chains from the stored roster to the signed head; a client
- * never supplies the ring. A removal clears its own markers; an addition answers its join request, and a step
- * drops requests it made stale. Null when an automatic addition's join request is no longer waiting. */
+ * write introduces after checking that it chains from the stored roster to the signed head and that its signer
+ * had the authority for its shape (the reader's walkTransition); a client never supplies the ring. A removal
+ * clears its own markers; an addition answers its join request, and a step drops requests it made stale. Null
+ * when an automatic addition's join request is no longer waiting. `accountId` is the caller's sealed account id. */
 export function nextSealedState(input: {
   set: StoredSealedSet | null;
   facts: SealedWriteFacts;
   genesis: ArrayBuffer | null;
   transition: ArrayBuffer | null;
   stored: { genesis: ArrayBuffer; transitions: ArrayBuffer[] } | null;
+  accountId: Uint8Array;
 }) {
-  const { set, facts, genesis, transition, stored } = input;
+  const { set, facts, genesis, transition, stored, accountId } = input;
   refuse(facts.head.headVersion === (set?.headVersion ?? 0) + 1, 'The signed head is not the next version.');
   invariant(
     !set || equalBytes(u8(set.setId), facts.head.setId),
@@ -89,18 +120,24 @@ export function nextSealedState(input: {
       !stored || equalBytes(u8(stored.genesis), u8(genesis!)),
       'A set keeps its first genesis permanently.',
     );
+    // A genesis has one owner device, checked in full like every reader's genesis.
+    checkRoster(first);
+    checkWriteHead(facts, null, [], accountId);
     // A first head starts its own ring; it never inherits steps from an older history row.
     return { genesis: genesis!, transitions: [], revoked, joinRequests };
   }
   refuse(genesis === null, 'A set keeps its first genesis permanently.');
   refuse(stored, 'Genesis history is required.');
   // The stored head's roster hash was bound to its roster when that head was accepted.
-  const current = (decodeSealedWire(u8(set.payload)) as Payload).head;
+  const { head: current, roster: currentRoster } = decodeSealedWire(u8(set.payload)) as Payload,
+    pinned = { head: current, roster: currentRoster },
+    markers = revoked.map(u8);
   if (!transition) {
     refuse(
       facts.roster.rosterVersion === set.rosterVersion && equalBytes(facts.rosterHash, current.rosterHash),
       'A roster change needs its signed transition.',
     );
+    checkWriteHead(facts, pinned, markers, accountId);
     return { genesis: stored.genesis, transitions: stored.transitions, revoked, joinRequests };
   }
   const t = part<Transition>('transition', transition);
@@ -122,6 +159,9 @@ export function nextSealedState(input: {
     t.delta.removed.every(id => !member(id)) && t.delta.added.every(e => member(e.id)),
     'The transition delta does not match the signed roster.',
   );
+  // The step's signer, its authority for this shape and the rebuilt roster, with the stored markers (4.8).
+  walkTransition(currentRoster, t, markers);
+  checkWriteHead(facts, pinned, markers, accountId);
   revoked = revoked.filter(id => !t.delta.removed.some(removed => equalBytes(removed, u8(id))));
   // A roster step also drops requests it made stale: every request once the set leaves Automatic, and one whose
   // account now has an entry. Requests were validated when stored, so only the account field is read (at most 32).

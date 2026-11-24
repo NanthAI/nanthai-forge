@@ -2,8 +2,20 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { randomBytes } from 'node:crypto';
 import { invariant } from './errors.js';
-import { deriveKey, equalBytes, fixed, frame, framedHash, octet, textBytes, uint } from './sealed-format.js';
+import {
+  ciphertextHash,
+  deriveKey,
+  equalBytes,
+  fixed,
+  frame,
+  framedHash,
+  octet,
+  textBytes,
+  uint,
+} from './sealed-format.js';
 import { decrypt, encrypt, type RandomBytes, type SetContext } from './sealed-keys.js';
+
+export { ciphertextHash };
 
 export type ValueContext = SetContext & {
   name: string;
@@ -54,8 +66,6 @@ export const valueCommitment = (
     bytes.fill(0);
   }
 };
-export const ciphertextHash = (name: string, stored: Uint8Array) =>
-  framedHash(frame('ct-record', textBytes(name), stored));
 export function sealValue(
   key: Uint8Array,
   c: ValueContext,

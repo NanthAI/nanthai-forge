@@ -164,6 +164,9 @@ export const recipientId = (kind: 1 | 2 | 3, signPub: Uint8Array, encPub: Uint8A
       ? frame('machine', fixed(encPub, 32))
       : frame(kind === 1 ? 'device' : 'person', fixed(signPub, 32), fixed(encPub, 32)),
   ).subarray(0, 16);
+/** A ciphertext's public record hash, which the signed name record carries; the server checks it before storing. */
+export const ciphertextHash = (name: string, stored: Uint8Array) =>
+  framedHash(frame('ct-record', textBytes(name), stored));
 export const bindingBytes = (
   accountId: Uint8Array,
   id: Uint8Array,

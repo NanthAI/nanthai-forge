@@ -9,6 +9,8 @@ export { empty, frame, list, octet, requireFrame, textBytes, uint, type Framed }
 const view = (bytes: Uint8Array) => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 export const fixed = (bytes: Uint8Array, length: number): Buffer => view(portable.fixed(bytes, length));
 export const framedHash = (bytes: portable.Framed) => view(portable.framedHash(bytes));
+export const ciphertextHash = (name: string, stored: Uint8Array) =>
+  view(portable.ciphertextHash(name, stored));
 export const forgeSecretId = (kind: 'project' | 'account', id: string) =>
   view(portable.forgeSecretId(kind, id));
 export const deriveKey = (key: Uint8Array, salt: Uint8Array, info: portable.Framed) => {

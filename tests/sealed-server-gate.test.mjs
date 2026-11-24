@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { getConvexSize } from 'convex/values';
 import { fixture } from './helpers/sealed-fixture.mjs';
-import { server, setup } from './helpers/sealed-hosted.mjs';
+import { clone, server, setup } from './helpers/sealed-hosted.mjs';
 import { headBytes } from '../dist/sealed-records.js';
 import { forgeSecretId, framedHash } from '../dist/sealed-format.js';
 import { deviceKeys } from '../dist/sealed-keys.js';
@@ -292,9 +292,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const bundled = await build({
   stdin: {
     contents: [
-      "export { checkRoster } from './src/sealed-roster.ts';",
-      "export { checkAgreementKey, framedHash, verifyBytes } from './src/sealed-portable.ts';",
-      "export { headBytes } from './src/sealed-records.ts';",
+      "export { checkAgreementKey } from './src/sealed-portable.ts';",
       "export { sealedWriteFacts, nextSealedState } from './convex/sealedSecretGate.ts';",
       "export { decodeSealedWire } from './src/sealed-wire.ts';",
     ].join('\n'),
@@ -369,7 +367,7 @@ test('C22 the fixed X25519 probe refuses every low-order point and accepts a rea
   assert.deepEqual([...outcomes], [...lowOrder.map(() => 'SECRETS_WRAP_REFUSED'), 'ok']);
 });
 
-test('C22/C23 measured server gate and full public roster check at 100 recipients and 200 names', async t => {
+test('C20/C23 measured server gate at 100 recipients and 200 names: a 99-device step and a value write', async t => {
   const h = harness(t),
     f = h.f;
   const members = Array.from({ length: 99 }, (_, i) => {
@@ -382,7 +380,8 @@ test('C22/C23 measured server gate and full public roster check at 100 recipient
     });
   });
   for (let i = 0; i < 200; i++) f.name(`TOKEN_${i}`, Buffer.alloc(128, 65 + (i % 20)));
-  const first = await h.publish(null);
+  const first = await h.publish(null),
+    firstSet = clone(h.set());
   f.bump();
   f.transition({ added: members });
   f.wrap();
@@ -395,35 +394,42 @@ test('C22/C23 measured server gate and full public roster check at 100 recipient
   assert.equal(step.result.accepted, true);
   const io = Object.fromEntries(Object.keys(before).map(k => [k, h.io[k] - before[k]]));
   assert.equal(io.writes, 2);
-  // Same bytes, inside the V8 bundle: the stage 1-2 gate as built, and the stage 3 public roster check.
+  const stepSet = clone(h.set()),
+    stepRing = clone(h.history().transitions);
+  f.bump();
+  f.name('TOKEN_0', Buffer.alloc(128, 90));
+  const value = await h.publish(step.base);
+  assert.equal(value.result.accepted, true);
+  // Same bytes, inside the V8 bundle: the stage 3 gate as built (it runs the reader's public verifier).
   const context = runtime();
   context.input = {
     projectId: h.project,
-    payload: step.args.payload,
-    transition: step.args.transition,
-    stored: { genesis: first.args.genesis, transitions: [] },
-    set: { ...h.set(), headHash: first.base.headHash.buffer.slice(0), headVersion: 1, rosterVersion: 1 },
-    storedPayload: first.args.payload,
+    accountId: Uint8Array.from(f.account),
+    genesis: first.args.genesis,
+    step: {
+      payload: step.args.payload,
+      transition: step.args.transition,
+      set: firstSet,
+      transitions: [],
+    },
+    value: { payload: value.args.payload, transition: null, set: stepSet, transitions: stepRing },
   };
   const timings = vm.runInContext(
     `(() => {
       const runs = [];
-      for (let i = 0; i < 5; i++) {
+      const run = w => {
         const t0 = performance.now();
-        const facts = gate.sealedWriteFacts(input.projectId, 1, input.payload);
-        gate.nextSealedState({ set: { ...input.set, payload: input.storedPayload }, facts, genesis: null, transition: input.transition, stored: input.stored });
-        const t1 = performance.now();
-        gate.checkRoster(facts.roster);
-        gate.checkRoster(facts.roster);
-        const ok = gate.verifyBytes(gate.headBytes(facts.head), facts.head.signature, facts.roster.entries.find(e => e.role === 1).signPub);
-        runs.push({ gateMs: t1 - t0, verifierMs: performance.now() - t1, ok });
-      }
+        const facts = gate.sealedWriteFacts(input.projectId, 1, w.payload);
+        const state = gate.nextSealedState({ set: w.set, facts, genesis: null, transition: w.transition, stored: { genesis: input.genesis, transitions: w.transitions }, accountId: input.accountId });
+        return { ms: performance.now() - t0, ok: !!state };
+      };
+      for (let i = 0; i < 5; i++) runs.push({ step: run(input.step), value: run(input.value) });
       return runs;
     })()`,
     context,
   );
-  assert(timings.every(r => r.ok));
-  const median = key => [...timings].map(r => r[key]).sort((a, b) => a - b)[2];
+  assert(timings.every(r => r.step.ok && r.value.ok));
+  const median = key => [...timings].map(r => r[key].ms).sort((a, b) => a - b)[2];
   const round = n => Math.round(n * 10) / 10;
   console.log(
     'SEALED_GATE_BUDGET ' +
@@ -440,10 +446,10 @@ test('C22/C23 measured server gate and full public roster check at 100 recipient
         dbDocumentsRead: io.documents,
         dbReadBytes: io.readBytes,
         dbWrites: io.writes,
-        v8GateMsFirst: round(timings[0].gateMs),
-        v8GateMsMedian: round(median('gateMs')),
-        v8FullRosterCheckMsFirst: round(timings[0].verifierMs),
-        v8FullRosterCheckMsMedian: round(median('verifierMs')),
+        v8StepGateMsFirst: round(timings[0].step.ms),
+        v8StepGateMsMedian: round(median('step')),
+        v8ValueGateMsFirst: round(timings[0].value.ms),
+        v8ValueGateMsMedian: round(median('value')),
       }),
   );
 });
