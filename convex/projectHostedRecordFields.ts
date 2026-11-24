@@ -121,6 +121,15 @@ export const hostedRecordTables = {
     /** Work store kinds (issue, comment, lifecycle): the current version as its journal row read, so a
      * planning page reads one document per row. Absent on other kinds; a replace without it drops it. */
     value: v.optional(v.string()),
+    /** Optional, version-pinned status timestamps for Work-store Items. */
+    planningTimes: v.optional(
+      v.object({
+        version: v.number(),
+        lastStatusChangeAt: v.union(v.string(), v.null()),
+        closedAt: v.union(v.string(), v.null()),
+        closeKept: v.union(v.string(), v.null()),
+      }),
+    ),
   })
     // Creation order within a kind: the Work store's planning list pages in the journal's append order.
     // index-order: caller: convex/projectWorkStore.ts#journalWorkStoreCompare; order: planning comparison exposes newest-first creation-time pages of Issues.

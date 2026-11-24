@@ -7,7 +7,8 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { PaginationOptions } from 'convex/server';
 import { record, recordPartition } from './projectWorkIndexStore';
 import { hostedRecordValue } from './hostedRecordValue';
-import { readsStore, storeItem } from './projectWorkStoreReads';
+import { readsStore, storeItemRow } from './projectWorkStoreReads';
+import type { PlanningTimes } from './projectPlanningTimes';
 import { planningWaitingKinds } from '../src/work-planning-types';
 import {
   coveredInitiativeTallies,
@@ -222,7 +223,7 @@ export async function planningPage(
           maximumRowsRead: input.counts ? 1000 : 100,
           maximumBytesRead: 1000000,
         });
-  const rows: { id: string; position: number; value: unknown }[] = [];
+  const rows: { id: string; position: number; value: unknown; planningTimes?: PlanningTimes }[] = [];
   const roots: string[] = [];
   for (const root of page.page) {
     if (input.counts) {
@@ -240,14 +241,15 @@ export async function planningPage(
         );
       continue;
     }
-    const stored = readsStore(project, 'planningItems');
-    const row = stored ? null : await record(ctx, partition, 'planningItems', root.key);
-    const value = stored
-      ? await storeItem(ctx, project._id, root.key)
-      : row
-        ? JSON.parse(await hostedRecordValue(ctx, partition, row))
-        : null;
-    if (value) rows.push({ id: root.key, position: root.position, value });
+    if (readsStore(project, 'planningItems')) {
+      const item = await storeItemRow(ctx, project._id, root.key);
+      if (item?.value) rows.push({ id: root.key, position: root.position, ...item });
+    } else {
+      const row = await record(ctx, partition, 'planningItems', root.key);
+      if (!row) continue;
+      const value = JSON.parse(await hostedRecordValue(ctx, partition, row));
+      if (value) rows.push({ id: root.key, position: root.position, value });
+    }
   }
   return {
     ...page,

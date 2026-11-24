@@ -608,9 +608,9 @@ test('with the store reader on, planning lists, versions, comments and detail re
     ],
     [2, 2, ['Two', 'One'], ['First note', 'Decided'], 1, ['completed']],
   );
-  // Spend freeze 2026-11-10: a store page reads no more documents or bytes than the journal page it
-  // replaces. Each head keeps its current value, so a page reads one document per row (before: head,
-  // record and body for an Issue; record and body for a comment, and the Issue's notes as well).
+  // A store page reads no more documents than its journal equivalent. Its byte budget has one
+  // explicit exception: the Item head's status-time pin eliminates version reads on dated pages.
+  // Comments and notes get no allowance, and an Item still costs one head document.
   const body = `Done when: the page costs no more.\n${'Planned work in ordinary words. '.repeat(20)}`;
   for (let i = 0; i < 20; i++) {
     await s.send(s.item({ title: `Issue ${i}`, body }));
@@ -646,12 +646,16 @@ test('with the store reader on, planning lists, versions, comments and detail re
   const storeCost = await costs();
   meter.restore();
   console.log(JSON.stringify({ journalCost, storeCost }));
-  for (const name of ['list', 'comments', 'notes', 'detail'])
+  const itemHeads = [...s.tables.projectHostedRecordHeads.values()].filter(head => head.kind === 'issue');
+  for (const name of ['list', 'comments', 'notes', 'detail']) {
+    // At most three ISO dates and the version plus object keys, once per Item already read.
+    const pinAllowance = 176 * (name === 'list' ? itemHeads.length : name === 'detail' ? 1 : 0);
     assert.ok(
       storeCost[name].documents <= journalCost[name].documents &&
-        storeCost[name].bytes <= journalCost[name].bytes,
-      `${name}: store ${JSON.stringify(storeCost[name])}, journal ${JSON.stringify(journalCost[name])}`,
+        storeCost[name].bytes <= journalCost[name].bytes + pinAllowance,
+      `${name}: store ${JSON.stringify(storeCost[name])}, journal ${JSON.stringify(journalCost[name])}, pin allowance ${pinAllowance} B`,
     );
+  }
   assert.equal(storeCost.notes.documents, journalCost.notes.documents, 'notes: one document per note');
   const fromStore = await reads();
   assert.deepEqual(fromStore, fromJournal);

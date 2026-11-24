@@ -7,6 +7,9 @@ import { isShelved } from '../src/work-planning-types';
 import { planningStatusTransition } from '../src/work-planning-state';
 import { hostedRecordBody } from './projectHostedRecords';
 import { workRecordTable } from './projectWorkRecordTables';
+import { instant, planningTime, type PlanningTimes } from './projectPlanningTimes';
+
+export { instant } from './projectPlanningTimes';
 
 type Version = {
   version: number;
@@ -30,25 +33,15 @@ const recentCloses = 512;
 const initiativeWindowBytes = 8 * 1024 * 1024;
 const pageBytes = 2 * 1024 * 1024;
 
-// Journal writes use UTC ISO timestamps. Require an exact calendar date so permissive
-// Date.parse normalization cannot turn retained malformed text into dated evidence.
-export function instant(at: string | undefined) {
-  if (!at || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(at)) return NaN;
-  const time = Date.parse(at);
-  return Number.isFinite(time) &&
-    new Date(time).toISOString() === (at.includes('.') ? at : at.replace('Z', '.000Z'))
-    ? time
-    : NaN;
-}
-
 export const planningHistoryResult = v.object({
   closedByDay: v.array(v.object({ day: v.string(), count: v.number() })),
   coverage: v.union(v.literal('complete'), v.literal('partial'), v.literal('unavailable')),
   unresolved: v.number(),
 });
 
-export function planningHistoryBudget(byteLimit = pageBytes) {
+export function planningHistoryBudget(byteLimit = pageBytes, maxVersions = perItemVersions) {
   let bytes = byteLimit;
+  let unavailable = false;
   const spend = (size: number) => {
     bytes -= size;
     return bytes >= 0;
@@ -57,6 +50,16 @@ export function planningHistoryBudget(byteLimit = pageBytes) {
     get exhausted() {
       return bytes <= 0;
     },
+    get readBytes() {
+      return byteLimit - bytes;
+    },
+    get unavailable() {
+      return unavailable;
+    },
+    missingSnapshot: () => {
+      unavailable = true;
+    },
+    maxVersions,
     record: (row: Parameters<typeof getDocumentSize>[0]) => spend(getDocumentSize(row)),
     spend,
   };
@@ -87,11 +90,12 @@ export async function recordSnapshot(
     // remains usable where retained; otherwise leave this time unproved within the page budget.
     let read = 0;
     for await (const legacy of legacyVersions(ctx, partition, row.key)) {
-      if (read++ >= perItemVersions || !charge.record(legacy)) break;
+      if (read++ >= charge.maxVersions || !charge.record(legacy)) break;
       const snapshot = JSON.parse(legacy.value) as Snapshot;
       if (snapshot.version === row.version && !snapshot.purged) return snapshot;
       if (snapshot.version < row.version) break;
     }
+    charge.missingSnapshot();
     return null;
   }
   if (row.inline === undefined && !charge.spend(row.bytes)) return null;
@@ -137,7 +141,12 @@ export async function restoredClosed(previous: VersionRead) {
   return was === undefined ? null : was === 'closed';
 }
 
-async function itemTimes(item: Snapshot, history: AsyncIterable<VersionRead>) {
+async function itemTimes(
+  item: Snapshot,
+  history: AsyncIterable<VersionRead>,
+  maxVersions: number,
+  seekClose = item.status === 'closed',
+) {
   let version: VersionRead = { ...item, snapshot: async () => item };
   let statusChange: VersionRead | undefined;
   let close: VersionRead | undefined;
@@ -151,7 +160,7 @@ async function itemTimes(item: Snapshot, history: AsyncIterable<VersionRead>) {
       if (changed === null) break;
       if (changed) {
         statusChange ??= version;
-        if (item.status !== 'closed') break;
+        if (!seekClose) break;
         if (version.status === 'closed') {
           const restored = await restoredClosed(previous);
           if (restored === null) break;
@@ -163,20 +172,17 @@ async function itemTimes(item: Snapshot, history: AsyncIterable<VersionRead>) {
       }
     }
     version = previous;
-    if (version.version === 1 || ++read >= perItemVersions) break;
+    if (version.version === 1 || ++read >= maxVersions) break;
   }
   if (version.version === 1) {
     statusChange ??= version;
-    if (item.status === 'closed' && version.status === 'closed') close ??= version;
+    if (seekClose && version.status === 'closed') close ??= version;
   }
-  const timestamp = async (read: VersionRead | undefined) => {
-    const at = (await read?.snapshot())?.at;
-    return at && Number.isFinite(instant(at)) ? at : null;
-  };
+  const timestamp = async (read: VersionRead | undefined) => planningTime((await read?.snapshot())?.at);
   const lastStatusChangeAt = await timestamp(statusChange);
   return {
     lastStatusChangeAt,
-    closedAt: close === statusChange ? lastStatusChangeAt : await timestamp(close),
+    closeKept: close === statusChange ? lastStatusChangeAt : await timestamp(close),
   };
 }
 
@@ -186,12 +192,49 @@ export async function withPlanningTimes(
   partition: Id<'projectWorkGenerations'>,
   value: string,
   charge: ReturnType<typeof planningHistoryBudget>,
+  pinned?: PlanningTimes,
 ) {
   const item = JSON.parse(value) as Snapshot;
-  const times = item.purged
-    ? { lastStatusChangeAt: null, closedAt: null }
-    : await itemTimes(item, earlierVersions(ctx, project, partition, item, charge));
-  return JSON.stringify({ ...item, ...times });
+  if (item.purged) return JSON.stringify({ ...item, lastStatusChangeAt: null, closedAt: null });
+  if (pinned?.version === item.version)
+    return JSON.stringify({
+      ...item,
+      lastStatusChangeAt: pinned.lastStatusChangeAt,
+      closedAt: pinned.closedAt,
+    });
+  const { lastStatusChangeAt, closeKept } = await itemTimes(
+    item,
+    earlierVersions(ctx, project, partition, item, charge),
+    charge.maxVersions,
+  );
+  return JSON.stringify({
+    ...item,
+    lastStatusChangeAt,
+    closedAt: item.status === 'closed' ? closeKept : null,
+  });
+}
+
+/** One-off derivation. Unlike request reads there is no version cap, and a spent byte budget
+ * never publishes a partial proof. A shelved head keeps the close a later restore would use. */
+export async function backfillPlanningTimes(
+  ctx: QueryCtx,
+  project: Project,
+  partition: Id<'projectWorkGenerations'>,
+  value: string,
+  charge: ReturnType<typeof planningHistoryBudget>,
+): Promise<PlanningTimes | undefined> {
+  const item = JSON.parse(value) as Snapshot;
+  if (item.purged)
+    return { version: item.version, lastStatusChangeAt: null, closeKept: null, closedAt: null };
+  const seekClose = item.status === 'closed' || (isShelved(item.status) && item.was === 'closed');
+  const times = await itemTimes(
+    item,
+    earlierVersions(ctx, project, partition, item, charge),
+    Infinity,
+    seekClose,
+  );
+  if (!charge.exhausted && !charge.unavailable)
+    return { ...times, version: item.version, closedAt: item.status === 'closed' ? times.closeKept : null };
 }
 
 /** The Initiative on the immutable version is its group at the time of the close. The range uses

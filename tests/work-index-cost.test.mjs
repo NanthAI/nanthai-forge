@@ -12,6 +12,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { setup, actions } from './hosted-planning-fixture.mjs';
 import { dispatchHostedWork } from '../dist/hosted-work-client.js';
 import { indexedRecord } from '../dist/work-hosted-index.js';
+import { digest } from '../dist/hash.js';
 const awaitSchema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
@@ -118,6 +119,10 @@ function measure(ctx) {
       get(target, key) {
         const fn = target[key];
         if (typeof fn !== 'function') return fn;
+        if (key === Symbol.asyncIterator)
+          return async function* () {
+            for await (const value of target) yield record(value);
+          };
         return (...args) => {
           const value = fn.apply(target, args);
           if (['unique', 'first', 'take', 'collect'].includes(key))
@@ -161,6 +166,72 @@ function measure(ctx) {
   ctx.storage.get = ctx.storage.getUrl = async () => assert.fail('full-history bytes must stay at zero');
   return metrics;
 }
+
+test('a 50-Item planning timestamp page reads the same bounded bytes with 40 extra versions per Item', async t => {
+  const s = await setup(t);
+  await s.ctx.db.patch(s.projectId, { workStore: 'records' });
+  const at = '2026-11-23T09:00:00.000Z';
+  const items = Array.from({ length: 50 }, (_, i) => ({
+    id: `issue-${i}`,
+    version: 41,
+    status: 'closed',
+    kind: 'issue',
+    at,
+    title: 'Synthetic issue',
+    body: 'x'.repeat(4096),
+  }));
+  for (const item of items)
+    await s.ctx.db.insert('projectHostedRecordHeads', {
+      projectId: s.projectId,
+      kind: 'issue',
+      key: item.id,
+      parent: '',
+      status: item.status,
+      version: item.version,
+      recordId: `current-${item.id}`,
+      value: JSON.stringify(item),
+      planningTimes: { version: item.version, closedAt: at, lastStatusChangeAt: at, closeKept: at },
+    });
+  const metrics = measure(s.ctx);
+  const read = () =>
+    index.records._handler(s.ctx, {
+      projectId: s.projectId,
+      collection: 'planningItems',
+      planningHistory: true,
+      paginationOpts: { cursor: null, numItems: 50 },
+    });
+  const before = await read();
+  const pageBytes = metrics.readBytes;
+  const documents = metrics.readDocuments;
+  for (const item of items)
+    for (let version = 1; version < item.version; version++) {
+      const inline = JSON.stringify({ item: { ...item, version } });
+      await s.ctx.db.insert('projectHostedRecords', {
+        projectId: s.projectId,
+        kind: 'issue',
+        key: item.id,
+        parent: '',
+        status: 'closed',
+        version,
+        inline,
+        bodyId: `body-${item.id}-${version}`,
+        digest: digest(inline),
+        bytes: Buffer.byteLength(inline),
+      });
+    }
+  const after = await read();
+  assert.deepEqual(after, before);
+  assert.equal(after.page.length, 50);
+  for (const row of after.page) {
+    const item = JSON.parse(row.value);
+    assert.equal(item.closedAt, at);
+    assert.equal('planningTimes' in row || 'closeKept' in item, false);
+  }
+  assert.equal(metrics.readBytes - pageBytes, pageBytes);
+  assert.equal(metrics.readDocuments - documents, documents);
+  assert.ok(pageBytes < 240 * 1024, `planning page read ${pageBytes} B`);
+  t.diagnostic(`Planning page at 0 and 2,000 older versions: ${documents} docs, ${pageBytes} B each`);
+});
 
 test('doubled dogfood history retains its index through main moves and incremental commands with zero rebuild bytes', async t => {
   const s = await setup(t);

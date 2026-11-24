@@ -41,6 +41,7 @@ import {
   type WorkStoreSource,
 } from '../src/work-store-records';
 import { sameValue, storeReadOf } from './projectWorkStoreReads';
+import { advancePlanningTimes } from './projectPlanningTimes';
 
 /** Rows per page: a copy page writes at most 3 documents per row (body, version, head). */
 export const WORK_STORE_PAGE = 100;
@@ -166,7 +167,15 @@ export async function storeVersion(
   const indexed = hostedRecordIndex(record),
     value = inlineValue(encoded);
   if (head?.recordId !== old._id || (head.value === value && head.status === indexed.status)) return 'same';
-  await ctx.db.patch(head._id, { value, status: indexed.status });
+  await ctx.db.patch(head._id, {
+    value,
+    status: indexed.status,
+    ...(record.kind === 'issue' &&
+    head.planningTimes &&
+    (head.status !== indexed.status || head.value !== value)
+      ? { planningTimes: undefined }
+      : {}),
+  });
   if (old.status !== indexed.status) await ctx.db.patch(old._id, { status: indexed.status });
   return 'refreshed';
 }
@@ -213,13 +222,20 @@ async function insertVersion(
       ? {}
       : { workReadDigest: workReadDigest(journalRow(record as unknown as { kind: string })) }),
   });
+  // A missing older version can change a previously incomplete walk without moving this head.
+  // Re-copying that version is then a no-op; only a newly inserted predecessor invalidates it.
+  if (record.kind === 'issue' && head?.planningTimes && record.version < head.version)
+    await ctx.db.patch(head._id, { planningTimes: undefined });
   const inline = inlineValue(encoded),
+    planningTimes =
+      record.kind === 'issue' ? advancePlanningTimes(record.item, head ?? undefined) : undefined,
     pointer = {
       ...identity,
       ...indexed,
       recordId,
       ...(inline === undefined ? {} : { value: inline }),
       ...(planningItemId === undefined ? {} : { planningItemId }),
+      ...(planningTimes === undefined ? {} : { planningTimes }),
     };
   if (!head) await ctx.db.insert('projectHostedRecordHeads', pointer);
   else if (head.version < record.version) {

@@ -31,7 +31,8 @@ import {
   withPlanningTimes,
 } from './projectPlanningHistory';
 import { countedInitiative, planningFilter, planningPage } from './projectPlanningList';
-import { readsStore, storeItem, storePage } from './projectWorkStoreReads';
+import { readsStore, storeItem, storeItemRow, storePage } from './projectWorkStoreReads';
+import type { PlanningTimes } from './projectPlanningTimes';
 import { linkedLandingCursor, withLandingNotes } from './projectWorkIndexLandingNotes';
 const selection = {
   projectId: v.id('hostedProjects'),
@@ -159,16 +160,28 @@ export const detail = query({
         input.planningHistory &&
         input.collection === 'planningItems' &&
         (await readProjectRole(ctx, project, user.subject));
-      const decorate = (value: string) =>
+      const decorate = (value: string, pinned?: PlanningTimes) =>
         planningHistory
-          ? withPlanningTimes(ctx, project, recordPartition(generation), value, planningHistoryBudget())
+          ? withPlanningTimes(
+              ctx,
+              project,
+              recordPartition(generation),
+              value,
+              planningHistoryBudget(),
+              pinned,
+            )
           : value;
       if (input.collection === 'planningItems' && readsStore(project, input.collection)) {
-        const item = await storeItem(ctx, project._id, input.id);
+        const item = await storeItemRow(ctx, project._id, input.id);
         return {
           generationId: generation._id,
           revision: generation.initialRevision,
-          value: item ? await decorate(await actorSummary(ctx, project._id, JSON.stringify(item))) : null,
+          value: item?.value
+            ? await decorate(
+                await actorSummary(ctx, project._id, JSON.stringify(item.value)),
+                item.planningTimes,
+              )
+            : null,
           editable: project.owner === user.subject,
           intentPin: null,
         };
@@ -349,11 +362,17 @@ export async function journalWorkRecordsRead(
       numItems,
       ...(end ? { endCursor: end.recordsCursor } : {}),
     };
-    const decorateRows = async <T extends { value: string }>(rows: T[]) => {
-      if (!planningHistory || input.counts) return rows;
+    const decorateRows = async (
+      rows: { id: string; position: number; value: string; planningTimes?: PlanningTimes }[],
+    ) => {
       const charge = planningHistoryBudget();
-      for (const row of rows) row.value = await withPlanningTimes(ctx, project, partition, row.value, charge);
-      return rows;
+      const result = [];
+      for (const { planningTimes, ...row } of rows) {
+        if (planningHistory && !input.counts)
+          row.value = await withPlanningTimes(ctx, project, partition, row.value, charge, planningTimes);
+        result.push(row);
+      }
+      return result;
     };
     if ((input.collection === 'planningItems' && input.planningFilter) || store) {
       const actors = new Map<string, Promise<boolean>>();
@@ -376,6 +395,7 @@ export async function journalWorkRecordsRead(
           id: row.id,
           position: row.position,
           value: await actorSummary(ctx, project._id, JSON.stringify(row.value), actors),
+          ...(row.planningTimes ? { planningTimes: row.planningTimes } : {}),
         })),
       );
       return {

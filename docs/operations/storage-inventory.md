@@ -182,3 +182,29 @@ Before each run and a day after it, record:
 
 The moves are done when the sizes and the daily write I/O of those tables have dropped and the
 cost per 1,000 landings has not risen.
+
+## Item status timestamps
+
+Record-store Item heads keep optional version-pinned `planningTimes`. The existing Item
+write computes them without a history read. Planning list and detail read the pin only
+when it matches the returned version. A missing or stale pin uses the bounded history
+walk. Legacy projects and ranked search previews continue to use the walk.
+
+After deploying the writer, an authorized operator can fill older heads in one
+record-store project at a time. Estimate for the dogfood project: **40 MB**;
+stop at **150 MB cumulative billed reads plus writes** ($0.03), including verification
+and retries. No new tables, indexes, R2 bodies, jobs or idle calls. Start with one page:
+
+```sh
+npx convex run projectPlanningTimesBackfill:run '{"projectId":"…","cursor":null,"pages":1,"budgetBytes":12582912}'
+```
+
+Each page reads up to five heads in Item-key order and walks their version chains
+with a byte limit but no version-count cap. Its cursor is the last visited key;
+partial provider pagination cannot skip unseen heads. The driver reserves 12 MiB
+before starting a page and does not schedule more work. Compare its reply with the billed completion logs before sizing
+another batch. Resume with `nextCursor`; replaying a cursor skips heads already pinned.
+`blocked` lists heads the page could not prove within its budget or available record
+bodies. Stop and inspect those Items; don't treat such a pass as complete. A second pass
+must scan to `nextCursor: null` with zero `filled` and no `blocked` before considering
+any removal of the fallback.

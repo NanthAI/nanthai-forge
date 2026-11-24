@@ -11,8 +11,9 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { PaginationOptions } from 'convex/server';
 import { hostedRecordBody, recordHead, recordVersion } from './projectHostedRecords';
 import { noteRecordId } from '../src/work-store-records';
+import { pinnedPlanningTimes, type PlanningTimes } from './projectPlanningTimes';
 
-type Row = { id: string; position: number; value: unknown };
+type Row = { id: string; position: number; value: unknown; planningTimes?: PlanningTimes };
 type Page = { page: Row[]; isDone: boolean; continueCursor: string };
 
 /** Whether this read comes from the record store. Other collections, and shapes the store does not
@@ -111,6 +112,7 @@ export async function storePage(
       id: indexed ? `${parent}:${(value as { index: number }).index}` : head.key,
       position: indexed ? (value as { index: number }).index : head._creationTime,
       value,
+      ...(collection === 'planningItems' ? planningHeadTimes(head) : {}),
     });
   }
   return { ...page, page: rows };
@@ -118,8 +120,17 @@ export async function storePage(
 
 /** The current Issue or Initiative, as the journal's `planningItems` detail returns it. */
 export async function storeItem(ctx: QueryCtx, projectId: Id<'hostedProjects'>, id: string) {
+  return (await storeItemRow(ctx, projectId, id))?.value ?? null;
+}
+
+const planningHeadTimes = (head: Doc<'projectHostedRecordHeads'>) => {
+  const planningTimes = pinnedPlanningTimes(head);
+  return planningTimes ? { planningTimes } : {};
+};
+
+export async function storeItemRow(ctx: QueryCtx, projectId: Id<'hostedProjects'>, id: string) {
   const head = await recordHead(ctx, projectId, 'issue', id);
-  return head ? await headValue(ctx, 'planningItems', head) : null;
+  return head ? { value: await headValue(ctx, 'planningItems', head), ...planningHeadTimes(head) } : null;
 }
 
 /** Order-free JSON, so a reader compare does not depend on key order. */
