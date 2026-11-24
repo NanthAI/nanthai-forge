@@ -17,7 +17,7 @@ import { useAction, useConvex, useMutation } from 'convex/react';
 import { makeFunctionReference, type PaginationResult } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
-import { Band, Key, Menu, Region, Standing } from '../../ds';
+import { Band, Key, Menu, Region, Sheet, Standing } from '../../ds';
 import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
 import { isLive, itemStatus, itemStatusLabel } from '../../../../src/planning-model';
 import type { PlanRow } from '../../../../src/planning-model';
@@ -29,6 +29,7 @@ import { hrefFor } from '../paths';
 import { Head, crumbsFor } from '../Place';
 import { progressCells, progressOf, type PlanCountsRead } from '../progress';
 import { navigate, useSearch } from '../router';
+import { CopyKey } from '../start/parts';
 import type { PlaceProps } from '../screens';
 import {
   readComments,
@@ -1334,6 +1335,19 @@ function ItemPage({
     : undefined;
   const line = group?.lines.find(entry => entry.row.id === row?.id);
   const initiative = row?.initiativeId ? view?.byId.get(row.initiativeId) : undefined;
+  const [handOff, setHandOff] = useState(false);
+  const itemToHandOff =
+    edit && row?.kind === 'issue' && statusOf(row) === 'planned' && isPlanningUuid(row.id) ? row : null;
+  const handoffPrompt = itemToHandOff
+    ? [
+        `Work on this Forge Item: ${new URL(at({ rest: itemToHandOff.id }), location.origin).href}`,
+        'From the local Forge clone of this project, read the Item and its comments for the current requirements:',
+        `nforge agent . planning '${JSON.stringify({ planningItemId: itemToHandOff.id })}'`,
+        'If it is still Planned and nobody has started it, open a Lane for the Item:',
+        `nforge agent . start '${JSON.stringify({ planningItemId: itemToHandOff.id })}'`,
+        'Use the returned Lane folder. If the Item has no Done-when lines, propose them before editing.',
+      ].join('\n')
+    : null;
   const facts: [string, ReactNode][] = row
     ? [
         [
@@ -1387,6 +1401,11 @@ function ItemPage({
           )
         }
       >
+        {itemToHandOff ? (
+          <Key kind="primary" size="sm" onClick={() => setHandOff(true)}>
+            Hand to an agent
+          </Key>
+        ) : null}
         {row && onVersions ? (
           <Key size="sm" onClick={() => onVersions()}>
             Versions
@@ -1426,6 +1445,24 @@ function ItemPage({
         <div className="pf" role="alert">
           {error}
         </div>
+      ) : null}
+      {handoffPrompt ? (
+        <Sheet
+          title="Hand to an agent"
+          open={handOff}
+          onOpenChange={setHandOff}
+          footer={<CopyKey text={handoffPrompt} label="Copy prompt" kind="primary" />}
+        >
+          <p>Paste the prompt into your agent to start work on this Item.</p>
+          <details>
+            <summary className="btn ghost">
+              Show prompt <span className="tw" aria-hidden="true" />
+            </summary>
+            <pre className="cmd mono" translate="no">
+              {handoffPrompt}
+            </pre>
+          </details>
+        </Sheet>
       ) : null}
       {purgeDialog}
       {announcement}

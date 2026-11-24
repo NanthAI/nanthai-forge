@@ -131,6 +131,9 @@ and say that output appears when the check finishes. Available logs remain reada
 ## Detail navigation and actions
 
 Intent, Lane, Candidate, review and Lane source pages show linked Work breadcrumbs.
+On a Planned Item, a writer can choose “Hand to an agent” and copy a prompt with
+the exact Item link and command to start a Lane. Copying the prompt does not place
+an agent, open a Lane or change the Item’s status.
 The Lane page shows the same Item title as Lanes, alongside its short id, wherever
 you opened it. If the title cannot be read, the short id appears with “title unavailable.”
 Long titles truncate while retaining their full title on hover. Detail visits add

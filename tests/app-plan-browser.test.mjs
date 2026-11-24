@@ -120,7 +120,7 @@ const read = {
   more: exactCounts || partialCounts,
   liveMore: exactCounts || partialCounts,
   settled: emptyPlan ? [] : [{ initiativeId: launch.id, ...launchProgress }, { initiativeId: docs.id, done: partialCounts ? 2 : 0, dropped: 0, atLeast: partialCounts }, { initiativeId: big.id, ...bigSettled }],
-  canEdit: true,
+  canEdit: !boardFlags.has('reader'),
 };
 const settledRows = [item(20, { title: 'Old reader removed', status: 'closed', initiativeId: launch.id,
   ...(boardFlags.has('hierarchy-worst') ? { parentId: uuid(52), initiativeId: uuid(4) } : {}) }), item(21, { title: 'Ship a second parser', status: 'abandoned' })];
@@ -281,7 +281,7 @@ function Fixture() {
     <React.Suspense fallback={<h1>Loading</h1>}>{window.livePlan ?
       <ConvexProvider client={linkBackend.client}><LivePlan route={route} projectId="synthetic"
         projectName="Synthetic project" viewerHandle="example-builder" /></ConvexProvider> :
-      <PlanScreenView route={route} projectId={rest === uuid(16) || deferred || boardFlags.has('hierarchy-worst') ? undefined : "synthetic"} projectName="Synthetic project" feed={planFeed}
+      <PlanScreenView route={route} projectId={rest === uuid(16) || boardFlags.has('handoff-in-progress') || deferred || boardFlags.has('hierarchy-worst') ? undefined : "synthetic"} projectName="Synthetic project" feed={planFeed}
       progress={boardFlags.has('no-counts') ? null : boardFlags.has('loading-plan') ? undefined : progress} needs={planNeeds}
       read={boardFlags.has('loading-plan') ? undefined : read} stale={boardFlags.has('stale-plan')}
       put={put} run={run} purge={purge} reads={reads} query={query} go={go} viewer="example-builder"
@@ -1538,6 +1538,75 @@ test('plan views and bulk bar: real components keep the view in the address and 
       await context.close();
     }
   }
+  // A planned Item hands its exact identity to an agent via the clipboard, not a Forge mutation or agent launch.
+  for (const width of [1440, 390])
+    for (const theme of ['dark', 'light'])
+      await t.test(`hand a Planned Item to an agent at ${width} ${theme}`, async () => {
+        const id = '00000000-0000-4000-8000-000000000016';
+        const { page, errors, context } = await open(width, theme, `/${id}`);
+        await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
+          origin: 'https://forge.test',
+        });
+        const hand = page.getByRole('button', { name: 'Hand to an agent', exact: true });
+        await page.waitForFunction(() => window.workerReads > 0);
+        const readsBefore = await page.evaluate(() => window.workerReads);
+        await hand.focus();
+        const trigger = await hand.boundingBox();
+        assert.ok(trigger);
+        await page.keyboard.press('Enter');
+        const sheet = page.getByRole('dialog', { name: 'Hand to an agent', exact: true });
+        await sheet.waitFor();
+        await page.waitForFunction(() => document.activeElement.closest('[role="dialog"]') !== null);
+        // The scrim intercepts pointer input, and Tab stays inside the modal.
+        assert.equal(
+          await page.evaluate(
+            ({ x, y, width, height }) =>
+              Boolean(document.elementFromPoint(x + width / 2, y + height / 2)?.closest('.scrim')),
+            trigger,
+          ),
+          true,
+        );
+        await page.keyboard.press('Tab');
+        assert.equal(
+          await page.evaluate(() => document.activeElement.closest('[role="dialog"]') !== null),
+          true,
+        );
+        await sheet.getByText('Show prompt', { exact: true }).click();
+        const shown = await sheet.locator('.cmd').textContent();
+        assert.ok(shown.includes(`https://forge.test/example-builder/synthetic/plan/${id}`));
+        assert.ok(shown.includes(`nforge agent . start '{"planningItemId":"${id}"}'`));
+        await check(page, `hand-off ${width} ${theme}`);
+        if (shots) await page.screenshot({ path: join(shots, `item-handoff-${width}-${theme}.png`) });
+        await sheet.getByRole('button', { name: 'Copy prompt' }).click();
+        await sheet.getByRole('status').filter({ hasText: 'Copied' }).waitFor();
+        assert.equal(await page.evaluate(() => navigator.clipboard.readText()), shown);
+        assert.deepEqual(
+          await page.evaluate(() => [window.calls.length, window.puts.length, window.workerReads]),
+          [0, 0, readsBefore],
+        );
+        await page.keyboard.press('Escape');
+        await sheet.waitFor({ state: 'hidden' });
+        await page.waitForFunction(
+          () =>
+            document.activeElement?.tagName === 'BUTTON' &&
+            document.activeElement.textContent?.trim() === 'Hand to an agent',
+        );
+        assert.deepEqual(errors, []);
+        await context.close();
+      });
+
+  await t.test('Item hand-off is unavailable to a reader and for work already in progress', async () => {
+    for (const [id, query, title] of [
+      ['00000000-0000-4000-8000-000000000016', '?reader', 'Tidy the old notes'],
+      ['00000000-0000-4000-8000-000000000017', '?handoff-in-progress', 'Last open step of the long release'],
+    ]) {
+      const { page, context } = await open(1440, 'dark', `/${id}${query}`);
+      await page.locator('.plan .head').getByText(title, { exact: true }).waitFor();
+      assert.equal(await page.getByRole('button', { name: 'Hand to an agent', exact: true }).count(), 0);
+      await context.close();
+    }
+  });
+
   // Archive and Deleted (Item 4c9e961e): a shelved row comes back to the status it left in one batch write with Undo,
   // and the Item page sends an Item to Deleted the same way.
   {
