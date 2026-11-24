@@ -97,6 +97,52 @@ test('browser creation publishes one R2 catalog page, initialized indexed Work a
   assert.deepEqual(JSON.parse(tree.value), { head: snapshot.manifest.head, files: 0 });
 });
 
+// Item c0af6cfa F2: a new project is never born journal-only; its first Item lives in the record store.
+test('a browser-created project starts in the record store and keeps its first Item there, not in the journal', async () => {
+  const s = setup(),
+    projectId = await s.create(input()),
+    project = s.tables.hostedProjects.get(projectId);
+  assert.equal(project.workStore, 'records');
+  assert.deepEqual(project.workStoreWriters, ['note', 'intent', 'intent-status', 'planning']);
+  assert.equal(project.workStoreCutoverRevision, 0);
+  assert.deepEqual(project.workStoreEventWindows, [{ revision: 0, storeFirst: true }]);
+  const receipt = JSON.parse([...s.tables.projectSourceCutovers.values()][0].receipt);
+  assert.ok(receipt.changes.includes('Work kept in the record store'), 'the birth receipt says what it set');
+  const { command } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+  const { records } = await import(moduleUrl('../convex/projectWorkIndex.ts'));
+  const itemId = randomUUID(),
+    operationId = randomUUID();
+  await s.transaction(() =>
+    command._handler(s.ctx, {
+      projectId,
+      operationId,
+      command: JSON.stringify({
+        action: 'put-planning-item',
+        operationId,
+        itemId,
+        expectedVersion: 0,
+        kind: 'issue',
+        title: 'First Item',
+        body: '',
+        status: 'open',
+        intentIds: [],
+      }),
+    }),
+  );
+  assert.equal(s.tables.projectWorkEvents?.size ?? 0, 0, 'no journal event row');
+  const retained = [...s.tables.projectHostedRecordBodies.values()].filter(row => row.operationId);
+  assert.equal(retained.length, 1, 'the command retains its one primary version');
+  const page = await records._handler(s.ctx, {
+    projectId,
+    collection: 'planningItems',
+    paginationOpts: { cursor: null, numItems: 10 },
+  });
+  assert.deepEqual(
+    page.page.map(row => [row.id, JSON.parse(row.value).title]),
+    [[itemId, 'First Item']],
+  );
+});
+
 test('a lost publication reply retries to the selected project without another R2 request', async t => {
   const r2 = fakeSourceR2(t),
     s = setup(),
@@ -342,4 +388,74 @@ test('R2 bootstrap retries an incomplete reservation without any Convex byte sto
   assert.equal(s.tables.projectObjectCatalog.size, 1);
   assert.equal(page.sizes.length, 3);
   assert.equal(r2.objects.size, 3);
+});
+
+// Item c0af6cfa F2 review 92eafa87 P1: in the record store an Intent's creation is a retained version, not a
+// `projectWorkEvents` row. A contributor's proposal on the first Intent of a browser-born project must still
+// register against the Intent's exact server-pinned base, in both Work modes, and keep its denials.
+test('a contributor proposal on a browser-born Intent registers its exact base pins with no journal event', async () => {
+  for (const records of [true, false]) {
+    const s = setup(),
+      projectId = await s.create(input()),
+      project = s.tables.hostedProjects.get(projectId);
+    if (!records)
+      for (const field of [
+        'workStore',
+        'workStoreWriters',
+        'workStoreCutoverRevision',
+        'workStoreEventWindows',
+      ])
+        delete project[field];
+    establishedAccount(s.tables, 'contributor', ['planning', 'start']);
+    s.tables.projectContributors.set('grant', {
+      _id: 'grant',
+      _creationTime: 1,
+      projectId,
+      contributor: 'contributor',
+    });
+    const main = await modules.projectHostedChannels.hostedStartMain(s.ctx, projectId);
+    const { command } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+    const proposals = await import(moduleUrl('../convex/projectProposals.ts'));
+    const intentId = randomUUID();
+    s.caller('contributor');
+    await s.transaction(() =>
+      command._handler(s.ctx, {
+        projectId,
+        operationId: intentId,
+        command: JSON.stringify({
+          action: 'intent',
+          outcome: 'First Intent',
+          constraints: '',
+          base: main.head,
+        }),
+      }),
+    );
+    assert.equal(s.tables.projectWorkEvents?.size ?? 0, records ? 0 : 1);
+    const backup = s.tables.projectBackups.get(project.currentBackup);
+    const register = (patch = {}) =>
+      s.transaction(() =>
+        proposals.register._handler(s.ctx, {
+          projectId,
+          operationId: randomUUID(),
+          intentId,
+          baseBackupId: backup._id,
+          baseArchiveSha256: backup.digest,
+          baseState: main.head,
+          head: 'c'.repeat(64),
+          viewId: 'view',
+          digest: 'd'.repeat(64),
+          size: 1,
+          preview: backup.preview,
+          transport: 'objects',
+          actor: 'contributor',
+          request: 'e'.repeat(64),
+          nonce: randomUUID(),
+          ...patch,
+        }),
+      );
+    assert.ok(await register(), `registered with ${records ? 'record store' : 'journal'} provenance`);
+    await assert.rejects(register({ baseState: 'f'.repeat(64) }), code('SOURCE_UNAVAILABLE'));
+    s.tables.projectContributors.delete('grant');
+    await assert.rejects(register(), code('PROJECT_UNAVAILABLE'));
+  }
 });

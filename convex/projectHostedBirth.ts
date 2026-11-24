@@ -8,12 +8,18 @@ import { mutation } from './cliServer';
 import { activeOwnedProject } from './projectAuthority';
 import { channelRow, assertRootlessSeed } from './projectHostedChannels';
 import { requireHostedOwnerDrained } from './projectSourceAuthorityDrain';
-import { nextSourceAuthority, requireSourceAuthority, sourceAuthority } from '../src/hosted-source-authority';
+import {
+  nextSourceAuthority,
+  requireSourceAuthority,
+  sourceAuthority,
+  type SourceAuthority,
+} from '../src/hosted-source-authority';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import { CUTOVER_CLI_VERSION } from '../src/cutover-version';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { bornRecordStore } from './projectWorkStoreFingerprintWrites';
 
 type Birth = {
   operationId: string;
@@ -22,10 +28,30 @@ type Birth = {
   generationId: Id<'projectWorkGenerations'>;
   origin: 'new-project' | 'github-import' | 'make-editable';
 };
+/** The one seam for a project born under server authority (guarded by
+ * tests/born-record-store-guard.test.mjs). `workRevision` is the born Work revision when its
+ * Work has no commands, so it starts in the record store (Item c0af6cfa); null only for a native
+ * owner whose earlier commands are still in its journal index until slice 6 copies them. */
+export function serverBirth(previous: SourceAuthority, workRevision: number | null) {
+  const authority = nextSourceAuthority(previous, previous, 'server'),
+    at = new Date().toISOString();
+  return {
+    authority,
+    at,
+    fields: {
+      sourceAuthority: authority,
+      sourceCutover: { minimumCliVersion: CUTOVER_CLI_VERSION, at },
+      ...(workRevision === null ? {} : bornRecordStore(workRevision)),
+    },
+  };
+}
+
 /** A project with no native owner starts under server authority. One
  * transaction selects hosted main at the published head and keeps the same
  * receipt a cutover writes, so agents can start Lanes with no Mac. A project
- * with a native owner journal keeps the drained-owner cutover instead. */
+ * with a native owner journal keeps the drained-owner cutover instead. With no
+ * owner journal there are no Work commands yet, so the same patch starts its
+ * Work in the record store (Item c0af6cfa). */
 export async function selectBornMain(ctx: MutationCtx, project: Doc<'hostedProjects'>, input: Birth) {
   const previous = requireSourceAuthority(project);
   invariant(!project.sourceCutover, 'CHANNEL_CHANGED', 'This project already changed source authority.');
@@ -39,8 +65,8 @@ export async function selectBornMain(ctx: MutationCtx, project: Doc<'hostedProje
     'SOURCE_AUTHORITY_DRAIN_REQUIRED',
     'A native owner journal exists for this project. Switch it with nforge host ROOT --cutover-file.',
   );
-  const authority = nextSourceAuthority(previous, previous, 'server'),
-    at = new Date().toISOString();
+  // The born Work revision: no owner journal head exists (checked above), so it is the published one.
+  const { authority, at, fields } = serverBirth(previous, project.work?.revision ?? 0);
   const main = hostedMainV2Schema.parse({
     schema: 2,
     projectId: project._id,
@@ -59,10 +85,7 @@ export async function selectBornMain(ctx: MutationCtx, project: Doc<'hostedProje
     name: 'main',
     selection: canonicalPayload(main),
   });
-  await ctx.db.patch(project._id, {
-    sourceAuthority: authority,
-    sourceCutover: { minimumCliVersion: CUTOVER_CLI_VERSION, at },
-  });
+  await ctx.db.patch(project._id, fields);
   const receipt = canonicalPayload({
     operationId: input.operationId,
     projectId: project._id,
@@ -71,7 +94,11 @@ export async function selectBornMain(ctx: MutationCtx, project: Doc<'hostedProje
     authority,
     main,
     minimumCliVersion: CUTOVER_CLI_VERSION,
-    changes: ['project source authority and epoch', 'hosted main selected at the published head'],
+    changes: [
+      'project source authority and epoch',
+      'hosted main selected at the published head',
+      'Work kept in the record store',
+    ],
     undo: 'Recover a native owner from this project, then cut over to native-owner at the next epoch with a new operationId.',
     at,
   });

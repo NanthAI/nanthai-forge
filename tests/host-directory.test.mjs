@@ -344,6 +344,14 @@ test('legacy native-owner and existing server projects retain their original aut
       mode: server ? 'server' : 'native-owner',
       epoch: server ? 1 : 0,
     });
+    // Item c0af6cfa F2: a server-born seed with no Work commands starts in the record store; a native
+    // owner keeps its Work in its own journal (setMode refuses native-owner projects).
+    assert.deepEqual(
+      [project.workStore, project.workStoreWriters, project.workStoreCutoverRevision],
+      server
+        ? ['records', ['note', 'intent', 'intent-status', 'planning'], 0]
+        : [undefined, undefined, undefined],
+    );
     if (server) assert.equal((await exchange.current()).head, JSON.parse(selection).head);
     else
       await assert.rejects(

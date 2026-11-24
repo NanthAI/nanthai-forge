@@ -21,6 +21,7 @@ import { retainUploadCleanup, scheduleUploadSweep, retryRemovedUpload } from './
 import { report } from './errors';
 import { assertAccountActive } from './accountLimits';
 import { findObject } from './projectObjectFind';
+import { findWorkEvent } from './projectWorkEventStore';
 
 export const proposalArgs = {
   projectId: v.id('hostedProjects'),
@@ -79,9 +80,15 @@ export const register = internalMutation({
       await assertAccountActive(ctx, input.actor);
       const authority = await intentAuthority(ctx, input.projectId, input.actor, input.intentId),
         backup = await ctx.db.get(input.baseBackupId);
+      // A record-store Intent keeps its creation in its retained version, not a journal event (Item c0af6cfa).
+      const event =
+        authority.event ??
+        (await findWorkEvent(ctx, input.projectId, authority.targetId, { authority: true }));
+      const command = event ? (JSON.parse(event.command) as { action?: string; base?: string }) : null;
       invariant(
-        authority.event?.baseBackupId === input.baseBackupId &&
-          authority.command?.base === input.baseState &&
+        event?.baseBackupId === input.baseBackupId &&
+          command?.action === 'intent' &&
+          command.base === input.baseState &&
           backup?.projectId === input.projectId &&
           backup.status === 'stored' &&
           backup.preview.format === 'native' &&

@@ -57,7 +57,7 @@ export async function intentAuthority(
     'PROJECT_UNAVAILABLE',
     'Select an Intent created by or assigned to this account on this Forge project.',
   );
-  return { project, event, command: command as { action: 'intent'; base: string } | null };
+  return { project, targetId, event, command: command as { action: 'intent'; base: string } | null };
 }
 export const add = internalMutation({
   args: {

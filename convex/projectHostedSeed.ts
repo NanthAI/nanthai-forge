@@ -9,8 +9,7 @@ import type { Id } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
 import { channelRow, assertRootlessSeed } from './projectHostedChannels';
 import { isStored } from './projectObjectFields';
-import { nextSourceAuthority, requireSourceAuthority, sourceAuthority } from '../src/hosted-source-authority';
-import { CUTOVER_CLI_VERSION } from '../src/cutover-version';
+import { requireSourceAuthority, sourceAuthority } from '../src/hosted-source-authority';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import {
@@ -22,6 +21,7 @@ import {
 } from '../src/hosted-seed-protocol';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { serverBirth } from './projectHostedBirth';
 import { findObject, findObjects, findStoredObject, findStoredObjects } from './projectObjectFind';
 import { indexEntry } from './projectWorkIndexFields';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
@@ -357,9 +357,12 @@ export const commit = internalMutation({
     // A new host becomes agent-writable only when its complete, verified source
     // and matching schema-2 main are selected in this same transaction. Legacy
     // seed requests never change authority, including retries after an upgrade.
-    const authority = request.serverAuthority
-      ? nextSourceAuthority(row.authority, row.authority, 'server')
-      : row.authority;
+    // A Work with no commands starts in the record store (Item c0af6cfa). A native owner that already
+    // ran commands keeps them in its journal index until slice 6 copies them.
+    const birth = request.serverAuthority
+      ? serverBirth(row.authority, request.revision === 0 ? 0 : null)
+      : null;
+    const authority = birth?.authority ?? row.authority;
     if (request.format === 'native') {
       const selected = hostedMainV2Schema.parse({
         schema: 2,
@@ -392,12 +395,7 @@ export const commit = internalMutation({
     await ctx.db.patch(project._id, {
       currentBackup: backupId,
       revision: project.revision + 1,
-      ...(request.serverAuthority
-        ? {
-            sourceAuthority: authority,
-            sourceCutover: { minimumCliVersion: CUTOVER_CLI_VERSION, at: new Date().toISOString() },
-          }
-        : {}),
+      ...birth?.fields,
     });
     await ctx.db.patch(row._id, { backupId, ...(input.mainDigest ? { mainDigest: input.mainDigest } : {}) });
     return progress({ ...row, backupId, ...(input.mainDigest ? { mainDigest: input.mainDigest } : {}) });
