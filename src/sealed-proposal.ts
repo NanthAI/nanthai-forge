@@ -19,11 +19,10 @@ import {
 } from './sealed-keys.js';
 import { proposalBytes, proposalSealBytes, type SealedProposal } from './sealed-future-records.js';
 import { changeBytes, type Head, type NameRecord, type Roster } from './sealed-records.js';
-import { findEntry, sameId, writeDevice } from './sealed-roster.js';
+import { findEntry, writeDevice } from './sealed-roster.js';
 import { requireConfirmedBase, requireConfirmedWriter } from './sealed-anchors.js';
 import { safeSecretName } from './sealed-display.js';
 import {
-  bucketSize,
   makeRoom,
   nextValueVersion,
   packValue,
@@ -32,14 +31,18 @@ import {
   valueCommitment,
 } from './sealed-value.js';
 import { decodeSealedProposal } from './sealed-decode.js';
-import { secretNameKind } from './secret-names.js';
+import {
+  acceptedName,
+  checkProposal,
+  currentAuthor,
+  proposalAuthor,
+  type ProposalAuthority,
+} from './sealed-proposal-check.js';
 import type { SecretPin } from './sealed-verify.js';
 
 type Signer = { id: Buffer; sign: Buffer };
 /** Each proposal key comes from a fresh ephemeral agreement and seals one plaintext, so its nonce is fixed. */
 const NONCE = Buffer.alloc(12);
-/** A proposal ciphertext is one value bucket plus the 16-byte tag: 272 to 69,648 bytes. */
-export const PROPOSAL_CIPHERTEXT = { min: bucketSize(0) + 16, max: bucketSize(65536) + 16 };
 const notAllowed = (ok: unknown, message: string) => invariant(ok, 'SECRETS_NOT_ALLOWED', message);
 const refused = (ok: unknown, message: string) => invariant(ok, 'SECRETS_VALUE_REFUSED', message);
 const conflict = (ok: unknown, message: string) => invariant(ok, 'WORK_CONFLICT', message);
@@ -62,22 +65,6 @@ export const proposedRecord = (p: SealedProposal, valueVersion: number): NameRec
   flags: 0,
   allowedChecks: [],
 });
-const namedOk = (name: string) => ['routing', 'credential'].includes(secretNameKind(name));
-/** Who may author a proposal on this set: a device of the set's own roster for Development; for Checks a device of
- * the proposer's trusted Development roster that the Checks head lists as an approved proposer (GB-08 e). */
-function proposalAuthor(r: Roster, h: Head, id: Uint8Array, development?: Roster) {
-  notAllowed(r.setKind !== 3, 'Production takes no proposals.');
-  notAllowed(
-    r.setKind === 1 ? !development : development && h.proposers.some(p => sameId(p.deviceId, id)),
-    r.setKind === 1
-      ? 'A Development proposal is authored on the Development roster.'
-      : 'Only an approved Checks proposer proposes. Ask a Checks owner for a proposer code.',
-  );
-  const author = findEntry(development ?? r, id);
-  notAllowed(author?.entryKind === 1, 'Only a device on the roster proposes a change.');
-  return author!;
-}
-
 /** Review M2: the head the applier will extend, after the compaction its write makes for a new name (makeRoom is
  * deterministic from the head), so the version signed here is the one apply computes. The real head is unchanged. */
 const roomFor = (h: Head, name: string) => {
@@ -108,7 +95,7 @@ export function sealProposal(input: {
   requireConfirmedWriter(pin);
   const { roster: r, head: h } = pin;
   proposalAuthor(r, h, proposer.id, input.development);
-  notAllowed(namedOk(name), 'This name is not accepted for a secret.');
+  notAllowed(acceptedName(name), 'This name is not accepted for a secret.');
   const old = h.names.find(n => n.name === name),
     live = !!old && old.kind !== 3;
   notAllowed(input.value !== null || live, 'There is no current value to remove.');
@@ -153,25 +140,8 @@ export function sealProposal(input: {
 }
 
 /** The verified current view of a holder that has the set key: from the read this write made, never a cache. */
-export type ProposalView = {
-  roster: Roster;
-  head: Head;
-  key: Uint8Array;
-  /** Server-owned removal markers on this set. */
-  revoked: readonly Uint8Array[];
-  /** Checks only: the holder's trusted Development roster and its markers, where proposals are authored. */
-  development?: Roster;
-  developmentRevoked?: readonly Uint8Array[];
-};
+export type ProposalView = ProposalAuthority & { key: Uint8Array };
 export type OpenedProposal = { proposal: SealedProposal; r: Buffer; value: Buffer };
-/** The proposal's author on this view: listed, allowed to propose, and not marked for removal. */
-function currentAuthor(view: ProposalView, p: SealedProposal) {
-  const author = proposalAuthor(view.roster, view.head, p.proposerId, view.development);
-  const markers = view.roster.setKind === 1 ? view.revoked : (view.developmentRevoked ?? []);
-  notAllowed(!markers.some(id => sameId(id, p.proposerId)), 'Forge marked this proposer for removal.');
-  return author;
-}
-
 /** Opens `proposal` for a holder on its verified view. Checks the record schema, its epoch, author and signature,
  * operation, kind and name, the ciphertext digest, the authenticated encryption and the padding. The change
  * signature and value commitment cover the version the proposal will get, so applyProposal checks them. The caller
@@ -179,24 +149,8 @@ function currentAuthor(view: ProposalView, p: SealedProposal) {
 export function openProposal(view: ProposalView, proposal: unknown): OpenedProposal {
   const p = decodeSealedProposal(proposal),
     { roster: r, head: h } = view;
-  conflict(
-    p.epoch === r.epoch && h.epoch === r.epoch,
-    'This proposal was made before the set was re-keyed. Ask for a new proposal.',
-  );
-  const author = currentAuthor(view, p);
-  invariant(
-    (p.op === 3 ? p.kind === 3 && p.valueCommit.length === 0 : p.kind !== 3 && p.valueCommit.length === 32) &&
-      namedOk(p.name) &&
-      p.ciphertext.length >= PROPOSAL_CIPHERTEXT.min &&
-      p.ciphertext.length <= PROPOSAL_CIPHERTEXT.max,
-    'SECRETS_FORMAT_REFUSED',
-    'Proposal fields exceed format bounds.',
-  );
-  refused(
-    equalBytes(ciphertextHash(p.name, p.ciphertext), p.ciphertextHash) &&
-      verifyBytes(proposalBytes(r, p), p.signature, author.signPub),
-    'The proposal does not match its signature.',
-  );
+  // The same public checks the server ran when it stored the proposal, on this holder's own verified view.
+  checkProposal(view, p);
   const inbox = inboxKeys(view.key, r),
     aad = proposalSealBytes(r, p);
   let shared: Buffer | undefined, key: Buffer | undefined, plain: Buffer | undefined;

@@ -7,12 +7,14 @@
 // holds no key. Clients verify everything themselves and rely on none of this.
 import { invariant } from '../src/errors';
 import { checkSealedContents, checkSignedHead } from '../src/sealed-head';
-import { checkRoster, findEntry, ownerDevice, walkTransition } from '../src/sealed-roster';
+import { checkRoster, findEntry, ownerDevice, walkTransition, writeDevice } from '../src/sealed-roster';
 import { checkSealedPart } from '../src/sealed-schema';
 import { decodeSealedWire } from '../src/sealed-wire';
 import { equalBytes, forgeSecretId, framedHash, hex } from '../src/sealed-portable';
 import { headBytes, rosterBytes, type Head, type Roster, type Transition } from '../src/sealed-records';
 import { AUTOMATIC_SET_KIND, decodeJoinRequest, type JoinRequest } from '../src/sealed-join';
+import { checkProposal } from '../src/sealed-proposal-check';
+import type { SealedProposal } from '../src/sealed-future-records';
 
 type Payload = {
   head: Head;
@@ -23,6 +25,16 @@ type Payload = {
   wraps: { recipientId: Uint8Array }[];
 };
 export type SealedJoinRequest = { deviceId: ArrayBuffer; request: ArrayBuffer; at: number };
+/** A waiting proposal's facts on the set row; the proposal bytes are in their own row (`id`). */
+export type SealedPendingProposal = {
+  id: string;
+  proposalId: ArrayBuffer;
+  proposerId: ArrayBuffer;
+  name: string;
+  epoch: number;
+  size: number;
+  at: number;
+};
 export type StoredSealedSet = {
   setId: ArrayBuffer;
   headHash: ArrayBuffer;
@@ -31,12 +43,14 @@ export type StoredSealedSet = {
   payload: ArrayBuffer;
   revoked?: ArrayBuffer[];
   joinRequests?: SealedJoinRequest[];
+  proposals?: SealedPendingProposal[];
+  resolvedProposals?: ArrayBuffer[];
 };
 const u8 = (bytes: ArrayBuffer) => new Uint8Array(bytes);
 function refuse(ok: unknown, message: string): asserts ok {
   invariant(ok, 'SECRETS_FORMAT_REFUSED', message);
 }
-function part<T>(kind: 'payload' | 'roster' | 'transition', bytes: ArrayBuffer): T {
+function part<T>(kind: 'payload' | 'roster' | 'transition' | 'proposal', bytes: ArrayBuffer): T {
   const value = decodeSealedWire(u8(bytes));
   checkSealedPart(kind, value);
   return value as T;
@@ -97,12 +111,13 @@ function checkWriteHead(
     'SECRETS_ROSTER_REFUSED',
     'The head must be signed by a device of the signed-in account.',
   );
-  // Review M1: a proposal record's author is in Development, which this gate does not read. Forge stores no
-  // proposals yet, so a head carrying one is refused until the server-owned proposal store checks it.
+  // Review M1: a Checks proposal record's author is in Development, which this gate does not read, and Forge stores
+  // no Checks proposals yet, so a Checks head carrying one is refused. A Development proposal record is checked
+  // below like any record, and answers a waiting proposal (nextProposals).
   invariant(
-    facts.head.names.every(n => n.proposalId.length === 0),
+    facts.roster.setKind === 1 || facts.head.names.every(n => n.proposalId.length === 0),
     'SECRETS_NOT_ALLOWED',
-    'Proposal records are not accepted yet.',
+    'Checks proposal records are not accepted yet.',
   );
   checkSignedHead(facts.head, facts.roster, { pinned, revoked });
   checkSealedContents(facts.head, facts.roster, facts.ciphertexts, facts.wraps);
@@ -112,6 +127,100 @@ function checkWriteHead(
     'SECRETS_WRAP_REFUSED',
     'Every roster entry needs its set-key wrap.',
   );
+}
+
+/** The waiting cap per set (proposals and bytes) and per proposer device (review F3), and how many resolved
+ * proposal ids the set row remembers so the same proposal is not stored again (review F4). */
+export const SEALED_PROPOSALS = { count: 32, bytes: 256 * 1024, perProposer: 8, remembered: 64 };
+/** The set row's remembered resolved ids after `dropped` leave the waiting list (newest last). */
+export function rememberResolved(set: StoredSealedSet, dropped: readonly SealedPendingProposal[]) {
+  const ids = [...(set.resolvedProposals ?? []), ...dropped.map(p => p.proposalId)];
+  return ids.slice(-SEALED_PROPOSALS.remembered);
+}
+/** Review F2: the waiting proposals whose proposer is not marked for removal, and the ones that leave. */
+export function unmarkedProposals<S extends StoredSealedSet>(set: S, revoked: readonly ArrayBuffer[]) {
+  type P = NonNullable<S['proposals']>[number];
+  const pending: P[] = set.proposals ?? [],
+    marked = (p: P) => revoked.some(id => equalBytes(u8(id), u8(p.proposerId)));
+  return { proposals: pending.filter(p => !marked(p)), dropped: pending.filter(marked) };
+}
+/** Review F1: the waiting proposals `ids` names that this caller may reject; refuses the whole call if any known one
+ * is not. The proposer's own account withdraws its own from any write-scoped device; another account's proposals
+ * need a person's unmarked write device on the roster, from an unrestricted sign-in (`holderSignIn`). Unknown ids
+ * are ignored. One decode of the roster. */
+export function rejectableProposals<S extends StoredSealedSet>(
+  set: S,
+  accountId: Uint8Array,
+  holderSignIn: boolean,
+  ids: readonly ArrayBuffer[],
+) {
+  const pending: NonNullable<S['proposals']>[number][] = set.proposals ?? [],
+    drop = pending.filter(p => ids.some(id => equalBytes(u8(id), u8(p.proposalId))));
+  if (!drop.length) return drop;
+  const roster = (decodeSealedWire(u8(set.payload)) as Payload).roster,
+    marked = (id: Uint8Array) => (set.revoked ?? []).some(m => equalBytes(u8(m), id));
+  const holder =
+    holderSignIn &&
+    roster.entries.some(
+      e => writeDevice(e, roster.setKind) && equalBytes(e.accountId, accountId) && !marked(e.id),
+    );
+  const own = (p: SealedPendingProposal) => {
+    const proposer = findEntry(roster, u8(p.proposerId));
+    return !!proposer && equalBytes(proposer.accountId, accountId);
+  };
+  invariant(
+    holder || drop.every(own),
+    'SECRETS_NOT_ALLOWED',
+    "Another person's proposal is rejected only from a write device on the roster.",
+  );
+  return drop;
+}
+/** The waiting proposals after a head write (Item 6466c6a5). Every changed record with a proposal id answers a
+ * waiting proposal from that record's author for that name in that epoch, and resolves it; `resolved` names more
+ * that the write resolves (adopted or rejected with it; unknown ids are ignored). A re-key drops proposals from an
+ * older epoch, and a roster step drops those whose proposer left the roster. Reads only the set row's facts. */
+export function nextProposals(
+  set: StoredSealedSet | null,
+  facts: SealedWriteFacts,
+  current: Head | null,
+  resolved: readonly ArrayBuffer[],
+  revoked: readonly ArrayBuffer[],
+) {
+  invariant(
+    resolved.length <= SEALED_PROPOSALS.count,
+    'SECRETS_FORMAT_REFUSED',
+    'A write resolves at most 32 proposals.',
+  );
+  const pending = set?.proposals ?? [],
+    done = new Set<SealedPendingProposal>();
+  const find = (id: Uint8Array) => pending.find(p => equalBytes(u8(p.proposalId), id));
+  for (const n of facts.head.names) {
+    if (!n.proposalId.length) continue;
+    const old = current?.names.find(o => o.name === n.name);
+    if (old && old.valueVersion === n.valueVersion) continue;
+    const row = find(n.proposalId);
+    invariant(
+      row && equalBytes(u8(row.proposerId), n.changedBy) && row.name === n.name && row.epoch === n.valueEpoch,
+      'WORK_CONFLICT',
+      'A proposal record must answer a waiting proposal. List the proposals again.',
+    );
+    done.add(row);
+  }
+  for (const id of resolved) {
+    const row = find(u8(id));
+    if (row) done.add(row);
+  }
+  // Review F2: a proposer marked for removal counts as off the roster.
+  const listed = (p: SealedPendingProposal) =>
+    facts.roster.entries.some(e => e.entryKind === 1 && equalBytes(e.id, u8(p.proposerId))) &&
+    !revoked.some(id => equalBytes(u8(id), u8(p.proposerId)));
+  const proposals = pending.filter(p => !done.has(p) && p.epoch === facts.head.epoch && listed(p)),
+    dropped = pending.filter(p => !proposals.includes(p));
+  return {
+    proposals,
+    dropped: dropped.map(p => p.id),
+    resolvedProposals: set ? rememberResolved(set, dropped) : [],
+  };
 }
 
 /** The history and side records after an accepted write. The server appends the one transition the
@@ -129,8 +238,10 @@ export function nextSealedState(input: {
   /** Checks and Production steps and genesis: the active Development roster, for the cross-set owner rule (GB-08 d2,
    * applied to the roster this write leaves, which is the final one). */
   development?: Roster;
+  /** Proposal ids this write resolves beyond its own proposal records (nextProposals). */
+  resolved?: readonly ArrayBuffer[];
 }) {
-  const { set, facts, genesis, transition, stored, accountId, development } = input;
+  const { set, facts, genesis, transition, stored, accountId, development, resolved = [] } = input;
   invariant(
     facts.roster.setKind === 1 || (!transition && set) || development,
     'SECRETS_ROSTER_REFUSED',
@@ -161,7 +272,13 @@ export function nextSealedState(input: {
     checkRoster(first, development);
     checkWriteHead(facts, null, [], accountId);
     // A first head starts its own ring; it never inherits steps from an older history row.
-    return { genesis: genesis!, transitions: [], revoked, joinRequests };
+    return {
+      genesis: genesis!,
+      transitions: [],
+      revoked,
+      joinRequests,
+      ...nextProposals(null, facts, null, [], []),
+    };
   }
   refuse(genesis === null, 'A set keeps its first genesis permanently.');
   refuse(stored, 'Genesis history is required.');
@@ -176,7 +293,13 @@ export function nextSealedState(input: {
     );
     checkWork(facts, current, 0);
     checkWriteHead(facts, pinned, markers, accountId);
-    return { genesis: stored.genesis, transitions: stored.transitions, revoked, joinRequests };
+    return {
+      genesis: stored.genesis,
+      transitions: stored.transitions,
+      revoked,
+      joinRequests,
+      ...nextProposals(set, facts, current, resolved, revoked),
+    };
   }
   const t = part<Transition>('transition', transition);
   // An automatic addition answers a join request that is still waiting. Removing a person drops theirs, so a share
@@ -231,6 +354,30 @@ export function nextSealedState(input: {
     transitions: [...stored.transitions, transition],
     revoked,
     joinRequests,
+    ...nextProposals(set, facts, current, resolved, revoked),
+  };
+}
+
+/** A new proposal for the stored Development set (Item 6466c6a5): the exact record schema, then the same public
+ * checks a holder runs before opening it (src/sealed-proposal-check.ts) on the stored head, roster and markers, made
+ * by a device of the signed-in account. Returns its facts for the set row. The server opens nothing. */
+export function proposalFacts(set: StoredSealedSet, bytes: ArrayBuffer, accountId: Uint8Array, at: number) {
+  refuse(bytes.byteLength <= 72 * 1024, 'Proposal exceeds format bounds.');
+  const p = part<SealedProposal>('proposal', bytes),
+    { head, roster } = decodeSealedWire(u8(set.payload)) as Payload;
+  const author = checkProposal({ roster, head, revoked: (set.revoked ?? []).map(u8) }, p);
+  invariant(
+    equalBytes(author.accountId, accountId),
+    'SECRETS_ROSTER_REFUSED',
+    'A proposal is made by a device of the signed-in account.',
+  );
+  return {
+    proposalId: Uint8Array.from(p.proposalId).buffer,
+    proposerId: Uint8Array.from(p.proposerId).buffer,
+    name: p.name,
+    epoch: p.epoch,
+    size: bytes.byteLength,
+    at,
   };
 }
 

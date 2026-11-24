@@ -495,7 +495,13 @@ test('Gate B2 L7 an owner write, removal or share on a trust-on-first-use pin ne
 });
 test('d4/C6 every proposal or join builder in src and convex checks the confirmed base first', () => {
   const root = new URL('../', import.meta.url),
-    exempt = new Set(['src/sealed-future-records.ts', 'src/sealed-format.ts', 'src/sealed-anchors.ts']),
+    // src/sealed-proposal-check.ts only verifies a proposal signature (server and holder); it signs and seals nothing.
+    exempt = new Set([
+      'src/sealed-future-records.ts',
+      'src/sealed-format.ts',
+      'src/sealed-anchors.ts',
+      'src/sealed-proposal-check.ts',
+    ]),
     // Client code that signs or seals a sealed proposal or join (exchange proposals are unrelated code-change
     // records). The server only stores these as opaque bytes and holds no pin, so d4 is a client gate.
     builder = /\bproposal(Seal)?Bytes\b|\bjoin(Request)?Bytes\b/;
@@ -515,6 +521,11 @@ test('d4/C6 every proposal or join builder in src and convex checks the confirme
     return builder.test(text) && !text.includes('requireConfirmedBase(');
   });
   assert.deepEqual(unguarded, []);
+  // Review N2: the verify-only exemption holds only while that file signs and seals nothing.
+  assert.doesNotMatch(
+    readFileSync(new URL('src/sealed-proposal-check.ts', root), 'utf8'),
+    /\bsignBytes\b|\bproposalSealBytes\b|\binboxKeys\b|\bcreateCipheriv\b|\bencrypt\(|\bderiveKey\b|\bsealValue\b/,
+  );
   // The pattern still names the real builders, so the guard cannot go silently stale.
   assert.match(readFileSync(new URL('src/sealed-future-records.ts', root), 'utf8'), builder);
   // Wraps are produced only from a key verifyCore opened (which refuses a walk-only base) or from genesis.

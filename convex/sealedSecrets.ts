@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { v, getConvexSize } from 'convex/values';
-import { query, mutation } from './cliServer';
+import type { Id } from './_generated/dataModel';
+import { query, mutation, type QueryCtx } from './cliServer';
 import { activeProject, memberProject } from './projectAuthority';
 import { currentCredential } from './deviceFields';
 import { sealedKind } from './sealedSecretFields';
@@ -13,6 +14,10 @@ import {
   isOwnDeviceEntry,
   nextJoinRequests,
   nextSealedState,
+  proposalFacts,
+  rejectableProposals,
+  rememberResolved,
+  SEALED_PROPOSALS,
   sealedWriteFacts,
   storedRoster,
 } from './sealedSecretGate';
@@ -39,6 +44,8 @@ export const read = query({
       joinRequests: v.optional(v.array(v.bytes())),
       /** Gate B2 M3: this CLI sign-in has no sealed device link in this project yet (sealedSecrets:link). */
       unlinked: v.optional(v.literal(true)),
+      /** How many proposals wait for a holder (sealedSecrets:proposals lists them); absent when none. */
+      proposals: v.optional(v.number()),
     }),
   ),
   handler: async (ctx, args) => {
@@ -59,6 +66,7 @@ export const read = query({
       const sides = {
         ...(set.revoked?.length ? { revoked: set.revoked } : {}),
         ...(set.joinRequests?.length ? { joinRequests: set.joinRequests.map(j => j.request) } : {}),
+        ...(set.proposals?.length ? { proposals: set.proposals.length } : {}),
         ...(device?.deviceKey && !device.sealed?.some(l => l.projectId === args.projectId)
           ? { unlinked: true as const }
           : {}),
@@ -92,6 +100,8 @@ export const write = mutation({
     payload: v.bytes(),
     genesis: v.union(v.bytes(), v.null()),
     transition: v.union(v.bytes(), v.null()),
+    /** Waiting proposals this write resolves beyond its own proposal records (adopted, or rejected with it). */
+    resolved: v.optional(v.array(v.bytes())),
   },
   returns: v.object({ accepted: v.boolean(), replay: v.boolean() }),
   handler: async (ctx, args) => {
@@ -166,6 +176,7 @@ export const write = mutation({
         // The head signer must be a device of this sign-in's account (the CLI derives the same id from its token).
         accountId: forgeSecretId('account', user.subject),
         ...(development ? { development: storedRoster(development) } : {}),
+        ...(args.resolved ? { resolved: args.resolved } : {}),
       });
       if (!state) return { accepted: false, replay: false };
       const next = {
@@ -183,6 +194,11 @@ export const write = mutation({
         ...(state.joinRequests.length ? { joinRequests: state.joinRequests } : {}),
         // A sweep's later marking steps still skip the device its issuing browser kept, after this write too.
         ...(set?.sweptKept ? { sweptKept: set.sweptKept } : {}),
+        // The gate returns the set row's own entries, unchanged, so their row ids keep their type.
+        ...(state.proposals.length
+          ? { proposals: state.proposals as NonNullable<typeof set>['proposals'] }
+          : {}),
+        ...(state.resolvedProposals.length ? { resolvedProposals: state.resolvedProposals } : {}),
       };
       const events = [
         ...(previous?.events ?? []),
@@ -209,6 +225,8 @@ export const write = mutation({
       else await ctx.db.insert('sealedSecretSets', next);
       if (previous) await ctx.db.replace(previous._id, nextHistory);
       else await ctx.db.insert('sealedSecretHistory', nextHistory);
+      // The proposals this write applied, adopted, rejected or made stale go in the same mutation.
+      for (const id of state.dropped) await ctx.db.delete(id as Id<'sealedSecretProposals'>);
       // The head's signer is this sign-in's sealed device; ending the sign-in elsewhere marks it here.
       await linkSealedDevice(ctx, forgeDevice, args.projectId, facts.head.signerId);
       return { accepted: true, replay: false };
@@ -290,6 +308,168 @@ export const link = mutation({
         return { linked: false };
       await linkSealedDevice(ctx, forgeDevice, args.projectId, deviceId);
       return { linked: true };
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+const proposalSet = (ctx: QueryCtx, projectId: Id<'hostedProjects'>, kind: 1 | 2 | 3) =>
+  ctx.db
+    .query('sealedSecretSets')
+    .withIndex('by_project_and_kind_and_active', q =>
+      q.eq('projectId', projectId).eq('kind', kind).eq('active', true),
+    )
+    .unique();
+/** Item 6466c6a5: a device on the Development roster that may not change a value directly asks a holder to. The
+ * server checks the record's schema, epoch, author (a device of this sign-in's account, not marked) and signature
+ * on the stored set, as a holder will, and stores it; it opens nothing. One indexed set read, one insert and one
+ * set-row patch. A newer proposal from the same device for the same name replaces its older one. Idempotent by
+ * proposal id: the same bytes again is a replay, other bytes under that id are refused. */
+export const propose = mutation({
+  args: { projectId: v.id('hostedProjects'), kind: sealedKind, proposal: v.bytes() },
+  returns: v.object({ accepted: v.boolean(), replay: v.boolean() }),
+  handler: async (ctx, args) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'AUTH_REQUIRED', 'Sign in to propose a secret change.');
+      const { forgeDevice } = ctx;
+      invariant(
+        forgeDevice?.deviceKey &&
+          currentCredential(forgeDevice, user.subject, user.forgeSignIn) &&
+          forgeDevice.scope === 'cli',
+        'AUTH_SCOPE_DENIED',
+        'Sealed secrets need a stable device sign-in from nforge login.',
+      );
+      await activeProject(Object.assign(ctx, { forgeDevice }), args.projectId, user.subject);
+      invariant(args.kind === 1, 'SECRETS_NOT_ALLOWED', 'Only Development takes proposals for now.');
+      const set = await proposalSet(ctx, args.projectId, args.kind);
+      invariant(
+        set,
+        'SECRETS_NOT_SET_UP',
+        'Development is not set up yet. The owner runs nforge secret set NAME.',
+      );
+      const at = Date.now(),
+        facts = proposalFacts(set, args.proposal, forgeSecretId('account', user.subject), at);
+      const pending = set.proposals ?? [],
+        existing = pending.find(p =>
+          equalBytes(new Uint8Array(p.proposalId), new Uint8Array(facts.proposalId)),
+        );
+      if (existing) {
+        const row = await ctx.db.get(existing.id);
+        invariant(
+          row && same(row.proposal, args.proposal),
+          'WORK_OPERATION_REUSED',
+          'This proposal id already names a different proposal.',
+        );
+        return { accepted: true, replay: true };
+      }
+      // Review F4: a proposal applied, adopted or rejected recently is not stored again.
+      invariant(
+        !(set.resolvedProposals ?? []).some(id =>
+          equalBytes(new Uint8Array(id), new Uint8Array(facts.proposalId)),
+        ),
+        'WORK_CONFLICT',
+        'This proposal was already applied or rejected. Make a new proposal.',
+      );
+      const replaced = pending.filter(
+        p =>
+          p.name === facts.name && equalBytes(new Uint8Array(p.proposerId), new Uint8Array(facts.proposerId)),
+      );
+      const kept = pending.filter(p => !replaced.includes(p));
+      const mine = kept.filter(p =>
+        equalBytes(new Uint8Array(p.proposerId), new Uint8Array(facts.proposerId)),
+      ).length;
+      invariant(
+        kept.length < SEALED_PROPOSALS.count &&
+          mine < SEALED_PROPOSALS.perProposer &&
+          kept.reduce((total, p) => total + p.size, facts.size) <= SEALED_PROPOSALS.bytes,
+        'SECRETS_NOT_ALLOWED',
+        'Too many proposals are waiting for Development. A holder applies or rejects them first.',
+      );
+      const id = await ctx.db.insert('sealedSecretProposals', {
+        projectId: args.projectId,
+        kind: args.kind,
+        setId: set.setId,
+        proposal: args.proposal,
+        at,
+      });
+      const proposals = [...kept, { id, ...facts }];
+      // The set row keeps room under its cap for the facts it now lists, so the next head write still fits.
+      invariant(
+        getConvexSize({ ...set, proposals }) + 128 <= 512 * 1024,
+        'SECRETS_NOT_ALLOWED',
+        'Too many proposals are waiting for Development. A holder applies or rejects them first.',
+      );
+      for (const p of replaced) await ctx.db.delete(p.id);
+      await ctx.db.patch(set._id, { proposals });
+      return { accepted: true, replay: false };
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+/** The waiting proposals' records, for a holder to open and apply or reject. Read access, like read; at most 32
+ * records and 256 KiB. Called only when read reported waiting proposals. */
+export const proposals = query({
+  args: { projectId: v.id('hostedProjects'), kind: sealedKind },
+  returns: v.array(v.bytes()),
+  handler: async (ctx, args) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'AUTH_REQUIRED', 'Sign in to read sealed secrets.');
+      await memberProject(ctx, args.projectId, user.subject);
+      const set = await proposalSet(ctx, args.projectId, args.kind);
+      const rows = await Promise.all((set?.proposals ?? []).map(p => ctx.db.get(p.id)));
+      return rows.flatMap(row => (row ? [row.proposal] : []));
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+/** Rejects waiting proposals without a head write (review F1): the proposer's own account withdraws its own from
+ * any write-scoped device; another account's need a person's unmarked write device on the roster, from an
+ * unrestricted sign-in. The whole call is refused if any known id is not allowed; unknown ids are ignored, so a
+ * retry is harmless. Applying goes through write, which resolves its proposals in the same mutation. */
+export const reject = mutation({
+  args: { projectId: v.id('hostedProjects'), kind: sealedKind, proposalIds: v.array(v.bytes()) },
+  returns: v.object({ rejected: v.number() }),
+  handler: async (ctx, args) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'AUTH_REQUIRED', 'Sign in to reject a proposal.');
+      const { forgeDevice } = ctx;
+      invariant(
+        forgeDevice?.deviceKey &&
+          currentCredential(forgeDevice, user.subject, user.forgeSignIn) &&
+          forgeDevice.scope === 'cli',
+        'AUTH_SCOPE_DENIED',
+        'Sealed secrets need a stable device sign-in from nforge login.',
+      );
+      const holderSignIn =
+        forgeDevice.settings?.projects.kind === 'all' && forgeDevice.settings.source === 'write';
+      await activeProject(Object.assign(ctx, { forgeDevice }), args.projectId, user.subject);
+      invariant(
+        args.proposalIds.length <= SEALED_PROPOSALS.count,
+        'SECRETS_FORMAT_REFUSED',
+        'Reject at most 32 proposals at once.',
+      );
+      const set = await proposalSet(ctx, args.projectId, args.kind);
+      if (!set) return { rejected: 0 };
+      const drop = rejectableProposals(
+        set,
+        forgeSecretId('account', user.subject),
+        holderSignIn,
+        args.proposalIds,
+      );
+      if (!drop.length) return { rejected: 0 };
+      for (const p of drop) await ctx.db.delete(p.id);
+      const left = (set.proposals ?? []).filter(p => !drop.includes(p));
+      await ctx.db.patch(set._id, {
+        proposals: left.length ? left : undefined,
+        resolvedProposals: rememberResolved(set, drop),
+      });
+      return { rejected: drop.length };
     } catch (error) {
       return report(error);
     }

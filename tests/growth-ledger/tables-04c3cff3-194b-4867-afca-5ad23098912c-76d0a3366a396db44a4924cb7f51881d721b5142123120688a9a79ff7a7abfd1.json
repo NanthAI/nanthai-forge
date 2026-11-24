@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "sealedSecretProposals (6466c6a5): proposal bytes cannot share the set row (512 KiB cap, read on every run) or the history row (128 KiB); one bounded row per waiting proposal, facts on the set row. Nothing to merge: Secret Objects retire in slice 6.",
+  "date": "2026-11-24"
+}

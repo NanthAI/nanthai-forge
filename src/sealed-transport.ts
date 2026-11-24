@@ -31,6 +31,8 @@ export type SealedWrite = {
   history: SealedHistoryWire | null;
   /** The roster transition this write introduces, if any. Older journal records lack it. */
   transition?: ArrayBuffer | null;
+  /** Waiting proposals this write resolves beyond its own proposal records. */
+  resolved?: ArrayBuffer[];
 };
 /** The mutation arguments: everything else is derived from the payload by the server. */
 export type SealedWriteArgs = {
@@ -38,6 +40,7 @@ export type SealedWriteArgs = {
   payload: ArrayBuffer;
   genesis: ArrayBuffer | null;
   transition: ArrayBuffer | null;
+  resolved?: ArrayBuffer[];
 };
 export type SealedReadWire = {
   payload: ArrayBuffer | null;
@@ -48,6 +51,8 @@ export type SealedReadWire = {
   joinRequests?: ArrayBuffer[];
   /** Gate B2 M3: this sign-in has no sealed device link in the project yet; absent from older deployments. */
   unlinked?: true;
+  /** How many proposals wait for a holder; absent when none or from older deployments. */
+  proposals?: number;
 };
 export interface SealedTransport {
   read(input: {
@@ -60,6 +65,15 @@ export interface SealedTransport {
   join?(input: { kind: 1 | 2 | 3; request: ArrayBuffer }): Promise<{ accepted: boolean; replay: boolean }>;
   /** Gate B2 M3: record this device on its sign-in, so ending the sign-in elsewhere marks it (sealedSecrets:link). */
   link?(input: { kind: 1 | 2 | 3; deviceId: ArrayBuffer }): Promise<{ linked: boolean }>;
+  /** Item 6466c6a5: store this device's signed proposal (sealedSecrets:propose). */
+  propose?(input: {
+    kind: 1 | 2 | 3;
+    proposal: ArrayBuffer;
+  }): Promise<{ accepted: boolean; replay: boolean }>;
+  /** The waiting proposal records (sealedSecrets:proposals). */
+  proposals?(input: { kind: 1 | 2 | 3 }): Promise<ArrayBuffer[]>;
+  /** Reject waiting proposals without a head write (sealedSecrets:reject). */
+  reject?(input: { kind: 1 | 2 | 3; proposalIds: ArrayBuffer[] }): Promise<{ rejected: number }>;
 }
 const refusals = new Set([
   'AUTH_REQUIRED',
@@ -72,6 +86,7 @@ const refusals = new Set([
   'SECRETS_NOT_ALLOWED',
   'SECRETS_NOT_SET_UP',
   'WORK_OPERATION_REUSED',
+  'WORK_CONFLICT',
   'HOSTED_SCHEMA_REJECTED',
   'BAD_ARGUMENT',
 ]);
@@ -80,6 +95,8 @@ const fixedSealedReasons: Record<string, string> = {
   SECRETS_SET_REPLACED: 'this set was replaced; read it again and start over',
   SECRETS_NOT_ALLOWED: 'this device or account is not allowed to make that change here',
   SECRETS_NOT_SET_UP: 'this set is not set up yet',
+  WORK_CONFLICT:
+    'the proposal is no longer current: it was made before a re-key, was already applied or rejected, or is no longer waiting; list the proposals again or make a new one',
 };
 /** A storage reply that proves the mutation stored nothing, as a terminal error; null when the outcome is unknown.
  * Convex checks arguments before a mutation runs, so an argument-validation failure (a CLI build whose request
@@ -134,6 +151,7 @@ export const sealedWriteArgs = (wire: SealedWrite): SealedWriteArgs => ({
   payload: wire.payload,
   genesis: wire.prevHeadHash === null && wire.history ? wire.history.genesis : null,
   transition: wire.transition ?? null,
+  ...(wire.resolved?.length ? { resolved: wire.resolved } : {}),
 });
 export function sealedRead(wire: SealedReadWire, cached?: SealedReply): SealedReply {
   const revoked = (wire.revoked ?? []).map(id => Buffer.from(id));
@@ -169,5 +187,11 @@ export function hostedSealedTransport(deployment: string, projectId: string, tok
       client.mutation(makeFunctionReference<'mutation'>('sealedSecrets:join'), { projectId, ...input }),
     link: input =>
       client.mutation(makeFunctionReference<'mutation'>('sealedSecrets:link'), { projectId, ...input }),
+    propose: input =>
+      client.mutation(makeFunctionReference<'mutation'>('sealedSecrets:propose'), { projectId, ...input }),
+    proposals: input =>
+      client.query(makeFunctionReference<'query'>('sealedSecrets:proposals'), { projectId, ...input }),
+    reject: input =>
+      client.mutation(makeFunctionReference<'mutation'>('sealedSecrets:reject'), { projectId, ...input }),
   };
 }

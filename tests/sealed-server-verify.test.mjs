@@ -211,12 +211,13 @@ test('C20 the CLI and the server derive the same sealed account id from one sign
   assert.equal(Buffer.from(portable.forgeSecretId('account', subject)).toString('hex'), expected);
 });
 
-test('Gate B3a review M1: a proposal record is refused until Forge stores proposals; a Checks genesis or step reads Development', async t => {
+test('Gate B3a review M1: a proposal record answers a waiting proposal; a Checks genesis or step reads Development', async t => {
   const h = harness(t),
     f = h.f;
   f.name();
   await h.publish();
-  await refused(h, 'SECRETS_NOT_ALLOWED', () => {
+  // Nothing is waiting, so a record that claims a proposal stores nothing (tests/sealed-proposal-store.test.mjs).
+  await refused(h, 'WORK_CONFLICT', () => {
     f.bump();
     f.name('PROPOSED_TOKEN', Buffer.from('proposal-synthetic-value'), { proposalId: Buffer.alloc(16, 1) });
   });

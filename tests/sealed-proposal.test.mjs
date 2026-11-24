@@ -15,7 +15,8 @@ import { proposalBytes, proposalSealBytes } from '../dist/sealed-future-records.
 import { changeBytes } from '../dist/sealed-records.js';
 import { makeRoom, openValue, packValue } from '../dist/sealed-value.js';
 import { verifySealedReply } from '../dist/sealed-verify.js';
-import { applyProposal, openProposal, sealProposal, PROPOSAL_CIPHERTEXT } from '../dist/sealed-proposal.js';
+import { applyProposal, openProposal, sealProposal } from '../dist/sealed-proposal.js';
+import { PROPOSAL_CIPHERTEXT } from '../dist/sealed-proposal-check.js';
 
 const clone = x => deserialize(serialize(x));
 const text = value => Buffer.from(value);

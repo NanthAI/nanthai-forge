@@ -1,6 +1,6 @@
 ## Sealed secret records
 
-`sealedSecretSets` and `sealedSecretHistory` are an approved exception to the R2
+`sealedSecretSets`, `sealedSecretHistory` and `sealedSecretProposals` are an approved exception to the R2
 byte-body rule (Issue `41a0df87`). They hold client-signed public metadata, key
 wraps and padded ciphertext; no private key, value encoding or unkeyed value hash
 belongs in either row. One set and one history row per project/set kind are
@@ -13,9 +13,25 @@ ceiling of 128 KiB, including metadata allowance. It appends each write's own
 transition, keeps at most 64 that fit the history ceiling and 50 retry events,
 pruning in the same mutation. Genesis remains in the history row. Removal markers
 and join requests are optional fields of the set row, absent when empty; reads
-return them only when present. The landing storage ledger charges zero bytes for both
-new tables: owner secret commands are outside the landing path. Standalone
+return them only when present. The landing storage ledger charges zero bytes for all three
+tables: secret commands are outside the landing path. Standalone
 record-size and request tests account for configured sets separately.
+
+`sealedSecretProposals` (Item `6466c6a5`) holds one signed proposal record per row:
+public metadata and a ciphertext sealed to the set's inbox key, 272 to 69,648 bytes
+of ciphertext, a row under 72 KiB. A set waits on at most 32 proposals and 256 KiB of
+proposal bytes, at most 8 from one device. The set row also keeps the last 64 resolved
+proposal ids (about 1.5 KB) so a resolved proposal is not stored again. Their facts (id, proposer, name, epoch, size, row id; about 4 KB for
+32) are an optional field of the set row, so a head write checks and resolves them
+without reading proposal rows, and the set row stays under its own cap. `propose`
+reads the bounded set row and inserts one row and patches the set (2 writes). The
+head write that applies, adopts or rejects proposals, or re-keys, deletes their rows
+in the same mutation; so do `reject` and the marking of a proposer (at most 32
+deletes, no extra read). `proposals` reads the listed rows only when `read` reported a
+count. Synthetic fixture at 100 recipients and 200 names: `propose` read 5 documents
+(242 KB, almost all the set row) and took about 9 ms median in local Node; a head
+write applying 32 proposals from 4 devices read 4 documents (294 KB), wrote 34 (set,
+history, 32 deletes) and took 62 ms. Local observations, not Convex-billed I/O or time.
 
 No application subscribes to these tables. CLI reads are one-shot. A cached
 `run` asks with its verified head hash and receives only an unchanged response

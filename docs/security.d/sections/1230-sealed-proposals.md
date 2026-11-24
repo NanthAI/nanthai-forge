@@ -1,10 +1,34 @@
 ### Sealed proposals
 
 A proposal is how a device that may not change a value directly asks a person to
-change it. The format and its checks exist as local functions
-(`src/sealed-proposal.ts`). No command, agent tool or server call creates, stores or
-applies one yet, so agents and member devices are still refused when they change an
-existing value.
+change it. The format and its checks are local functions (`src/sealed-proposal.ts`);
+the public checks that need no key are shared with the server
+(`src/sealed-proposal-check.ts`). Forge stores Development proposals; no command or
+agent tool creates or applies one yet, so agents and member devices are still refused
+when they change an existing value.
+
+Storing. `sealedSecrets:propose` takes one record for the active Development set from
+a stable CLI device sign-in with write access. Before it stores anything, the server
+checks the exact record schema and runs the same public checks a holder runs on the
+stored head, roster and markers: the current epoch, an unmarked author that is a device
+of the signed-in account, operation, kind and name, the ciphertext bounds and digest,
+and the proposal signature. It opens nothing and holds no key. A set waits on at most
+32 proposals and 256 KiB, and one device on at most 8; a newer proposal from the same
+device for the same name replaces the older one. The set row remembers the last 64
+proposal ids that left the list, so an applied or rejected proposal is not stored again
+(the holder's own journal of applied ids is the client's check). A Development head write may carry a proposal record only when
+it answers a waiting proposal from that record's author, for that name and epoch; the
+same mutation removes it. The write also removes the proposals it names as resolved
+(adopted or rejected with it), and a re-key or roster step removes proposals from an
+older epoch or from a proposer no longer on the roster or marked for removal. Marking a
+proposer (a person removed, or a sign-in ended) removes its proposals in the same
+mutation. `sealedSecrets:reject` removes waiting proposals without a head write: a
+proposer's own account withdraws its own from any write-scoped device; another
+account's proposals need a sign-in without restrictions whose account has an unmarked
+write device on the roster, and the whole call is refused if any known id is not
+allowed. Checks heads still carry no proposal record, and
+Checks takes no proposals yet. Holders rely on none of these server checks: every
+holder checks a proposal again before it opens one.
 
 Sealing. The proposer works from its verified view of the set. A device that trusted
 Development on first use (it joined automatically and has no code yet) proposes

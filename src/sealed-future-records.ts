@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Format fields reserved now; their user journeys ship in later slices.
-import { empty, fixed, frame, octet, textBytes, uint } from './sealed-format.js';
+import { empty, fixed, frame, octet, textBytes, uint } from './sealed-portable.js';
 import type { Roster } from './sealed-records.js';
 
 export type SealedProposal = {

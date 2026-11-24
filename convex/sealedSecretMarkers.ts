@@ -19,6 +19,8 @@ import {
   markableAccounts,
   markersForEndedDevice,
   markersForRemovedAccount,
+  rememberResolved,
+  unmarkedProposals,
 } from './sealedSecretGate';
 import { hasWriteRole } from './projectRole';
 
@@ -45,11 +47,20 @@ async function mark(
 ) {
   for (const set of sets) {
     const next = markers(set);
-    if (next)
-      await ctx.db.patch(set._id, {
-        revoked: next.revoked.length ? next.revoked : undefined,
-        joinRequests: next.joinRequests.length ? next.joinRequests : undefined,
-      });
+    if (!next) continue;
+    // Review F2: a marked proposer's waiting proposals leave in the same mutation (at most 32 deletes, no read).
+    const { proposals, dropped } = unmarkedProposals(set, next.revoked);
+    for (const p of dropped) await ctx.db.delete(p.id);
+    await ctx.db.patch(set._id, {
+      revoked: next.revoked.length ? next.revoked : undefined,
+      joinRequests: next.joinRequests.length ? next.joinRequests : undefined,
+      ...(dropped.length
+        ? {
+            proposals: proposals.length ? proposals : undefined,
+            resolvedProposals: rememberResolved(set, dropped),
+          }
+        : {}),
+    });
   }
 }
 

@@ -200,6 +200,12 @@ export const fullReply = (enqueue: Check) =>
 /** The stored parts of a reply, checked in place with the same schemas: the head-write payload
  * (a reply without its history, and without nested previous/related replies, whose markers only the
  * server may supply), a genesis roster and one transition. No Buffer, so the server runs it. */
-export function checkSealedPart(kind: 'payload' | 'roster' | 'transition', value: unknown) {
-  (kind === 'payload' ? record(replyFields) : kind === 'roster' ? roster : transition)(value);
+export function checkSealedPart(kind: 'payload' | 'roster' | 'transition' | 'proposal', value: unknown) {
+  (kind === 'payload'
+    ? record(replyFields)
+    : kind === 'roster'
+      ? roster
+      : kind === 'proposal'
+        ? proposal
+        : transition)(value);
 }

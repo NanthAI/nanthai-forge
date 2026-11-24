@@ -3,6 +3,15 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 export const sealedKind = v.union(v.literal(1), v.literal(2), v.literal(3));
+export const sealedPendingProposal = v.object({
+  id: v.id('sealedSecretProposals'),
+  proposalId: v.bytes(),
+  proposerId: v.bytes(),
+  name: v.string(),
+  epoch: v.number(),
+  size: v.number(),
+  at: v.number(),
+});
 /** Client records contain public signed metadata and ciphertext only. The server never opens a value
  * or holds a key; it checks public signatures and bindings before storing a write (sealedSecretGate).
  * Clients rely on none of this. */
@@ -24,6 +33,12 @@ export const sealedSetFields = {
   /** Server-owned: the owner devices the issuing browser of the account's "Sign out everywhere" at `epoch` kept
    * (convex/sealedSecretMarkers.ts clearSweptSignIn); that sweep's later marking steps leave them unmarked. */
   sweptKept: v.optional(v.object({ epoch: v.number(), ids: v.array(v.bytes()) })),
+  /** Server-owned: the waiting proposals (Item 6466c6a5), at most 32 and 256 KiB of proposal bytes per set. Each
+   * row's facts are kept here so a head write checks and resolves them without reading the proposal rows. */
+  proposals: v.optional(v.array(sealedPendingProposal)),
+  /** Server-owned: the last 64 proposal ids that left the waiting list, so the same proposal is not stored again
+   * (review F4). A holder's own journal of applied ids is the client's check. */
+  resolvedProposals: v.optional(v.array(v.bytes())),
 };
 export const sealedHistoryFields = {
   projectId: v.id('hostedProjects'),
@@ -44,4 +59,13 @@ export const sealedSecretTables = {
     'active',
   ]),
   sealedSecretHistory: defineTable(sealedHistoryFields).index('by_project_and_setId', ['projectId', 'setId']),
+  /** One signed proposal record, sealed to the set's inbox key; only a holder of the set key opens it. Written by
+   * sealedSecrets:propose, deleted by the head write or rejection that resolves it, or by a re-key. */
+  sealedSecretProposals: defineTable({
+    projectId: v.id('hostedProjects'),
+    kind: sealedKind,
+    setId: v.bytes(),
+    proposal: v.bytes(),
+    at: v.number(),
+  }).index('by_project_and_setId', ['projectId', 'setId']),
 };
