@@ -127,11 +127,10 @@ type Page = {
   after: string | null;
   rootsRead: number;
   targeted?: true;
-  rows: (Seed & { workStamp: string })[];
+  rows: Seed[];
 };
 
-/** Publish counts only after a complete dry-run pass with a single Plan revision. Work stamps are as-observed;
- * evidence for the operator is not authorization to apply. A fenced preparation must recheck them. */
+/** A whole-Plan report is diagnostic and requires one revision; targeted apply has independent Item fences. */
 function readFencedPages(pages: readonly Page[]) {
   const selected = pages[0]?.fence;
   let next: string | null = '';
@@ -170,25 +169,4 @@ function reportForDryRun(
 export function summarizeRollupDryRun(pages: readonly Page[]) {
   const dryRun = readFencedPages(pages);
   return reportForDryRun(dryRun, previewPlanningRollup(dryRun.rows));
-}
-
-/** Select the values that a lead approved. The dev writer rechecks them; this is not an apply. */
-export function prepareRollupApproval(pages: readonly Page[]) {
-  const dryRun = readFencedPages(pages);
-  const result = previewPlanningRollup(dryRun.rows);
-  const report = reportForDryRun(dryRun, result);
-  if (!report.complete) throw new Error('Roll-up apply requires a complete preview.');
-  const stamps = new Map(dryRun.rows.map(row => [row.id, row.workStamp]));
-  return {
-    report,
-    expected: dryRun.selected,
-    moves: result.changes.map(({ id, version, from, status, rule }) => ({
-      id,
-      version,
-      from,
-      status,
-      rule,
-      workStamp: stamps.get(id)!,
-    })),
-  };
 }

@@ -9,52 +9,13 @@ import { planCounter, type PlanCounts } from './projectPlanCountsStore';
 import { publishRollupBranches, readRollupBranch, readRollupScope } from './projectPlanRollupStore';
 import { rollupChecklist, rollupWorkReader } from './projectPlanRollupFacts';
 import { completionHeldByReopen } from './projectPlanRollupReopen';
-import { approvedDevRollup } from './projectPlanRollupPreview';
 import { writeRollupMove } from './projectPlanRollup';
 import { workRecordTable } from './projectWorkRecordTables';
 import { rollupBranch, rollupDecision } from '../src/planning-rollup';
 import { isShelved, type PlanningItem } from '../src/work-planning-types';
-import { invariant } from '../src/errors';
-
-import {
-  approvedMove,
-  beginRollupCatchup,
-  catchupFence,
-  catchupRow,
-  catchupWake,
-  type CatchupProgress,
-} from './projectPlanRollupCatchupStore';
+import { catchupRow, catchupWake, type CatchupProgress } from './projectPlanRollupCatchupStore';
 
 const levels = 3;
-
-/** Explicit dev apply takes the exact approved changes, not merely a count or a project identifier. A
- * changed Work stamp or recomputed decision stops the pass before that page writes. */
-export const applyApproved = internalMutation({
-  args: {
-    projectId: v.id('hostedProjects'),
-    operationId: v.string(),
-    expected: catchupFence,
-    moves: v.array(approvedMove),
-  },
-  returns: v.id('projectWorkGenerations'),
-  handler: async (ctx, { projectId, operationId, expected, moves }) => {
-    invariant(
-      process.env.CONVEX_CLOUD_URL === approvedDevRollup,
-      'HOSTED_ACTION_UNSUPPORTED',
-      'Planning roll-up apply is not enabled on the selected dev deployment.',
-    );
-    invariant(
-      /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(operationId),
-      'BAD_ARGUMENT',
-      'Use the original apply operation UUID.',
-    );
-    const project = await ctx.db.get(projectId);
-    invariant(project && !project.removal, 'PROJECT_UNAVAILABLE', 'Select a current project.');
-    const partition = await beginRollupCatchup(ctx, project, operationId, { expected, moves });
-    invariant(partition, 'PROJECT_WORK_INDEX_MISSING', 'Select a ready Plan before applying the preview.');
-    return partition;
-  },
-});
 
 export const status = internalQuery({
   args: { partition: v.id('projectWorkGenerations') },
@@ -63,7 +24,10 @@ export const status = internalQuery({
     const row = await catchupRow(ctx, partition);
     if (!row) return null;
     const { pending, ...progress } = JSON.parse(row.value) as CatchupProgress;
-    return JSON.stringify({ ...progress, ...(pending ? { pending: pending.length } : {}) });
+    return JSON.stringify({
+      ...progress,
+      ...(pending ? { state: 'partial', reason: 'approval-path-replaced' } : {}),
+    });
   },
 });
 
@@ -93,17 +57,10 @@ export const page = internalMutation({
     const project = await ctx.db.get(projectId);
     if (!project || project.removal || project.autonomyPolicy?.rollUpPlanningStatus === false)
       return stop('disabled-or-removed');
-    if (progress.pending && process.env.CONVEX_CLOUD_URL !== approvedDevRollup) return stop('not-dev');
+    if (progress.pending) return stop('approval-path-replaced');
     const selected = await selectedGeneration(ctx, project);
     const generation = selected && (await generationHead(ctx, selected));
-    if (
-      !generation ||
-      recordPartition(generation) !== partition ||
-      (progress.pending &&
-        (generation._id !== progress.expected.generation ||
-          generation.revision !== progress.expected.revision))
-    )
-      return stop('plan-changed');
+    if (!generation || recordPartition(generation) !== partition) return stop('plan-changed');
     const header = await planCounter(ctx.db, partition);
     const counts: PlanCounts | null = header ? JSON.parse(header.value) : null;
     if (counts?.scopeThrough !== null || counts.scopeBlocked) return stop('scope-tallies-unavailable');
@@ -116,7 +73,6 @@ export const page = internalMutation({
     const last = source.page.at(-1)?.key;
     if (!source.isDone && (!last || last <= progress.after)) return stop('page-could-not-advance');
     const read = rollupWorkReader(ctx, project, generation, 150);
-    const pending = progress.pending && new Map(progress.pending.map(move => [move.id, move]));
     const targets = [];
     for (const root of source.page) {
       const item: PlanningItem & { payload?: true; payloadKey?: string } = JSON.parse(root.value);
@@ -136,7 +92,7 @@ export const page = internalMutation({
         branch?.counts ??
         (await readRollupScope(ctx.db, partition, `initiative:${item.id}`, true, true))!;
       const facts = await read.read(item);
-      const { work, workStamp } = facts;
+      const { work } = facts;
       if (work === 'unknown') return stop('work-incomplete');
       const move = rollupDecision(
         {
@@ -150,26 +106,9 @@ export const page = internalMutation({
         scope,
         true,
       );
-      if (pending) {
-        const approved = pending.get(item.id);
-        if (move || approved) {
-          if (
-            !move ||
-            !approved ||
-            approved.version !== item.version ||
-            approved.from !== item.status ||
-            approved.status !== move.status ||
-            approved.rule !== move.rule ||
-            approved.workStamp !== workStamp
-          )
-            return stop('approved-move-changed');
-          pending.delete(item.id);
-        }
-      }
       targets.push({ item, move, branch, forwarded: rollupBranch(scope, work) });
     }
-    if (source.isDone && progress.pass === levels - 1 && pending?.size) return stop('approved-move-missing');
-    // A page has no edges between its targets, so it validates all approval checks before any status write.
+    // A page has no edges between its targets; validate its evidence before any status write.
     const planning = targets.some(target => target.move)
       ? await planningWriteContext(ctx, project)
       : undefined;
@@ -187,17 +126,12 @@ export const page = internalMutation({
         progress.moved++;
       }
     }
-    progress.expected = {
-      generation: generation._id,
-      revision: planning?.generation.revision ?? generation.revision,
-    };
-    if (pending) progress.pending = [...pending.values()];
     progress.pass += Number(source.isDone);
     progress.after = source.isDone ? '' : last!;
     progress.step++;
     if (progress.pass === levels) progress.state = 'complete';
     await ctx.db.patch(row._id, { value: JSON.stringify(progress) });
-    if (progress.state === 'running' && !progress.pending)
+    if (progress.state === 'running')
       await ctx.scheduler.runAfter(0, catchupWake, { ...args, step: progress.step });
     return null;
   },

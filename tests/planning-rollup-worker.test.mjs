@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { batchUndo } from '../dist/planning-batch.js';
-import { prepareRollupApproval, previewPlanningRollup } from '../dist/planning-rollup-preview.js';
+import { summarizeRollupDryRun, previewPlanningRollup } from '../dist/planning-rollup-preview.js';
 import { successorIntentId } from '../dist/hosted-intent-chain.js';
 import { getFunctionName } from 'convex/server';
 import { setup } from './hosted-planning-fixture.mjs';
@@ -14,6 +14,7 @@ const { advance } = await import(moduleUrl('../convex/projectPlanRollup.ts'));
 const { move: startMove } = await import(moduleUrl('../convex/projectPlanningStart.ts'));
 const { apply } = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
 const catchup = await import(moduleUrl('../convex/projectPlanRollupCatchup.ts'));
+const exact = await import(moduleUrl('../convex/projectPlanRollupExact.ts'));
 const preview = await import(moduleUrl('../convex/projectPlanRollupPreview.ts'));
 const { workspace } = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const { transition } = await import(moduleUrl('../convex/projectHostedLifecycle.ts'));
@@ -340,53 +341,89 @@ test('a regular planning workspace read reports a catch-up blocked by unavailabl
   assert.deepEqual(reply.rollupCatchup, { state: 'partial', moved: 0, reason: 'scope-tallies-unavailable' });
 });
 
-async function devApproval(t, s) {
-  const prior = process.env.CONVEX_CLOUD_URL;
-  process.env.CONVEX_CLOUD_URL = preview.approvedDevRollup;
-  t.after(() => {
-    if (prior === undefined) delete process.env.CONVEX_CLOUD_URL;
-    else process.env.CONVEX_CLOUD_URL = prior;
-  });
-  const dry = await preview.page._handler(s.ctx, { projectId: s.projectId, after: '' });
-  const { expected, moves, report } = prepareRollupApproval([dry]);
+async function devApproval(t, s, ids) {
+  t.mock.property(process, 'env', { ...process.env, CONVEX_CLOUD_URL: preview.approvedDevRollup });
   const operationId = randomUUID();
-  const partition = await catchup.applyApproved._handler(s.ctx, {
-    projectId: s.projectId,
-    operationId,
-    expected,
-    moves,
-  });
-  return {
-    report,
-    step: step => catchup.page._handler(s.ctx, { projectId: s.projectId, operationId, partition, step }),
+  const proposals = await Promise.all(
+    ids.map(itemId => exact.preview._handler(s.ctx, { projectId: s.projectId, itemId })),
+  );
+  const pins = proposals
+    .filter(p => p.move)
+    .map(({ generation, move }) => ({ projectId: s.projectId, generation, operationId, move }));
+  assert.equal(pins.length, ids.length, 'exact dry-run count');
+  const run = async () => {
+    const receipts = [];
+    for (const pin of pins) receipts.push(await exact.applyApproved._handler(s.ctx, pin));
+    return receipts;
   };
+  return { pins, run };
 }
 
-test('approved dev apply stops on a changed Plan revision even inside the same partition', async t => {
+test('an unrelated Plan edit does not invalidate any move in an exact approved set', async t => {
   const s = await plan(t);
-  const itemId = await s.add({ status: 'open' });
-  await s.work(itemId, 'active');
-  const { step } = await devApproval(t, s);
-  await step(0);
-  await s.set(itemId, { status: 'in-progress' });
-  const pinned = await s.read(itemId);
-  await step(1);
-  assert.equal((await s.progress()).reason, 'plan-changed');
-  assert.deepEqual(await s.read(itemId), pinned);
+  const targets = [await s.add({}), await s.add({})];
+  const unrelated = await s.add({});
+  for (const id of targets) await s.work(id, 'active');
+  const { run, pins } = await devApproval(t, s, targets);
+  await s.set(unrelated, { status: 'in-progress' });
+  const receipts = await run();
+  assert.deepEqual(
+    receipts.map(r => [r.move.id, r.outcome]),
+    targets.map(id => [id, 'applied']),
+  );
+  assert.deepEqual(await run(), receipts, 'a retry returns the original receipt, not drift or a new Version');
+  await assert.rejects(
+    exact.applyApproved._handler(s.ctx, { ...pins[0], move: { ...pins[0].move, version: 2 } }),
+    { code: 'WORK_OPERATION_CHANGED' },
+  );
+  for (const id of targets) {
+    const item = await s.read(id);
+    assert.equal(item.status, 'in-progress');
+    assert.equal(item.version, 2);
+  }
 });
 
-test('dev apply refuses a changed open Lane version even if the approved decision would be unchanged', async t => {
+test('an edited target drifts and the remaining approved move still applies', async t => {
   const s = await plan(t);
-  const itemId = await s.add({ status: 'open' });
+  const changed = await s.add({}),
+    kept = await s.add({});
+  for (const id of [changed, kept]) await s.work(id, 'active');
+  const { run } = await devApproval(t, s, [changed, kept]);
+  await s.set(changed, { title: 'Human edit, same roll-up decision' });
+  const edited = await s.read(changed);
+  const receipts = await run();
+  assert.deepEqual(
+    receipts.map(r => [r.move.id, r.outcome, r.reason]),
+    [
+      [changed, 'drift', 'item-changed'],
+      [kept, 'applied', undefined],
+    ],
+  );
+  assert.deepEqual(await run(), receipts);
+  assert.deepEqual(await s.read(changed), edited);
+  assert.equal((await s.read(kept)).status, 'in-progress');
+});
+
+test('exact apply refuses a changed open Lane version even if the same move still matches', async t => {
+  const s = await plan(t);
+  const itemId = await s.add({});
   const { lane } = await s.work(itemId, 'active');
-  const { report, step } = await devApproval(t, s);
-  assert.equal(report.wouldChange, 1);
+  const { run } = await devApproval(t, s, [itemId]);
   await s.ctx.db.patch(lane, { version: 2 });
-  await step(0);
-  await step(1);
-  assert.equal((await s.progress()).reason, 'approved-move-changed');
+  const [receipt] = await run();
+  assert.equal(receipt.reason, 'work-changed');
   assert.equal((await s.read(itemId)).status, 'open');
-  assert.equal(s.pages.length, 0);
+});
+
+test('exact apply fences direct Initiative counters even if the same move still matches', async t => {
+  const s = await plan(t);
+  const initiativeId = await s.add({ kind: 'initiative' });
+  await s.add({ initiativeId, status: 'in-progress' });
+  const { run } = await devApproval(t, s, [initiativeId]);
+  await s.add({ initiativeId });
+  const [receipt] = await run();
+  assert.equal(receipt.reason, 'counters-changed');
+  assert.equal((await s.read(initiativeId)).status, 'open');
 });
 
 test('a stale active Intent with only a terminal Lane cannot start the Item or its Initiative', async t => {
@@ -615,7 +652,7 @@ for (const mode of ['legacy', 'verified'])
       [[id, 'completed', true]],
     );
     assert.deepEqual(previewPlanningRollup(output.rows).changes, []);
-    assert.throws(() => prepareRollupApproval([output]), /missing, repeated, or stale page/);
+    assert.throws(() => summarizeRollupDryRun([output]), /missing, repeated, or stale page/);
     assert.equal(await s.execute(id, { source: 'plan' }), 'unchanged');
 
     const later = successorIntentId(id);

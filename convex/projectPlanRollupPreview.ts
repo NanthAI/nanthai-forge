@@ -25,9 +25,8 @@ const status = v.union(...statuses.map(word => v.literal(word)));
 
 type PreviewRoot = PlanningItem & { payload?: true; payloadKey?: string };
 
-/** An explicitly opted-in, read-only operator page. No stored cursor or scheduler. The Work revision fences
- * planning roots. The preparation/apply pass must recheck workStamp because hosted Intent heads can move
- * without changing that revision. The preview does not authorize an apply. */
+/** Read-only diagnostic pages share one Plan revision. No stored cursor or scheduler.
+ * An exact approved set uses point previews with its own counter and Work pins instead. */
 export const page = internalQuery({
   args: {
     projectId: v.id('hostedProjects'),

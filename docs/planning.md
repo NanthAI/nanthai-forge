@@ -283,20 +283,22 @@ partition or incomplete facts stop catch-up rather than guessing a status from a
 Plan and Item reads include `rollupCatchup` with the pass status, number of moves and any stop reason. An import
 checks tally coverage once per committed page and keeps the imported statuses. No source bytes move.
 
-For an initial, lead-approved **dev-only** run on a Plan of about 1,300 roots, budget the preview plus three ordered
-root passes (about 5,200 root reads before point reads and status appends), at most one status append per changed root,
-and a cumulative
-stop of **0.10 GB billed Convex database I/O ($0.02 at $0.20/GB)**, including index I/O, retries and a reserve for
-the final page. Pilot one page within **0.01 GB** of that total. Run a read-only preview first and record the would-be
-changes by kind and from/to status. The preview reads a single Plan revision and returns compact facts, not Item text
-or pin attribution. Fragmented or unreadable facts and cycles are reported as incomplete; do not apply an incomplete
-preview. After approval, `projectPlanRollupCatchup:applyApproved` retains the exact proposed changes and returns the
-partition. Before each `projectPlanRollupCatchup:page`, compare provider usage and stop if the next page plus the reserve
-will not fit. `projectPlanRollupCatchup:status` reports the retained step, outcome and reason for a partial result. Each
-approved move rechecks the live facts and linked Intent stamp as well as the Plan revision: a Lane can move without an
-Item edit. Do not apply if even one pinned or Proposed row would move. Function reply byte
-estimates are not billing ceilings. Verify the resulting Initiative statuses with the owner on dev; this does not
-authorize a production run.
+For an approved **dev-only** exact set, use `projectPlanRollupExact:preview` for each named Item. Count the
+non-null moves and retain their from/to status and rule, Item version, Work stamp, scope-counter stamp, and
+selected generation. The whole-Plan preview can still report transition counts from one revision; it is diagnostic,
+not a prerequisite for applying an exact set. It reports fragmented or unreadable facts and cycles as incomplete.
+
+Send each approved move to `projectPlanRollupExact:applyApproved` with the same operation UUID for the set and its
+own preview pins. Each transaction rechecks the target and the counters its rule reads. A different version, Work
+stamp, scope tally or decision produces a drift receipt for that Item; unrelated Plan writes cannot invalidate the set.
+Keep each receipt: retrying the same move with the same UUID returns the original applied or drift result. Neither
+pinned nor Proposed Items can move. The writer does not schedule any extra moves.
+
+For seven moves this is seven indexed target previews and at most seven point apply transactions, not a scan of
+1,300 roots or a walk of their siblings. Peak memory is one target with bounded Work evidence plus the ordinary
+version writer; elapsed time covers the serial applies and any retries. Check provider-billed database I/O against
+the approved allowance with a reserve before each apply. Deployment-wide deltas include concurrent traffic; reply
+sizes are not billing ceilings. Verify resulting statuses on dev; this does not authorize a production run.
 
 ### Archive and Deleted
 

@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { previewPlanningRollup, summarizeRollupDryRun } from '../dist/planning-rollup-preview.js';
 import { successorIntentId } from '../dist/hosted-intent-chain.js';
 import { moduleUrl } from './convex-module.mjs';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 
-const { page } = await import(moduleUrl('../convex/projectPlanRollupPreview.ts'));
+const { page, approvedDevRollup } = await import(moduleUrl('../convex/projectPlanRollupPreview.ts'));
+const exact = await import(moduleUrl('../convex/projectPlanRollupExact.ts'));
 const { addPlanLane, removePlanLanes } = await import(moduleUrl('../convex/projectPlanLaneMarks.ts'));
 const { verifiedItemMembership } = await import(moduleUrl('../convex/projectItemMembershipVersion.ts'));
 const row = (id, fields) => ({
@@ -170,6 +172,47 @@ test('verified roll-up uses the open-Lane tally across earlier Intents and lates
   assert.notEqual(settled.rows[0].workStamp, indexed.rows[0].workStamp, 'the tally is fenced for apply');
   assert.equal(settled.rows[1].work, 'completed', 'an Item-root link keeps its successor completion');
   assert.equal(settled.rows[2].work, 'abandoned', 'a bare Intent does not borrow a foreign Item tally');
+});
+
+test('exact preview and drift I/O do not grow with 1,300 unrelated Plan roots', async t => {
+  const s = await fixture();
+  const id = randomUUID();
+  const args = { projectId: s.projectId, itemId: id };
+  t.mock.property(process, 'env', { ...process.env, CONVEX_CLOUD_URL: 'https://other.convex.cloud' });
+  await assert.rejects(s.call('deny', exact.preview, args), { code: 'HOSTED_ACTION_UNSUPPORTED' });
+  t.mock.restoreAll();
+  t.mock.property(process, 'env', { ...process.env, CONVEX_CLOUD_URL: approvedDevRollup });
+  await s.put(id, { body: '## Done when\n- [x] Synthetic evidence' });
+  await s.ctx.db.insert('projectWorkDataRecords', {
+    projectId: s.projectId,
+    generationId: s.generationId,
+    collection: '_workStorePlanCounts',
+    key: 'counts',
+    parent: '',
+    position: 0,
+    value: JSON.stringify({ scopeThrough: null }),
+  });
+  const scan = async () => {
+    const p = await s.call('exact preview', exact.preview, args);
+    const previewCost = s.counts.at(-1).readBytes;
+    assert.equal(p.move?.rule, 'checklistDone');
+    const r = await s.call('exact drift', exact.applyApproved, {
+      projectId: s.projectId,
+      generation: p.generation,
+      operationId: randomUUID(),
+      move: { ...p.move, version: p.move.version + 1 },
+    });
+    assert.equal(r.reason, 'item-changed');
+    return [previewCost, s.counts.at(-1).readBytes, s.counts.at(-1).writeBytes];
+  };
+  const small = await scan();
+  for (let i = 0; i < 1300; i++) await s.put(`unrelated-${i}`, {});
+  const large = await scan();
+  assert.deepEqual(large.slice(0, 2), small.slice(0, 2));
+  assert(large[2] < 1024, 'one compact retained drift receipt');
+  t.diagnostic(
+    `1,300 roots: ${large[0]} B preview, ${large[1]} B drift read, ${large[2]} B receipt write (fixture document bytes)`,
+  );
 });
 
 test('dry-run pages are read only, fence the Work head, and omit bodies and pin identities', async t => {

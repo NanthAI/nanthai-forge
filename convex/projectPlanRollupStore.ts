@@ -56,7 +56,7 @@ async function writeScope(
   }
 }
 
-const validCounts = (c: RollupCounts) =>
+export const validCounts = (c: RollupCounts) =>
   Object.values(c).every(n => Number.isSafeInteger(n) && n >= 0 && n <= c.total) && c.progress <= c.started;
 
 /** All point reads and validation precede the writes. A broken counter cannot be interpreted as zero
