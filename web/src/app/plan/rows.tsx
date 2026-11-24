@@ -22,21 +22,33 @@ export function Status({ row }: { row: PlanRow }) {
   return <State word={itemStatusLabel[status] as 'Done' | 'Abandoned' | 'Archived' | 'Deleted'} />;
 }
 
-export function DoneWhen({ row }: { row: PlanRow }) {
+export function DoneWhen({ counts }: { counts: PlanRow['doneWhen'] }) {
   // No checklist: the cell stays empty, and says so on hover and to assistive tech (owner 2026-11-19).
-  if (!row.doneWhen)
+  if (!counts)
     return (
       <span className="dw none" title="no checklist">
         <span className="sr">no checklist</span>
       </span>
     );
-  const [ticked, total] = row.doneWhen;
+  const [ticked, total] = counts;
+  const blocks = Math.min(total, 12);
+  const filled = total ? Math.floor((ticked * blocks) / total) : 0;
+  const remainder = total ? (ticked * blocks) % total : 0;
+  const step = remainder ? Math.max(1, Math.floor((remainder * 3) / total)) : undefined;
+  const group =
+    total > blocks
+      ? ` · a block is ${total % 3 ? 'about ' : ''}${(total / blocks).toLocaleString(undefined, { maximumFractionDigits: 2 })} lines`
+      : '';
   return (
-    <span className="dw" title={`${ticked} of ${total} done-when lines ticked`}>
-      {total <= 12 ? (
+    <span className="dw" title={`${ticked} of ${total} done-when lines ticked${group}`}>
+      {blocks > 0 ? (
         <span className="shards" aria-hidden="true">
-          {Array.from({ length: total }, (_, index) => (
-            <i key={index} className={index < ticked ? 'ok' : undefined} />
+          {Array.from({ length: blocks }, (_, index) => (
+            <i
+              key={index}
+              className={index < filled ? 'ok' : undefined}
+              data-dw-step={index === filled ? step : undefined}
+            />
           ))}
         </span>
       ) : null}
@@ -130,7 +142,7 @@ export function Line({
         {row.hidden ? <span className="flag">hidden</span> : null}
       </span>
       <span className="plan-wide">
-        <DoneWhen row={row} />
+        <DoneWhen counts={row.doneWhen} />
       </span>
       <span className="plan-wide">
         <Owner owner={row.owner} workers={workers ? workers.get(row.id) : []} />

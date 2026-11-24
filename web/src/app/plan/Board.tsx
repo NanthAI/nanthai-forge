@@ -204,7 +204,7 @@ function BoardRow({
       </span>
       <span className="plan-facts">
         {subs ? <SubRoll subs={subs} settledRead={settledRead} /> : null}
-        <DoneWhen row={row} />
+        <DoneWhen counts={row.doneWhen} />
         <Owner
           owner={row.owner}
           workers={settled ? undefined : workers ? (workers.get(row.id) ?? []) : undefined}

@@ -11,6 +11,9 @@
   .plan .tt .ttl { font-weight: var(--w-strong); min-width: min(14ch, 60%); overflow-wrap: anywhere; }
   .plan .dw { display: inline-flex; gap: var(--s-1); align-items: center; font-size: var(--t-meta); white-space: nowrap; }
   .plan .dw .num { font-variant-numeric: tabular-nums; color: var(--text-2); }
+  .plan .dw [data-dw-step] { position: relative; }
+  .plan .dw [data-dw-step]::after { content: ''; position: absolute; inset: auto 0 0; height: 4px; background: var(--passed); }
+  .plan .dw [data-dw-step='2']::after { height: 7px; }
   /* No checklist: an empty cell with room to hover for its "no checklist" title (owner 2026-11-19). */
   .plan .dw.none { min-width: 2.5em; min-height: 1em; }
   .plan .plan-who { display: inline-flex; gap: 2px; align-items: baseline; min-width: 0; }

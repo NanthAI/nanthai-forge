@@ -24,6 +24,13 @@ const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../', import.meta.url));
 const shots = process.env.FORGE_PLAN_SHOTS;
 const sidebarShots = process.env.FORGE_SIDEBAR_SHOTS;
+const checklistBars = [
+  { ticked: 1, total: 1, full: 1, partialHeight: null },
+  { ticked: 7, total: 12, full: 7, partialHeight: null },
+  { ticked: 10, total: 27, full: 4, partialHeight: '4px', group: '2.25' },
+  { ticked: 44, total: 60, full: 8, partialHeight: '7px', group: '5' },
+  { ticked: 1, total: 60, full: 0, partialHeight: '4px', group: '5' },
+];
 
 const fixture = `
 import React from 'react';
@@ -71,6 +78,10 @@ if (largeInitiative) {
 // approved mock (CJK Initiative, right-to-left and one-letter titles, long and emoji handles, 60 sub-items, 60
 // done-when lines, 1,284 Planned Items per scale step; worst-plan=2 doubles them).
 const boardFlags = new URLSearchParams(location.search);
+const checklistRows = boardFlags.has('checklist-bars') ? ${JSON.stringify(checklistBars)}.map(({ticked, total}, index) =>
+  item(70 + index, { title: 'Checklist ' + ticked + '/' + total, doneWhen: [ticked, total] }),
+) : [];
+if (checklistRows.length) rows.splice(0, rows.length, ...checklistRows);
 const emptyPlan = boardFlags.has('empty-plan');
 const worstPlan = boardFlags.has('worst-plan') ? Number(boardFlags.get('worst-plan') || 1) : 0;
 if (worstPlan) {
@@ -104,7 +115,7 @@ const shelfRows = {
   archived: [item(30, { title: 'Browser bundle size budget', status: 'archived', was: 'proposed', at: '2026-10-02T09:00:00.000Z', version: 4 })],
   deleted: [item(31, { title: 'Benchmark against the v1 parser', status: 'deleted', was: 'in-progress', at: '2026-11-01T09:00:00.000Z', purgeAt: Date.parse('2026-12-01T09:00:00.000Z'), version: 3 })],
 };
-const linkedOpen = rows.find(row => row.id === uuid(10));
+const linkedOpen = rows.find(row => row.id === uuid(10)) ?? checklistRows[0];
 const linkedDeleted = shelfRows.deleted[0];
 window.initiativeReads = [];
 const linkBackend = fakeConvex({
@@ -121,10 +132,16 @@ const linkBackend = fakeConvex({
         throw Error('Expected one first version on the current detail’s generation');
       return { generationId: 'generation', page: [{ value: JSON.stringify({ ...launch, version: 1, author: 'release-lead/amber-fox' }) }], isDone: false };
     }
+    const checklist = checklistRows.find(row => row.id === args.id);
+    if (name === 'projectWorkIndex:detail' && checklist) {
+      const [ticked, total] = checklist.doneWhen;
+      const lines = Array.from({ length: total }, (_, index) => '- [' + (index < ticked ? 'x' : ' ') + '] Criterion ' + (index + 1));
+      return { generationId: 'generation', revision: 1, value: JSON.stringify({ ...checklist, body: ['Done when:', ...lines].join(String.fromCharCode(10)) }) };
+    }
     if (name === 'projectWorkIndex:detail' && args.id === linkedOpen.id) return {
       generationId: 'generation', revision: 1, value: JSON.stringify({...linkedOpen, body: ['Read the **parser** contract.', '', 'Done when:', '- [x] Read', '- [ ] Test', '- [ ] Land'].join(String.fromCharCode(10)) }),
     };
-    if (name === 'projectPlanView:read') return { ...read, rows: JSON.stringify(window.readItemWork ? [launch, linkedOpen] : [linkedOpen]) };
+    if (name === 'projectPlanView:read') return checklistRows.length ? read : { ...read, rows: JSON.stringify(window.readItemWork ? [launch, linkedOpen] : [linkedOpen]) }; 
     if (name === 'projectPlanSettled:item') {
       const candidates = [linkedOpen, linkedDeleted, ...settledRows].filter(row => row.id.startsWith(args.id));
       if (candidates.length !== 1) return null;
@@ -359,6 +376,95 @@ test('plan views and bulk bar: real components keep the view in the address and 
       `${label}: axe`,
     );
   };
+
+  for (const [width, theme] of [
+    [1440, 'light'],
+    [390, 'dark'],
+  ]) {
+    await t.test(
+      `Done-when bars at ${width}px keep exact counts and fill grouped blocks from the bottom`,
+      async () => {
+        const { page, context, errors } = await open(
+          width,
+          theme,
+          '?layout=list&checklist-bars',
+          false,
+          true,
+        );
+        const measure = async (bar, example) => {
+          const count = Math.min(example.total, 12);
+          assert.equal(await bar.locator('.num').textContent(), `${example.ticked}/${example.total}`);
+          assert.equal(await bar.locator('.shards').getAttribute('aria-hidden'), 'true');
+          const blocks = await bar.locator('.shards i').evaluateAll(elements =>
+            elements.map(element => {
+              const style = getComputedStyle(element);
+              const fill = getComputedStyle(element, '::after');
+              const passed = style.getPropertyValue('--passed').trim();
+              const colors = document.createElement('span');
+              colors.style.color = passed;
+              element.append(colors);
+              const passedColor = getComputedStyle(colors).color;
+              colors.remove();
+              return {
+                full: style.backgroundColor === passedColor,
+                partial:
+                  fill.content === 'none'
+                    ? null
+                    : {
+                        height: fill.height,
+                        bottom: fill.bottom,
+                        passed: fill.backgroundColor === passedColor,
+                      },
+              };
+            }),
+          );
+          assert.deepEqual(
+            blocks,
+            Array.from({ length: count }, (_, index) => ({
+              full: index < example.full,
+              partial:
+                index === example.full && example.partialHeight
+                  ? { height: example.partialHeight, bottom: '0px', passed: true }
+                  : null,
+            })),
+          );
+          assert.equal(
+            await bar.locator('.shards').evaluate(node => node.getBoundingClientRect().width),
+            count * 7 - 2,
+          );
+          if (example.group)
+            assert((await bar.getAttribute('title')).endsWith(`a block is ${example.group} lines`));
+        };
+        try {
+          for (const example of checklistBars) {
+            const link = page
+              .getByRole('link', {
+                name: `Checklist ${example.ticked}/${example.total}`,
+                exact: true,
+              })
+              .and(page.locator('a.ttl'));
+            await link.waitFor();
+            const inRow = link
+              .locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " row ")][1]')
+              .locator('.dw');
+            if (width === 1440) await measure(inRow, example);
+            else assert.equal(await inRow.isVisible(), false, 'phone list leaves space for the title');
+            await link.click();
+            const detail = page.getByRole('region', { name: 'Done when', exact: true });
+            const onItem = detail.locator('.dw');
+            await onItem.waitFor({ state: 'visible' });
+            await measure(onItem, example);
+            assert.equal(await detail.locator('li').count(), example.total);
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width);
+            await page.goBack();
+          }
+          assert.deepEqual(errors, []);
+        } finally {
+          await context.close();
+        }
+      },
+    );
+  }
 
   // The board's columns (d3357f40): each head's name and total beside the rows drawn under it in every band.
   const boardColumns = page =>

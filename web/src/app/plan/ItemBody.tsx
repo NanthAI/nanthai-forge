@@ -12,6 +12,7 @@ import { EditDraft } from './ItemDraft';
 import { itemBody, movedTo, type ItemLine } from './item-body';
 import type { FullItem } from './batch';
 import type { ItemEdits, LineAction } from './item-edit';
+import { DoneWhen } from './rows';
 
 function ItemProse({ text, itemId }: { text: string; itemId: string }) {
   const id = useId();
@@ -251,10 +252,7 @@ export function ItemBody({
         title="Done when"
         hint={
           <>
-            <span className="cnt" aria-label={`${done} of ${total} ticked`}>
-              {done}/{total}
-            </span>{' '}
-            in the Item’s own order{moved ? ` · ${moved} moved` : ''}
+            <DoneWhen counts={[done, total]} /> in the Item’s own order{moved ? ` · ${moved} moved` : ''}
           </>
         }
       >
