@@ -238,6 +238,39 @@ test('active search hides settled Items and an explicit Closed search finds both
   assert.ok(more.items.every(item => item.status === 'closed' || item.status === 'abandoned'));
 });
 
+test('title-only capture never starts a model and refinement needs an explicit project opt-in', async t => {
+  const s = await setup(t);
+  const p = port(s);
+  const { set } = await import(moduleUrl('../convex/projectAutonomy.ts'));
+  const title = 'Preserve parser position';
+  const { itemId } = (await put(p, { kind: 'issue', title })).result;
+  const request = { id: itemId, refine: true };
+  const change = fields =>
+    set._handler(s.ctx, {
+      projectId: s.projectId,
+      command: JSON.stringify({ action: 'set-policy', operationId: randomUUID(), ...fields }),
+    });
+  t.mock.method(globalThis, 'fetch', () => {
+    throw new Error('Forge must not use an external model');
+  });
+  const off = async () => {
+    p.calls.length = 0;
+    const reply = await list(p, request);
+    assert.equal(reply.refinement.enabled, false);
+    assert.equal(reply.item, undefined, 'no text is prepared for a model');
+    assert.deepEqual(p.calls, ['projectWorkIndex:workspace']);
+  };
+  await off();
+  await change({ agentsWriteItemText: true });
+  const ready = await list(p, request);
+  assert.equal(ready.refinement.enabled, true);
+  assert.equal(ready.item.title, title);
+  assert.equal(ready.item.body, '');
+  assert.equal(ready.item.version, 1, 'preparing suggestions did not edit the captured Item');
+  await change({ autoCreatePlanningItem: false });
+  await off();
+});
+
 test('a server without the V8 command receives the same original operation on the Node command', async t => {
   const s = await setup(t),
     p = port(

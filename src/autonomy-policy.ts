@@ -112,6 +112,8 @@ export const autonomyPolicySchema = z.object({
   ownerRootUpdates: z.boolean().optional(),
   /** Hosted agent starts capture a plain Item unless the owner turns tracking off. */
   autoCreatePlanningItem: z.boolean().optional(),
+  /** The owner's opt-in to agent-side planning text. Forge does not run a model. */
+  agentsWriteItemText: z.boolean().optional(),
   /** Debounced local snapshots of open native Lanes; absent means on. */
   /** Expand-only C1 rollout settings; absent is off until the later writers are enabled. */
   accessIdentities: z
@@ -242,6 +244,7 @@ export const policyWriteObject = z
     integrationPreview: autonomyPolicySchema.shape.integrationPreview,
     ownerRootUpdates: autonomyPolicySchema.shape.ownerRootUpdates,
     autoCreatePlanningItem: autonomyPolicySchema.shape.autoCreatePlanningItem,
+    agentsWriteItemText: autonomyPolicySchema.shape.agentsWriteItemText,
     accessIdentities: autonomyPolicySchema.shape.accessIdentities,
     mainAudit: autonomyPolicySchema.shape.mainAudit,
     autoSnapshot: autonomyPolicySchema.shape.autoSnapshot,
@@ -323,6 +326,9 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     ownerRootUpdates: command.ownerRootUpdates ?? base.ownerRootUpdates,
     ...((command.autoCreatePlanningItem ?? previous.autoCreatePlanningItem) !== undefined
       ? { autoCreatePlanningItem: command.autoCreatePlanningItem ?? previous.autoCreatePlanningItem }
+      : {}),
+    ...((command.agentsWriteItemText ?? previous.agentsWriteItemText) !== undefined
+      ? { agentsWriteItemText: command.agentsWriteItemText ?? previous.agentsWriteItemText }
       : {}),
     ...((command.accessIdentities ?? previous.accessIdentities) !== undefined
       ? { accessIdentities: { ...previous.accessIdentities, ...command.accessIdentities } }

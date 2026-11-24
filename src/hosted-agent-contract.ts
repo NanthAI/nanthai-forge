@@ -604,6 +604,8 @@ export const hostedAgentCommandSchemas = {
       ...planningIssueFields,
       transfer: z.unknown().optional(),
       search: z.string().trim().min(1).optional(),
+      /** Prepare agent-side refinement of one Item, only if enabled in the project. No model is called. */
+      refine: z.literal(true).optional(),
       kind: z.enum(['issue', 'initiative']).optional(),
       status: z
         .union([z.enum([...planningStatuses, 'active', 'all']), z.array(z.enum(planningStatuses)).nonempty()])
@@ -717,6 +719,21 @@ export const hostedAgentCommandSchemas = {
           input.transfer
         ),
       'Use groupBy on an Item list or search page.',
+    )
+    .refine(
+      input =>
+        !input.refine ||
+        (!!(input.id || input.itemId || input.planningItemId) &&
+          !(
+            input.search ||
+            input.counts ||
+            input.history ||
+            input.transfer ||
+            input.groupBy ||
+            input.cursor ||
+            input.reconcile
+          )),
+      'refine:true needs one Item id, with no search, paging or reconciliation.',
     )
     .refine(input => !(input.id && input.search), 'Use planningItemId or search, not both.')
     .refine(input => !(input.id && input.waitingOn), 'Use waitingOn with a list or search read.')

@@ -34,6 +34,7 @@ export default function ProjectSettings(props: PlaceProps) {
           visibility: project.visibility === 'public' ? 'public' : 'private',
           planVisibility: project.planVisibility === 'members' ? 'members' : 'public',
           autoCreatePlanningItem: project.autonomyPolicy?.autoCreatePlanningItem,
+          agentsWriteItemText: project.autonomyPolicy?.agentsWriteItemText,
           createdAt: project._creationTime,
           revision: project.revision,
           removal: project.removal,
@@ -99,6 +100,15 @@ export default function ProjectSettings(props: PlaceProps) {
         });
         setFacts(
           current => current && { ...current, autoCreatePlanningItem: result.policy.autoCreatePlanningItem },
+        );
+      }}
+      setRefinement={async (enabled, operationId) => {
+        const result = await client.mutation(api.projectAutonomy.set, {
+          projectId,
+          command: JSON.stringify({ action: 'set-policy', operationId, agentsWriteItemText: enabled }),
+        });
+        setFacts(
+          current => current && { ...current, agentsWriteItemText: result.policy.agentsWriteItemText },
         );
       }}
       extra={

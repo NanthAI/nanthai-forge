@@ -40,6 +40,7 @@ export function ProjectSettingsView({
   setVisibility,
   setPlanVisibility,
   setTrackWork,
+  setRefinement,
   extra,
 }: {
   facts: ProjectFacts;
@@ -54,6 +55,7 @@ export function ProjectSettingsView({
   /** Owner person only: the server refuses anyone else. One reversible write; repeating it changes nothing. */
   setPlanVisibility: (plan: ProjectFacts['planVisibility'], operationId: string) => Promise<void>;
   setTrackWork?: (enabled: boolean, operationId: string) => Promise<void>;
+  setRefinement?: (enabled: boolean, operationId: string) => Promise<void>;
   /** Further regions of the page (backups, transfer, imports), after the lifecycle. */
   extra?: ReactNode;
 }) {
@@ -119,7 +121,21 @@ export function ProjectSettingsView({
         <Region title="Plan" weight="ref">
           <PlanSwitch facts={facts} set={setPlanVisibility} />
           {setTrackWork ? (
-            <TrackWork enabled={facts.autoCreatePlanningItem !== false} set={setTrackWork} />
+            <PlanningSwitch
+              label="Link work to Items"
+              description="When an agent starts unplanned work, its outcome becomes an Item for project members."
+              enabled={facts.autoCreatePlanningItem !== false}
+              set={setTrackWork}
+            />
+          ) : null}
+          {setRefinement ? (
+            <PlanningSwitch
+              label="Agents write Item text"
+              description="Allow agents to suggest Item text using their own models. Link work to Items must be on."
+              enabled={facts.autoCreatePlanningItem !== false && facts.agentsWriteItemText === true}
+              unavailable={facts.autoCreatePlanningItem === false}
+              set={setRefinement}
+            />
           ) : null}
         </Region>
       ) : null}
@@ -236,12 +252,18 @@ function PlanSwitch({
   );
 }
 
-function TrackWork({
+function PlanningSwitch({
+  label,
+  description,
   enabled,
+  unavailable,
   set,
 }: {
+  label: string;
+  description: string;
   enabled: boolean;
-  set: NonNullable<Parameters<typeof ProjectSettingsView>[0]['setTrackWork']>;
+  unavailable?: boolean;
+  set: (enabled: boolean, operationId: string) => Promise<void>;
 }) {
   const attempt = useRef<{ enabled: boolean; id: string } | null>(null);
   const [pending, setPending] = useState(false);
@@ -264,17 +286,15 @@ function TrackWork({
     <>
       <Row cols="minmax(0, 1fr) auto">
         <span className="nm">
-          <span className="ttl">Link work to Items</span>
-          <span className="meta">
-            When an agent starts unplanned work, its outcome becomes an Item for project members.
-          </span>
+          <span className="ttl">{label}</span>
+          <span className="meta">{description}</span>
         </span>
         <Key
           size="sm"
           role="switch"
-          aria-label="Link work to Items"
+          aria-label={label}
           aria-checked={enabled}
-          disabled={pending}
+          disabled={pending || unavailable}
           onClick={() => void change()}
         >
           {enabled ? 'On' : 'Off'}

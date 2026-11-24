@@ -36,6 +36,22 @@ constraints, and uses no model. Retrying the start returns the same Lane and doe
 `nforge agent ROOT set-policy '{"autoCreatePlanningItem":false}'`. Pass `true` to re-enable it. This changes
 future starts only. Archive a captured Item to remove it from the Plan without stopping its Lane.
 
+## Title-only capture and optional agent refinement
+
+Use **New Item** on the Plan, or `nforge agent ROOT put-planning-item '{"kind":"item","title":"…"}'`.
+A title is enough. The Item can be edited later without starting a Lane.
+
+**Agents write Item text** starts off for each project. The owner can opt in under Settings → Project →
+Plan or with `nforge agent ROOT set-policy '{"agentsWriteItemText":true}'`. An agent's policy edit may be
+held for owner-person approval; check the result before refining. Use `false` to turn it off. Turning off
+Link work to Items also pauses agent refinement without erasing the preference.
+
+When asked to refine an Item, an agent first runs `nforge agent ROOT planning '{"id":"ITEM","refine":true}'`
+(or the same `planning` command in `forge_planning`). If `refinement.enabled` is false, do not run a
+model for refinement. If true, use the returned title, body and version to suggest changes with the model
+in your own tool. Forge does not call a model, edit the Item, or start a Lane. To apply agreed changes, use
+`put-planning-item` with `itemId` set to `item.id` and `expectedVersion` set to `item.version`.
+
 ## Item Work
 
 Open an Item from the Plan, including its Done and Dropped lists. Work lists open Lanes
