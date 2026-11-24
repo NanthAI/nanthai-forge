@@ -563,11 +563,14 @@ export async function readItemAuditHistory(
         const bodyAuthorFallback =
           item.author && (item.version === 1 || (prev && prev.body !== item.body)) ? item.author : undefined;
         const resolvedActor = actor ?? decision?.author ?? bodyAuthorFallback;
-        const who = writerIdentity(
-          resolvedActor,
-          item.agent ?? decision?.agent,
-          item.agentClient ?? decision?.agentClient,
-        );
+        const who =
+          item.statusSource === 'work'
+            ? { actor: 'Forge', actorKind: 'system' as const, model: null }
+            : writerIdentity(
+                resolvedActor,
+                item.agent ?? decision?.agent,
+                item.agentClient ?? decision?.agentClient,
+              );
         versionEntries.push({
           version: item.version,
           event: {

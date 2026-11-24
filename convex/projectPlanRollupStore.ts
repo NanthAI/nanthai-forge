@@ -2,12 +2,18 @@
 // Copyright 2026 Ferdinando Valsecchi
 import type { Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import { addRollupCounts, emptyRollupCounts, type RollupScope } from '../src/planning-rollup-membership';
+import {
+  addRollupCounts,
+  emptyRollupCounts,
+  rollupMembershipChanges,
+  type RollupScope,
+} from '../src/planning-rollup-membership';
 import type { RollupCounts } from '../src/planning-rollup';
 
 const COLLECTION = '_workStorePlanRollup';
 type Scope = { projectId: Id<'hostedProjects'>; partition: Id<'projectWorkGenerations'> };
-type State = { counts: RollupCounts };
+type Branch = Pick<RollupCounts, 'unsettled' | 'progress' | 'started'>;
+type State = { counts: RollupCounts; effective?: RollupCounts; forwarded?: Branch };
 
 const find = (db: QueryCtx['db'], partition: Scope['partition'], key: string) =>
   db
@@ -32,9 +38,9 @@ async function writeScope(
 ) {
   const value = JSON.stringify(state);
   if (previous.row) {
-    if (!state.counts.total) await db.delete(previous.row._id);
+    if (!state.counts.total && !state.forwarded) await db.delete(previous.row._id);
     else if (previous.row.value !== value) await db.patch(previous.row._id, { value });
-  } else if (state.counts.total) {
+  } else if (state.counts.total || state.forwarded) {
     await db.insert('projectWorkDataRecords', {
       projectId: scope.projectId,
       generationId: scope.partition,
@@ -56,20 +62,36 @@ export async function applyRollupDeltas(
   db: MutationCtx['db'],
   scope: Scope,
   changes: ReadonlyMap<RollupScope, RollupCounts>,
+  effectiveChanges: ReadonlyMap<RollupScope, RollupCounts> = changes,
   read = (key: RollupScope) => rollupScope(db, scope.partition, key),
 ) {
   const touched = await Promise.all(
-    [...changes]
-      .filter(([, delta]) => Object.values(delta).some(Boolean))
-      .map(async ([key, delta]) => {
-        const previous = await read(key);
-        const counts = { ...previous.counts };
-        addRollupCounts(counts, delta);
-        return { key, previous, counts };
-      }),
+    [...new Set([...changes.keys(), ...effectiveChanges.keys()])].map(async key => {
+      const direct = changes.get(key);
+      const inherited = effectiveChanges.get(key);
+      if (![direct, inherited].some(delta => delta && Object.values(delta).some(Boolean))) return null;
+      const previous = await read(key);
+      const counts = { ...previous.counts };
+      const effective = { ...(previous.effective ?? previous.counts) };
+      if (direct) addRollupCounts(counts, direct);
+      if (inherited) addRollupCounts(effective, inherited);
+      return { key, previous, counts, effective };
+    }),
   );
-  if (touched.some(({ counts }) => !validCounts(counts))) return false;
-  for (const { key, previous, counts } of touched) await writeScope(db, scope, key, previous, { counts });
+  if (touched.some(step => step && (!validCounts(step.counts) || !validCounts(step.effective)))) return false;
+  for (const step of touched) {
+    if (!step) continue;
+    const { key, previous, counts, effective } = step;
+    await writeScope(db, scope, key, previous, {
+      counts,
+      ...(Object.keys(counts).some(
+        k => counts[k as keyof RollupCounts] !== effective[k as keyof RollupCounts],
+      )
+        ? { effective }
+        : {}),
+      ...(previous.forwarded ? { forwarded: previous.forwarded } : {}),
+    });
+  }
   return true;
 }
 
@@ -87,6 +109,44 @@ export function rollupScopeReads(db: QueryCtx['db']) {
   };
 }
 
+export async function readRollupBranch(db: QueryCtx['db'], partition: Scope['partition'], itemId: string) {
+  return rollupScope(db, partition, `parent:${itemId}`);
+}
+
+/** Store what the next parent consumed. A later re-parent uses this retained contribution, not newer unstamped facts. */
+export async function publishRollupBranches(
+  db: MutationCtx['db'],
+  scope: Scope,
+  updates: readonly {
+    item: NonNullable<Parameters<typeof rollupMembershipChanges>[0]> & { id: string };
+    previous: Awaited<ReturnType<typeof readRollupBranch>>;
+    next: Branch;
+  }[],
+) {
+  const changed = updates.filter(
+    ({ previous: { forwarded: before }, next }) =>
+      next.unsettled !== (before?.unsettled ?? 0) ||
+      next.progress !== (before?.progress ?? 0) ||
+      next.started !== (before?.started ?? 0),
+  );
+  const combined = new Map<RollupScope, RollupCounts>();
+  for (const { item, previous, next } of changed) {
+    for (const [key, delta] of rollupMembershipChanges(item, item, previous.forwarded, next)) {
+      let total = combined.get(key);
+      if (!total) combined.set(key, (total = emptyRollupCounts()));
+      addRollupCounts(total, delta);
+    }
+  }
+  if (!(await applyRollupDeltas(db, scope, new Map(), combined))) return null;
+  for (const { item, previous, next } of changed)
+    await writeScope(db, scope, `parent:${item.id}`, previous, {
+      counts: previous.counts,
+      ...(previous.effective ? { effective: previous.effective } : {}),
+      ...(next.unsettled || next.progress || next.started ? { forwarded: next } : {}),
+    });
+  return combined.size > 0;
+}
+
 /** One indexed point after the parent writer proved complete coverage from the selected Plan metadata.
  * No siblings are read. A missing sparse row is zero only when coverage was proved. */
 export async function readRollupScope(
@@ -94,6 +154,9 @@ export async function readRollupScope(
   partition: Scope['partition'],
   scope: RollupScope,
   complete: boolean,
+  effective?: true,
 ): Promise<RollupCounts | null> {
-  return complete ? (await rollupScope(db, partition, scope)).counts : null;
+  if (!complete) return null;
+  const row = await rollupScope(db, partition, scope);
+  return (effective && row.effective) || row.counts;
 }

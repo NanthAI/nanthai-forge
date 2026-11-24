@@ -25,7 +25,7 @@ export async function commandPayloadRows(rows: Rows, lookup: CommandLookup) {
   for (const row of rows) {
     if (
       !row ||
-      !['intents', 'initiatives', 'planningItems'].includes(row.collection) ||
+      !['intents', 'initiatives', 'planningItems', 'planningVersions'].includes(row.collection) ||
       rows.some(item => item?.collection === `${row.collection}:attributes` && item.key === row.key) ||
       pending.some(item => item.row.collection === row.collection && item.row.key === row.key)
     )

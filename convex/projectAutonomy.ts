@@ -47,6 +47,7 @@ import { digest } from '../src/state/hash';
 import { retargetGithubMirror } from './projectGithubMirrorRetarget';
 import { resumeMirrorQueue } from './projectGithubMirrorCatchup';
 import { rescheduleMainAudit } from './projectHostedMainAuditState';
+import { beginRollupCatchup } from './projectPlanRollupCatchupStore';
 /** Device identity always uses agent authority; callers may explicitly downscope to it. */
 export async function acceptanceActor(
   ctx: QueryCtx | MutationCtx | ActionCtx,
@@ -137,6 +138,8 @@ async function writePolicy(
         : project.githubMirrorPausedInbound
       : undefined;
   await ctx.db.patch(project._id, { autonomyPolicy: policy, githubMirrorPausedInbound: pausedInbound });
+  if (previous.rollUpPlanningStatus === false && policy.rollUpPlanningStatus !== false)
+    await beginRollupCatchup(ctx, { ...project, autonomyPolicy: policy }, command.operationId);
   if (
     command.mainAudit &&
     canonicalPayload(previous.mainAudit ?? null) !== canonicalPayload(policy.mainAudit ?? null)

@@ -403,11 +403,11 @@ test('primary Work writes retire migration I/O without changing item versions or
     planningPrimaryWriteBytes: Math.max(...Object.values(after).map(cost => cost.writeBytes)),
     planningMigrationWrites: Math.max(...Object.values(after).map(cost => cost.migrationWrites)),
   };
+  console.log(JSON.stringify({ primaryWorkIO: { before, after } }));
   assert.deepEqual(
     judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'planning-fixture', measured)
       .filter(v => v.metric in measured && v.status !== 'pass')
       .map(v => v.message),
     [],
   );
-  console.log(JSON.stringify({ primaryWorkIO: { before, after } }));
 });

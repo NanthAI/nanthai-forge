@@ -19,7 +19,6 @@ export const rollupReasons = {
   lastChildSettled: 'Done: last child settled',
   lastItemSettled: 'Done: last Item settled',
   allAbandoned: 'Abandoned: all Items abandoned',
-  workAbandoned: 'Abandoned: linked work abandoned',
   workReopened: 'Reopened: work is open again',
 } as const;
 
@@ -38,6 +37,15 @@ export function rollupContribution(
     progress: Number(progress || !!branch?.progress),
     started: Number(done || progress || !!branch?.started),
     done: Number(done),
+  };
+}
+
+/** A status pin owns the display, not evidence that work exists below the next parent. */
+export function rollupBranch(scope: RollupCounts, work: RollupWork) {
+  return {
+    unsettled: Number(scope.unsettled > 0 || work === 'active'),
+    progress: Number(scope.progress > 0 || work === 'active'),
+    started: Number(scope.started > 0 || work === 'active' || work === 'completed'),
   };
 }
 
@@ -73,8 +81,7 @@ export function rollupDecision(subject: Subject, scope: RollupCounts, enabled: b
     if (!scope.total || unchecked) return null;
     return scope.done ? move('closed', 'lastItemSettled') : move('abandoned', 'allAbandoned');
   }
-  if (work === 'abandoned' && !(enabled && scope.total)) return move('abandoned', 'workAbandoned');
-  if (work === 'active' || work === 'unknown' || unchecked) return null;
+  if (work === 'active' || work === 'abandoned' || work === 'unknown' || unchecked) return null;
   if (enabled && scope.total) return move('closed', 'lastChildSettled');
   if (work === 'completed') return move('closed', 'ownWorkDone');
   return enabled && checked ? move('closed', 'checklistDone') : null;

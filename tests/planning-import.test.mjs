@@ -11,6 +11,8 @@ import { planningImportId } from '../dist/work-planning-put.js';
 import { importPlanningPut, planningImportPages, planningImportRowSchema } from '../dist/planning-import.js';
 import { executeHostedPlanning } from '../dist/hosted-agent-planning.js';
 import { exportPlanning } from '../dist/work-planning-state.js';
+import { getFunctionName } from 'convex/server';
+const { advance } = await import(moduleUrl('../convex/projectPlanRollup.ts'));
 const imports = await import(moduleUrl('../convex/projectPlanningImport.ts'));
 const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
@@ -92,6 +94,33 @@ test('an ordinary put cannot claim the import path to assign a missing parent', 
     code('BAD_ARGUMENT'),
   );
   assert.equal(await s.read('old/child'), null);
+});
+
+test('an import page schedules one check after the batch and never closes imported open Items', async t => {
+  const s = await fixture(t);
+  const checks = [];
+  const original = s.ctx.scheduler.runAfter.bind(s.ctx.scheduler);
+  s.ctx.scheduler.runAfter = (delay, fn, args) =>
+    getFunctionName(fn) === 'projectPlanRollup:advance'
+      ? Promise.resolve(`rollup-${checks.push(args)}`)
+      : original(delay, fn, args);
+  const operationId = randomUUID();
+  const source = [
+    row('import/parent', { status: 'open' }),
+    row('import/child', {
+      parentKey: 'import/parent',
+      status: 'open',
+      body: '## Done when\n- [x] Historical checkbox',
+    }),
+    row('import/other', { status: 'open', body: '## Done when\n- [x] Already recorded' }),
+  ];
+  const batchId = randomUUID();
+  await s.run(source, true, operationId, batchId);
+  await s.run(source, true, operationId, batchId);
+  assert.equal(checks.length, 1);
+  await advance._handler(s.ctx, checks.shift());
+  assert.equal(checks.length, 0);
+  for (const entry of source) assert.equal((await s.read(entry.key)).status, 'open');
 });
 
 test('source-agnostic review writes nothing; apply keeps closed history, parent/order, source and original dates without landing evidence', async t => {

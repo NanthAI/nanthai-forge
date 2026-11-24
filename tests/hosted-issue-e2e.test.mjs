@@ -27,6 +27,9 @@ const search = await import(moduleUrl('../convex/projectHostedPlanningSearch.ts'
 const planningModule = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
 const itemWork = await import(moduleUrl('../convex/projectItemWork.ts'));
 const startModule = await import(moduleUrl('../convex/projectHostedStart.ts'));
+const { move } = await import(moduleUrl('../convex/projectPlanningStart.ts'));
+const { fold } = await import(moduleUrl('../convex/projectInitiativeWorkFold.ts'));
+const { advance } = await import(moduleUrl('../convex/projectPlanRollup.ts'));
 const keyId = process.env.FORGE_HOSTED_CHECK_KEY_ID;
 test.before(() => {
   process.env.FORGE_HOSTED_CHECK_KEY_ID = 'SYNTHETIC';
@@ -78,7 +81,7 @@ function port(s, f) {
       const value = await invoke(name, { ...args, projectId: s.projectId });
       return typeof value === 'string' ? JSON.parse(value) : value;
     },
-    serverFeatures: [...hostedContractFeatures],
+    serverFeatures: [...hostedContractFeatures, 'planning-status-worker'],
   };
 }
 const run = (p, action, input) =>
@@ -99,6 +102,33 @@ async function world(t, { ticks = ['x', 'x'], completeOnAccept = false } = {}) {
   const issue = (
     await run(p, 'put-planning-item', { kind: 'issue', title: 'Planned work', body: boxes(ticks) })
   ).result.itemId;
+  const wakes = [];
+  const schedule = s.ctx.scheduler.runAfter.bind(s.ctx.scheduler);
+  s.ctx.scheduler.runAfter = (delay, ref, args) =>
+    getFunctionName(ref) === 'projectPlanRollup:advance'
+      ? Promise.resolve(`rollup-${wakes.push(args)}`)
+      : schedule(delay, ref, args);
+  const drain = async () => {
+    for (let i = 0; wakes.length && i < 20; i++) await advance._handler(s.ctx, wakes.shift());
+    assert.deepEqual(wakes, []);
+  };
+  const bridged = new Set();
+  const bridge = async name => {
+    // The fixtures split Work index setup from the landing controller. Bridge the canonical Intent head
+    // and run the actual scheduled steps in its corresponding Plan, once per scheduled function.
+    const head = [...f.tables.projectHostedRecordHeads.values()].find(
+      row => row.kind === 'intent' && row.key === issue,
+    );
+    s.tables.projectHostedRecordHeads.set(head._id, { ...head, projectId: s.projectId });
+    for (const task of f.tables._scheduled_functions.values()) {
+      if (task.name !== name || bridged.has(task._id)) continue;
+      bridged.add(task._id);
+      const args = { ...task.args[0], projectId: s.projectId };
+      if (name === 'projectPlanningStart:move') await move._handler(s.ctx, args);
+      else await fold._handler(s.ctx, args);
+    }
+    await drain();
+  };
   // `start {planningItemId}`: the CLI resolves the Intent from the Issue, the server opens Intent + Lane.
   const begin = async () => {
     const planned = await plannedIntent(p, issue);
@@ -112,6 +142,7 @@ async function world(t, { ticks = ['x', 'x'], completeOnAccept = false } = {}) {
       }),
     );
     await markPlanningStarted(p, issue, randomUUID());
+    await bridge('projectPlanningStart:move');
     // A builder's save: the Lane head moves to the saved state.
     const saved = await f.changeLane(result.lane.laneId, {
       head: f.state.sha256,
@@ -137,9 +168,10 @@ async function world(t, { ticks = ['x', 'x'], completeOnAccept = false } = {}) {
     const { state } = await f.ready(item, { expectedMain: base });
     const { receipt } = await f.accept(state);
     await f.materialize(receipt.id);
+    await bridge('projectInitiativeWorkFold:fold');
     return receipt;
   };
-  return { s, f, p, issue, begin, land };
+  return { s, f, p, issue, begin, land, bridge, drain };
 }
 const intentStatus = async (w, intentId) =>
   JSON.parse(
@@ -166,8 +198,7 @@ test('planned start links the Issue to its Intent although the legacy intentIds 
   assert.equal(item.intent, 'active', 'the link shows as the Intent state, not as intentIds');
 });
 
-// An Item read reconciles only when asked (6b7d5a79); list reads and the last tick close by default.
-test('closes + every Done-when box ticked: landing (completeOnAccept off) completes the Intent, the read closes the Issue once, replays add nothing', async t => {
+test('closes + every Done-when box ticked: the landing fold closes the Issue even with completeOnAccept off, and reads write nothing', async t => {
   const w = await world(t, { ticks: ['x', 'x'], completeOnAccept: false });
   const started = await w.begin();
   const receipt = await w.land(started.lane);
@@ -178,16 +209,14 @@ test('closes + every Done-when box ticked: landing (completeOnAccept off) comple
     'completeOnAccept off keeps the Lane open',
   );
   w.p.calls.length = 0;
+  const events = w.s.tables.projectWorkEvents.size;
   const first = await read(w.p, { id: w.issue, reconcile: true });
   assert.equal(first.item.intent, 'completed');
-  assert.deepEqual(
-    first.reconciled.changed.map(c => [c.id, c.to]),
-    [[w.issue, 'closed']],
-  );
-  assert.equal(first.reconciled.held, undefined);
-  const events = w.s.tables.projectWorkEvents.size;
-  // The healthy path adds no Convex call beyond the read itself: workspace, item, comments, one Item work read (the
-  // Intent state and the Lanes, 1c2ab97a, in place of the states call), one write.
+  assert.equal(first.item.status, 'closed');
+  assert.equal(first.item.reason, 'Done: linked work finished');
+  assert.equal(first.reconciled, undefined);
+  assert.equal(w.s.tables.projectWorkEvents.size, events);
+  // The healthy path reads the workspace, item, comments and one Item work reply; it never writes.
   assert.equal(w.p.calls.filter(name => name === 'projectItemWork:read').length, 1);
   assert.equal(w.p.calls.filter(name => name === 'projectHostedPlanning:intentStates').length, 0);
   // Incident d4b68402/16093ed1: the Item read names the landed Lane and its receipt, not just a status.
@@ -197,13 +226,14 @@ test('closes + every Done-when box ticked: landing (completeOnAccept off) comple
   assert.equal(first.work.lanes[0].receipt.receiptId, receipt.id, 'and it still names its landing');
   // Idempotent: another read, and a replayed completion tick, change nothing.
   await w.f.materialize(receipt.id);
+  await w.bridge('projectInitiativeWorkFold:fold');
   const again = await read(w.p, { id: w.issue, reconcile: true });
   assert.equal(again.item.status, 'closed');
   assert.equal(again.reconciled, undefined);
   assert.equal(w.s.tables.projectWorkEvents.size, events);
 });
 
-test('closes + open Done-when lines: the Issue holds, names the open lines and the close command, and closes by that command', async t => {
+test('closes + open Done-when lines: reads explain the hold without writing, and the final tick closes the Issue', async t => {
   const w = await world(t, { ticks: ['x', ' ', ' '], completeOnAccept: false });
   const started = await w.begin();
   await w.land(started.lane);
@@ -213,21 +243,17 @@ test('closes + open Done-when lines: the Issue holds, names the open lines and t
   const [held] = first.reconciled.held;
   assert.equal(held.openLines, 2);
   assert.deepEqual(held.lines, ['line 2', 'line 3']);
-  assert.match(held.close, /"status":"closed"/);
   const after = await read(w.p, { id: w.issue, reconcile: false });
-  assert.match(held.close, new RegExp(`"expectedVersion":${after.item.version},`));
-  assert.equal(after.comments.filter(c => /still open/.test(c.text)).length, 1);
-  // Retry: still held, no second comment or write.
+  assert.equal(after.item.version, first.item.version);
+  assert.equal(after.comments.filter(c => /still open/.test(c.text)).length, 0);
   const events = w.s.tables.projectWorkEvents.size;
   assert.equal((await read(w.p, { id: w.issue, reconcile: true })).reconciled.held.length, 1);
   assert.equal(w.s.tables.projectWorkEvents.size, events);
-  // The builder runs the printed close with its evidence: done.
-  await run(w.p, 'put-planning-item', {
-    itemId: w.issue,
-    expectedVersion: after.item.version,
-    status: 'closed',
-    reason: 'Done-when met, evidence in comments',
-  });
+  await run(w.p, 'tick-planning-item', { planningItemId: w.issue, line: 2, evidence: 'Checked' });
+  await w.drain();
+  assert.equal((await read(w.p, { id: w.issue })).item.status, 'in-progress');
+  await run(w.p, 'tick-planning-item', { planningItemId: w.issue, line: 3, evidence: 'Checked' });
+  await w.drain();
   const done = await read(w.p, { id: w.issue, reconcile: true });
   assert.equal(done.item.status, 'closed');
   assert.equal(done.reconciled, undefined);

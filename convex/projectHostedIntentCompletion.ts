@@ -5,6 +5,7 @@ import type { Id } from './_generated/dataModel';
 import { readHostedRecord, recordHead, writeHostedRecord } from './projectHostedRecords';
 import { hostedIntentSchema } from '../src/hosted-lane';
 import { supersedeQuietSiblings } from './projectHostedSuperseded';
+import { wakePlanLifecycle } from './projectPlanRollupWake';
 
 /** One page of sibling Lane heads; an Intent with more Lanes than this stays open. */
 const SIBLINGS = 100;
@@ -19,8 +20,8 @@ async function landedAtHead(ctx: MutationCtx, projectId: Id<'hostedProjects'>, l
 }
 /** Completes an active Intent once none of its Lanes is still open. Runs in the transaction that just
  * completed a Lane (acceptance completion tick, explicit complete, operator sweep), so it adds no call:
- * one head read, one indexed page of sibling heads and one record write. The planning read then closes
- * the Issue that shares this Intent's id (`reconcile`), unless its Done-when lines are still open.
+ * one head read, one indexed page of sibling heads and one record write. Outside acceptance, the
+ * lifecycle cause requests an Item check; acceptance already wakes the batched fold.
  * Idempotent: a completed, abandoned or missing Intent, or any open sibling, changes nothing. */
 export async function completeIntentWhenLanesDone(
   ctx: MutationCtx,
@@ -30,6 +31,7 @@ export async function completeIntentWhenLanesDone(
     authorityEpoch: number;
     intentId: string;
     at: string;
+    planningCause?: string;
     /** Lanes of a landing that stay active (keepOpen, completeOnAccept off): they declared this Intent and do
      * not keep it open. A pinned Lane always does. */
     landed?: ReadonlySet<string>;
@@ -82,5 +84,11 @@ export async function completeIntentWhenLanesDone(
     expectedVersion: intent.version,
     record: { ...intent, version: intent.version + 1, status: 'completed', at: input.at },
   });
+  if (input.planningCause)
+    await wakePlanLifecycle(ctx, {
+      projectId: input.projectId,
+      cause: input.planningCause,
+      itemId: head.planningItemId,
+    });
   return true;
 }

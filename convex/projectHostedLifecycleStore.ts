@@ -9,7 +9,8 @@ import { settleLaneApproval } from './projectHostedApprovalStore';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
-import { hostedWriteProject, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
+import { hostedWriteProject, readHostedRecord, recordHead, writeHostedRecord } from './projectHostedRecords';
+import { wakePlanLifecycle } from './projectPlanRollupWake';
 import { saveExpectedSchema } from '../src/hosted-save';
 import { hostedLaneSchema, hostedIntentSchema } from '../src/hosted-lane';
 import { hostedLifecycleRequestSchema, hostedLifecycleResultSchema } from '../src/hosted-lifecycle';
@@ -211,7 +212,22 @@ export async function applyLifecycleRecord(
       authorityEpoch: plan.authorityEpoch,
       intentId: before.intentId,
       at: plan.at,
+      planningCause: plan.operationId,
     });
+  if (request.action === 'reopen') {
+    const head = await recordHead(ctx, plan.projectId, before.kind, before.id);
+    const itemId =
+      head?.planningItemId ??
+      (before.kind === 'lane'
+        ? (await recordHead(ctx, plan.projectId, 'intent', before.intentId))?.planningItemId
+        : undefined);
+    await wakePlanLifecycle(ctx, {
+      projectId: plan.projectId,
+      cause: plan.operationId,
+      itemId,
+      ...(before.kind === 'lane' ? { reopenedLaneId: before.id } : {}),
+    });
+  }
   if (request.action === 'abandon') {
     // Freeze the queue at application, after any save or cascade staging.
     // Enqueue writes this same row, so concurrent admissions serialize here.

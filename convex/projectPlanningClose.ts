@@ -162,6 +162,7 @@ async function applyPage(
       planning,
       lock: operationId,
       atomic: true,
+      undoClosePins: true,
       prepare: async write => {
         const item = await current(planning, write.itemId);
         invariant(item?.status === 'closed', 'WORK_STALE', 'The parent changed during Undo.');

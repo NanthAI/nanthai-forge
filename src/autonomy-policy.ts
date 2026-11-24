@@ -112,6 +112,8 @@ export const autonomyPolicySchema = z.object({
   ownerRootUpdates: z.boolean().optional(),
   /** Hosted agent starts capture a plain Item unless the owner turns tracking off. */
   autoCreatePlanningItem: z.boolean().optional(),
+  /** Status follows active work up the Plan unless the owner explicitly turns it off. */
+  rollUpPlanningStatus: z.boolean().optional(),
   /** The owner's opt-in to agent-side planning text. Forge does not run a model. */
   agentsWriteItemText: z.boolean().optional(),
   /** Debounced local snapshots of open native Lanes; absent means on. */
@@ -244,6 +246,7 @@ export const policyWriteObject = z
     integrationPreview: autonomyPolicySchema.shape.integrationPreview,
     ownerRootUpdates: autonomyPolicySchema.shape.ownerRootUpdates,
     autoCreatePlanningItem: autonomyPolicySchema.shape.autoCreatePlanningItem,
+    rollUpPlanningStatus: autonomyPolicySchema.shape.rollUpPlanningStatus,
     agentsWriteItemText: autonomyPolicySchema.shape.agentsWriteItemText,
     accessIdentities: autonomyPolicySchema.shape.accessIdentities,
     mainAudit: autonomyPolicySchema.shape.mainAudit,
@@ -326,6 +329,9 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     ownerRootUpdates: command.ownerRootUpdates ?? base.ownerRootUpdates,
     ...((command.autoCreatePlanningItem ?? previous.autoCreatePlanningItem) !== undefined
       ? { autoCreatePlanningItem: command.autoCreatePlanningItem ?? previous.autoCreatePlanningItem }
+      : {}),
+    ...((command.rollUpPlanningStatus ?? previous.rollUpPlanningStatus) !== undefined
+      ? { rollUpPlanningStatus: command.rollUpPlanningStatus ?? previous.rollUpPlanningStatus }
       : {}),
     ...((command.agentsWriteItemText ?? previous.agentsWriteItemText) !== undefined
       ? { agentsWriteItemText: command.agentsWriteItemText ?? previous.agentsWriteItemText }

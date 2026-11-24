@@ -10,6 +10,7 @@ import { record, recordPartition, selectedGeneration } from './projectWorkIndexS
 import { readsStore, storeItem } from './projectWorkStoreReads';
 import { commandPayloadRows, commandValues } from './projectWorkCommandRows';
 import { executeCommand } from './projectWorkCommand';
+import { rollupWake } from './projectPlanRollupWake';
 import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import { canonicalPayload, hostedPayloadHash, hostedOperationSchema } from '../src/hosted-source-operation';
 import { sourceAuthority } from '../src/hosted-source-authority';
@@ -109,7 +110,7 @@ async function inspect(
         : {}),
     });
   }
-  return rows;
+  return { rows, partition: recordPartition(generation) };
 }
 export const preview = query({
   args,
@@ -117,7 +118,7 @@ export const preview = query({
   handler: async (ctx, input) => {
     try {
       const page = planningImportPageSchema.parse(JSON.parse(input.request));
-      const rows = await inspect(ctx, input.projectId, page);
+      const { rows } = await inspect(ctx, input.projectId, page);
       return canonicalPayload({
         batchId: page.batchId,
         page: page.page,
@@ -180,7 +181,7 @@ export const apply = mutation({
         );
         return canonicalPayload(operation.terminal.outcome.result);
       }
-      const rows = await inspect(ctx, input.projectId, page);
+      const { rows, partition } = await inspect(ctx, input.projectId, page);
       invariant(
         rows.every(row => row.action !== 'attention'),
         'WORK_OPERATION_CHANGED',
@@ -213,6 +214,15 @@ export const apply = mutation({
         );
         result.created.push(row.id);
       }
+      const first = result.created[0];
+      if (first && project.autonomyPolicy?.rollUpPlanningStatus !== false)
+        await ctx.scheduler.runAfter(0, rollupWake, {
+          projectId: input.projectId,
+          partition,
+          cause: input.operationId,
+          itemId: first,
+          source: 'import',
+        });
       await finishHostedOperation(ctx, {
         projectId: input.projectId,
         actor,

@@ -7,7 +7,7 @@ import { planningWriteContext, type PlanningWriteContext } from './projectWorkCo
 import { ForgeError, invariant } from '../src/errors';
 import { digest } from '../src/state/hash';
 import { undoableFields, type BatchBefore, type BatchResult, type BatchWrite } from '../src/planning-batch';
-import type { PlanningItem } from '../src/work-planning-types';
+import { isShelved, type PlanningItem } from '../src/work-planning-types';
 
 /** The operation id of write `index` of batch `operationId`: stable, so a replay finds the original write. */
 export function batchWriteOperationId(operationId: string, index: number) {
@@ -42,6 +42,7 @@ export async function applyWrites(
     /** Child writes a close or its Undo derives from the parents the caller chose: not charged
      * to the account limiter (the chosen writes are). */
     derived?: true;
+    undoClosePins?: true;
   } = {},
 ) {
   const results: BatchResult[] = [];
@@ -79,6 +80,7 @@ export async function applyWrites(
           ...(writes.length > 1 && !options.planning ? { ownerBatch } : {}),
           planningClose: options.lock,
           planningRestore: options.restore,
+          ...(options.undoClosePins ? { undoClosePins: true as const } : {}),
           ...(options.planningTick ? { planningTick: true as const } : {}),
           ...(options.derived ? { server: true as const } : {}),
           onPlanningBatchState: state => {
@@ -116,6 +118,16 @@ export async function applyWrites(
       continue;
     }
     const kept: BatchBefore = {};
+    if (
+      prior.item &&
+      (write.statusPin !== undefined ||
+        write.statusPinUndo ||
+        (write.status &&
+          write.status !== prior.item.status &&
+          !isShelved(write.status) &&
+          !isShelved(prior.item.status)))
+    )
+      kept.statusPinUndo = prior.item.statusPin ? prior.item.operationId : null;
     if (prior.item)
       for (const field of undoableFields)
         if (field in write && (write as Record<string, unknown>)[field] !== undefined)

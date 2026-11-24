@@ -1997,6 +1997,7 @@ export const clearFixed = internalMutation({
         authorityEpoch: project.sourceAuthority.epoch,
         intentId,
         at: new Date().toISOString(),
+        planningCause: `culprit-cleared:${input.sequence}:${intentId}`,
       });
     }
     return null;

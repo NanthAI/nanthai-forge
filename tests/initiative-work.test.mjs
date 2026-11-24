@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
 import { itemWorkFixture } from './item-work-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
@@ -120,6 +121,29 @@ test('one receipt on two Items counts once, and replay adds no writes', async t 
   assert.equal(subsequent.writes, 2);
   assert.equal((await view(s)).landings, 2);
   assert.equal((await view(s)).files, 9);
+});
+
+test('the Work fold queues status only for a settled Item and takes no extra document reads', async () => {
+  const s = await emptyInitiative();
+  await s.rebuildInitiative();
+  const planningWakes = [];
+  const original = s.ctx.scheduler.runAfter;
+  s.ctx.scheduler.runAfter = (delay, wake, args) => {
+    if (getFunctionName(wake) !== 'projectPlanRollup:advance') return original(delay, wake, args);
+    planningWakes.push(args);
+    return Promise.resolve('status-wake');
+  };
+  const ongoing = await addLanding(s, 43, ['src/stable.ts']);
+  const done = await addLanding(s, 44, ['src/stable.ts']);
+  await s.foldInitiative(ongoing);
+  assert.deepEqual(planningWakes, []);
+  const replay = s.counts.at(-1);
+  await s.foldInitiative({ ...done, settledItemIds: [s.itemId] });
+  assert.deepEqual(
+    planningWakes.map(({ itemId, cause }) => ({ itemId, cause })),
+    [{ itemId: s.itemId, cause: done.receiptId }],
+  );
+  assert(s.counts.at(-1).documents <= replay.documents, 'no additional document reads in the fold');
 });
 
 test('rebuilding Initiative work includes the receipts of archived Item landing notes', async () => {

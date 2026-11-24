@@ -26,6 +26,7 @@ import { breakdownTotal, breakdownWords } from '../progress';
 import type { Put, Settled } from './Plan';
 import { BreakdownWords, COLS, Line, Roll, Status } from './rows';
 import { InitiativeWork, type ReadInitiativeWork } from './InitiativeWork';
+import { FollowWork } from './FollowWork';
 import { accountableHandle, workingAgentsLabel, type Workers } from './workers';
 
 type At = (patch: Partial<PlaceProps['route']>) => string;
@@ -285,6 +286,9 @@ export function InitiativePage({
             <dt>Status</dt>
             <dd>
               <Status row={initiative} />
+              {full.item && full.item.version === initiative.version ? (
+                <FollowWork key={full.item.version} item={full.item} put={view.canEdit ? put : undefined} />
+              ) : null}
             </dd>
             <dt>Accountable</dt>
             <dd>{accountable ? <Who handle={accountable} /> : <span className="t3">Not reported</span>}</dd>

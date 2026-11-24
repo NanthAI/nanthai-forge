@@ -745,6 +745,9 @@ export const hostedAgentCommandSchemas = {
       itemId: true,
       agent: true,
       agentClient: true,
+      statusPinBy: true,
+      statusPinUndo: true,
+      statusPinRestore: true,
       ...omitKeys(planningModelPutKeys),
     })
     .extend({

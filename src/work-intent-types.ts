@@ -93,7 +93,18 @@ export const purgeFieldClasses = {
       'agentClient',
     ],
     words: { title: PURGED_ITEM_TITLE, body: '' },
-    drop: ['reason', 'type', 'owner', 'waitingOn', 'imported'],
+    drop: [
+      'reason',
+      'type',
+      'owner',
+      'waitingOn',
+      'imported',
+      'statusPin',
+      'statusPinBy',
+      'statusPinUndo',
+      'statusPinRestore',
+      'statusSource',
+    ],
   },
   // authorLabel is free text the client sends; decidedBy, agent and agentClient are server-set or checked against
   // fixed public shapes (handle, agent slug, tool:model), the same identities the row's envelope already records.

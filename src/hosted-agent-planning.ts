@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { memberDataNotice, systemCommentNotice } from './member-data-notice.js';
-import { planningSummary, planningSearchTerms, proseDoneWhenLines } from './planning-search.js';
+import { planningSummary, planningSearchTerms, closingChecklist } from './planning-search.js';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -36,6 +36,7 @@ import {
   isShelved,
   itemChanged,
   planningCommentCommandSchema,
+  planningItemSchema,
   planningPutAgentFields,
   planningPutSchema,
   type PlanningItem,
@@ -64,6 +65,8 @@ type Workspace = {
   sourceRevision?: number;
   likelyDuplicates?: unknown;
   planningFilteredReads?: boolean;
+  capabilities?: { planning?: boolean };
+  rollupCatchup?: { state: 'running' | 'partial' | 'complete'; moved: number; reason?: string };
   autonomyPolicy?: { autoCreatePlanningItem?: boolean; agentsWriteItemText?: boolean };
 };
 type PlanningTimes = { closedAt?: string | null; lastStatusChangeAt?: string | null };
@@ -97,13 +100,17 @@ const uuidFrom = (seed: string) => {
   const h = createHash('sha256').update(seed).digest('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 };
-async function workspace(port: PlanningPort, planningDuplicateText?: string): Promise<Workspace> {
+async function workspace(
+  port: PlanningPort,
+  planningDuplicateText?: string,
+  planningRollup?: true,
+): Promise<Workspace> {
   let ws: Workspace | null;
   try {
-    ws = await port.query<Workspace | null>(
-      'projectWorkIndex:workspace',
-      planningDuplicateText === undefined ? {} : { planningDuplicateText },
-    );
+    ws = await port.query<Workspace | null>('projectWorkIndex:workspace', {
+      ...(planningDuplicateText === undefined ? {} : { planningDuplicateText }),
+      ...(planningRollup ? { planningRollup } : {}),
+    });
   } catch (error) {
     if (
       planningDuplicateText === undefined ||
@@ -161,7 +168,7 @@ async function fullItem(port: PlanningPort, ws: Workspace, id: string, planningH
 /** The link every planning read shows for an Issue (30a4d75d). Starting an Issue opens the Intent that has the
  * Issue's own id and never fills the legacy `intentIds` array, so an empty array is not "no link". This is the
  * Intent a start opens or opened: static text from the item, no call. `intent` is its state, present once started. */
-const withPlannedLink = <T extends { id: string; kind?: string; author?: string | undefined }>(raw: T) => {
+const withPlannedLink = <T extends PublicAttribution & { id: string; kind?: string }>(raw: T) => {
   const item = shownAuthor(raw);
   return item.kind === 'issue' ? { ...item, plannedIntentId: item.id } : item;
 };
@@ -169,10 +176,15 @@ const withPlannedLink = <T extends { id: string; kind?: string; author?: string 
  * maps the stored account to its handle before the row leaves it (convex/publicPeople.ts); anything that is
  * not handle-shaped (an unmapped account id, a name, an email) is dropped here, so no raw id can pass. */
 const handleShape = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])$/;
-function shownAuthor<T extends { author?: string | undefined }>(item: T): T {
-  if (item.author === undefined || handleShape.test(item.author)) return item;
+type PublicAttribution = { author?: string | undefined; statusPin?: unknown };
+function shownAuthor<T extends PublicAttribution>(item: T): T {
+  const badAuthor = item.author !== undefined && !handleShape.test(item.author);
+  const badPin =
+    item.statusPin !== undefined && !planningItemSchema.shape.statusPin.safeParse(item.statusPin).success;
+  if (!badAuthor && !badPin) return item;
   const rest: T = { ...item };
-  delete rest.author;
+  if (badAuthor) delete rest.author;
+  if (badPin) delete rest.statusPin;
   return rest;
 }
 const compact = (item: PlanningReadItem, intent?: string) =>
@@ -485,8 +497,11 @@ async function reconcile(
   items: { id: string; status: string; version: number }[],
   states: Record<string, string>,
 ) {
+  const serverOwnsStatus = port.serverFeatures?.includes('planning-status-worker');
   const due = items.filter(
-    item => open.includes(item.status) && ['completed', 'abandoned'].includes(states[item.id] ?? ''),
+    item =>
+      open.includes(item.status) &&
+      (states[item.id] === 'completed' || (!serverOwnsStatus && states[item.id] === 'abandoned')),
   );
   const changed: { id: string; from: string; to: PlanningItem['status']; at?: string; undo: string }[] = [];
   const failed: unknown[] = [];
@@ -504,15 +519,12 @@ async function reconcile(
         const marker = holdMarker(unmet);
         // The hold's own reason write bumps the version once; a read that finds the marker already there
         // names the current version.
-        const advice = holdAdvice(
-          item.id,
-          item.reason === marker ? item.version : item.version + 1,
-          openLines,
-        );
+        const version = serverOwnsStatus || item.reason === marker ? item.version : item.version + 1;
+        const advice = holdAdvice(item.id, version, openLines);
         held.push({
           id: item.id,
           openLines: unmet,
-          version: item.reason === marker ? item.version : item.version + 1,
+          version,
           lines: advice.lines,
           tick: advice.tick,
           close: advice.close,
@@ -520,7 +532,7 @@ async function reconcile(
         });
         // The Issue keeps its status. One comment and one reason write say so, then reads stay silent:
         // the reason is the marker, and both writes carry operation ids derived from the Issue version.
-        if (item.reason !== marker) {
+        if (!serverOwnsStatus && item.reason !== marker) {
           await writePlanning(
             port,
             {
@@ -545,6 +557,7 @@ async function reconcile(
         }
         continue;
       }
+      if (serverOwnsStatus) continue;
       const reason = `Intent ${states[entry.id]}`;
       const event = await writePlanning(
         port,
@@ -578,17 +591,7 @@ async function reconcile(
  * 8b4bfd78: Issues c329d191 and 47558a99 closed with agreed work pending) cannot be ticked, so each of
  * its bullet lines (or the paragraph, as one line) counts as open: a person closes such an Issue. A body
  * with no Done-when section keeps closing as before. Returns the line texts (CAS-free, body only). */
-export const openDoneWhenLines = (body: string): string[] => {
-  const lineText = (line: string) =>
-    line
-      .replace(/^[ \t>]*(?:(?:[-*+]|\d+[.)])\s+)?(?:\[[ xX]\]\s*)?/, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-  const boxes = body.match(/^[ \t>]*(?:(?:[-*+]|\d+[.)])\s+)?\[([ xX])\].*$/gm) ?? [];
-  if (boxes.length)
-    return boxes.filter(line => /^[ \t>]*(?:(?:[-*+]|\d+[.)])\s+)?\[ \]/.test(line)).map(lineText);
-  return proseDoneWhenLines(body);
-};
+export const openDoneWhenLines = (body: string): string[] => closingChecklist(body).open;
 
 /** What a builder needs after a landing that left Done-when lines open: which lines (at most five, 100
  * characters each) and the one command that closes the Issue with evidence. Pure text from the item
@@ -607,6 +610,7 @@ const holdAdvice = (id: string, version: number, lines: string[]) => {
 /** After the last Done-when tick: close (or abandon) the Issue when its Intent finished, as a reconciling read
  * would. Nothing when the Intent is still running; the Issue then closes on the next list read after landing. */
 async function closeTicked(port: PlanningPort, itemId: string, version: number) {
+  if (port.serverFeatures?.includes('planning-status-worker')) return undefined;
   const states = await intentStates(port, [itemId]);
   if (!['completed', 'abandoned'].includes(states[itemId] ?? '')) return undefined;
   const sync = await reconcile(
@@ -835,7 +839,12 @@ async function readPlanning(
         : {}),
     };
   }
-  const ws = await workspace(port);
+  const ws = await workspace(
+    port,
+    undefined,
+    port.serverFeatures?.includes('planning-status-worker') ? true : undefined,
+  );
+  const rollupProgress = ws.rollupCatchup ? { rollupCatchup: ws.rollupCatchup } : {};
   if (input.id) {
     if (
       input.refine &&
@@ -901,12 +910,13 @@ async function readPlanning(
           version: item.version + 1,
           reason: `Intent ${states[item.id]}`,
         }
-      : held
+      : held && !port.serverFeatures?.includes('planning-status-worker')
         ? { ...item, version: held.version, reason: holdMarker(held.openLines) }
         : item;
     const shown = comments.page.map(row => JSON.parse(row.value) as { system?: boolean }).reverse();
     return {
       workRevision: ws.revision,
+      ...rollupProgress,
       item: withPlannedLink({
         ...settled,
         ...(states[item.id] ? { intent: states[item.id] } : {}),
@@ -974,6 +984,7 @@ async function readPlanning(
     !input.relation;
   return {
     workRevision: ws.revision,
+    ...rollupProgress,
     items: matches.map(item =>
       compact(
         {
@@ -1458,6 +1469,46 @@ export async function markPlanningStarted(
       port.serverFeatures?.includes('planning-model')
         ? `@${claimAs}`
         : undefined;
+    if (port.serverFeatures?.includes('planning-status-worker')) {
+      if (!claim) return { updated: false, status: item.status };
+      const memberStart = () => ({ updated: false, status: item.status, claimed: false });
+      if (ws.capabilities?.planning === false) return memberStart();
+      let current = item;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await writePlanning(
+            port,
+            {
+              action: 'put-planning-item',
+              operationId: uuidFrom(`${startOperationId}:planning-claim${attempt ? ':retry' : ''}`),
+              itemId: current.id,
+              expectedVersion: current.version,
+              owner: claim,
+              ...putAgent(port),
+            },
+            undefined,
+            undefined,
+            current,
+          );
+          return { updated: true, owner: claim, version: current.version + 1 };
+        } catch (error) {
+          const safe = hostedActionError(error, 'planning claim');
+          if (
+            safe.code === 'PROJECT_UNAVAILABLE' &&
+            (safe.message === ownerOnlyPlanning ||
+              safe.message === 'This planning change is available only to the project owner.')
+          )
+            return memberStart();
+          // A known CAS refusal (not an unknown outcome) can use the current version and a new operation id.
+          if (safe.code !== 'ITEM_CHANGED' || attempt > 0)
+            return { updated: false, claimed: false, error: { code: safe.code, message: safe.message } };
+          const latest = await fullItem(port, ws, item.id);
+          if (!latest || latest.owner || isShelved(latest.status) || latest.purged)
+            return { updated: false, status: latest?.status, claimed: false };
+          current = latest;
+        }
+      }
+    }
     if (item.status === 'in-progress' && !claim) return { updated: false, status: item.status };
     // A member who cannot edit the plan (planning writes are the project owner's) gets no error to act on: with only the
     // claim left to write (the Issue is already in progress) the start stays as it was (review 3f84a176), an open

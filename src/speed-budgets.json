@@ -1172,11 +1172,11 @@
       "measuredBy": "planning-fixture",
       "metric": "planningPrimaryWriteBytes",
       "unit": "bytes",
-      "value": 13012,
+      "value": 13678,
       "floor": 0,
-      "source": "tests/hosted-contention.test.mjs primary Work I/O fixture, hosted run 830b45f1 on 2026-11-10: maximum over note, Intent, status, Issue put/comment and hosted Intent. Before migration telemetry retirement: 17905 B; after: 12225 B. Same commands already retain primary provenance on both fixture paths; the baseline leaves an unrelated writer in migration. Normalized fixture bytes, not provider billing. 2026-11-17 (Item 3fa3187d): 13012 B, the Issue put that closes an Item now also patches the planning progress counter row in the same transaction.",
-      "issue": "0695ab24",
-      "reason": "Ratchets removal of source fingerprints, target pointers and migration reader hashes from completed primary writes. Per-command paired assertions also require fewer documents and bytes; ordinary tab reads and idle calls do not rise. The +787 B counter patch on a status change (Item 3fa3187d) costs a modeled $0.00016 per 1,000 such writes at $0.20/GB, about 0.01% of the $1.688095 per 1,000 landings reference even if every landing moves a status; it replaces Needs me re-reading up to 1 MB of planning roots per change with one point read."
+      "source": "tests/hosted-contention.test.mjs primary Work I/O fixture: manual Item close with retained status pin and roll-up bookkeeping is 13,678 B (13,676 B in hosted admission), versus the 13,012 B previous pin. Normalized fixture bytes, not provider billing. The paired migration-maintenance version was 19,356 B.",
+      "issue": "052ca3c8",
+      "reason": "Keeps the paired per-command checks for no migration metadata and fewer documents and bytes. The measured +666 B on the largest manual write retains who overrode the status and when, and the roll-up inputs needed to continue from that write. At $0.20/GB it models $0.000133 per 1,000 such writes; no extra client round trip or idle work."
     },
     {
       "id": "planning-migration-writes",

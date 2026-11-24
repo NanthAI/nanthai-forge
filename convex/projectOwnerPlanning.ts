@@ -17,6 +17,7 @@ export type StoredPlanningItem = {
   kind?: string;
   status?: string;
   owner?: string | null;
+  statusPin?: { by: string; at: string };
 };
 
 /** One planning write by the server as the project owner, through the same Work command path as

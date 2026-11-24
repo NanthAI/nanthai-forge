@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { isShelved, type PlanningItem } from './work-planning-types.js';
-import { rollupContribution, rollupDecision, type RollupWork } from './planning-rollup.js';
-import { addRollupCounts, emptyRollupCounts, type RollupScope } from './planning-rollup-membership.js';
+import { rollupBranch, rollupContribution, rollupDecision, type RollupWork } from './planning-rollup.js';
+import {
+  addRollupCounts,
+  emptyRollupCounts,
+  initiativeContribution,
+  type RollupScope,
+} from './planning-rollup-membership.js';
 
 type Seed = Pick<PlanningItem, 'id' | 'kind' | 'version' | 'status' | 'parentId' | 'initiativeId'> & {
   work: RollupWork;
@@ -59,23 +64,30 @@ export function previewPlanningRollup(rows: Iterable<Seed>) {
     id: string,
     scope: RollupScope,
     status: Seed['status'],
-    branch?: ReturnType<typeof emptyRollupCounts>,
+    branch?: ReturnType<typeof rollupBranch>,
   ) => {
     if (blocked.has(row.id)) blocked.add(id);
-    else addRollupCounts(tally(scope), rollupContribution(status, branch));
+    else
+      addRollupCounts(
+        tally(scope),
+        scope.startsWith('initiative:')
+          ? initiativeContribution(status, branch)
+          : rollupContribution(status, branch),
+      );
   };
   for (let index = 0; index < ready.length; index++) {
     const row = ready[index]!;
     const scope = `parent:${row.id}` as const;
     const status = move(row, scope);
+    const branch = rollupBranch(tally(scope), row.work);
     const parent = parentOf(row);
     if (parent) {
-      pass(row, parent, `parent:${parent}`, status, tallies.get(scope));
+      pass(row, parent, `parent:${parent}`, status, branch);
       const left = remaining.get(parent)! - 1;
       remaining.set(parent, left);
       if (!left) ready.push(byId.get(parent)!);
     }
-    if (row.initiativeId) pass(row, row.initiativeId, `initiative:${row.initiativeId}`, status);
+    if (row.initiativeId) pass(row, row.initiativeId, `initiative:${row.initiativeId}`, status, branch);
   }
   let cyclicItems = 0;
   for (const [id, pending] of remaining) {
@@ -118,7 +130,7 @@ type Page = {
 
 /** Publish counts only after a complete dry-run pass with a single Plan revision. Work stamps are as-observed;
  * evidence for the operator is not authorization to apply. A fenced preparation must recheck them. */
-export function summarizeRollupDryRun(pages: readonly Page[]) {
+function readFencedPages(pages: readonly Page[]) {
   const selected = pages[0]?.fence;
   let next: string | null = '';
   let rootsRead = 0;
@@ -136,11 +148,44 @@ export function summarizeRollupDryRun(pages: readonly Page[]) {
     rows.push(...page.rows);
   }
   if (next !== null) throw new Error('The dry run did not read every page.');
-  const { changes, ...report } = previewPlanningRollup(rows);
+  return { selected: selected!, rootsRead, rows };
+}
+
+function reportForDryRun(
+  dryRun: ReturnType<typeof readFencedPages>,
+  result: ReturnType<typeof previewPlanningRollup>,
+) {
+  const { changes, ...report } = result;
   return {
     ...report,
-    rootsRead,
+    rootsRead: dryRun.rootsRead,
     wouldChange: changes.length,
-    complete: report.incompleteRows === 0 && report.cyclicItems === 0,
+    complete: report.incompleteRows === 0 && report.cyclicItems === 0 && report.blockedInitiatives === 0,
+  };
+}
+
+export function summarizeRollupDryRun(pages: readonly Page[]) {
+  const dryRun = readFencedPages(pages);
+  return reportForDryRun(dryRun, previewPlanningRollup(dryRun.rows));
+}
+
+/** Select the values that a lead approved. The dev writer rechecks them; this is not an apply. */
+export function prepareRollupApproval(pages: readonly Page[]) {
+  const dryRun = readFencedPages(pages);
+  const result = previewPlanningRollup(dryRun.rows);
+  const report = reportForDryRun(dryRun, result);
+  if (!report.complete) throw new Error('Roll-up apply requires a complete preview.');
+  const stamps = new Map(dryRun.rows.map(row => [row.id, row.workStamp]));
+  return {
+    report,
+    expected: dryRun.selected,
+    moves: result.changes.map(({ id, version, from, status, rule }) => ({
+      id,
+      version,
+      from,
+      status,
+      rule,
+      workStamp: stamps.get(id)!,
+    })),
   };
 }

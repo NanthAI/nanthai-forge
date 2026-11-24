@@ -33,6 +33,6 @@ nforge agent ROOT tick-planning-item '{"planningItemId":"ITEM_ID","line":1,"evid
 nforge agent ROOT comment-planning-item '{"planningItemId":"ITEM_ID","text":"Evidence that is not one line."}'
 ```
 
-`tick-planning-item` ticks one line (its 1-based position or a unique text prefix) and posts the evidence as a decision comment. The last tick closes the Item once its work finished; otherwise the Item closes on the next Plan list read after it lands. A held Item names the lines still open.
+`tick-planning-item` ticks one line (its 1-based position or a unique text prefix) and posts the evidence as a decision comment. The Plan worker checks for closure after the last tick or after work finishes. It leaves an Item open if any required lines are unticked, and reads can name those lines without writing to Plan.
 
 See [the complete planning workflow](../agents/workflow.md) for filtering, versions, comments, grouped work and lifecycle commands. The [capability status](../status.md) distinguishes delivered behavior from work in the phase plan.

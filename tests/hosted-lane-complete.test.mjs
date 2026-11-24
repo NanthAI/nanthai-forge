@@ -141,6 +141,24 @@ test('complete-merged completes only Lanes whose exact landed head is still the 
   assert.deepEqual((await sweep(f)).completed, [], 'a repeat changes nothing');
 });
 
+test('complete-merged checks planning once when the sweep completes the linked Intent', async () => {
+  const f = await lifecycleFixture();
+  const intent = [...f.tables.projectHostedRecordHeads.values()].find(
+    row => row.kind === 'intent' && row.key === f.intentId,
+  );
+  const itemId = randomUUID();
+  f.patch('projectHostedRecordHeads', intent._id, { planningItemId: itemId });
+  seedReceipt(f, [f.initial]);
+  assert.deepEqual((await sweep(f)).completed, [f.laneId]);
+  assert.deepEqual((await sweep(f)).completed, []);
+  assert.deepEqual(
+    [...f.tables._scheduled_functions.values()]
+      .filter(task => task.name === 'projectPlanRollup:advance')
+      .map(task => task.args.itemId),
+    [itemId],
+  );
+});
+
 test('complete-merged is owner only and pages a dogfood-size sweep within the read budget', async () => {
   const f = await lifecycleFixture();
   const all = [];

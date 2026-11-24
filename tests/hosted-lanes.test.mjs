@@ -1165,17 +1165,20 @@ test('fails without: starting a planner-written Intent by its id marks it with i
   assert.equal(intentHead(alone).planningItemId, undefined, 'no Issue, no marker');
 });
 
-// Lead 2026-11-19 (Item d3357f40): planning writes are the owner's, so a member's start of a planned Item has the
-// server move it to in progress (convex/projectPlanningStart.ts), scheduled once after the start commits. The owner's
-// own client does it with the claim, so the owner's start schedules nothing; a replayed start schedules nothing again.
-test('a member start of a planned Item schedules the server status move once; the owner start does not', async () => {
+test('each planned start schedules one worker-owned status check; unplanned work and replays schedule none', async () => {
   const s = await setup();
   s.insert('projectContributors', { projectId: s.projectId, contributor: 'member' });
   const moves = () => s.scheduled.filter(task => getFunctionName(task.fn) === 'projectPlanningStart:move');
   const planned = intentId => ({ kind: 'planned', intentId, outcome: 'Planned Issue', constraints: '' });
-  await s.begin(s.input(planned(randomUUID())));
+  const ownerItem = randomUUID();
+  const ownerInput = s.input(planned(ownerItem));
+  const ownerStart = await s.begin(ownerInput);
+  assert.deepEqual(await s.begin(ownerInput), ownerStart);
   await s.begin(s.input({ kind: 'new', outcome: 'Unplanned work' }), 'member');
-  assert.deepEqual(moves(), [], 'an owner start, or a start with no Item, moves nothing on the server');
+  assert.deepEqual(
+    moves().map(task => task.args.itemId),
+    [ownerItem],
+  );
   const issue = randomUUID();
   const input = s.input(planned(issue));
   const started = await s.begin(input, 'member');
@@ -1186,6 +1189,13 @@ test('a member start of a planned Item schedules the server status move once; th
       {
         projectId: s.projectId,
         owner: 'owner',
+        itemId: ownerItem,
+        actor: 'owner',
+        startOperationId: ownerInput.operationId,
+      },
+      {
+        projectId: s.projectId,
+        owner: 'owner',
         itemId: issue,
         actor: 'member',
         startOperationId: input.operationId,
@@ -1193,7 +1203,7 @@ test('a member start of a planned Item schedules the server status move once; th
     ],
   );
   assert.deepEqual(await s.begin(input, 'member'), started, 'the replay returns the original start');
-  assert.equal(moves().length, 1, 'and schedules nothing again');
+  assert.equal(moves().length, 2, 'and schedules nothing again');
 });
 
 test('incident 5c26c2ed: negotiated status names completed Lanes from the existing head read; legacy replies keep their shape', async () => {

@@ -38,8 +38,22 @@ export const normalizedPlanning = (command: PlanningWrite): PlanningWrite => {
   delete original.restoredTopLevel;
   return original.intentIds ? { ...original, intentIds: [...new Set(original.intentIds)].sort() } : original;
 };
-export const planningRequest = (command: PlanningWrite) =>
-  digest(JSON.stringify(normalizedPlanning(command)));
+export const planningRequest = (command: PlanningWrite) => {
+  // The server's display label can change before a retry; it is evidence, not a client input.
+  const normalized = normalizedPlanning(command);
+  if (
+    normalized.action !== 'put-planning-item' ||
+    (normalized.statusPinBy === undefined &&
+      normalized.statusPinRestore === undefined &&
+      normalized.statusSource === undefined)
+  )
+    return digest(JSON.stringify(normalized));
+  const requested = { ...normalized };
+  delete requested.statusPinBy;
+  delete requested.statusPinRestore;
+  delete requested.statusSource;
+  return digest(JSON.stringify(requested));
+};
 export function retainedPlanning(data: WorkData, command: PlanningWrite) {
   const retained =
     data.planningItems.find(item => item.operationId === command.operationId) ??
@@ -121,7 +135,7 @@ function applyPlanningWrite(data: WorkData, command: PlanningWrite, at: string, 
       expectedVersion: command.expectedVersion,
       currentVersion: current?.version ?? 0,
     });
-  const put = resolvePlanningPut(command, current);
+  const put = resolvePlanningPut(command, current, at);
   invariant(
     !current || current.kind === put.kind,
     'BAD_ARGUMENT',
@@ -178,6 +192,7 @@ export function stampPlanningAuthor(
   }
   if (command.action !== 'put-planning-item' || data.planningItems.length !== count + 1) return;
   const item = data.planningItems[count]!;
+  if (command.statusSource) item.statusSource = command.statusSource;
   let author: string | undefined = actor;
   if (command.body === undefined && item.version > 1) {
     author = undefined;

@@ -523,6 +523,7 @@ const projectFields = {
   planVisibility: v.optional(v.literal('members')),
   hostingRequest: v.optional(v.string()),
   autonomyPolicy: v.optional(autonomyPolicy),
+  planningRollupCatchup: v.optional(v.id('projectWorkDataRecords')),
   /** Desired mirror direction retained while its existing policy is disabled. */
   githubMirrorPausedInbound: v.optional(v.boolean()),
   /** Entry files of every check definition and setup action (src/public-governance.ts); kept current by the definition save. Absent until the first save after this field existed. */

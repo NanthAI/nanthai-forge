@@ -29,7 +29,15 @@ const keys = ['planningItemId', 'id', 'itemId'] as const;
 const full = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const entrySchemas = (schemas: BatchSchemas) => ({
   putEntry: schemas.planningPutSchema
-    .omit({ action: true, operationId: true, itemId: true, agent: true, agentClient: true })
+    .omit({
+      action: true,
+      operationId: true,
+      itemId: true,
+      agent: true,
+      agentClient: true,
+      statusPinBy: true,
+      statusPinRestore: true,
+    })
     .extend({ fields: schemas.planningPutAgentFields.optional() })
     .strict(),
   commentEntry: schemas.planningCommentCommandSchema

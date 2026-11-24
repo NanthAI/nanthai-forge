@@ -10,7 +10,9 @@ const { workRecordWriter, finishWorkRecordWrites } = await import(
   moduleUrl('../convex/projectWorkRecordWriter.ts')
 );
 const { exactChildTally, planCounter } = await import(moduleUrl('../convex/projectPlanCountsStore.ts'));
-const { readRollupScope } = await import(moduleUrl('../convex/projectPlanRollupStore.ts'));
+const { publishRollupBranches, readRollupBranch, readRollupScope } = await import(
+  moduleUrl('../convex/projectPlanRollupStore.ts')
+);
 const { prepareScopes, prepareScopesAll, scopeCoverage } = await import(
   moduleUrl('../convex/projectPlanCounts.ts')
 );
@@ -87,6 +89,14 @@ async function fixture(legacy = false) {
     update,
     child: id => exactChildTally(s.ctx.db, partition, id),
     initiative: id => readRollupScope(s.ctx.db, partition, `initiative:${id}`, true),
+    async effective(id) {
+      const state = await readRollupBranch(s.ctx.db, partition, id);
+      return state.effective ?? state.counts;
+    },
+    async forward(item, facts) {
+      const previous = await readRollupBranch(s.ctx.db, partition, item.id);
+      return publishRollupBranches(s.ctx.db, { projectId, partition }, [{ item, previous, next: facts }]);
+    },
     prepare: after => prepareScopes._handler(s.ctx, { projectId, expectedPartition: partition, after }),
     coverage: async () => JSON.parse((await planCounter(s.ctx.db, partition)).value),
     partition,
@@ -190,4 +200,27 @@ test('the all-project preparation driver advances one root page per task and is 
     replayed: true,
   });
   assert.equal((await s.child('a')).total, 55);
+});
+
+test('moving an overridden branch subtracts its published facts and preserves them only on the new parent', async () => {
+  const s = await fixture();
+  const middle = { id: 'middle', parentId: 'old', initiativeId: 'g', status: 'closed' };
+  const doc = await s.put(middle.id, 0, middle);
+  assert.equal((await s.child('old')).unsettled, 0);
+  const childFacts = { unsettled: 1, progress: 1, started: 1 };
+  assert.equal(await s.forward(middle, childFacts), true);
+  assert.equal(await s.forward(middle, childFacts), false, 'retry does not double-count a branch');
+  assert.equal(
+    (await s.child('old')).unsettled,
+    0,
+    'public exact tally still counts direct displayed statuses',
+  );
+  assert.equal((await s.effective('old')).unsettled, 1);
+  assert.equal((await s.initiative('g')).unsettled, 0, 'an Initiative counts the displayed member once');
+  await s.update(doc, middle.id, 0, { ...middle, parentId: 'new' });
+  assert.equal((await s.effective('old')).total, 0);
+  assert.equal((await s.effective('new')).progress, 1);
+  await s.forward({ ...middle, parentId: 'new' }, { unsettled: 0, progress: 0, started: 1 });
+  assert.equal((await s.effective('new')).unsettled, 0);
+  assert.equal((await s.effective('new')).done, 1);
 });

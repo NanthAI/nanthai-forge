@@ -34,6 +34,7 @@ export default function ProjectSettings(props: PlaceProps) {
           visibility: project.visibility === 'public' ? 'public' : 'private',
           planVisibility: project.planVisibility === 'members' ? 'members' : 'public',
           autoCreatePlanningItem: project.autonomyPolicy?.autoCreatePlanningItem,
+          rollUpPlanningStatus: project.autonomyPolicy?.rollUpPlanningStatus,
           agentsWriteItemText: project.autonomyPolicy?.agentsWriteItemText,
           createdAt: project._creationTime,
           revision: project.revision,
@@ -92,6 +93,15 @@ export default function ProjectSettings(props: PlaceProps) {
       setPlanVisibility={async (planVisibility, operationId) => {
         await client.mutation(api.publicDiscovery.setSettings, { projectId, planVisibility, operationId });
         read();
+      }}
+      setRollup={async (enabled, operationId) => {
+        const result = await client.mutation(api.projectAutonomy.set, {
+          projectId,
+          command: JSON.stringify({ action: 'set-policy', operationId, rollUpPlanningStatus: enabled }),
+        });
+        setFacts(
+          current => current && { ...current, rollUpPlanningStatus: result.policy.rollUpPlanningStatus },
+        );
       }}
       setTrackWork={async (enabled, operationId) => {
         const result = await client.mutation(api.projectAutonomy.set, {

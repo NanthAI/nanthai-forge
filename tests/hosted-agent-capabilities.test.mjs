@@ -7,6 +7,7 @@ import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { hostedAgentActions, hostedAgentPlanningActions } from '../dist/hosted-agent-contract.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
+import { capabilityOptions } from '../dist/hosted-capabilities-early.js';
 const { capabilities } = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 function setup() {
@@ -57,6 +58,23 @@ test('discovery reports protocol and actual project authority with constant read
   assert(s.counts.every(count => count.ranges <= 3 && count.documents <= 3 && count.writes === 0));
   assert(s.counts.every(count => !count.touched.some(table => /Work|SourceJob|CheckRuns/.test(table))));
 });
+test('planned start negotiates both worker-owned status and CLI metric provenance within the discovery budget', async () => {
+  const s = setup();
+  const result = JSON.parse(
+    await s.call(
+      'capabilities',
+      capabilities,
+      {
+        projectId: s.projectId,
+        ...capabilityOptions('.', false, true, 'start'),
+      },
+      'owner',
+    ),
+  );
+  assert.ok(result.features.includes('planning-status-worker'));
+  assert.ok(result.features.includes('metric-cli-provenance'));
+});
+
 test('explicit discovery shows live queue switch booleans and older clients keep their reply shape', async t => {
   const s = setup();
   const switches = [

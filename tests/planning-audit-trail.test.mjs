@@ -1153,7 +1153,7 @@ test('411727ba row 3: Item history and Work event readers answer byte-equal befo
   assert.match(JSON.stringify(await runPlanning(p, { planningItemId: itemId })), /After the move/);
 });
 
-test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decision, start, reconcile) records its declared model or says "not declared"', async t => {
+test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decision, start) records its declared model or says "not declared"', async t => {
   const baseTime = Date.parse('2026-11-22T12:00:00.000Z');
   t.mock.timers.enable({ apis: ['Date'], now: baseTime });
   const stateDir = mkdtempSync(join(tmpdir(), 'forge-audit-model-'));
@@ -1287,7 +1287,7 @@ test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decisio
     'derived Decisions version records declared model directly (for windowHistory & cross-page reads)',
   );
 
-  // 3. Session-inherited model (declared once at start, then put/reconcile with NO model env var).
+  // 3. Session-inherited model (declared once at start, then put with NO model env var).
   const ancestor = nearestAgentProcess();
   const inheritedKey = `inherited-${randomUUID()}`;
   const inheritedEnv = ancestor
@@ -1316,17 +1316,12 @@ test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decisio
   });
   assert.match(versionItem(5).agentClient, /:inherited-from-start$/);
 
-  // 4. Reconcile held-close comment + reason put carry the reconciling agent's slug and model.
+  // 4. Held advice is a read, not an audit event attributed to whoever opened the Item.
   t.mock.timers.setTime(Date.parse('2026-11-22T12:30:00.000Z'));
   intentState = 'completed';
+  calls.length = 0;
   await makeTransport(undefined).dispatch('planning', { planningItemId: itemId, reconcile: true });
-  assert.match(versionItem(6).agentClient, /:inherited-from-start$/);
-  const heldComment = [...s.tables.projectHostedRecordHeads.values()]
-    .filter(h => h.kind === 'comment' && h.parent === itemId)
-    .map(h => JSON.parse(h.value))
-    .find(c => /Done-when line\(s\) still open/.test(c.text));
-  assert.ok(heldComment, 'reconcile posted held comment');
-  assert.match(heldComment.agentClient, /:inherited-from-start$/);
+  assert.ok(!calls.includes('projectWorkCommand:command'));
   intentState = null;
 
   // 5. Agent with NO declared model anywhere: stored agentClient has no fake model, and audit reads say 'not declared'.
@@ -1338,10 +1333,10 @@ test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decisio
     line: 2,
     evidence: 'Verified line 2 without a model env.',
   });
+  assert.ok(isAgentSlug(versionItem(6).agent));
+  assert.equal(versionItem(6).agentClient, undefined, 'no fake model id is stored');
   assert.ok(isAgentSlug(versionItem(7).agent));
-  assert.equal(versionItem(7).agentClient, undefined, 'no fake model id is stored');
-  assert.ok(isAgentSlug(versionItem(8).agent));
-  assert.equal(versionItem(8).agentClient, undefined);
+  assert.equal(versionItem(7).agentClient, undefined);
 
   // Also add an undeclared agent Lane and landing note, plus a browser (person) edit.
   const laneId = randomUUID();
@@ -1394,7 +1389,7 @@ test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decisio
   });
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
   t.mock.timers.setTime(Date.parse('2026-11-22T12:50:00.000Z'));
-  await runPut(makePort(s), { planningItemId: itemId, expectedVersion: 8, title: 'Browser edit' });
+  await runPut(makePort(s), { planningItemId: itemId, expectedVersion: 7, title: 'Browser edit' });
 
   // Read full Item timeline: EVERY agent event has a non-empty model (declared or 'not declared'); person has null.
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: 'cred-1' });
@@ -1418,11 +1413,10 @@ test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decisio
   assert.equal(byVersion.get(3).model, 'synth-forge-model');
   assert.equal(byVersion.get(4).model, 'inherited-from-start');
   assert.equal(byVersion.get(5).model, 'inherited-from-start');
-  assert.equal(byVersion.get(6).model, 'inherited-from-start');
+  assert.equal(byVersion.get(6).model, 'not declared');
   assert.equal(byVersion.get(7).model, 'not declared');
-  assert.equal(byVersion.get(8).model, 'not declared');
-  assert.equal(byVersion.get(9).actorKind, 'person');
-  assert.equal(byVersion.get(9).model, null, 'person edits have null model');
+  assert.equal(byVersion.get(8).actorKind, 'person');
+  assert.equal(byVersion.get(8).model, null, 'person edits have null model');
   const laneEvent = history.events.find(e => e.kind === 'lane');
   const landingEvents = history.events.filter(e => e.kind === 'landing');
   assert.equal(laneEvent.model, 'not declared');

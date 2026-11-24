@@ -223,7 +223,12 @@ export function planCountsWriter(db: MutationCtx['db']) {
     {
       projectId: Id<'hostedProjects'>;
       totals: Change[];
-      scoped: { key: string; changes: Deltas | null }[];
+      scoped: {
+        key: string;
+        changes: Deltas | null;
+        before?: ScopeMember | null;
+        after?: ScopeMember | null;
+      }[];
     }
   >();
   const header = new Map<Id<'projectWorkGenerations'>, ReturnType<typeof planCounter>>();
@@ -262,7 +267,12 @@ export function planCountsWriter(db: MutationCtx['db']) {
       };
       if (scopeDeltas.size || badScope) {
         const root = (after ?? before)!;
-        entriesFor(root).scoped.push({ key: root.key!, changes: badScope ? null : scopeDeltas });
+        const linked = Boolean(before && scopeDeltas.size);
+        entriesFor(root).scoped.push({
+          key: root.key!,
+          changes: badScope ? null : scopeDeltas,
+          ...(linked ? { before: was?.member ?? null, after: now?.member ?? null } : {}),
+        });
       }
       if (was && now && was.kind === now.kind && was.status === now.status && was.group === now.group) return;
       if (was) entriesFor(before!).totals.push({ ...was, sign: -1, closing: false });
@@ -284,21 +294,32 @@ export function planCountsWriter(db: MutationCtx['db']) {
         const counts = JSON.parse(row.value) as PlanCounts;
         if (scoped.length && counts.scopeThrough !== undefined && !counts.scopeBlocked) {
           const deltas: Deltas = new Map();
-          for (const { key, changes: moves } of scoped) {
+          const effective: Deltas = new Map();
+          const collect = (target: Deltas, changes: Deltas) => {
+            for (const [scope, move] of changes) {
+              let delta = target.get(scope);
+              if (!delta) target.set(scope, (delta = emptyRollupCounts()));
+              addRollupCounts(delta, move);
+            }
+          };
+          for (const { key, changes: moves, before, after } of scoped) {
             if (counts.scopeThrough !== null && key > counts.scopeThrough) continue;
             if (!moves) {
               counts.scopeBlocked = true;
               break;
             }
-            for (const [scope, move] of moves) {
-              let delta = deltas.get(scope);
-              if (!delta) deltas.set(scope, (delta = emptyRollupCounts()));
-              addRollupCounts(delta, move);
+            let adjusted = moves;
+            if (before || after) {
+              const { forwarded } = await scopes.read(partition, `parent:${key}`);
+              if (forwarded)
+                adjusted = rollupMembershipChanges(before ?? null, after ?? null, forwarded, forwarded);
             }
+            collect(deltas, moves);
+            collect(effective, adjusted);
           }
           if (
             !counts.scopeBlocked &&
-            !(await applyRollupDeltas(db, { projectId, partition }, deltas, key =>
+            !(await applyRollupDeltas(db, { projectId, partition }, deltas, effective, key =>
               scopes.read(partition, key),
             ))
           )

@@ -35,6 +35,8 @@ export const planningInitiativeCountsFeature = 'planning-initiative-counts';
 export const planningHistoryFeature = 'planning-history';
 /** Item audit timeline, backlog audit window and agent attribution on planning puts (Item 1d51c91f). */
 export const planningAuditFeature = 'planning-audit';
+/** Plan writes own status; CLI/MCP do not move Items on reads or after a tick. */
+export const planningStatusWorkerFeature = 'planning-status-worker';
 export const initiativeProgressRequested = (input: Record<string, unknown>) =>
   input.counts === true &&
   typeof input.initiativeId === 'string' &&
@@ -267,6 +269,7 @@ export const advertisedFeatures = (asked: readonly string[]) => [
   ...(asked.includes(planningInitiativeCountsFeature) ? [planningInitiativeCountsFeature] : []),
   ...(asked.includes(planningHistoryFeature) ? [planningHistoryFeature] : []),
   ...(asked.includes(planningAuditFeature) ? [planningAuditFeature] : []),
+  ...(asked.includes(planningStatusWorkerFeature) ? [planningStatusWorkerFeature] : []),
   ...hostedContractFeatures.filter(feature => asked.includes(feature)),
   ...(asked.includes('feed') ? ['feed'] : []),
 ];

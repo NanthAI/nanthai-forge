@@ -292,9 +292,12 @@ test('a writer can undo their fresh child, not abandon another author’s child'
     { action: 'put-planning-item', itemId, expectedVersion: 1, status: 'abandoned', reason: 'Undone' },
   ];
   await assert.rejects(s.batch(undo(other.itemId)), unavailable);
+  await assert.rejects(s.batch([{ ...undo(child.itemId)[0], statusPinBy: '@somebody' }]), unavailable);
   assert.equal((await s.batch(undo(child.itemId))).results[0].outcome, 'applied');
   s.caller('owner');
-  assert.equal((await s.latest(child.itemId)).status, 'abandoned');
+  const undone = await s.latest(child.itemId);
+  assert.equal(undone.status, 'abandoned');
+  assert.ok(undone.statusPin, 'Undo keeps the signed-in writer’s pin, not an asserted byline');
   assert.equal((await s.latest(other.itemId)).status, 'open');
 });
 

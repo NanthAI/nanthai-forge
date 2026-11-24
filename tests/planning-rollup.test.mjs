@@ -126,7 +126,31 @@ test('a retained pin survives an unrelated edit and is erased when the record is
   const put = resolvePlanningPut(
     { action: 'put-planning-item', itemId: id, title: 'Plan more work' },
     version,
+    pin.at,
   );
   assert.deepEqual(put.model.statusPin, pin);
   assert.equal(purgedIndexValue('planningVersions', version, id).statusPin, undefined);
+});
+
+test('a versioned manual status change receives a pin; clearing and shelving do not forge a pin', () => {
+  const itemId = 'fec7baf6-9cc3-4329-a057-1a3edb8462e5';
+  const current = { ...item(), title: 'Plan work', body: '', intentIds: [] };
+  const command = { action: 'put-planning-item', itemId, expectedVersion: 2 };
+  const changed = resolvePlanningPut({ ...command, status: 'closed', statusPinBy: pin.by }, current, pin.at);
+  assert.deepEqual(changed.model.statusPin, pin);
+  const pinned = { ...current, status: changed.status, statusPin: changed.model.statusPin };
+  assert.equal(
+    resolvePlanningPut({ ...command, statusPin: null }, pinned, pin.at).model.statusPin,
+    undefined,
+  );
+  assert.deepEqual(
+    resolvePlanningPut({ ...command, status: 'archived', statusPinBy: 'someone' }, pinned, pin.at).model
+      .statusPin,
+    pin,
+  );
+  assert.equal(
+    resolvePlanningPut({ ...command, status: 'closed' }, current, pin.at).model.statusPin,
+    undefined,
+    'a trusted automation write leaves no pin',
+  );
 });

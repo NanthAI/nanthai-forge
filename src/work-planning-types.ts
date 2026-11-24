@@ -52,6 +52,10 @@ const planningImportSchema = z.object({
     .optional(),
   batchId: id,
 });
+const statusPinActor = z
+  .string()
+  .regex(/^@?[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?(?:\/[a-z]{2,10}-[a-z]{2,10})?$/);
+const statusPinSchema = z.object({ by: statusPinActor, at: z.iso.datetime({ offset: true }) }).strict();
 const modelFields = {
   /** Hand order among siblings; absent = creation order (legacyRank). */
   order: rank.optional(),
@@ -67,19 +71,15 @@ const modelFields = {
   hidden: z.literal(true).optional(),
   imported: planningImportSchema.optional(),
   /** Retained public attribution of a manual status override. Older Items have no pin. */
-  statusPin: z
-    .object({
-      by: z.string().regex(/^@?[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?(?:\/[a-z]{2,10}-[a-z]{2,10})?$/),
-      at: z.iso.datetime({ offset: true }),
-    })
-    .strict()
-    .optional(),
+  statusPin: statusPinSchema.optional(),
   /** On an Archived or Deleted version only: the status it left, which Unarchive and Restore put back. Set by the
    * reducer, never sent by a client. */
   was: z.enum(unshelvedStatuses).optional(),
 };
 /** Model fields of a put: omitted keeps, null (relations [], hidden false) clears. */
 const modelPutFields = {
+  /** A client may clear its override, never supply pin attribution. */
+  statusPin: z.null().optional(),
   order: rank.nullable().optional(),
   type: label.nullable().optional(),
   parentId: id.nullable().optional(),
@@ -111,6 +111,7 @@ const planningPutFields = {
 };
 /** Fields a server without `planning-model` drops; the CLI refuses to send them there. */
 export const planningModelPutKeys = [
+  'statusPin',
   'order',
   'type',
   'parentId',
@@ -128,6 +129,8 @@ export const planningItemSchema = z.object({
   previousVersion: z.number().int().nonnegative(),
   ...planningFields,
   ...modelFields,
+  /** This Version's status was set by the server's Work roll-up, not the body's author. */
+  statusSource: z.literal('work').optional(),
   /** The account that last wrote this body, recorded by the hosted journal replay (S-17). Public reads
    * map it to a Forge handle (convex/publicPeople.ts); absent on local Work and on older rows. */
   author: z.string().min(1).max(200).optional(),
@@ -191,6 +194,11 @@ export const planningPutSchema = z.object({
   itemId: id,
   expectedVersion: z.number().int().nonnegative().default(0),
   ...planningPutFields,
+  /** Server-stamped attribution, never a client-selected actor. */
+  statusPinBy: statusPinActor.optional(),
+  /** A batch Undo selects a retained version. Only the server can copy its exact pin into the journal. */
+  statusPinUndo: id.optional(),
+  statusPinRestore: statusPinSchema.nullable().optional(),
   /** The writing agent session's slug (set by device session / server); dropped if off-shape. */
   agent: z.string().max(40).optional(),
   /** The writing agent session's declared client and model (`tool:model`); dropped without `agent` or off-shape. */
@@ -199,6 +207,7 @@ export const planningPutSchema = z.object({
 /** A hosted restore detached an obsolete parent edge; journal-derived, never a command argument. */
 export const retainedPlanningPutSchema = planningPutSchema.extend({
   restoredTopLevel: z.literal(true).optional(),
+  statusSource: z.literal('work').optional(),
 });
 export const planningCommentCommandSchema = z.object({
   action: z.literal('comment-planning-item'),

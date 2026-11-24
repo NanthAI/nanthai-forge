@@ -12,6 +12,7 @@ import { metadataCommandSchema } from '../src/work-intent-types';
 import {
   planningCommentPurgeSchema,
   planningPurgeSchema,
+  isShelved,
   type PlanningItem,
 } from '../src/work-planning-types';
 import { hostedRecordSchema } from '../src/hosted-records';
@@ -21,6 +22,8 @@ import { serverCommentWriter, serverPutWriter } from './planningCommentWriter';
 import { report } from './errors';
 import { activeProject } from './projectAuthority';
 import { planningTarget } from '../src/work-planning-unified';
+import { wakePlanWrite } from './projectPlanRollupWake';
+import { publicActorLabel } from './publicPeople';
 import { memberCreationUndo, memberPlanningTarget, memberPlanningWrite } from './projectPlanningWriteAccess';
 import { intentAuthority } from './projectContributors';
 import { selectedGeneration, record, recordPartition } from './projectWorkIndexStore';
@@ -31,9 +34,17 @@ import { appendWork } from './projectWork';
 import { commutativeCommand } from './projectWorkCommandRun';
 import { internalMutation } from './server';
 import { isItemRetentionOperation, itemRetentionOperation } from './projectItemRetentionStore';
-import { decisionOperationId } from '../src/work-planning-put';
+import { decisionActor, decisionOperationId } from '../src/work-planning-put';
 import { planningParent, restoredTopLevelNotice } from './projectPlanningParent';
 import { workRecordTable } from './projectWorkRecordTables';
+import { digest } from '../src/state/hash';
+
+const legacyStatusMessage =
+  'The server now follows Work status. Update Forge; planning reads no longer move Items.';
+const legacyStatusOperation = (itemId: string, version: number, suffix: string) => {
+  const h = digest(`${itemId}:${version}:${suffix}`);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+};
 
 /** Commands this revision-free mutation runs. A planning put (flip 5 S5) checks only its item version
  * (ITEM_CHANGED); the project revision is read in the same transaction, so an unrelated write never
@@ -55,6 +66,10 @@ export async function executeCommand(
     planningTick?: true;
     /** Trusted parent-move notes have fixed server text and the project as their author. */
     planningMoveNote?: true;
+    /** The worker itself owns the continuation after this Version. */
+    fromRollup?: true;
+    /** Only the retained close receipt selects a version other than the immediate predecessor. */
+    undoClosePins?: true;
     onPlanningBatchState?: (
       state: ({ replayed: true } | { before: PlanningItem | null }) & { notice?: string },
     ) => void;
@@ -68,11 +83,13 @@ export async function executeCommand(
   const project = options.planning?.project ?? (await activeProject(ctx, input.projectId, user.subject));
   let parsed;
   let assertsRestore = false;
+  let assertsSource = false;
   try {
     // The server's purge steps send only a purge (an Item's or one comment's); every other caller only client
     // commands, never a purge.
     const raw = JSON.parse(input.command);
     assertsRestore = raw?.action === 'put-planning-item' && raw.restoredTopLevel !== undefined;
+    assertsSource = raw?.action === 'put-planning-item' && raw.statusSource !== undefined;
     parsed = (
       !options.purge
         ? metadataCommandSchema
@@ -85,7 +102,8 @@ export async function executeCommand(
   }
   invariant(parsed.success, 'BAD_ARGUMENT', 'Send a supported hosted Work command.');
   invariant(!assertsRestore, 'BAD_ARGUMENT', 'Only Forge marks a restore top level.');
-  const command: typeof parsed.data & { restoredTopLevel?: true } = parsed.data;
+  invariant(!assertsSource, 'BAD_ARGUMENT', 'Only Forge attributes an automatic status.');
+  const command: typeof parsed.data & { restoredTopLevel?: true; statusSource?: 'work' } = parsed.data;
   invariant(commutativeCommand(command), 'BAD_ARGUMENT', 'Use the pinned action for this Work command.');
   invariant(
     /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.operationId),
@@ -124,6 +142,21 @@ export async function executeCommand(
       if (!options.planningMoveNote) await serverCommentWriter(ctx, command, project);
     }
     if (command.action === 'put-planning-item') {
+      invariant(
+        command.statusPinBy === undefined && command.statusPinRestore === undefined,
+        'BAD_ARGUMENT',
+        'Pin attribution comes from the signed-in writer.',
+      );
+      invariant(
+        !command.statusPinUndo || (options.onPlanningBatchState && command.statusPin === undefined),
+        'BAD_ARGUMENT',
+        'Restore a previous pin through a versioned batch Undo.',
+      );
+      invariant(
+        command.statusPin !== null || command.expectedVersion > 0,
+        'BAD_ARGUMENT',
+        'Select the current version of an existing planning Item to clear its pin.',
+      );
       if (command.agent === undefined && command.agentClient === undefined) {
         rawPutCommand = JSON.stringify(command);
         rawPutRequest = metadataRequest(command);
@@ -172,6 +205,30 @@ export async function executeCommand(
       ...(restored ? { notice: restoredTopLevelNotice } : {}),
     });
     return original;
+  }
+  // Older CLI/MCP reads and final ticks issued deterministic status/hold writes. Do not bypass
+  // current children, pin or linked Work facts. Historical retries returned above.
+  if (command.action === 'put-planning-item') {
+    invariant(
+      !(
+        (command.status === 'closed' || command.status === 'abandoned') &&
+        command.operationId === legacyStatusOperation(command.itemId, command.expectedVersion, command.status)
+      ) && command.operationId !== legacyStatusOperation(command.itemId, command.expectedVersion, 'held'),
+      'HOSTED_ACTION_UNSUPPORTED',
+      legacyStatusMessage,
+    );
+    if (options.fromRollup) command.statusSource = 'work';
+  } else if (
+    command.action === 'comment-planning-item' &&
+    /^Intent completed; \d+ Done-when line\(s\) still open, so this Issue stays open\. Open: /.test(
+      command.text,
+    ) &&
+    command.text.endsWith(
+      `Tick each line with its evidence: nforge agent . tick-planning-item '{"planningItemId":"${command.itemId}","line":1,"evidence":"…"}' (line: the checkbox's position or a unique text prefix); the last tick closes the Issue.`,
+    )
+  ) {
+    // These old comments carry no expectedVersion; even a stale one has the same generated text envelope.
+    invariant(false, 'HOSTED_ACTION_UNSUPPORTED', legacyStatusMessage);
   }
   // Recovery notices belong to canonical hosted Intents, while this endpoint also updates Work.
   // Keep both writes in this mutation, after the original-operation replay guard above.
@@ -335,6 +392,49 @@ export async function executeCommand(
           })),
         },
   );
+  const planBefore =
+    command.action === 'put-planning-item'
+      ? commandValues(rows, 'planningItems').find(item => item.id === command.itemId)
+      : undefined;
+  if (command.action === 'put-planning-item' && command.statusPinUndo) {
+    invariant(
+      planBefore && planBefore.version === command.expectedVersion,
+      'ITEM_CHANGED',
+      'The Item changed after the batch. Nothing was undone.',
+    );
+    const priorRow = await load('planningVersions', command.statusPinUndo);
+    const priorRows = [priorRow];
+    await commandPayloadRows(priorRows, lookup);
+    const previous = commandValues(priorRows, 'planningVersions')[0] as PlanningItem | undefined;
+    invariant(
+      previous &&
+        previous.id === planBefore.id &&
+        previous.status === (command.status ?? planBefore.status) &&
+        (options.undoClosePins
+          ? previous.version < planBefore.version
+          : previous.version === planBefore.version - 1),
+      'BAD_ARGUMENT',
+      'Undo can restore only the selected Item’s previous status and pin.',
+    );
+    command.statusPinRestore = previous.statusPin ?? null;
+  }
+  if (
+    command.action === 'put-planning-item' &&
+    command.status &&
+    command.statusPinUndo === undefined &&
+    !isShelved(command.status) &&
+    command.statusPin !== null &&
+    (!options.server || options.planningClose)
+  ) {
+    if (
+      planBefore &&
+      !isShelved(planBefore.status) &&
+      planBefore.status !== command.status &&
+      planBefore.version === command.expectedVersion
+    )
+      command.statusPinBy =
+        decisionActor(await publicActorLabel(ctx, user.subject, command.agent, true)) || 'member';
+  }
   const revision = generation.revision;
   const projectCommand = () =>
     commandProjection(
@@ -441,6 +541,22 @@ export async function executeCommand(
       : {}),
     ...(options.server ? { server: true as const } : {}),
   });
+  const planned =
+    !options.fromRollup &&
+    !options.planningImport &&
+    command.action === 'put-planning-item' &&
+    projection.entries.find(entry => entry.collection === 'planningItems');
+  if (planned && planned.value)
+    await wakePlanWrite(
+      ctx,
+      {
+        projectId: input.projectId,
+        partition: recordPartition(generation),
+        cause: input.operationId,
+      },
+      planBefore,
+      JSON.parse(planned.value),
+    );
   if (shift && current && command.action === 'put-planning-item') {
     // A writer can move an Item to its parent's Initiative but cannot post arbitrary Initiative comments.
     const initiatives = commandValues(rows, 'initiatives') as PlanningItem[];

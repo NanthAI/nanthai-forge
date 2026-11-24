@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// A start shows its Item as in progress for every member (Item d3357f40, lead 2026-11-19). Planning writes are the
-// project owner's, so a member's own status write after a start is refused. The start schedules this action instead
-// when the starter is not the owner, and the server moves the Issue, as the owner, from open to in progress. A proposed
-// Issue stays proposed: approving a proposal is the owner's call (lead 2026-11-19, as maintainers triage on GitHub).
-// Only an Issue moves; an Initiative or any other kind never does, whatever id the start names. It runs once per such
-// start, after the start committed, so a planning failure never fails the start.
-// Cost: one Work generation read, one planning-item lookup, and one Work command only when the status moves. The
-// owner's own start writes nothing here: their client already sets the status, and claims the Item, in one write.
+// One hook after any planned start commits. Keep the member's direct move; always forward the work signal,
+// including when a Proposed or pinned Item keeps its status.
 import { v } from 'convex/values';
 import { internalAction } from './server';
 import { ownerPlanningCommand } from './projectOwnerPlanning';
+import { rollupWake } from './projectPlanRollupWake';
 import { digest } from '../src/state/hash';
 
 /** The server's own operation id for a start's status move: stable across retries of the same start, and distinct per
@@ -44,25 +39,31 @@ export const move = internalAction({
   },
   returns: v.null(),
   handler: async (ctx, { projectId, owner, itemId, actor = '', startOperationId }) => {
-    await ownerPlanningCommand(
-      ctx,
-      projectId,
-      owner,
-      item =>
-        // An Issue only (a stored item names its kind), and only when open: a stored item without a status is open (the
-        // planning schema's default); proposed waits for the owner; closed, abandoned and in progress stay as they are.
-        item && item.kind === 'issue' && (item.status ?? 'open') === 'open'
-          ? {
-              action: 'put-planning-item',
-              operationId: startMoveOperationId({ projectId, itemId, actor, startOperationId }),
-              itemId,
-              expectedVersion: item.version,
-              status: 'in-progress',
-              reason: 'Lane started',
-            }
-          : null,
-      itemId,
-    );
+    const cause = startMoveOperationId({ projectId, itemId, actor, startOperationId });
+    let moved = false;
+    try {
+      if (actor !== owner)
+        moved = await ownerPlanningCommand(
+          ctx,
+          projectId,
+          owner,
+          item =>
+            item && item.kind === 'issue' && (item.status ?? 'open') === 'open' && !item.statusPin
+              ? {
+                  action: 'put-planning-item',
+                  operationId: cause,
+                  itemId,
+                  expectedVersion: item.version,
+                  status: 'in-progress',
+                  reason: 'Lane started',
+                }
+              : null,
+          itemId,
+        );
+    } finally {
+      // A member move already wakes from the shared Plan write in the same transaction.
+      if (!moved) await ctx.scheduler.runAfter(0, rollupWake, { projectId, itemId, cause, source: 'start' });
+    }
     return null;
   },
 });

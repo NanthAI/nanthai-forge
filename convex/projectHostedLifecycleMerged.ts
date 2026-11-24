@@ -49,14 +49,18 @@ export const completeMerged = mutation({
       let sequence = input.sequence,
         page = input.page,
         inspected = 0;
-      for (const row of receipts) {
+      let exhausted = false;
+      receiptPages: for (const row of receipts) {
         const receipt = receiptSchema.parse(JSON.parse(row.value));
         const plan = receipt.completion.enabled
           ? null
           : await acceptancePlan(ctx, { projectId: input.projectId, receiptId: row.receiptId });
         for (; plan && page < plan.inputPages; page++) {
-          if (inspected >= ENTRIES)
-            return canonicalPayload({ completed, next: { sequence: row.sequence, page }, done: false });
+          if (inspected >= ENTRIES) {
+            sequence = row.sequence;
+            exhausted = true;
+            break receiptPages;
+          }
           const stored = await acceptancePage(ctx, {
             projectId: input.projectId,
             receiptId: row.receiptId,
@@ -104,11 +108,12 @@ export const completeMerged = mutation({
           authorityEpoch: input.authorityEpoch,
           intentId,
           at: new Date().toISOString(),
+          planningCause: `complete-merged:${input.sequence}:${input.page}:${intentId}`,
         });
       return canonicalPayload({
         completed,
         next: { sequence, page },
-        done: receipts.length < RECEIPTS,
+        done: !exhausted && receipts.length < RECEIPTS,
       });
     } catch (error) {
       return report(error);

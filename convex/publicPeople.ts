@@ -258,9 +258,10 @@ export async function publicActorLabel(
   ctx: QueryCtx | MutationCtx,
   actor: string,
   agent?: string | null,
+  authenticated?: true,
 ): Promise<string> {
-  const found = await databaseLookup(ctx, null)(actor);
-  const label = found.person ? (found.handle ?? '') : actor;
+  const found = await databaseLookup(ctx, authenticated ? actor : null)(actor);
+  const label = found.person || authenticated ? (found.handle ?? '') : actor;
   return label ? agentActor(label, agent) : '';
 }
 

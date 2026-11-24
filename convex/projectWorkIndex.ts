@@ -35,6 +35,7 @@ import { countedInitiative, planningFilter, planningPage } from './projectPlanni
 import { readsStore, storeItem, storeItemRow, storePage } from './projectWorkStoreReads';
 import type { PlanningTimesRead } from './projectPlanningTimes';
 import { linkedLandingCursor, withLandingNotes } from './projectWorkIndexLandingNotes';
+import { readRollupCatchup } from './projectPlanRollupCatchupStore';
 const selection = {
   projectId: v.id('hostedProjects'),
   generationId: v.optional(v.id('projectWorkGenerations')),
@@ -44,9 +45,13 @@ const identity = {
   revision: v.union(v.number(), v.null()),
 };
 export const workspace = query({
-  args: { projectId: v.id('hostedProjects'), planningDuplicateText: v.optional(v.string()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    planningDuplicateText: v.optional(v.string()),
+    planningRollup: v.optional(v.literal(true)),
+  },
   returns: v.union(v.string(), v.null()),
-  handler: async (ctx, { projectId, planningDuplicateText }) => {
+  handler: async (ctx, { projectId, planningDuplicateText, planningRollup }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
@@ -77,6 +82,9 @@ export const workspace = query({
         ...(planningDuplicateText === undefined
           ? {}
           : { likelyDuplicates: await likelyPlanningDuplicates(ctx, project, planningDuplicateText) }),
+        ...(planningRollup
+          ? { rollupCatchup: await readRollupCatchup(ctx, project, recordPartition(generation)) }
+          : {}),
         autonomyPolicy: effectivePolicy(project),
         ...(project.needsFix ? { needsFix: needsFix(project) } : {}),
         githubMirror: await githubMirrorStatus(ctx, project),

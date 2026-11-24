@@ -113,7 +113,7 @@ export function applyUnifiedPlanning(
       expectedVersion: command.expectedVersion,
       currentVersion: current?.version ?? 0,
     });
-  const put = resolvePlanningPut(command, current);
+  const put = resolvePlanningPut(command, current, at);
   invariant(
     put.kind === 'initiative' ? !target.intent : !target.initiative,
     'BAD_ARGUMENT',

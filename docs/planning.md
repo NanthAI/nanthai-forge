@@ -151,15 +151,15 @@ Stored status words never change. Screens and agent replies show the visible wor
 
 Status follows real work. Starting a Lane from a Planned Item moves it to In progress. The Item keeps its
 Intent link, and Work follows that Intent to the Lane and its check and acceptance evidence. A landing posts
-its receipt to the Item even if the agent is no longer running. A landing that completes the Intent lets the
-next reconciling planning read close the Item, without a manual status edit. If any Done-when lines remain
-open, the Item stays open and the read names the remaining lines. These are the body's Markdown task lines
+its receipt to the Item even if the agent is no longer running. When a landing completes the Intent, the
+planning worker checks whether to close the Item; no planning read or running agent is needed. If any Done-when
+lines remain open, the Item stays open and a planning read can name the remaining lines without writing a Version. These are the body's Markdown task lines
 (`- [ ]` and `- [x]`); planning rows carry their count as `doneWhen: [ticked, total]`.
 Put `@due YYYY-MM-DD` before the text of an unchecked line to date it. The agent Loose ends read lists the earliest
 pending date on each open Issue, with the exact line number in its body. Dates are calendar dates in UTC and the Issue
 body retains every annotation, including dates that have been checked off.
 
-### Status roll-up (design; not yet active)
+### Status roll-up
 
 New Plan partitions maintain exact direct Item membership counts for parents and Initiatives. Counts include hidden Items and exclude Archived and Deleted Items; a move updates the old and new scopes together. Older partitions report unknown child coverage until an explicit bounded preparation finishes. Partial counts never authorize automatic status changes.
 
@@ -168,8 +168,9 @@ New Plan partitions maintain exact direct Item membership counts for parents and
   of starting when there is still open work in the scope. Proposed Items still require planning; a Proposed or
   pinned ancestor does not stop the start signal from reaching the next level.
 - **Done.** An Item closes when its own Done-when lines are met and its children are settled (Done or Abandoned).
-  An Item with linked work still needs that work to finish. A parent without its own Lane can close after its
-  last child settles. An unstarted leaf without a checklist does not close merely because it has nothing to tick.
+  An Item with linked work still needs that work to finish. Completing the last Lane outside a landing also
+  checks the Item. Abandoning a Lane never abandons its Item or prevents another start. A parent without
+  its own Lane can close after its last child settles. An unstarted leaf without a checklist does not close merely because it has nothing to tick.
   After the last child settles, a parent with unchecked lines stays open and the Item shows the remaining lines.
   An Initiative closes when it has at least one Item, every Item in it is settled and its own Done-when lines are
   met. It becomes Abandoned if all its Items were Abandoned, or Done if any Item was Done. The reason names the
@@ -182,7 +183,8 @@ New Plan partitions maintain exact direct Item membership counts for parents and
 - **Override.** An explicit manual status change pins that Item or Initiative. Its status shows who pinned it
   and when, from the retained version. Editing the title or checklist does not pin it. Automation, including
   start and completion, leaves the pinned status alone, but still forwards facts about the children and updates
-  the rest of the tree. A pinned Done Item counts as Done in its Initiative; a pin does not settle its descendants.
+  the rest of the tree. An Initiative still counts each Item once and a pinned Done Item counts as Done there;
+  pinned or Proposed Items can pass along evidence of starting. A pin does not settle its descendants.
   Close and bulk status changes pin each changed row. On the web choose **Follow work** in the status menu;
   in CLI or MCP use `put-planning-item` with the current `expectedVersion` and `fields: {"statusPin": null}`.
   The member Item or Initiative reply shows `statusPin` with who and when; clearing starts the same evaluation
@@ -198,6 +200,10 @@ New Plan partitions maintain exact direct Item membership counts for parents and
   This setting does not change Lane creation, completion, acceptance or autonomy policy. Direct counter facts
   are still maintained while off. Switching back on starts one bounded catch-up using the existing recompute
   path; it does not wait for another Lane or schedule recurring work.
+
+The Board shows each Initiative on one line with its status and **x of y Items done**. There is no stuck status
+or inactivity timer. Status changes only through an explicit action or this work roll-up. Agents ask before moving
+anyone else’s work out of In progress, even when pivoting.
 
 Automatic changes append ordinary retained planning versions, not a separate history. Versions and History say
 what changed and why, with a Forge actor and a rule such as “Done: last child closed”. CLI, MCP and the web use
@@ -227,7 +233,7 @@ idle call or extra client round trip.
 | Planning status work for one linked Item landing | Before | Design budget after |
 | --- | --- | --- |
 | Acceptance and required completion | No planning status read or write in the acceptance transaction. Completion already schedules the Work fold. | No added read, write or call on acceptance or required completion. Start evaluation in the existing background Work fold. |
-| Item closure | No status change without a reconciling read or last tick. Reconciliation reads the Intent state (one point read, in the page query), reads the selected Item, then appends one ordinary status version; an unticked checklist can instead append one hold version and one comment. | Reuse the fold's project and Item root, read at most one child tally plus one Intent head for the Item, and append zero or one ordinary status version. Replace the closing read and hold writes; clients no longer drive status. |
+| Item closure | No status change without a reconciling read or last tick. Reconciliation reads the Intent state (one point read, in the page query), reads the selected Item, then appends one ordinary status version; an unticked checklist can instead append one hold version and one comment. | The fold schedules the background check for settled work. The check fences the project, Plan partition and coverage, reads the Item root, linked Intent heads and one direct scope, and appends zero or one ordinary status version. No closing read or hold writes. |
 | Propagation | Zero reads and writes for parents and Initiatives. | Per affected target: at most one root and one tally read for the decision, one counter update per changed contribution, and zero or one ordinary status version. Pages share scope reads and the scheduler continuation; stable facts and disabled roll-up add no ancestor step. |
 
 For one landing that closes one Item, the old status path selects two records (Intent state and the Item, not
@@ -247,19 +253,26 @@ not width. Measure it off the acceptance critical path rather than assuming a sc
 
 #### Existing Plans
 
-Before making decisions from the new counters, a one-time recompute builds complete coverage in a selected
-partition, then evaluates statuses from the leaves up. Use indexed pages of at most 50 roots and a 256 KiB compact
-working page, with a saved cursor and a revision fence. Interleaved writes must be accounted for before publishing
-coverage. An incomplete pass supplies no zero counts and cannot produce an automatic close. No source bytes move.
+Before making decisions from the new counters, prepare complete scope coverage in the selected partition with
+`projectPlanCounts:prepareScopes`. Re-enable catch-up evaluates children, then top-level Items, then Initiatives,
+one indexed page per transaction (up to 50 roots and 256 KiB). The same Work partition retains the cursor and current
+pass. Re-enabling uses current rows in that partition, so ordinary Plan edits do not interrupt the pass. A replaced
+partition or incomplete facts stop catch-up rather than guessing a status from a partial tally. Ordinary CLI and MCP
+Plan and Item reads include `rollupCatchup` with the pass status, number of moves and any stop reason. An import
+checks tally coverage once per committed page and keeps the imported statuses. No source bytes move.
 
-For an initial, lead-approved **dev-only** run on a Plan of about 1,300 roots, budget two root passes (about 2,600
-root reads before point reads and status appends), at most one status append per changed root, and a cumulative
+For an initial, lead-approved **dev-only** run on a Plan of about 1,300 roots, budget the preview plus three ordered
+root passes (about 5,200 root reads before point reads and status appends), at most one status append per changed root,
+and a cumulative
 stop of **0.10 GB billed Convex database I/O ($0.02 at $0.20/GB)**, including index I/O, retries and a reserve for
 the final page. Pilot one page within **0.01 GB** of that total. Run a read-only preview first and record the would-be
 changes by kind and from/to status. The preview reads a single Plan revision and returns compact facts, not Item text
 or pin attribution. Fragmented or unreadable facts and cycles are reported as incomplete; do not apply an incomplete
-preview. The apply pass must recheck linked Intent stamps as well as the Plan revision: a Lane can move without an
-Item edit. Do not apply if even one pinned or Proposed row would move. Compare provider usage before allowing the next batch, and stop if the next batch plus the reserve will not fit. Function reply byte
+preview. After approval, `projectPlanRollupCatchup:applyApproved` retains the exact proposed changes and returns the
+partition. Before each `projectPlanRollupCatchup:page`, compare provider usage and stop if the next page plus the reserve
+will not fit. `projectPlanRollupCatchup:status` reports the retained step, outcome and reason for a partial result. Each
+approved move rechecks the live facts and linked Intent stamp as well as the Plan revision: a Lane can move without an
+Item edit. Do not apply if even one pinned or Proposed row would move. Function reply byte
 estimates are not billing ceilings. Verify the resulting Initiative statuses with the owner on dev; this does not
 authorize a production run.
 

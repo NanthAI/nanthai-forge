@@ -25,8 +25,14 @@ export const memberCreationUndo = (command: Extract<PlanningWrite, { action: 'pu
 
 /** The enclosing Work mutation has already checked the current write role and device scope. Keep every other
  * planning operation owner-only, including versions restore (title + body), close, shelf moves and purge. */
-export function memberPlanningWrite(command: PlanningWrite, tick: boolean) {
+export function memberPlanningWrite(command: PlanningWrite, tick: boolean, projected?: true) {
   if (command.action === 'comment-planning-item') return Boolean(tick && command.decision && command.line);
+  // Only the internal append's already-authorized projection can carry a server-derived Undo pin.
+  if (projected && command.statusPinBy !== undefined) {
+    const requested = { ...command };
+    delete requested.statusPinBy;
+    return !tick && memberCreationUndo(requested);
+  }
   if (command.expectedVersion === 0)
     return (
       command.status === 'open' &&

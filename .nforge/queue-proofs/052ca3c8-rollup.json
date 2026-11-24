@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedAcceptanceCompletion.ts": "19d1eec8bff986ff99aa8094181123d74f9ae9390b9a226737d5701c2c148879",
+    "convex/projectHostedAcceptanceFields.ts": "d7077815cf43c7da00a9f0e462a3936afdae3aa2112fe2c570543bf568728589"
+  },
+  "replay": {
+    "incident": "5e3c3a3c",
+    "test": "incident 5e3c3a3c: passed followers land within the pass-to-land ceiling while the holder re-checks",
+    "receipt": "0eca6b5c-a1bb-480e-bc49-eb7838ec6731"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A8b0caf41-aa3a-4f13-90a0-360dde6f8f1f",
+  "review": {
+    "model": "claude-opus-5-5",
+    "session": "752814a3-fdbc-459c-852c-378e0a7c2a13",
+    "receipt": "797a2ab8-94bb-4735-b173-b1ab2d1d6ac2"
+  },
+  "exercised": {
+    "convex/projectHostedAcceptanceFields.ts": {
+      "executed": [
+        "acceptanceWorkItems"
+      ],
+      "digest": "8afd85e080053eddfe32669ea737bcaa97edce38041199c0fb1033981a53f7b2",
+      "units": [
+        [
+          "acceptanceWorkItems",
+          "a595fe2bc267272637e5bba15a64c7917bc633a21ef0d555ceb552b03bcde04c"
+        ],
+        [
+          "defineTable",
+          "b47c67ba5772cdb88aa4a6b681e8b5447b2dc09879b915898b6f088274e1b34b"
+        ],
+        [
+          "hostedAcceptanceTables",
+          "0fb46ff9ba99fead65eb9db3bb7ad0c776ec58ff68a238c78b84abbb0a131737"
+        ],
+        [
+          "identity",
+          "b8ee50c846ed8205538f2012653ec55e6b9e8776eb1e9e31e3c6583fd425a56e"
+        ],
+        [
+          "landingNoteBy",
+          "56b6edc7dbbd1d4b84a86a76469466e451a7d6438bf982c442940d5b34eb265b"
+        ],
+        [
+          "pin",
+          "3d4860e59e2c2dd1dfdf06262d13d573c59c78c503e47324401e7bf8d38d84cf"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ],
+      "shell": "0be361655679b76526defd2d54fb930355b965e45765421f3a3c8ea366f2cae5"
+    }
+  }
+}

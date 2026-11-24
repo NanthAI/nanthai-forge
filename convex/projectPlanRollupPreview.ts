@@ -5,15 +5,12 @@ import { internalQuery } from './server';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { workRecordTable } from './projectWorkRecordTables';
 import { generationHead } from './projectWorkHead';
-import { currentPlanningIntentHead } from './projectPlanningIntentState';
+import { rollupChecklist, rollupWorkReader, rollupWorkStamp } from './projectPlanRollupFacts';
 import { invariant } from '../src/errors';
-import { digest } from '../src/state/hash';
-import { planningTaskLines, proseDoneWhenLines } from '../src/planning-search';
 import { isShelved, planningItemSchema, type PlanningItem } from '../src/work-planning-types';
-import type { RollupWork } from '../src/planning-rollup';
 
 // One-time operator tool: bind to the same approved Forge development deployment as storage retirement.
-const approvedDev = 'https://benevolent-wildebeest-974.convex.cloud';
+export const approvedDevRollup = 'https://benevolent-wildebeest-974.convex.cloud';
 const PAGE = 50;
 const BYTES = 256 * 1024;
 // This budgets operator probes, not the number of Intents an Item can link. An incomplete
@@ -22,20 +19,6 @@ const INTENT_KEYS = 150;
 const fence = v.object({ generation: v.id('projectWorkGenerations'), revision: v.number() });
 const statuses = planningItemSchema.shape.status.unwrap().options;
 const status = v.union(...statuses.map(word => v.literal(word)));
-
-function checklist(body: string) {
-  let checked = 0;
-  let unchecked = 0;
-  let structured = false;
-  for (const { match } of planningTaskLines(body.split('\n'))) {
-    structured = true; // A moved line is no longer an obligation and needs no tick.
-    if (match[2] === ' ') unchecked++;
-    else if (match[2] !== '~') checked++;
-  }
-  // A prose-only Done-when section needs manual review, not a guessed successful tick.
-  if (!structured) unchecked += proseDoneWhenLines(body).length;
-  return { checked, unchecked };
-}
 
 type PreviewRoot = PlanningItem & { payload?: true; payloadKey?: string };
 
@@ -79,7 +62,7 @@ export const page = internalQuery({
   }),
   handler: async (ctx, args) => {
     invariant(
-      process.env.CONVEX_CLOUD_URL === approvedDev,
+      process.env.CONVEX_CLOUD_URL === approvedDevRollup,
       'HOSTED_ACTION_UNSUPPORTED',
       'Planning roll-up preview is not enabled on the selected dev deployment.',
     );
@@ -107,7 +90,7 @@ export const page = internalQuery({
       'WORK_STALE',
       'The bounded preview could not advance.',
     );
-    const readHeads = new Map<string, ReturnType<typeof currentPlanningIntentHead>>();
+    const read = rollupWorkReader(ctx, args.projectId, INTENT_KEYS);
     const rows = await Promise.all(
       source.page.map(async row => {
         const item: PreviewRoot = JSON.parse(row.value);
@@ -121,35 +104,7 @@ export const page = internalQuery({
         if (isShelved(item.status) || item.purged) return null;
         // A compact payload may omit both the pin and links. Never interpret that as unpinned or unlinked.
         const fragmented = Boolean(item.payload || item.payloadKey || typeof item.body !== 'string');
-        const ids =
-          item.kind === 'issue' && !fragmented ? [...new Set([item.id, ...(item.intentIds ?? [])])] : [];
-        const supported =
-          !fragmented && readHeads.size + ids.filter(id => !readHeads.has(id)).length <= INTENT_KEYS;
-        const heads = supported
-          ? await Promise.all(
-              ids.map(id => {
-                let read = readHeads.get(id);
-                if (!read) {
-                  read = currentPlanningIntentHead(ctx, args.projectId, id);
-                  readHeads.set(id, read);
-                }
-                return read;
-              }),
-            )
-          : [];
-        const live = heads.flatMap(head =>
-          head && !head.status.startsWith('journal:') ? [head.status] : [],
-        );
-        const incomplete = !supported || heads.slice(1).some(head => !head);
-        const work: RollupWork = incomplete
-          ? 'unknown'
-          : live.some(s => s !== 'completed' && s !== 'abandoned')
-            ? 'active'
-            : live.includes('completed')
-              ? 'completed'
-              : live.length
-                ? 'abandoned'
-                : 'none';
+        const { work, heads } = fragmented ? { work: 'unknown' as const, heads: [] } : await read.read(item);
         return {
           id: item.id,
           kind: item.kind,
@@ -158,14 +113,10 @@ export const page = internalQuery({
           ...(item.parentId ? { parentId: item.parentId } : {}),
           ...(item.initiativeId ? { initiativeId: item.initiativeId } : {}),
           ...(item.statusPin ? { pinned: true as const } : {}),
-          ...(incomplete ? { incomplete: true as const } : {}),
-          ...(fragmented ? { checked: 0, unchecked: 1 } : checklist(item.body)),
+          ...(work === 'unknown' ? { incomplete: true as const } : {}),
+          ...(fragmented ? { checked: 0, unchecked: 1 } : rollupChecklist(item.body)),
           work,
-          workStamp: digest(
-            JSON.stringify(
-              heads.map(head => (head ? [head.key, head.recordId, head.version, head.status] : null)),
-            ),
-          ),
+          workStamp: rollupWorkStamp(heads),
         };
       }),
     );
@@ -174,7 +125,7 @@ export const page = internalQuery({
       from: args.after,
       after: source.isDone ? null : last!,
       rootsRead: source.page.length,
-      intentKeys: readHeads.size,
+      intentKeys: read.calls,
       rows: rows.filter(row => row !== null),
     };
   },

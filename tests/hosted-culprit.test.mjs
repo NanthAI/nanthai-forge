@@ -1955,6 +1955,11 @@ test('593fc2d7: a full green at or after a needs-fix notice clears it; an older 
   const { intentId } = JSON.parse(f.recovery().recovery);
   const notice = (await f.readIntent(intentId)).needsFix;
   assert.equal(notice.state, 'needs-fix');
+  const intentHead = [...f.tables.projectHostedRecordHeads.values()].find(
+    row => row.kind === 'intent' && row.key === intentId,
+  );
+  const itemId = randomUUID();
+  f.patch('projectHostedRecordHeads', intentHead._id, { planningItemId: itemId });
   const reverted = Array.from({ length: 21 }, () => randomUUID());
   const project = () => f.tables.hostedProjects.get(f.projectId);
   // Reverted notices recorded first (insertion order) never crowd the clearable one out of the 20 read.
@@ -1983,6 +1988,11 @@ test('593fc2d7: a full green at or after a needs-fix notice clears it; an older 
     cleared.status,
     'completed',
     'the notice reopened a landed Intent; its fix on main completes it',
+  );
+  await clear(notice.sequence);
+  assert.deepEqual(
+    f.scheduled.filter(task => task.name === 'projectPlanRollup:advance').map(task => task.args.itemId),
+    [itemId],
   );
 });
 

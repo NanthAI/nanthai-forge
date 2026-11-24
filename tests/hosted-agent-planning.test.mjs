@@ -28,6 +28,7 @@ import {
   MAX_CONTRACT_FEATURES,
   planningInitiativeCountsFeature,
   planningHistoryFeature,
+  planningStatusWorkerFeature,
   planningWaitingFeature,
 } from '../dist/hosted-contract-features.js';
 import { printedReceipt } from '../dist/receipt-slim.js';
@@ -64,6 +65,37 @@ const itemWork = await import(moduleUrl('../convex/projectItemWork.ts'));
 const planningBatch = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
 const { move, startMoveOperationId } = await import(moduleUrl('../convex/projectPlanningStart.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
+const { advance: advancePlanStatus } = await import(moduleUrl('../convex/projectPlanRollup.ts'));
+const workerFeatures = [
+  ...hostedContractFeatures,
+  planningInitiativeCountsFeature,
+  planningStatusWorkerFeature,
+];
+async function publishPlanWork(s, itemId, status) {
+  if (status) {
+    const old = [...s.tables.projectHostedRecordHeads.values()].find(
+      row => row.kind === 'intent' && row.key === itemId,
+    );
+    if (old) await s.ctx.db.patch(old._id, { status, version: old.version + 1 });
+    else
+      await s.ctx.db.insert('projectHostedRecordHeads', {
+        projectId: s.projectId,
+        key: itemId,
+        kind: 'intent',
+        status,
+        version: 1,
+        parent: '',
+        recordId: randomUUID(),
+      });
+  }
+  return advancePlanStatus._handler(s.ctx, {
+    projectId: s.projectId,
+    partition: s.tables.hostedProjects.get(s.projectId).work.generationId,
+    cause: randomUUID(),
+    source: 'plan',
+    itemId,
+  });
+}
 
 /** The agent's port over the real Convex handlers; Intent states are the one stub (tested with
  * the Convex lanes fixture). Counts every Convex call the agent makes. The real handlers keep
@@ -238,9 +270,9 @@ test('active search hides settled Items and an explicit Closed search finds both
   assert.ok(more.items.every(item => item.status === 'closed' || item.status === 'abandoned'));
 });
 
-test('reconciliation closes an Item from its completed hosted Intent, but reports open Done-when lines', async t => {
+test('the worker closes an Item from its completed hosted Intent; planning reads report open lines without writing', async t => {
   const s = await setup(t);
-  const p = port(s, new Map(), undefined, true);
+  const p = port(s, new Map(), workerFeatures, true);
   const { writeHostedRecord } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
   const { completeIntentWhenLanesDone } = await import(
     moduleUrl('../convex/projectHostedIntentCompletion.ts')
@@ -303,7 +335,10 @@ test('reconciliation closes an Item from its completed hosted Intent, but report
       await completeIntentWhenLanesDone(ctx, { projectId, actor, authorityEpoch, at, intentId: itemId }),
       true,
     );
+    await publishPlanWork(s, itemId);
+    const eventCount = s.tables.projectWorkEvents.size;
     const after = await list(p, reading);
+    assert.equal(s.tables.projectWorkEvents.size, eventCount);
     assert.equal(after.item.intent, 'completed');
     assert.equal(after.item.status, met ? 'closed' : 'in-progress');
     if (!met) {
@@ -1085,14 +1120,17 @@ test('on a server before planning-put-mutation a repeated operation replays, a l
   );
 });
 
-test('a completed Intent closes its Issue only when every Done-when line is ticked; otherwise it holds and says how many are left', async t => {
+test('a completed Intent closes its Item only when every Done-when line is ticked; reads name the remaining lines', async t => {
   const s = await setup(t),
-    p = port(s);
+    p = port(s, new Map(), workerFeatures);
   const body = ticks => `Why\n\nDone when:\n${ticks.map(tick => `- [${tick}] line`).join('\n')}`;
   const unmet = (await put(p, { kind: 'issue', title: 'Unmet', body: body(['x', ' ', ' ']) })).result;
   const met = (await put(p, { kind: 'issue', title: 'Met', body: body(['x', 'x']) })).result;
   const plain = (await put(p, { kind: 'issue', title: 'No checklist', body: 'Just words' })).result;
-  for (const id of [unmet.itemId, met.itemId, plain.itemId]) p.states.set(id, 'completed');
+  for (const id of [unmet.itemId, met.itemId, plain.itemId]) {
+    p.states.set(id, 'completed');
+    await publishPlanWork(s, id, 'completed');
+  }
   const read = await list(p);
   const status = Object.fromEntries(read.items.map(item => [item.id, item.status]));
   assert.deepEqual(status, {
@@ -1104,25 +1142,25 @@ test('a completed Intent closes its Issue only when every Done-when line is tick
     read.reconciled.held.map(held => [held.id, held.openLines]),
     [[unmet.itemId, 2]],
   );
-  assert.equal(read.reconciled.changed.length, 2);
-  // Ticking the lines is the explicit step; the next read closes the Issue (no further Intent change).
+  assert.deepEqual(read.reconciled.changed, []);
+  // The final checklist change re-evaluates the completed Work without another Intent transition.
   await put(p, {
     kind: 'issue',
     itemId: unmet.itemId,
-    // The hold wrote its marker once (version + 1) after the comment.
-    expectedVersion: unmet.version + 1,
+    expectedVersion: unmet.version,
     title: 'Unmet',
     body: body(['x', 'x', 'x']),
     status: 'open',
   });
+  await publishPlanWork(s, unmet.itemId);
   const after = await list(p);
   assert.equal(after.items.find(item => item.id === unmet.itemId).status, 'closed');
-  assert.equal(after.reconciled.held, undefined);
+  assert.equal(after.reconciled, undefined);
 });
 
-test('a completed Intent holds an Issue with unticked or untickable Done-when lines, comments once, and a replay adds nothing (8b4bfd78)', async t => {
+test('a completed Intent leaves unticked or untickable Done-when lines open and explains them without writing (8b4bfd78)', async t => {
   const s = await setup(t),
-    p = port(s);
+    p = port(s, new Map(), workerFeatures);
   const bodies = {
     boxes: 'Why\n\nDone when:\n- [x] a\n- [ ] b\n1. [ ] c',
     bullets:
@@ -1134,7 +1172,10 @@ test('a completed Intent holds an Issue with unticked or untickable Done-when li
   const ids = {};
   for (const [name, body] of Object.entries(bodies))
     ids[name] = (await put(p, { kind: 'issue', title: name, body })).result.itemId;
-  for (const id of Object.values(ids)) p.states.set(id, 'completed');
+  for (const id of Object.values(ids)) {
+    p.states.set(id, 'completed');
+    await publishPlanWork(s, id, 'completed');
+  }
   const read = await list(p);
   const status = Object.fromEntries(
     Object.entries(ids).map(([n, id]) => [n, read.items.find(i => i.id === id).status]),
@@ -1152,21 +1193,10 @@ test('a completed Intent holds an Issue with unticked or untickable Done-when li
     [ids.prose]: 1,
   });
   const commentsOf = async id => (await list(p, { id, reconcile: false })).comments.map(c => c.text);
-  for (const name of ['boxes', 'bullets', 'prose']) {
-    const comments = await commentsOf(ids[name]);
-    assert.equal(comments.length, 1);
-    assert.match(comments[0], /^Intent completed; \d Done-when line\(s\) still open/);
-  }
-  assert.deepEqual(await commentsOf(ids.allTicked), []);
-  // The end state is clear (d56dfe49 replay): the comment names the open lines and the one tick command
-  // (6b7d5a79: tick-planning-item, never a hand-edited body); the held entry also keeps the explicit close
-  // with the version the reason write leaves behind; ticked lines are not listed.
+  for (const name of ['boxes', 'bullets', 'prose', 'allTicked'])
+    assert.deepEqual(await commentsOf(ids[name]), []);
+  // The read names checklist evidence and the explicit override using the actual stored version.
   const boxesItem = (await list(p, { id: ids.boxes, reconcile: false })).item;
-  const boxesComment = (await commentsOf(ids.boxes))[0];
-  assert.match(boxesComment, /Open: "b"; "c"\./);
-  assert(!boxesComment.includes('"a"'));
-  assert(boxesComment.includes(`tick-planning-item '{"planningItemId":"${ids.boxes}","line":1,`));
-  assert(!boxesComment.includes('[x]'));
   const heldBoxes = read.reconciled.held.find(h => h.id === ids.boxes);
   assert.deepEqual(heldBoxes.lines, ['b', 'c']);
   assert.match(heldBoxes.tick, /tick-planning-item/);
@@ -1176,16 +1206,19 @@ test('a completed Intent holds an Issue with unticked or untickable Done-when li
     ),
   );
   assert.match(
-    (await commentsOf(ids.bullets))[0],
+    read.reconciled.held.find(h => h.id === ids.bullets).reason,
     /Open: "the root cause is fixed;"; "the live queue drains;"\./,
   );
-  assert.match((await commentsOf(ids.prose))[0], /Open: "The budget is met on both harnesses\."/);
-  // Replays and later reads: still held, no second comment, no further write (reads only).
+  assert.match(
+    read.reconciled.held.find(h => h.id === ids.prose).reason,
+    /Open: "The budget is met on both harnesses\."/,
+  );
+  // Replays and later reads keep the original version and do not post comments.
   p.calls.length = 0;
   const again = await list(p);
   assert.equal(again.reconciled.held.length, 3);
   assert(!p.calls.some(name => name.includes(':command')));
-  for (const name of ['boxes', 'bullets', 'prose']) assert.equal((await commentsOf(ids[name])).length, 1);
+  for (const name of ['boxes', 'bullets', 'prose']) assert.deepEqual(await commentsOf(ids[name]), []);
   // A person's explicit close stays allowed.
   const held = await list(p, { id: ids.bullets, reconcile: false });
   await put(p, {
@@ -1197,9 +1230,9 @@ test('a completed Intent holds an Issue with unticked or untickable Done-when li
   assert.equal((await list(p, { id: ids.bullets, reconcile: false })).item.status, 'closed');
 });
 
-test('an Issue whose Intent completed is closed by the next read, with undo named; reconcile:false changes nothing', async t => {
+test('default and explicitly non-reconciling planning reads use worker statuses without adding Versions', async t => {
   const s = await setup(t),
-    p = port(s);
+    p = port(s, new Map(), workerFeatures);
   const done = (await put(p, { kind: 'issue', title: 'Done work' })).result.itemId;
   const dropped = (await put(p, { kind: 'issue', title: 'Dropped work' })).result.itemId;
   const live = (await put(p, { kind: 'issue', title: 'Still going' })).result.itemId;
@@ -1212,18 +1245,19 @@ test('an Issue whose Intent completed is closed by the next read, with undo name
   assert(quiet.items.every(item => item.status === 'open'));
   assert.equal(quiet.items.find(item => item.id === done).intent, 'completed');
 
+  await publishPlanWork(s, done, 'completed');
+  await publishPlanWork(s, dropped, 'abandoned');
   const read = await list(p);
-  assert.equal(read.reconciled.changed.length, 2);
-  assert(read.reconciled.changed.every(change => change.undo.includes('put-planning-item')));
+  assert.equal(read.reconciled, undefined);
   const byId = Object.fromEntries(read.items.map(item => [item.id, item.status]));
   assert.deepEqual(byId, {
     [done]: 'closed',
-    [dropped]: 'abandoned',
+    [dropped]: 'open',
     [live]: 'open',
   });
   const persisted = (await s.read()).data.planningItems;
   assert.equal(persisted.filter(item => item.id === done).at(-1).status, 'closed');
-  assert.equal(persisted.filter(item => item.id === done).at(-1).reason, 'Intent completed');
+  assert.equal(persisted.filter(item => item.id === done).at(-1).reason, 'Done: linked work finished');
 
   const events = s.tables.projectWorkEvents.size;
   const next = await list(p);
@@ -1231,7 +1265,7 @@ test('an Issue whose Intent completed is closed by the next read, with undo name
   assert.equal(s.tables.projectWorkEvents.size, events);
   assert.deepEqual(Object.fromEntries(next.items.map(item => [item.id, item.status])), {
     [done]: 'closed',
-    [dropped]: 'abandoned',
+    [dropped]: 'open',
     [live]: 'open',
   });
 });
@@ -1264,6 +1298,63 @@ test('a start keeps an archived Item archived and a deleted Item deleted: no sta
       [shelf, from, before.version + 1, undefined],
     );
   }
+});
+
+test('a worker-owned start keeps the owner claim when status moves before the first put', async t => {
+  const s = await setup(t);
+  const p = port(s, new Map(), [...hostedContractFeatures, 'planning-status-worker']);
+  const itemId = (await put(p, { kind: 'issue', title: 'Start and claim' })).result.itemId;
+  const mutation = p.mutation;
+  let race = true;
+  p.mutation = async (name, args) => {
+    if (race) {
+      race = false;
+      await s.ctx.db.insert('projectHostedRecordHeads', {
+        projectId: s.projectId,
+        kind: 'intent',
+        key: itemId,
+        status: 'active',
+        version: 1,
+        parent: '',
+        recordId: randomUUID(),
+      });
+      assert.equal(
+        await advancePlanStatus._handler(s.ctx, {
+          projectId: s.projectId,
+          itemId,
+          cause: randomUUID(),
+          source: 'start',
+        }),
+        'moved',
+      );
+    }
+    return mutation(name, args);
+  };
+  const result = await markPlanningStarted(p, itemId, randomUUID(), 'synthetic-owner/amber-fox');
+  const { status, statusPin, owner, version } = (await list(p, { id: itemId })).item;
+  assert.deepEqual(
+    [result.updated, status, statusPin, owner, version],
+    [true, 'in-progress', undefined, '@synthetic-owner/amber-fox', 3],
+  );
+});
+
+test('a worker-owned member start does not report the expected owner-only refusal as an error', async t => {
+  const s = await setup(t);
+  const p = port(s, new Map(), [...hostedContractFeatures, 'planning-status-worker']);
+  const itemId = (await put(p, { kind: 'issue', title: 'Contributor start' })).result.itemId;
+  const member = {
+    ...p,
+    mutation: async () => {
+      throw new ConvexError({
+        code: 'PROJECT_UNAVAILABLE',
+        message: 'Project planning is available to its current owner.',
+      });
+    },
+  };
+  const result = await markPlanningStarted(member, itemId, randomUUID(), 'synthetic-member/amber-fox');
+  assert.equal(result.error, undefined);
+  assert.equal(result.claimed, false);
+  assert.equal((await list(p, { id: itemId })).item.owner, undefined);
 });
 
 test('builders claim the Item they start (d3357f40): an unowned Item takes the starter’s public identity once; a set owner is kept', async t => {
@@ -2796,9 +2887,9 @@ test('shelf counts keep independent byte bounds and overflow into exact root-pag
   assert.ok(first.cost.bytes - baseline.cost.bytes < 1_120_000, 'one archive bound plus the crossing root');
 });
 
-test('indexed planning preserves all filter combinations, record-store bodies, paging and reconciliation (5a85cb5f)', async t => {
+test('indexed planning preserves all filter combinations, record-store bodies, paging and hold advice (5a85cb5f)', async t => {
   const s = await setup(t),
-    p = port(s);
+    p = port(s, new Map(), workerFeatures);
   // Stage both copies before exposing the record-store read path in this compatibility fixture.
   await s.ctx.db.patch(s.projectId, { workStore: 'dual' });
   const initiativeId = (await put(p, { kind: 'initiative', title: 'Group' })).result.itemId;
@@ -2859,11 +2950,8 @@ test('indexed planning preserves all filter combinations, record-store bodies, p
     expectedVersion: read.reconciled.held[0].version,
     body: 'Done when:\n- [x] Evidence met',
   });
-  assert.equal(
-    (await list(p, { kind: 'issue', status: 'open', initiativeId })).items.find(item => item.id === first)
-      .status,
-    'closed',
-  );
+  await publishPlanWork(s, first, 'completed');
+  assert.equal((await list(p, { id: first })).item.status, 'closed');
   assert(
     !(await list(p, { kind: 'issue', status: 'open', initiativeId })).items.some(item => item.id === first),
   );
@@ -3329,7 +3417,7 @@ test('planning count page cap labels incomplete totals and continues without los
 
 test('incident 1018d0f8: alert refresh preserves every outstanding Done-when line and reconciliation holds it open', async t => {
   const s = await setup(t),
-    p = port(s);
+    p = port(s, new Map(), workerFeatures);
   const { write } = await import(moduleUrl('../convex/projectLandingSpeedIssue.ts'));
   const { speedBudgetIssue } = await import('../dist/landing-speed-alerts.js');
   const event = {
@@ -3351,7 +3439,7 @@ test('incident 1018d0f8: alert refresh preserves every outstanding Done-when lin
   await send(speedBudgetIssue({ ...event, kind: 'recovered', landing: 'second' }, s.projectId, speedBudgets));
   assert.equal((await list(p, { id: issue.itemId, reconcile: false })).item.body, body);
   p.states.set(issue.itemId, 'completed');
-  // An Item read reconciles only when asked (6b7d5a79).
+  assert.equal(await publishPlanWork(s, issue.itemId, 'completed'), 'unchanged');
   const read = await list(p, { id: issue.itemId, reconcile: true });
   assert.equal(read.item.status, 'open');
   assert.equal(read.reconciled.held[0].openLines, 3);
@@ -3361,6 +3449,7 @@ test('incident 1018d0f8: alert refresh preserves every outstanding Done-when lin
     expectedVersion: read.item.version,
     body: 'Done when:\n- [x] Code fixed\n[ ] Evidence pending',
   });
+  assert.equal(await publishPlanWork(s, issue.itemId), 'unchanged');
   const held = await list(p, { id: issue.itemId, reconcile: true });
   assert.equal(held.item.status, 'open');
   assert.deepEqual(held.reconciled.held[0].lines, ['Evidence pending']);
@@ -3858,9 +3947,9 @@ test('tick-planning-item ticks the line by position or text prefix and posts the
 
 // Item 6b7d5a79: an Item read changes nothing by default, and the last tick closes an Issue whose Intent finished,
 // so a builder needs neither reconcile:false on reads nor a close command after landing.
-test('an Item read never reconciles unless asked; the last Done-when tick closes a finished Issue (6b7d5a79)', async t => {
+test('an Item read never moves status; the last Done-when tick lets the worker close a finished Item (6b7d5a79)', async t => {
   const s = await setup(t),
-    p = port(s);
+    p = port(s, new Map(), workerFeatures);
   const itemId = await tickIssue(p);
   p.states.set(itemId, 'completed');
   const events = s.tables.projectWorkEvents.size;
@@ -3874,17 +3963,17 @@ test('an Item read never reconciles unless asked; the last Done-when tick closes
   }
   const last = await tick(p, { planningItemId: itemId, line: 4, evidence: 'Evidence 4' });
   assert.equal(last.result.openLines, 0);
-  assert.deepEqual(
-    last.result.reconciled.changed.map(change => [change.id, change.to]),
-    [[itemId, 'closed']],
-  );
+  assert.equal(last.result.reconciled, undefined);
+  assert.equal((await stored(p, itemId)).status, 'open');
+  await publishPlanWork(s, itemId, 'completed');
   assert.equal((await stored(p, itemId)).status, 'closed');
-  // An Intent still running: the last tick only ticks; the Issue closes on a list read after it lands.
+  // An Intent still running: the last tick only ticks, even after automation evaluates it.
   const running = (await put(p, { kind: 'issue', title: 'Still running', body: tickBody })).result.itemId;
   assert.notEqual(running, itemId);
   p.states.set(running, 'active');
   for (const line of [1, 2, 4]) await tick(p, { planningItemId: running, line, evidence: 'e' });
-  assert.equal((await stored(p, running)).status, 'open');
+  await publishPlanWork(s, running, 'active');
+  assert.equal((await stored(p, running)).status, 'in-progress');
 });
 
 test('tick-planning-item refuses zero or several matches and lists the candidates (66667155)', async t => {

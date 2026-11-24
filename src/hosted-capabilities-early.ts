@@ -9,6 +9,7 @@ import {
   initiativeProgressRequested,
   planningAuditFeature,
   planningHistoryFeature,
+  planningStatusWorkerFeature,
   planningInitiativeCountsFeature,
   planningWaitingFeature,
   startLaneTitle,
@@ -53,12 +54,17 @@ export function capabilityOptions(
               // Planning uses the history-log slot for Work history. Check reads name ci-status-check
               // themselves, so audit-capable actions give its discovery slot to planning-audit.
               (action !== 'planning' || feature !== 'history-log') &&
-              (!planningAudit || feature !== 'ci-status-check'),
+              (!planningAudit || feature !== 'ci-status-check') &&
+              (action !== 'start' || feature !== 'planning-import-pages'),
           ),
-          // A selected check summary takes the slot for landing metrics, which this read never uses.
-          ...((action === 'status' || action === 'observe') && input.summary === true
-            ? ['queue-switch-state']
-            : ['metric-cli-provenance']),
+          // Start also sends mutation receipts; drop the unused import slot, not metric provenance.
+          ...(action === 'start'
+            ? [planningStatusWorkerFeature, 'metric-cli-provenance']
+            : planningAudit
+              ? [planningStatusWorkerFeature]
+              : (action === 'status' || action === 'observe') && input.summary === true
+                ? ['queue-switch-state']
+                : ['metric-cli-provenance']),
           ...(startWithIntent ? [startLaneTitle] : []),
           ...(action === 'planning' || action === 'put-planning-item' ? [planningFeature] : []),
           ...(action === 'planning' ? [planningHistoryFeature] : []),

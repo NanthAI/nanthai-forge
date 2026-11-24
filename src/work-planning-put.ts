@@ -89,7 +89,8 @@ export type PlanningPut = Extract<PlanningWrite, { action: 'put-planning-item' }
 export function resolvePlanningPut(
   command: PlanningPut,
   current?: Pick<PlanningItem, 'kind' | 'title' | 'body' | 'status' | 'intentIds' | 'initiativeId'> &
-    Partial<Pick<PlanningItem, (typeof planningModelPutKeys)[number] | 'was' | 'statusPin'>>,
+    Partial<Pick<PlanningItem, (typeof planningModelPutKeys)[number] | 'was'>>,
+  at?: string,
 ) {
   invariant(
     current || (command.kind && command.title),
@@ -107,9 +108,8 @@ export function resolvePlanningPut(
     initiativeId: command.initiativeId === null ? undefined : (command.initiativeId ?? current?.initiativeId),
     reason: command.reason,
     model: {
-      ...resolveModelFields(command, current),
+      ...resolveModelFields(command, at, current),
       ...shelfFrom(status, current),
-      ...(current?.statusPin ? { statusPin: current.statusPin } : {}),
     },
     agent: putAgentFields(command),
   };
@@ -126,7 +126,7 @@ function shelfFrom(status: string, current?: Partial<Pick<PlanningItem, 'status'
 const keep = <T>(next: T | null | undefined, stored: T | undefined) =>
   next === null ? undefined : (next ?? stored);
 /** The model fields of the resolved item, absent ones left out so older items keep their exact bytes. */
-function resolveModelFields(command: PlanningPut, current?: Partial<PlanningItem>) {
+function resolveModelFields(command: PlanningPut, at: string | undefined, current?: Partial<PlanningItem>) {
   const kind = command.kind ?? current?.kind;
   // Initiatives take no parent here: a retained legacy Initiative parentId stays on its record untouched.
   invariant(kind === 'issue' || !command.parentId, 'BAD_ARGUMENT', 'Only an Item can have a parent Item.');
@@ -146,7 +146,24 @@ function resolveModelFields(command: PlanningPut, current?: Partial<PlanningItem
     'An imported Item id must be derived from its source key; use planning with transfer to prepare it.',
   );
   const hidden = command.hidden === undefined ? current?.hidden : command.hidden || undefined;
+  const status = command.status;
+  const previous = current?.status;
+  const statusPin =
+    command.statusPinRestore !== undefined
+      ? (command.statusPinRestore ?? undefined)
+      : command.statusPin === null
+        ? undefined
+        : command.statusPinBy &&
+            at &&
+            status &&
+            previous &&
+            status !== previous &&
+            !isShelved(status) &&
+            !isShelved(previous)
+          ? { by: command.statusPinBy, at }
+          : current?.statusPin;
   const fields = {
+    statusPin,
     order: keep(command.order, current?.order),
     type: keep(command.type, current?.type),
     parentId,

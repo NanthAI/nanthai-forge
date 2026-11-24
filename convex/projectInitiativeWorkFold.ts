@@ -18,6 +18,7 @@ import {
   WORK_PATHS_PAGE,
 } from './projectInitiativeWorkStore';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { rollupWake } from './projectPlanRollupWake';
 
 export async function initiativeLandingPaths(
   ctx: QueryCtx,
@@ -45,6 +46,7 @@ export const fold = internalMutation({
     receiptId: v.string(),
     commit: v.string(),
     itemIds: v.array(v.string()),
+    settledItemIds: v.optional(v.array(v.string())),
     offset: v.optional(v.number()),
   },
   returns: v.null(),
@@ -84,6 +86,20 @@ export const fold = internalMutation({
       if (pending) {
         next = offset;
         break;
+      }
+    }
+    // Only a newly settled Intent needs a status decision. No extra reads or jobs for keeps-open landings.
+    if (next > offset && input.settledItemIds?.length) {
+      const settled = new Set(input.settledItemIds);
+      for (const itemId of itemIds.slice(offset, next)) {
+        if (!settled.has(itemId)) continue;
+        await ctx.scheduler.runAfter(0, rollupWake, {
+          projectId,
+          partition,
+          itemId,
+          cause: receiptId,
+          source: 'landing',
+        });
       }
     }
     if (next < itemIds.length) await ctx.scheduler.runAfter(0, resumeFold, { ...input, offset: next });

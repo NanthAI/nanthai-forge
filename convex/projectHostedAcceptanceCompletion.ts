@@ -86,6 +86,7 @@ async function settleCompletion(ctx: MutationCtx, plan: Plan, patch: Partial<Pla
       landedBy: undefined,
       feedCompletion: undefined,
       workItemIds: undefined,
+      settledItemIds: undefined,
     });
   return { complete: true };
 }
@@ -329,6 +330,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
             finished.add(intentId);
       }
   const currentWorkItems = [];
+  const currentSettledItems = [];
   for (const [intentId, { laneIds, viaLaneId }] of noted) {
     const head = await recordHead(ctx, input.projectId, 'intent', intentId);
     if (head?.planningItemId) currentWorkItems.push(head.planningItemId);
@@ -349,8 +351,8 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
         viaLaneId,
       });
     // Reuse the Intent head when its last Lane lets the planning read close the Issue.
-    if (declares && finished.has(intentId))
-      await completeIntentWhenLanesDone(
+    if (declares && finished.has(intentId)) {
+      const settled = await completeIntentWhenLanesDone(
         ctx,
         {
           projectId: input.projectId,
@@ -365,10 +367,14 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
         },
         head,
       );
+      if (head?.planningItemId && (settled || head.status === 'completed'))
+        currentSettledItems.push(head.planningItemId);
+    }
   }
   const appliedPage = end === entries.length ? plan.appliedPage + 1 : plan.appliedPage;
   const position = { appliedPage, appliedEntry: end === entries.length ? 0 : end };
   const workItemIds = acceptanceWorkItems(plan.workItemIds, currentWorkItems);
+  const settledItemIds = acceptanceWorkItems(plan.settledItemIds, currentSettledItems);
   if (appliedPage === plan.inputPages) {
     if (workItemIds.length)
       await ctx.scheduler.runAfter(0, FOLD_WORK, {
@@ -376,6 +382,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
         receiptId: receipt.id,
         commit: receipt.candidate.head,
         itemIds: workItemIds,
+        ...(settledItemIds.length ? { settledItemIds } : {}),
       });
     return settleCompletion(ctx, plan, position);
   }
@@ -387,6 +394,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   await ctx.db.patch(plan._id, {
     ...position,
     ...(workItemIds.length ? { workItemIds } : {}),
+    ...(settledItemIds.length ? { settledItemIds } : {}),
     ...(plan.completion ? { completion: { ...plan.completion, alarm: undefined, tick } } : {}),
   });
   return { complete: false };

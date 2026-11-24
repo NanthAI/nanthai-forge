@@ -63,6 +63,7 @@ export const hostedAcceptanceTables = {
     appliedEntry: v.number(),
     /** Item roots collected by earlier acceptance completion windows for one rollup fold. */
     workItemIds: v.optional(v.array(v.string())),
+    settledItemIds: v.optional(v.array(v.string())),
     /** Who published it and whether a person accepted it (Issue 3a733ee8), set with the completion tick
      * from facts publication holds; the tick copies it into each Item's system landing note. */
     landedBy: v.optional(landingNoteBy),

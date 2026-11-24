@@ -79,6 +79,7 @@ export type FullItem = {
   at?: string;
   author?: string;
   agent?: string;
+  statusPin?: { by: string; at: string };
   intentIds?: string[];
   relations?: { kind: 'depends-on' | 'duplicate-of' | 'related'; id: string }[];
   initiativeId?: string | null;

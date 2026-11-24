@@ -9,9 +9,8 @@ import type { PlanningItem } from './work-planning-types.js';
 export const planningTaskLine = /^([ \t]*(?:[-*+]|\d+[.)])[ \t]+\[)([ xX~])(\][ \t]+)(.*?)(\r?)$/;
 
 /** Browser and CLI address the same rows, including moved rows, excluding Markdown fences. */
-export function* planningTaskLines(rows: readonly string[]) {
+function* unfencedLines(rows: readonly string[]) {
   let fence: string | undefined;
-  let position = 0;
   for (const [row, raw] of rows.entries()) {
     if (fence) {
       const end = /^[ \t]*(`{3,}|~{3,})[ \t]*\r?$/.exec(raw)?.[1];
@@ -24,9 +23,32 @@ export function* planningTaskLines(rows: readonly string[]) {
       fence = marker;
       continue;
     }
+    yield { row, raw };
+  }
+}
+
+export function* planningTaskLines(rows: readonly string[]) {
+  let position = 0;
+  for (const { row, raw } of unfencedLines(rows)) {
     const match = planningTaskLine.exec(raw);
     if (match) yield { row, raw, position: ++position, match };
   }
+}
+
+/** Closure also honors bare and quoted legacy checkboxes, which cannot be ticked by position. */
+export function closingChecklist(body: string) {
+  const lines = [...unfencedLines(body.split('\n'))].map(line => line.raw);
+  let structured = false;
+  let checked = 0;
+  const open: string[] = [];
+  for (const raw of lines) {
+    const match = /^[ \t>]*(?:(?:[-*+]|\d+[.)])[ \t]+)?\[([ xX~])\](.*)$/.exec(raw);
+    if (!match) continue;
+    structured = true;
+    if (match[1] === ' ') open.push(match[2]!.replace(/\s+/g, ' ').trim());
+    else if (match[1] !== '~') checked++;
+  }
+  return { checked, open: structured ? open : proseDoneWhenLines(lines.join('\n')) };
 }
 
 export function doneWhenCounts(body: string): [number, number] | null {

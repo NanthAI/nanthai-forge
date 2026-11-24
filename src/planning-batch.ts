@@ -29,6 +29,8 @@ export type BatchFields = {
   title?: string;
   body?: string;
   status?: BatchStatus;
+  statusPin?: null;
+  statusPinUndo?: string;
   reason?: string;
   intentIds?: string[];
   initiativeId?: string | null;
@@ -67,7 +69,10 @@ export const undoableFields = [
   'hidden',
 ] as const;
 type Undoable = (typeof undoableFields)[number];
-export type BatchBefore = Partial<Record<Undoable, unknown>> & { kind?: string };
+export type BatchBefore = Partial<Record<Undoable, unknown>> & {
+  kind?: string;
+  statusPinUndo?: string | null;
+};
 
 /** One write's outcome. `before` holds the touched fields as they were (absent on a replayed write, which was
  * applied by the original call). A refused write names why; nothing else in the batch is affected by it. */
@@ -131,6 +136,11 @@ export function batchUndo(writes: readonly BatchWrite[], results: readonly Batch
       itemId: write.itemId,
       expectedVersion: result.version,
       ...back,
+      ...(result.before.statusPinUndo === null
+        ? { statusPin: null }
+        : result.before.statusPinUndo
+          ? { statusPinUndo: result.before.statusPinUndo }
+          : {}),
     });
   }
   return { undo, kept, unknown };

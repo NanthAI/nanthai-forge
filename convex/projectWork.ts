@@ -307,7 +307,7 @@ export async function appendWork(
         project.owner === input.owner ||
           (input.memberPlanning &&
             input.projection &&
-            memberPlanningWrite(parsed.data, input.memberPlanning === 'tick')),
+            memberPlanningWrite(parsed.data, input.memberPlanning === 'tick', true)),
         'PROJECT_UNAVAILABLE',
         'Project planning is available to its current owner.',
       );

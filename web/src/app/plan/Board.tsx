@@ -16,7 +16,7 @@ import { boardColumns, columnTotals, subItems, type BoardColumn, type PlanBand }
 import { isShut, type Folds } from './fold';
 import { groupBreakdown, statusOf, type PlanLine } from './model';
 import { sortRows, type Sort } from './query';
-import { COLS, DoneWhen, Line, Owner, Roll } from './rows';
+import { COLS, DoneWhen, Line, Owner, Roll, Status } from './rows';
 import { Tick, type Ticker } from './Tick';
 import type { Workers } from './workers';
 
@@ -62,9 +62,7 @@ function bandSummary(band: PlanBand, settledRead: boolean, liveAtLeast: boolean)
     const total = breakdown.total - band.group.dropped;
     return {
       breakdown: boardRoll(breakdown),
-      words: total
-        ? `${count(band.group.done, band.group.atLeast)} of ${count(total, breakdown.atLeast)} done`
-        : 'Nothing in it yet',
+      words: `${count(band.group.done, band.group.atLeast)} of ${count(total, breakdown.atLeast)} Items done`,
     };
   }
   const n = { done: 0, inProgress: 0, open: 0, proposed: 0, removed: 0 };
@@ -125,6 +123,7 @@ function BandHead({
           {band.title}
         </span>
       )}
+      {band.group?.initiative ? <Status row={band.group.initiative} /> : null}
       {breakdown.total ? <Roll breakdown={breakdown} /> : null}
       <span className="hint">{words}</span>
       <button

@@ -82,6 +82,7 @@ import { ItemWork, type ReadItemHistory, type ReadItemWork } from './ItemWork';
 import type { ReadItem } from './ItemDetail';
 import { itemBody } from './item-body';
 import { ItemChildren, ParentFact } from './ItemHierarchy';
+import { FollowWork } from './FollowWork';
 import { ItemRelations, type Related } from './ItemRelations';
 import type { SearchOpenItems } from './ItemPicker';
 import { planningSearchTerms } from '../../../../src/planning-search';
@@ -577,6 +578,7 @@ export function PlanScreenView({
               }
             : undefined
         }
+        followWork={whole?.canEdit ? put : undefined}
         onShelve={whole?.canEdit && run ? (row, to) => void shelfMove(shelve([row], to), row, to) : undefined}
         shelved={here}
         onBack={here && run ? () => void shelfMove([here.back], here.row, null) : undefined}
@@ -1256,6 +1258,7 @@ function ItemPage({
   onSplit,
   onVersions,
   edit,
+  followWork,
   onShelve,
   shelved,
   onBack,
@@ -1281,6 +1284,7 @@ function ItemPage({
   onSplit?: (() => void) | undefined;
   onVersions?: ((pair?: readonly [number, number | undefined]) => void) | undefined;
   edit?: import('./item-edit').EditItemPorts | undefined;
+  followWork?: Put | undefined;
   /** Archive or Delete this Item (the owner only). */
   onShelve?: ((row: PlanRow, to: Shelf) => void) | undefined;
   /** This page's Item when it is Archived or Deleted (just sent, or opened by its link); onBack brings it back. */
@@ -1332,7 +1336,15 @@ function ItemPage({
   const initiative = row?.initiativeId ? view?.byId.get(row.initiativeId) : undefined;
   const facts: [string, ReactNode][] = row
     ? [
-        ['Status', <Status key="s" row={row} />],
+        [
+          'Status',
+          <div key="s">
+            <Status row={row} />
+            {full && full.version === row.version ? (
+              <FollowWork key={full.version} item={full} put={followWork} />
+            ) : null}
+          </div>,
+        ],
         [
           'In',
           initiative

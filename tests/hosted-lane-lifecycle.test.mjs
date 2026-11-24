@@ -279,6 +279,35 @@ test('completing a Lane completes its Intent only when no sibling Lane is still 
   await complete(sibling.id).catch(() => {});
   assert.equal(f.tables.projectHostedRecords.size, versions);
 });
+test('explicit completion and reopen each check linked planning once despite lifecycle replay', async () => {
+  const f = await lifecycleFixture();
+  const heads = [...f.tables.projectHostedRecordHeads.values()];
+  const intent = heads.find(row => row.kind === 'intent' && row.key === f.intentId);
+  const itemId = randomUUID();
+  f.patch('projectHostedRecordHeads', intent._id, { planningItemId: itemId });
+  const check = async request => {
+    assert.equal((await f.begin(request)).status, 'applied');
+    await f.begin(request);
+    const wakes = [...f.tables._scheduled_functions.values()].filter(
+      task => task.name === 'projectPlanRollup:advance' && task.args.cause === request.operationId,
+    );
+    assert.deepEqual(
+      wakes.map(wake => wake.args.itemId),
+      [itemId],
+    );
+  };
+  await check(f.request(null, { action: 'complete', reason: '' }));
+  const lane = await f.read(f.laneId);
+  await check(f.request({ kind: 'lane', laneId: lane.id, expected: pins(lane) }, { action: 'reopen' }));
+  const latestIntent = f.tables.projectHostedRecordHeads.get(intent._id);
+  await check(
+    f.request(
+      { kind: 'intent', intentId: f.intentId, version: latestIntent.version, cascade: false },
+      { action: 'reopen' },
+    ),
+  );
+});
+
 test('current write authority and epoch are checked per page/final; readers can read retained lifecycle events', async () => {
   const f = await lifecycleFixture(),
     grant = f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });

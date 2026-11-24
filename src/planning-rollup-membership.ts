@@ -19,8 +19,12 @@ export function addRollupCounts(target: RollupCounts, counts: RollupCounts, sign
   for (const field of fields) target[field] += sign * counts[field];
 }
 
-/** An Item is a direct member of two independent scopes. Moves touch the old and new scopes once each.
- * The forwarded child facts, if any, affect only the parent contribution; the Initiative never double counts. */
+/** An Initiative counts each stored member's status once. Started evidence can pass through a pin
+ * or Proposed status, but never changes whether the member itself is settled. */
+export const initiativeContribution = (status: Member['status'], branch?: Branch) =>
+  rollupContribution(status, branch ? { ...branch, unsettled: 0 } : undefined);
+
+/** An Item is a direct member of two independent scopes. Moves touch the old and new scopes once each. */
 export function rollupMembershipChanges(
   before: Member | null,
   after: Member | null,
@@ -37,7 +41,8 @@ export function rollupMembershipChanges(
   const count = (row: Member | null, sign: 1 | -1, branch?: Branch) => {
     if (!row) return;
     if (row.parentId) add(`parent:${row.parentId}`, rollupContribution(row.status, branch), sign);
-    if (row.initiativeId) add(`initiative:${row.initiativeId}`, rollupContribution(row.status), sign);
+    if (row.initiativeId)
+      add(`initiative:${row.initiativeId}`, initiativeContribution(row.status, branch), sign);
   };
   count(before, -1, beforeBranch);
   count(after, 1, afterBranch);

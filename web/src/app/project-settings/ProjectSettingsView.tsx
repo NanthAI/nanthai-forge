@@ -40,6 +40,7 @@ export function ProjectSettingsView({
   setVisibility,
   setPlanVisibility,
   setTrackWork,
+  setRollup,
   setRefinement,
   extra,
 }: {
@@ -55,6 +56,7 @@ export function ProjectSettingsView({
   /** Owner person only: the server refuses anyone else. One reversible write; repeating it changes nothing. */
   setPlanVisibility: (plan: ProjectFacts['planVisibility'], operationId: string) => Promise<void>;
   setTrackWork?: (enabled: boolean, operationId: string) => Promise<void>;
+  setRollup?: (enabled: boolean, operationId: string) => Promise<void>;
   setRefinement?: (enabled: boolean, operationId: string) => Promise<void>;
   /** Further regions of the page (backups, transfer, imports), after the lifecycle. */
   extra?: ReactNode;
@@ -126,6 +128,18 @@ export function ProjectSettingsView({
               description="When an agent starts unplanned work, its outcome becomes an Item for project members."
               enabled={facts.autoCreatePlanningItem !== false}
               set={setTrackWork}
+            />
+          ) : null}
+          {setRollup ? (
+            <PlanningSwitch
+              label="Roll up planning status"
+              description={
+                facts.rollUpPlanningStatus === false
+                  ? 'Automatic would turn this on because status follows work.'
+                  : 'Parents and Initiatives follow their Items as work starts and finishes. A manual status stays pinned.'
+              }
+              enabled={facts.rollUpPlanningStatus !== false}
+              set={setRollup}
             />
           ) : null}
           {setRefinement ? (

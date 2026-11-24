@@ -1086,7 +1086,7 @@ test('agents send a batch as one put-planning-item call, get per-Item results an
       batch: [
         { itemId: items[0].itemId, expectedVersion: 2, owner: null, type: null },
         // `reason` describes one version and is never carried back.
-        { itemId: items[1].itemId, expectedVersion: 2, status: 'open' },
+        { itemId: items[1].itemId, expectedVersion: 2, status: 'open', statusPin: null },
       ],
     },
   });
