@@ -228,6 +228,9 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 - Preflight takes one slot for its full static batch, build and tests, including runs that only
   execute static checks. Nested `nforge heavy` and preflight commands reuse a live parent slot.
   A preflight that a test runs on a fixture takes no slot (the test already runs in one).
+  `nforge heavy nforge agent ROOT preflight|land|finish ...` holds no slot itself: those commands
+  check their arguments and preconditions first, then take their own slot, so a refusal never
+  waits in the queue (friction 7c0ed580).
 - A slot is never held by a command nobody waits for. A signal to heavy (an agent run ending, Ctrl-C)
   reaches the command; one that has not exited 10 s later is killed and the slot freed. A command
   still running after `localHeavyMaxMinutes` is stopped by its own heavy (exit 124). A holder that

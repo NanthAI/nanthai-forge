@@ -101,6 +101,10 @@ export function validExercisedScope(scope) {
 export const REFRESH_QUEUE_PROOF =
   'nforge heavy npm run build:core && nforge heavy node scripts/refresh-queue-proof.mjs';
 
+/** Registers one new replay (friction 213fefab): runs only it and adds its ladder-doc row. */
+export const ADD_REPLAY =
+  "nforge heavy npm run build:core && nforge heavy node scripts/incident-replay-coverage.mjs --add --incident ID --file tests/NAME.test.mjs --test 'TITLE' --what 'WHAT IT REPLAYS'";
+
 const shellWord = word => (/^[\w./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
 const printable = path =>
   path.replace(/\p{Cc}/gu, char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0'));
@@ -204,7 +208,7 @@ export function queueProofDetail({ missing, stale }, registry) {
     else
       uncoverable.push({
         path,
-        next: `No registered replay reaches ${printable(path)}. A replay records only code it calls, so a module whose only code runs at load (a pure schema or validator module) can never be reached: prove it with an on-path bench cell (a bench proof whose rule lists it). Otherwise add a replay test that calls code in it, run \`nforge heavy node scripts/incident-replay-coverage.mjs --write\`, and attach that replay's proof.`,
+        next: `No registered replay reaches ${printable(path)}. A replay records only code it calls, so a module whose only code runs at load (a pure schema or validator module) can never be reached: prove it with an on-path bench cell (a bench proof whose rule lists it). Otherwise add a replay test that calls code in it, register it with \`${ADD_REPLAY}\` (it runs only that replay and adds the regression-ladder row the guard needs), and attach that replay's proof.`,
       });
   }
   const refresh = [...stale]

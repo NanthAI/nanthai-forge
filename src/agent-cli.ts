@@ -320,7 +320,9 @@ async function runAgentCli(
   }
   // Any message text (apostrophes, newlines) arrives verbatim from a file or stdin, never through shell quoting.
   if (client.messageFile !== undefined) {
-    const message = read(client.messageFile, 'Message file', '--message-file').replace(/\r?\n$/, '');
+    // landing-message.ts clientLandingMessage, inlined to keep zod off CLI startup: idempotent, so the
+    // transport's own pass for land messages changes nothing more (friction 081135b9).
+    const message = read(client.messageFile, 'Message file', '--message-file').replace(/(?:\r?\n)+$/, '');
     // An empty file (a failed extraction script) never submits an empty commit message (friction 737e85cb).
     invariant(
       message.trim() !== '',

@@ -26,7 +26,7 @@ import { clientSettingsCli, heavySlots, readClientSettings } from '../dist/clien
 import { editHooksEnabled } from '../dist/agent-hook-settings.js';
 import { listLanes, readLaneEntry, recordLane } from '../dist/lane-registry.js';
 import { housekeepingLines, laneHousekeeping } from '../dist/lane-prune.js';
-import { acquireHeavySlot, heavyCli, tryHeavySlot } from '../dist/heavy-slots.js';
+import { acquireHeavySlot, heavyCli, slotsItself, tryHeavySlot } from '../dist/heavy-slots.js';
 import { dependencyKey, shareDependencies } from '../dist/shared-dependencies.js';
 import { landSummary } from '../dist/hosted-land-cli.js';
 
@@ -270,6 +270,21 @@ test('heavy slots are machine-wide, reclaim dead holders and run the command wit
   assert.deepEqual(readdirSync(process.env.FORGE_HEAVY_DIR), ['holds.jsonl']);
   writeFileSync(process.env.FORGE_CLIENT_SETTINGS, JSON.stringify({ localHeavySlots: 0 }));
   assert.equal(await heavyCli([process.execPath, '-e', '']), 0);
+});
+
+test('friction 7c0ed580: heavy runs nforge agent preflight/land without holding a slot, so its argument refusal never waits for one', async t => {
+  const directory = isolated(t);
+  writeFileSync(process.env.FORGE_CLIENT_SETTINGS, JSON.stringify({ localHeavySlots: 1 }));
+  // Every slot is held by a live holder: a command that claims one would wait here forever.
+  assert(tryHeavySlot(process.env.FORGE_HEAVY_DIR, 1));
+  const nforge = join(directory, 'nforge');
+  writeFileSync(nforge, '#!/bin/sh\necho refused: retry needs a stopped run >&2\nexit 3\n', { mode: 0o755 });
+  assert.equal(await heavyCli([nforge, 'agent', directory, 'preflight', '{"retry":true}']), 3);
+  assert.equal(await heavyCli([nforge, 'agent', directory, 'land', '--save']), 3);
+  assert.equal(slotsItself([process.execPath, 'dist/cli-entry.js', 'agent', '.', 'finish']), true);
+  // Other nforge actions and other programs still queue for a slot.
+  assert.equal(slotsItself([nforge, 'agent', directory, 'save']), false);
+  assert.equal(slotsItself([process.execPath, '--test', 'tests/a.test.mjs']), false);
 });
 
 test('shared dependencies install once per lockfile hash and never share a different lockfile', async t => {

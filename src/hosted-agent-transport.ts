@@ -5,7 +5,7 @@ import type { SaveContract } from './hosted-save-client.js';
 import { capsuleHistoryQueries, hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
 import { agentClient, agentAuthorship, modelTipOnce } from './agent-turn-work.js';
 import { workIndexRecovery } from './error-teaching.js';
-import { suppliedLandingMessage } from './landing-message.js';
+import { clientLandingMessage, suppliedLandingMessage } from './landing-message.js';
 import { keptApplyEnvelope } from './hosted-apply-kept.js';
 import { laneScratchPath } from './forge-cache-paths.js';
 import { cliBuildProvenance, withCliBuildProvenance } from './cli-installation.js';
@@ -128,7 +128,12 @@ import { START_COMPLETION_SECONDS, boundedStep, startContinuation } from './host
 import { gcNestedLanesHourly } from './client-cache-gc.js';
 import { hostedStartResultSchema, replacedOpenLanes } from './hosted-lane.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
-import { HostedAgentJournal, finishCommandLaneIds, hostedAgentRoot } from './hosted-agent-journal.js';
+import {
+  HostedAgentJournal,
+  finishCommandLaneIds,
+  hostedAgentRoot,
+  retainedFinishMessage,
+} from './hosted-agent-journal.js';
 import { shellQuote } from './shell-quote.js';
 import { landPhase } from './hosted-land-summary.js';
 import { agentSlug, sessionAgentSlug, sessionAgentIdentity } from './agent-slug-session.js';
@@ -689,10 +694,15 @@ export class HostedAgentTransport {
         ...(result.conflictNotice ? { conflictNotice: result.conflictNotice, notice: result.notice } : {}),
       };
     }
-    const response = await this.operationContext.run(
-      { id: typeof input.operationId === 'string' ? input.operationId : null },
-      () => this.dispatchScoped(requestedAction, input, signal),
-    );
+    const response = await this.operationContext
+      .run({ id: typeof input.operationId === 'string' ? input.operationId : null }, () =>
+        this.dispatchScoped(requestedAction, input, signal),
+      )
+      .catch(error => {
+        // Refused by the local checks before the recorded dispatch (message limit, pending conflict).
+        this.retainRefusal(requestedAction, input, error, null);
+        throw error;
+      });
     const snapshot = this.snapshotReceipt;
     this.snapshotReceipt = undefined;
     const withSnapshot = snapshot ? { ...response, snapshot } : response;
@@ -713,13 +723,27 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
+    // A replay by operationId that names no message reuses the retained one (friction 54584edf).
+    if (
+      requestedAction === 'finish' &&
+      input.message === undefined &&
+      typeof input.operationId === 'string' &&
+      z.uuid().safeParse(input.operationId).success
+    ) {
+      const message = retainedFinishMessage(this.root, input.operationId);
+      if (message !== undefined) input = { ...input, message };
+    }
     // The landing message limit is local knowledge: refuse before any server call (friction d8d357c2),
     // and before preflight runs a test when it is given the message it will land with (ad80e037).
     if (
       (requestedAction === 'finish' || requestedAction === 'preflight') &&
       typeof input.message === 'string'
-    )
-      suppliedLandingMessage(input.message);
+    ) {
+      // One normalisation for every route (JSON, --message-file, MCP), so a replay sent another way
+      // keeps the same operation (friction 081135b9).
+      input = { ...input, message: clientLandingMessage(input.message) };
+      suppliedLandingMessage(input.message as string);
+    }
     // A failed check's reply names its retry reason `next.retryReason`; land takes it as `reason`.
     // Either name lands the same request (ad80e037): one name reaches the journal and the server.
     if (requestedAction === 'finish' && Object.hasOwn(input, 'retryReason')) {
@@ -783,7 +807,7 @@ export class HostedAgentTransport {
       }
       return response;
     } catch (error) {
-      this.retainCaller(requestedAction, { error }, this.callerOperationId);
+      this.retainRefusal(requestedAction, input, error, this.callerOperationId);
       if (networkFailure(error))
         return networkContinuation(
           this.root,
@@ -918,6 +942,20 @@ export class HostedAgentTransport {
       undefined,
       { laneId, operationId: recorded.operationId, phase, next: wait.next, command: wait.command },
     );
+  }
+  private readonly refusalsRetained = new WeakSet<object>();
+  /** A refusal's outcome, once per error: one before the operation's journal opened still counts as
+   * this land run, with its code (friction 0a9a5207), under its own or a fresh id. */
+  private retainRefusal(action: string, input: Record<string, unknown>, error: unknown, id: string | null) {
+    if (error && typeof error === 'object') {
+      if (this.refusalsRetained.has(error)) return;
+      this.refusalsRetained.add(error);
+    }
+    const own =
+      typeof input.operationId === 'string' && z.uuid().safeParse(input.operationId).success
+        ? input.operationId
+        : undefined;
+    this.retainCaller(action, { error }, id ?? own ?? randomUUID());
   }
   /** Record what the caller receives, locally; a later CLI mutation carries it. */
   private retainCaller(

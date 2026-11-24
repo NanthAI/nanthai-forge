@@ -239,8 +239,12 @@ title. The `paths` lists come from function calls observed during each isolated 
 If there is no matching entry, use an on-path bench cell or add a replay that reaches the
 path. A pure schema or validator module (all of its code runs at load) never appears in
 a replay's `paths`: prove it with an on-path bench cell. `QUEUE_PROOF_REQUIRED` lists such files
-under `recovery.queueProof.uncoverable`, and every other path with its own next step. To refresh the registry after replay or source changes, build the project and run
-`nforge heavy node scripts/incident-replay-coverage.mjs --write` from the Lane. The
+under `recovery.queueProof.uncoverable`, and every other path with its own next step. To add
+one replay, build the project and run `nforge heavy node scripts/incident-replay-coverage.mjs
+--add --incident ID --file tests/NAME.test.mjs --test 'TITLE' --what 'WHAT IT REPLAYS'` from
+the Lane: it runs only that replay, records its paths and adds the incident's row to the
+[regression ladder](regression-ladder.md) table, which the guard requires. To refresh the whole
+registry after replay or source changes, run the same script with `--write`. The
 normal suite checks existing mappings during their replays. Registry edits schedule the
 named replays in the landing check. The read-only `--check` command verifies the mappings in
 isolation. Run one fresh-context review, fix its findings, and land without a second review.

@@ -3,7 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { ConvexError } from 'convex/values';
 import { join } from 'node:path';
 import { ForgeError } from '../dist/errors.js';
 import { cliBuildIdentity } from '../dist/cli-installation.js';
@@ -504,4 +505,41 @@ test('6000-landing month of receipts pages in bounded calls with zero writes and
   assert(measured.calls <= 140, `${measured.calls} calls`);
   assert(measured.documents <= 14000, `${measured.documents} documents`);
   assert.equal(measured.writes, 0);
+});
+
+test('friction 0a9a5207: a land refused before its operation opened, or by a server refusal, keeps its code in the hosted outcome', async t => {
+  const f = agentFixture(t);
+  const directory = metricOutboxDirectory({ url: 'https://fixture.invalid', projectId: 'project' });
+  rmSync(directory, { recursive: true, force: true });
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  // No operationId and refused before any journal or server call: still one finish outcome, with its code.
+  await assert.rejects(
+    f.transport().dispatch('finish', { message: 'x'.repeat(17 * 1024) }),
+    code('LANDING_MESSAGE_TOO_LARGE'),
+  );
+  const outcomes = readdirSync(directory)
+    .map(name => JSON.parse(readFileSync(join(directory, name), 'utf8')))
+    .filter(receipt => receipt.kind === 'outcome');
+  assert.deepEqual(
+    outcomes.map(r => [r.action, r.errorCodes]),
+    [['finish', ['LANDING_MESSAGE_TOO_LARGE']]],
+  );
+  assert.match(outcomes[0].operationId, /^[0-9a-f-]{36}$/);
+  // A structured server refusal keeps its own code instead of INTERNAL_ERROR.
+  const refused = callerReceipts({
+    action: 'finish',
+    operationId: randomUUID(),
+    actor: 'owner',
+    at: now(),
+    error: new ConvexError({ code: 'WORK_BUSY', message: 'busy' }),
+  });
+  assert.deepEqual(refused[0].errorCodes, ['WORK_BUSY']);
+  const unknown = callerReceipts({
+    action: 'finish',
+    operationId: randomUUID(),
+    actor: 'owner',
+    at: now(),
+    error: new TypeError('local bug'),
+  });
+  assert.deepEqual(unknown[0].errorCodes, ['INTERNAL_ERROR']);
 });

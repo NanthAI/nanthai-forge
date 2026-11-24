@@ -115,3 +115,30 @@ test('Guard 4 (6abdde40): a core queue change runs every registered replay, the 
   files.set('tests/fixtures/incident-replays.json', JSON.stringify(registry));
   assert.deepEqual(coreQueueTests(files), [...new Set([...fixed, ...listed])].sort());
 });
+
+test('friction 213fefab: adding one replay registers only that entry and names the ladder row before the landing check', async () => {
+  const { withReplayEntry, withLadderRow, declaredReplay } =
+    await import('../scripts/incident-replay-coverage.mjs');
+  // Only a title the guard can find is registered.
+  assert.equal(declaredReplay("test('replays it (a)', () => {});", 'replays it (a)'), true);
+  assert.equal(declaredReplay('test(TITLE, () => {});', 'replays it (a)'), false);
+  assert.equal(declaredReplay("test.skip('replays it (a)', () => {});", 'replays it (a)'), false);
+  const entry = {
+    incident: 'f00dfeed',
+    what: 'A synthetic | incident',
+    file: 'tests/a.test.mjs',
+    test: 'replays it',
+  };
+  const before = { schema: 1, replays: [{ ...entry, incident: 'old00001', paths: ['src/x.ts'] }] };
+  const added = withReplayEntry(before, entry, ['convex/y.ts']);
+  assert.deepEqual(added.replays.at(-1), { ...entry, paths: ['convex/y.ts'] });
+  assert.deepEqual(added.replays[0], before.replays[0], 'other entries are kept, not re-run');
+  // The same incident and test again refreshes its paths in place.
+  const refreshed = withReplayEntry(added, entry, ['convex/z.ts']);
+  assert.equal(refreshed.replays.length, 2);
+  assert.deepEqual(refreshed.replays[1].paths, ['convex/z.ts']);
+  // The ladder doc gains the row the guard above requires, once.
+  const doc = withLadderRow(readFileSync(LADDER, 'utf8'), entry.incident, entry.what);
+  assert(doc.includes('| `f00dfeed` | A synthetic \\| incident |'));
+  assert.equal(withLadderRow(doc, entry.incident, entry.what), null);
+});

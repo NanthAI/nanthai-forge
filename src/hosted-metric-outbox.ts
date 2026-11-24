@@ -63,6 +63,13 @@ function cause(codes: string[], states: Landing[]) {
   if (stall) return `${stall.missingOwner}${stall.step ? ` at ${stall.step}` : ''}`.slice(0, 200);
   return codes.find(code => noOwnerCodes.has(code)) ?? null;
 }
+/** A refusal's own code: a ForgeError's, or a server refusal's structured ConvexError code (friction
+ * 0a9a5207: these were all counted as INTERNAL_ERROR). Anything else is INTERNAL_ERROR. */
+function outcomeCode(error: unknown) {
+  if (error instanceof ForgeError) return error.code;
+  const code = (error as { data?: { code?: unknown } } | null)?.data?.code;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? code : 'INTERNAL_ERROR';
+}
 /** What this caller received: one outcome per lifecycle command and one delivery per
  * terminal submission state in the response. Pure; no IO. */
 export function callerReceipts(input: {
@@ -75,10 +82,7 @@ export function callerReceipts(input: {
   error?: unknown;
 }): CallerReceipt[] {
   const cli = input.cli && cliProvenanceSchema.safeParse(input.cli).data;
-  const errorCodes =
-    input.error === undefined
-      ? metricErrorCodes(input.result)
-      : [input.error instanceof ForgeError ? input.error.code : 'INTERNAL_ERROR'];
+  const errorCodes = input.error === undefined ? metricErrorCodes(input.result) : [outcomeCode(input.error)];
   const states = input.error === undefined ? landings(input.result) : [];
   const recorded = cause(errorCodes, states);
   const receipts: unknown[] = [];

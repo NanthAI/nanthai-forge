@@ -157,9 +157,87 @@ function main(mode) {
   );
 }
 
+const LADDER = 'docs/agents/regression-ladder.md';
+const USAGE =
+  'Usage: nforge heavy node scripts/incident-replay-coverage.mjs --check|--write, or --add --incident ID --file tests/NAME.test.mjs --test TITLE --what TEXT';
+
+/** The registry with one entry added, or its recorded paths refreshed when the incident and test are
+ * already registered (friction 213fefab). Pure. */
+export function withReplayEntry(registry, { incident, what, file, test }, paths) {
+  const at = registry.replays.findIndex(entry => entry.incident === incident && entry.test === test);
+  const entry = at >= 0 ? { ...registry.replays[at], file, paths } : { incident, what, file, paths, test };
+  const replays = [...registry.replays];
+  if (at >= 0) replays[at] = entry;
+  else replays.push(entry);
+  return { ...registry, replays };
+}
+/** The ladder doc with a row for `incident` after its last incident row, unless it already names
+ * it: the incident-replays guard needs that row (friction 213fefab). Pure; null when unchanged. */
+export function withLadderRow(doc, incident, what) {
+  if (doc.includes(`\`${incident}\``)) return null;
+  const lines = doc.split('\n');
+  const last = lines.findLastIndex(line => line.startsWith('| `'));
+  if (last < 0) throw new Error(`${LADDER} has no incident table to extend.`);
+  lines.splice(
+    last + 1,
+    0,
+    `| \`${incident}\` | ${what.replaceAll('|', '\\|').replace(/\s+/g, ' ').trim()} |`,
+  );
+  return lines.join('\n');
+}
+/** The incident-replays guard's rule: the title is written directly in a plain, unskipped test( call. */
+export function declaredReplay(source, title) {
+  const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = source.match(new RegExp(`\\btest(\\.\\w+)?\\(\\s*(['"\`])${escaped}\\2([^\\n]*)`));
+  return Boolean(match && !match[1] && !/\b(skip|todo)\s*:/.test(match[3]));
+}
+function option(args, name) {
+  const at = args.indexOf(name);
+  const value = at >= 0 ? args[at + 1] : undefined;
+  if (!value || value.startsWith('--')) throw new Error(`${name} is required. ${USAGE}`);
+  return value;
+}
+/** Run one replay and register it: no other replay runs (friction 213fefab). */
+function add(args) {
+  const entry = {
+    incident: option(args, '--incident'),
+    what: option(args, '--what'),
+    file: option(args, '--file'),
+    test: option(args, '--test'),
+  };
+  const source = existsSync(join(root, entry.file)) ? readFileSync(join(root, entry.file), 'utf8') : '';
+  if (!declaredReplay(source, entry.test))
+    throw new Error(
+      `${entry.file}: no plain, unskipped test( call titled "${entry.test}" written as a literal; the registry guard needs one.`,
+    );
+  const registryFile = join(root, REGISTRY);
+  const original = readFileSync(registryFile, 'utf8');
+  const paths = runReplayCoverage(entry);
+  if (!paths.length)
+    throw new Error(
+      `${entry.file}: "${entry.test}" passed but called no core queue code, so it proves no path. Make it call the code it replays.`,
+    );
+  if (readFileSync(registryFile, 'utf8') !== original)
+    throw new Error(`${REGISTRY} changed during the replay. Run again on the current registry.`);
+  writeFileSync(
+    registryFile,
+    JSON.stringify(withReplayEntry(JSON.parse(original), entry, paths), null, 2) + '\n',
+  );
+  const ladderFile = join(root, LADDER);
+  const doc = withLadderRow(readFileSync(ladderFile, 'utf8'), entry.incident, entry.what);
+  if (doc !== null) writeFileSync(ladderFile, doc);
+  console.log(
+    JSON.stringify(
+      { registered: entry.incident, paths, ladderRow: doc === null ? 'already named' : 'added' },
+      null,
+      2,
+    ),
+  );
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [mode, ...rest] = process.argv.slice(2);
-  if (!['--check', '--write'].includes(mode) || rest.length)
-    throw new Error('Usage: nforge heavy node scripts/incident-replay-coverage.mjs --check|--write');
-  main(mode);
+  if (mode === '--add') add(rest);
+  else if (!['--check', '--write'].includes(mode) || rest.length) throw new Error(USAGE);
+  else main(mode);
 }

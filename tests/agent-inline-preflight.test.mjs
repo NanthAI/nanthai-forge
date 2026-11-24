@@ -249,6 +249,44 @@ test('a failed inline land keeps its original operation and complete replay, wit
   assert(!s.calls.some(c => /Compose|Landing/.test(c.name)), 'a failed local run starts no remote check');
 });
 
+test('frictions 54584edf, 3b31573b and 081135b9: a pre-submit refusal sends a long message once, and a replay by id with no message or another trailing newline keeps the operation', async t => {
+  const reader =
+    "import test from 'node:test'; import fs from 'node:fs'; test('red document reader', () => { fs.readFileSync(new URL('../README.md', import.meta.url)); throw Error('synthetic failure'); });\n";
+  const s = await fixture(t, 'require', reader),
+    operationId = randomUUID(),
+    message = `Long landing message\n\n${'detail line\n'.repeat(340)}MARKER-END`;
+  t.mock.method(preflightRuntime, 'filesystemEventHealth', () => ({ ok: true }));
+  const refused = async command => {
+    let failure;
+    await submitHostedLand(s.root, command, s.address, s.transport()).catch(error => {
+      failure = error;
+    });
+    return failure;
+  };
+  // A message file's trailing blank line on the first send.
+  const first = await refused({ operationId, message: `${message}\n\n` });
+  assert.equal(first?.code, 'PREFLIGHT_REQUIRED');
+  assert.equal(first.recovery.operationId, operationId, 'the id is a plain field');
+  const reply = JSON.stringify({ message: first.message, recovery: first.recovery });
+  assert.equal(reply.split('MARKER-END').length - 1, 1, 'the message travels once');
+  assert.equal(first.recovery.replay.parameters.message, message);
+  assert(!first.recovery.replayCommand.includes('MARKER-END'));
+  // The printed replay (no message) and an inline send without the newline reach the same operation.
+  for (const replay of [{ operationId }, { operationId, message }, first.recovery.replay.parameters]) {
+    const again = await refused(replay);
+    assert.equal(again?.code, 'PREFLIGHT_REQUIRED', `${JSON.stringify(Object.keys(replay))}: ${again?.code}`);
+    assert.equal(again.recovery.operationId, operationId);
+  }
+  // The reverse order: first without, then with a trailing newline.
+  const other = randomUUID();
+  assert.equal((await refused({ operationId: other, message: 'Plain message' }))?.code, 'PREFLIGHT_REQUIRED');
+  assert.equal(
+    (await refused({ operationId: other, message: 'Plain message\r\n' }))?.code,
+    'PREFLIGHT_REQUIRED',
+  );
+  assert(!s.calls.some(c => /Compose|Landing/.test(c.name)));
+});
+
 test('protected-path approval is printed before required inline preflight spends a check', async t => {
   const s = await fixture(t);
   const { policyPreset } = await import('../dist/autonomy-policy.js');

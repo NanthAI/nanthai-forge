@@ -525,6 +525,21 @@ export const waitingMessage = (slots: number, directory: string, wait: HeavyWait
   );
 };
 
+/**
+ * True for Forge's own `nforge agent ROOT preflight|land|finish` (also run as `node .../cli-entry.js`):
+ * it checks its arguments and preconditions first, then takes its own heavy slot for the build and
+ * tests only. Wrapped in `nforge heavy`, a slot would be held through its queue wait, those checks and
+ * any hosted wait, and a refusal comes only after the slot (friction 7c0ed580).
+ */
+export function slotsItself(args: string[]) {
+  const at = /(^|[\\/])nforge(\.cmd|\.exe)?$/i.test(args[0] ?? '')
+    ? 0
+    : (basename(args[0] ?? '').replace(/\.exe$/i, '') === 'node' || args[0] === process.execPath) &&
+        /(^|[\\/])cli-entry\.js$/.test(args[1] ?? '')
+      ? 1
+      : -1;
+  return at >= 0 && args[at + 1] === 'agent' && ['preflight', 'land', 'finish'].includes(args[at + 3] ?? '');
+}
 /** An inherited holder is a scheduling lease, never source or user authority. */
 export function inheritedHeavySlot(directory: string): string | null {
   try {
@@ -643,8 +658,13 @@ export async function heavyCli(
   const { stopLeftovers, stopProcessTree } = await loadStop();
   const inherited = inheritedHeavySlot(heavySlotDirectory());
   const queuedAt = Date.now();
+  const ownSlot = slotsItself(args);
+  if (ownSlot && slots !== 0 && !inherited)
+    process.stderr.write(
+      'heavy: nforge agent preflight/land take their own slot after their checks; running it without holding one.\n',
+    );
   const slot =
-    slots === 0 || inherited
+    slots === 0 || inherited || ownSlot
       ? null
       : await acquireHeavySlot(
           heavySlotDirectory(),

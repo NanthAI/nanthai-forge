@@ -49,6 +49,12 @@ export function landingNote(message: string) {
   return note;
 }
 export const noteSchema = z.string().transform(noteText);
+/** The one client-side normalisation of a supplied landing message: trailing newlines (a file's or
+ * editor's) are dropped, whichever route sent it (friction 081135b9). Idempotent, so a replay of the
+ * retained, already normalised message keeps its operation. */
+export function clientLandingMessage(value: string) {
+  return value.replace(/(?:\r?\n)+$/, '');
+}
 /** A message the client supplies (land, finish, --message-file): empty text never reaches the server (friction 737e85cb). */
 export function suppliedLandingMessage(value: string) {
   invariant(

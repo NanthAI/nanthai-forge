@@ -569,14 +569,18 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
         error instanceof ForgeError &&
         (code === 'PREFLIGHT_REQUIRED' || code === 'PREFLIGHT_BUDGET_EXCEEDED')
       ) {
-        const parameters = {
+        const parameters: Record<string, unknown> = {
           ...(input as Record<string, unknown>),
           operationId: session.journal.operationId,
         };
-        const replayCommand = `nforge agent ${shellQuote(session.root)} land --save ${shellQuote(JSON.stringify(parameters))}`;
+        // The message travels once, in replay.parameters: a replay by this id without a message reuses
+        // the retained one (friction 54584edf), so the printed command stays short.
+        const { message: _message, ...short } = parameters;
+        void _message;
+        const replayCommand = `nforge agent ${shellQuote(session.root)} land --save ${shellQuote(JSON.stringify(short))}`;
         throw new ForgeError(
           error.code,
-          `${error.message} Source is pinned to this operation. If source is unchanged, replay: ${replayCommand}. If you edit or save different source after this pre-submit refusal, run land --save with the same options and a fresh operationId; replaying this id keeps the original source pins.`,
+          `${error.message} Source is pinned to operation ${session.journal.operationId}. If source is unchanged, replay: ${replayCommand} (it keeps this operation's message). If you edit or save different source after this pre-submit refusal, run land --save with the same options and a fresh operationId; replaying this id keeps the original source pins.`,
           undefined,
           {
             ...(code === 'PREFLIGHT_BUDGET_EXCEEDED' ? { command: replayCommand } : {}),

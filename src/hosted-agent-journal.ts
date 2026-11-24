@@ -75,6 +75,18 @@ export function readAgentJson(path: string): unknown {
   );
   return JSON.parse(readFileSync(path, 'utf8'));
 }
+/** The landing message a retained finish operation was first sent with: a replay by its id that names
+ * no message reuses it (friction 54584edf). Undefined when there is no such journal or message. */
+export function retainedFinishMessage(root: string, operationId: string) {
+  const path = join(hostedAgentDirectory(root), `${operationId}.json`);
+  if (!checkoutPathExists(path)) return undefined;
+  const saved = schema.safeParse(readAgentJson(path));
+  if (!saved.success) return undefined;
+  const identity = JSON.parse(saved.data.identity) as { action?: unknown; command?: { message?: unknown } };
+  return identity.action === 'finish' && typeof identity.command?.message === 'string'
+    ? identity.command.message
+    : undefined;
+}
 const schema = z
   .object({
     schema: z.literal(1),
