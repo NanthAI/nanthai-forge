@@ -13,6 +13,7 @@ import { networkFetch, networkTimeout } from '../dist/network-fetch.js';
 import { api, internal } from '../convex/_generated/api.js';
 import { decodeHostedArtifact } from '../dist/hosted-artifact.js';
 import { releases, release, digest, main, portNumber } from './selfhost.mjs';
+import { smokeWebUrl, verifyConvexAuth } from './selfhost-auth.mjs';
 import { assertSmokeImport, deploySmoke, smokeCommand, smokeFailure } from './selfhost-smoke-support.mjs';
 import { startFakeR2, fakeR2Config } from '../tests/fake-r2.mjs';
 
@@ -127,6 +128,7 @@ async function deploy(directory) {
     token,
     keys,
     r2,
+    webUrl: smokeWebUrl,
   });
 }
 function archiveFor(pin, platform, provided) {
@@ -244,6 +246,8 @@ try {
   const originalSecret = await primary.admin.query(internal.secrets.created, { owner, operationId });
   assert(originalSecret);
   assert(!JSON.stringify(originalSecret).includes(secretValue));
+  stage = 'Convex Auth sign-up, token verification and revocation';
+  let convexAuth = await verifyConvexAuth(primary, repository, ref, undefined, { secrets });
   stage = 'snapshot export';
   const backup = join(root, 'backup.zip');
   cli(primaryPath, ['export', '--include-file-storage', '--path', backup]);
@@ -299,6 +303,7 @@ try {
       (await clients.admin.action(api.secretActions.reveal, { id: secret, operationId: randomUUID() })).value,
       secretValue,
     );
+    convexAuth = await verifyConvexAuth(clients, repository, ref, convexAuth, { secrets });
   };
   stage = 'restored original data';
   await verify(restored);
@@ -346,6 +351,19 @@ try {
       applicationRedeployAndRestart: true,
       freshPinUpgradeAndRollback: targetRelease !== release,
       localToS3AndLocalRestore: Boolean(storageEnv),
+      convexAuth: {
+        method: 'usernamePasskey',
+        origin: smokeWebUrl,
+        signedUpAndAuthenticated: true,
+        returnSignInPreserved: true,
+        refreshedOwnerPreserved: true,
+        wrongOriginDenied: true,
+        badSignatureDenied: true,
+        tamperedTokenDenied: true,
+        untrustedSignerDenied: true,
+        revokedTokenDenied: true,
+        anonymousAndSimulatedOwnersDenied: true,
+      },
     }),
   );
   succeeded = true;

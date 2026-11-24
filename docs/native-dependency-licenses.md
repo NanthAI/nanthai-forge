@@ -9,6 +9,8 @@ Forge's [npm inventory](dependency-licenses.md) does not cover the separately do
 | `precompiled-2026-09-28-5c7cb5b` | `5c7cb5bc7db457290f1769f95f1d1340912f7fd7` | `78a71666065da9f2baeeb0dce1b9d514d9ab2a469cf7f8302340f7a3050a2c8e` |
 | `precompiled-2026-10-01-d2ca853` | `d2ca8533c52e2dbd8e55e20181988973dcbabe41` | `a76614c586d46385e09e6943bdcbfb38e4ee90dd9597cb0998e9576455c9dd77` |
 
+For Convex Auth (`1.0/signJwt` and `/.well-known/jwks.json`, Item de67c77d), `scripts/selfhost.mjs` moved its default launcher pins to `precompiled-2026-11-23-df1590a` and `precompiled-2026-11-23-a064d22` while keeping the September/October pins readable for existing-instance export. Both November releases publish the identical root `LICENSE.md` text (LF SHA-256 `563cea54ba1ad9d2a1b36f4a62b1ebdc3e1dcfb8776a7afee06c99aad5294588`); their locked Cargo/V8 component inventory has not been re-audited yet, so complete native dependency closure remains open.
+
 Platform archive digests remain in the [install/upgrade recipe](operations.md). Both source-root `LICENSE.md` files have SHA-256 `563cea54ba1ad9d2a1b36f4a62b1ebdc3e1dcfb8776a7afee06c99aad5294588`. Their [FSL terms](https://github.com/get-convex/convex-backend/blob/d2ca8533c52e2dbd8e55e20181988973dcbabe41/LICENSE.md) govern separately from the Apache npm client and [Forge's licensing map](../LICENSE.md). Current native server licensing must not be labelled Apache merely from its client package or future-license text.
 
 ## Native release scope and actual checks

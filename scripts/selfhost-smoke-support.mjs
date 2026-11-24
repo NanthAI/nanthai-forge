@@ -22,7 +22,7 @@ export function sanitizeSmokeText(value, secrets = []) {
     .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/g, '[redacted]')
     // Never echo dotenv contents, even when the variable name is unfamiliar.
     .replace(/^\s*(?:export\s+)?[A-Z][A-Z0-9_]*\s*=.*$/gm, '[environment assignment redacted]')
-    .replace(/\b(?:oidc|native)-synthetic-[a-f0-9-]+/g, '[redacted]')
+    .replace(/\b(?:oidc|auth|native)-synthetic-[a-f0-9-]+/g, '[redacted]')
     .replace(/\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]')
     .replace(/\b[\da-f]{64,}\b/gi, '[redacted]')
     .replace(/\b(authorization|proxy-authorization)\s*:\s*[^\r\n]+/gi, '$1: [redacted]')
@@ -69,9 +69,10 @@ export function smokeFailure(error, { stage, secrets = [], command, stderr } = {
 
 /** Bytes always go to R2 (self-host included): `r2` names the bucket settings, here a local
  * S3-compatible fake reached through R2_ENDPOINT. */
-export async function deploySmoke(cli, { token, keys, r2 }) {
+export async function deploySmoke(cli, { token, keys, r2, webUrl }) {
   // Convex rejects reads of unset auth-config variables, including guarded optional reads.
   await cli(['env', 'set', 'FORGE_CLI_ISSUER', '']);
+  if (webUrl !== undefined) await cli(['env', 'set', 'FORGE_WEB_URL', webUrl]);
   await cli(['env', 'set', 'GITHUB_PUBLIC_TOKEN', token]);
   await cli(['env', 'set', 'FORGE_SECRET_KEYS', keys]);
   for (const [name, value] of Object.entries(r2)) await cli(['env', 'set', name, value]);

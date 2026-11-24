@@ -9,5 +9,9 @@
   conflicts fail atomically and successful links are audited. GitHub App user tokens
   are encrypted in the account row with a separate service keyring. GitHub settings
   are optional for deployment and required when starting that sign-in method.
-  Live GitHub, real phones and browser dormancy integration remain open. See
+  Browser dormancy holds (`withRefreshHold` and `WhileAwake`) keep idle cost at
+  zero, and `scripts/selfhost-smoke.mjs` verifies passkey sign-up/sign-in,
+  refresh rotation, negative checks and revocation end to end on a self-hosted
+  backend. Public-beta phone/new-user checks, admission policy and production
+  setup live in Phase 8. See
   [setup and browser lifecycle rules](../../development.md#convex-auth).

@@ -11,10 +11,31 @@ import { parseEnv } from 'node:util';
 import { retainBackendNotice, retainNativeComponentNotices } from './selfhost-notices.mjs';
 export { backendLicenseSha256, retainBackendNotice } from './selfhost-notices.mjs';
 
-export const release = 'precompiled-2026-09-28-5c7cb5b';
-export const upgradeRelease = 'precompiled-2026-10-01-d2ca853';
+export const release = 'precompiled-2026-11-23-df1590a';
+export const upgradeRelease = 'precompiled-2026-11-23-a064d22';
 export const releases = {
   [release]: {
+    'darwin-arm64': {
+      name: 'convex-local-backend-aarch64-apple-darwin.zip',
+      sha256: '23a327689d49f9ba3d748e515cf21cf0dd43f1ff82cf9417fb0c4e00a68a9656',
+    },
+    'linux-x64': {
+      name: 'convex-local-backend-x86_64-unknown-linux-gnu.zip',
+      sha256: '9b3ce2672fa6bf7693669f2255ddba16439934835f47305599cbb8aa1c691f37',
+    },
+  },
+  [upgradeRelease]: {
+    'darwin-arm64': {
+      name: 'convex-local-backend-aarch64-apple-darwin.zip',
+      sha256: '29340c30f51df5f2b06ddef6de2dfef7396bd22a7a6d43f07fcdc895e41039ec',
+    },
+    'linux-x64': {
+      name: 'convex-local-backend-x86_64-unknown-linux-gnu.zip',
+      sha256: '7888ebe6895cc349321f89637dc433244a5db296908a6784a62885803ecc7ee8',
+    },
+  },
+  // Earlier pre-Convex-Auth pins kept read-only so existing local instances can start to export snapshots.
+  'precompiled-2026-09-28-5c7cb5b': {
     'darwin-arm64': {
       name: 'convex-local-backend-aarch64-apple-darwin.zip',
       sha256: 'c1613bb4a3ac884871184020662c865a045cde95ad781fff002a6bd25f2f2890',
@@ -24,7 +45,7 @@ export const releases = {
       sha256: '5b4adbe9fc2f9985c66eb12b19dadedf2700d8796c839ddba09802196099f241',
     },
   },
-  [upgradeRelease]: {
+  'precompiled-2026-10-01-d2ca853': {
     'darwin-arm64': {
       name: 'convex-local-backend-aarch64-apple-darwin.zip',
       sha256: '39cf428d9e6adb51eba1d572ffffbc04b14786b2d72fca47636b701f65f18612',

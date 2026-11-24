@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { upgradeRelease } from '../scripts/selfhost.mjs';
 
 const workflow = readFileSync('.github/workflows/foundation.yml', 'utf8');
 const job = name => workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [a-z][\w-]*:\n/)[0];
@@ -25,6 +26,11 @@ test('verification matrix is independent of native selfhost and preserves every 
   }
   assert.match(job('verify-static'), /node scripts\/public-verify\.mjs static 8/);
   assert.match(job('native-selfhost'), /node scripts\/selfhost-smoke\.mjs/);
+  assert.match(
+    job('native-selfhost'),
+    new RegExp(`FORGE_NATIVE_TARGET_RELEASE: ${upgradeRelease.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+    'native-selfhost upgrade target must stay aligned with scripts/selfhost.mjs upgradeRelease (Convex Auth pin)',
+  );
 });
 
 test('public shards share the Node 24 build and package smoke runs only in the static matrix', () => {

@@ -42,32 +42,47 @@ function auth(variables) {
   return JSON.parse(JSON.stringify(module.exports.default));
 }
 
-test('fresh native auth reproduces the unset optional issuer failure; smoke defines it before deploy', async () => {
+test('fresh native auth reproduces the unset optional issuer failure; smoke defines it and configures Convex Auth before deploy', async () => {
   assert.throws(() => auth({}), /FORGE_CLI_ISSUER.*not set/);
-  const variables = {},
-    commands = [];
-  await deploySmoke(
-    args => {
-      commands.push(args);
-      if (args[0] === 'env') variables[args[2]] = args[3];
-      // Only Forge's own issuers remain: no third-party sign-in provider is configured (Item de67c77d).
-      else assert.deepEqual(auth(variables).providers, []);
-    },
-    {
-      token: 'synthetic-token',
-      keys: 'synthetic-keyring',
-      r2: { R2_BUCKET: 'synthetic-bucket', R2_ENDPOINT: 'http://127.0.0.1:9' },
-    },
-  );
-  assert.equal(variables.FORGE_CLI_ISSUER, '');
-  assert.equal('CLERK_JWT_ISSUER_DOMAIN' in variables, false);
-  // Self-host has no Convex byte mode: the smoke always configures object storage.
-  assert.equal(variables.FORGE_BLOBS, undefined);
-  assert.equal(variables.R2_BUCKET, 'synthetic-bucket');
-  assert.equal(variables.R2_ENDPOINT, 'http://127.0.0.1:9');
-  assert.equal(variables.GITHUB_PUBLIC_TOKEN, 'synthetic-token');
-  assert.equal(variables.FORGE_SECRET_KEYS, 'synthetic-keyring');
-  assert.deepEqual(commands.at(-1), ['deploy', '--typecheck', 'enable', '--yes']);
+  for (const webUrl of [undefined, 'https://selfhost-smoke.invalid']) {
+    const variables = {},
+      commands = [];
+    await deploySmoke(
+      args => {
+        commands.push(args);
+        if (args[0] === 'env') variables[args[2]] = args[3];
+        else {
+          // Only Forge's own issuers remain: no third-party sign-in provider is configured (Item de67c77d).
+          assert.deepEqual(auth(variables).providers, []);
+          assert.deepEqual(auth({ ...variables, CONVEX_CLOUD_URL: 'http://127.0.0.1:3320' }).providers, [
+            {
+              type: 'customJwt',
+              applicationID: 'convex-auth',
+              issuer: 'http://127.0.0.1:3320/components/auth',
+              jwks: 'http://127.0.0.1:3320/.well-known/jwks.json',
+              algorithm: 'ES256',
+            },
+          ]);
+        }
+      },
+      {
+        token: 'synthetic-token',
+        keys: 'synthetic-keyring',
+        r2: { R2_BUCKET: 'synthetic-bucket', R2_ENDPOINT: 'http://127.0.0.1:9' },
+        ...(webUrl !== undefined ? { webUrl } : {}),
+      },
+    );
+    assert.equal(variables.FORGE_CLI_ISSUER, '');
+    assert.equal(variables.FORGE_WEB_URL, webUrl);
+    assert.equal('CLERK_JWT_ISSUER_DOMAIN' in variables, false);
+    // Self-host has no Convex byte mode: the smoke always configures object storage.
+    assert.equal(variables.FORGE_BLOBS, undefined);
+    assert.equal(variables.R2_BUCKET, 'synthetic-bucket');
+    assert.equal(variables.R2_ENDPOINT, 'http://127.0.0.1:9');
+    assert.equal(variables.GITHUB_PUBLIC_TOKEN, 'synthetic-token');
+    assert.equal(variables.FORGE_SECRET_KEYS, 'synthetic-keyring');
+    assert.deepEqual(commands.at(-1), ['deploy', '--typecheck', 'enable', '--yes']);
+  }
 });
 
 test('import failures expose the job reason through redacted smoke diagnostics', () => {
@@ -101,13 +116,14 @@ test('diagnostics redact known opaque secrets, dotenv, JWTs, keyrings, authoriza
     'token="unknown quoted credential" admin_key=unknown-admin',
     'https://user:private-password@example.test/path?credential=private-query',
     'ghp_unknowncredential ' + 'a'.repeat(64),
+    'auth-synthetic-01234567-89ab-cdef-0123-456789abcdef',
     '-----BEGIN PRIVATE KEY-----\nprivate pem data\n-----END PRIVATE KEY-----',
   ].join('\n');
   const output = sanitizeSmokeText(input, [secret]);
   assert.match(output, /Useful error: missing FORGE_CLI_ISSUER/);
   assert.doesNotMatch(
     output,
-    /opaque|unrecognized-value|private-content|unknown-bearer|eyJ|unknown quoted|unknown-admin|private-password|private-query|unknowncredential|a{64}|private pem|\x1b/,
+    /opaque|unrecognized-value|private-content|unknown-bearer|eyJ|unknown quoted|unknown-admin|private-password|private-query|unknowncredential|a{64}|01234567-89ab|private pem|\x1b/,
   );
 });
 

@@ -143,7 +143,7 @@ jobs:
       - run: node scripts/selfhost-smoke.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          FORGE_NATIVE_TARGET_RELEASE: precompiled-2026-10-01-d2ca853
+          FORGE_NATIVE_TARGET_RELEASE: precompiled-2026-11-23-a064d22
 
   verify:
     needs: [scope, foundation, verify-static, verify-tests, native-selfhost]
