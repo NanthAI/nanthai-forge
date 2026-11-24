@@ -437,14 +437,19 @@ test('public discovery screens: explore, a profile signed out and as its person,
     rmSync(out, { recursive: true, force: true });
   });
   const errors = [];
+  const offSite = [];
   const asked = [];
   const open = async (path, width = 1440, theme = 'dark') => {
     const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 1000 } });
     t.after(() => page.close());
     page.on('pageerror', error => errors.push(error.message));
+    page.on('websocket', socket => offSite.push(new URL(socket.url()).hostname));
     await page.route('**/*', async route => {
       const url = new URL(route.request().url());
-      if (url.hostname !== 'forge.test') return route.abort();
+      if (url.hostname !== 'forge.test') {
+        offSite.push(url.hostname);
+        return route.abort();
+      }
       if (url.pathname.startsWith('/-/public/v1/')) {
         asked.push(url.pathname);
         assert.equal(route.request().method(), 'GET');
@@ -546,8 +551,15 @@ test('public discovery screens: explore, a profile signed out and as its person,
   );
   assert.ok(asked.includes('/-/public/v1/explore/stars.json'));
   // A visitor's star asks for sign-in; nothing is starred.
-  await ex.locator('.row.xrow .star').first().click();
-  await ex.getByRole('dialog', { name: /Sign in to star/ }).waitFor();
+  const firstStar = ex.locator('.row.xrow .star').first();
+  const unstarred = await firstStar.textContent();
+  const readsBeforeStar = asked.length;
+  await firstStar.click();
+  const exploreGate = ex.getByRole('dialog', { name: /Sign in to star/ });
+  assert.match(await exploreGate.textContent(), /Nothing was starred/);
+  assert.equal(await firstStar.getAttribute('aria-pressed'), 'false');
+  assert.equal(await firstStar.textContent(), unstarred);
+  assert.equal(asked.length, readsBeforeStar, 'opening the refusal reads no public data');
   assert.match(
     await ex.getByRole('dialog').getByRole('link', { name: 'Sign in' }).getAttribute('href'),
     /^\/signin\?next=%2Fexplore$/,
@@ -610,6 +622,8 @@ test('public discovery screens: explore, a profile signed out and as its person,
   await cloneGate.getByRole('button', { name: 'Not now' }).click();
   await pp.getByRole('button', { name: /Star .* for ada\/atlas/ }).click();
   const starGate = pp.getByRole('dialog', { name: 'Sign in to star atlas' });
+  assert.match(await starGate.textContent(), /Nothing was starred/);
+  assert.deepEqual(await pp.evaluate(() => window.writes), []);
   assert.equal(
     await starGate.getByRole('link', { name: 'Sign in' }).getAttribute('href'),
     `/signin?next=${encodeURIComponent(next)}`,
@@ -786,4 +800,5 @@ test('public discovery screens: explore, a profile signed out and as its person,
           await page.screenshot({ path: join(shots, `${name}-${width}-${theme}.png`), fullPage: true });
       }
   assert.deepEqual(errors, []);
+  assert.deepEqual(offSite, [], 'public discovery and its refusal sheets do not connect to Convex');
 });

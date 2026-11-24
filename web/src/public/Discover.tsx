@@ -218,7 +218,7 @@ function Gate({
     >
       <p className="note">
         {what === 'star'
-          ? 'A star is one per person, given by a person and never by an agent. Sign in, then star it.'
+          ? 'Nothing was starred. Sign in, then press Star again.'
           : 'Cloning needs an account. Nothing was copied. Sign in, then the clone command is ready here.'}
       </p>
     </Sheet>
