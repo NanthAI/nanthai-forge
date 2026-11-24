@@ -287,10 +287,12 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // Item 3c01e736: the compose state stores its compact server steps (about 225 bytes), so each read or write of
 // a compose row moves by that much: carry +675 read/-98 write, scoped recheck +742 read/+4 write, red -917 read/-309 write.
 // No call is added.
+// Item fa2c1383: keep/cancel decisions stay on the canonical run. The keep arm writes its observation
+// once, and the retire stamps its decision on the existing cancellation write. Calls stay exact.
 export const WIRED = {
-  carry: { calls: -2, readBytes: 188_795, writeBytes: 14_738 },
-  'scoped-recheck': { calls: 8, readBytes: 327_617, writeBytes: 85_769 },
-  red: { calls: -17, readBytes: -386_969, writeBytes: -145_667 },
+  carry: { calls: -2, readBytes: 190_115, writeBytes: 18_883 },
+  'scoped-recheck': { calls: 8, readBytes: 328_807, writeBytes: 89_950 },
+  red: { calls: -17, readBytes: -386_493, writeBytes: -141_605 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

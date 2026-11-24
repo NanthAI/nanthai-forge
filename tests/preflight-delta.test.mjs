@@ -236,7 +236,7 @@ test('a real run records the rule, deferral target and measured wall time; peak 
   const plan = f.plan();
   assert.match(
     plan.local.summary,
-    /Local rule: changed tests, explicit coverage and smoke; then tests that failed for these paths before; then tests that run a changed module directly, through a test fixture or through one module that imports it, or are named for it \(never trimmed, most specific first\)/,
+    /Local rule: changed tests, explicit coverage and smoke; then tests that failed for these paths before; then tests that run a changed module directly, through a test fixture or through one module that imports it, or are named for it \(most specific first\)/,
   );
   assert.equal(plan.local.budgetSeconds, 180);
   const receipt = f.run(plan);
@@ -294,7 +294,7 @@ test('a tiny budget trims by time, names the trimmed files and the one command t
   assert.equal(second.skipped, undefined);
 });
 
-test('direct tests are never trimmed by an estimate; the wall-time cap names the ones it did not start (8288e7f5)', t => {
+test('direct tests survive a trim to the local budget; the wall-time cap names the ones it did not start (8288e7f5)', t => {
   const f = fixture(t);
   // Both tests import a changed module directly: protected from the plan's trim, whatever the budget.
   const plan = f.plan([], { budgetSeconds: 1 });
@@ -333,6 +333,59 @@ test('direct tests are never trimmed by an estimate; the wall-time cap names the
   assert.equal(second.passed, true);
   assert.equal(second.tests, 1);
   assert.equal(second.stopped, undefined);
+});
+
+test('8dbd2683: a wide shared-code preflight plans only what fits the ceiling and keeps the rest for landing', t => {
+  const f = fixture(t);
+  const readers = Array.from({ length: 158 }, (_, index) => `tests/shared-${index}.test.mjs`);
+  for (const path of readers) f.put(path, "import '../src/a.ts';");
+  f.put('README.md', '# Test fixture');
+  f.put(
+    'forge.json',
+    JSON.stringify({
+      preflight: { guards: [{ name: 'shared-code checks', tests: readers, inputs: ['src/a.ts'] }] },
+    }),
+  );
+  const expected = ['tests/a.test.mjs', 'tests/b.test.mjs', ...readers].sort();
+
+  for (const options of [{}, { trim: false }, { only: expected, trim: false }]) {
+    const plan = f.plan(['README.md'], options);
+    assert.equal(plan.tests.length, 150);
+    assert.equal(plan.local.estimateSeconds, 600);
+    assert.equal(plan.estimateMinutes, 10);
+    assert.equal(plan.totalEstimateMinutes, 11);
+    assert.deepEqual([...plan.tests, ...plan.deferredTests].sort(), expected);
+    assert.match(planLine(plan), /10 test file\(s\) deferred by the 600 s ceiling/);
+    for (const path of plan.deferredTests) assert.ok(!plan.command.includes(path));
+  }
+
+  const longer = f.plan(['README.md'], { trim: false, budgetSeconds: 900 });
+  assert.deepEqual([...longer.tests].sort(), expected);
+  assert.deepEqual(longer.deferredTests, []);
+  assert.match(planLine(longer), /900 s ceiling \(budgetSeconds override\)/);
+});
+
+test('8dbd2683: a saved change with no test that fits the ceiling reports incomplete', t => {
+  const f = fixture(t);
+  const agent = join(f.root + '.forge-client', 'agent');
+  const file = 'tests/a.test.mjs';
+  mkdirSync(agent, { recursive: true });
+  writeFileSync(
+    join(agent, 'preflight-files.json'),
+    JSON.stringify({ [file]: { ms: 720_000, failed: false } }),
+  );
+  const plan = preflightPlan(f.root, { paths: [file], complete: true });
+  assert.deepEqual(plan.tests, []);
+  assert.deepEqual(plan.deferredTests, [file]);
+  assert.equal(plan.command, null);
+  const receipt = f.run(plan);
+  assert.equal(receipt.outcome, 'incomplete');
+  assert.equal(receipt.tests, 0);
+  assert.equal(receipt.incomplete.mustRun, 1);
+  assert.equal(receipt.deferredTo, 'pre-queue');
+  assert.deepEqual(receipt.ceiling, { seconds: 600 });
+  const longer = preflightPlan(f.root, { paths: [file], complete: true }, undefined, { budgetSeconds: 900 });
+  assert.deepEqual(longer.tests, [file]);
 });
 
 test('the run stops between groups when the local budget is spent and reports what it did not start', t => {

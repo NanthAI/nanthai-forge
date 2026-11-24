@@ -191,6 +191,32 @@ export const runCeiling = (
 /** The ceiling a planned run keeps, wherever its plan carries it; the default when it carries none. */
 const planCeiling = (plan: PreflightPlan & { status: 'planned' }) =>
   plan.local?.ceiling ?? plan.ceiling ?? runCeiling(undefined, plan.timeSettings);
+/** Fit a prefix of the existing run order, including protected tests. The wall clock still
+ * handles estimates that turn out low. */
+function fitRunCeiling(
+  ranked: string[],
+  ceilingSeconds: number,
+  secondsFor: (test: string) => number,
+  unit = 'test file',
+) {
+  let seconds = 0;
+  let count = 0;
+  for (const test of ranked) {
+    const next = seconds + secondsFor(test);
+    if (next - ceilingSeconds > 1e-9) break; // Ignore rounding noise from fractional estimates.
+    seconds = next;
+    count++;
+  }
+  const deferred = ranked.slice(count);
+  return {
+    tests: ranked.slice(0, count),
+    seconds: Math.min(seconds, ceilingSeconds),
+    deferred,
+    note: deferred.length
+      ? `${deferred.length} ${unit}(s) deferred by the ${ceilingSeconds} s ceiling (listed in deferredTests with --detail). `
+      : '',
+  };
+}
 /** Longest a group is planned to run (seconds). The run re-checks the budget between groups and sizes
  * the next one from the speed it observed and the time left, so this is only how finely it can stop,
  * never how many tests may run. */
@@ -338,15 +364,15 @@ export type LocalSelection = {
   mandatoryOverBudget: boolean;
   /** Protected tiers (mandatory, learned, direct) alone exceed the budget; they still all run. */
   protectedOverBudget?: boolean;
-  /** Leading tests that always run: changed tests, explicit coverage and smoke not already passed. */
+  /** Selected changed tests, explicit coverage and smoke that have not already passed. */
   mandatory: number;
-  /** Leading tests the budget never trims or stops: mandatory, learned and direct (not yet passed). */
+  /** Selected mandatory, learned and direct tests that have not already passed. */
   protected?: number;
-  /** Ranked local-tier files the budget trimmed from this run, by name. */
+  /** Ranked local-tier files the local budget trimmed from this run, by name. */
   trimmedTests?: string[];
-  /** The one command that runs every trimmed file (passed ones are reused). */
+  /** The command that tries the ranked tiers up to the ceiling (passed files are reused). */
   rerun?: string;
-  /** false: run every ranked local tier, no time budget (the rerun command); the ceiling still holds. */
+  /** false: bypass the local budget and run the ranked tiers up to the ceiling. */
   trim?: false;
   /** Hard wall-time ceiling of the test phase (8dbd2683); absent in a caller-built plan (the default holds). */
   ceiling?: { seconds: number; override?: true };
@@ -355,7 +381,7 @@ export type LocalSelection = {
   /** Set when the plan runs only the files a previous run stopped for time. */
   only?: 'stopped';
   deferred: number;
-  /** Declared guards this change triggered: always run first, never trimmed; `seconds` is the cost
+  /** Declared guards this change triggered: ordered early and protected from the local budget. `seconds` is the cost
    * (measured on this machine where known, else the per-file estimate). */
   guards?: { name: string; tests: string[]; seconds: number }[];
   /** The learned guard set (Automatic, manual or off) and why each file is in: p, C, r, t, saving. */
@@ -402,6 +428,8 @@ export type PreflightPlan =
       packages?: SelectedPackage[];
       /** A package-graph plan's run ceiling (8dbd2683); other plans keep it on `local`. */
       ceiling?: { seconds: number; override?: true };
+      /** How many ranked tests moved to landing to fit the run ceiling. */
+      ceilingDeferred?: number;
       timeSettings?: PreflightTimeSettings;
     };
 
@@ -719,6 +747,7 @@ function runnerPlan(
   const runner: TestRunner = resolved.runner;
   const only = options.only ? new Set(options.only) : null;
   const keep = (tests: string[]) => (only ? tests.filter(test => only.has(test)) : tests);
+  const ceiling = runCeiling(options.budgetSeconds, timeSettings);
   if (runner.layout === 'packages') {
     // A wrapper script the tree commits (gradlew, mvnw) runs only when the project declares it.
     let wrappers: ReturnType<typeof declaredPreflight>;
@@ -736,15 +765,12 @@ function runnerPlan(
       graph!(),
       statics,
       keep,
+      ceiling,
       modules,
       declaredPackageFlags(forgeJson),
       wrappers?.value === true,
     );
-    // Same object: plannedPaths keys on it. Package commands have no time budget, but the ceiling holds.
-    if (plan.status === 'planned') {
-      if (timeSettings) plan.timeSettings = timeSettings;
-      plan.ceiling = runCeiling(options.budgetSeconds, timeSettings);
-    }
+    if (plan.status === 'planned' && timeSettings) plan.timeSettings = timeSettings;
     return plan;
   }
   const selection = runnerSelection(runner, allPaths, paths, preflightImports(root, runner, allPaths, paths));
@@ -821,9 +847,11 @@ function runnerPlan(
     },
   ].filter(item => item.tests.length);
   if (inPackages.reason) selection.reason = `${selection.reason}; ${inPackages.reason}`;
-  const tests = tiers.flatMap(item => item.tests);
+  const ranked = tiers.flatMap(item => item.tests);
+  const { tests, seconds, deferred, note } = fitRunCeiling(ranked, ceiling.seconds, secondsFor);
+  const selected = new Set(tests);
+  const tierTests = tiers.map(item => ({ ...item, local: item.tests.filter(test => selected.has(test)) }));
   const trim = options.trim !== false;
-  const seconds = tests.reduce((sum, test) => sum + secondsFor(test), 0);
   const label = runnerLabel(runner);
   const rule = `${label}: changed test files, learned failures, then tests named for a changed module (closest folder first) or reaching it through imports, then tests in affected packages`;
   const reason = learned.length
@@ -835,18 +863,18 @@ function runnerPlan(
     secondsPerFile: timing.secondsPerFile,
     basis: timing.basis,
     estimateSeconds: seconds,
-    tiers: tiers.map(item => ({ tier: item.tier, total: item.tests.length, local: item.tests.length })),
-    tierTests: Object.fromEntries(tiers.map(item => [item.tier, item.tests])),
+    tiers: tierTests.map(item => ({ tier: item.tier, total: item.tests.length, local: item.local.length })),
+    tierTests: Object.fromEntries(tierTests.map(item => [item.tier, item.local])),
     trimmed: [],
     mandatoryOverBudget: false,
-    mandatory: tiers[0]?.tier === 'mandatory' ? tiers[0].tests.length : 0,
+    mandatory: tierTests[0]?.tier === 'mandatory' ? tierTests[0].local.length : 0,
     protected: tests.length,
-    deferred: 0,
+    deferred: deferred.length,
     ...(trim ? {} : { trim: false as const }),
-    ceiling: runCeiling(options.budgetSeconds, timeSettings),
+    ceiling,
     ...(only ? { only: 'stopped' as const } : {}),
     deferredTo: 'pre-queue',
-    summary: `Local rule: ${rule}. ${reason}.${guardSet ? ` ${guardSetLine(guardSet)}` : ''}`,
+    summary: `${note}Local rule: ${rule}. ${reason}.${guardSet ? ` ${guardSetLine(guardSet)}` : ''}`,
     ...(guards.length || learnedGuards.length
       ? {
           guards: [
@@ -864,20 +892,16 @@ function runnerPlan(
   const plan: PreflightPlan = {
     status: 'planned',
     scope: selection.scope === 'none' && learned.length ? 'scoped' : selection.scope,
-    reason,
+    reason: note + reason,
     tests,
-    deferredTests: [],
+    deferredTests: deferred,
+    ...(deferred.length ? { ceilingDeferred: deferred.length } : {}),
     ...statics,
     local,
     ...(timeSettings ? { timeSettings } : {}),
     reusedTests: [],
-    estimateMinutes: Math.ceil(
-      Math.min(
-        seconds,
-        trim ? budgetSeconds + tests.reduce((most, test) => Math.max(most, secondsFor(test)), 0) : Infinity,
-      ) / 60,
-    ),
-    totalEstimateMinutes: estimatePreflightMinutes(root, tests.length),
+    estimateMinutes: Math.ceil(seconds / 60),
+    totalEstimateMinutes: estimatePreflightMinutes(root, ranked.length),
     runner: { label, command: runner.command, ...(runner.parts ? { parts: runner.parts } : {}) },
     ...(runner.source === 'dependency' ? { advisory: INFERRED_RUNNER_ADVISORY } : {}),
     command: tests.length
@@ -909,7 +933,6 @@ function treeWrapperRule(selection: ReturnType<typeof packageTestSelection>, dec
     ...selection,
     commands,
     units: commands.map(packageCommandUnit),
-    command: commands.map(command => packageCommandLine(command, shellWord)).join(' && '),
     replacedWrappers: [...replaced].sort(),
   };
 }
@@ -922,38 +945,47 @@ function packagePlan(
   graph: PackageGraph,
   statics: Partial<Pick<PreflightPlan & { status: 'planned' }, 'static'>>,
   keep: (tests: string[]) => string[],
+  ceiling: ReturnType<typeof runCeiling>,
   modules?: () => ModuleGraph,
   flags?: PackageFlagSource | { refusal: string },
   treeWrappers = false,
 ): PreflightPlan {
   const selection = treeWrapperRule(packageTestSelection(graph, paths, modules, flags), treeWrappers);
   const units = keep(selection.units);
-  const commands = Object.fromEntries(
-    selection.commands.map(command => [
-      selection.units[selection.commands.indexOf(command)]!,
-      { cwd: command.cwd, argv: command.argv, ecosystem: command.ecosystem },
-    ]),
-  );
   const estimate = packageEstimate(root, units);
+  const { tests, seconds, deferred, note } = fitRunCeiling(
+    units,
+    ceiling.seconds,
+    estimate.secondsFor,
+    'package command',
+  );
+  const commands = new Map(selection.units.map((unit, index) => [unit, selection.commands[index]!]));
+  const selected = tests.map(unit => commands.get(unit)!);
   const label = runnerLabel(runner);
   const plan: PreflightPlan = {
     status: 'planned',
     scope: selection.scope,
-    reason: selection.reason,
-    tests: units,
-    deferredTests: [],
+    reason: note + selection.reason,
+    tests,
+    deferredTests: deferred,
+    ...(deferred.length ? { ceilingDeferred: deferred.length } : {}),
+    ceiling,
     ...statics,
     reusedTests: [],
-    estimateMinutes: Math.ceil(estimate.seconds / 60),
+    estimateMinutes: Math.ceil(seconds / 60),
     totalEstimateMinutes: Math.ceil(estimate.seconds / 60),
     estimateBasis: estimate.basis,
     runner: { label, command: [] },
     advisory: selection.replacedWrappers.length
       ? `${INFERRED_RUNNER_ADVISORY} ${selection.replacedWrappers.join(' and ')} in the tree ${selection.replacedWrappers.length > 1 ? 'are' : 'is'} not declared, so the build tool on PATH runs instead; declare "preflight": {"wrappers": true} in forge.json to run the wrapper.`
       : INFERRED_RUNNER_ADVISORY,
-    packageCommands: commands,
+    packageCommands: Object.fromEntries(
+      selected.map(({ cwd, argv, ecosystem }, index) => [tests[index]!, { cwd, argv, ecosystem }]),
+    ),
     packages: selection.packages,
-    command: selection.command,
+    command: selected.length
+      ? selected.map(command => packageCommandLine(command, shellWord)).join(' && ')
+      : null,
   };
   plannedPaths.set(plan, paths);
   return plan;
@@ -973,19 +1005,19 @@ function preflightImports(root: string, runner: TestRunner, allPaths: string[], 
   );
 }
 
-/** Seconds the package units should take: each unit this machine already ran at its smoothed time;
- * the rest at the hosted check's recent median (the whole CI build bounds any subset of packages),
- * else the per-command default. Never the per-test-file constant: one unit builds whole packages. */
+/** Price each package command at its smoothed local time, an equal share of the hosted median
+ * for the untimed commands, or the cold per-command default. */
 function packageEstimate(root: string, units: string[]) {
   const stats = preflightFileStats(root);
-  const known = units.filter(unit => stats[unit] && stats[unit].ms > 0);
-  const unknown = units.length - known.length;
+  const unknown = units.filter(unit => !stats[unit]?.ms).length;
   const hosted = unknown ? hostedCheckSeconds(root) : null;
+  const fallback = hosted === null ? PREFLIGHT_SECONDS_PER_PACKAGE_COMMAND : hosted / unknown;
+  const secondsFor = (unit: string) => (stats[unit]?.ms ? stats[unit].ms / 1000 : fallback);
   const seconds =
-    known.reduce((sum, unit) => sum + stats[unit]!.ms / 1000, 0) +
-    (unknown ? (hosted ?? unknown * PREFLIGHT_SECONDS_PER_PACKAGE_COMMAND) : 0);
+    units.reduce((sum, unit) => sum + (stats[unit]?.ms ?? 0) / 1000, 0) +
+    (hosted ?? unknown * PREFLIGHT_SECONDS_PER_PACKAGE_COMMAND);
   const basis = !unknown ? 'measured' : hosted !== null ? 'hosted' : 'default';
-  return { seconds, basis } as const;
+  return { seconds, secondsFor, basis } as const;
 }
 
 /** One saved text file outside the selector inventory (a shell script, a workflow), for comparison. */
@@ -1109,6 +1141,7 @@ function planTests(
     const stats = preflightFileStats(root);
     const budgetSeconds =
       timeSettings?.budget.seconds ?? options?.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
+    const ceiling = runCeiling(options?.budgetSeconds, timeSettings);
     const trim = options?.trim !== false;
     const secondsFor = (test: string) => (stats[test] ? stats[test].ms / 1000 : timing.secondsPerFile);
     const declaredGuards = preflightGuards(packageJson, path => files.has(path), forgeJson);
@@ -1330,10 +1363,15 @@ function planTests(
       leftover -= seconds;
       filler.push(test);
     }
-    tests = [...tests, ...filler];
+    const capped = fitRunCeiling([...tests, ...filler], ceiling.seconds, secondsFor);
+    tests = capped.tests;
     const filled = new Set(filler);
-    const deferredTests = [...selection.deferredTests, ...cut].filter(test => !filled.has(test)).sort();
+    const deferredTests = [
+      ...new Set([...selection.deferredTests, ...cut.filter(test => !filled.has(test)), ...capped.deferred]),
+    ].sort();
     const complete = tests.length + reusedTests.length + deferredTests.length;
+    const selected = new Set([...tests, ...reusedTests]);
+    const mandatory = new Set(selection.tiers[0]?.tests ?? []);
     const guarded = new Set(
       selection.tiers.filter(item => protectedTiers.has(item.tier)).flatMap(item => item.tests),
     );
@@ -1342,10 +1380,13 @@ function planTests(
       fit,
       timing,
       budgetSeconds,
-      kept,
-      mandatory: tests.filter(test => selection.tiers[0]?.tests.includes(test)).length,
+      kept: selected,
+      mandatory: tests.filter(test => mandatory.has(test)).length,
       protected: tests.filter(test => guarded.has(test)).length,
       deferred: deferredTests.length,
+      ceiling,
+      ceilingNote: capped.note,
+      estimateSeconds: Math.ceil(capped.seconds),
       guards: [
         ...guards.selected
           .filter(guard => !guard.demote)
@@ -1375,7 +1416,7 @@ function planTests(
           : []),
       ],
       ...(guardSet ? { guardSet } : {}),
-      filler: filler.length,
+      filler: filler.filter(test => selected.has(test)).length,
       trimmedTests: only ? [] : cut.filter(test => !filled.has(test)).sort(),
       rerun: context ? rerunCommand(root, context.laneId) : undefined,
       trim,
@@ -1383,15 +1424,15 @@ function planTests(
       costTests,
       only: !!only,
     });
-    local.ceiling = runCeiling(options?.budgetSeconds, timeSettings);
     const checks = planStatic(files.get('package.json'), changed.paths, forgeJson);
     if ('reason' in checks) return { status: 'unavailable', reason: checks.reason };
     const plan: PreflightPlan = {
       status: 'planned',
       scope: selection.scope,
-      reason: selection.reason,
+      reason: capped.note + selection.reason,
       tests,
       deferredTests,
+      ...(capped.deferred.length ? { ceilingDeferred: capped.deferred.length } : {}),
       ...(checks.selected.length || checks.untouched.length
         ? {
             static: {
@@ -1406,19 +1447,13 @@ function planTests(
             },
           }
         : {}),
-      ...(selection.tiers.length ? { local } : {}),
+      ...(selection.tiers.length ? { local } : tests.length || capped.deferred.length ? { ceiling } : {}),
       ...(timeSettings ? { timeSettings } : {}),
       reusedTests,
       ...(reusedFrom ? { reusedFrom } : {}),
       ...(delta ? { deltaPaths: delta } : {}),
       ...(changed.source === 'manifests' ? { changedPathsFrom: 'manifests' as const } : {}),
-      // The run's wall-time cap bounds what this plan can cost here: the budget plus one file.
-      estimateMinutes: Math.ceil(
-        Math.min(
-          tests.reduce((sum, test) => sum + secondsFor(test), 0),
-          trim ? budgetSeconds + tests.reduce((most, test) => Math.max(most, secondsFor(test)), 0) : Infinity,
-        ) / 60,
-      ),
+      estimateMinutes: Math.ceil(capped.seconds / 60),
       totalEstimateMinutes: estimatePreflightMinutes(root, complete),
       command: tests.length
         ? ['node', ...testArgs(root, tests)]
@@ -1500,7 +1535,7 @@ export function planLine(plan: PreflightPlan & { status: 'planned' }) {
 }
 const PLAN_REASON_CHARS = 400;
 
-/** Runs every ranked local tier with no time budget; reused passes make it run only what was skipped. */
+/** Tries the ranked tiers up to the ceiling, reusing passes. */
 const rerunCommand = (root: string, laneId: string) =>
   `nforge agent ${shellQuote(root)} preflight ${shellQuote(JSON.stringify({ laneId, trim: false }))}`;
 /** Runs exactly the files the last run stopped for time (under the same wall-time budget). */
@@ -1556,6 +1591,9 @@ function localSelection(input: {
   mandatory: number;
   protected: number;
   deferred: number;
+  ceiling: ReturnType<typeof runCeiling>;
+  ceilingNote: string;
+  estimateSeconds: number;
   guards: { name: string; tests: string[]; seconds: number }[];
   guardSet?: GuardSetReport;
   filler: number;
@@ -1590,7 +1628,7 @@ function localSelection(input: {
       `${timing.secondsPerFile.toFixed(1)} s per file (${timing.basis === 'measured' ? 'measured on this machine' : 'default estimate, no run measured yet'}).`
     : '';
   const over = !input.trim
-    ? ' trim:false: every ranked local tier runs, no time budget.'
+    ? ' trim:false: the ranked local tiers run up to the ceiling.'
     : fit.protectedOverBudget
       ? ` Protected tests (changed, learned, direct) alone exceed the ${budgetSeconds} s budget: they run first (fast repo-wide guards, guards, the change's own tests, files that failed for these paths, named tests, then most learned saving per second; smoke and explicit coverage last); the wall clock stops the rest by name, and the run is then NOT COMPLETE with one command to finish them.`
       : '';
@@ -1602,7 +1640,7 @@ function localSelection(input: {
     budgetSeconds,
     secondsPerFile: timing.secondsPerFile,
     basis: timing.basis,
-    estimateSeconds: fit.estimateSeconds,
+    estimateSeconds: input.estimateSeconds,
     tiers,
     tierTests,
     trimmed,
@@ -1611,6 +1649,7 @@ function localSelection(input: {
     mandatory: input.mandatory,
     protected: input.protected,
     deferred: input.deferred,
+    ceiling: input.ceiling,
     ...(input.guards.length ? { guards: input.guards } : {}),
     ...(input.guardSet ? { guardSet: input.guardSet } : {}),
     ...(input.filler ? { filler: input.filler } : {}),
@@ -1621,9 +1660,9 @@ function localSelection(input: {
     ...(input.only ? { only: 'stopped' as const } : {}),
     deferredTo: 'pre-queue',
     summary:
-      `Local rule: ${preflightTierRule}.` +
+      `${input.ceilingNote}Local rule: ${preflightTierRule}.` +
       (input.guards.length
-        ? ` Guards always run first, never trimmed: ${input.guards.map(guard => `${guard.name} ~${guard.seconds} s`).join(', ')}.`
+        ? ` Guards run early and are protected from the local budget: ${input.guards.map(guard => `${guard.name} ~${guard.seconds} s`).join(', ')}.`
         : '') +
       (input.guardSet ? ` ${guardSetLine(input.guardSet)}` : '') +
       `${cutNote}${over}${skippedNote}` +
@@ -2166,22 +2205,29 @@ export function runPreflight(
   const skippedFiles = [...(plan.local?.trimmedTests ?? []), ...notRun].sort();
   const rerun = skippedFiles.length ? (plan.local?.rerun ?? rerunCommand(root, laneId)) : undefined;
   const stoppedRerun = notRun.length ? stoppedCommand(root, laneId) : undefined;
+  const emptyAtCeiling =
+    !staticOnly && !plan.tests.length && !plan.reusedTests?.length ? plan.ceilingDeferred : undefined;
   // A clean run that left must-run files unstarted proved nothing about them: NOT COMPLETE.
   const incomplete =
     exitCode === 0 && !environment
-      ? incompletePreflight({
-          root,
-          laneId,
-          // Package plans list only selected commands, so a configured ceiling stopping one
-          // leaves required coverage outstanding even though the plan has no file tiers.
-          tierTests:
-            plan.packageCommands && plan.timeSettings && ceilingReached
-              ? { mandatory: plan.tests }
-              : plan.local?.tierTests,
-          notRun,
-          secondsPerFile,
-          ...(needsBrowser.length ? { needs: { ...NEEDS_CHROMIUM, files: [...needsBrowser].sort() } } : {}),
-        })
+      ? emptyAtCeiling
+        ? {
+            mustRun: emptyAtCeiling,
+            estimateMinutes: Math.max(Math.floor(ceiling.seconds / 60) + 1, plan.totalEstimateMinutes ?? 0),
+          }
+        : incompletePreflight({
+            root,
+            laneId,
+            // Package plans list only selected commands, so a configured ceiling stopping one
+            // leaves required coverage outstanding even though the plan has no file tiers.
+            tierTests:
+              plan.packageCommands && plan.timeSettings && ceilingReached
+                ? { mandatory: plan.tests }
+                : plan.local?.tierTests,
+            notRun,
+            secondsPerFile,
+            ...(needsBrowser.length ? { needs: { ...NEEDS_CHROMIUM, files: [...needsBrowser].sort() } } : {}),
+          })
       : undefined;
   // When a quick landing stops at its static gate, retain the static-only failure receipt.
   const receiptStaticOnly =
@@ -2229,10 +2275,10 @@ export function runPreflight(
           rule: plan.local.rule,
           budgetSeconds: plan.local.budgetSeconds,
           ...(plan.local.trimmed.length ? { trimmedTiers: plan.local.trimmed.map(item => item.tier) } : {}),
-          ...(plan.deferredTests?.length || skipped ? { deferredTo: plan.local.deferredTo } : {}),
         }
       : {}),
-    ...(!receiptStaticOnly && plan.tests.length
+    ...(plan.deferredTests?.length || skipped ? { deferredTo: 'pre-queue' as const } : {}),
+    ...(!receiptStaticOnly && (plan.tests.length || emptyAtCeiling)
       ? {
           ceiling: {
             seconds: ceilingMs / 1000,
@@ -2316,11 +2362,13 @@ function runSummary(
   // Must-run files stopped, other files stopped for time, and browser files skipped are separate
   // sentences: a run can have the last two at once (needs with no must-run file still stops for time).
   const mustRun = receipt.incomplete?.mustRun
-    ? ` ${receipt.incomplete.mustRun} must-run test file(s) (changed, learned or direct) not started, 0 failed: ${ranOut}` +
-      ` (receipt.stopped names them, first). Next: land --save; the landing check runs them.` +
-      (receipt.incomplete.finish
-        ? ` To finish them here first (about ${receipt.incomplete.estimateMinutes} min): ${receipt.incomplete.finish}.`
-        : ` Finishing them here takes about ${receipt.incomplete.estimateMinutes} min, longer than one agent wait (${AGENT_WAIT_SECONDS / 60} min).`)
+    ? !plan.tests.length
+      ? ` The first ranked test is estimated above the ${receipt.ceiling?.seconds} s ceiling. Next: land --save; the landing check runs the deferred tests. Pass a larger budgetSeconds to run them here.`
+      : ` ${receipt.incomplete.mustRun} must-run test file(s) (changed, learned or direct) not started, 0 failed: ${ranOut}` +
+        ` (receipt.stopped names them, first). Next: land --save; the landing check runs them.` +
+        (receipt.incomplete.finish
+          ? ` To finish them here first (about ${receipt.incomplete.estimateMinutes} min): ${receipt.incomplete.finish}.`
+          : ` Finishing them here takes about ${receipt.incomplete.estimateMinutes} min, longer than one agent wait (${AGENT_WAIT_SECONDS / 60} min).`)
     : '';
   const forTime =
     !mustRun && receipt.stoppedForTime

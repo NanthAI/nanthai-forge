@@ -372,7 +372,7 @@ test('a triggered guard runs first and the time budget never trims it, even wher
     ['runtime'],
   );
   assert.equal(typeof plan.local.guards[0].seconds, 'number');
-  assert.match(plan.local.summary, /Guards always run first, never trimmed: runtime ~\d/);
+  assert.match(plan.local.summary, /Guards run early and are protected from the local budget: runtime ~\d/);
   assert.ok(!plan.local.tierTests.mandatory.includes('tests/b.test.mjs'), 'an untouched guard stays out');
 });
 

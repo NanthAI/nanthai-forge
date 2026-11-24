@@ -194,6 +194,44 @@ const gradle = {
   'app/src/main/java/App.java': '',
 };
 
+test('8dbd2683: independent package commands past the ceiling stay in landing coverage', t => {
+  const modules = Array.from({ length: 11 }, (_, index) => `service-${index}`);
+  const { root } = repo(
+    t,
+    Object.fromEntries(
+      modules.flatMap(name => [
+        [`${name}/go.mod`, `module example.com/${name}\n`],
+        [`${name}/service_test.go`, 'package service\n'],
+      ]),
+    ),
+  );
+  const paths = changed(modules.map(name => `${name}/service_test.go`)).changedPaths;
+  const plan = preflightPlan(root, paths);
+  const longer = preflightPlan(root, paths, undefined, { budgetSeconds: 900 });
+  assert.equal(plan.tests.length, 10);
+  assert.equal(plan.estimateMinutes, 10);
+  assert.equal(plan.totalEstimateMinutes, 11);
+  assert.deepEqual([...plan.tests, ...plan.deferredTests], longer.tests);
+  assert.deepEqual(Object.keys(plan.packageCommands), plan.tests);
+  const [deferred] = plan.deferredTests;
+  assert.ok(!plan.command.includes(`cd ${longer.packageCommands[deferred].cwd} &&`));
+});
+
+test('8dbd2683: a declared file runner receives a bounded command and names deferred files', t => {
+  const files = Array.from({ length: 151 }, (_, index) => `tests/test_${index}.py`);
+  const { root } = repo(t, {
+    ...Object.fromEntries(files.map(path => [path, ''])),
+    'forge.json': JSON.stringify({
+      preflight: { tests: { glob: 'tests/test_*.py', command: ['python', '-m', 'pytest', '{files}'] } },
+    }),
+  });
+  const plan = preflightPlan(root, changed(files).changedPaths, undefined, { trim: false });
+  assert.equal(plan.tests.length, 150);
+  assert.equal(plan.estimateMinutes, 10);
+  assert.deepEqual([...plan.tests, ...plan.deferredTests].sort(), [...files].sort());
+  assert.deepEqual(plan.command.split(' ').slice(3), plan.tests);
+});
+
 test('a Gradle estimate uses the hosted check timing, then this machine, never the per-file constant', t => {
   const { root } = repo(t, gradle);
   const advice = changed(['core/src/main/java/Core.java']);

@@ -57,6 +57,34 @@ test('discovery reports protocol and actual project authority with constant read
   assert(s.counts.every(count => count.ranges <= 3 && count.documents <= 3 && count.writes === 0));
   assert(s.counts.every(count => !count.touched.some(table => /Work|SourceJob|CheckRuns/.test(table))));
 });
+test('explicit discovery shows live queue switch booleans and older clients keep their reply shape', async t => {
+  const s = setup();
+  const switches = [
+    'FORGE_QUEUE_KEEP_THE_RUN',
+    'FORGE_QUEUE_PARK_ON_MAIN_RED',
+    'FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED',
+    'FORGE_QUEUE_HOLD_ON_CI_DOWN',
+    'FORGE_QUEUE_NO_CARRY_HOLD',
+    'FORGE_QUEUE_LAND_WHEN_ROOM',
+  ];
+  const expected = Object.fromEntries(switches.map((name, index) => [name, index % 2 === 0]));
+  for (const [name, enabled] of Object.entries(expected)) {
+    const previous = process.env[name];
+    process.env[name] = enabled ? '1' : 'true';
+    t.after(() => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    });
+  }
+  const args = { projectId: s.projectId, features: ['queue-switch-state'] };
+  assert.equal((await s.read('owner')).queueSwitches, undefined);
+  const result = JSON.parse(await s.call('capabilities', capabilities, args, 'owner'));
+  assert.deepEqual(result.queueSwitches, expected);
+  await assert.rejects(s.call('capabilities', capabilities, args, 'stranger'), code('PROJECT_UNAVAILABLE'));
+  assert.equal(s.counts[0].documents, s.counts[1].documents);
+  assert.equal(s.counts[1].writes, 0);
+});
+
 test('legacy native authority is explicit and never advertises owner-free hosted mutations', async () => {
   const s = setup();
   s.patch('hostedProjects', s.projectId, { sourceAuthority: undefined });

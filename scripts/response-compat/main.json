@@ -721,6 +721,15 @@
         "mainReady": {
           "type": "boolean"
         },
+        "queueSwitches": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
         "main": {
           "type": "object",
           "properties": {

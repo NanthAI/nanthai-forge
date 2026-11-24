@@ -55,7 +55,10 @@ export function capabilityOptions(
               (action !== 'planning' || feature !== 'history-log') &&
               (!planningAudit || feature !== 'ci-status-check'),
           ),
-          'metric-cli-provenance',
+          // A selected check summary takes the slot for landing metrics, which this read never uses.
+          ...((action === 'status' || action === 'observe') && input.summary === true
+            ? ['queue-switch-state']
+            : ['metric-cli-provenance']),
           ...(startWithIntent ? [startLaneTitle] : []),
           ...(action === 'planning' || action === 'put-planning-item' ? [planningFeature] : []),
           ...(action === 'planning' ? [planningHistoryFeature] : []),
@@ -75,10 +78,11 @@ export function capabilityOptions(
   };
 }
 
-/** Explicit discovery for observers can use the main-today slot reserved for bare status. */
+/** Explicit discovery uses the main-today slot for feed order and the landing-metrics slot for
+ * queue diagnostics. Individual check reads still ask directly for report detail. */
 export function requestFeedCapability(options: Record<string, unknown>) {
   const features = (options.features as string[]).map(feature =>
-    feature === 'metric-cli-provenance' ? 'check-report-detail' : feature,
+    feature === 'metric-cli-provenance' ? 'queue-switch-state' : feature,
   );
   return { ...options, features: [...features, feedCommitOrder] };
 }

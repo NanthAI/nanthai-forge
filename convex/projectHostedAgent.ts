@@ -27,6 +27,11 @@ import { effectiveAgentDefaults, wireAgentDefaults } from '../src/agent-parallel
 import { advertisedFeatures, MAX_CONTRACT_FEATURES } from '../src/hosted-contract-features';
 import { guardSetField } from './projectLandingSpeed';
 import { readMainDay } from './projectLiveLineStore';
+import { keepTheRunOn } from './projectHostedKeepSwitch';
+import { parkExactOnMainRed, parkOnMainRed } from './projectHostedMainAuditState';
+import { holdOnCiDown } from './projectHostedLandingCiDown';
+import { noCarryHoldOn } from './projectHostedLandingNoCarry';
+import { landWhenRoom } from './projectHostedQueueRoom';
 /** Discovery is a current-authority read, never a worker wake or an availability promise. */
 /** The caller's own save outcome by operation id, or null terminal when it is still settling or
  * cannot be read here (the client then reads its progress as before). */
@@ -163,6 +168,7 @@ export const capabilities = query({
                   ...(features.includes('landing-client-hold') ? ['landing-client-hold'] : []),
                   // Only clients that may carry metrics need to ask for this field.
                   ...(features.includes('metric-cli-provenance') ? ['metric-cli-provenance'] : []),
+                  ...(features.includes('queue-switch-state') ? ['queue-switch-state'] : []),
                 ],
               }
             : {}),
@@ -212,6 +218,18 @@ export const capabilities = query({
                     (!(hostedAgentPlanningActions as readonly string[]).includes(action) ||
                       planningVersion === 1),
                 ),
+          ...(features?.includes('queue-switch-state')
+            ? {
+                queueSwitches: {
+                  FORGE_QUEUE_KEEP_THE_RUN: keepTheRunOn(),
+                  FORGE_QUEUE_PARK_ON_MAIN_RED: parkOnMainRed(),
+                  FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED: parkExactOnMainRed(),
+                  FORGE_QUEUE_HOLD_ON_CI_DOWN: holdOnCiDown(),
+                  FORGE_QUEUE_NO_CARRY_HOLD: noCarryHoldOn(),
+                  FORGE_QUEUE_LAND_WHEN_ROOM: landWhenRoom(),
+                },
+              }
+            : {}),
           mainReady: channel !== null,
           sourceWorkerConfigured: (process.env.FORGE_SOURCE_PROVIDER ?? 'convex') === 'convex',
           checkCallbackConfigured: Boolean(process.env.FORGE_HOSTED_CHECK_KEY_ID),

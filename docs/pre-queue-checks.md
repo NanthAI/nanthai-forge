@@ -550,9 +550,18 @@ parks on main's red tests (it gives up its place). When the platform ends a kept
 result, the entry clears the kept marker. An ordinary finish already in progress continues on its
 existing attempt. Otherwise, the queue retires the check, recomposes on current main, and passes the
 provider-delay reason to the replacement check. Coverage movers, red main or audit debt, cohorts, recoveries,
-reverts and partial runs retire as today, and today's unrelated keep reads nothing more. Each landing
-row records its check kind (full, scoped or batch) when the check starts. With the switch off the sweep
-is unchanged.
+reverts and partial runs retire as today. Each landing row records its check kind (full, scoped or batch)
+when the check starts. With the switch off, the existing retire rule applies.
+
+`nforge agent ROOT capabilities '{}'` reports the server's live `queueSwitches` as booleans.
+`nforge agent ROOT status '{"runId":"RUN_ID","summary":true}'` reports `mainMoveDecision`
+with the latest sweep verdict, its reason and the mover's receipt ID. A legacy retirement is
+recorded as `switch-off`. A null verdict means the keep rule recorded no decision for that run.
+This includes older runs, already exact checks and unrelated checks that keep on the ordinary fast path.
+A later probe or provider outcome remains in the ordinary landing and check records. The sweep adds
+no database reads or separate function calls. It writes a substantive keep on the run already loaded
+and stamps a retirement in its cancellation write. The unrelated fast path remains read- and write-free
+for the run.
 
 With `FORGE_QUEUE_NO_CARRY_HOLD=1` (Item 1018d0f8, decision c2be3da5, incident 0e94a117; off by
 default), a plain change does not start its Lane check while the head of the order is a spent
@@ -728,18 +737,17 @@ Each tier answers a different question. None depends on a particular CI provider
    two-module consumers), with only the last four trimmed by a local time budget
    (180 s by default, `budgetSeconds` overrides). The budget is also a wall-time
    cap: the run starts no file once it is spent and names those files in
-   `stopped`, with `stoppedRerun` to run just them. Every local test phase,
-   `trim:false`, finish and retry runs included, also stops at a 600 s ceiling
-   (`PREFLIGHT_RUN_CEILING_SECONDS`, Item 8dbd2683; declared guards too): runs
-   past it held half of all preflight slot time on 2026-11-19 and caught nothing.
-   What it stops goes to the landing check, and the receipt's `ceiling` names it;
-   a `budgetSeconds` above 600 raises it for that one run, named as an override.
-   The plan, the receipt and
-   the builder output name the rule, the trimmed tier and files, the one command
-   that runs them (`trim:false`), the estimate and the number of tests left for this
-   pre-queue tier. The local tier **may leave out** any hub, name-watch or farther
-   consumer of the change, plus the near-full set that preflight already hands to
-   the runner. It never decides acceptance. A docs-only change parses no import
+   `stopped`, with `stoppedRerun` to run just them. Preflight also fits the
+   ranked list to the 600 s test-phase ceiling by estimate, including guards
+   and package commands. This applies to `trim:false`, finish and retry runs.
+   The plan shows the count it deferred at the ceiling and `--detail` names
+   those tests in `plan.deferredTests`. If the first test exceeds the ceiling
+   and preflight has no reusable pass, the run reports incomplete. The landing
+   check covers the remainder.
+   The wall clock still checks elapsed time as tests finish, and the receipt
+   records the ceiling. A `budgetSeconds` above 600 raises it for that one run.
+   `trim:false` bypasses the local budget (180 s by default) and still fits the ceiling.
+   A docs-only change parses no import
    graph: the local tier runs only the tests that read a changed document, beside
    the static checks. Tiers 2 and 3 select the same readers (one shared selector,
    `scripts/docs-readers.mjs`) beside the documents checks, and nothing more: a document

@@ -2984,7 +2984,9 @@ export class HostedAgentTransport {
                 ? { board: { laneId: this.waitBoard.laneId, after: this.waitBoard.after } }
                 : {}),
             }
-          : {}),
+          : this.serverFeatures?.includes('queue-switch-state')
+            ? { mainMoveDecision: 1 }
+            : {}),
       });
     if (laneId)
       return this.query('projectHostedLanes:head', {

@@ -428,13 +428,14 @@ test('a project ceiling that stops a package command leaves the saved preflight 
     else process.env.FORGE_PREFLIGHT_TIME_SETTINGS = before;
   });
   process.env.FORGE_PREFLIGHT_TIME_SETTINGS = '1';
-  const repo = lane(t, { ...go, 'forge.json': '{"preflight":{"ceilingSeconds":1}}' });
+  // Both cold estimates fit, then the first command takes longer than the ceiling at runtime.
+  const repo = lane(t, { ...go, 'forge.json': '{"preflight":{"ceilingSeconds":120}}' });
   const plan = repo.plan(['lib/sum/sum.go']);
   assert.equal(plan.tests.length, 2);
-  assert.deepEqual(plan.ceiling, { seconds: 1 });
+  assert.deepEqual(plan.ceiling, { seconds: 120 });
   const pass = [process.execPath, '-e', 'process.exit(0)'];
   let now = Date.UTC(2026, 0, 1);
-  t.mock.method(Date, 'now', () => (now += 2000));
+  t.mock.method(Date, 'now', () => (now += 121_000));
   const receipt = repo.run({
     ...plan,
     packageCommands: Object.fromEntries(
@@ -444,7 +445,7 @@ test('a project ceiling that stops a package command leaves the saved preflight 
   assert.equal(receipt.outcome, 'incomplete');
   assert.equal(receipt.tests, 1);
   assert.deepEqual(receipt.stopped, [plan.tests[1]]);
-  assert.deepEqual(receipt.ceiling, { seconds: 1, reached: true });
+  assert.deepEqual(receipt.ceiling, { seconds: 120, reached: true });
   const result = finishGates(repo.root, effectiveAgentDefaults({ preflight: 'require' }), {
     laneId,
     head: repo.head,

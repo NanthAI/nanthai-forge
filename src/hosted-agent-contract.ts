@@ -157,6 +157,8 @@ export const hostedAgentCapabilitiesSchema = z
     authority: sourceAuthoritySchema,
     actions: z.array(z.enum(hostedAgentActions)),
     mainReady: z.boolean(),
+    /** Opt-in snapshot of the deployment's live queue switches, by documented name. */
+    queueSwitches: z.record(z.string(), z.boolean()).optional(),
     /** Feature capabilities-main: hosted main as projectHostedChannels:current returns it, read with
      * this reply; absent when main is unseeded or its authority differs from the project's. */
     main: hostedMainV2Schema.optional(),

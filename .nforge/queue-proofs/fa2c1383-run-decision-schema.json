@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedCheckFields.ts": "0cf489570b3199b7c490961e89a351d44f62ab7ec45c19dadcaf28e555f26c37"
+  },
+  "replay": {
+    "incident": "fa2c1383",
+    "test": "incident fa2c1383 wiring: the guards fail on the incident, stranded followers, a parked kept run, a stale-base restart and a dropped conflict",
+    "receipt": "c036db7a-1b39-43dd-a5f3-6c7221da3941"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A640713f1-0698-4cf1-a435-b1fc3e2bcad2",
+  "review": {
+    "model": "claude-sonnet-5-5",
+    "session": "aed8ce00-8c5f-483d-b053-98d57d1cb174",
+    "receipt": "6deab7e1-758e-4987-98c4-9ad1f82c9fc2"
+  },
+  "exercised": {
+    "convex/projectHostedCheckFields.ts": {
+      "executed": [
+        "hostedCheckTables"
+      ],
+      "digest": "be57634ef4a02ca37aff8f864ae3d3a011b6389d05134eb75ab3add9d91d9575",
+      "units": [
+        [
+          "checkCause",
+          "951898d2c83b24b33455ecfb98acea9ce436ed50e52d985a280b89061f7ab66d"
+        ],
+        [
+          "checkGate",
+          "ffd015ffb9e883b99c8ce3a2a2e2b5310c7882382b94343b28baf37b1e6ef43a"
+        ],
+        [
+          "defineTable",
+          "b47c67ba5772cdb88aa4a6b681e8b5447b2dc09879b915898b6f088274e1b34b"
+        ],
+        [
+          "hostedCheckTables",
+          "c0edf2b676e21f71dc8250ae59d238bf8e5551695084684b1318cb75037f0190"
+        ],
+        [
+          "setting",
+          "e4b5989ffb335184ea7cde43b0da61ff7b76bec56bf789d75a19ae3b8626620e"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ]
+    }
+  }
+}

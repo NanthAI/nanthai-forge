@@ -23,6 +23,7 @@ test('a watcher negotiates commit order within the existing capability request b
   const reply = JSON.parse(await f.call('feedCapabilities', hostedAgent.capabilities, args));
   assert(reply.features.includes('feed-commit-order'));
   assert(reply.features.includes('board-wait'));
+  assert.equal(typeof reply.queueSwitches.FORGE_QUEUE_KEEP_THE_RUN, 'boolean');
   assert(!args.features.includes('main-today'));
 });
 

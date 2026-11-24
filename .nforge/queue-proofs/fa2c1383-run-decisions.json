@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedCheckCancel.ts": "f39321414310e4e5a9f5157e2aaaf8a8ea160c8c628d09d97cd20396b3a10bc6",
+    "convex/projectHostedCheckRead.ts": "e6b16f437dfbee86a70eaaab866c478dd37d7d09306a9145f26722863a3e8b19",
+    "convex/projectHostedCheckStore.ts": "b726c142fdbcd58cc216cab03fd831765552012bb0eab95a1a4c9781038514c9",
+    "convex/projectHostedLandingStaleChecks.ts": "beda1b5a56d3922214a0d4fd848d6a91f0d07eda7b9619c12b59872b582bd3b1"
+  },
+  "replay": {
+    "incident": "fa2c1383",
+    "test": "incident fa2c1383: check summaries retain why main kept or retired each run",
+    "receipt": "c036db7a-1b39-43dd-a5f3-6c7221da3941"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A640713f1-0698-4cf1-a435-b1fc3e2bcad2",
+  "review": {
+    "model": "claude-sonnet-5-5",
+    "session": "aed8ce00-8c5f-483d-b053-98d57d1cb174",
+    "receipt": "6deab7e1-758e-4987-98c4-9ad1f82c9fc2"
+  }
+}

@@ -92,6 +92,23 @@ test('only an explicit requested wait subscribes, emits observations and closes 
   await turn();
   assert.equal(s.calls.length, count);
 });
+test('finite run summaries request queue decisions only from servers that advertise them', async t => {
+  const s = fixture(t);
+  const summary = 'projectHostedCheckRead:summary';
+  const query = s.exchange.client.query;
+  s.exchange.client.query = async (reference, args) => {
+    if (getFunctionName(reference) !== summary) return query(reference, args);
+    s.calls.push({ name: summary, args });
+    return JSON.stringify({ ...(args.mainMoveDecision ? { mainMoveDecision: null } : {}) });
+  };
+  const command = { runId: s.runId, summary: true };
+  assert.equal((await s.transport().dispatch('status', command)).result.mainMoveDecision, undefined);
+  s.caps.features = ['queue-switch-state'];
+  assert.equal((await s.transport().dispatch('status', command)).result.mainMoveDecision, null);
+  for (const discovery of s.calls.filter(call => call.name === 'projectHostedAgent:capabilities'))
+    assert(discovery.args.features.includes('queue-switch-state'));
+});
+
 for (const status of ['passed', 'failed', 'cancelled', 'interrupted', 'runner-unavailable'])
   test(`terminal ${status} and finite zero waits open no subscription`, async t => {
     const s = fixture(t);

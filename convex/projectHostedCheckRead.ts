@@ -71,12 +71,16 @@ export const status = query({
 /** `status` without the 80 KB run: counts, failed and flaky file names, timings and selection scope in
  * under 8 KB. The same single run-row read as `status`; nothing else is read or written. */
 export const summary = query({
-  args: identity,
+  args: { ...identity, mainMoveDecision: v.optional(v.literal(1)) },
   returns: v.string(),
-  handler: async (ctx, input) => {
+  handler: async (ctx, { mainMoveDecision, ...input }) => {
     try {
       await checkReader(ctx, input.projectId);
-      return canonicalPayload(summarizeCheckRun((await loadHostedCheck(ctx, input)).run));
+      const { row, run } = await loadHostedCheck(ctx, input);
+      return canonicalPayload({
+        ...summarizeCheckRun(run),
+        ...(mainMoveDecision ? { mainMoveDecision: row.mainMoveDecision ?? null } : {}),
+      });
     } catch (error) {
       return report(error);
     }

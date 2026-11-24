@@ -20,10 +20,21 @@ export async function cancelHostedCheck(
   input: CheckIdentity,
   preserveLiveConsumers = false,
   loaded?: Awaited<ReturnType<typeof loadHostedCheck>>,
+  decision?: { action: 'cancel'; reason: string; moverReceiptId: string },
 ) {
   const selected = loaded ?? (await loadHostedCheck(ctx, input)),
     { row, run } = selected;
-  if (hostedCheckTerminal(run)) return run;
+  if (hostedCheckTerminal(run)) {
+    // A cohort retry can release its own run before the sweep's explicit stop.
+    if (
+      decision &&
+      run.status === 'cancelled' &&
+      (row.mainMoveDecision?.moverReceiptId !== decision.moverReceiptId ||
+        row.mainMoveDecision.reason !== decision.reason)
+    )
+      await ctx.db.patch(row._id, { mainMoveDecision: decision });
+    return run;
+  }
   if (preserveLiveConsumers)
     for (const phase of ['queued', 'checking', 'ready'] as const) {
       const live = await ctx.db
@@ -42,7 +53,7 @@ export async function cancelHostedCheck(
   run.exitCode = null;
   run.terminalDigest = checkPin({ kind: 'cancelled', runId: run.id, fence: run.fence });
   await completeHostedCheck(ctx, run, row);
-  await writeHostedCheck(ctx, row._id, run);
+  await writeHostedCheck(ctx, row._id, run, false, decision);
   await requestDirectCancel(ctx, run);
   await requestCiCancel(ctx, selected);
   // Retain the existing legacy-adapter cleanup wake; direct Actions has none.

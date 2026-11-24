@@ -86,6 +86,14 @@ export const hostedCheckTables = {
      * server-only, written with keep-the-run on. Keep the run (fa2c1383) measures a run's progress
      * from here, so waiting for runners is not progress. */
     shardStartedAt: v.optional(v.number()),
+    /** Latest main-move sweep verdict for this canonical run. Observation only. */
+    mainMoveDecision: v.optional(
+      v.object({
+        action: v.union(v.literal('keep'), v.literal('cancel')),
+        reason: v.string(),
+        moverReceiptId: v.string(),
+      }),
+    ),
     reportStorage: v.optional(v.literal('r2')),
     resultBatch: v.optional(v.object({ packed: v.boolean() })),
     reportTimingStamp: v.optional(v.object({ generation: v.string(), sequence: v.number() })),

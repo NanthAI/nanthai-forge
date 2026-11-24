@@ -25,6 +25,7 @@ import { storageClock } from './storage-clock.mjs';
 import { armed, assertQueueProgress } from './queue-sim/invariants.mjs';
 const stale = await import(moduleUrl('../convex/projectHostedLandingStaleChecks.ts'));
 const mainAudit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
+const { summary: checkSummary } = await import(moduleUrl('../convex/projectHostedCheckRead.ts'));
 const { reserveFinishRetry } = await import(moduleUrl('../convex/projectHostedFinishCompose.ts'));
 const { loadFinish } = await import(moduleUrl('../convex/projectHostedFinishStore.ts'));
 const { writableHostedCheck } = await import(moduleUrl('../convex/projectHostedCheckStore.ts'));
@@ -172,6 +173,33 @@ const passRun = async (f, id) => {
 };
 // An order-sensitive global mover (schema) that shares no path with the run: today it retires it.
 const ORDER_SENSITIVE = ['convex/schema.ts', 'src/b.ts'];
+
+test('incident fa2c1383: check summaries retain why main kept or retired each run', async t => {
+  const paths = ['convex/schema.ts', 'src/b.ts'];
+  for (const [minutes, action, reason] of [
+    [12, 'keep', 'scoped-recheck'],
+    [null, 'cancel', 'scoped-costs-more'],
+  ]) {
+    const { f, runs } = await mainMoves(t, { paths, minutes });
+    const [mover, affected] = runs;
+    const summary = (runId, diagnostics = true) =>
+      f.rawChecks.call('checkSummary', checkSummary, {
+        projectId: f.projectId,
+        runId,
+        ...(diagnostics ? { mainMoveDecision: 1 } : {}),
+      });
+    const decision = {
+      action,
+      reason,
+      moverReceiptId: current(f, 0).acceptance.receiptId,
+    };
+    assert.equal(JSON.parse(await summary(mover.id)).mainMoveDecision, null);
+    assert.equal(JSON.parse(await summary(affected.id, false)).mainMoveDecision, undefined);
+    assert.deepEqual(JSON.parse(await summary(affected.id)).mainMoveDecision, decision);
+    await settle(f);
+    assert.deepEqual(JSON.parse(await summary(affected.id)).mainMoveDecision, decision);
+  }
+});
 
 test('A3/F3: a strict kept run holds order, keeps its attempt, and lands only after a scoped recheck', async t => {
   const { f, runs, before } = await mainMoves(t, { paths: ORDER_SENSITIVE });

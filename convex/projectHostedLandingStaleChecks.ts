@@ -35,7 +35,7 @@ import { claimFinishPrecompose } from './projectHostedFinishPrecompose';
 import { coverageLanding } from './projectHostedMainAuditState';
 import { coverageChangePaths, firstCheckRiskPaths } from '../src/first-check-risk';
 import { STANDARD_SELECTION_INPUTS } from '../src/standard-check';
-import { todayKeeps } from '../src/stale-check-keep';
+import { todayKeeps, type StaleCheckCancel } from '../src/stale-check-keep';
 import {
   holdKeptOrder,
   keepDecision,
@@ -117,6 +117,8 @@ export async function cancelStaleLandingChecks(
       ...STANDARD_SELECTION_INPUTS,
     ]).length > 0;
   const memo: KeepMemo = {};
+  // A cohort is published in one move. Its last receipt identifies that move for diagnostics.
+  const moverReceiptId = input.receiptIds.at(-1) ?? main.receipt.id;
   for (const selected of rows) {
     if (!selected.runId || retired.has(selected.runId)) continue;
     // A previous member may have retired this row's whole cohort/descendants.
@@ -174,17 +176,19 @@ export async function cancelStaleLandingChecks(
           : null;
       if (!keep && (!paths || !pathsOverlap(paths, changed))) continue;
     }
-    // Today's keep, cohorts included, with no read beyond today's (no run, finish, gate or cost read).
+    // Path-disjoint entries that keep as usual never load a run or write a verdict.
     if (keep && todayKeeps({ paths, changed, globalMover: global, coverageMover: coverageBound })) continue;
     const runId = row.runId;
-    const { row: runRow, run } = await loadHostedCheck(ctx, { projectId: input.projectId, runId }, false);
+    const checkKey = { projectId: input.projectId, runId };
+    const { row: runRow, run } = await loadHostedCheck(ctx, checkKey, false);
     if (hostedCheckTerminal(run)) continue;
-    // The bound above was loose for this run's own check: today's keep still holds.
+    // The upper bound can be loose for this run's own check.
     if (
       keep &&
       todayKeeps({ paths, changed, globalMover: global, coverageMover: coverageLanding(run, changed) })
     )
       continue;
+    let cancelReason: StaleCheckCancel | 'switch-off' = keep ? 'cohort' : 'switch-off';
     // Keep the run (fa2c1383, switch FORGE_QUEUE_KEEP_THE_RUN): a solo run the rule keeps goes on;
     // every cancel retires it below exactly as today. A cohort's shared run retires (cohort) unless
     // today keeps it.
@@ -207,6 +211,12 @@ export async function cancelStaleLandingChecks(
       });
       if (decided.action === 'keep') {
         if (decided.holdOrder) await holdKeptOrder(ctx, row, state, input.receiptIds.at(-1));
+        // Carry and scoped decisions are recorded once per exact mover, on the run already loaded.
+        const previous = runRow.mainMoveDecision;
+        if (previous?.moverReceiptId !== moverReceiptId || previous.reason !== decided.reason)
+          await ctx.db.patch(runRow._id, {
+            mainMoveDecision: { action: 'keep', reason: decided.reason, moverReceiptId },
+          });
         // Sticky: a running probe now answers on this main too; an idle one starts here.
         if (probing) await retargetKeptProbe(ctx, finish, paths, changed, main);
         else if (decided.probe) await probeKeptRun(ctx, finish, row, paths, changed, main);
@@ -214,6 +224,7 @@ export async function cancelStaleLandingChecks(
       }
       // A cancel while the probe runs: detach it (its exact-main result stays cached, as a queue
       // claim does), so the retire below proceeds as today instead of skipping the row.
+      cancelReason = decided.reason;
       if (probing) await claimFinishPrecompose(ctx, finish.row);
     }
     if (state.batchId && !state.batchSolo) {
@@ -227,7 +238,11 @@ export async function cancelStaleLandingChecks(
       if (finish.value.pending) continue;
       await retireSoloCheck(ctx, { row, state, attempt, finish, main });
     }
-    await cancelHostedCheck(ctx, { projectId: input.projectId, runId });
+    await cancelHostedCheck(ctx, checkKey, false, undefined, {
+      action: 'cancel',
+      reason: cancelReason,
+      moverReceiptId,
+    });
     retired.add(runId);
   }
   return retired.size;
