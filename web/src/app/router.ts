@@ -8,7 +8,12 @@ import { oldAddress } from './old-address';
 import { isAppPath, parseAppPath, type AppRoute } from './paths';
 
 const listeners = new Set<() => void>();
-const notify = () => listeners.forEach(listener => listener());
+const notify = () => {
+  // A document snapshot belongs only to the original navigation, even if the initial
+  // signed-in frame never mounted the public reader. Back/Forward must read again.
+  document.getElementById('forge-public-snapshot')?.remove();
+  listeners.forEach(listener => listener());
+};
 let current = '';
 let route: AppRoute = parseAppPath('/');
 /** Moves in place only to an app address; an old one (old-address.ts) loads as a page, which resolves it. */

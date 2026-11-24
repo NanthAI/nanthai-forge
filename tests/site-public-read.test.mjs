@@ -161,6 +161,129 @@ test('the edge keeps a 200 for the period the backend allows and serves it again
   assert.equal(asked.length, 2, 'an expired entry reads the backend again');
 });
 
+const snapshotObject = value => {
+  const json = JSON.stringify(value);
+  return { size: Buffer.byteLength(json), text: async () => json };
+};
+
+const SNAPSHOT_KEY = 'public-pages/v1/project/ada/atlas.json';
+
+test('snapshot pages put crawlable facts and inert data in the document and reuse the edge copy', async t => {
+  const { edge } = edgeCaches(t);
+  const buckets = new Map([
+    [
+      SNAPSHOT_KEY,
+      { ...PAGE, v: 1, project: { ...PAGE.project, name: '$& </template><script>bad()</script>' } },
+    ],
+    ['public-pages/v1/explore/active/1.json', { v: 1, order: 'active', total: 1, projects: [PAGE.project] }],
+    ['public-pages/v1/profile/ada.json', { v: 1, handle: 'ada', projects: [PAGE.project] }],
+  ]);
+  const read = [];
+  const { asked, env } = backend(t, () => new Error('R2 discovery must not reach Convex'), {
+    PUBLIC_PAGES: {
+      get: async key => {
+        read.push(key);
+        return buckets.has(key) ? snapshotObject(buckets.get(key)) : null;
+      },
+    },
+  });
+  env.ASSETS.fetch = async () => new Response(APP.replace('</body>', '<div id="root"></div></body>'));
+  for (const [url, expected] of [
+    ['/ada/atlas', /<h1>ada\/\$&amp; &lt;\/template&gt;&lt;script&gt;bad\(\)&lt;\/script&gt;<\/h1>/],
+    ['/explore', /<h1>Explore public projects<\/h1><ul><li><a href="\/ada\/atlas">ada\/atlas<\/a>/],
+    ['/ada', /<h1>@ada<\/h1><ul><li><a href="\/ada\/atlas">ada\/atlas<\/a>/],
+  ]) {
+    const request = new Request('https://site.example' + url);
+    const html = await (await serve(request, env)).text();
+    assert.match(html, expected);
+    assert.match(html, /<template id="forge-public-snapshot" data-path="[^\"]+\.json">/);
+    assert.equal(html.match(/<script/g).length, 1, 'stored text cannot add a script to the document');
+    assert.equal(await (await serve(request, env)).text(), html);
+  }
+  assert.deepEqual(read, [...buckets.keys()]);
+  assert.equal(edge.puts.length, 3);
+  assert.deepEqual(asked, []);
+});
+
+test('bound discovery misses, mismatched addresses and malformed paths never fall back to Convex', async t => {
+  const { edge } = edgeCaches(t);
+  const { asked, serve } = backend(t, () => json(PAGE), {
+    PUBLIC_PAGES: {
+      get: async key =>
+        key === SNAPSHOT_KEY
+          ? snapshotObject({ ...PAGE, v: 1, project: { ...PAGE.project, slug: 'wrong-project' } })
+          : null,
+    },
+  });
+  const request = path => new Request('https://site.example/-/public/v1/' + path);
+  assert.equal((await serve(request('project/ada/atlas.json'))).status, 502);
+  assert.equal((await serve(request('explore/newest.json'))).status, 404);
+  assert.equal((await serve(request('explore/unknown.json'))).status, 404);
+  assert.equal((await serve(request('profile/ada.json/extra'))).status, 404);
+  assert.equal(edge.puts.length, 1, 'only the well-formed missing address is negatively cached');
+  assert.deepEqual(asked, []);
+});
+
+test('a missing snapshot is cached for 30 seconds, and a limited miss never reads R2', async t => {
+  const { edge } = edgeCaches(t);
+  let gets = 0;
+  let allowed = true;
+  const { asked, env } = backend(t, () => new Error('R2 discovery must not reach Convex'), {
+    PUBLIC_PAGES: { get: async () => (gets++, null) },
+    PUBLIC_LIMIT: { limit: async () => ({ success: allowed }) },
+  });
+  env.ASSETS.fetch = async () => new Response(APP.replace('</body>', '<div id="root"></div></body>'));
+  const page = new Request('https://site.example/ada/missing');
+  const data = new Request('https://site.example/-/public/v1/project/ada/missing.json');
+  const initial = await (await serve(page, env)).text();
+  assert.match(initial, /data-path="project\/ada\/missing.json">null<\/template>/);
+  assert.equal(await (await serve(page, env)).text(), initial);
+  assert.equal(gets, 1);
+  const first = await serve(data, env);
+  assert.equal(first.status, 404);
+  assert.equal(await first.text(), '{"found":false}');
+  allowed = false;
+  const hit = await serve(data, env);
+  assert.equal(hit.status, 404, 'the snapshot outcome hits the cache before the limiter');
+  assert.equal(hit.headers.get('x-forge-edge-missing'), null);
+  assert.equal(await hit.text(), '{"found":false}');
+  assert.equal(gets, 2, 'each distinct past miss reads R2 only once per cache period');
+  assert.equal(edge.puts.length, 2);
+  assert.ok(edge.puts.every(put => put.cacheControl === 'public, max-age=30'));
+  edge.values.clear();
+  assert.equal((await serve(data, env)).status, 429);
+  assert.doesNotMatch(await (await serve(page, env)).text(), /forge-public-snapshot/);
+  assert.equal(gets, 2);
+  assert.deepEqual(asked, []);
+});
+
+test('the Worker accepts exact-limit snapshots and refuses one byte more before reading the body', async t => {
+  const fixtures = [
+    ['project/ada/atlas.json', { ...PAGE, v: 1 }, 64 * 1024],
+    ['profile/ada.json', { v: 1, handle: 'ada', projects: [] }, 24 * 1024],
+    ['explore/active.json', { v: 1, order: 'active', total: 0, projects: [] }, 16 * 1024],
+  ];
+  let object;
+  let bodies = 0;
+  const { asked, serve } = backend(t, () => new Error('R2 discovery must not reach Convex'), {
+    PUBLIC_PAGES: { get: async () => object },
+  });
+  for (const [path, content, cap] of fixtures) {
+    const request = new Request('https://site.example/-/public/v1/' + path);
+    const count = bodies;
+    for (const [size, status] of [
+      [cap, 200],
+      [cap + 1, 502],
+    ]) {
+      const json = JSON.stringify(content).padEnd(size, ' ');
+      object = { size, text: async () => (bodies++, json) };
+      assert.equal((await serve(request)).status, status, `${path} at ${size} bytes`);
+    }
+    assert.equal(bodies, count + 1, `${path} only reads the in-budget body`);
+  }
+  assert.deepEqual(asked, []);
+});
+
 const CODE_PATH = `/public/v1/code/ada/atlas/${'1'.repeat(64)}/page/612e7473/0.json`;
 const WORKER_URL = 'https://worker.example';
 

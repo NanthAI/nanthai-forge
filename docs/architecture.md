@@ -30,6 +30,13 @@ For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [co
 | Site Worker       | Serves the web app, cached public reads and device sign-in at the edge (no records of its own)       | `site/`                                                   |
 | Git compatibility | Import, export, projections and publication                                                          | `src/native-git*.ts`, `src/work-git*.ts`                  |
 
+The site has an unbound R2 discovery reader for project, Explore and profile
+snapshots. When bound, a discovery miss reads at most one bounded snapshot from
+R2, with no Convex fallback. The document includes crawlable facts and inert
+page data for the browser to reuse. Deployments still use the existing Convex
+cache fill; do not bind the reader without the writer and visibility revocation.
+Public Code and History use their existing path.
+
 Forge has one client mode: hosted. Hosted main, Lanes and the landing queue are canonical; the CLI keeps regenerable caches and retry journals and cannot accept. A folder without a hosted marker is refused with `FORGE_ROOT_UNAVAILABLE` and the next step `nforge host ROOT`; "offline" means a Lane keeps working and lands once back online. The native-owner mode (local source authority, its landing driver and local Work store commands) is removed; the shared kernel below (State format, merge, durable writes) serves hosted clients and the server. Exchange push, source return and the `autoExchange` policy are retired. See [source exchange](operations/source-exchange.md).
 
 Projects land exclusively through the [hosted landing queue](#hosted-landing-request-queue).

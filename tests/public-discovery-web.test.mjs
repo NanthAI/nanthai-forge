@@ -15,6 +15,9 @@ import { createRequire } from 'node:module';
 import { build } from 'vite';
 import { chromium } from 'playwright';
 import { chromiumLaunchOptions } from './browser-runtime.mjs';
+import { moduleUrl } from './convex-module.mjs';
+
+const { withSnapshot } = await import(moduleUrl('../site/public-snapshots.ts'));
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const axe = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
@@ -334,7 +337,7 @@ async function fixture(out) {
     import {ConvexProvider, ConvexReactClient} from 'convex/react';
     import {getFunctionName} from 'convex/server';
     import Discover from ${JSON.stringify(join(root, 'web/src/public/Discover.tsx'))};
-    import {useRoute} from ${JSON.stringify(join(root, 'web/src/app/router.ts'))};
+    import {followLink, useRoute} from ${JSON.stringify(join(root, 'web/src/app/router.ts'))};
     import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
     const signed = ${JSON.stringify(signed)};
     const viewer = new URLSearchParams(location.search).get('as');
@@ -385,7 +388,13 @@ async function fixture(out) {
       subscribeToConnectionState: () => noop,
     };
     const client = signedIn ? fake : new ConvexReactClient('https://example.convex.cloud', {skipConvexDeploymentUrlCheck: true});
-    function Root() { return h(Discover, {route: useRoute(), signedIn, viewerHandle: self ? 'ada' : signedIn ? 'wren' : undefined}); }
+    let memberFrame = viewer === 'initial-member-frame';
+    function Root() {
+      const route = useRoute();
+      if (memberFrame) return h('main', {}, h('h1', {}, 'Member frame'),
+        h('a', {href: '/ada', onClick: event => { memberFrame = false; followLink(event); }}, 'Open public profile'));
+      return h(Discover, {route, signedIn, viewerHandle: self ? 'ada' : signedIn ? 'wren' : undefined});
+    }
     createRoot(document.getElementById('root')).render(h(ConvexProvider, {client}, h(Root)));`;
   const result = await build({
     configFile: join(root, 'web/vite.config.ts'),
@@ -454,8 +463,17 @@ test('public discovery screens: explore, a profile signed out and as its person,
         : file.endsWith('.css')
           ? 'text/css'
           : 'font/woff2';
+      const document =
+        url.pathname === '/explore' && url.searchParams.get('snapshot') === '1'
+          ? withSnapshot(html, 'explore/active.json', {
+              json: JSON.stringify(reads['/-/public/v1/explore/active.json']),
+              html: '<h1>Explore public projects</h1>',
+            })
+          : html;
       return route.fulfill(
-        asset ? { contentType: type, body: readFileSync(file) } : { contentType: 'text/html', body: html },
+        asset
+          ? { contentType: type, body: readFileSync(file) }
+          : { contentType: 'text/html', body: document },
       );
     });
     await page.goto(`https://forge.test${path}`);
@@ -464,6 +482,25 @@ test('public discovery screens: explore, a profile signed out and as its person,
     await page.waitForFunction(() => !document.querySelector('[aria-busy="true"]'));
     return page;
   };
+
+  // The initial snapshot supplies the rows without a second read; selecting a different order still reads its file.
+  const embedded = await open('/explore?snapshot=1');
+  await embedded.locator('.row.xrow').first().waitFor();
+  assert.deepEqual(asked, []);
+  await embedded.getByRole('button', { name: 'Stars', exact: true }).click();
+  await embedded.waitForFunction(() =>
+    document.querySelector('.row.xrow .pjn')?.textContent?.includes('a-very-long-organisation'),
+  );
+  assert.deepEqual(asked.splice(0), ['/-/public/v1/explore/stars.json']);
+  const member = await open('/explore?snapshot=1&as=initial-member-frame');
+  await member.getByRole('link', { name: 'Open public profile' }).click();
+  await member.waitForURL('**/ada');
+  await member.goBack();
+  await member.locator('.row.xrow').first().waitFor();
+  assert.ok(
+    asked.splice(0).includes('/-/public/v1/explore/active.json'),
+    'Back reads again if the first view never consumed the snapshot',
+  );
 
   // Explore: the sentence's counts match the list; search filters people and projects; the order reads another file.
   const ex = await open('/explore');

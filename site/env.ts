@@ -10,6 +10,8 @@ export type SiteEnv = {
   ASSETS: { fetch(request: Request): Promise<Response> };
   /** Per-address backstops (Cloudflare's rate-limit binding, counted per location); absent in tests. */
   PUBLIC_LIMIT?: RateLimit;
+  /** Optional R2 binding; when present, discovery never falls back to a Convex fill. */
+  PUBLIC_PAGES?: { get(key: string): Promise<{ size: number; text(): Promise<string> } | null> };
   DEVICE_LIMIT?: RateLimit;
   FORGE_WEB_URL?: string;
   FORGE_CONVEX_SITE_URL?: string;

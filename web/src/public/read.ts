@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // The public read a visitor's page asks for (Items 8947a779, 6a60e89a): one GET of a cached JSON file per page, the
-// same file crawlers and the agent lookup get. A visitor never opens a Convex connection: the site's shared cache
-// answers, and the backend sees at most one call per page per cache period (convex/publicHttp.ts). Read once when the
-// page mounts; no polling, no timer, nothing while the tab is idle.
-import { useEffect, useState } from 'react';
+// same data crawlers get. A visitor never opens a Convex connection: the site's shared cache answers. The document
+// may already supply its snapshot; otherwise read once. No polling, timer or calls while the tab is idle.
+import { useEffect, useRef, useState } from 'react';
 import type { ProfileRead } from '../../../src/person-days';
 
 export type MainCheck = 'passing' | 'unchecked';
@@ -88,11 +87,28 @@ export type Read<T> =
   | { state: 'failed' }
   | { state: 'ok'; data: T };
 
-/** One cached JSON read for this page; `retry` asks again after a failure. */
+function embeddedRead<T>(path: string): Read<T> | undefined {
+  const template = document.getElementById('forge-public-snapshot');
+  if (!(template instanceof HTMLTemplateElement) || template.dataset.path !== path) return undefined;
+  try {
+    const data = JSON.parse(template.content.textContent ?? '') as T | null;
+    return data === null ? { state: 'missing' } : { state: 'ok', data };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Reuse the document's page, or read one cached JSON file for a client navigation or explicit retry. */
 export function usePublicRead<T>(path: string): [Read<T>, () => void] {
-  const [read, setRead] = useState<Read<T>>({ state: 'loading' });
+  const [read, setRead] = useState<Read<T>>(() => embeddedRead<T>(path) ?? { state: 'loading' });
+  const initialPath = useRef(read.state === 'loading' ? null : path);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    if (initialPath.current === path && attempt === 0) {
+      document.getElementById('forge-public-snapshot')?.remove();
+      return;
+    }
+    initialPath.current = null;
     let live = true;
     setRead({ state: 'loading' });
     fetch(publicReadUrl(path), { credentials: 'omit', headers: { accept: 'application/json' } })

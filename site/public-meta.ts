@@ -63,7 +63,7 @@ export function exploreMeta(origin: string, page: { total: number; more?: boolea
   };
 }
 
-const attr = (text: string) =>
+export const escapeHtml = (text: string) =>
   text.replace(
     /[<>&"']/g,
     c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c]!,
@@ -72,6 +72,7 @@ const attr = (text: string) =>
 /** The app page with its title replaced and the share tags added to <head>. Adds no script, so the page's content
  * policy (inline script hashes) is unchanged. */
 export function withMeta(html: string, meta: PageMeta): string {
+  const attr = escapeHtml;
   const tags = [
     `<title>${attr(meta.title)}</title>`,
     `<meta name="description" content="${attr(meta.description)}"/>`,

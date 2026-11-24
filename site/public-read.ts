@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 /** The cached public read (Items 6a60e89a, 875a4b60, 8947a779). Signed-out visitors and crawlers of public pages are
- * served from the site's edge cache: a hit makes no Convex call. On a miss this asks the backend's public route once
+ * served from the site's edge cache: a hit makes no Convex call. Discovery can read one R2 snapshot when bound;
+ * the deployed reader is still unbound. On a legacy miss this asks the backend's public route once
  * (convex/publicHttp.ts) and the edge keeps the answer for the period the backend allows (s-maxage), so the backend is
  * reached only on misses. Cloudflare's cache is per location, so each location fills once per period. Query parameters
  * do not affect the shared bytes: the cache key is the canonical path. No visitor credential is forwarded; a miss
@@ -25,6 +26,7 @@ import { CLIENT_HEADER, clientHash } from '../src/client-hash';
 import { earlierAppPath, isAppPath, normalizeAccountPathname } from '../web/src/app/paths';
 import { exploreMeta, profileMeta, projectMeta, withMeta, type PageMeta } from './public-meta';
 import { limited, siteFetch, type SiteContext, type SiteEnv } from './env';
+import { HANDLE, SLUG, readSnapshot, snapshotAddress, withSnapshot } from './public-snapshots';
 
 /** The backend marks a shareable public answer with this header (convex/publicHttp.ts PUBLIC_CACHE.shared). */
 const UPSTREAM_SHARED = 'netlify-cdn-cache-control';
@@ -32,6 +34,8 @@ const UPSTREAM_SHARED = 'netlify-cdn-cache-control';
 const EDGE_SECONDS = 'x-forge-edge-seconds';
 /** The visitor's own cache-control, kept beside the edge copy's. */
 const BROWSER_CACHE = 'x-forge-browser-cache-control';
+/** The snapshot cache stores misses in 200 envelopes; visitors see the original status. */
+const EDGE_MISSING = 'x-forge-edge-missing';
 const FAILURE_SECONDS = 30;
 /** Every one- or two-segment page address, with slash/case variants, so they reach canonicalization before any public
  * read; a name with a dot is a file. The cached reads under /-/public/v1/, the 301 for every other earlier /-/
@@ -47,11 +51,6 @@ export const isPublicReadPath = (url: string) => {
   const { pathname } = new URL(url);
   return PUBLIC_READ_PATHS.some(pattern => pattern.test(pathname)) && !PUBLIC_READ_EXCLUDED.test(pathname);
 };
-
-/** A handle and a project slug (src/readable-urls.ts handleError, src/project-routes.ts slug). Any other shape, such as
- * a probe for /wp-login.php or /.env, is never a public page and never reaches the backend. */
-const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/;
-const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/;
 
 const edge = (response: Response, seconds: number) => {
   if (seconds > 0) response.headers.set(EDGE_SECONDS, String(seconds));
@@ -100,6 +99,18 @@ const tooMany = () =>
   new Response('Too many requests; try again in a minute.', {
     status: 429,
     headers: { 'cache-control': 'no-store', 'content-type': 'text/plain', 'retry-after': '60' },
+  });
+
+// Keep malformed discovery URLs on the snapshot path too, so they cannot fall through to the legacy fill.
+const snapshotRoute = (path: string) => /^\/public\/v1\/(?:project|explore|profile)(?:\/|$)/.test(path);
+const missingSnapshot = () =>
+  new Response('{"found":false}', {
+    status: 404,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+      'access-control-allow-origin': '*',
+    },
   });
 
 async function proxy(env: SiteEnv, path: string, visitor: Visitor) {
@@ -202,13 +213,25 @@ export async function appShell(env: SiteEnv, url: URL) {
 async function page(env: SiteEnv, origin: string | null, url: URL, path: string, visitor: Visitor) {
   let html = await appShell(env, url);
   const read = readFor(path);
+  let seconds = FAILURE_SECONDS;
   if (origin && read) {
+    const path = read.json.slice(2);
+    const address = env.PUBLIC_PAGES && snapshotAddress(path);
     try {
-      const data = await proxy(env, read.json.slice(2), visitor);
-      // Unavailable, unauthorized, private and missing reads all keep the plain app shell.
-      if (data.ok) html = withMeta(html, read.meta(origin, (await data.json()) as never));
+      if (env.PUBLIC_PAGES && address) {
+        if (await limited(env.PUBLIC_LIMIT, visitor.ip)) seconds = 0;
+        else {
+          const snapshot = await readSnapshot(env.PUBLIC_PAGES, address);
+          if (snapshot) html = withMeta(html, read.meta(origin, snapshot.data as never));
+          html = withSnapshot(html, path.slice('/public/v1/'.length), snapshot);
+        }
+      } else if (!env.PUBLIC_PAGES) {
+        const data = await proxy(env, path, visitor);
+        if (data.ok) html = withMeta(html, read.meta(origin, (await data.json()) as never));
+      }
     } catch {
-      // Metadata is optional; the app must still load when the public read or cache fails.
+      // Metadata is optional; a missing or invalid object must not stop the signed-in app.
+      if (env.PUBLIC_PAGES) seconds = 0;
     }
   }
   return edge(
@@ -218,7 +241,7 @@ async function page(env: SiteEnv, origin: string | null, url: URL, path: string,
         'cache-control': 'public, max-age=0, must-revalidate',
       },
     }),
-    FAILURE_SECONDS,
+    seconds,
   );
 }
 
@@ -263,7 +286,25 @@ async function respond(request: Request, env: SiteEnv, url: URL, visitor: Visito
     });
   if (data && !origin) return unavailable(503, 'Public reads are not configured.');
   if (path === '/sitemap.xml') return proxy(env, '/public/v1/sitemap.xml', visitor);
-  if (path.startsWith('/-/public/v1/')) return proxy(env, path.slice(2), visitor);
+  if (path.startsWith('/-/public/v1/')) {
+    const upstream = path.slice(2);
+    if (!env.PUBLIC_PAGES || !snapshotRoute(upstream)) return proxy(env, upstream, visitor);
+    const address = snapshotAddress(upstream);
+    if (!address) return missingSnapshot();
+    if (await limited(env.PUBLIC_LIMIT, visitor.ip)) return tooMany();
+    const snapshot = await readSnapshot(env.PUBLIC_PAGES, address);
+    if (!snapshot) return edge(missingSnapshot(), FAILURE_SECONDS);
+    return edge(
+      new Response(snapshot.json, {
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'public, max-age=0, must-revalidate',
+          'access-control-allow-origin': '*',
+        },
+      }),
+      FAILURE_SECONDS,
+    );
+  }
   return page(env, origin, url, path, visitor);
 }
 
@@ -272,21 +313,27 @@ function forEdge(response: Response, seconds: number) {
   const headers = new Headers(response.headers);
   headers.set(BROWSER_CACHE, headers.get('cache-control') ?? '');
   headers.set('cache-control', `public, max-age=${seconds}`);
-  return new Response(response.body, { status: response.status, headers });
+  if (response.status === 404) headers.set(EDGE_MISSING, '1');
+  return new Response(response.body, { headers });
 }
 function fromEdge(response: Response) {
   const headers = new Headers(response.headers);
   const browser = headers.get(BROWSER_CACHE);
+  const status = headers.get(EDGE_MISSING) === '1' ? 404 : response.status;
   headers.delete(BROWSER_CACHE);
+  headers.delete(EDGE_MISSING);
   if (browser) headers.set('cache-control', browser);
   else headers.delete('cache-control');
-  return new Response(response.body, { status: response.status, headers });
+  return new Response(response.body, { status, headers });
 }
 
 export async function publicRead(request: Request, env: SiteEnv, ip: string | null, ctx?: SiteContext) {
   const url = new URL(request.url);
   // A shared edge entry per canonical path: ordinary query parameters share one object (they stay in the browser).
-  const key = `${url.origin}${url.pathname}`;
+  const snapshot =
+    env.PUBLIC_PAGES &&
+    (readFor(url.pathname) || (url.pathname.startsWith('/-/') && snapshotRoute(url.pathname.slice(2))));
+  const key = `${url.origin}${url.pathname}${snapshot ? '?forge-cache=public-pages-v1' : ''}`;
   const storage = (globalThis as unknown as { caches?: { default?: Cache } }).caches;
   const cache = request.method === 'GET' || request.method === 'HEAD' ? storage?.default : undefined;
   let response: Response;
@@ -300,7 +347,7 @@ export async function publicRead(request: Request, env: SiteEnv, ip: string | nu
       });
       const seconds = Number(response.headers.get(EDGE_SECONDS) ?? 0);
       response.headers.delete(EDGE_SECONDS);
-      if (cache && seconds > 0 && response.status === 200) {
+      if (cache && seconds > 0 && (response.status === 200 || (snapshot && response.status === 404))) {
         const [body, copy] = response.body ? response.body.tee() : [null, null];
         const stored = cache.put(key, forEdge(new Response(copy, response), seconds)).catch(() => {});
         response = new Response(body, response);
