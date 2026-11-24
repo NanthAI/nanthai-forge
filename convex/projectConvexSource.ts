@@ -167,6 +167,7 @@ export async function runConvexSourceStep(
           logSourceStep(input, {
             runtime: 'v8',
             kind: state.jobKind ?? null,
+            cause: state.cause ?? null,
             from: 'input',
             to: 'done',
             objects: transport.reads.objects,
@@ -182,6 +183,7 @@ export async function runConvexSourceStep(
           logSourceStep(input, {
             runtime: 'v8',
             kind: state.jobKind ?? null,
+            cause: state.cause ?? null,
             from: 'input',
             to: null,
             objects: transport.reads.objects,

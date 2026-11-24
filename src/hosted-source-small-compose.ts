@@ -14,6 +14,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { parseNativeState, stateSchema, overlappingPaths, type NativeFile } from './state/format.js';
 import { mergeFileMetadata } from './native-file-merge.js';
 import { digest } from './state/hash.js';
+import { validStateGeneration } from './state/generation.js';
 import { invariant } from './errors.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import type { WorkerPin, WorkerObject } from './hosted-source-worker-format.js';
@@ -41,6 +42,61 @@ export async function runSmallSourceCompose(
     const state = parseNativeState(await readSourceExact(io, ref.object));
     io.rememberLoadedState?.(ref.object, state.files.length, state.files);
     return state;
+  }
+  /** Main moved on from the Lane's base: true only when recorded parents and generations prove
+   * `base` is an ancestor of main and `head` is not, so `base` is the one merge base. Every ancestor
+   * above base's generation is visited (an ancestor's generation is lower), one descriptor call per
+   * level (the first also returns the base's descriptor), at most 32 States; an unknown edge, the
+   * head itself or a longer walk keeps the full step (null). */
+  async function movedFrom(
+    main: string,
+    parents: readonly string[],
+    base: string,
+    head: string,
+  ): Promise<WorkerObject | null> {
+    const generation = (id: string) => io.stateGeneration?.(id),
+      edges = (id: string) => io.stateParents?.(id);
+    const unknown = (ids: string[]) => ids.filter(id => !validStateGeneration(generation(id)) || !edges(id));
+    const describe = async (ids: string[]) => {
+      for (const id of ids) io.expectState?.(id);
+      return ids.length ? await io.describeBatch!(ids) : [];
+    };
+    // Free pre-check from the begin payload's descriptors: without recorded levels on main and the
+    // head (older rows), or with main below the head's level (base + 1), no walk can prove the base.
+    const top = generation(main),
+      own = generation(head);
+    if (!validStateGeneration(top) || !edges(main) || !validStateGeneration(own) || top < own) return null;
+    let level = [...new Set(parents)];
+    // The base's bytes are read next, so its descriptor is always part of the first call.
+    const ref = (await describe([base, ...unknown(level.filter(id => id !== base))])).find(
+      value => value.object.sha256 === base,
+    );
+    const floor = generation(base);
+    if (!ref || !validStateGeneration(floor) || !edges(base)) return null;
+    const seen = new Set([main]);
+    let found = false,
+      visited = 0,
+      first = true;
+    while (level.length) {
+      // A wide merge frontier stops before its descriptors are read, not after.
+      if (visited + level.length > 33) return null;
+      if (!first) await describe(unknown(level));
+      first = false;
+      const next = new Set<string>();
+      for (const id of level) {
+        seen.add(id);
+        const value = generation(id),
+          up = edges(id);
+        if (id === head || !validStateGeneration(value) || !up) return null;
+        if (id === base) found = true;
+        else if (value > floor) {
+          if (++visited > 32) return null;
+          for (const parent of up) if (!seen.has(parent)) next.add(parent);
+        }
+      }
+      level = [...next];
+    }
+    return found ? ref : null;
   }
   // Read the exact input once before interpreting any routing hint.
   async function compose(plan: ReturnType<typeof composeInputSchema.parse>): Promise<WorkerPin | null> {
@@ -105,20 +161,16 @@ export async function runSmallSourceCompose(
       state = entry.state.object;
       files = right.files;
     } else {
-      if (
-        left.parents.length !== 1 ||
-        right.parents.length !== 1 ||
-        left.parents[0] !== right.parents[0] ||
-        !io.describeBatch
-      )
-        return null;
-      const refs = await io.describeBatch([left.parents[0]!]);
-      invariant(
-        refs.length === 1 && refs[0]!.object.sha256 === left.parents[0],
-        'SOURCE_HASH_MISMATCH',
-        'Merge base changed.',
-      );
-      const ref: WorkerObject = refs[0]!;
+      // The Lane head's one parent is the merge base when main is its sibling, or when main moved on
+      // from it (a recompose, Item 686ecdde Fix 3): proven from recorded edges, else the full step.
+      const baseId = right.parents.length === 1 ? right.parents[0]! : undefined;
+      if (!baseId || !io.describeBatch) return null;
+      const ref =
+        left.parents.length === 1 && left.parents[0] === baseId
+          ? (await io.describeBatch([baseId]))[0]
+          : await movedFrom(plan.base.head, left.parents, baseId, entry.head);
+      if (ref === null) return null;
+      invariant(ref?.object.sha256 === baseId, 'SOURCE_HASH_MISMATCH', 'Merge base changed.');
       if (
         ref.recipe ||
         ref.object.size > stateBytes ||

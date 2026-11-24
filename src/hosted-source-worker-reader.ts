@@ -37,6 +37,8 @@ export interface SourceWorkerTransport {
   /** Only trusted compose may replace a working physical root. */
   composePhysicalState?(pin: WorkerPin, files: readonly NativeFile[], main: string): Promise<void>;
   stateGeneration?(id: string): number | undefined;
+  /** Recorded parents of a hash-verified State's descriptor; absent for older rows. */
+  stateParents?(id: string): readonly string[] | undefined;
   rememberStateGenerations?(values: Record<string, number>): void;
   publishRecipe?(object: WorkerPin, recipe: WorkerPin): Promise<void>;
   recipeLeaves?(id: string): readonly { sha256: string; size: number }[] | undefined;

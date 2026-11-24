@@ -29,8 +29,40 @@ export function deadlineConvexSubscription(
   return boundedClient(new ConvexClient(url, options), 120_000);
 }
 
+/** Which surface of this CLI process makes its calls, for the spend ledger's caller kind
+ * (convex/cliServer.ts logCaller): agent commands declare `agent`; a person's own commands send
+ * nothing and count as `cli`. A label for metering only, never an authority. */
+const declaredCaller: 'agent' | undefined =
+  ['agent', 'x', 'mcp'].includes(process.argv[2]!) || process.env.FORGE_HELD_LAND_WORKER === '1'
+    ? 'agent'
+    : undefined;
+/** A deployment older than the caller field (or a function outside the guarded builders) refuses
+ * the extra argument in argument validation, before any handler runs; only that exact refusal sends
+ * the call again without it. */
+const callerRefusal = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  return /ArgumentValidationError/.test(message) && /extra field `forgeCaller`/.test(message);
+};
+const withCaller = (args: unknown[]) => [
+  args[0],
+  { ...((args[1] as object | undefined) ?? {}), forgeCaller: declaredCaller },
+  ...args.slice(2),
+];
+
 function boundedClient<T extends object>(client: T, timeoutMs: number): T {
   const methods = new Map<PropertyKey, { source: unknown; bound: unknown }>();
+  const undeclared = new Set<string>();
+  /** Send the declared caller, once per function falling back to the untagged form on refusal. */
+  const declare = async (name: string, args: unknown[], run: (args: unknown[]) => unknown) => {
+    if (!declaredCaller || !name || undeclared.has(name)) return run(args);
+    try {
+      return await run(withCaller(args));
+    } catch (error) {
+      if (!callerRefusal(error)) throw error;
+      undeclared.add(name);
+      return run(args);
+    }
+  };
   let mutationTail = Promise.resolve();
   let credential: string | undefined;
   const refreshed = async (token: string | undefined) => {
@@ -56,9 +88,11 @@ function boundedClient<T extends object>(client: T, timeoutMs: number): T {
         credential = token;
       }
     }
-    const options = args[2] as { skipQueue?: boolean } | undefined;
+    const options = args[2] as { skipQueue?: boolean } | undefined,
+      name = key === 'close' ? '' : getFunctionName(args[0] as never),
+      run = (sent: unknown[]) => value.apply(target, sent);
     if (key !== 'mutation' || !(target instanceof ConvexHttpClient) || options?.skipQueue)
-      return withExchangeProgress({ signal }, () => value.apply(target, args));
+      return withExchangeProgress({ signal }, () => declare(name, args, run));
     const before = mutationTail;
     let release!: () => void;
     mutationTail = new Promise<void>(resolve => {
@@ -67,8 +101,9 @@ function boundedClient<T extends object>(client: T, timeoutMs: number): T {
     await before;
     try {
       signal.throwIfAborted();
+      // A refused tagged attempt and its untagged retry both run inside this queue slot.
       return await withExchangeProgress({ signal }, () =>
-        value.apply(target, [args[0], args[1], { ...options, skipQueue: true }]),
+        declare(name, [args[0], args[1], { ...options, skipQueue: true }], run),
       );
     } finally {
       release();
@@ -95,11 +130,27 @@ function boundedClient<T extends object>(client: T, timeoutMs: number): T {
             ...rest,
           );
         };
+      // Live reads (agent waits and observers) carry the declared caller too; a refusal arrives as the
+      // subscription's error, and the same subscription restarts untagged.
+      if (key === 'onUpdate' && declaredCaller)
+        return (query: unknown, args: unknown, onUpdate: unknown, onError?: (error: Error) => void) => {
+          const name = getFunctionName(query as never);
+          const subscribe = (tag: boolean): (() => void) =>
+            value.call(target, query, tag ? withCaller([query, args])[1] : args, onUpdate, (error: Error) => {
+              if (!tag || !callerRefusal(error)) return onError?.(error);
+              undeclared.add(name);
+              current();
+              current = subscribe(false);
+            });
+          let current = subscribe(!undeclared.has(name));
+          return () => current();
+        };
       if (methods.get(key)?.source !== value)
         methods.set(key, {
           source: value,
           bound: ['query', 'mutation', 'action', 'consistentQuery', 'close'].includes(String(key))
             ? (...args: unknown[]) => {
+                const name = key === 'close' ? '' : getFunctionName(args[0] as never);
                 const call = () =>
                   networkDeadline(
                     signal => invoke(key, value as (...args: unknown[]) => unknown, target, args, signal),
@@ -111,11 +162,9 @@ function boundedClient<T extends object>(client: T, timeoutMs: number): T {
                         ? LONG_ACTION_DEADLINE_MS
                         : timeoutMs,
                     key === 'close' ? undefined : currentExchangeProgress()?.signal,
-                    key === 'close'
-                      ? 'Convex close'
-                      : `Convex ${String(key)} ${getFunctionName(args[0] as never)}`,
+                    key === 'close' ? 'Convex close' : `Convex ${String(key)} ${name}`,
                   );
-                return key === 'close' ? call() : measureCheckoutRpc(getFunctionName(args[0] as never), call);
+                return key === 'close' ? call() : measureCheckoutRpc(name, call);
               }
             : value.bind(target),
         });

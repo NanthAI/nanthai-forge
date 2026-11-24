@@ -33,8 +33,14 @@ reconciles that execution. It cannot create another execution.
 page, a raw baseline up to 4 MiB and up to 8 MiB of raw changed objects finishes
 there, avoiding concurrent Node cold starts. Its input and delta page each fit
 128 KiB. A single-selection compose also finishes on V8 when its verified tip
-manifests prove containment, a direct fast-forward, or a shared immediate parent
-whose files merge from metadata alone. Each raw manifest is at most 768 KiB and
+manifests prove containment, a direct fast-forward, or a merge base whose files
+merge from metadata alone. The base is the Lane head's one parent: main's own
+parent, or, when main moved on since the Lane's request (a recompose), an
+ancestor of main proven from recorded parents and generations. That walk visits
+every ancestor of main above the base's generation, one descriptor call per
+level, at most 32 States, and starts only when main and the Lane head already
+carry recorded generations. An unknown edge, a longer walk or main already
+containing the Lane head falls back. Each raw manifest is at most 768 KiB and
 a sibling merge reads at most 2 MiB of manifests. It uses the native metadata
 merge rules, State schema and result format; content merges, overlapping paths,
 recipes, batches and restore compositions fall back before writing any output.

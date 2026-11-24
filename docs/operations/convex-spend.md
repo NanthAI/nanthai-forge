@@ -246,7 +246,21 @@ lowercase `a/b` grammar. The day summary then splits the function by label in
 `projectSelfMetrics:page` labels each call `metrics-<stream>/<shape>`: `window`
 reads canonical rows, `compact` a compact projection, and `context`, `inputs` and
 `save-heads` the follow-up lookups. The line also carries the call's own
-`documentsRead` and `bytesRead`, which stay in the provider log. It adds no read or call. Each append is flushed; replayed execution identities are
+`documentsRead` and `bytesRead`, which stay in the provider log. It adds no read or call.
+A source step's `forge-source-step` line carries its `cause`
+(`save`, `register`, a sync mode, `compose`, or `recompose` when main moved since
+the Lane's request; `batch-` for a cohort). A call with one cause and no read-shape
+label gets the label `source-step/<cause>`, so source-step compute splits by cause.
+
+Every row also keeps its caller kind, a code-chosen word: each public function's
+guard (`convex/cliServer.ts`) prints one `FORGE_CALLER <kind>` line. `web` is a
+browser session, `public` a signed-out visitor, `cli` a person's CLI, and `agent`
+a CLI that declared itself (`nforge agent`, `nforge mcp`, live agent waits). CI
+reaches Convex only through its result routes (`POST /checks/actions`,
+`POST /deploy/actions`), which count as `ci`. Any other call is `internal`:
+scheduled, nested or another HTTP route, which its function name tells apart. The day summary splits cost by caller in `perCaller`, so a read
+burst is attributed instead of shape-matched. Rows recorded before this have no
+caller and stay out of that split. Each append is flushed; replayed execution identities are
 ignored, including after a restart. Every local tick also atomically replaces a
 derived `YYYY-MM-DD.summary.json` with per-function/per-class totals and dollars;
 these summaries can always be rebuilt from the append-only `.jsonl` journals.

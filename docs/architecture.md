@@ -204,7 +204,9 @@ exposed, including when either fails.
 The existing `forge-source-step` log line includes `putBytes`: State (including
 recipe metadata), continuation/progress, final result and other attempted bodies;
 `refused` is the subset answered 412 and `avoided` counts reused destination bytes.
-Failed attempts use the same marker with `outcome: "failed"`.
+Failed attempts use the same marker with `outcome: "failed"`. Its `cause` says why
+the step ran (save, sync mode, `compose`, or `recompose` when main moved since the
+Lane's request), read from the state the step's begin already loaded.
 These are action-local counters, not billed egress: headers, responses, RPC metadata,
 platform accounting and other functions are outside this body measurement. No
 metrics query, retained counter, timer or idle call is introduced.

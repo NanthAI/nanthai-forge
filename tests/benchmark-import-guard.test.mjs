@@ -552,8 +552,12 @@ test('denied project access and deletion log only caller-supplied IDs, never pri
   } finally {
     console.log = previous;
   }
-  assert.equal(lines.length, 3);
-  for (const line of lines) {
+  // The public guard also prints its caller kind (Item 686ecdde): one code word, never an identity.
+  const callers = lines.filter(line => line.startsWith('FORGE_CALLER '));
+  assert.ok(callers.every(line => /^FORGE_CALLER [a-z]+$/.test(line)));
+  const executions = lines.filter(line => !callers.includes(line));
+  assert.equal(executions.length, 3);
+  for (const line of executions) {
     const detail = JSON.parse(line.slice('FORGE_PROJECT_EXECUTION '.length));
     assert.deepEqual(detail, { projectId: 'project', name: null });
   }

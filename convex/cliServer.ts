@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { customAction, customCtx, customMutation, customQuery } from 'convex-helpers/server/customFunctions';
+import { customAction, customMutation, customQuery } from 'convex-helpers/server/customFunctions';
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
@@ -152,9 +152,35 @@ async function authorizeAction(
   verified.set(key, { at: now, expiresAt: row.expiresAt, row });
   return row;
 }
-export async function guard(ctx: QueryCtx | MutationCtx | ActionCtx, scope: 'cli' | 'coordination') {
+/** A CLI may say an agent made a call; anything else is identity-derived. */
+type DeclaredCaller = 'agent';
+const callerArgs = { forgeCaller: v.optional(v.literal('agent')) };
+/** The builder input for every public function: guards the call and records who made it. */
+function callerInput<C, R>(make: (ctx: C, declared?: DeclaredCaller) => Promise<R>) {
+  return {
+    args: callerArgs,
+    input: async (ctx: C, { forgeCaller }: { forgeCaller?: DeclaredCaller }) => ({
+      ctx: await make(ctx, forgeCaller),
+      args: {},
+    }),
+  };
+}
+/** One `FORGE_CALLER <kind>` line per public call, read by the spend ledger
+ * (scripts/convex-spend-model.mjs callerKind). A code-chosen word, never an identity. A CLI credential
+ * is `cli` unless the CLI declared `agent`; any other signed-in caller is `web`. */
+function logCaller(user: { issuer?: string; forgeCredential?: unknown } | null, declared?: DeclaredCaller) {
+  console.log(`FORGE_CALLER ${!user ? 'public' : isDeviceIdentity(user) ? (declared ?? 'cli') : 'web'}`);
+}
+export async function guard(
+  ctx: QueryCtx | MutationCtx | ActionCtx,
+  scope: 'cli' | 'coordination',
+  /** Only a public builder's own guard records the caller: once per call, never from a handler's
+   * inner check or an action's post-run check. */
+  caller?: { declared?: DeclaredCaller },
+) {
   try {
     const user = await ctx.auth.getUserIdentity();
+    if (caller) logCaller(user, caller.declared);
     if (user && isDeviceIdentity(user)) {
       invariant(typeof user.forgeCredential === 'string', 'AUTH_REQUIRED', 'Use a Forge CLI credential.');
       const args = {
@@ -190,7 +216,7 @@ export async function guard(ctx: QueryCtx | MutationCtx | ActionCtx, scope: 'cli
 export const query = readPeople(
   customQuery(
     baseQuery,
-    customCtx((ctx: QueryCtx) => guard(ctx, 'cli')),
+    callerInput((ctx: QueryCtx, declared) => guard(ctx, 'cli', { declared })),
   ),
 );
 /** The finite finish observer uses the same exact read projections at its public identity
@@ -198,8 +224,8 @@ export const query = readPeople(
 export const finishQuery = readPeople(
   customQuery(
     baseQuery,
-    customCtx(async (ctx: QueryCtx) => {
-      const guarded = await guard(ctx, 'cli');
+    callerInput(async (ctx: QueryCtx, declared) => {
+      const guarded = await guard(ctx, 'cli', { declared });
       return { ...guarded, db: finishReadReader(ctx).db };
     }),
   ),
@@ -208,8 +234,8 @@ export const finishQuery = readPeople(
 export const planQuery = readPeople(
   customQuery(
     baseQuery,
-    customCtx(async (ctx: QueryCtx) => {
-      const guarded = await guard(ctx, 'cli');
+    callerInput(async (ctx: QueryCtx, declared) => {
+      const guarded = await guard(ctx, 'cli', { declared });
       return { ...guarded, db: finishReadReader(ctx, 'plan').db };
     }),
   ),
@@ -220,8 +246,8 @@ export const planQuery = readPeople(
 export const projectQuery = readPeople(
   customQuery(
     baseQuery,
-    customCtx(async (ctx: QueryCtx) => {
-      const guarded = await guard(ctx, 'cli');
+    callerInput(async (ctx: QueryCtx, declared) => {
+      const guarded = await guard(ctx, 'cli', { declared });
       const projects = new Map<string, Promise<Doc<'hostedProjects'> | null>>();
       return {
         ...guarded,
@@ -253,7 +279,7 @@ export const projectQuery = readPeople(
 const guardedMutationFor = (scope: 'cli' | 'coordination') =>
   customMutation(
     baseMutation,
-    customCtx((ctx: MutationCtx) => guard(ctx, scope)),
+    callerInput((ctx: MutationCtx, declared) => guard(ctx, scope, { declared })),
   );
 const guardedMutation = guardedMutationFor('cli');
 export const mutation = mutationPeople(guardedMutation);
@@ -263,9 +289,9 @@ export const accountMutation = (policy: AccountPolicy) =>
   mutationPeople(policy === 'handle' ? guardedMutationFor('coordination') : guardedMutation, policy);
 const guardedActionFor = (scope: 'cli' | 'coordination') =>
   customAction(baseAction, {
-    args: {},
-    input: async (ctx: ActionCtx) => {
-      const device = await guard(ctx, scope);
+    args: callerArgs,
+    input: async (ctx: ActionCtx, { forgeCaller }: { forgeCaller?: DeclaredCaller }) => {
+      const device = await guard(ctx, scope, { declared: forgeCaller });
       const session = (await ctx.auth.getUserIdentity())?.forgeAuthSession;
       return {
         ctx: device,
@@ -308,7 +334,7 @@ export function actionWithMappedResult(transform: (value: unknown, args: unknown
 export const coordinationQuery = readPeople(
   customQuery(
     baseQuery,
-    customCtx((ctx: QueryCtx) => guard(ctx, 'coordination')),
+    callerInput((ctx: QueryCtx, declared) => guard(ctx, 'coordination', { declared })),
   ),
 );
 export const coordinationMutation = mutationPeople(guardedMutationFor('coordination'));
@@ -317,9 +343,9 @@ export const coordinationMutation = mutationPeople(guardedMutationFor('coordinat
  * project and authenticated requester. No extra call is made for them. */
 export const receiptMutation = mutationPeople(
   customMutation(baseMutation, {
-    args: { metricReceipts: v.optional(v.string()) },
-    input: async (ctx: MutationCtx, { metricReceipts }) => {
-      const guarded = await guard(ctx, 'cli');
+    args: { metricReceipts: v.optional(v.string()), ...callerArgs },
+    input: async (ctx: MutationCtx, { metricReceipts, forgeCaller }) => {
+      const guarded = await guard(ctx, 'cli', { declared: forgeCaller });
       return {
         ctx: guarded,
         args: {},

@@ -52,6 +52,43 @@ export function ioAttribution(log) {
   return labels.length === 1 ? labels[0] : null;
 }
 
+/** The cause label of a source step's `forge-source-step` or failure line (src/hosted-source-io-error.ts), so
+ * source-step compute splits by save, compose, recompose and sync mode. Kept only when the call
+ * printed one cause (a chained action that ran two kinds stays unlabelled). */
+export function sourceStepCause(log) {
+  const causes = new Set(
+    messages(log).flatMap(message => {
+      if (!/^\{"event":"forge-source-(?:step|failure)"/.test(message)) return [];
+      try {
+        // A failed attempt names why the step ran as `stepCause` (its `cause` is why it failed).
+        const { event, cause: done, stepCause } = JSON.parse(message);
+        const cause = event === 'forge-source-step' ? done : stepCause;
+        return typeof cause === 'string' && /^[a-z-]{1,32}$/.test(cause) ? [cause] : [];
+      } catch {
+        return [];
+      }
+    }),
+  );
+  return causes.size === 1 ? `source-step/${[...causes][0]}` : null;
+}
+
+/** Who made a call: a public function's guard (convex/cliServer.ts) prints `agent`, `cli` (a
+ * person's CLI), `web` or `public`. CI reaches Convex only through its result routes, so those are
+ * `ci`. Any other call is `internal`: scheduled, nested or another HTTP route, which the function
+ * name tells apart. Only a code-chosen word is kept, and only when the call printed one. */
+const callerKinds = Object.freeze(['agent', 'cli', 'web', 'public']);
+const ciRoute = /^POST \/(?:checks|deploy)\/actions$/;
+export function callerKind(log) {
+  if (ciRoute.test(log.identifier)) return 'ci';
+  const kinds = new Set(
+    messages(log).flatMap(message => {
+      const match = /^FORGE_CALLER ([a-z]+)$/.exec(message);
+      return match && callerKinds.includes(match[1]) ? [match[1]] : [];
+    }),
+  );
+  return kinds.size === 1 ? [...kinds][0] : 'internal';
+}
+
 /** Never retain arguments, results, error text or console output (beyond the code-chosen read label).
  * OCC attempts remain distinct. */
 export function spendEvent(log, deployment) {
@@ -95,7 +132,10 @@ export function spendEvent(log, deployment) {
     deployment,
     identifier: log.identifier,
     acceptedLandings: acceptedLandings(log),
-    ...(ioAttribution(log) ? { attribution: ioAttribution(log) } : {}),
+    caller: callerKind(log),
+    ...((ioAttribution(log) ?? sourceStepCause(log))
+      ? { attribution: ioAttribution(log) ?? sourceStepCause(log) }
+      : {}),
     usage: {
       calls: 1,
       io: sum(usage.databaseIoReadBytes, usage.databaseIoWriteBytes),
@@ -122,6 +162,7 @@ export function daySummary(day, rows, now = Date.now()) {
   const deployments = new Map(),
     functions = new Map(),
     attributions = new Map(),
+    callers = new Map(),
     gaps = [],
     alerts = new Set();
   const get = name => {
@@ -167,7 +208,20 @@ export function daySummary(day, rows, now = Date.now()) {
         knownUsage: empty(),
         missingFields: new Set(),
       });
-    for (const target of [dep, fn, ...(shape ? [attributions.get(shape)] : [])]) {
+    // Rows recorded before caller kinds existed have none; they stay out of perCaller.
+    if (row.caller && !callers.has(row.caller))
+      callers.set(row.caller, {
+        caller: row.caller,
+        usage: empty(),
+        knownUsage: empty(),
+        missingFields: new Set(),
+      });
+    for (const target of [
+      dep,
+      fn,
+      ...(shape ? [attributions.get(shape)] : []),
+      ...(row.caller ? [callers.get(row.caller)] : []),
+    ]) {
       for (const key of Object.keys(spendRates)) {
         target.usage[key] = sum(target.usage[key], row.usage[key]);
         target.knownUsage[key] += row.usage[key] ?? 0;
@@ -224,6 +278,14 @@ export function daySummary(day, rows, now = Date.now()) {
         ...shape,
         missingFields: [...missingFields],
         ...costOf(shape.usage, shape.knownUsage),
+      }))
+      .sort((a, b) => b.knownUsd - a.knownUsd),
+    // Every call by who made it (agent, cli, ci, web, public, internal): a read burst is attributed.
+    perCaller: [...callers.values()]
+      .map(({ missingFields, ...entry }) => ({
+        ...entry,
+        missingFields: [...missingFields],
+        ...costOf(entry.usage, entry.knownUsage),
       }))
       .sort((a, b) => b.knownUsd - a.knownUsd),
     coverage: 'partial: provider drops cannot be ruled out; unobserved time is unknown',

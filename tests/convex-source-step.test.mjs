@@ -1040,6 +1040,90 @@ test('V8 manifest-only composition is byte-identical to the fixed worker for fas
     }
 });
 
+test('Item 686ecdde Fix 3: a recompose after main moved on other paths composes in V8, byte-identical to the fixed worker', async () => {
+  for (const kind of ['moved', 'moved-twice', 'conflict', 'landed', 'unrecorded']) {
+    const x = fixture(),
+      blob = x.put('base'),
+      changed = x.put('changed'),
+      other = x.put('other');
+    const files = Array.from({ length: 200 }, (_, i) => ({
+      path: `src/${String(i).padStart(4, '0')}.txt`,
+      mode: 'file',
+      blob: blob.sha256,
+    }));
+    const edit = (list, index, value) => list.map((f, i) => (i === index ? { ...f, blob: value.sha256 } : f));
+    // Recorded descriptor metadata, as the object rows carry it; `unrecorded` is an older row.
+    const generations = new Map(),
+      parents = new Map();
+    const record = (pin, ps) => {
+      parents.set(pin.sha256, ps);
+      generations.set(pin.sha256, 1 + Math.max(0, ...ps.map(p => generations.get(p))));
+      return pin;
+    };
+    const base = record(x.state(files), []);
+    // The Lane was saved on `base` and edits file 1 (file 0 when it conflicts with main).
+    const laneFiles = edit(files, kind === 'conflict' ? 0 : 1, other);
+    const right = record(x.state(laneFiles, [base.sha256]), [base.sha256]);
+    // Main moved by accepted landings: each a merge of the previous main and another Lane.
+    let main = base,
+      mainFiles = files;
+    for (let step = 0; step < (kind === 'moved-twice' ? 2 : 1); step++) {
+      const peerFiles = edit(mainFiles, step === 0 ? 0 : 2, changed);
+      const peer = record(x.state(peerFiles, [main.sha256]), [main.sha256]);
+      const merged = [main.sha256, peer.sha256];
+      main = record(x.state(peerFiles, merged), merged);
+      mainFiles = peerFiles;
+    }
+    if (kind === 'landed') {
+      // The Lane head already landed and main moved on: main contains it, so the full step decides.
+      const merged = [main.sha256, right.sha256];
+      mainFiles = edit(mainFiles, 1, other);
+      main = record(x.state(mainFiles, merged), merged);
+      mainFiles = edit(mainFiles, 3, changed);
+      main = record(x.state(mainFiles, [main.sha256]), [main.sha256]);
+    }
+    if (kind === 'unrecorded') parents.delete(base.sha256);
+    const io = {
+      ...x.io,
+      stateGeneration: id => generations.get(id),
+      stateParents: id => parents.get(id),
+    };
+    const inputs = buildComposePages([
+        {
+          laneId: randomUUID(),
+          head: right.sha256,
+          version: 0,
+          sourceVersion: 0,
+          lifecycleVersion: 0,
+          state: { object: right, recipe: null },
+        },
+      ]),
+      dependencies = buildComposePages([]);
+    for (const page of [...inputs.pages, ...dependencies.pages]) x.json(page.value);
+    const input = x.json({
+      schema: 1,
+      kind: 'forge-hosted-compose-input',
+      base: { head: main.sha256, receiptId: 'main' },
+      main: { object: main, recipe: null },
+      inputs: inputs.manifest,
+      dependencies: dependencies.manifest,
+      algorithm: 'forge-native-compose-v1',
+      message: 'merge',
+      at,
+    });
+    const before = x.uploads.length,
+      describes = x.describes.length,
+      actual = await runSmallSourceCompose(input, io);
+    if (kind === 'moved' || kind === 'moved-twice') {
+      assert.deepEqual(actual, (await buildHostedSourceState(input, x.io)).output, kind);
+      // One descriptor call for the base, one per main level walked, one for the base's bytes.
+      assert.ok(x.describes.length - describes <= (kind === 'moved' ? 4 : 6), kind);
+    } else {
+      assert.equal(actual, null, kind);
+      assert.equal(x.uploads.length, before, `${kind}: fallback writes no speculative result`);
+    }
+  }
+});
 test('inline merge recomputation retains completed calculations but yields at the time boundary', async t => {
   const x = fixture(),
     file = text => ({ path: 'a.txt', mode: 'file', blob: x.put(text).sha256 });

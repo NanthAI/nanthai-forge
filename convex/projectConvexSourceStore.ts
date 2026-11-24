@@ -50,6 +50,7 @@ import { mergeStepReads, saveStepReads, sourceObjectLocation } from './projectSo
 import { sourceResultInlineBytes } from './projectConvexSourceTransport';
 import { digest } from '../src/state/hash';
 import { publishSourceResult } from './projectSourcePublishInline';
+import { sourceStepCause } from '../src/hosted-source-io-error';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
 /** The step's own result text, when publication may take it without the complete action's R2 read. */
 export function inlineSourceResult(
@@ -335,6 +336,7 @@ export const begin = sourceMutation({
         : {}),
       input: active.job.input,
       jobKind: active.job.jobKind,
+      cause: sourceStepCause(active.job.jobKind, active.source?.state),
       ...(active.project.physicalSeed?.jobId === args.jobId
         ? { physicalSeed: active.project.physicalSeed }
         : {}),

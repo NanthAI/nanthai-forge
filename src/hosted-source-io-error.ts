@@ -76,12 +76,14 @@ export const transientSourceStatus = (status: number) =>
  * arbitrary messages, stacks, response bodies, URLs, headers or source bytes. */
 export function logSourceFailure(
   error: unknown,
-  identity: { jobId: string; step: number; index?: number; generation?: number },
+  identity: { jobId: string; step: number; index?: number; generation?: number; stepCause?: string | null },
   stage: string,
   started: number,
   timing?: SourcePhaseTiming,
 ) {
   const cause = sourceFailureCause(error, stage, started, timing);
+  const stepCause =
+    identity.stepCause && /^[a-z-]{1,32}$/.test(identity.stepCause) ? identity.stepCause : null;
   const io = error instanceof SourceIoError ? error : null;
   console.warn(
     JSON.stringify({
@@ -90,6 +92,8 @@ export function logSourceFailure(
       step: identity.step,
       task: identity.index ?? null,
       generation: identity.generation ?? null,
+      // sourceStepCause (why the step ran); `cause` below is why it failed.
+      ...(stepCause ? { stepCause } : {}),
       ...cause,
       object: io?.object && /^[a-f0-9]{64}$/.test(io.object) ? io.object : null,
     }),
@@ -98,11 +102,33 @@ export function logSourceFailure(
 /** One bounded line per completed step or failed attempt so the existing log-stream
  * instrument can split source memory-time by job kind and phase without a
  * metrics read. Counts and identifiers only; never URLs, messages or bytes. */
+/** Why a source step runs, for its log line (Item 686ecdde Fix 3): `save`, `register`, a sync's mode
+ * (`sync`, `revert`, `resolution`, `resolve`), or a compose: `compose` on the main its request
+ * expected, `recompose` when main moved since that request (a race or a named recompose), with a
+ * `batch-` prefix for a cohort. Read from the state the step's begin already loaded: no extra read. */
+export function sourceStepCause(jobKind: string | undefined, state: unknown): string | null {
+  if (jobKind === 'save') return 'save';
+  if (jobKind === 'register-state') return 'register';
+  const value = (state ?? {}) as {
+    work?: { mode?: unknown };
+    batch?: unknown;
+    main?: { object?: { sha256?: unknown } };
+    request?: { expectedMain?: { head?: unknown } };
+  };
+  if (jobKind === 'sync') return typeof value.work?.mode === 'string' ? value.work.mode : null;
+  if (jobKind !== 'compose') return null;
+  const main = value.main?.object?.sha256,
+    expected = value.request?.expectedMain?.head;
+  if (typeof main !== 'string' || typeof expected !== 'string') return null;
+  return `${value.batch ? 'batch-' : ''}${main === expected ? 'compose' : 'recompose'}`;
+}
 export function logSourceStep(
   identity: { jobId: string; step: number },
   fields: {
     runtime: 'v8' | 'node';
     kind: string | null;
+    /** sourceStepCause, carried in the step's begin payload. */
+    cause?: string | null;
     from: string | null;
     to: string | null;
     objects: number;
@@ -133,6 +159,7 @@ export function logSourceStep(
       runtime: fields.runtime,
       ...(fields.outcome ? { outcome: fields.outcome } : {}),
       kind: name(fields.kind),
+      ...(name(fields.cause ?? null) ? { cause: name(fields.cause ?? null) } : {}),
       from: name(fields.from),
       to: name(fields.to),
       objects: count(fields.objects),

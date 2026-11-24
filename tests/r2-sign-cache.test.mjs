@@ -207,7 +207,10 @@ test('cached signed URLs never appear in console output, files, or download erro
         ),
       );
       continue;
-    } else assert.match(line, /^FORGE_PROJECT_EXECUTION /);
+    }
+    // The public guard's caller kind (Item 686ecdde): one code word, never an identity.
+    if (/^FORGE_CALLER [a-z]+$/.test(line)) continue;
+    assert.match(line, /^FORGE_PROJECT_EXECUTION /);
     assert.deepEqual(JSON.parse(line.slice('FORGE_PROJECT_EXECUTION '.length)), {
       projectId: 'project',
       name: project.name,
