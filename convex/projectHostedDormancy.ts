@@ -120,12 +120,12 @@ export async function overlapEvidence(
   lane: { head: string },
   row: Pick<
     Doc<'projectHostedOverlapLanes'>,
-    'head' | 'complete' | 'changes' | 'projectId' | 'laneId' | 'pathSummary'
+    'head' | 'complete' | 'projectId' | 'laneId' | 'pathSummary'
   > | null,
 ): Promise<{ path: string; after: { blob: string; mode: string } | null }[] | null> {
   if (!row || row.head !== lane.head || !row.complete) return null;
-  // A slim row knows how many paths it holds: one too large to compare reads no bucket.
-  if (row.changes === undefined && (row.pathSummary?.pathCount ?? 0) > COMPARE_PATHS) return null;
+  // The row knows how many paths it holds: one too large to compare reads no bucket.
+  if (row.pathSummary.pathCount > COMPARE_PATHS) return null;
   try {
     const changes = JSON.parse(await overlapLaneChanges(ctx, row)) as {
       path: string;

@@ -122,25 +122,22 @@ export async function trackHostedOverlapLane(
   const keepChanges = sameBase || metadata?.rebased === true;
   const sameHead = old?.head === lane.head;
   const unchangedBase = lane.head === lane.base.head && !metadata?.pending;
-  // The list this row held before the write: inline (a row not yet converted by the backfill), or joined from its
-  // buckets. Read at most once, and only when the projection can change (a slim row's bucket rows are not read for
-  // a write that keeps its list; a new, inline or empty-list row has none).
+  // The list this row held before the write, joined from its buckets. Read at most once, and only when the
+  // projection can change (a write that keeps its list reads no bucket; a new or empty-list row has none).
   let oldBuckets: ReturnType<typeof overlapBucketRows> | undefined;
   const oldBucketRows = () =>
     (oldBuckets ??=
-      old && old.changes === undefined && old.pathSummary?.pathCount !== 0
+      old && old.pathSummary.pathCount !== 0
         ? overlapBucketRows(ctx, projectId, lane.id)
         : Promise.resolve([]));
   let oldText: string | undefined;
   const oldList = async () =>
-    (oldText ??= old!.changes ?? joinOverlapBuckets((await oldBucketRows()).map(bucket => bucket.changes)));
-  // A write of a slim row that keeps its saved list as it is (same head and base, nothing new, nothing failed):
+    (oldText ??= joinOverlapBuckets((await oldBucketRows()).map(bucket => bucket.changes)));
+  // A write that keeps its saved list as it is (same head and base, nothing new, nothing failed):
   // `boundOverlapChanges` on its own output returns it unchanged (tests/hosted-overlap-buckets.test.mjs), so no
   // bucket is read or written, and the row keeps its list summary.
   const keepsList =
     old !== null &&
-    old.changes === undefined &&
-    old.pathSummary !== undefined &&
     sameHead &&
     metadata?.changes === undefined &&
     !metadata?.restorePending &&
@@ -317,7 +314,7 @@ export async function trackHostedOverlapLane(
             ? (lane.holder?.change?.previous?.actor ?? old.actor)
             : (lane.holder?.actor ?? old.actor),
           pointer: old.presenceRow,
-          paths: old.pathSummary ?? presencePaths(old.changes!),
+          paths: old.pathSummary,
           goal: old.intent,
           ...(old.landedMark ? { landedBefore: true as const } : {}),
         }
@@ -350,9 +347,6 @@ export async function trackHostedOverlapLane(
   // A stamp that did not carry over (a newer head, or a closed Lane) takes its marker row with it.
   if (old?.passedMark && value.passedMark !== old.passedMark) await ctx.db.delete(old.passedMark);
   const stored = { ...value, ...slim, ...(presenceRow ? { presenceRow } : {}) };
-  // The in-memory row the trial merge reads carries the list even when the stored one is slim.
-  const withList = (row: Doc<'projectHostedOverlapLanes'>) =>
-    list === undefined ? row : { ...row, changes: list };
   const sourceId = old ? old._id : await ctx.db.insert('projectHostedOverlapLanes', stored);
   if (old) await ctx.db.replace(old._id, stored);
   await trackLineLane(ctx, sourceId, stored, old, false);
@@ -370,8 +364,9 @@ export async function trackHostedOverlapLane(
     await planTrialMerge(
       ctx,
       projectId,
-      withList({ ...stored, _id: old._id, _creationTime: old._creationTime }),
+      { ...stored, _id: old._id, _creationTime: old._creationTime },
       undefined,
+      list,
     );
   else if (
     old?.conflicted &&
@@ -393,8 +388,9 @@ export async function trackHostedOverlapLane(
     await planTrialMerge(
       ctx,
       projectId,
-      withList({ ...stored, _id: old._id, _creationTime: old._creationTime }),
+      { ...stored, _id: old._id, _creationTime: old._creationTime },
       old.head,
+      list,
     );
   // Stacked Lanes (Issue dc62b120). A Lane nobody stacked on has no flag and a Lane without `stack`
   // returns at once, so neither adds a read. This Lane as a child: keep its dependents row. As a parent:

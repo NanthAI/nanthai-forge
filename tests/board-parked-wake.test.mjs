@@ -106,7 +106,7 @@ async function exerciseParkedNotice(t, startHolder) {
         baseSequence: 0,
         recordVersion: 0,
         open: true,
-        changes: '[]',
+        pathSummary: { paths: [], pathCount: 0 },
         complete: true,
       });
   }

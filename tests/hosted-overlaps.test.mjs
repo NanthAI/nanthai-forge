@@ -33,6 +33,7 @@ import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { boardReadPosition, writeBoardProjectCursor } from '../dist/board-local.js';
 import { boardWakeEnvelope } from '../dist/hosted-board-wait.js';
 import { readHostedOverlapAdvice } from '../dist/hosted-overlap-client.js';
+import { replaceOverlapList, seedOverlapLane } from './hosted-overlap-list.mjs';
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
@@ -406,10 +407,8 @@ test('20 open Lanes x 200 paths use one indexed peer read; history does not ente
   }));
   const value = mergeOverlapChanges([], paths);
   const existing = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === lane.id);
-  s.patch('projectHostedOverlapLanes', existing._id, {
-    ...value,
-    head: lane.head,
-  });
+  replaceOverlapList(s, existing, value.changes);
+  s.patch('projectHostedOverlapLanes', existing._id, { complete: value.complete, head: lane.head });
   for (let i = 0; i < 18; i++) {
     const peerId = randomUUID();
     s.insert('projectHostedRecordHeads', {
@@ -421,7 +420,7 @@ test('20 open Lanes x 200 paths use one indexed peer read; history does not ente
       version: 0,
       recordId: 'synthetic',
     });
-    s.insert('projectHostedOverlapLanes', {
+    seedOverlapLane((table, row) => s.insert(table, row), {
       projectId: s.projectId,
       laneId: peerId,
       intentId: randomUUID(),
@@ -455,7 +454,7 @@ test('20 open Lanes x 200 paths use one indexed peer read; history does not ente
       baseReceiptId: 'main-0',
       baseSequence: 0,
       open: false,
-      changes: '[]',
+      pathSummary: { paths: [], pathCount: 0 },
       complete: true,
     });
   for (let i = 0; i < 575; i++)
@@ -516,7 +515,12 @@ test('20 open Lanes x 200 paths use one indexed peer read; history does not ente
     2,
     'one focus lookup and one peer range',
   );
-  assert(meter.documents <= 60, JSON.stringify(meter));
+  // A detail read loads each peer's whole list: its bucket rows, one range per peer (Item 411727ba).
+  assert(
+    meter.documents - (meter.readDocumentsByTable.projectHostedOverlapChanges ?? 0) <= 60,
+    JSON.stringify(meter),
+  );
+  assert((meter.readRangesByTable.projectHostedOverlapChanges ?? 0) <= 20, JSON.stringify(meter));
   assert(meter.readBytes < 2 * 1024 * 1024);
   assert.equal(meter.writes, 0);
   assert(
@@ -961,10 +965,8 @@ for (const [files, laneCount] of [
       const projection = [...s.tables.projectHostedOverlapLanes.values()].find(
         row => row.laneId === entry.id,
       );
-      s.patch('projectHostedOverlapLanes', projection._id, {
-        changes: changes.changes,
-        complete: false,
-      });
+      replaceOverlapList(s, projection, changes.changes);
+      s.patch('projectHostedOverlapLanes', projection._id, { complete: false });
     }
     const result = JSON.parse(
       await s.transaction('scale-path', overlaps.read, {
@@ -977,8 +979,15 @@ for (const [files, laneCount] of [
     assert.equal(result.peerEvidence.items.length, Math.min(laneCount - 1, 50));
     assert.equal(result.peerEvidence.coverage, 'hosted-incomplete');
     const meter = s.counts.at(-1);
-    assert(meter.documents <= (laneCount > 50 ? 180 : 80), JSON.stringify(meter));
-    assert(meter.ranges <= 15, JSON.stringify(meter));
+    // Each listed peer's whole list is its bucket rows, one range per peer (Item 411727ba), counted apart.
+    const bucketRanges = meter.readRangesByTable.projectHostedOverlapChanges ?? 0;
+    assert(
+      meter.documents - (meter.readDocumentsByTable.projectHostedOverlapChanges ?? 0) <=
+        (laneCount > 50 ? 180 : 80),
+      JSON.stringify(meter),
+    );
+    assert(meter.ranges - bucketRanges <= 15, JSON.stringify(meter));
+    assert(bucketRanges <= Math.min(laneCount, 51), JSON.stringify(meter));
     // Thirty Lanes fit below 4.5 MiB; the new 560-Lane case saturates the
     // existing 51-row projection window (each row is at most 128 KiB).
     assert(meter.readBytes < (laneCount > 50 ? 8 : 4.5) * 1024 * 1024, JSON.stringify(meter));
@@ -1099,8 +1108,8 @@ async function busyProject(t, { behind }) {
       path: n < 2 ? change.path : `src/peer-${i}/file-${n}.ts`,
       after: { ...change.after, blob: digest(peerId + n) },
     }));
-    const { _id, _creationTime, presenceRow, ...template } = mineRow;
-    s.insert('projectHostedOverlapLanes', {
+    const { _id, _creationTime, presenceRow, pathSummary, symbolFacts, ...template } = mineRow;
+    seedOverlapLane((table, row) => s.insert(table, row), {
       ...template,
       laneId: peerId,
       intentId: randomUUID(),

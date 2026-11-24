@@ -75,17 +75,18 @@ export const hostedOverlapTables = {
     superseded: v.optional(
       v.object({ by: v.string(), receiptId: v.string(), laneHead: v.string(), at: v.string() }),
     ),
-    /** The saved change list as JSON, only on a row not yet converted by the one-off backfill. A slim row has no `changes`:
-     * its entries are the rows of projectHostedOverlapChanges, read through convex/projectHostedOverlapChanges.ts. */
-    changes: v.optional(v.string()),
+    /** The saved change list's entries are the rows of projectHostedOverlapChanges, read through
+     * convex/projectHostedOverlapChanges.ts; the row itself stays slim. */
     complete: v.boolean(),
-    /** Slim rows only: some entry carries usable cross-file symbol links, so a default read needs the whole list. */
+    /** Some entry carries usable cross-file symbol links, so a default read needs the whole list. */
     symbolFacts: v.optional(v.literal(true)),
-    /** Slim rows only: the presence path summary (src/hosted-presence presencePaths) of the saved list, so a
-     * record write compares presence without reading a bucket. */
-    pathSummary: v.optional(
-      v.object({ paths: v.array(v.string()), pathCount: v.number(), pathBloom: v.optional(v.string()) }),
-    ),
+    /** The presence path summary (src/hosted-presence presencePaths) of the saved list, so a record write
+     * compares presence and an idle read skips without reading a bucket. */
+    pathSummary: v.object({
+      paths: v.array(v.string()),
+      pathCount: v.number(),
+      pathBloom: v.optional(v.string()),
+    }),
     /** While background saves settle at this head (Item 3f70760d): the saved evidence of the paths their
      * pending deltas touched (`changes`, entries absent when the saved head did not change the path),
      * so a publish or a failure rebuilds `changes` from the saved head, never from unsaved work. */

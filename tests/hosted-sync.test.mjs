@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { transfers } from './hosted-compose-fixture.mjs';
 import { syncFixture, api, jobApi, code } from './hosted-sync-fixture.mjs';
-import { withSavedList } from './hosted-overlap-list.mjs';
+import { replaceOverlapList, withSavedList } from './hosted-overlap-list.mjs';
 const target = s => ({ kind: 'main', head: s.main.head, receiptId: s.main.receipt.id });
 // A Lane whose base names the same head under an earlier receipt: its sync is still up to date, but
 // publication rebases the record, so prepare cannot settle it and the source job runs.
@@ -124,10 +124,12 @@ test('a merged sync moves the Lane base to the main it took in, so behindMain st
   assert.notEqual(before.head, main.sha256);
   // The Lane's saved-path evidence (what a save recorded) must survive the rebase.
   const seeded = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === lane.laneId);
-  s.patch('projectHostedOverlapLanes', seeded._id, {
-    changes: JSON.stringify([{ path: 'lane', before: null, after: { blob: s.hidden.blob, mode: 'file' } }]),
-    complete: true,
-  });
+  replaceOverlapList(
+    s,
+    seeded,
+    JSON.stringify([{ path: 'lane', before: null, after: { blob: s.hidden.blob, mode: 'file' } }]),
+  );
+  s.patch('projectHostedOverlapLanes', seeded._id, { complete: true });
   const r = s.request('sync', {
     laneId: lane.laneId,
     expected: s.pins(lane),

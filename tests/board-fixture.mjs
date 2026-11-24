@@ -71,7 +71,7 @@ export function boardFixture() {
       baseSequence: 0,
       recordVersion: 0,
       open,
-      changes: '[]',
+      pathSummary: { paths: [], pathCount: 0 },
       complete: true,
     });
   lane('A', 'writer', true);

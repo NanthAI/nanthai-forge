@@ -104,7 +104,7 @@ export async function itemWorkFixture({
       baseSequence: 1,
       recordVersion: 0,
       open: false,
-      changes: '[]',
+      pathSummary: { paths: [], pathCount: 0 },
       complete: true,
       ...stamp,
     });

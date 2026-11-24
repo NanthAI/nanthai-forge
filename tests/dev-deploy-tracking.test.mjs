@@ -335,6 +335,7 @@ test('Item 8b6efb50: ancestry picks the first successful deploy >= sequence in l
     baseSequence: 0,
     recordVersion: 0,
     open: false,
+    pathSummary: { paths: [], pathCount: 0 },
     complete: true,
     landed: { receiptId: r11, commit: hex('b'), laneHead: hex('b'), at: '2026-11-23T10:05:00.000Z' },
   });

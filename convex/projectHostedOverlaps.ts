@@ -128,9 +128,8 @@ export const read = query({
           : {}),
       };
       const current = mine && mine.head === lane.head && mine.baseHead === lane.base.head ? mine : null;
-      // A slim row says without a read whether it saved nothing (the idle skip below).
-      const savedNothing =
-        current?.changes === undefined ? current?.pathSummary?.pathCount === 0 : current.changes === '[]';
+      // The row says without a read whether it saved nothing (the idle skip below).
+      const savedNothing = current?.pathSummary.pathCount === 0;
       const focus = current
         ? {
             ...current,
@@ -231,14 +230,13 @@ export const read = query({
         peers.length <= 50 &&
         headers.length <= 50 &&
         unmatched.every(header => dormantLanes?.has(header.key));
-      // A slim peer row's entries are read only as far as this read can use them (Item 411727ba): a path read needs
-      // the entry of that path, a default read the entries of the paths the caller saved (the whole list only when
-      // both sides carry cross-file symbol facts), scope and detail reads the whole list. An inline row already
-      // holds everything. The advice function sees the same entries it would have used from the whole list.
+      // A peer's entries are read only as far as this read can use them (Item 411727ba): a path read needs the entry
+      // of that path, a default read the entries of the paths the caller saved (the whole list only when both sides
+      // carry cross-file symbol facts), scope and detail reads the whole list. The advice function sees the same
+      // entries it would have used from the whole list.
       const mineSaved = new Set(savedPaths(focus.changes));
       const mineFacts = !path && !detail && !scope?.length && hasSymbolFacts(focus.changes);
       const peerChanges = async (peer: (typeof currentPeers)[number]) => {
-        if (peer.changes !== undefined) return peer.changes;
         if (!peer.open || peer.laneId === laneId) return '[]';
         if (path) return overlapLaneEntries(ctx, peer, new Set([path]));
         if (detail || scope?.length || (mineFacts && peer.symbolFacts)) return overlapLaneChanges(ctx, peer);

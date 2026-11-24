@@ -47,9 +47,9 @@ async function openLanePage(ctx: QueryCtx, projectId: Id<'hostedProjects'>, cuto
       if (rowActivity(row) > cutoff) yield row;
   };
   for await (const slim of rows()) {
-    // The Now signal needs every saved path: a slim row's list counts against the page like an inline one.
+    // The Now signal needs every saved path: the Lane's list counts against the page.
     const row = { ...slim, changes: await overlapLaneChanges(ctx, slim) };
-    // The page boundary is the inline row's size: the slim-row fields add nothing to it.
+    // The page boundary is the row's size with its list in place of the summary fields.
     const size = JSON.stringify({ ...row, pathSummary: undefined, symbolFacts: undefined }).length;
     if (page.length >= OPEN_LANE_ROWS || (page.length && bytes + size > OPEN_LANE_BYTES)) {
       isDone = false;

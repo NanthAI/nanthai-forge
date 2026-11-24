@@ -1455,7 +1455,7 @@ test('members fetch Lane refs as built commits; git diff main...lane equals the 
     baseSequence: 1,
     recordVersion: 2,
     open: true,
-    changes: '[]',
+    pathSummary: { paths: [], pathCount: 0 },
     complete: false,
   });
   await s.ctx.db.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
@@ -1676,7 +1676,7 @@ test('members fetch Lane refs as built commits; git diff main...lane equals the 
     baseSequence: 2,
     recordVersion: 1,
     open: true,
-    changes: '[]',
+    pathSummary: { paths: [], pathCount: 0 },
     complete: false,
   });
   await refused(['-C', repo, 'fetch', 'origin', `refs/forge/lanes/${other}`], /GIT_LANE_BASE_UNPUBLISHED/);
@@ -1854,7 +1854,7 @@ test('a first Lane build lists the parent tree from the history packs and reads 
     baseSequence: 1,
     recordVersion: 1,
     open: true,
-    changes: '[]',
+    pathSummary: { paths: [], pathCount: 0 },
     complete: false,
   });
   const metrics = [];
@@ -2473,7 +2473,7 @@ test('an unmirrored project lists and serves Lane refs on the imported and Forge
       baseSequence: 1,
       recordVersion: 2,
       open: true,
-      changes: '[]',
+      pathSummary: { paths: [], pathCount: 0 },
       complete: false,
     });
     return laneId;

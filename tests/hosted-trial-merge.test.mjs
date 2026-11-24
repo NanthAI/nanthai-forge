@@ -16,6 +16,7 @@ import { presencePaths, presenceMayShare } from '../dist/hosted-presence.js';
 import { speedBudgets } from '../dist/speed-budgets.js';
 import { judgeCosts } from '../dist/cost-budgets.js';
 import { moduleUrl } from './convex-module.mjs';
+import { seedOverlapLane } from './hosted-overlap-list.mjs';
 
 const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
 const conflicts = await import(moduleUrl('../convex/projectHostedConflicts.ts'));
@@ -451,7 +452,7 @@ test('truncated disjoint peers cost zero overlap-row reads; hidden shared paths 
       changes: JSON.stringify(changes),
       complete: true,
     };
-    s.insert('projectHostedOverlapLanes', peer);
+    seedOverlapLane((table, row) => s.insert(table, row), peer);
     const projection = presencePaths(peer.changes);
     if (!filtered) delete projection.pathBloom;
     s.insert('projectHostedPresence', {
@@ -472,7 +473,7 @@ test('truncated disjoint peers cost zero overlap-row reads; hidden shared paths 
     };
     await s.call(
       'save-trial',
-      { _handler: ctx => conflicts.planTrialMerge(ctx, 'project', mine, 'old') },
+      { _handler: ctx => conflicts.planTrialMerge(ctx, 'project', mine, 'old', mine.changes) },
       {},
     );
     const meter = s.counts.at(-1);
@@ -484,8 +485,11 @@ test('truncated disjoint peers cost zero overlap-row reads; hidden shared paths 
   assert.equal(peerReads, 0, 'a truncated, disjoint peer costs no full-row point read');
   assert.equal(filtered.s.scheduled.length, 0, 'no file shared, no action scheduled');
   assert.equal(legacy.meter.readRangesByTable.projectHostedOverlapLanes, 1, 'older rows remain conservative');
+  // The peer's saved list is bucket rows (Item 411727ba), so the skipped read is its slim row and the bucket of the
+  // shared path; the filter still costs less than that read.
+  t.diagnostic(`read bytes: ${legacy.meter.readBytes} unfiltered, ${filtered.meter.readBytes} filtered`);
   assert(
-    legacy.meter.readBytes - filtered.meter.readBytes > 8000,
+    legacy.meter.readBytes > filtered.meter.readBytes,
     'bytes saved include the new slim-row filter cost',
   );
   const verdicts = judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'trial-merge-fixture', {

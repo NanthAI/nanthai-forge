@@ -1117,19 +1117,15 @@ The count uses the current Lane state, and replaying a page adds no duplicate ma
 npx convex run projectPlanLaneBackfill:run '{"projectId":"PROJECT_ID","phase":"items","cursor":null}'
 ```
 
-### Move overlap change lists into buckets
+### Overlap change lists live in buckets
 
-After a deploy at or past the bucketed overlap writer, convert the Lane rows that still hold their saved change list inline
-(closed and idle Lanes; an open Lane converts on its next record write). One run covers the whole deployment and is
-idempotent: it pages 25 rows of `projectHostedOverlapLanes` per call, moves a row's list into `projectHostedOverlapChanges`
-rows and leaves the row slim, then continues itself until the table ends or no further page fits `budgetBytes` of row bytes
-read (a page reads at most 2 MB). State the budget first: row bytes read plus the same bytes written, at $0.20/GB. The run
-ends with one log line (`npx convex logs`): `done` with the totals, or `stopped` with the `cursor` to pass back as
-`{"budgetBytes":BYTES,"cursor":"…"}`. A second full run that logs `converted` 0 proves no inline row is left.
-
-```sh
-npx convex run projectHostedOverlapBackfill:run '{"budgetBytes":BYTES}'
-```
+A Lane's saved change list lives only in `projectHostedOverlapChanges` bucket rows; `projectHostedOverlapLanes` has no
+`changes` field. A deployment that still holds a Lane row with its list inline (written before 2026-11-23) refuses the
+schema on deploy, so nothing is dropped silently: deploy a State before the removal (main #31908 to the landing that
+removed it), run `npx convex run projectHostedOverlapBackfill:run '{"budgetBytes":BYTES}'` from that State until a
+second run logs `done` (not `stopped`) with `converted` 0, then deploy current main. `budgetBytes` counts only row bytes
+read; billed I/O adds the bucket and index writes: the dogfood run reported 20.5 MB and billed 72.8 MB (about 3.5x), so
+set `budgetBytes` to the billed cap divided by 4.
 
 ### Project retention and restore
 

@@ -734,7 +734,7 @@ test('purge Lane 3, records mode: an Intent-born Item (Lane-pinned, continued on
     baseSequence: null,
     recordVersion: 0,
     open: false,
-    changes: '[]',
+    pathSummary: { paths: [], pathCount: 0 },
     complete: true,
   });
   const before = storeIntents(s, itemId);

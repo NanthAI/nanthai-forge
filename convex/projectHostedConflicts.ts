@@ -153,7 +153,7 @@ const finishedAtHead = (row: Pick<Row, 'head' | 'landed' | 'superseded'>) =>
 /** The Lane's saved entries, or with `only` just those of the given paths (a slim peer reads only their buckets). */
 const changesOf = async (
   ctx: QueryCtx,
-  row: Pick<Row, 'changes' | 'projectId' | 'laneId'>,
+  row: Pick<Row, 'projectId' | 'laneId'>,
   only?: ReadonlySet<string>,
 ): Promise<OverlapChange[]> => {
   try {
@@ -218,9 +218,11 @@ export async function planTrialMerge(
   projectId: Id<'hostedProjects'>,
   row: Row,
   previousHead: string | undefined,
+  /** The list the calling record write just stored, so its buckets are not read back. */
+  list?: string,
 ) {
   if (!row.open || row.head === previousHead) return;
-  const changes = await changesOf(ctx, row);
+  const changes = list === undefined ? await changesOf(ctx, row) : (JSON.parse(list) as OverlapChange[]);
   const mine = new Map(changes.map(change => [change.path, change]));
   if (!mine.size) {
     if (row.conflicted) await closeConflictNotices(ctx, projectId, row.laneId, 'save');

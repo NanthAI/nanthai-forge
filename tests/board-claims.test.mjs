@@ -28,6 +28,7 @@ import {
 import { editedPolicy, policyPreset, policyReadView } from '../dist/autonomy-policy.js';
 import { runResourceWorker } from './resource-budget.mjs';
 import { saveFixture } from './hosted-saves-fixture.mjs';
+import { slimOverlapLane } from './hosted-overlap-list.mjs';
 
 const claims = await import(moduleUrl('../convex/projectBoardClaims.ts'));
 const delivery = await import(moduleUrl('../convex/projectBoardDelivery.ts'));
@@ -57,7 +58,17 @@ function fixture() {
   const rows = () => [...f.tables.projectBoardClaims.values()];
   const laneRow = key =>
     [...f.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === f.lanes[key]);
-  const save = (key, paths) => (laneRow(key).changes = JSON.stringify(paths.map(path => ({ path }))));
+  const save = (key, paths) => {
+    const row = laneRow(key);
+    const saved = slimOverlapLane({ ...row, changes: JSON.stringify(paths.map(path => ({ path }))) });
+    Object.assign(row, { pathSummary: saved.row.pathSummary });
+    const table = (f.tables.projectHostedOverlapChanges ??= new Map());
+    for (const [id, bucket] of [...table]) if (bucket.laneId === row.laneId) table.delete(id);
+    for (const bucket of saved.buckets) {
+      const id = `bucket-${row.laneId}-${bucket.bucket}`;
+      table.set(id, { _id: id, _creationTime: 1, ...bucket });
+    }
+  };
   const deliver = (args = {}) =>
     delivery.boardDelivery(f.ctx, {
       projectId: 'project',

@@ -238,7 +238,7 @@ test('a resolution Lane landed with keepOpen or closes:false notes its origin It
         baseSequence: 0,
         recordVersion: 0,
         open: true,
-        changes: '[]',
+        pathSummary: { paths: [], pathCount: 0 },
         complete: false,
         lastActivityAt: Date.parse(AT),
         ...extra,

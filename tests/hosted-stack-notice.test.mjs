@@ -357,7 +357,7 @@ test('writeLanding announces a cancelled landing of a stacked Lane through the r
       baseSequence: 0,
       recordVersion: 0,
       open: true,
-      changes: '[]',
+      pathSummary: { paths: [], pathCount: 0 },
       complete: true,
       ...extra,
     });

@@ -151,7 +151,7 @@ test('92f4bf04: one bounded prune read classifies retained terminal/open headers
       baseSequence: null,
       recordVersion: 1,
       open: false,
-      changes: '[]',
+      pathSummary: { paths: [], pathCount: 0 },
       complete: true,
       landed: { receiptId: 'accepted', commit: head, laneHead, at: '2026-01-01' },
     });

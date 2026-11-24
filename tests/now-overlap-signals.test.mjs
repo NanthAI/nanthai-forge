@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { seedOverlapLane } from './hosted-overlap-list.mjs';
 const nowApi = await import(moduleUrl('../convex/projectNowOverlaps.ts'));
 const { NOW_OVERLAP_VIEW_BUDGET, readViewSignals } = await import(moduleUrl('../src/now-overlap-view.ts'));
 // Overlap answers are gone (Issue 853fcde3): the Now page's one read carries the bounded signals only.
@@ -28,7 +29,7 @@ function fixture(count = 20, shared = count) {
   for (let i = 0; i < 560; i++) {
     const laneId = `lane-${i}`,
       open = i < count;
-    s.insert('projectHostedOverlapLanes', {
+    seedOverlapLane((table, row) => s.insert(table, row), {
       projectId,
       laneId,
       intentId: `intent-${i}`,
@@ -75,8 +76,14 @@ test('one authorized Now read uses bounded indexed signals at dogfood size, with
   const measured = s.counts.at(-1);
   assert.equal(signals.edits.length, 20);
   assert.equal(signals.complete, true, 'twenty open Lanes fit one window');
-  assert.ok(measured.documents <= 150, JSON.stringify(measured));
-  assert.ok(measured.ranges <= 10);
+  // Saved lists are bucket rows (Item 411727ba): one bucket range per open Lane, counted apart from the rest.
+  const bucketRanges = measured.readRangesByTable.projectHostedOverlapChanges ?? 0;
+  assert.ok(
+    measured.documents - (measured.readDocumentsByTable.projectHostedOverlapChanges ?? 0) <= 150,
+    JSON.stringify(measured),
+  );
+  assert.ok(measured.ranges - bucketRanges <= 10);
+  assert.ok(bucketRanges <= signals.edits.length);
   assert.ok(measured.readBytes < 1200 * 1024);
   assert.equal(measured.writes, 0);
   assert.ok(

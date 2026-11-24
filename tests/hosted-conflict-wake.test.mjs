@@ -41,7 +41,7 @@ async function fixture(selectedLaneId, [mineHead, peerHead] = ['mine', 'peer']) 
       baseSequence: 0,
       recordVersion: 0,
       open: true,
-      changes: '[]',
+      pathSummary: { paths: [], pathCount: 0 },
       complete: true,
     });
   const request = f.request();
