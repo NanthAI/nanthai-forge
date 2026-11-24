@@ -95,7 +95,7 @@ export type Ask = {
  * reverted from main, work that still needs a fix, a GitHub mirror that stopped, or a failed deploy / post-deploy smoke.
  * It stays until the state changes. */
 export type Notice = {
-  kind: 'reverted' | 'needs-fix' | 'mirror' | 'deploy';
+  kind: 'reverted' | 'needs-fix' | 'mirror' | 'deploy' | 'secrets';
   /** The reverted Intent's id, `mirror`, or `deploy:<target>`. */
   id: string;
   summary: string;
@@ -113,6 +113,8 @@ export type NeedsRead = {
   parkedMore?: boolean;
   notices?: readonly Notice[];
   noticesMore?: true;
+  /** What waits on a person in sealed secrets (convex/projectNeedsMe.ts `secrets`); write members only. */
+  secrets?: number;
 };
 
 export const needsRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, NeedsRead>(
@@ -183,7 +185,7 @@ export function needsCount(
   const asks = (read.asks ?? []).filter(row => !row.ahead && !row.recipientSession).length;
   const blocked = blockedRequestIds(read.approvals, now, read.canDecide).size;
   return {
-    n: held + asks + parked + blocked + (read.notices?.length ?? 0),
+    n: held + asks + parked + blocked + (read.notices?.length ?? 0) + (read.secrets ?? 0),
     atLeast:
       read.more > 0 ||
       read.parkedMore === true ||

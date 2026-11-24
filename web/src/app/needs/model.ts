@@ -227,6 +227,7 @@ const noticeTags = {
   'needs-fix': 'Fix needed',
   mirror: 'GitHub mirror',
   deploy: 'Deploy failed',
+  secrets: 'Secrets',
 } as const;
 function noticeRow(notice: Notice): NoticeRow {
   return {
@@ -309,11 +310,30 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
     ...(askedAhead.length ? { askedAhead } : {}),
     ...(sessionAsks.length ? { sessionAsks } : {}),
     parked,
-    notices: (read.notices ?? []).map(noticeRow),
+    // Sealed secrets that wait on the reader (Item 41a0df87): one row that points at Settings, Secrets, where each is.
+    notices: [
+      ...(read.notices ?? []).map(noticeRow),
+      ...(read.secrets
+        ? [
+            noticeRow({
+              kind: 'secrets',
+              id: 'secrets',
+              summary: `${read.secrets.toLocaleString()} ${read.secrets === 1 ? 'secret change waits' : 'secret changes wait'} on you.`,
+              next: 'Each is done in a terminal; the Secrets page lists them.',
+            }),
+          ]
+        : []),
+    ],
     fyi,
     ahead,
     blocked,
-    count: waiting.length + asks.length + parked.length + blocked.length + (read.notices?.length ?? 0),
+    count:
+      waiting.length +
+      asks.length +
+      parked.length +
+      blocked.length +
+      (read.notices?.length ?? 0) +
+      (read.secrets ?? 0),
     atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true,
     countAtLeast:
       read.more > 0 ||

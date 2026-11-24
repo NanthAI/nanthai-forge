@@ -1,184 +1,312 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Synthetic names and public handles only. This entry is never a production Vite input or an app route.
+// Synthetic names, codes and public handles only (Item 41a0df87, slice 4). This entry is never a production Vite input
+// or an app route. It draws the real SecretsScreen inside the real project frame from fixed overview data.
 import { createRoot } from 'react-dom/client';
 import { useState } from 'react';
 import { ProjectFrame } from '../../web/src/app/frames';
 import { SecretsScreen } from '../../web/src/app/secrets/Secrets';
-import { secretsView, type SecretsMetadata, type SecretsView } from '../../web/src/app/secrets/secrets-model';
+import type { Overview, OverviewSet, SecretsView } from '../../web/src/app/secrets/secrets-model';
 import '../../web/src/app/app.css';
 import '../../web/src/ui/mark.css';
 
-const data: SecretsMetadata = {
-  sets: [
-    {
-      id: 'development',
-      nameTotal: 4,
-      names: ['DEV_SERVICE_URL', 'TRACE_ENDPOINT', 'PACKAGE_READ_KEY', 'TEST_WORKSPACE'].map((name, i) => ({
-        name,
-        changed: i ? '5 d ago' : '8 min ago',
-        by: i ? '@ash' : 'river/task-runner',
-        note: i ? undefined : 'new name, added by an agent',
-      })),
-      holderTotal: 3,
-      holders: [
-        { id: 'river', kind: 'person', label: '@river', detail: '2 computers' },
-        { id: 'ash', canRemove: true, kind: 'person', label: '@ash', detail: '1 computer' },
-        {
-          id: 'sandbox',
-          canRemove: true,
-          kind: 'machine',
-          label: 'build-sandbox',
-          detail: 'a sandbox key, reads only. Last used 2 h ago',
-        },
-      ],
-    },
-    {
-      id: 'checks',
-      nameTotal: 2,
-      names: ['PACKAGE_WRITE_KEY', 'COVERAGE_UPLOAD_KEY'].map(name => ({
-        name,
-        changed: '12 d ago',
-        by: '@river',
-        note: 'check verify',
-      })),
-      holderTotal: 2,
-      holders: [
-        { id: 'river', kind: 'person', label: '@river', detail: '2 computers' },
-        {
-          id: 'ci',
-          canRemove: true,
-          kind: 'machine',
-          label: 'ci',
-          detail: 'a machine key. Last used 6 min ago',
-        },
-      ],
-    },
-  ],
-  rotationTotal: 0,
-  missingTotal: 0,
-  waiting: [],
-  waitingTotal: 0,
+const NOW = Date.parse('2026-11-24T14:02:11Z');
+const ago = (minutes: number) => NOW - minutes * 60_000;
+type Names = NonNullable<OverviewSet['names']>['page'];
+type People = NonNullable<OverviewSet['people']>['page'];
+const name = (n: string, v: number, minutes: number, by: string | null, extra = {}): Names[number] => ({
+  name: n,
+  kind: n.includes('.') ? 2 : 1,
+  version: v,
+  at: ago(minutes),
+  by,
+  waits: 0,
+  ...extra,
+});
+const development = (patch: Partial<OverviewSet> = {}): OverviewSet => ({
+  kind: 1,
   sharing: 'automatic',
-  canManageSharing: true,
-  recent: [
-    { id: 'new', when: '10:37', text: 'river/task-runner added TEST_WORKSPACE to Development' },
-    { id: 'change', when: 'Tue', text: '@river changed PACKAGE_WRITE_KEY in Checks' },
-    {
-      id: 'share',
-      when: 'Mon',
-      text: 'Computer AB12-CD34 can open Development, shared by computer EF56-GH78',
-      automatic: true,
+  headVersion: 12,
+  takeOut: [],
+  proposals: [],
+  rotate: { total: 0, page: [], next: null },
+  names: {
+    total: 4,
+    page: [
+      name('API_BASE_URL', 2, 12 * 1440, 'alex'),
+      name('API_TOKEN', 3, 4 * 1440, 'sam'),
+      name('DATABASE_URL', 7, 25 * 1440, 'alex'),
+      name('SENTRY_DSN', 1, 1440, 'lee'),
+    ],
+    next: null,
+  },
+  people: {
+    total: 2,
+    page: [
+      {
+        handle: 'alex',
+        role: 'owner',
+        mine: true,
+        computers: [
+          { code: 'M5VG-0YSJ', how: 'first', name: 'desk machine' },
+          { code: '9CEB-T4NQ', how: 'code', name: 'travel laptop' },
+        ],
+      },
+      {
+        handle: 'sam',
+        role: 'write',
+        computers: [
+          { code: '4HTB-W8CZ', how: 'code' },
+          { code: 'ZX7H-1PRF', how: 'auto' },
+        ],
+      },
+    ],
+    next: null,
+  },
+  machines: [],
+  waiting: [],
+  ...patch,
+});
+const checks = (patch: Partial<OverviewSet> = {}): OverviewSet => ({
+  kind: 2,
+  sharing: 'confirm',
+  headVersion: 3,
+  takeOut: [],
+  proposals: [],
+  rotate: { total: 0, page: [], next: null },
+  names: {
+    total: 2,
+    page: [name('E2E_ACCOUNT_PASSWORD', 1, 6 * 1440, 'alex'), name('NPM_TOKEN', 2, 6 * 1440, 'alex')],
+    next: null,
+  },
+  people: {
+    total: 1,
+    page: [
+      {
+        handle: 'alex',
+        role: 'owner',
+        mine: true,
+        computers: [{ code: 'M5VG-0YSJ', how: 'first', name: 'desk machine' }],
+      },
+    ],
+    next: null,
+  },
+  machines: [{ code: 'T8NB-3QZE', by: 'alex' }],
+  waiting: [],
+  ...patch,
+});
+const ok = (sets: OverviewSet[]): SecretsView => ({
+  status: 'ready',
+  data: { status: 'ok', now: NOW, needs: 0, sets } as Overview,
+  shownAt: NOW,
+});
+const removal = (): OverviewSet =>
+  development({
+    takeOut: [{ handle: 'dana', left: true, at: ago(120), codes: ['K7QD-2MWX'] }],
+    rotate: {
+      total: 3,
+      page: [
+        {
+          name: 'DATABASE_URL',
+          kind: 1,
+          version: 7,
+          devices: [{ code: 'R2PA-9XNE', handle: 'dana' }],
+          more: 0,
+        },
+        {
+          name: 'SIGNING_KEY.pem',
+          kind: 2,
+          version: 1,
+          devices: [{ code: 'R2PA-9XNE', handle: 'dana' }],
+          more: 0,
+        },
+        {
+          name: 'STRIPE_SECRET_KEY',
+          kind: 1,
+          version: 4,
+          devices: [{ code: 'R2PA-9XNE', handle: 'dana' }],
+          more: 0,
+        },
+      ],
+      next: null,
     },
-  ],
+    proposals: [
+      {
+        id: '3f9a12c04b7e5d1a9c2e8f60b3d417aa',
+        op: 2,
+        name: 'API_TOKEN',
+        kind: 1,
+        from: '4HTB-W8CZ',
+        handle: 'sam',
+        at: ago(12),
+      },
+      {
+        id: 'a81c0e5f92d34b07e6a1c9d8f2b4e0c3',
+        op: 3,
+        name: 'LEGACY_WEBHOOK_SECRET',
+        kind: 3,
+        from: 'M5VG-0YSJ',
+        handle: 'alex',
+        at: ago(180),
+      },
+    ],
+    names: {
+      total: 4,
+      page: [
+        name('API_TOKEN', 3, 4 * 1440, 'sam', { waits: 1 }),
+        name('DATABASE_URL', 7, 25 * 1440, 'alex', { rotate: true }),
+        name('SIGNING_KEY.pem', 1, 23 * 1440, 'alex', { rotate: true }),
+        name('STRIPE_SECRET_KEY', 4, 19 * 1440, null, { rotate: true }),
+      ],
+      next: null,
+    },
+    people: {
+      total: 3,
+      page: [
+        {
+          handle: 'alex',
+          role: 'owner',
+          mine: true,
+          computers: [{ code: 'M5VG-0YSJ', how: 'first', name: 'desk machine' }],
+        },
+        { handle: 'sam', role: 'write', computers: [{ code: 'ZX7H-1PRF', how: 'auto' }] },
+        {
+          handle: 'dana',
+          role: 'write',
+          left: true,
+          leftAt: ago(120),
+          computers: [{ code: 'K7QD-2MWX', how: 'code', marked: true }],
+        },
+      ],
+      next: null,
+    },
+    waiting: [{ code: 'P3TR-88KD', handle: 'jo', at: ago(5) }],
+  });
+const worst = (): SecretsView => {
+  const long = `ENV_${'X'.repeat(56)}_KEY`;
+  const handle60 = `quintessential-maintainer-${'x'.repeat(34)}`;
+  const people: People = Array.from({ length: 25 }, (_, i) => ({
+    handle: i === 0 ? handle60 : i === 1 ? 'b' : i === 2 ? '🦊fox' : `person-${i}`,
+    role: i === 0 ? 'owner' : 'write',
+    computers: [{ code: `P${String(i).padStart(3, '0')}-ABCD`, how: 'code' }],
+  }));
+  return ok([
+    development({
+      takeOut: [{ handle: null, left: false, at: null, codes: ['0000-0001', '0000-0002'] }],
+      rotate: {
+        total: 787,
+        page: Array.from({ length: 100 }, (_, i) => ({
+          name: i === 0 ? long : `ROTATE_${String(i).padStart(4, '0')}`,
+          kind: 1 as const,
+          version: 12840,
+          devices: [{ code: '0000-0001', handle: null }],
+          more: i === 1 ? 4 : 0,
+        })),
+        next: 'ROTATE_0099',
+      },
+      proposals: Array.from({ length: 32 }, (_, i) => ({
+        id: `${i.toString(16).padStart(2, '0')}ff00ff${'a'.repeat(24)}`,
+        op: ([1, 2, 3] as const)[i % 3]!,
+        name: i === 0 ? 'X' : i === 1 ? 'K' : `NAME_${i}`,
+        kind: ([2, 1, 3] as const)[i % 3]!,
+        from: `ZZ${String(i).padStart(2, '0')}-ZZZZ`,
+        handle: i === 0 ? handle60 : i === 1 ? '🦊fox' : i === 2 ? 'b' : null,
+        at: ago(i * 7),
+      })),
+      names: {
+        total: 400,
+        page: Array.from({ length: 100 }, (_, i) =>
+          name(
+            i === 0 ? long : i === 1 ? 'X' : `SERVICE_${String(i).padStart(3, '0')}_API_KEY`,
+            12840,
+            i * 300,
+            i === 3 ? null : handle60,
+          ),
+        ),
+        next: 'SERVICE_099_API_KEY',
+      },
+      people: { total: 61, page: people, next: '000024' },
+    }),
+    checks({ names: { total: 1, page: [name('X', 1, 5, 'b')], next: null } }),
+  ]);
 };
 
-function state(name: string): SecretsView {
-  const metadata = structuredClone(data);
-  if (name === 'unavailable') return secretsView();
-  if (name === 'reader') return { status: 'forbidden' };
-  if (name === 'member') {
-    Object.assign(metadata, { canManageSharing: false });
-    for (const set of metadata.sets)
-      for (const holder of set.holders) Object.assign(holder, { canRemove: false });
-  }
-  if (name === 'loading') return { status: 'loading' };
-  if (name === 'failed') return { status: 'failed', previous: metadata, lastShown: '11:58' };
-  if (name === 'failed-empty') return { status: 'failed' };
-  if (name === 'empty')
-    for (const set of metadata.sets) {
-      Object.assign(set, { names: [], nameTotal: 0, holders: [], holderTotal: 0 });
+function state(which: string): SecretsView {
+  switch (which) {
+    case 'calm':
+      return ok([development(), checks()]);
+    case 'removal':
+      return ok([removal(), checks()]);
+    case 'proposals': {
+      const set = removal();
+      return ok([{ ...set, takeOut: [], rotate: { total: 0, page: [], next: null } }, checks()]);
     }
-  if (name === 'one') {
-    Object.assign(metadata, { missingTotal: 1 });
-    Object.assign(metadata.sets[0], {
-      names: [{ name: 'X', changed: 'not set', state: 'missing' }],
-      nameTotal: 1,
-    });
-    Object.assign(metadata.sets[1], { names: [], nameTotal: 0 });
+    case 'takeout': {
+      const set = removal();
+      return ok([{ ...set, rotate: { total: 0, page: [], next: null }, proposals: [] }]);
+    }
+    case 'empty':
+      return ok([]);
+    case 'loading':
+      return { status: 'loading' };
+    case 'reader':
+      return { status: 'reader' };
+    case 'failed':
+      return {
+        status: 'failed',
+        previous: (ok([development(), checks()]) as Extract<SecretsView, { status: 'ready' }>).data,
+        lastShown: NOW,
+      };
+    case 'failed-empty':
+      return { status: 'failed' };
+    case 'nobody':
+      return ok([
+        development(),
+        checks({
+          people: { total: 0, page: [], next: null },
+          machines: [],
+          names: { total: 4, page: [name('NPM_TOKEN', 2, 6 * 1440, 'alex')], next: null },
+        }),
+      ]);
+    case 'worst':
+      return worst();
+    default:
+      return ok([development(), checks()]);
   }
-  if (name === 'rotate') {
-    Object.assign(metadata, { rotationTotal: 3 });
-    metadata.sets[0].names.slice(0, 3).forEach(n => Object.assign(n, { state: 'rotate' }));
-    Object.assign(metadata.sets[0], {
-      holders: metadata.sets[0].holders.filter(h => h.id !== 'ash'),
-      holderTotal: 2,
-    });
-  }
-  if (name === 'waiting')
-    Object.assign(metadata, {
-      waiting: [{ id: 'wait', handle: '@oak', code: 'Q7R8-S9T0', set: 'development' }],
-      waitingTotal: 1,
-      sharing: 'confirm',
-    });
-  if (name === 'single' || name === 'single-reissuable') {
-    for (const set of metadata.sets) Object.assign(set, { holders: [set.holders[0]], holderTotal: 1 });
-    if (name === 'single') Object.assign(metadata, { recovery: 'non-reissuable-without-envelope' });
-  }
-  if (name === 'worst' || name === 'double') {
-    const count = name === 'double' ? 8 : 60;
-    const long = `ENV_${'X'.repeat(56)}_KEY`;
-    Object.assign(metadata.sets[0], {
-      names: Array.from({ length: count }, (_, i) => ({
-        name: i ? `SERVICE_${i}_API_KEY` : long,
-        changed: '11 months ago',
-        by: '@a-very-long-public-handle-with-many-characters',
-        state: name === 'worst' && i === 0 ? 'missing' : undefined,
-      })),
-      nameTotal: name === 'worst' ? 120 : count,
-    });
-  }
-  if (name === 'double')
-    Object.assign(metadata.sets[1], {
-      names: [
-        ...metadata.sets[1].names,
-        ...metadata.sets[1].names.map(n => ({ ...n, name: `${n.name}_OTHER` })),
-      ],
-      nameTotal: 4,
-    });
-  if (name === 'worst')
-    Object.assign(metadata.sets[0], {
-      holderTotal: 1200,
-      holders: Array.from({ length: 50 }, (_, i) => ({
-        id: `holder-${i}`,
-        kind: i % 2 ? 'person' : 'machine',
-        label: i % 2 ? `@person-${i}-${'q'.repeat(50)}` : `${'build-'.repeat(10)}${i}`,
-        detail: i % 2 ? '14 computers' : 'a sandbox key, reads only. Last used 2 h ago',
-        canRemove: true,
-      })),
-    });
-  if (name === 'worst') Object.assign(metadata, { missingTotal: 1 });
-  return { status: 'ready', metadata };
 }
 
 function Fixture() {
   const query = new URLSearchParams(location.search);
   const [view, setView] = useState<SecretsView>(() => state(query.get('state') ?? 'calm'));
-  Object.assign(window, { secretsFixture: { show: setView, state, data, retries: 0 } });
+  const w = window as unknown as { secretsFixture: Record<string, unknown> };
+  w.secretsFixture = { show: setView, state, refreshes: 0, more: [] as string[] };
   document.documentElement.dataset.ds = '';
   document.documentElement.dataset.theme = query.get('theme') ?? 'dark';
+  const route = {
+    frame: 'project',
+    handle: 'river',
+    project: 'test-project',
+    place: 'settings',
+    section: 'secrets',
+    rest: '',
+  } as const;
   return (
     <ProjectFrame
-      route={{
-        frame: 'project',
-        handle: 'river',
-        project: 'test-project',
-        place: 'settings',
-        section: 'secrets',
-        rest: '',
-      }}
+      route={route}
       name="test-project"
       feed={{ lanes: [], more: 0, moreIsLowerBound: false, main: null }}
+      needs={undefined}
       projects={null}
       controls={{ viewerHandle: 'river', onPalette() {}, onKeys() {} }}
     >
-      <p className="quietline">Sample data · screen fixture</p>
       <SecretsScreen
+        route={route}
+        projectName="test-project"
         view={view}
-        onRetry={() => {
-          const fixture = (window as unknown as { secretsFixture: { retries: number } }).secretsFixture;
-          fixture.retries++;
+        onRefresh={() => {
+          (w.secretsFixture.refreshes as number)++;
         }}
+        onMore={(kind, part) => (w.secretsFixture.more as string[]).push(`${kind}:${part}`)}
       />
     </ProjectFrame>
   );

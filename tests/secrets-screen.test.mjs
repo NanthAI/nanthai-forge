@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// The actual screen and frame, with synthetic metadata only: values have no entry or display surface; access-loss,
-// failure and partial-page states are honest; commands are inert, quoted proposals; both widths and themes pass axe.
+// The Secrets page (Item 41a0df87, slice 4), drawn from synthetic overview data in the real project frame: the words
+// follow the design, no value or key has any surface, commands carry the full proposal id, the page reads names only
+// once (never a subscription), and every state holds at 1440 and 390 px in both themes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -14,16 +15,105 @@ import { chromiumLaunchOptions } from './browser-runtime.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const { secretSetCommand, secretsView } = await import(moduleUrl('../web/src/app/secrets/secrets-model.ts'));
+const model = await import(moduleUrl('../web/src/app/secrets/secrets-model.ts'));
 
-test('the stub has no invented data; proposed commands quote a metadata name as one inert shell argument', () => {
-  assert.deepEqual(secretsView(), { status: 'unavailable' });
-  assert.equal(secretSetCommand('SERVICE_KEY', 'checks'), 'nforge secret set SERVICE_KEY --set checks');
-  const hostile = "x' ; $(false)";
-  assert.equal(secretSetCommand(hostile, 'development'), "nforge secret set 'x'\\'' ; $(false)'");
+test('the page words follow the design copy and each command is one value-free line with the full id', () => {
+  const set = patch => ({
+    kind: 1,
+    sharing: 'automatic',
+    headVersion: 1,
+    takeOut: [],
+    proposals: [],
+    rotate: { total: 0, page: [], next: null },
+    names: { total: 18, page: [], next: null },
+    ...patch,
+  });
+  const read = (...sets) => ({ status: 'ok', now: 0, needs: 0, sets });
+  const rotating = {
+    rotate: {
+      total: 3,
+      page: [{ name: 'A', kind: 1, version: 1, devices: [{ code: 'R2PA-9XNE', handle: 'dana' }], more: 0 }],
+      next: null,
+    },
+  };
+  const proposal = { id: 'a'.repeat(32), op: 2, name: 'N', kind: 1, from: 'X', handle: null, at: 1 };
+  assert.deepEqual(model.sentence(read(set({ ...rotating, proposals: [proposal, proposal] }))), {
+    lead: '3 secrets need a new value',
+    rest: ' after @dana left. 2 proposals wait for a person.',
+  });
+  assert.equal(
+    model.sentence(
+      read(
+        set({
+          rotate: {
+            total: 1,
+            page: [{ name: 'A', kind: 1, version: 1, devices: [{ code: 'X', handle: null }], more: 0 }],
+            next: null,
+          },
+        }),
+      ),
+    ).rest,
+    ' after a computer was removed.',
+  );
+  assert.deepEqual(model.sentence(read(set({ proposals: [proposal] }))), {
+    lead: '1 proposal waits for a person.',
+    rest: ' 18 secrets in 1 set.',
+  });
+  assert.equal(
+    model.sentence(read(set({ takeOut: [{ handle: 'dana', left: true, at: 1, codes: ['K7QD-2MWX'] }] })))
+      .lead,
+    '1 removed computer still holds Development.',
+  );
+  assert.deepEqual(
+    model.sentence(read(set({}), set({ kind: 2, names: { total: 0, page: [], next: null } }))),
+    {
+      lead: '18 secrets in 2 sets.',
+      rest: ' Nothing needs you.',
+    },
+  );
+  assert.equal(model.sentence(read()).lead, 'This project has no secrets yet.');
+  const id = '3f9a12c04b7e5d1a9c2e8f60b3d417aa';
+  assert.equal(model.applyCommand(id), `nforge secret apply ${id}`);
+  assert.equal(model.rejectCommand(id), `nforge secret reject ${id}`);
+  assert.equal(model.setCommand('SIGNING_KEY.pem', 2), 'nforge secret set SIGNING_KEY.pem --file');
+  assert.equal(model.setCommand("x' ; $(false)", 1), "nforge secret set 'x'\\'' ; $(false)'");
+  assert.equal(model.relative(1000, 1000 + 12 * 60_000), '12 min ago');
+  assert.equal(model.relative(0, 3 * 86_400_000), '3 d ago');
+  assert.equal(model.relative(0, 86_400_000 + 5), 'yesterday');
 });
 
-test('Secrets: value-free screen, honest states, accessible themes and zero protocol activity', async t => {
+test('guard: the page reads names once, one-shot; it never references a value, ciphertext or proposal read', () => {
+  const dir = join(root, 'web/src/app/secrets');
+  const source = readdirSync(dir)
+    .filter(file => /\.tsx?$/.test(file))
+    .map(file => readFileSync(join(dir, file), 'utf8'))
+    .join('\n');
+  assert.doesNotMatch(source, /sealedSecrets\.(read|proposals|write|join|link|propose|reject)\b/);
+  assert.doesNotMatch(source, /sealedSecrets:(?!overview)/);
+  assert.doesNotMatch(
+    source,
+    /\buseQuery\b|\buseMutation\b|\buseAction\b|\bsetInterval\b|\.subscribe\b|onUpdate/,
+  );
+  assert.equal(
+    [...source.matchAll(/api\.sealedSecrets\.(\w+)/g)].every(m => m[1] === 'overview'),
+    true,
+  );
+  assert.match(source, /convex\.query\(api\.sealedSecrets\.overview/);
+  assert.doesNotMatch(source, /<input|<textarea|contentEditable/);
+  // The whole web bundle: no module reads a sealed value or proposal bytes (those are the CLI's alone).
+  const walk = folder =>
+    readdirSync(folder, { withFileTypes: true }).flatMap(entry =>
+      entry.isDirectory() ? walk(join(folder, entry.name)) : [join(folder, entry.name)],
+    );
+  for (const file of walk(join(root, 'web/src')).filter(file => /\.tsx?$/.test(file)))
+    assert.doesNotMatch(
+      readFileSync(file, 'utf8'),
+      /sealedSecrets[.:](read|proposals|write|join|link|propose|reject)\b/,
+      file,
+    );
+});
+
+test('Secrets: value-free screen, honest states, accessible themes, no sideways scroll', async t => {
   const launchOptions = chromiumLaunchOptions(t);
   if (!launchOptions) return;
   const server = await createServer({
@@ -57,14 +147,15 @@ test('Secrets: value-free screen, honest states, accessible themes and zero prot
   const page = await context.newPage();
   const base = `http://127.0.0.1:${server.httpServer.address().port}`;
   const errors = [];
-  const protocol = [];
+  const unexpected = [];
   page.on('pageerror', () => errors.push('pageerror'));
   page.on('request', req => {
-    if (req.method() !== 'GET' || !req.url().startsWith(base)) protocol.push('unexpected request');
+    if (req.method() !== 'GET' || !req.url().startsWith(base))
+      unexpected.push(`${req.method()} ${req.url()}`);
   });
   const open = async (state = 'calm', theme = 'dark') => {
     await page.goto(`${base}/fixture.html?state=${state}&theme=${theme}`);
-    await page.getByRole('heading', { name: 'Secrets', exact: true }).waitFor();
+    await page.locator('.secrets-screen .head').waitFor();
     await page.evaluate(() => document.fonts.ready);
   };
   const show = name =>
@@ -74,125 +165,121 @@ test('Secrets: value-free screen, honest states, accessible themes and zero prot
   const capture = async name => {
     if (shots) await page.screenshot({ path: join(shots, `${name}.png`), fullPage: true });
   };
+  const sentence = () => page.locator('.secrets-screen .sit').innerText();
 
   await t.test(
-    'today’s stub explains runner passthrough without pretending the sealed protocol exists',
+    'after a removal: three bands in order, the same count everywhere, full ids in the commands',
     async () => {
-      await open('unavailable');
-      assert.equal(await page.getByText('Sealed secrets are not connected yet.', { exact: true }).count(), 1);
-      assert.equal(await page.getByRole('region', { name: 'Names', exact: true }).count(), 0);
-      assert.equal(await page.locator('input,textarea,[contenteditable=true]').count(), 0);
-      await page.getByRole('button', { name: 'nforge agent . secrets Proposed' }).click();
-      assert.equal(await page.locator('#secrets-cli').isVisible(), true);
-      assert.ok(
-        (await page.locator('#secrets-cli').innerText()).includes('awaits the sealed-secret protocol'),
-      );
-      await page.getByRole('button', { name: 'nforge agent . secrets Proposed' }).press('Enter');
-      assert.equal(await page.locator('#secrets-cli').count(), 0);
-      // Item 0485fe7d: on a wide window the two guidance columns sit side by side, not one narrow column.
-      const [today, planned] = await page
-        .locator('.secret-guidance')
-        .evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().toJSON()));
-      assert.ok(planned.left >= today.right && Math.abs(planned.top - today.top) < 2);
-      await capture('unavailable');
-    },
-  );
-
-  await t.test(
-    'names and counts match; no value fields, unknown payloads or executable metadata render',
-    async () => {
-      await open();
-      assert.ok((await page.locator('.sit').innerText()).startsWith('6 secrets in 2 sets.'));
-      assert.equal(await page.locator('.row.secret-name').count(), 6);
-      assert.equal(await page.locator('input:not([type=radio]),textarea,[contenteditable=true]').count(), 0);
-      await page.evaluate(() => {
-        const view = window.secretsFixture.state('calm');
-        view.metadata.value = 'hidden-fixture-marker';
-        view.metadata.sets[0].names[0].value = 'hidden-fixture-marker';
-        view.metadata.sets[0].names[0].name = '<img src=x onerror="window.executed=true">';
-        window.secretsFixture.show(view);
-      });
-      assert.equal(await page.locator('.secrets-screen img').count(), 0);
+      await open('removal');
       assert.equal(
-        await page.evaluate(() => document.body.innerHTML.includes('hidden-fixture-marker')),
-        false,
+        await sentence(),
+        '3 secrets need a new value after @dana left. 2 proposals wait for a person.',
       );
-      assert.equal(await page.evaluate(() => Boolean(window.executed)), false);
-    },
-  );
-
-  await t.test(
-    'copy is a name-only proposal, works by keyboard, and clipboard failure stays generic',
-    async () => {
-      await open('rotate');
-      const copy = page.getByRole('button', { name: 'Copy command', exact: true }).first();
-      await copy.focus();
-      await page.keyboard.press('Enter');
-      await page.getByRole('status').filter({ hasText: 'Command copied.' }).waitFor();
+      const needs = page.getByRole('region', { name: 'Needs you', exact: true });
+      assert.deepEqual(await needs.locator('.band > span:first-child').allInnerTexts(), [
+        'Take out removed computers',
+        'To rotate',
+        'Proposals',
+      ]);
+      assert.equal(await needs.locator('.secret-need').count(), 6);
+      assert.equal((await needs.locator('.ph .cnt').innerText()).trim(), '6');
+      await needs.getByRole('button', { name: 'Copy: nforge secret unshare --marked' }).click();
       assert.equal(
         await page.evaluate(() => navigator.clipboard.readText()),
-        'nforge secret set DEV_SERVICE_URL',
+        'nforge secret unshare --marked',
       );
-      await page.evaluate(() =>
-        Object.defineProperty(navigator, 'clipboard', {
-          configurable: true,
-          value: {
-            writeText() {
-              throw Error('private error fixture');
-            },
-          },
-        }),
-      );
-      await page.getByRole('button', { name: 'Copy command', exact: true }).first().click();
-      await page.getByRole('status').filter({ hasText: 'Could not copy the command.' }).waitFor();
+      await needs.getByRole('button', { name: 'Copy apply' }).first().click();
       assert.equal(
-        await page.evaluate(() => document.body.innerHTML.includes('private error fixture')),
-        false,
+        await page.evaluate(() => navigator.clipboard.readText()),
+        'nforge secret apply 3f9a12c04b7e5d1a9c2e8f60b3d417aa',
       );
+      await needs.getByRole('button', { name: 'Copy reject' }).nth(1).click();
+      assert.equal(
+        await page.evaluate(() => navigator.clipboard.readText()),
+        'nforge secret reject a81c0e5f92d34b07e6a1c9d8f2b4e0c3',
+      );
+      assert.match(await needs.innerText(), /change\s+API_TOKEN\s+\(env\)/);
+      assert.match(await needs.innerText(), /remove\s+LEGACY_WEBHOOK_SECRET\s+\(removal\)/);
+      assert.match(await needs.innerText(), /fp R2PA-9XNE \(@dana\) could open v7/);
+      await page.getByRole('button', { name: 'Copy command' }).nth(1).click();
+      assert.equal(
+        await page.evaluate(() => navigator.clipboard.readText()),
+        'nforge secret set SIGNING_KEY.pem --file',
+      );
+      // Names carry the facts, not the commands (rule 9).
+      const names = page.getByRole('region', { name: 'Names', exact: true });
+      assert.equal(await names.getByText('To rotate', { exact: true }).count(), 3);
+      assert.equal(await names.getByText('1 proposal waits').count(), 1);
+      assert.equal(await names.getByRole('button').count(), 0);
+      assert.equal(await page.locator('input:not([type=radio]),textarea,[contenteditable=true]').count(), 0);
+      await capture('removal');
     },
   );
 
+  await t.test('nothing needs you: no Needs you region and no orange anywhere', async () => {
+    await open('calm');
+    assert.equal(await sentence(), '6 secrets in 2 sets. Nothing needs you.');
+    assert.equal(await page.getByRole('region', { name: 'Needs you', exact: true }).count(), 0);
+    assert.equal(await page.locator('.cnt.hot, [data-st=waiting]').count(), 0);
+    assert.match(await page.getByRole('region', { name: 'Names' }).innerText(), /new computers: Automatic/);
+    // The viewer's own computers show their name; no other person's name ever appears.
+    const holders = await page.getByRole('region', { name: 'Who can open them' }).innerText();
+    assert.match(holders, /desk machine/);
+    assert.equal((holders.match(/“/g) ?? []).length, 3);
+    await capture('calm');
+  });
+
   await t.test(
-    'a failed read keeps explicit previous names; forbidden state drops even a stale supplied snapshot',
+    'empty, loading, reader, failed and nobody states say what happened and keep what was shown',
     async () => {
-      await open('failed');
+      await open('empty');
+      assert.equal(await sentence(), 'This project has no secrets yet.');
+      await page.getByRole('button', { name: 'Copy: nforge secret set NAME' }).waitFor();
+      assert.equal(await page.getByText('Proposed', { exact: true }).count(), 1);
+      await show('loading');
+      assert.equal(await sentence(), 'Loading secrets…');
+      await show('reader');
+      assert.equal(await sentence(), 'Secrets are for people who can write.');
+      assert.equal(await page.getByRole('region', { name: 'Names' }).count(), 0);
+      await show('failed');
+      assert.equal(await sentence(), 'Secrets could not be loaded. Nothing was changed.');
       assert.equal(await page.locator('.row.secret-name').count(), 6);
-      await page.getByRole('button', { name: 'Retry', exact: true }).click();
-      assert.equal(await page.evaluate(() => window.secretsFixture.retries), 1);
-      await page.evaluate(() =>
-        window.secretsFixture.show({
-          status: 'forbidden',
-          previous: window.secretsFixture.data,
-          metadata: window.secretsFixture.data,
-        }),
+      assert.match(
+        await page.locator('.notice').innerText(),
+        /Below is what this page last showed, at \d\d:\d\d\./,
       );
-      await page.getByText('Secrets are for people who can write.', { exact: true }).waitFor();
-      assert.equal(await page.locator('.row.secret-name').count(), 0);
-      assert.equal(await page.getByRole('region', { name: 'Recent', exact: true }).count(), 0);
+      await page.getByRole('button', { name: 'Retry', exact: true }).click();
+      assert.equal(await page.evaluate(() => window.secretsFixture.refreshes), 1);
       await show('failed-empty');
-      await page.getByText('No secret metadata was returned.', { exact: true }).waitFor();
+      await page.getByText('No secret names were returned.', { exact: true }).waitFor();
+      await show('nobody');
+      await page.getByText('No value', { exact: true }).waitFor();
+      assert.match(
+        await page.locator('.quietline').innerText(),
+        /Nobody can open Checks\. Its 4 names stay listed/,
+      );
     },
   );
 
   await t.test(
-    'partial counts reconcile and lone reissuable holders do not trigger a recovery warning',
+    'worst case: long, one-letter and emoji handles, 787 to rotate, 32 proposals, paged names and people',
     async () => {
       await open('worst');
-      assert.equal(await page.getByText('60 of 120 names shown.', { exact: true }).count(), 1);
-      assert.equal(await page.getByText('50 of 1,200 holders shown.', { exact: true }).count(), 1);
-      await show('one');
-      await page.getByText('1 secret in 2 sets.', { exact: true }).waitFor();
-      assert.equal(await page.locator('.row.secret-name').count(), 1);
-      assert.ok((await page.locator('.sit').innerText()).includes('1 name has no value.'));
-      await show('single-reissuable');
-      assert.equal(await page.getByText('One holder', { exact: true }).count(), 0);
-      await show('single');
-      await page.getByText('One holder', { exact: true }).waitFor();
-      assert.equal(await page.getByText(/print.*recovery key/i).count(), 0);
-      await show('member');
-      await page.getByText('Automatic.', { exact: true }).waitFor();
-      assert.equal(await page.getByRole('button', { name: 'Remove', exact: true }).count(), 0);
-      assert.equal(await page.getByRole('radio').count(), 0);
+      assert.equal(await page.locator('.secret-need').count(), 1 + 100 + 32);
+      assert.match(
+        await page.getByRole('region', { name: 'Needs you' }).innerText(),
+        /100 of 787 to rotate shown/,
+      );
+      assert.match(
+        await page.getByRole('region', { name: 'Needs you' }).innerText(),
+        /the most Development holds/,
+      );
+      assert.equal(await page.getByRole('button', { name: 'Show the next 100' }).count(), 2);
+      assert.equal(await page.getByRole('button', { name: 'Show the next 25' }).count(), 1);
+      await page.getByRole('button', { name: 'Show the next 25' }).click();
+      assert.deepEqual(await page.evaluate(() => window.secretsFixture.more), ['1:people']);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      await capture('worst');
     },
   );
 
@@ -204,17 +291,14 @@ test('Secrets: value-free screen, honest states, accessible themes and zero prot
         await page.addScriptTag({ path: createRequire(import.meta.url).resolve('axe-core/axe.min.js') });
         for (const name of [
           'calm',
-          'rotate',
-          'waiting',
-          'single',
+          'removal',
+          'takeout',
+          'proposals',
           'empty',
-          'one',
           'reader',
-          'member',
           'failed',
           'failed-empty',
-          'loading',
-          'unavailable',
+          'nobody',
           'worst',
         ]) {
           await show(name);
@@ -231,52 +315,16 @@ test('Secrets: value-free screen, honest states, accessible themes and zero prot
             ).violations.map(v => v.id),
           );
           assert.deepEqual(violations, [], `axe: ${width} ${theme} ${name}`);
-          if (
-            [
-              'calm',
-              'rotate',
-              'waiting',
-              'single',
-              'empty',
-              'one',
-              'reader',
-              'member',
-              'failed',
-              'worst',
-            ].includes(name)
-          )
+          if (['calm', 'removal', 'empty', 'worst'].includes(name))
             await capture(`${name}-${width}-${theme}`);
         }
       }
     }
   });
 
-  if (shots) {
-    const cdp = await context.newCDPSession(page);
-    await cdp.send('Performance.enable');
-    const metrics = [];
-    for (const state of ['calm', 'double']) {
-      const start = performance.now();
-      await open(state);
-      await page.evaluate(() => new Promise(requestAnimationFrame));
-      const { metrics: browserMetrics } = await cdp.send('Performance.getMetrics');
-      metrics.push({
-        names: await page.locator('.row.secret-name').count(),
-        renderWallMs: performance.now() - start,
-        jsHeapUsedBytes: browserMetrics.find(m => m.name === 'JSHeapUsedSize')?.value,
-        convexCalls: 0,
-        dbIoBytes: 0,
-        storageBytes: 0,
-        landingCostDeltaPer1000: 0,
-        provenance:
-          'synthetic metadata fixture, one fresh navigation; not billed usage or a performance claim',
-      });
-    }
-    writeFileSync(join(shots, 'metrics.json'), JSON.stringify(metrics, null, 2) + '\n');
-  }
-
-  await t.test('an idle or hidden screen schedules no protocol calls or storage writes', async () => {
-    await open();
+  await t.test('an idle screen schedules no calls, timers or storage writes', async () => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await open('removal');
     const before = await page.evaluate(() => ({
       local: Object.keys(localStorage),
       session: Object.keys(sessionStorage),
@@ -292,7 +340,7 @@ test('Secrets: value-free screen, honest states, accessible themes and zero prot
       await page.evaluate(() => ({ local: Object.keys(localStorage), session: Object.keys(sessionStorage) })),
       before,
     );
-    assert.deepEqual(protocol, []);
+    assert.deepEqual(unexpected, []);
     assert.deepEqual(errors, []);
   });
 });

@@ -158,6 +158,9 @@ test('6466c6a5 a member proposes a change; the owner applies it and the same wri
   assert.deepEqual(await h.propose(proposal), { accepted: true, replay: false });
   assert.deepEqual(await h.propose(proposal), { accepted: true, replay: true });
   assert.equal(await h.waiting(), 1);
+  // Slice 4: the pending facts keep the operation and kind (a change of an env value), so the Secrets page names them
+  // without opening the proposal bytes; the same proposal counts once in the set's needs-you total.
+  assert.deepEqual([h.set().proposals[0].op, h.set().proposals[0].kind, h.set().needs], [2, 1, 1]);
   const listed = await server.proposals._handler(h.s.ctx, { projectId: h.project, kind: 1 });
   assert.equal(listed.length, 1);
   assert.equal(apply(h, listed[0]).mode, 'kept');

@@ -11,6 +11,7 @@ import { query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject, coordinationAccess } from './projectAuthority';
+import { hasWriteRole } from './projectRole';
 import { githubMirrorStatus } from './projectGithubMirrorStatus.idle';
 import { failedDeployNotices } from './projectDeployStore';
 import { effectivePolicy } from '../src/autonomy-policy';
@@ -139,6 +140,9 @@ export const needsMeResult = v.object({
     ),
   ),
   noticesMore: v.optional(v.literal(true)),
+  /** What waits on a person in the project's sealed secrets (Item 41a0df87): removed people still listed, names to
+   * rotate and waiting proposals, from the counter on the project row. Write members only; absent when zero. */
+  secrets: v.optional(v.number()),
   /** Questions with choices addressed to the viewer, unanswered, on an open Lane (Items 12fde646, 48049998). */
   asksMore: v.optional(v.literal(true)),
   asks: v.optional(
@@ -397,6 +401,9 @@ export const read = query({
       const owner = project.owner === user.subject;
       // The team check reads a role only for a project with notices to show or for its owner's mirror.
       const team = fixes.length > 0 || owner ? await coordinationAccess(ctx, project, user.subject) : false;
+      // The sealed-secrets counter sits on the project row already read; a role check runs only when it is not zero.
+      const secrets =
+        project.secretsNeeds && (await hasWriteRole(ctx, project, user.subject)) ? project.secretsNeeds : 0;
       const notices: Notice[] = [];
       let noticesMore = false;
       if (team) {
@@ -420,6 +427,7 @@ export const read = query({
         parked,
         ...(notices.length ? { notices } : {}),
         ...(noticesMore ? { noticesMore: true as const } : {}),
+        ...(secrets ? { secrets } : {}),
         parkedMore: parks.length > NEEDS_ME_PARKED_LIMIT,
         more: Math.max(0, marks.length - NEEDS_ME_HELD_LIMIT),
         moreIsLowerBound: marks.length > NEEDS_ME_HELD_LIMIT,

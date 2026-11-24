@@ -18,6 +18,7 @@ import { createTransition } from './sealed-transition.js';
 import { sealedRefusal, sealedWrite, sealedWriteArgs } from './sealed-transport.js';
 import { verifySealedReply, type SealedReply } from './sealed-verify.js';
 import { safeSecretName } from './sealed-display.js';
+import { rotateRows } from './sealed-overview.js';
 import type { SealedClient } from './sealed-client.js';
 
 /** What a removal prints: who went, and the names to rotate at their provider. */
@@ -54,15 +55,10 @@ export function droppableFormers(roster: Roster, head: Head): Buffer[] {
  * value has not changed since that device's last epoch, with the fingerprints of those devices. A new value
  * (sealed at a later epoch) takes the name off the list. Nothing is stored for it. */
 export function rotateList(roster: Roster, head: Head) {
-  return liveNames(head, roster.epoch)
-    .map(name => {
-      const epoch = head.names.find(n => n.name === name)!.valueEpoch;
-      return {
-        name,
-        devices: roster.former.filter(f => epoch <= f.lastEpoch).map(f => deviceFingerprint(f.deviceId)),
-      };
-    })
-    .filter(r => r.devices.length);
+  return rotateRows(roster, head).map(row => ({
+    name: row.record.name,
+    devices: row.former.map(f => deviceFingerprint(f.deviceId)),
+  }));
 }
 /** The holder notice for markers, shown on every verified read until a person removes the entries. */
 export function markerNotice(roster: Roster, revoked: readonly Uint8Array[], self: Uint8Array) {

@@ -438,11 +438,13 @@ export function NeedsMeView({
                               href={
                                 row.kind === 'mirror'
                                   ? at({ place: 'settings', section: 'mirror' })
-                                  : row.kind === 'deploy'
-                                    ? row.next?.startsWith('https://')
-                                      ? row.next
-                                      : at({ place: 'settings', section: 'checks' })
-                                    : at({ place: 'plan', rest: row.id })
+                                  : row.kind === 'secrets'
+                                    ? at({ place: 'settings', section: 'secrets' })
+                                    : row.kind === 'deploy'
+                                      ? row.next?.startsWith('https://')
+                                        ? row.next
+                                        : at({ place: 'settings', section: 'checks' })
+                                      : at({ place: 'plan', rest: row.id })
                               }
                             />
                           ) : 'question' in row ? (
@@ -836,9 +838,11 @@ function NoticeCard({ row, href }: { row: NoticeRow; href: string }) {
           <A className="btn ghost sm" href={href}>
             {row.kind === 'mirror'
               ? 'Open the mirror'
-              : row.kind === 'deploy'
-                ? 'Open checks'
-                : 'Open the Item'}
+              : row.kind === 'secrets'
+                ? 'Open Secrets'
+                : row.kind === 'deploy'
+                  ? 'Open checks'
+                  : 'Open the Item'}
           </A>
         )}
       </div>

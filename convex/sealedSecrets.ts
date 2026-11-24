@@ -12,6 +12,7 @@ import { equalBytes, forgeSecretId } from '../src/sealed-portable';
 import {
   extendsStored,
   isOwnDeviceEntry,
+  nextHandles,
   nextJoinRequests,
   nextSealedState,
   proposalFacts,
@@ -19,10 +20,15 @@ import {
   rememberResolved,
   SEALED_PROPOSALS,
   sealedWriteFacts,
+  storedNeeds,
   storedRoster,
 } from './sealedSecretGate';
 import { linkSealedDevice } from './sealedSecretMarkers';
 import { storeMachineReaders } from './sealedMachines';
+import { overviewFor } from './sealedSecretOverview';
+import { overviewPart, overviewResult } from './sealedSecretOverviewFields';
+import { moveSecretsNeeds, patchSetKeepingNeeds } from './sealedSecretNeeds';
+import { setNeeds } from '../src/sealed-overview';
 
 const history = v.object({
   genesis: v.bytes(),
@@ -194,6 +200,16 @@ export const write = mutation({
         owner: project.owner === user.subject,
         reader: args.machineReader,
       });
+      // Slice 4: the handles kept beside markers follow the entries they name, and this set's needs-you total moves with
+      // the project counter in this same mutation (the head and roster are already decoded for the gate).
+      const handles = nextHandles(set, state.revoked, facts.roster);
+      const needs = setNeeds(
+        facts.roster,
+        facts.head,
+        state.revoked.map(id => new Uint8Array(id)),
+        state.proposals.length,
+      );
+      const needsBefore = set ? (set.needs ?? storedNeeds(set)) : 0;
       const next = {
         projectId: args.projectId,
         kind: args.kind,
@@ -206,6 +222,9 @@ export const write = mutation({
         rosterVersion: facts.roster.rosterVersion,
         payload: args.payload,
         ...(state.revoked.length ? { revoked: state.revoked } : {}),
+        ...(handles.revokedNotes.length ? { revokedNotes: handles.revokedNotes } : {}),
+        ...(handles.formerHandles.length ? { formerHandles: handles.formerHandles } : {}),
+        ...(needs ? { needs } : {}),
         ...(state.joinRequests.length ? { joinRequests: state.joinRequests } : {}),
         // A sweep's later marking steps still skip the device its issuing browser kept, after this write too.
         ...(set?.sweptKept ? { sweptKept: set.sweptKept } : {}),
@@ -244,6 +263,7 @@ export const write = mutation({
       for (const id of state.dropped) await ctx.db.delete(id as Id<'sealedSecretProposals'>);
       // The head's signer is this sign-in's sealed device; ending the sign-in elsewhere marks it here.
       await linkSealedDevice(ctx, forgeDevice, args.projectId, facts.head.signerId);
+      await moveSecretsNeeds(ctx, args.projectId, needs - needsBefore, project);
       return { accepted: true, replay: false };
     } catch (error) {
       return report(error);
@@ -417,7 +437,7 @@ export const propose = mutation({
         'Too many proposals are waiting for Development. A holder applies or rejects them first.',
       );
       for (const p of replaced) await ctx.db.delete(p.id);
-      await ctx.db.patch(set._id, { proposals });
+      await patchSetKeepingNeeds(ctx, set, { proposals });
       return { accepted: true, replay: false };
     } catch (error) {
       return report(error);
@@ -480,11 +500,32 @@ export const reject = mutation({
       if (!drop.length) return { rejected: 0 };
       for (const p of drop) await ctx.db.delete(p.id);
       const left = (set.proposals ?? []).filter(p => !drop.includes(p));
-      await ctx.db.patch(set._id, {
+      await patchSetKeepingNeeds(ctx, set, {
         proposals: left.length ? left : undefined,
         resolvedProposals: rememberResolved(set, drop),
       });
       return { rejected: drop.length };
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** The Secrets page's one read (Item 41a0df87, slice 4): names, kinds, versions, holder handles and codes, the rotate
+ * list, take-out rows and waiting proposals, all derived from the stored sets without opening any value. Write role
+ * only: a reader gets `{status:'reader'}`. The page calls it one-shot, never as a subscription. A page of one set
+ * (`kind`, `part`, `after`) is one more call. See sealedSecretOverview.ts for what it reads. */
+export const overview = query({
+  args: {
+    projectId: v.id('hostedProjects'),
+    kind: v.optional(sealedKind),
+    part: v.optional(overviewPart),
+    after: v.optional(v.string()),
+  },
+  returns: overviewResult,
+  handler: async (ctx, args) => {
+    try {
+      return await overviewFor(ctx, args);
     } catch (error) {
       return report(error);
     }

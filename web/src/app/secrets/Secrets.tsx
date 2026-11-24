@@ -1,230 +1,268 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Names-first Secrets, on the shared design system. The protocol is gated: the live route uses a metadata-only
-// unavailable stub. Fixtures exercise the future view without adding a public fixture route or any secret endpoint.
-import { useState } from 'react';
-import { Band, Key, Region, Row, State, Who } from '../../ds';
-import { SecretCommand } from './SecretCommand';
-import { SecretsDetails, SecretsGuidance } from './SecretsDetails';
+// Settings > Landing and checks > Secrets (Item 41a0df87, slice 4): names, what to rotate, proposals and holders. The
+// page is value-free and changes nothing: it makes one one-shot names-only read (sealedSecrets:overview) when it
+// opens, again on Refresh or Retry and once per "Show the next" page. No subscription, no timer, no idle cost, and
+// no value, ciphertext or key is ever read, shown or fetched.
+import { useConvex } from 'convex/react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { api } from '../../../../convex/_generated/api';
+import type { Id } from '../../../../convex/_generated/dataModel';
+import { Key, Region } from '../../ds';
+import { A } from '../frames';
+import { crumbsFor, Head } from '../Place';
+import { hrefFor } from '../paths';
+import type { PlaceProps, ProjectRoute } from '../screen-route';
+import { SecretsHolders } from './SecretsHolders';
+import { SecretsNames } from './SecretsNames';
+import { SecretsNeeds } from './SecretsNeeds';
 import {
-  secretCount,
-  secretPageCount,
-  secretSetCommand,
-  secretSetLabel,
-  secretsView,
-  type SecretSet,
+  LIST_COMMAND,
+  clock,
+  exact,
+  listOutput,
+  sentence,
+  type Overview,
   type SecretsView,
+  type SetKind,
 } from './secrets-model';
 import './secrets.css';
 
-function Names({ sets }: { sets: readonly SecretSet[] }) {
-  const shown = sets.reduce((n, set) => n + set.names.length, 0);
-  const total = sets.reduce((n, set) => n + set.nameTotal, 0);
+/** Still bars appear only after this long: a fast read draws nothing, never a flash. */
+const SKELETON_AFTER_MS = 300;
+
+function Loading() {
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setLate(true), SKELETON_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  if (!late) return null;
   return (
-    <Region title="Names" count={total} hint="values are set and used in a terminal, never shown here">
-      <div className="th secret-name" aria-hidden="true">
-        <span>Name</span>
-        <span>Changed</span>
-        <span>By</span>
-        <span />
+    <Region title="Names">
+      <div className="secret-sk" role="status" aria-busy="true">
+        <span className="sr">Loading names.</span>
+        {[60, 45, 70, 50, 65, 40].map((w, i) => (
+          <div className="skrow" key={i} style={{ ['--w' as string]: w }}>
+            <div className="sk" />
+            <div className="sk" />
+          </div>
+        ))}
       </div>
-      {sets.map(set => (
-        <div key={set.id}>
-          <Band
-            title={secretSetLabel(set.id)}
-            count={set.nameTotal}
-            hint={
-              set.id === 'development' ? (
-                <>
-                  what people and agents run with: <code>nforge run -- &lt;cmd&gt;</code>
-                </>
-              ) : (
-                'what a check receives, and only the names it declares'
-              )
-            }
-          />
-          {set.names.length === 0 ? <p className="quietline">No names in this page.</p> : null}
-          {set.names.map(name => (
-            <Row key={name.name} cols="" className="secret-name" dense={total > 20}>
-              <div className="secret-nm">
-                <span className="ttl mono" translate="no">
-                  {name.name}
-                </span>
-                {name.note ? <span className="sub meta">{name.note}</span> : null}
-              </div>
-              <span className="t2 tnum secret-changed">
-                <span className="sr">Changed </span>
-                {name.changed}
-              </span>
-              <span className="cut">
-                {name.by ? <Who handle={name.by} /> : <span className="t3">Not reported</span>}
-              </span>
-              <span className="secret-actions">
-                {name.state ? (
-                  <>
-                    <State word="Needs you" state={name.state === 'missing' ? 'failed' : 'waiting'}>
-                      {name.state === 'missing'
-                        ? 'No value'
-                        : name.state === 'through-checks'
-                          ? 'To rotate, through checks'
-                          : 'To rotate'}
-                    </State>
-                    <SecretCommand command={secretSetCommand(name.name, set.id)} small />
-                  </>
-                ) : null}
-              </span>
-            </Row>
-          ))}
-          {set.names.length < set.nameTotal ? (
-            <p className="pf">{secretPageCount(set.names.length, set.nameTotal, 'name')} shown.</p>
-          ) : null}
-        </div>
-      ))}
-      {shown < total ? (
-        <p className="pf">{secretPageCount(shown, total, 'name')} shown across both sets.</p>
-      ) : null}
     </Region>
   );
 }
 
-export function SecretsScreen({ view, onRetry }: { view: SecretsView; onRetry?: () => void }) {
+export function SecretsScreen({
+  route,
+  projectName,
+  view,
+  refreshing = false,
+  busy = false,
+  onRefresh,
+  onMore,
+}: {
+  route: ProjectRoute;
+  projectName: string;
+  view: SecretsView;
+  /** A read started by Refresh or Retry is out: the rows stay on screen and are replaced when it arrives. */
+  refreshing?: boolean;
+  /** A page read ("Show the next") is out. */
+  busy?: boolean;
+  onRefresh?: () => void;
+  onMore?: (kind: SetKind, part: 'names' | 'people' | 'rotate') => void;
+}) {
   const [cli, setCli] = useState(false);
-  const metadata =
-    view.status === 'ready' ? view.metadata : view.status === 'failed' ? view.previous : undefined;
-  const total = metadata?.sets.reduce((n, set) => n + set.nameTotal, 0) ?? 0;
-  const empty = metadata && total === 0;
-  const sentence =
-    view.status === 'unavailable' ? (
-      <b>Sealed secrets are not connected yet.</b>
-    ) : view.status === 'forbidden' ? (
-      <b>Secrets are for people who can write.</b>
-    ) : view.status === 'loading' ? (
-      <b>Loading secrets…</b>
-    ) : view.status === 'failed' ? (
+  const data: Overview | undefined =
+    view.status === 'ready' ? view.data : view.status === 'failed' ? view.previous : undefined;
+  const trail = crumbsFor(route, projectName);
+  const parent = trail.pop()!;
+  trail.push(
+    { label: 'Landing and checks', href: hrefFor({ ...route, section: 'checks', rest: '' }) },
+    parent,
+  );
+  const now = view.status === 'ready' ? view.shownAt : (view.status === 'failed' ? view.lastShown : 0) || 0;
+  const words =
+    view.status === 'loading'
+      ? { lead: 'Loading secrets…', rest: '' }
+      : view.status === 'reader'
+        ? { lead: 'Secrets are for people who can write.', rest: '' }
+        : view.status === 'failed'
+          ? { lead: 'Secrets could not be loaded.', rest: ' Nothing was changed.' }
+          : sentence(view.data);
+  const stamp =
+    view.status === 'ready' ? view.shownAt : view.status === 'failed' ? view.lastShown : undefined;
+  const head: ReactNode =
+    view.status === 'ready' ? (
       <>
-        <b>Secrets could not be loaded.</b> Nothing was changed.
+        <span className="secret-asof" title={exact(view.shownAt)}>
+          shown at {clock(view.shownAt)}
+        </span>
+        <Key size="sm" onClick={onRefresh} disabled={refreshing} aria-busy={refreshing}>
+          {refreshing ? 'Refreshing…' : 'Refresh'}
+        </Key>
+        <Key
+          className="cli"
+          aria-controls="secrets-cli"
+          aria-expanded={cli}
+          onClick={() => setCli(open => !open)}
+        >
+          <span className="mono">{LIST_COMMAND}</span>
+        </Key>
       </>
-    ) : empty ? (
-      <b>This project has no secrets yet.</b>
-    ) : metadata?.rotationTotal ? (
-      <b>{secretCount(metadata.rotationTotal, 'secret needs', 'secrets need')} a new value.</b>
-    ) : metadata?.missingTotal ? (
-      <>
-        <b>
-          {secretCount(total, 'secret')} in {secretCount(metadata.sets.length, 'set')}.
-        </b>{' '}
-        {secretCount(metadata.missingTotal, 'name has', 'names have')} no value.
-      </>
-    ) : metadata?.waitingTotal ? (
-      <>
-        <b>{secretCount(metadata.waitingTotal, 'computer is', 'computers are')} waiting.</b>{' '}
-        {secretCount(total, 'secret')} in {secretCount(metadata.sets.length, 'set')}.
-      </>
-    ) : metadata?.recovery ? (
-      <>
-        <b>Only one computer can open these secrets.</b> {secretCount(total, 'secret')} in{' '}
-        {secretCount(metadata.sets.length, 'set')}.
-      </>
-    ) : (
-      <>
-        <b>
-          {secretCount(total, 'secret')} in {secretCount(metadata?.sets.length ?? 0, 'set')}.
-        </b>{' '}
-        Nothing needs a new value.
-      </>
-    );
+    ) : null;
   return (
     <div className="secrets-screen">
-      <div className="head">
-        <h1>Secrets</h1>
-        <p className="sit">{sentence}</p>
-        <div className="tools">
-          {metadata && !empty ? <SecretCommand command="nforge secret set NAME" /> : null}
-          <Key className="cli" aria-controls="secrets-cli" aria-expanded={cli} onClick={() => setCli(!cli)}>
-            <span className="mono">nforge agent . secrets</span>
-            <span className="t3">Proposed</span>
-          </Key>
-        </div>
-      </div>
-      {cli ? (
+      <Head
+        trail={trail}
+        sentence={
+          <>
+            <b>{words.lead}</b>
+            {words.rest}
+          </>
+        }
+      >
+        {head}
+      </Head>
+      {cli && view.status === 'ready' ? (
         <pre className="cli-out mono" id="secrets-cli">
-          Proposed: nforge agent . secrets &apos;{'{}'}&apos;{`\n`}Names, sets, holders and state only. Values
-          are never returned.{`\n`}This command awaits the sealed-secret protocol.
+          {listOutput(view.data)}
         </pre>
       ) : null}
-      {view.status === 'unavailable' ? <SecretsGuidance /> : null}
-      {view.status === 'forbidden' ? (
-        <p className="quietline">Names, holders and history are visible to people with write access.</p>
-      ) : null}
-      {view.status === 'loading' ? (
-        <div className="pad" role="status" aria-busy="true">
-          <span className="sr">Loading secret metadata.</span>
-          <div className="sk" />
-        </div>
+      {view.status === 'loading' ? <Loading /> : null}
+      {view.status === 'reader' ? (
+        <>
+          <p className="quietline">Names, holders and proposals are shown to the owner and write members.</p>
+          <p className="quietline">
+            <A className="lk" href={hrefFor({ ...route, section: '', rest: '' })}>
+              People and access
+            </A>
+          </p>
+        </>
       ) : null}
       {view.status === 'failed' ? (
-        <div className="notice" data-st="failed">
-          <State word="Check failed">Could not load</State>
+        <div className="notice" data-st="failed" role="alert">
+          <span className="st" data-st="failed">
+            Could not load
+          </span>
           <p>
-            {metadata
-              ? `Below is what this browser last showed${view.lastShown ? `, at ${view.lastShown}` : ''}.`
-              : 'No secret metadata was returned.'}
+            {data
+              ? `Below is what this page last showed${stamp ? `, at ${clock(stamp)}` : ''}.`
+              : 'No secret names were returned.'}
           </p>
-          {onRetry ? (
-            <Key size="sm" onClick={onRetry}>
-              Retry
+          {onRefresh ? (
+            <Key size="sm" onClick={onRefresh} disabled={refreshing}>
+              {refreshing ? 'Retrying…' : 'Retry'}
             </Key>
           ) : null}
         </div>
       ) : null}
-      {empty ? (
-        <Region title="Names" count={0}>
-          <div className="empty">
-            <h2>No names yet</h2>
-            <p>
-              Sealed sets are planned. Today, checks use the names declared in their definition and the values
-              already on their runner.
-            </p>
-            <a
-              className="lk"
-              href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/security.md#secrets-for-checks"
-            >
-              Where check secrets go
-            </a>
+      {data ? (
+        <div className="secret-frame">
+          <div className="secret-main">
+            <SecretsNeeds data={data} now={now} busy={busy} onMore={(kind, part) => onMore?.(kind, part)} />
+            <SecretsNames data={data} now={now} busy={busy} onMore={(kind, part) => onMore?.(kind, part)} />
           </div>
-        </Region>
-      ) : null}
-      {metadata && !empty ? (
-        <>
-          {metadata.rotationTotal ? (
-            <div className="notice" data-st="waiting">
-              <State word="Needs you">{secretCount(metadata.rotationTotal, 'to rotate', 'to rotate')}</State>
-              <p>
-                A removed holder may still know these values. Replace each at its provider, then set it in a
-                terminal.
-              </p>
-              <SecretCommand command="nforge secret rotate-list" />
-            </div>
-          ) : null}
-          {metadata.recovery ? (
-            <div className="notice" data-st="waiting">
-              <State word="Needs you">One holder</State>
-              <p>
-                A non-reissuable key has one holder and no passkey envelope. Another holder is needed for
-                recovery. The separate secret-envelope passkey path is not available yet.
-              </p>
-            </div>
-          ) : null}
-          <div className="secret-frame">
-            <Names sets={metadata.sets} />
-            <SecretsDetails metadata={metadata} />
+          <div className="secret-side">
+            <SecretsHolders data={data} now={now} busy={busy} onMore={(kind, part) => onMore?.(kind, part)} />
           </div>
-        </>
+        </div>
       ) : null}
     </div>
   );
 }
 
-export default function Secrets() {
-  return <SecretsScreen view={secretsView()} />;
+/** The page's one read and its pages. `convex.query` is one-shot: nothing subscribes to a set row, so a write by
+ * anyone costs this page nothing, and there is no timer. */
+export default function Secrets({ route, projectId, projectName }: PlaceProps) {
+  const convex = useConvex();
+  const [view, setView] = useState<SecretsView>({ status: 'loading' });
+  const [refreshing, setRefreshing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const current = useRef<Id<'hostedProjects'> | null>(null);
+  const read = useCallback(
+    async (id: Id<'hostedProjects'>, previous?: Overview) => {
+      try {
+        const result = await convex.query(api.sealedSecrets.overview, { projectId: id });
+        if (current.current !== id) return;
+        setView(
+          result.status === 'reader'
+            ? { status: 'reader' }
+            : { status: 'ready', data: result, shownAt: Date.now() },
+        );
+      } catch {
+        if (current.current !== id) return;
+        setView({ status: 'failed', ...(previous ? { previous, lastShown: Date.now() } : {}) });
+      } finally {
+        if (current.current === id) setRefreshing(false);
+      }
+    },
+    [convex],
+  );
+  useEffect(() => {
+    current.current = projectId;
+    setView({ status: 'loading' });
+    if (projectId) void read(projectId);
+    return () => {
+      current.current = null;
+    };
+  }, [projectId, read]);
+  const shown = view.status === 'ready' ? view.data : view.status === 'failed' ? view.previous : undefined;
+  const lastAt =
+    view.status === 'ready' ? view.shownAt : view.status === 'failed' ? view.lastShown : undefined;
+  const onRefresh = () => {
+    if (!projectId) return;
+    setRefreshing(true);
+    void read(projectId, shown).then(() => undefined);
+  };
+  const onMore = async (kind: SetKind, part: 'names' | 'people' | 'rotate') => {
+    if (!projectId || view.status !== 'ready') return;
+    const set = view.data.sets.find(s => s.kind === kind)?.[part];
+    if (!set?.next) return;
+    setBusy(true);
+    try {
+      const result = await convex.query(api.sealedSecrets.overview, {
+        projectId,
+        kind,
+        part,
+        after: set.next,
+      });
+      if (result.status !== 'ok') return;
+      const page = result.sets[0]?.[part];
+      if (!page) return;
+      setView(now =>
+        now.status !== 'ready'
+          ? now
+          : {
+              ...now,
+              data: {
+                ...now.data,
+                sets: now.data.sets.map(s =>
+                  s.kind === kind
+                    ? ({
+                        ...s,
+                        [part]: { ...page, page: [...(s[part]?.page ?? []), ...page.page] },
+                      } as typeof s)
+                    : s,
+                ),
+              },
+            },
+      );
+    } catch {
+      setView({ status: 'failed', previous: view.data, lastShown: lastAt ?? Date.now() });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <SecretsScreen
+      route={route}
+      projectName={projectName}
+      view={view}
+      refreshing={refreshing}
+      busy={busy}
+      onRefresh={onRefresh}
+      onMore={(kind, part) => void onMore(kind, part)}
+    />
+  );
 }

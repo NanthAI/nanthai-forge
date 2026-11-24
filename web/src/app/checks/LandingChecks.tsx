@@ -15,6 +15,8 @@ import type { Id } from '../../../../convex/_generated/dataModel';
 import type { AutonomyPolicy } from '../../../../src/autonomy-policy';
 import type { LandingModeView } from '../../../../src/landing-mode';
 import { Key, Region, Row } from '../../ds';
+import { A } from '../frames';
+import { hrefFor } from '../paths';
 import { crumbsFor, Head } from '../Place';
 import { approvalWords, useApprovalWrite, type ApprovalMode } from '../start/approvals';
 import { landedAt } from '../code/code-words';
@@ -232,6 +234,15 @@ export default function LandingChecks({ projectId, route, projectName, feed }: P
       </Region>
       <Approvals facts={facts} projectId={projectId} onDone={refresh} />
       <LandingSettings policy={facts.policy} landing={landing} owner={owner} />
+      {/* One line that points at the Secrets page (Item 41a0df87): static, so this page makes no extra read. */}
+      <Region title="Secrets" hint="names only">
+        <p className="quietline">Check and team secrets are listed by name, never by value.</p>
+        <p className="quietline">
+          <A className="lk" href={hrefFor({ ...route, section: 'secrets', rest: '' })}>
+            Open Secrets
+          </A>
+        </p>
+      </Region>
     </div>
   );
 }

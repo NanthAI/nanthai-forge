@@ -566,3 +566,23 @@ test('a1e71a48: session-directed and ended-session questions stay out of actiona
     'maps by code only, never echoing raw server wording',
   );
 });
+
+test('sealed secrets that wait on the reader (Item 41a0df87) count in the shell and on Needs me, as one row that points at Secrets', () => {
+  const input = {
+    held: [],
+    more: 0,
+    moreIsLowerBound: false,
+    approvals: '{"requests":[]}',
+    canDecide: true,
+    secrets: 5,
+  };
+  assert.deepEqual(needsCount(input), { n: 5, atLeast: false });
+  const view = needsView(input);
+  assert.equal(view.count, 5);
+  assert.deepEqual(
+    view.notices.map(row => [row.kind, row.tag, row.head]),
+    [['secrets', 'Secrets', '5 secret changes wait on you.']],
+  );
+  assert.equal(needsCount({ ...input, secrets: undefined }).n, 0);
+  assert.equal(needsView({ ...input, secrets: 1 }).notices[0].head, '1 secret change waits on you.');
+});

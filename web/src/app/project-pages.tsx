@@ -41,11 +41,14 @@ export function ProjectPagesProvider({
   route,
   projectId,
   viewer,
+  secrets,
   children,
 }: {
   route: ProjectRoute;
   projectId: string | null;
   viewer: string | undefined;
+  /** What waits on the reader in sealed secrets (Needs me's read), shown beside the Secrets page. */
+  secrets?: number | undefined;
   children: ReactNode;
 }) {
   const stored = useMemo(() => (projectId ? loadViews(projectId) : []), [projectId]);
@@ -63,8 +66,8 @@ export function ProjectPagesProvider({
   const saved = edited?.projectId === projectId ? edited.saved : stored;
   const search = typeof location === 'undefined' ? '' : location.search;
   const pages = useMemo(
-    () => pagesFor(route, viewer, saved, counts, search),
-    [route, viewer, saved, counts, search],
+    () => pagesFor(route, viewer, saved, counts, search, secrets),
+    [route, viewer, saved, counts, search, secrets],
   );
   return (
     <ProjectPages.Provider
@@ -81,6 +84,7 @@ export function pagesFor(
   saved: readonly SavedView[],
   counts: PlanViewCounts | undefined,
   search: string,
+  secrets?: number,
 ): Record<ProjectPlace, PageLink[]> {
   const here = (place: ProjectPlace, section: string): Current =>
     route.place === place && route.section === section ? (route.rest ? 'true' : 'page') : undefined;
@@ -98,6 +102,8 @@ export function pagesFor(
       href: hrefFor({ ...route, place, section, rest: '' }),
       current: here(place, section),
       seam: place === 'settings' && section === 'you',
+      // The Secrets page shows how many rows wait on the reader; nothing at zero.
+      ...(place === 'settings' && section === 'secrets' && secrets ? { count: secrets, counter: true } : {}),
     }));
   return {
     needs: sections('needs'),

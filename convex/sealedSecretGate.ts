@@ -13,6 +13,7 @@ import { decodeSealedWire } from '../src/sealed-wire';
 import { equalBytes, forgeSecretId, framedHash, hex } from '../src/sealed-portable';
 import { headBytes, rosterBytes, type Head, type Roster, type Transition } from '../src/sealed-records';
 import { AUTOMATIC_SET_KIND, decodeJoinRequest, type JoinRequest } from '../src/sealed-join';
+import { setNeeds } from '../src/sealed-overview';
 import { checkProposal } from '../src/sealed-proposal-check';
 import type { SealedProposal } from '../src/sealed-future-records';
 
@@ -34,7 +35,10 @@ export type SealedPendingProposal = {
   epoch: number;
   size: number;
   at: number;
+  op?: 1 | 2 | 3;
+  kind?: 1 | 2 | 3;
 };
+export type SealedMarkNote = { id: ArrayBuffer; at: number; handle?: string };
 export type StoredSealedSet = {
   setId: ArrayBuffer;
   headHash: ArrayBuffer;
@@ -45,6 +49,9 @@ export type StoredSealedSet = {
   joinRequests?: SealedJoinRequest[];
   proposals?: SealedPendingProposal[];
   resolvedProposals?: ArrayBuffer[];
+  revokedNotes?: SealedMarkNote[];
+  formerHandles?: { id: ArrayBuffer; handle: string }[];
+  needs?: number;
 };
 const u8 = (bytes: ArrayBuffer) => new Uint8Array(bytes);
 function refuse(ok: unknown, message: string): asserts ok {
@@ -378,6 +385,8 @@ export function proposalFacts(set: StoredSealedSet, bytes: ArrayBuffer, accountI
     epoch: p.epoch,
     size: bytes.byteLength,
     at,
+    op: p.op,
+    kind: p.kind,
   };
 }
 
@@ -535,4 +544,49 @@ export function nextJoinRequests(input: {
     "32 devices are already waiting for Development; a holder device's next run shares them.",
   );
   return [...others, { deviceId: Uint8Array.from(request.id).buffer, request: input.request, at: input.at }];
+}
+
+/** The set's needs-you total from its stored payload (setNeeds). One decode of the payload. */
+export function storedNeeds(set: StoredSealedSet) {
+  const { head, roster } = decodeSealedWire(u8(set.payload)) as Payload;
+  return setNeeds(roster, head, (set.revoked ?? []).map(u8), set.proposals?.length ?? 0);
+}
+/** Marker notes after `revoked` is set on `set`: each new marker is stamped with `at` and, when its account is in
+ * `handles` (hex account id to public Forge handle, known only when the person left the project), that handle.
+ * Notes of markers that are gone are dropped. Null when nothing changes. One decode of the roster, and only when a
+ * marker is new. */
+export function nextMarkNotes(
+  set: StoredSealedSet,
+  revoked: readonly ArrayBuffer[],
+  handles: ReadonlyMap<string, string>,
+  at: number,
+) {
+  const kept = (set.revokedNotes ?? []).filter(n => revoked.some(id => equalBytes(u8(id), u8(n.id))));
+  const added = revoked.filter(id => !set.revoked?.some(old => equalBytes(u8(old), u8(id))));
+  const roster = added.length ? (decodeSealedWire(u8(set.payload)) as Payload).roster : null;
+  const notes = [
+    ...kept,
+    ...added.map(id => {
+      const entry = roster?.entries.find(e => equalBytes(e.id, u8(id)));
+      const handle = entry ? handles.get(hex(entry.accountId)) : undefined;
+      return { id, at, ...(handle ? { handle } : {}) };
+    }),
+  ];
+  return notes.length === (set.revokedNotes ?? []).length && notes.every((n, i) => n === set.revokedNotes![i])
+    ? null
+    : notes;
+}
+/** The handle lists after a head write: markers still set keep their note; the handle of a removed entry moves to
+ * `formerHandles` while the roster still lists that device as a former signer, and leaves with it. */
+export function nextHandles(set: StoredSealedSet | null, revoked: readonly ArrayBuffer[], roster: Roster) {
+  const notes = (set?.revokedNotes ?? []).filter(n => revoked.some(id => equalBytes(u8(id), u8(n.id))));
+  const former = [
+    ...(set?.formerHandles ?? []),
+    ...(set?.revokedNotes ?? []).flatMap(n => (n.handle ? [{ id: n.id, handle: n.handle }] : [])),
+  ].filter(
+    (h, i, all) =>
+      roster.former.some(f => equalBytes(f.deviceId, u8(h.id))) &&
+      all.findIndex(o => equalBytes(u8(o.id), u8(h.id))) === i,
+  );
+  return { revokedNotes: notes, formerHandles: former };
 }

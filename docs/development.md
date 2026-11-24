@@ -1061,30 +1061,49 @@ dev billed-usage measurement.
 
 #### Secrets screen interface
 
-`web/src/app/secrets/Secrets.tsx` loads lazily at `/:handle/:project/settings/secrets`.
-`secrets-model.ts` defines a metadata-only `SecretsView`: unavailable, loading,
-forbidden, ready, or failed with optional previous metadata. `secretsView()` is
-the local unavailable stub; no secret backend or protocol has been added.
+Settings › Landing and checks › Secrets is `web/src/app/secrets/` at
+`/:handle/:project/settings/secrets` (the rail lists it directly under Landing and
+checks; its page count is the number of Needs-you rows). The design is
+`design/secrets-page/`. The page is value-free and changes nothing: every action is a
+command a person copies and runs on a terminal, where the CLI verifies and signs.
 
-`SecretsMetadata` carries Development/Checks pages with complete name and holder
-totals, rotation and missing-value totals, waiting-computer codes, the selected Development sharing
-mode and a newest-first recent page. The future authorized adapter supplies bounded
-pages, with up to 50 recent events. Partial pages explicitly say how many are shown;
-the interface imposes no limit on how many secrets a project may have. Add continuation
-actions with that adapter, not a per-row query. Recovery state is supplied only for
-a lone holder without an envelope holding a non-reissuable value; holder counts
-alone do not trigger the notice. Displayed handles and codes are metadata, never
-device keys or another person's private device name.
+**One names-only read.** `sealedSecrets:overview { projectId, kind?, part?, after? }`
+(write role; a reader gets `{status:'reader'}`) returns names, kinds, versions, holder
+handles and device codes, the take-out rows, the rotate list and the waiting proposals,
+derived from the project's active set rows (at most three indexed reads), the
+owner, direct writers and linked-team writers in one bounded listing (`planningMembers`) and one account row per matched holder. It
+does not read the history row, a proposal row or a credential row. Its `returns`
+validator (`convex/sealedSecretOverviewFields.ts`) has no bytes field. The web calls it
+with `convex.query`, never `useQuery`: on open, on Refresh or Retry, and once per
+"Show the next 100 / 25" page (`kind`, `part`, `after`). No subscription, timer or
+polling, so an idle or hidden tab and any write by anyone cost this page nothing.
+Guards: `tests/secrets-screen.test.mjs` fails if any web file references a sealed read,
+write or proposal-bytes function, or the page uses a subscription;
+`tests/sealed-overview.test.mjs` fails if the return shape carries bytes.
 
-The screen consumes no values, key material or envelopes. It has no value entry,
-reveal, removal or sharing mutation. Proposed commands stay marked until the CLI
-protocol exists. Tests render synthetic metadata through the real screen and project
-frame; no fixture switch is shipped. A failed load retains previous metadata only
-when explicitly supplied; forbidden and unavailable states never render it.
+**Derivations.** `src/sealed-overview.ts` is shared by the server and the CLI: the
+rotate list is the live names whose value epoch is at or below a former computer's
+last epoch (`rotateList` in the CLI is this function), take-out rows group marked
+person entries by account, and holders group a roster's device entries by account
+(a computer's own name is shown only to its owner). A holder's handle comes from the
+project's owner, direct writers or linked-team writers; anyone else shows "Not reported".
+
+**Needs-you counter.** Each set row keeps `needs` (removed people still listed + names to
+rotate + waiting proposals) and the project row keeps their sum, `secretsNeeds`
+(`convex/sealedSecretNeeds.ts`). The writes that change them move it in the same
+mutation: a head write, `propose`, `reject`, and every marker add or clear. It is absent
+at zero, adds one small number to the project row the Needs me read already holds (no
+extra read on project load, no idle cost), and `projectNeedsMe:read` returns it as
+`secrets` to write members only. The top-bar count and the Needs me page include it, as
+one row pointing at Secrets.
+
+**Kept beside markers.** A marker keeps when it was set and, when the person left the
+project, their public Forge handle (`revokedNotes`; handles only, never names or
+emails). A re-key moves the handles of the entries it removes to `formerHandles`, so
+"after @handle left" survives the re-key. `propose` keeps the proposal's operation and
+kind on the pending facts so the page names them without opening the sealed bytes.
+
 See [trust boundaries and current check-secret guidance](security.md#secrets-for-checks).
-Gate A remains open; this UI does not start an encryption slice. Future device
-encryption must remain separate from `FORGE_SECRET_KEYS`, sign-in keys and
-`FORGE_GITHUB_TOKEN_KEYRING`; this slice adds or changes no keyring setting.
 
 ### Signed-out landing review
 

@@ -397,6 +397,7 @@ function ProjectView({
       name={name}
       feed={feed}
       needs={needs}
+      secrets={needsLive?.secrets}
       waiting={waiting}
       projects={picker}
       controls={{ ...controls, onPicker }}

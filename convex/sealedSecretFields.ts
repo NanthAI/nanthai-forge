@@ -11,6 +11,10 @@ export const sealedPendingProposal = v.object({
   epoch: v.number(),
   size: v.number(),
   at: v.number(),
+  /** The proposal's operation (1 add, 2 change, 3 remove) and kind (1 env, 2 file, 3 removal), kept from the decoded
+   * record so the Secrets page names them without opening the proposal bytes. Absent on rows stored before slice 4. */
+  op: v.optional(sealedKind),
+  kind: v.optional(sealedKind),
 });
 /** Client records contain public signed metadata and ciphertext only. The server never opens a value
  * or holds a key; it checks public signatures and bindings before storing a write (sealedSecretGate).
@@ -39,6 +43,16 @@ export const sealedSetFields = {
   /** Server-owned: the last 64 proposal ids that left the waiting list, so the same proposal is not stored again
    * (review F4). A holder's own journal of applied ids is the client's check. */
   resolvedProposals: v.optional(v.array(v.bytes())),
+  /** Server-owned, beside `revoked` (Item 41a0df87, slice 4): when each marker was set and, when the person left the
+   * project, their public Forge handle (never a name or email). A holder's re-key step moves the handles of the
+   * entries it removes into `formerHandles`. Bounded by the roster: only ids in `revoked` or the roster's former list. */
+  revokedNotes: v.optional(
+    v.array(v.object({ id: v.bytes(), at: v.number(), handle: v.optional(v.string()) })),
+  ),
+  formerHandles: v.optional(v.array(v.object({ id: v.bytes(), handle: v.string() }))),
+  /** Server-owned: this set's needs-you total (removed people still listed + names to rotate + waiting proposals),
+   * kept by the writes that change them so the project's top-bar counter moves in the same transaction. */
+  needs: v.optional(v.number()),
 };
 export const sealedHistoryFields = {
   projectId: v.id('hostedProjects'),

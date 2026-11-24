@@ -187,6 +187,8 @@ type ProjectFrameProps = {
   feed: LineFeed | undefined;
   /** What waits on the reader (needs/count.ts `needsCount`), the same number Needs me shows. */
   needs: { n: number; atLeast: boolean } | undefined;
+  /** What waits on the reader in sealed secrets (the Needs me read's `secrets`), for the Secrets page's count. */
+  secrets?: number | undefined;
   /** The Lanes that wait on the reader (needs/count.ts `waitingLanes`), for the line and the F; undefined until
    * Needs me's read has classified every held Lane. */
   waiting?: ReadonlySet<string> | undefined;
@@ -202,6 +204,7 @@ export function ProjectFrame(props: ProjectFrameProps) {
       route={props.route}
       projectId={props.projectId ?? null}
       viewer={props.controls.viewerHandle}
+      secrets={props.secrets}
     >
       <ProjectShell {...props} />
     </ProjectPagesProvider>

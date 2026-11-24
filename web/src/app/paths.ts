@@ -54,7 +54,7 @@ export const placeSections: Record<ProjectPlace, readonly string[]> = {
   plan: [''],
   code: ['', 'files'],
   stats: [''],
-  settings: ['', 'checks', 'mirror', 'secrets', 'agents', 'project', 'you'],
+  settings: ['', 'checks', 'secrets', 'mirror', 'agents', 'project', 'you'],
 };
 
 export type AppRoute =

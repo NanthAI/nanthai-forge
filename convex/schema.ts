@@ -364,6 +364,9 @@ export const projectPurge = v.object({
   completedAt: v.optional(v.number()),
 });
 const projectFields = {
+  /** What waits on a person in the project's sealed secrets: the sum of its sets' `needs` (convex/sealedSecretNeeds.ts),
+   * moved by the same writes that change a marker, a proposal or a rotate row. Absent when zero. Item 41a0df87. */
+  secretsNeeds: v.optional(v.number()),
   /** How many `projectTeams` links this project has (Item b6588425, docs/access.md#teams). Kept with each link
    * change in the same transaction, so a project without teams resolves roles with no team read. */
   teamLinks: v.optional(v.number()),

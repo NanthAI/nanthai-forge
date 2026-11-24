@@ -19,9 +19,11 @@ import {
   markableAccounts,
   markersForEndedDevice,
   markersForRemovedAccount,
+  nextMarkNotes,
   rememberResolved,
   unmarkedProposals,
 } from './sealedSecretGate';
+import { patchSetKeepingNeeds } from './sealedSecretNeeds';
 import { hasWriteRole } from './projectRole';
 
 /** The project's active sets: one indexed read per set kind (at most three rows). */
@@ -44,16 +46,21 @@ async function mark(
   sets: Doc<'sealedSecretSets'>[],
   accountIds: Uint8Array[],
   markers = (set: Doc<'sealedSecretSets'>) => markersForRemovedAccount(set, ...accountIds),
+  /** Public Forge handles of people who left the project, by hex account id (slice 4: "after @handle left"). */
+  handles: ReadonlyMap<string, string> = new Map(),
 ) {
+  const at = Date.now();
   for (const set of sets) {
     const next = markers(set);
     if (!next) continue;
     // Review F2: a marked proposer's waiting proposals leave in the same mutation (at most 32 deletes, no read).
     const { proposals, dropped } = unmarkedProposals(set, next.revoked);
     for (const p of dropped) await ctx.db.delete(p.id);
-    await ctx.db.patch(set._id, {
+    const notes = nextMarkNotes(set, next.revoked, handles, at);
+    await patchSetKeepingNeeds(ctx, set, {
       revoked: next.revoked.length ? next.revoked : undefined,
       joinRequests: next.joinRequests.length ? next.joinRequests : undefined,
+      ...(notes ? { revokedNotes: notes.length ? notes : undefined } : {}),
       ...(dropped.length
         ? {
             proposals: proposals.length ? proposals : undefined,
@@ -66,7 +73,19 @@ async function mark(
 
 /** One indexed read per set kind (at most three rows) and one patch per set that changes; no other call. */
 export async function markRemovedAccount(ctx: MutationCtx, projectId: Id<'hostedProjects'>, account: string) {
-  await mark(ctx, await activeSets(ctx, projectId), [forgeSecretId('account', account)]);
+  const sets = await activeSets(ctx, projectId);
+  if (!sets.length) return;
+  const id = forgeSecretId('account', account);
+  await mark(ctx, sets, [id], undefined, new Map(await handleOf(ctx, account, id)));
+}
+/** The public Forge handle of `account`, kept beside its markers so the Secrets page can say who left. One indexed
+ * read, only when a set exists. A handle only; never a name or an email. */
+async function handleOf(ctx: MutationCtx, account: string, id: Uint8Array): Promise<[string, string][]> {
+  const row = await ctx.db
+    .query('forgeAccounts')
+    .withIndex('by_owner', q => q.eq('owner', account))
+    .unique();
+  return row?.handle ? [[hex(id), row.handle]] : [];
 }
 
 /** Trashing a project removes every grant but its owner's, and a restore brings none back (projectRetention
@@ -122,16 +141,20 @@ async function markLost(
   members: string[],
 ) {
   const listed = new Set(sets.flatMap(markableAccounts));
-  const lost: Uint8Array[] = [];
+  const lost: Uint8Array[] = [],
+    handles = new Map<string, string>();
   let seen = 0;
   for (const member of members) {
     if (seen === listed.size) break;
     const id = forgeSecretId('account', member);
     if (!listed.has(hex(id))) continue;
     seen++;
-    if (!(await hasWriteRole(ctx, project, member))) lost.push(id);
+    if (!(await hasWriteRole(ctx, project, member))) {
+      lost.push(id);
+      for (const [key, handle] of await handleOf(ctx, member, id)) handles.set(key, handle);
+    }
   }
-  if (lost.length) await mark(ctx, sets, lost);
+  if (lost.length) await mark(ctx, sets, lost, undefined, handles);
 }
 
 /** The rest of a team change's marking when the team has more members than one step reads (`projectTeamAccess.set`):
@@ -328,8 +351,10 @@ export async function clearSweptSignIn(
       }
       if (!writes) break;
       // The sweep's later marking steps skip what this approval kept (an approval can run between them).
-      await ctx.db.patch(set._id, {
+      const notes = nextMarkNotes(set, cleared.revoked, new Map(), Date.now());
+      await patchSetKeepingNeeds(ctx, set, {
         revoked: cleared.revoked.length ? cleared.revoked : undefined,
+        ...(notes ? { revokedNotes: notes.length ? notes : undefined } : {}),
         sweptKept: { epoch, ids: cleared.kept },
       });
     }

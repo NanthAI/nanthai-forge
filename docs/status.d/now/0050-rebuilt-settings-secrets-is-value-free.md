@@ -1,4 +1,7 @@
-Rebuilt Settings → Secrets is value-free with an unavailable metadata provider.
+Settings → Landing and checks → Secrets is a value-free page: one names-only read
+(`sealedSecrets:overview`, one-shot, no subscription) shows what needs a person (removed
+computers to take out, names to rotate, proposals), the names and who can open them; each
+action is a command copied to a terminal. The top bar's Needs-you count includes it.
 `nforge secret set/list/rm/repin/resolve` and lazy `nforge run` now use the owner's
 sealed Development set, signed metadata, local pins and a ciphertext-only cache.
 Release name rules, exact root `.env.example` reading, credential stripping,

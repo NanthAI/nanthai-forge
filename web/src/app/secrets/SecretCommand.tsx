@@ -1,16 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Key } from '../../ds';
 
-/** Copy only a constructed, value-free command. A failed clipboard never echoes the browser exception. */
-export function SecretCommand({ command, small = false }: { command: string; small?: boolean }) {
+/** Copies one constructed, value-free command; the person runs it on a terminal. The label says Copied for two
+ * seconds. A failed clipboard never echoes the browser's exception. */
+export function SecretCommand({
+  command,
+  label,
+  size = 'sm',
+  kind,
+}: {
+  command: string;
+  /** The key's words before it is pressed ("Copy command", "Copy apply"). */
+  label: string;
+  size?: 'sm';
+  kind?: 'ghost';
+}) {
   const [result, setResult] = useState<'copied' | 'failed' | null>(null);
+  useEffect(() => {
+    if (!result) return;
+    const timer = setTimeout(() => setResult(null), 2000);
+    return () => clearTimeout(timer);
+  }, [result]);
   return (
-    <span className="secret-command">
+    <>
       <Key
-        size={small ? 'sm' : undefined}
-        title="Proposed command; the sealed-secret protocol is not available yet"
+        size={size}
+        kind={kind}
+        title={command}
         onClick={() => {
           void (async () => {
             try {
@@ -22,12 +40,11 @@ export function SecretCommand({ command, small = false }: { command: string; sma
           })();
         }}
       >
-        {result === 'copied' ? 'Copied' : small ? 'Copy command' : `Copy: ${command}`}
+        {result === 'copied' ? 'Copied' : result === 'failed' ? 'Could not copy' : label}
       </Key>
-      <span className="t3">Proposed</span>
       <span className="sr" role="status">
         {result === 'copied' ? 'Command copied.' : result === 'failed' ? 'Could not copy the command.' : ''}
       </span>
-    </span>
+    </>
   );
 }

@@ -6,12 +6,15 @@ Walked: the security doc (secret scan, Secret Objects), the repository's own all
 
 ## Steps today
 
-The rebuilt project's **Settings → Secrets** is value-free: no values are entered
-or shown. It explains current runner-secret passthrough and the intended sealed
-Development/Checks sets, with a metadata-only unavailable stub until the gated
-protocol lands. Secret Objects still exist on the account screen and do not feed
-checks. Export/retirement and rotate-on-removal remain open on `41a0df87`; no
-replacement store, machine-key setup or recovery ceremony is claimed here.
+The rebuilt project's **Settings → Landing and checks → Secrets** is value-free: no values
+are entered or shown, and it changes nothing. It lists what needs a person (removed computers
+to take out, names to rotate, proposals with copy-able apply and reject commands), every
+name with kind, version, age and who changed it, and who can open each set. One names-only
+read when it opens. A person who leaves the project is named on the rotate list as
+"after @handle left", and the top bar's Needs-you count carries the rows until each is done
+in a terminal (J29-7). Secret Objects still exist on the account screen and do not feed
+checks. Export and retirement remain open on `41a0df87`; Checks writes, machine keys and
+import are not claimed here.
 See [secrets for checks](../../security.md#secrets-for-checks).
 
 | # | Situation | What happens | Evidence |
@@ -25,7 +28,7 @@ See [secrets for checks](../../security.md#secrets-for-checks).
 | 7 | A secret for a check | Names declared on the check; values live on the runner ([journey 13](13-connecting-ci.md)). | docs |
 | 8 | Secrets held by Forge | Account → **Secret Objects**: "Create Secret Object", "Import a GitHub credential from .env", "Use a known Secret Object", "Rotate credential", "Manage capabilities", "Audit events", "Archived in your list". "Dotenv import creates a Secret Object and a value-free example file. It does not erase committed history or rotate the provider's credential." "Public visibility and contributor membership confer no secret discovery, use, modification or delegation authority." Checks "do not inject Secret Objects". | source, docs |
 | 9 | A private file in a shared or public project | Not built. Owner decision on 6bd7ddb1: "paths inherit project visibility by default; only owner/maintainers may hide a path; readers see a hidden path placeholder (so diffs and conflicts still make sense)". The board notes a second, conflicting statement on who may hide a path. | docs |
-| 10 | A person leaves the team | Access is checked at every write. Nothing lists the secrets that person could see. The organizations Issue (1e474c35) plans: "The UI points to the secrets the person could see, so they can be rotated." | docs |
+| 10 | A person leaves the team | Access is checked at every write. For sealed secrets the Secrets page names the person ("after @handle left"), lists the computer to take out and every name they could open, and the top bar counts them; Secret Objects have no such list. | tests, docs |
 | 11 | Check logs | A secret printed by a test goes to the CI provider's log; with `publicLogs:true` anyone can read it ([journey 13](13-connecting-ci.md), J13-8). | ran |
 
 ## Findings
@@ -38,7 +41,7 @@ See [secrets for checks](../../security.md#secrets-for-checks).
 | J29-4 | S2 | **The page speaks its own language.** "Secret Object", "broker status", "capabilities", "delegation", "discoverable". The archive note reads "Archiving changes your list only. Broker status and granted capabilities stay the same." | source |
 | J29-5 | S2 | **Override alerts ride on the stall-alert settings.** The alert for a new allow entry goes to "the same settings as stall alerts". On the Forge project that is an empty email list and one webhook preset (journey 17, J17-2). The owner is the control here, and nothing confirms the alert has a destination. | docs, ran |
 | J29-6 | S2 | **Private files are decided and unbuilt, and one detail is disputed.** Until then every file in a project has the project's visibility, including for the scan. A team with a private `.env.production` in a public repository has no answer but to keep it out of Forge. | docs |
-| J29-7 | S2 | **Nothing helps after someone leaves.** No list of what they could read, no rotate reminder. | docs |
+| J29-7 | S2 | **Fixed for sealed secrets (41a0df87, slice 4).** After someone leaves, the Secrets page lists the names they could open and the top bar counts them until each gets a new value. Secret Objects still have no such list. | tests |
 | J29-8 | S3 | **The scan does not run on local preflight.** "Local (not hosted) checks" are outside it, so an agent learns of a finding only after the hosted check starts. | docs |
 | J29-9 | S3 | **Fixed (0fd5f69f).** The notice prints the exact allow entry for each finding, with an empty `reason` that the agent fills in; pasted unedited it allows nothing. | test |
 

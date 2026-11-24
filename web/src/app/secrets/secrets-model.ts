@@ -1,58 +1,111 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Metadata only. The gated device protocol will supply this view; neither values, ciphertext nor key material
-// belong in it. Totals describe the complete set; arrays are one bounded page, never a whole collection read.
-export type SecretName = {
-  name: string;
-  changed: string;
-  by?: string;
-  note?: string;
-  state?: 'rotate' | 'through-checks' | 'missing';
-};
-export type SecretHolder = {
-  id: string;
-  kind: 'person' | 'machine';
-  label: string;
-  detail: string;
-  canRemove?: boolean;
-};
-export type SecretSet = {
-  id: 'development' | 'checks';
-  names: readonly SecretName[];
-  nameTotal: number;
-  holders: readonly SecretHolder[];
-  holderTotal: number;
-};
-export type SecretsMetadata = {
-  sets: readonly SecretSet[];
-  rotationTotal: number;
-  missingTotal: number;
-  waiting: readonly { id: string; handle: string; code: string; set: 'development' | 'checks' }[];
-  waitingTotal: number;
-  sharing: 'automatic' | 'confirm';
-  canManageSharing?: boolean;
-  recent: readonly { id: string; when: string; text: string; automatic?: boolean }[];
-  // This is supplied only for the agreed lone-holder/non-reissuable case, not inferred from holder counts.
-  recovery?: 'non-reissuable-without-envelope';
-};
-export type SecretsView =
-  | { status: 'unavailable' | 'loading' | 'forbidden' }
-  | { status: 'ready'; metadata: SecretsMetadata }
-  | { status: 'failed'; previous?: SecretsMetadata; lastShown?: string };
+// The Secrets page's view (Item 41a0df87, slice 4): names, kinds, versions, handles, codes and counts from
+// sealedSecrets:overview, and the words and commands built from them. Nothing here holds, fetches or subscribes to a
+// value, a ciphertext or a key: the page reads names only, one-shot, and changes nothing. Every action is a command a
+// person copies and runs on a terminal.
+import type { FunctionReturnType } from 'convex/server';
+import type { api } from '../../../../convex/_generated/api';
 
-/** A local stub, not a backend fallback. No query, storage, timer or invented project data. */
-export function secretsView(): SecretsView {
-  return { status: 'unavailable' };
+export type Overview = Extract<FunctionReturnType<typeof api.sealedSecrets.overview>, { status: 'ok' }>;
+export type OverviewSet = Overview['sets'][number];
+export type SetKind = OverviewSet['kind'];
+export type SecretsView =
+  | { status: 'loading' }
+  | { status: 'reader' }
+  | { status: 'failed'; previous?: Overview; lastShown?: number }
+  | { status: 'ready'; data: Overview; shownAt: number };
+
+export const setLabel = (kind: SetKind) =>
+  kind === 1 ? 'Development' : kind === 2 ? 'Checks' : 'Production';
+export const count = (n: number, one: string, many = `${one}s`) =>
+  `${n.toLocaleString()} ${n === 1 ? one : many}`;
+
+/** Names are ASCII today (safeSecretName); anything else is quoted as one shell argument and never run. */
+const shellWord = (value: string) =>
+  /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+export const setCommand = (name: string, kind: 1 | 2 | 3) =>
+  `nforge secret set ${shellWord(name)}${kind === 2 ? ' --file' : ''}`;
+export const applyCommand = (id: string) => `nforge secret apply ${shellWord(id)}`;
+export const rejectCommand = (id: string) => `nforge secret reject ${shellWord(id)}`;
+export const UNSHARE_MARKED = 'nforge secret unshare --marked';
+export const LIST_COMMAND = 'nforge secret list';
+
+const MIN = 60_000;
+/** "just now", "12 min ago", "2 h ago", "yesterday", "3 d ago": relative, with the exact time on hover. */
+export function relative(at: number, now: number) {
+  const ms = Math.max(0, now - at);
+  if (ms < MIN) return 'just now';
+  if (ms < 60 * MIN) return `${Math.floor(ms / MIN)} min ago`;
+  if (ms < 24 * 60 * MIN) return `${Math.floor(ms / (60 * MIN))} h ago`;
+  const days = Math.floor(ms / (24 * 60 * MIN));
+  return days === 1 ? 'yesterday' : `${days} d ago`;
+}
+export const exact = (at: number) => new Date(at).toISOString().slice(0, 16).replace('T', ' ');
+export const clock = (at: number) =>
+  new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+export const OPERATION = { 1: 'add', 2: 'change', 3: 'remove' } as const;
+export const KIND_WORD = { 1: 'env', 2: 'file', 3: 'removal' } as const;
+
+/** What waits on a person, in the order the page draws it. The total is the number of rows, and equals the counter
+ * on the project row (convex/sealedSecretNeeds.ts). */
+export function needsOf(data: Overview) {
+  const takeOut = data.sets.flatMap(set => (set.takeOut ?? []).map(row => ({ ...row, set: set.kind })));
+  const rotate = data.sets.flatMap(set => (set.rotate?.page ?? []).map(row => ({ ...row, set: set.kind })));
+  const rotateTotal = data.sets.reduce((n, set) => n + (set.rotate?.total ?? 0), 0);
+  const proposals = data.sets.flatMap(set => (set.proposals ?? []).map(row => ({ ...row, set: set.kind })));
+  return { takeOut, rotate, rotateTotal, proposals, total: takeOut.length + rotateTotal + proposals.length };
 }
 
-export const secretSetLabel = (id: SecretSet['id']) => (id === 'development' ? 'Development' : 'Checks');
-export const secretCount = (n: number, one: string, many = `${one}s`) =>
-  `${n.toLocaleString()} ${n === 1 ? one : many}`;
-export const secretPageCount = (shown: number, total: number, noun: string) =>
-  shown < total ? `${shown.toLocaleString()} of ${secretCount(total, noun)}` : secretCount(total, noun);
+export const nameTotal = (data: Overview) => data.sets.reduce((n, set) => n + (set.names?.total ?? 0), 0);
 
-/** Commands are proposals until the protocol lands. Quote metadata as a single shell argument; never run it. */
-export function secretSetCommand(name: string, set: SecretSet['id']) {
-  const argument = /^[A-Z_][A-Z0-9_]*$/.test(name) ? name : `'${name.replaceAll("'", "'\\''")}'`;
-  return `nforge secret set ${argument}${set === 'checks' ? ' --set checks' : ''}`;
+/** The one sentence under the title: the first of these that is true (README "Copy"). */
+export function sentence(data: Overview) {
+  const needs = needsOf(data),
+    names = nameTotal(data);
+  const who =
+    needs.takeOut.find(row => row.left && row.handle)?.handle ??
+    needs.rotate.flatMap(row => row.devices).find(device => device.handle)?.handle ??
+    null;
+  const waiting = needs.proposals.length
+    ? ` ${count(needs.proposals.length, 'proposal waits', 'proposals wait')} for a person.`
+    : '';
+  if (needs.rotateTotal)
+    return {
+      lead: `${count(needs.rotateTotal, 'secret needs', 'secrets need')} a new value`,
+      rest: `${who ? ` after @${who} left.` : ' after a computer was removed.'}${waiting}`,
+    };
+  if (needs.proposals.length)
+    return {
+      lead: `${count(needs.proposals.length, 'proposal waits', 'proposals wait')} for a person.`,
+      rest: names ? ` ${count(names, 'secret')} in ${count(data.sets.length, 'set')}.` : '',
+    };
+  if (needs.takeOut.length) {
+    const computers = needs.takeOut.reduce((n, row) => n + row.codes.length, 0);
+    return {
+      lead: `${count(computers, 'removed computer still holds', 'removed computers still hold')} ${setLabel(needs.takeOut[0]!.set)}.`,
+      rest: ' Take it out in a terminal.',
+    };
+  }
+  if (!names) return { lead: 'This project has no secrets yet.', rest: '' };
+  return {
+    lead: `${count(names, 'secret')} in ${count(data.sets.length, 'set')}.`,
+    rest: ' Nothing needs you.',
+  };
+}
+
+/** What `nforge secret list` prints, drawn from the names this page holds (names and kinds only). */
+export function listOutput(data: Overview) {
+  const lines = [`$ ${LIST_COMMAND}`];
+  const rotating = new Set<string>();
+  for (const set of data.sets) {
+    for (const row of set.rotate?.page ?? []) rotating.add(row.name);
+    for (const row of (set.names?.page ?? []).slice(0, 5))
+      lines.push(`${row.name}\t${row.kind === 2 ? 'file' : 'env'}\tv${row.version}`);
+    if ((set.names?.total ?? 0) > 5) lines.push('…');
+  }
+  if (rotating.size)
+    lines.push(`To rotate (a removed computer could open these): ${[...rotating].slice(0, 12).join(', ')}`);
+  return lines.join('\n');
 }

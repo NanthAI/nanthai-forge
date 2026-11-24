@@ -109,7 +109,10 @@ test('review 1: trash never marks a machine entry (it has no account) and lists 
   const entry = (n, accountId, entryKind = 1) => ({ id: Buffer.alloc(16, n), accountId, entryKind });
   const member = forgeSecretId('account', 'fixture-member');
   const payload = encodeSealedWire({
+    head: { names: [] },
     roster: {
+      epoch: 1,
+      former: [],
       entries: [
         entry(1, forgeSecretId('account', h.account)),
         entry(2, member),
@@ -118,7 +121,8 @@ test('review 1: trash never marks a machine entry (it has no account) and lists 
       ],
     },
   });
-  // The stored row keeps every other field; only its roster is synthetic (the marking reads nothing else).
+  // The stored row keeps every other field; only its roster is synthetic (the marking reads the roster, and the
+  // needs-you total reads the head's names and the roster's former list).
   const row = set(h);
   row.payload = Uint8Array.from(payload).buffer;
   assert.deepEqual(
