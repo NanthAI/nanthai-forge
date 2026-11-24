@@ -2692,7 +2692,8 @@ test('incident 411727ba: whole-plan counts read the exact Plan counter and the s
     { kind: 'issue', status: 'archived' },
     { kind: 'initiative', status: 'closed' },
   ];
-  const meter = meterReads(s.ctx);
+  // Apply the provider's pagination rule to each query, including the unfiltered call below.
+  const meter = meterReads(s.ctx, { maxPaginations: 1 });
   const read = async () => {
     const replies = [];
     let bytes = 0;
@@ -2723,6 +2724,76 @@ test('incident 411727ba: whole-plan counts read the exact Plan counter and the s
   assert.deepEqual(grown.replies, scan.replies);
   assert(grown.bytes * 3 < scan.bytes, JSON.stringify({ counter: grown.bytes, scan: scan.bytes }));
   t.diagnostic(JSON.stringify({ counterBytes: grown.bytes, scanBytes: scan.bytes }));
+});
+
+test('shelf counts keep independent byte bounds and overflow into exact root-page totals with a valid counter', async t => {
+  const s = await setup(t);
+  const p = port(s);
+  await put(p, { kind: 'issue', title: 'Open counter seed' });
+  const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  let position = 100;
+  const seed = async (status, chars = 0) => {
+    const key = randomUUID();
+    await s.ctx.db.insert('projectPlanningRecords', {
+      projectId: s.projectId,
+      generationId,
+      collection: 'planningSearch',
+      key,
+      parent: '',
+      position: position++,
+      value: JSON.stringify({ id: key, body: 'x'.repeat(chars) }),
+      planning: { text: '', kind: 'issue', status, initiativeId: '', open: status === 'open' },
+    });
+  };
+  const meter = meterReads(s.ctx, { maxPaginations: 1 });
+  const readPage = async cursor => {
+    let reply;
+    const cost = await meter.cost(async () => {
+      reply = await p.query('projectWorkIndex:records', {
+        collection: 'planningItems',
+        counts: true,
+        planningFilter: {},
+        paginationOpts: { cursor, numItems: 1000 },
+      });
+    });
+    return { reply, cost };
+  };
+  await seed('archived', 550_000);
+  const empty = await readPage(null);
+  assert.equal(empty.reply.isDone, true);
+  assert.equal(empty.reply.counts.archived, 1);
+  assert.equal('deleted' in empty.reply.counts, false);
+  await seed('deleted', 550_000);
+  const both = await readPage(null);
+  assert.equal(both.reply.isDone, true, 'each shelf fits although their total exceeds 1 MB');
+  assert.equal(both.reply.counts.archived, 1);
+  assert.equal(both.reply.counts.deleted, 1);
+  assert.equal(both.cost.documents, empty.cost.documents + 1);
+  assert.ok(both.cost.bytes < 1_120_000);
+
+  for (let i = 0; i < 1000; i++) await seed('open');
+  await seed('archived', 550_000);
+  const counter = planCounterRow(s, generationId);
+  const tallies = JSON.parse(counter.value);
+  tallies.issue.open = 1001;
+  await s.ctx.db.patch(counter._id, { value: JSON.stringify(tallies) });
+  const first = await readPage(null);
+  assert.equal(first.reply.isDone, false);
+  assert.ok(first.reply.continueCursor);
+  const pages = [first.reply];
+  while (!pages.at(-1).isDone && pages.length < 5)
+    pages.push((await readPage(pages.at(-1).continueCursor)).reply);
+  assert.equal(pages.at(-1).isDone, true);
+  const sum = status => pages.reduce((total, page) => total + (page.counts[status] ?? 0), 0);
+  assert.deepEqual([sum('open'), sum('archived'), sum('deleted')], [1001, 2, 1]);
+  await s.ctx.db.delete(counter._id);
+  const baseline = await readPage(null);
+  assert.deepEqual(first.reply.counts, baseline.reply.counts);
+  assert.ok(
+    first.cost.documents - baseline.cost.documents <= 3,
+    'counter and two scanned archive roots only',
+  );
+  assert.ok(first.cost.bytes - baseline.cost.bytes < 1_120_000, 'one archive bound plus the crossing root');
 });
 
 test('indexed planning preserves all filter combinations, record-store bodies, paging and reconciliation (5a85cb5f)', async t => {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { planningRecordTable } from './projectWorkRecordTables';
-import { v, type Infer } from 'convex/values';
+import { getDocumentSize, v, type Infer } from 'convex/values';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { PaginationOptions } from 'convex/server';
@@ -152,7 +152,7 @@ export async function countedInitiative(
  * measured an unfiltered `planning {counts:true}` at four ~1 MB root pages on the dogfood board. The counter tallies
  * the five Plan statuses per kind in the transaction of each status move; Archived and Deleted, which it leaves out,
  * are counted from their own indexed roots. A viewer without a role, an Initiative or waiting filter, a continued
- * cursor, an unprepared search index, a counter still backfilling or a shelf past one page keeps the root scan. */
+ * cursor, an unprepared search index, a counter still backfilling or shelves past the bounded scan keep the paged root scan. */
 async function counterCounts(
   ctx: QueryCtx,
   generation: Doc<'projectWorkGenerations'>,
@@ -174,13 +174,17 @@ async function counterCounts(
   for (const status of PLAN_STATUSES)
     if (!filter.status || filter.status === status)
       found[status] = kinds.reduce((sum, kind) => sum + stored[kind][status], 0);
+  // Convex allows a single paginate() per query. Leave it available for the root fallback;
+  // each shelf is an indexed stream with its own former page cap plus the crossing document.
   for (const status of ['archived', 'deleted'] as const) {
     if (filter.status && filter.status !== status) continue;
-    const shelf = await (
-      await matchingSelectors(ctx, partition, { ...filter, status })
-    ).paginate({ cursor: null, numItems: 1000, maximumRowsRead: 1000, maximumBytesRead: 1000000 });
-    if (!shelf.isDone) return false;
-    found[status] = shelf.page.length;
+    let shelfBytes = 0;
+    let count = 0;
+    for await (const root of await matchingSelectors(ctx, partition, { ...filter, status })) {
+      shelfBytes += getDocumentSize(root);
+      if (++count > 1000 || shelfBytes > 1_000_000) return false;
+    }
+    found[status] = count;
   }
   Object.assign(counts, found);
   return true;

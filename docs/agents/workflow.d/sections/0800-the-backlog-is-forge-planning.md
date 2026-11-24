@@ -44,6 +44,10 @@ five counts. Archived and Deleted Issues are excluded. Use `status:"all"` for th
 counts including the shelves, or a single stored status to select one. `waitingOn` also
 uses the indexed count path.
 
+A whole-project member count (`planning {"counts":true}`) uses the stored Plan counter
+and short indexed reads of the Archived and Deleted shelves. If the shelves exceed the
+bounded read, the command uses the ordinary paged count, with the same totals.
+
 When the maintained counter covers the Initiative exactly for a member, the command uses
 one bounded read. Visitors and older, incomplete or overflowed counters use indexed Issue
 pages, applying the current Plan visibility rule for visitors. Counts read up to 20 pages

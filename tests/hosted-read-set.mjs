@@ -86,9 +86,10 @@ const documentBytes = row =>
         : value,
   ).length;
 
-export function meterReads(ctx) {
+export function meterReads(ctx, { maxPaginations = Infinity } = {}) {
   const { get, query } = ctx.db;
   const total = { documents: 0, bytes: 0 };
+  let paginations = 0;
   const count = rows => {
     for (const row of rows)
       if (row) {
@@ -110,6 +111,8 @@ export function meterReads(ctx) {
             return (...args) => wrap(value.apply(object, args));
           if (key === 'paginate')
             return async (...args) => {
+              if (++paginations > maxPaginations)
+                throw Error('Convex only supports one paginated query per query function');
               const page = await value.apply(object, args);
               count(page.page);
               return page;
@@ -142,6 +145,7 @@ export function meterReads(ctx) {
     /** What `read` costs, as { documents, bytes }. */
     async cost(read) {
       Object.assign(total, { documents: 0, bytes: 0 });
+      paginations = 0;
       await read();
       return { ...total };
     },
