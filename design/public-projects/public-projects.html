@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en" data-ds data-theme="dark">
+<head>
+<!-- Design mock with synthetic example data (projects, handles, files and numbers are invented). It shows intended
+     layout and wording only; it does not describe behaviour that ships. Decisions and read costs:
+     design/public-projects/README.md (Item 8947a779). -->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Public projects mock</title>
+<link rel="stylesheet" href="../../web/src/ds/tokens.css" />
+<link rel="stylesheet" href="../../web/src/ds/base.css" />
+<link rel="stylesheet" href="../../web/src/ds/core.css" />
+<link rel="stylesheet" href="../../web/src/ds/parts.css" />
+<link rel="stylesheet" href="../../web/src/ds/figures.css" />
+<link rel="stylesheet" href="../../web/src/ds/review.css" />
+<link rel="stylesheet" href="../../web/src/ds/public.css" />
+<link rel="stylesheet" href="../../web/src/public/person.css" />
+<style>
+/* Page-only parts of the public projects mock (prefix pp-). Every value is a token; system classes are drawn as the
+   system draws them, restyled only inside this page's own scope. */
+[data-ds] {
+  body { background: var(--bg); color: var(--text); margin: 0; }
+  .pp-mockbar { position: sticky; top: 0; z-index: 30; display: flex; gap: var(--s-2) var(--s-3); align-items: center; flex-wrap: wrap; padding: var(--s-2) var(--gut); background: var(--bg); border-bottom: var(--rule) dashed var(--line-strong); color: var(--text-3); font-size: var(--t-meta); }
+  .pp-mockbar nav { display: flex; gap: var(--s-3); flex-wrap: wrap; }
+  .pp-mockbar nav a { color: var(--text-2); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+  .pp-mockbar .pp-keys { margin-left: auto; display: flex; gap: var(--s-2); }
+  .pp-cap { max-width: var(--wrap-land); margin: 0 auto; padding: var(--s-8) var(--gut-head) var(--s-2); color: var(--text-3); font-size: var(--t-meta); }
+  .pp-cap b { color: var(--text-2); font-weight: var(--w-strong); }
+  .pp-page { border-bottom: var(--rule) dashed var(--line-strong); }
+  /* One sticky bar per mock page would stack; in the mock each bar sits in flow. */
+  .pp-page .pubbar.wide { position: relative; }
+  .pp-page .pubwide { min-height: 0; }
+
+  /* Worst-case data: the mock bar swaps sample rows (pp-n) for worst-case rows (pp-w). */
+  &:not(.pp-worst) .pp-w { display: none !important; }
+  &.pp-worst .pp-n { display: none !important; }
+
+  /* The project's sections, under its head: Overview, Code, Plan. The current one carries the nav edge. */
+  .pp-tabs { display: flex; gap: 0; padding: 0 calc(var(--gut-head) - var(--s-3)); border-bottom: var(--rule) solid var(--line); overflow-x: auto; scrollbar-width: none; }
+  .pp-tabs a { display: flex; align-items: center; gap: var(--s-2); height: var(--ph-h); padding: 0 var(--s-3); color: var(--text-2); font-size: var(--t-small); font-weight: var(--w-medium); white-space: nowrap; }
+  .pp-tabs a[aria-current] { color: var(--text); font-weight: var(--w-bold); box-shadow: inset 0 -2px 0 var(--brand); }
+  .pp-tabs a .cnt { color: var(--text-3); font: var(--w-regular) var(--t-meta)/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+  @media (hover: hover) and (pointer: fine) { .pp-tabs a:hover { color: var(--text); } }
+  @media (max-width: 860px) { .pp-tabs { padding-inline: calc(var(--gut) - var(--s-3)); } .pp-tabs a { height: 44px; } }
+
+  /* README first: the doc column is the README; the side column is recent landings, then About and open Lanes. */
+  .pp-readme .ph { gap: var(--s-3); }
+  .pp-readme .ph h2 { font-family: var(--font-mono); font-size: calc(var(--t-title) * var(--mono-scale)); }
+  .pp-readme .md { padding-top: var(--s-5); }
+  .pp-readme .md .pp-badges { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-bottom: var(--s-4); }
+  .pp-readme .md .pp-ext { display: inline-flex; align-items: center; gap: var(--s-1); height: 22px; padding: 0 var(--s-2); border: var(--rule) dashed var(--line-strong); border-radius: var(--r); color: var(--text-2); font-size: var(--t-meta); text-decoration: none; }
+  .pp-readme .md figure { max-width: var(--m-read); margin: 0 0 var(--s-4); }
+  .pp-readme .md .pp-img { display: grid; place-items: center; aspect-ratio: 16 / 6; background: var(--surface-2); border: var(--rule) solid var(--line); color: var(--text-3); font-size: var(--t-meta); }
+  .pp-readme .md figcaption { color: var(--text-2); font-size: var(--t-meta); margin-top: var(--s-1); }
+  .pp-readme .md .pp-wide { max-width: none; overflow-x: auto; }
+  .pp-readme .md .pp-wide table { min-width: 640px; }
+  .pp-cutnote { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); align-items: center; padding: var(--s-3) var(--gut-head); border-top: var(--rule) solid var(--line); color: var(--text-2); font-size: var(--t-small); }
+  @media (max-width: 860px) { .pp-cutnote { padding-inline: var(--gut); } }
+
+  /* Keeps its grid at every width (the system's narrow rows turn to flex); a long handle is cut, a title wraps. */
+  .pp-side .region .row.tl.pub, .pp-side .row.tl.pub { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: start; padding-block: 9px; }
+  .pp-side .row.tl.pub > span { min-width: 0; }
+  .pp-side .row.tl.pub .by { display: flex; min-width: 0; }
+  .pp-side .row.tl.pub .by .who { min-width: 0; }
+  .pp-side .row.tl.pub > time { color: var(--text-3); font-size: var(--t-meta); padding-top: 2px; white-space: nowrap; }
+  .pp-side .row.tl.pub .ttl { display: block; overflow-wrap: anywhere; }
+  .pp-side .row.tl.pub > .st { padding-top: 2px; font-size: var(--t-meta); white-space: nowrap; }
+  .pp-side .pf { display: flex; align-items: center; min-height: var(--ph-h); padding: 0 var(--gut); color: var(--text-2); font-size: var(--t-meta); border-top: var(--rule) solid var(--line); }
+  .pp-side .kv.about { grid-template-columns: 104px minmax(0, 1fr); }
+
+  /* Explore: the project table with time to main; five columns from 821 px of region width. */
+  @container (min-width: 821px) { .xrow.pp-x { grid-template-columns: minmax(0, 1fr) 150px 112px 128px 92px; } }
+  .xrow.pp-x .tm { color: var(--text-2); }
+  .xrow.pp-x .tm .nr { color: var(--text-3); font-family: var(--font-sans); }
+
+  /* An organisation's week across its public projects. */
+  .pp-orgweek > div { display: grid; gap: 2px; }
+
+  /* States: the star in every state, the sign-in prompts and the CLI refusals, drawn beside each other. */
+  .pp-states { max-width: var(--wrap-land); margin: 0 auto; padding: 0 0 var(--s-12); }
+  .pp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 1px; background: var(--line); border-block: var(--rule) solid var(--line); }
+  .pp-grid > section { background: var(--surface); min-width: 0; display: grid; align-content: start; }
+  .pp-grid .pp-sc { padding: var(--s-3) var(--gut-head) var(--s-2); color: var(--text-3); font-size: var(--t-meta); }
+  .pp-starrow { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4); align-items: center; padding: var(--s-2) var(--gut-head) var(--s-3); }
+  .pp-starrow .pp-l { color: var(--text-2); font-size: var(--t-meta); min-width: 150px; }
+  .pp-starrow .note { color: var(--failed); font-size: var(--t-meta); }
+  /* A sheet drawn in place: the scrim and its fixed position are left out so several show at once. */
+  .pp-sheetbox { display: grid; justify-items: center; padding: var(--s-4) var(--gut-head) var(--s-6); background: var(--scrim); }
+  .pp-sheetbox .sheet { width: min(520px, 100%); }
+  .pp-sheetbox .sheet .note { color: var(--text-2); }
+  .pp-states pre.out { border-top: var(--rule) solid var(--line); }
+  .pp-sheetbox .people .who { min-width: 0; }
+  .pp-sheetbox .people .who > a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pp-states .pp-prop { padding: 0 var(--gut-head) var(--s-3); }
+
+  /* Phone frames: the same file at 390 px, one page each. */
+  .pp-phones { max-width: var(--wrap-land); margin: 0 auto; padding: var(--s-2) var(--gut-head) var(--s-12); display: flex; gap: var(--s-5); overflow-x: auto; }
+  .pp-phones figure { margin: 0; display: grid; gap: var(--s-2); flex: none; }
+  .pp-phones figcaption { color: var(--text-3); font-size: var(--t-meta); }
+  .pp-phones iframe { width: 390px; height: 844px; border: var(--rule) solid var(--line-strong); background: var(--bg); }
+
+  @media (max-width: 860px) {
+    .pp-readme .md .pp-wide table { min-width: 560px; }
+    .pp-phones, .pp-mockbar nav { display: none; }
+  }
+  &.pp-embedded .pp-mockbar, &.pp-embedded .pp-cap, &.pp-embedded .pp-phones, &.pp-embedded .pp-phonecap { display: none; }
+  &.pp-embedded .pp-page { border-bottom: 0; }
+  &[data-only="project"] :is(.pp-page, .pp-states):not(#p-project),
+  &[data-only="explore"] :is(.pp-page, .pp-states):not(#p-explore),
+  &[data-only="person"] :is(.pp-page, .pp-states):not(#p-person),
+  &[data-only="org"] :is(.pp-page, .pp-states):not(#p-org),
+  &[data-only="states"] :is(.pp-page, .pp-states):not(#p-states) { display: none; }
+}
+</style>
+<script>
+  // ?only=PAGE shows one page (the phone frames); ?data=worst and ?theme=light set the toggles.
+  (function () {
+    var q = new URLSearchParams(location.search), r = document.documentElement;
+    if (q.get('only')) { r.dataset.only = q.get('only'); r.classList.add('pp-embedded'); }
+    if (q.get('theme') === 'light' || q.get('theme') === 'dark') r.dataset.theme = q.get('theme');
+    if (q.get('data') === 'worst') r.classList.add('pp-worst');
+    window.addEventListener('message', function (e) {
+      if (!e.data || !e.data.pp) return;
+      r.dataset.theme = e.data.theme;
+      r.classList.toggle('pp-worst', e.data.worst);
+    });
+  })();
+  function ppSend() {
+    var r = document.documentElement, s = { pp: 1, theme: r.dataset.theme, worst: r.classList.contains('pp-worst') };
+    document.querySelectorAll('iframe').forEach(function (f) { f.contentWindow && f.contentWindow.postMessage(s, '*'); });
+    document.querySelectorAll('[data-pp-key]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.ppKey === 'worst' ? s.worst : s.theme === 'light'));
+    });
+  }
+  function ppTheme() { var r = document.documentElement; r.dataset.theme = r.dataset.theme === 'light' ? 'dark' : 'light'; ppSend(); }
+  function ppWorst() { document.documentElement.classList.toggle('pp-worst'); ppSend(); }
+</script>
+</head>
+<body>
+<div class="pp-mockbar">
+  <span>Public projects mock (Item 8947a779). <span class="sample">Sample data.</span></span>
+  <nav aria-label="Mock pages">
+    <a href="#p-project">1 Project</a><a href="#p-explore">2 Explore</a><a href="#p-person">3 Person</a><a href="#p-org">4 Organisation</a><a href="#p-states">5 Star and sign-in</a><a href="#pp-phones">6 Phone</a>
+  </nav>
+  <span class="pp-keys">
+    <button type="button" class="btn sm" data-pp-key="light" aria-pressed="false" onclick="ppTheme()">Light theme</button>
+    <button type="button" class="btn sm" data-pp-key="worst" aria-pressed="false" onclick="ppWorst()">Worst case</button>
+  </span>
+</div>
+
+<!-- ======================================================================================================== -->
+<p class="pp-cap"><b>1. A public project, signed out.</b> README first, recent landings beside it, the code one click away (Code). Read: one cached snapshot from storage, 0 Convex calls.</p>
+<div class="pp-page" id="p-project">
+  <a class="skip" href="#main-project">Skip to the content</a>
+  <header class="pubbar wide">
+    <a class="brand" href="#" translate="no">
+      <svg class="mk" viewBox="0 0 64 64" width="20" height="20" aria-hidden="true"><path class="stem" d="M8 6H20V40.5H8Z"/><path class="stemB" d="M8 40H20V58H14L8 52Z"/><rect class="arm" x="8" y="6" width="26.6" height="12"/><path class="arm" d="M34 6H58L52 18H34Z"/><rect class="xT" x="8" y="6" width="12" height="12"/><rect class="arm" x="8" y="28" width="22.6" height="12"/><path class="arm" d="M30 28H48L42 40H30Z"/><rect class="xL" x="8" y="28" width="12" height="12"/></svg>
+      <span>Forge</span>
+    </a>
+    <nav class="pn" aria-label="Site"><a href="#p-explore">Explore</a><a class="hide-ph" href="#">Docs</a></nav>
+    <div class="end"><a class="btn sm" href="#p-states">Sign in</a></div>
+  </header>
+  <main class="pubwide" id="main-project" tabindex="-1">
+    <!-- Head: who and what, the license, the sentence that is the answer, the four keys. Clone is the one primary. -->
+    <div class="phead pp-n">
+      <span class="av pro org" aria-hidden="true">HL</span>
+      <div class="id">
+        <h1 translate="no"><a class="ow" href="#p-org">harbor-labs<i>/</i></a>tidewater<span class="kind">Public</span></h1>
+        <p class="say"><b>Main is passing.</b> 214 landings this week, usually 11 min from save to main; 9 Lanes are open.</p>
+        <div class="fl">
+          <span><a href="#">Apache-2.0</a></span>
+          <span>On Forge since 3 Mar 2026</span>
+          <span>Forked from <a href="#">sea-charts/tides</a></span>
+        </div>
+      </div>
+      <div class="tools">
+        <button type="button" class="btn star" aria-pressed="false" title="Star"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span>Star</span> <b class="n">1,284</b><span class="sr"> stars for harbor-labs/tidewater</span></button>
+        <button type="button" class="btn">Fork</button>
+        <button type="button" class="btn">Share</button>
+        <button type="button" class="btn primary">Clone</button>
+      </div>
+    </div>
+    <!-- Worst case: the longest handle and name, no license, a fork whose source is gone, a 6-figure star count. -->
+    <div class="phead pp-w">
+      <span class="av pro org" aria-hidden="true">AV</span>
+      <div class="id">
+        <h1 translate="no"><a class="ow" href="#p-org">a-very-long-organisation-handle-for-qa1<i>/</i></a>tide-tables-and-harbour-pilot-scheduling-with-an-unreasonably-long-project-slug-x<span class="kind">Public</span></h1>
+        <p class="say"><b>Main is not checked.</b> 1 landing this week, time to main not reported; 1 Lane is open.</p>
+        <div class="fl">
+          <span title="No LICENSE file on main: nobody may reuse this code without the owner's permission.">No license file</span>
+          <span>On Forge since 29 Feb 2024</span>
+          <span>Forked from a project that is no longer available</span>
+        </div>
+      </div>
+      <div class="tools">
+        <button type="button" class="btn star" aria-pressed="false" title="Star"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span>Star</span> <b class="n">128.4K</b><span class="sr"> stars (128,400) for this project</span></button>
+        <button type="button" class="btn">Fork</button>
+        <button type="button" class="btn">Share</button>
+        <button type="button" class="btn primary">Clone</button>
+      </div>
+    </div>
+
+    <!-- The standing line, public form: landings this week, open Lanes, open Items. -->
+    <nav class="pstate pp-n" aria-label="Where the project stands">
+      <a class="ps" href="#"><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Done</span><b>214</b><span>landings this week</span></a>
+      <a class="ps" href="#pp-lanes"><span class="st" data-st="active"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="currentColor" stroke="none"/></svg>In progress</span><b>9</b><span>open Lanes</span><span class="more">· 2 held</span></a>
+      <a class="ps" href="#"><span class="st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="5"/></svg>Left</span><b>37</b><span>open Items</span><span class="more">· 6 in progress</span></a>
+    </nav>
+    <nav class="pstate pp-w" aria-label="Where the project stands">
+      <span class="ps"><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Done</span><b>1</b><span>landing this week</span></span>
+      <span class="ps"><span class="st" data-st="active"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="currentColor" stroke="none"/></svg>In progress</span><b>1</b><span>open Lane</span></span>
+      <span class="ps"><span class="st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="5"/></svg>Left</span><b>0</b><span>open Items</span></span>
+    </nav>
+
+    <nav class="pp-tabs" aria-label="Project">
+      <a href="#" aria-current="page">Overview</a>
+      <a href="#">Code</a>
+      <a href="#" class="pp-n">Plan <span class="cnt">37</span></a>
+    </nav>
+
+    <div class="pframe">
+      <!-- 1. README.md (or .nforge/home.md): rendered once per change on main, stored with the page. -->
+      <div class="doc pp-readme">
+        <section aria-label="README" class="pp-n">
+          <div class="ph plain"><h2>README.md</h2><span class="hint">on main · changed 2 days ago</span><span class="tools"><a class="lk" href="#">Open in Code</a></span></div>
+          <div class="md" dir="auto">
+            <h1>Tidewater</h1>
+            <div class="pp-badges"><a class="pp-ext" href="#" title="Image from img.shields.io, not loaded">build: passing</a><a class="pp-ext" href="#" title="Image from img.shields.io, not loaded">crates.io v2.4.1</a></div>
+            <p>Tide tables and harbour-pilot windows from public gauge data. One library, one command, no network at run time once the tables are cached.</p>
+            <figure><div class="pp-img" role="img" aria-label="Chart of a spring tide at Dover, from docs/spring-tide.png">docs/spring-tide.png</div><figcaption>A spring tide at Dover, drawn by <code>tidewater plot</code>.</figcaption></figure>
+            <h2>Install</h2>
+            <pre><code><span class="tok-c"># needs Rust 1.82 or newer</span>
+cargo install tidewater</code></pre>
+            <h2>Use</h2>
+            <ol>
+              <li>Fetch a port's tables: <code>tidewater fetch dover</code>.</li>
+              <li>Ask for the next safe window: <code>tidewater window dover --draught 9.2</code>.</li>
+              <li>Plot a week: <code>tidewater plot dover --days 7</code>.</li>
+            </ol>
+            <h2>Ports</h2>
+            <table>
+              <thead><tr><th>Port</th><th>Source</th><th>Updated</th></tr></thead>
+              <tbody><tr><td>Dover</td><td>public gauge 0042</td><td>hourly</td></tr><tr><td>Rotterdam</td><td>public gauge 1187</td><td>hourly</td></tr><tr><td>Halifax</td><td>public gauge 3320</td><td>every 6 hours</td></tr></tbody>
+            </table>
+            <h2>Contributing</h2>
+            <p>Open a Lane, save, and land. Every landing runs <code>cargo test</code>; see <a href="#">CONTRIBUTING.md</a>.</p>
+          </div>
+        </section>
+        <!-- Worst case: right-to-left text, an unbroken URL, a wide table and a README past the stored size. -->
+        <section aria-label="README" class="pp-w">
+          <div class="ph plain"><h2>.nforge/home.md</h2><span class="hint">on main · changed 3 years ago</span><span class="tools"><a class="lk" href="#">Open in Code</a></span></div>
+          <div class="md" dir="auto">
+            <h1>x</h1>
+            <p dir="rtl" lang="ar">جداول المد والجزر ونوافذ الإرشاد البحري من بيانات المقاييس العامة.</p>
+            <p lang="ja">潮汐表と水先案内の時間帯を公開データから作ります。</p>
+            <p>Mirror: https://example.org/a/very/long/path/that/never/breaks/because/it/has/no/spaces/at/all/tidewater-mirror-archive-2026-11-24.tar.zst</p>
+            <div class="pp-wide"><table>
+              <thead><tr><th>Port</th><th>Gauge</th><th>Datum</th><th>Mean spring range</th><th>Mean neap range</th><th>Updated</th><th>Licence of the data</th></tr></thead>
+              <tbody><tr><td>Llanfairpwllgwyngyll harbour</td><td>0042-0042-0042</td><td>Chart datum (LAT)</td><td>5.92 m</td><td>3.10 m</td><td>hourly</td><td>Open Government Licence v3.0</td></tr></tbody>
+            </table></div>
+            <p>Section 1 of 214 …</p>
+          </div>
+          <div class="pp-cutnote"><span>This file is 412 KB; the first 48 KB show here.</span><a class="lk" href="#">Read the rest in Code</a></div>
+        </section>
+      </div>
+
+      <!-- 2. Beside the README: what landed, newest first; then the project's facts; then open Lanes as counts. -->
+      <aside class="pp-side" aria-label="Activity and about">
+        <section aria-label="Recent landings">
+          <div class="ph plain"><h2>Recent landings</h2><span class="cnt pp-n">214</span><span class="cnt pp-w">1</span><span class="hint">this week · newest first</span></div>
+          <div class="row tl pub pp-n"><time class="num" title="2026-11-24 14:08">14:08</time><span><span class="ttl" dir="auto">Halifax tables refresh every 6 hours</span><span class="by"><span class="who"><span class="av ag" aria-hidden="true">MI</span><span class="mono">mira/quiet-otter</span></span></span></span><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span></div>
+          <div class="row tl pub pp-n"><time class="num" title="2026-11-24 13:52">13:52</time><span><span class="ttl" dir="auto">Window search respects draught over 9 m</span><span class="by"><span class="who"><span class="av" aria-hidden="true">MI</span><span class="mono">@mira</span></span></span></span><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span></div>
+          <div class="row tl pub pp-n"><time class="num" title="2026-11-24 12:30">12:30</time><span><span class="ttl" dir="auto">Plot axis shows local time</span><span class="by"><span class="who"><span class="av ag" aria-hidden="true">JO</span><span class="mono">jonas/brisk-heron</span></span></span></span><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span></div>
+          <div class="row tl pub pp-n"><time class="num" title="2026-11-24 09:41">09:41</time><span><span class="ttl" dir="auto">Landing 41b09ad7</span><span class="by">an agent</span></span><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span></div>
+          <div class="row tl pub pp-n"><time class="num" title="2026-11-23 18:02">Mon</time><span><span class="ttl" dir="auto">Rotterdam gauge moved to 1187</span><span class="by"><span class="who"><span class="av" aria-hidden="true">JO</span><span class="mono">@jonas</span></span></span></span><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span></div>
+          <div class="row tl pub pp-n"><time class="num" title="2026-11-23 11:15">Mon</time><span><span class="ttl" dir="auto">Cache tables per port, not per run</span><span class="by"><span class="who"><span class="av ag" aria-hidden="true">MI</span><span class="mono">mira/quiet-otter</span></span></span></span><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span></div>
+          <!-- worst case rows -->
+          <div class="row tl pub pp-w"><time class="num" title="2021-11-24 14:08">2021</time><span><span class="ttl" dir="auto">🚢 harbour mode for every port on the list, including the ones whose names are longer than any line on this page can hold</span><span class="by"><span class="who"><span class="av ag" aria-hidden="true">AV</span><span class="mono" title="a-very-long-organisation-handle-for-qa1/a-run-name-that-is-long">a-very-long-organisation-handle-for-qa1/a-run-name-that-is-long</span></span></span></span><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span></div>
+          <div class="row tl pub pp-w"><time class="num">2021</time><span><span class="ttl" dir="rtl" lang="ar">تحديث جداول المد والجزر</span><span class="by"><span class="who"><span class="av" aria-hidden="true">Q</span><span class="mono">@q</span></span></span></span><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span></div>
+          <div class="row tl pub pp-w"><time class="num">2021</time><span><span class="ttl">x</span><span class="by">not reported</span></span><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span></div>
+          <div class="pf"><a class="lk" href="#">All landings, in Code › History</a></div>
+        </section>
+        <section aria-label="About">
+          <div class="ph plain"><h2>About</h2></div>
+          <dl class="kv about pp-n">
+            <dt>License</dt><dd><a class="lk" href="#">Apache-2.0</a> <span class="t3">· LICENSE</span></dd>
+            <dt>Owner</dt><dd><a class="lk" href="#p-org" translate="no">@harbor-labs</a></dd>
+            <dt>Time to main</dt><dd>usually <span class="num">11 min</span> <span class="t3">· this week, run by Forge</span></dd>
+            <dt>This week</dt><dd><span class="wk" role="img" aria-label="Landings per day: 6 days ago 22, 5 days ago 31, 4 days ago 40, 3 days ago 18, 2 days ago 36, yesterday 39, today 28"><i style="--h:55"></i><i style="--h:78"></i><i style="--h:100"></i><i style="--h:45"></i><i style="--h:90"></i><i style="--h:98"></i><i class="now" style="--h:70"></i></span></dd>
+            <dt>Since</dt><dd>3 Mar 2026</dd>
+          </dl>
+          <dl class="kv about pp-w">
+            <dt>License</dt><dd>No license file</dd>
+            <dt>Owner</dt><dd><a class="lk" href="#p-org" translate="no" title="@a-very-long-organisation-handle-for-qa1">@a-very-long-organisation-handle-for-qa1</a></dd>
+            <dt>Time to main</dt><dd>not reported <span class="t3">· no check on main</span></dd>
+            <dt>This week</dt><dd><span class="wk" role="img" aria-label="Landings per day: 1 today"><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i class="now" style="--h:100"></i></span></dd>
+            <dt>Since</dt><dd>29 Feb 2024</dd>
+          </dl>
+        </section>
+        <section aria-label="Open Lanes" id="pp-lanes">
+          <div class="ph plain"><h2>Open Lanes</h2><span class="cnt pp-n">9</span><span class="cnt pp-w">1</span><span class="hint">where each one is on its way to main</span></div>
+          <div class="pstops pp-n">
+            <div>Editing<b>4</b></div><div>Saved<b>2</b></div><div>In queue<b>1</b></div><div>Checking<b>2</b></div><div class="mn">Landed<b>214</b></div>
+          </div>
+          <div class="pstops pp-w">
+            <div>Editing<b>1</b></div><div class="z">Saved<b>0</b></div><div class="z">In queue<b>0</b></div><div class="z">Checking<b>0</b></div><div class="mn">Landed<b>1</b></div>
+          </div>
+          <p class="quietline">This project shows open Lanes as counts.</p>
+        </section>
+      </aside>
+    </div>
+  </main>
+  <footer class="pubfoot"><span translate="no">Forge by NanthAI</span><a href="#p-explore">Explore</a><a href="#">Docs</a><a href="#" translate="no">/llms.txt</a><span class="sample">Sample data</span></footer>
+</div>
+
+<!-- ======================================================================================================== -->
+<p class="pp-cap"><b>2. Explore, signed in.</b> Active ranks by landings this week, time to main and main, then stars. Read: one cached page of 50 from storage; signed in adds the existing star lookup for the 50 shown.</p>
+<div class="pp-page" id="p-explore">
+  <header class="pubbar wide">
+    <a class="brand" href="#" translate="no">
+      <svg class="mk" viewBox="0 0 64 64" width="20" height="20" aria-hidden="true"><path class="stem" d="M8 6H20V40.5H8Z"/><path class="stemB" d="M8 40H20V58H14L8 52Z"/><rect class="arm" x="8" y="6" width="26.6" height="12"/><path class="arm" d="M34 6H58L52 18H34Z"/><rect class="xT" x="8" y="6" width="12" height="12"/><rect class="arm" x="8" y="28" width="22.6" height="12"/><path class="arm" d="M30 28H48L42 40H30Z"/><rect class="xL" x="8" y="28" width="12" height="12"/></svg>
+      <span>Forge</span>
+    </a>
+    <nav class="pn" aria-label="Site"><a href="#p-explore" aria-current="page">Explore</a><a class="hide-ph" href="#">Docs</a></nav>
+    <div class="end"><a class="hide-ph" href="#">Your projects</a><a class="acct" href="#p-person" aria-label="@mira, your profile"><span class="av" aria-hidden="true">MI</span></a></div>
+  </header>
+  <main class="pubwide" tabindex="-1">
+    <div class="head">
+      <h1>Explore</h1>
+      <p class="sit pp-n"><b>1,284 public projects.</b> 412 of them landed something this week.</p>
+      <p class="sit pp-w"><b>2 public projects.</b> 1 of them landed something this week.</p>
+    </div>
+    <section class="region" aria-label="Public projects">
+      <form class="tbar" role="search" onsubmit="return false">
+        <label class="find"><span class="sr">Find a project, person or organisation</span><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><path d="M7 2.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9ZM10.3 10.3 14 14" stroke-width="1.5"/></svg><input class="inp" type="search" placeholder="Find a project, person or organisation…" /></label>
+        <div class="seg" role="group" aria-label="Order"><button type="button" aria-pressed="true">Active</button><button type="button" aria-pressed="false">Stars</button><button type="button" aria-pressed="false">Newest</button></div>
+        <span class="n pp-n">1,284 projects</span><span class="n pp-w">2 projects</span>
+      </form>
+      <div class="th xrow lean pp-x">
+        <span>Project</span>
+        <span class="r" title="Changes accepted onto main in the last 7 days, and each day’s share">Landings, 7 days</span>
+        <span class="r" title="Usual time from a save to main this week, run by Forge">Time to main</span>
+        <span title="Whether the check on main passes">Main</span>
+        <span class="r">Stars</span>
+      </div>
+      <!-- sample rows -->
+      <div class="row xrow lean pp-x pp-n">
+        <div class="pj"><span class="av lg org" aria-hidden="true">HL</span><a class="pjn" href="#p-project" translate="no"><span class="ow">harbor-labs</span><span class="sl">/</span><b>tidewater</b></a><span class="pjd">Tide tables and harbour-pilot windows from public gauge data.</span></div>
+        <div class="sig">
+          <span class="wkc r"><span class="num">214<span class="k"> this week</span></span><span class="wk" role="img" aria-label="Landings per day this week"><i style="--h:55"></i><i style="--h:78"></i><i style="--h:100"></i><i style="--h:45"></i><i style="--h:90"></i><i style="--h:98"></i><i class="now" style="--h:70"></i></span></span>
+          <span class="tm r num">11 min<span class="k"> to main</span></span>
+          <span class="hl"><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Passing</span></span>
+        </div>
+        <div class="stc"><button type="button" class="star in-row" aria-pressed="true" title="Starred by you"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span class="sr">Star</span> <b>1,284</b><span class="sr"> stars for harbor-labs/tidewater, starred by you</span></button></div>
+      </div>
+      <div class="row xrow lean pp-x pp-n">
+        <div class="pj"><span class="av lg" aria-hidden="true">JO</span><a class="pjn" href="#" translate="no"><span class="ow">jonas</span><span class="sl">/</span><b>gauge-reader</b></a><span class="pjd">Reads public tide gauges into one format.</span></div>
+        <div class="sig">
+          <span class="wkc r"><span class="num">96<span class="k"> this week</span></span><span class="wk" role="img" aria-label="Landings per day this week"><i style="--h:20"></i><i style="--h:40"></i><i style="--h:65"></i><i style="--h:100"></i><i style="--h:30"></i><i style="--h:50"></i><i class="now" style="--h:12"></i></span></span>
+          <span class="tm r num">7 min<span class="k"> to main</span></span>
+          <span class="hl"><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Passing</span></span>
+        </div>
+        <div class="stc"><button type="button" class="star in-row" aria-pressed="false" title="Star"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span class="sr">Star</span> <b>312</b><span class="sr"> stars for jonas/gauge-reader</span></button></div>
+      </div>
+      <div class="row xrow lean pp-x pp-n">
+        <div class="pj"><span class="av lg org" aria-hidden="true">SC</span><a class="pjn" href="#" translate="no"><span class="ow">sea-charts</span><span class="sl">/</span><b>tides</b></a><span class="pjd">The tide library tidewater was forked from.</span></div>
+        <div class="sig">
+          <span class="wkc r"><span class="num">58<span class="k"> this week</span></span><span class="wk" role="img" aria-label="Landings per day this week"><i style="--h:60"></i><i style="--h:30"></i><i style="--h:100"></i><i style="--h:10"></i><i style="--h:0"></i><i style="--h:70"></i><i class="now" style="--h:40"></i></span></span>
+          <span class="tm r num">24 min<span class="k"> to main</span></span>
+          <span class="hl"><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Passing</span></span>
+        </div>
+        <div class="stc"><button type="button" class="star in-row" aria-pressed="false" title="Star"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span class="sr">Star</span> <b>2,940</b><span class="sr"> stars for sea-charts/tides</span></button></div>
+      </div>
+      <div class="row xrow lean pp-x pp-n">
+        <div class="pj"><span class="av lg" aria-hidden="true">MI</span><a class="pjn" href="#" translate="no"><span class="ow">mira</span><span class="sl">/</span><b>pilot-notes</b></a><span class="pjd">On Forge since 2 Feb 2026</span></div>
+        <div class="sig">
+          <span class="wkc r"><span class="num">12<span class="k"> this week</span></span><span class="wk" role="img" aria-label="Landings per day this week"><i style="--h:0"></i><i style="--h:50"></i><i style="--h:0"></i><i style="--h:100"></i><i style="--h:0"></i><i style="--h:25"></i><i class="now" style="--h:0"></i></span></span>
+          <span class="tm r num"><span class="nr">not checked</span></span>
+          <span class="hl"><span class="st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 8h8"/></svg>Not checked</span></span>
+        </div>
+        <div class="stc"><button type="button" class="star in-row" aria-pressed="false" title="Star"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span class="sr">Star</span> <b>8</b><span class="sr"> stars for mira/pilot-notes</span></button></div>
+      </div>
+      <!-- worst-case rows -->
+      <div class="row xrow lean pp-x pp-w">
+        <div class="pj"><span class="av lg org" aria-hidden="true">AV</span><a class="pjn" href="#p-project" translate="no" title="a-very-long-organisation-handle-for-qa1/tide-tables-and-harbour-pilot-scheduling-with-an-unreasonably-long-project-slug-x"><span class="ow">a-very-long-organisation-handle-for-qa1</span><span class="sl">/</span><b>tide-tables-and-harbour-pilot-scheduling-with-an-unreasonably-long-project-slug-x</b></a><span class="pjd">On Forge since 29 Feb 2024</span></div>
+        <div class="sig">
+          <span class="wkc r"><span class="num">1<span class="k"> this week</span></span><span class="wk" role="img" aria-label="Landings per day: 1 today"><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i class="now" style="--h:100"></i></span></span>
+          <span class="tm r num"><span class="nr">not reported</span></span>
+          <span class="hl"><span class="st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 8h8"/></svg>Not checked</span></span>
+        </div>
+        <div class="stc"><button type="button" class="star in-row" aria-pressed="false" title="Star"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span class="sr">Star</span> <b>128.4K</b><span class="sr"> stars (128,400)</span></button></div>
+      </div>
+      <div class="row xrow lean pp-x pp-w">
+        <div class="pj"><span class="av lg" aria-hidden="true">Q</span><a class="pjn" href="#" translate="no"><span class="ow">q</span><span class="sl">/</span><b>x</b></a><span class="pjd">On Forge since today</span></div>
+        <div class="sig">
+          <span class="wkc r"><span class="num zero">0<span class="k"> this week</span></span><span class="wk" role="img" aria-label="No landings this week"><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i class="now" style="--h:0"></i></span></span>
+          <span class="tm r num"><span class="nr">not reported</span></span>
+          <span class="hl"><span class="st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 8h8"/></svg>Not checked</span></span>
+        </div>
+        <div class="stc"><button type="button" class="star in-row" aria-pressed="false" title="Star"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span class="sr">Star</span> <b class="zero">0</b><span class="sr"> stars</span></button></div>
+      </div>
+      <div class="pager pp-n"><span class="n">1 to 50 of 1,284 · most active first: landings this week, time to main, main, then stars</span><button type="button" class="btn sm">Next 50</button></div>
+      <div class="pager pp-w"><span class="n">1 to 2 of 2 · most active first</span></div>
+    </section>
+  </main>
+  <footer class="pubfoot"><span translate="no">Forge by NanthAI</span><a href="#p-explore">Explore</a><a href="#">Docs</a><a href="#" translate="no">/llms.txt</a><span class="sample">Sample data</span></footer>
+</div>
+
+<!-- ======================================================================================================== -->
+<p class="pp-cap"><b>3. A person’s profile, signed out.</b> Today’s profile (Item 6a251b23) kept; its public projects use the Explore table. Read: one cached profile from storage.</p>
+<div class="pp-page" id="p-person">
+  <header class="pubbar wide">
+    <a class="brand" href="#" translate="no">
+      <svg class="mk" viewBox="0 0 64 64" width="20" height="20" aria-hidden="true"><path class="stem" d="M8 6H20V40.5H8Z"/><path class="stemB" d="M8 40H20V58H14L8 52Z"/><rect class="arm" x="8" y="6" width="26.6" height="12"/><path class="arm" d="M34 6H58L52 18H34Z"/><rect class="xT" x="8" y="6" width="12" height="12"/><rect class="arm" x="8" y="28" width="22.6" height="12"/><path class="arm" d="M30 28H48L42 40H30Z"/><rect class="xL" x="8" y="28" width="12" height="12"/></svg>
+      <span>Forge</span>
+    </a>
+    <nav class="pn" aria-label="Site"><a href="#p-explore">Explore</a><a class="hide-ph" href="#">Docs</a></nav>
+    <div class="end"><a class="btn sm" href="#p-states">Sign in</a></div>
+  </header>
+  <main class="pubwide" tabindex="-1">
+    <div class="phead pp-n">
+      <span class="av pro" aria-hidden="true">MI</span>
+      <div class="id">
+        <h1 translate="no">@mira<span class="kind">Person</span></h1>
+        <p class="say"><b>226 landings in the last 26 weeks</b> across 3 public projects.</p>
+        <p class="fl"><span>On Forge since 2 Feb 2026</span><span>3 public projects</span></p>
+      </div>
+    </div>
+    <div class="phead pp-w">
+      <span class="av pro" aria-hidden="true">AV</span>
+      <div class="id">
+        <h1 translate="no">@a-very-long-organisation-handle-for-qa1<span class="kind">Person</span></h1>
+        <p class="say"><b>No landing on a public project yet.</b></p>
+        <p class="fl"><span>On Forge since today</span><span>0 public projects</span></p>
+      </div>
+    </div>
+    <section class="region pp-n" aria-label="Contributions">
+      <div class="nums pick" role="group" aria-label="What the days count">
+        <button type="button" aria-pressed="true"><span class="t2">Landings</span><b class="num">226</b></button>
+        <button type="button" aria-pressed="false"><span class="t2">Lanes opened</span><b class="num">261</b></button>
+        <button type="button" aria-pressed="false"><span class="t2">Items closed</span><b class="num">41</b></button>
+        <button type="button" aria-pressed="false"><span class="t2">By agents</span><b class="num">78%</b></button>
+      </div>
+      <div class="ph plain"><h2>Landings per day</h2><span class="hint">public projects · <span class="only-long">26 weeks</span><span class="only-short">13 weeks</span></span></div>
+      <div class="days">
+        <div class="cal" role="img" aria-label="Landings per day over 26 weeks, most on 18 Nov: 9" id="pp-cal"></div>
+        <dl class="kv"><dt>Most in a day</dt><dd><span class="num">9</span>, on 18 Nov</dd><dt>Days with a landing</dt><dd><span class="num">97</span> of 182</dd><dt>By agents</dt><dd><span class="num">78%</span> of these, for @mira</dd></dl>
+      </div>
+    </section>
+    <section class="region" aria-label="Public projects">
+      <div class="ph plain"><h2>Public projects</h2><span class="cnt pp-n">3</span><span class="cnt pp-w">0</span><span class="hint">most active first</span></div>
+      <div class="pp-n">
+        <div class="th xrow lean pp-x"><span>Project</span><span class="r">Landings, 7 days</span><span class="r">Time to main</span><span>Main</span><span class="r">Stars</span></div>
+        <div class="row xrow lean pp-x">
+          <div class="pj"><span class="av lg org" aria-hidden="true">HL</span><a class="pjn" href="#p-project" translate="no"><span class="ow">harbor-labs</span><span class="sl">/</span><b>tidewater</b></a><span class="pjd">Member · 140 of the 26 weeks’ landings</span></div>
+          <div class="sig">
+            <span class="wkc r"><span class="num">214<span class="k"> this week</span></span><span class="wk" role="img" aria-label="Landings per day this week"><i style="--h:55"></i><i style="--h:78"></i><i style="--h:100"></i><i style="--h:45"></i><i style="--h:90"></i><i style="--h:98"></i><i class="now" style="--h:70"></i></span></span>
+            <span class="tm r num">11 min<span class="k"> to main</span></span>
+            <span class="hl"><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Passing</span></span>
+          </div>
+          <div class="stc"><button type="button" class="star in-row" aria-pressed="false" title="Star"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span class="sr">Star</span> <b>1,284</b></button></div>
+        </div>
+        <div class="row xrow lean pp-x">
+          <div class="pj"><span class="av lg" aria-hidden="true">MI</span><a class="pjn" href="#" translate="no"><span class="ow">mira</span><span class="sl">/</span><b>pilot-notes</b></a><span class="pjd">Owner · 80 landings</span></div>
+          <div class="sig">
+            <span class="wkc r"><span class="num">12<span class="k"> this week</span></span><span class="wk" role="img" aria-label="Landings per day this week"><i style="--h:0"></i><i style="--h:50"></i><i style="--h:0"></i><i style="--h:100"></i><i style="--h:0"></i><i style="--h:25"></i><i class="now" style="--h:0"></i></span></span>
+            <span class="tm r num"><span class="nr">not checked</span></span>
+            <span class="hl"><span class="st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 8h8"/></svg>Not checked</span></span>
+          </div>
+          <div class="stc"><button type="button" class="star in-row" aria-pressed="false" title="Star"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span class="sr">Star</span> <b>8</b></button></div>
+        </div>
+      </div>
+      <p class="quietline pp-w">Nothing public here yet. Private projects are never listed.</p>
+    </section>
+    <section class="region pp-n" aria-label="Latest">
+      <div class="ph plain"><h2>Latest</h2><span class="hint">public projects · newest first</span></div>
+      <a class="row latest" href="#"><span class="num">14:08</span><span class="what"><span class="ttl">Halifax tables refresh every 6 hours</span><span class="meta">harbor-labs/tidewater · mira/quiet-otter</span></span><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span></a>
+      <a class="row latest" href="#"><span class="num">13:52</span><span class="what"><span class="ttl">Window search respects draught over 9 m</span><span class="meta">harbor-labs/tidewater · @mira</span></span><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Landed</span></a>
+    </section>
+  </main>
+  <footer class="pubfoot"><span translate="no">Forge by NanthAI</span><a href="#p-explore">Explore</a><a href="#">Docs</a><span class="sample">Sample data</span></footer>
+</div>
+
+<!-- ======================================================================================================== -->
+<p class="pp-cap"><b>4. An organisation’s profile, signed out.</b> Its public projects first, then its week across them. Members are not listed (decision in the README). Read: one cached profile from storage.</p>
+<div class="pp-page" id="p-org">
+  <header class="pubbar wide">
+    <a class="brand" href="#" translate="no">
+      <svg class="mk" viewBox="0 0 64 64" width="20" height="20" aria-hidden="true"><path class="stem" d="M8 6H20V40.5H8Z"/><path class="stemB" d="M8 40H20V58H14L8 52Z"/><rect class="arm" x="8" y="6" width="26.6" height="12"/><path class="arm" d="M34 6H58L52 18H34Z"/><rect class="xT" x="8" y="6" width="12" height="12"/><rect class="arm" x="8" y="28" width="22.6" height="12"/><path class="arm" d="M30 28H48L42 40H30Z"/><rect class="xL" x="8" y="28" width="12" height="12"/></svg>
+      <span>Forge</span>
+    </a>
+    <nav class="pn" aria-label="Site"><a href="#p-explore">Explore</a><a class="hide-ph" href="#">Docs</a></nav>
+    <div class="end"><a class="btn sm" href="#p-states">Sign in</a></div>
+  </header>
+  <main class="pubwide" tabindex="-1">
+    <div class="phead pp-n">
+      <span class="av pro org" aria-hidden="true">HL</span>
+      <div class="id">
+        <h1 translate="no">@harbor-labs<span class="kind">Organisation</span></h1>
+        <p class="say"><b>12 public projects,</b> 5 of them landed something this week.</p>
+        <p class="fl"><span>On Forge since 3 Mar 2026</span></p>
+      </div>
+    </div>
+    <div class="phead pp-w">
+      <span class="av pro org" aria-hidden="true">AV</span>
+      <div class="id">
+        <h1 translate="no">@a-very-long-organisation-handle-for-qa1<span class="kind">Organisation</span></h1>
+        <p class="say"><b>1 public project,</b> none landed something this week.</p>
+        <p class="fl"><span>On Forge since 29 Feb 2024</span></p>
+      </div>
+    </div>
+    <section class="region" aria-label="Public projects">
+      <div class="ph plain"><h2>Public projects</h2><span class="cnt pp-n">12</span><span class="cnt pp-w">1</span><span class="hint">most active first</span></div>
+      <div class="th xrow lean pp-x"><span>Project</span><span class="r">Landings, 7 days</span><span class="r">Time to main</span><span>Main</span><span class="r">Stars</span></div>
+      <div class="row xrow lean pp-x pp-n">
+        <div class="pj"><span class="av lg org" aria-hidden="true">HL</span><a class="pjn" href="#p-project" translate="no"><span class="ow">harbor-labs</span><span class="sl">/</span><b>tidewater</b></a><span class="pjd">Tide tables and harbour-pilot windows from public gauge data.</span></div>
+        <div class="sig">
+          <span class="wkc r"><span class="num">214<span class="k"> this week</span></span><span class="wk" role="img" aria-label="Landings per day this week"><i style="--h:55"></i><i style="--h:78"></i><i style="--h:100"></i><i style="--h:45"></i><i style="--h:90"></i><i style="--h:98"></i><i class="now" style="--h:70"></i></span></span>
+          <span class="tm r num">11 min<span class="k"> to main</span></span>
+          <span class="hl"><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Passing</span></span>
+        </div>
+        <div class="stc"><button type="button" class="star in-row" aria-pressed="false" title="Star"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span class="sr">Star</span> <b>1,284</b></button></div>
+      </div>
+      <div class="row xrow lean pp-x pp-n">
+        <div class="pj"><span class="av lg org" aria-hidden="true">HL</span><a class="pjn" href="#" translate="no"><span class="ow">harbor-labs</span><span class="sl">/</span><b>berth-planner</b></a><span class="pjd">Berth allocation from tide windows.</span></div>
+        <div class="sig">
+          <span class="wkc r"><span class="num">71<span class="k"> this week</span></span><span class="wk" role="img" aria-label="Landings per day this week"><i style="--h:30"></i><i style="--h:60"></i><i style="--h:100"></i><i style="--h:40"></i><i style="--h:20"></i><i style="--h:80"></i><i class="now" style="--h:50"></i></span></span>
+          <span class="tm r num">9 min<span class="k"> to main</span></span>
+          <span class="hl"><span class="st" data-st="passed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8.5 3.2 3.2L13 4.8"/></svg>Passing</span></span>
+        </div>
+        <div class="stc"><button type="button" class="star in-row" aria-pressed="false" title="Star"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span class="sr">Star</span> <b>406</b></button></div>
+      </div>
+      <div class="row xrow lean pp-x pp-w">
+        <div class="pj"><span class="av lg org" aria-hidden="true">AV</span><a class="pjn" href="#p-project" translate="no"><span class="ow">a-very-long-organisation-handle-for-qa1</span><span class="sl">/</span><b>tide-tables-and-harbour-pilot-scheduling-with-an-unreasonably-long-project-slug-x</b></a><span class="pjd">On Forge since 29 Feb 2024</span></div>
+        <div class="sig">
+          <span class="wkc r"><span class="num zero">0<span class="k"> this week</span></span><span class="wk" role="img" aria-label="No landings this week"><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i style="--h:0"></i><i class="now" style="--h:0"></i></span></span>
+          <span class="tm r num"><span class="nr">not reported</span></span>
+          <span class="hl"><span class="st" data-st="stale"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 8h8"/></svg>Not checked</span></span>
+        </div>
+        <div class="stc"><button type="button" class="star in-row" aria-pressed="false" title="Star"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span class="sr">Star</span> <b>128.4K</b><span class="sr"> stars (128,400)</span></button></div>
+      </div>
+      <div class="pager pp-n"><span class="n">2 of 12 shown here · 10 more</span><button type="button" class="btn sm">Show 10 more</button></div>
+    </section>
+    <section class="region" aria-label="This week across its projects">
+      <div class="ph plain"><h2>This week</h2><span class="hint">across its public projects</span></div>
+      <div class="nums pp-orgweek pp-n">
+        <div><span>Landings</span><b class="num">384</b></div>
+        <div><span>Open Lanes</span><b class="num">22</b></div>
+        <div><span>Main passing</span><b class="num">10 of 12</b></div>
+        <div><span>Stars</span><b class="num">3,410</b></div>
+      </div>
+      <div class="nums pp-orgweek pp-w">
+        <div><span>Landings</span><b class="num">0</b></div>
+        <div><span>Open Lanes</span><b class="num">1</b></div>
+        <div><span>Main passing</span><b class="num">0 of 1</b></div>
+        <div><span>Stars</span><b class="num">128,400</b></div>
+      </div>
+    </section>
+  </main>
+  <footer class="pubfoot"><span translate="no">Forge by NanthAI</span><a href="#p-explore">Explore</a><a href="#">Docs</a><span class="sample">Sample data</span></footer>
+</div>
+
+<!-- ======================================================================================================== -->
+<p class="pp-cap"><b>5. The star and the sign-in prompts.</b> Every state of the star; the one sign-in step for star, fork and clone on the web and in the CLI. Nothing happens before sign-in.</p>
+<div class="pp-states" id="p-states">
+  <div class="pp-grid">
+    <section aria-label="Star control states">
+      <p class="pp-sc">A. The star, on a project page. One per person; agents never star. Count exact below 100,000, then 128.4K with the exact number in its label.</p>
+      <div class="pp-starrow"><span class="pp-l">Signed out (opens B)</span><button type="button" class="btn star" aria-pressed="false"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span>Star</span> <b class="n">1,284</b></button></div>
+      <div class="pp-starrow"><span class="pp-l">Signed in, not starred</span><button type="button" class="btn star" aria-pressed="false"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span>Star</span> <b class="n">1,284</b></button></div>
+      <div class="pp-starrow"><span class="pp-l">Starred by you</span><button type="button" class="btn star" aria-pressed="true" title="Starred by you"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span>Star</span> <b class="n">1,285</b></button></div>
+      <div class="pp-starrow"><span class="pp-l">Saving (one write)</span><button type="button" class="btn star" aria-pressed="true" aria-disabled="true"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span>Star</span> <b class="n">1,285</b></button></div>
+      <div class="pp-starrow"><span class="pp-l">Write refused</span><button type="button" class="btn star" aria-pressed="false"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span>Star</span> <b class="n">1,284</b></button><span class="note" role="alert">Could not update the star. Try again.</span></div>
+      <div class="pp-starrow"><span class="pp-l">Zero, and the largest</span><button type="button" class="btn star" aria-pressed="false"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span>Star</span> <b class="n">0</b></button><button type="button" class="btn star" aria-pressed="false"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span>Star</span> <b class="n">128.4K</b><span class="sr"> stars (128,400)</span></button></div>
+      <div class="pp-starrow"><span class="pp-l">In a row, starred</span><button type="button" class="star in-row" aria-pressed="true"><span class="g" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg><svg class="f" viewBox="0 0 16 16"><path d="M8 1.9l1.85 3.9 4.25.55-3.1 3 .8 4.25L8 11.5l-3.8 2.1.8-4.25-3.1-3 4.25-.55z"/></svg></span><span class="sr">Star</span> <b>1,285</b></button></div>
+      <div class="pp-starrow"><span class="pp-l">The owner sees who (opens G)</span><button type="button" class="btn sm">Who starred · 1,284</button></div>
+    </section>
+
+    <section aria-label="Sign in to star">
+      <p class="pp-sc">B. Star, signed out. Sign in comes back to this page with the star focused; it does not star on its own.</p>
+      <div class="pp-sheetbox"><div class="sheet" role="dialog" aria-label="Sign in to star tidewater">
+        <div class="ph plain"><h2>Sign in to star tidewater</h2></div>
+        <div class="sbody"><p class="note">A star is one per person, given by a person and never by an agent. Sign in, then star it.</p></div>
+        <div class="sfoot"><a class="btn primary" href="#">Sign in</a><button type="button" class="btn ghost">Not now</button></div>
+      </div></div>
+    </section>
+
+    <section aria-label="Sign in to fork">
+      <p class="pp-sc">C. Fork, signed out (the fork itself is Item d1303286). Same one step.</p>
+      <div class="pp-sheetbox"><div class="sheet" role="dialog" aria-label="Sign in to fork tidewater">
+        <div class="ph plain"><h2>Sign in to fork tidewater</h2></div>
+        <div class="sbody"><p class="note">A fork is a copy in your account. Nothing was copied. Sign in, then fork it here.</p></div>
+        <div class="sfoot"><a class="btn primary" href="#">Sign in</a><button type="button" class="btn ghost">Not now</button></div>
+      </div></div>
+    </section>
+
+    <section aria-label="Sign in to clone">
+      <p class="pp-sc">D. Clone, signed out. After sign-in the same sheet shows E.</p>
+      <div class="pp-sheetbox"><div class="sheet" role="dialog" aria-label="Sign in to clone tidewater">
+        <div class="ph plain"><h2>Sign in to clone tidewater</h2></div>
+        <div class="sbody"><p class="note">Cloning needs an account. Nothing was copied. Sign in, then the clone command is ready here.</p></div>
+        <div class="sfoot"><a class="btn primary" href="#">Sign in</a><button type="button" class="btn ghost">Not now</button></div>
+      </div></div>
+    </section>
+
+    <section aria-label="Clone, signed in">
+      <p class="pp-sc">E. Clone, signed in: the device-approval step, then the clone, both pinned to this site.</p>
+      <div class="pp-sheetbox"><div class="sheet" role="dialog" aria-label="Clone tidewater">
+        <div class="ph plain"><h2>Clone tidewater</h2></div>
+        <div class="sbody">
+          <p>If this device needs approval, run:</p>
+          <div class="cmd mono"><code>nforge login https://dev.forge.example</code><button type="button" class="btn sm">Copy</button></div>
+          <p>Clone the project:</p>
+          <div class="cmd mono"><code>nforge clone https://dev.forge.example/harbor-labs/tidewater tidewater --deployment https://dev.forge.example</code><button type="button" class="btn sm">Copy</button></div>
+        </div>
+        <div class="sfoot"><button type="button" class="btn ghost">Close</button></div>
+      </div></div>
+    </section>
+
+    <section aria-label="CLI clone, signed out">
+      <p class="pp-sc">F. CLI, signed out: refused before any request, with the one step. Agents get the same reply as JSON.</p>
+      <pre class="out">$ nforge clone https://dev.forge.example/harbor-labs/tidewater tidewater
+<b>✕ Sign in first. Nothing was copied.</b>
+  This device is not signed in to dev.forge.example. Approve it in a browser:
+    <b>nforge login https://dev.forge.example</b>
+  then run the same clone again.</pre>
+      <pre class="out">{"ok":false,"code":"SIGN_IN_REQUIRED","nothingChanged":true,
+ "message":"Sign in first. Nothing was copied.",
+ "next":"nforge login https://dev.forge.example"}</pre>
+      <div class="pp-prop"><span class="prop">Proposed</span> <span class="t3">wording and code not in the docs yet</span></div>
+    </section>
+
+    <section aria-label="Who starred">
+      <p class="pp-sc">G. Who starred: the owner only, 25 handles a page, newest first; never a count of agents.</p>
+      <div class="pp-sheetbox"><div class="sheet" role="dialog" aria-label="Who starred">
+        <div class="ph plain"><h2>Who starred</h2><span class="cnt">1,284</span></div>
+        <div class="sbody">
+          <div class="people">
+            <div class="row"><span class="who"><span class="av" aria-hidden="true">JO</span><a class="mono" href="#">@jonas</a></span><span class="t3">today</span></div>
+            <div class="row"><span class="who"><span class="av" aria-hidden="true">Q</span><a class="mono" href="#">@q</a></span><span class="t3">yesterday</span></div>
+            <div class="row"><span class="who"><span class="av" aria-hidden="true">AV</span><a class="mono" href="#" title="@a-very-long-organisation-handle-for-qa1">@a-very-long-organisation-handle-for-qa1</a></span><span class="t3">3 days ago</span></div>
+          </div>
+          <div class="pager"><span class="n">25 of 1,284</span><button type="button" class="btn sm">Show 25 more</button></div>
+        </div>
+        <div class="sfoot"><button type="button" class="btn ghost">Close</button></div>
+      </div></div>
+    </section>
+
+    <section aria-label="Agent star refused">
+      <p class="pp-sc">H. An agent session that calls the star write is refused; nothing changes. There is no star command.</p>
+      <pre class="out">{"ok":false,"code":"STAR_PEOPLE_ONLY","nothingChanged":true,
+ "message":"Only a person can star a project. Ask @mira to star it in a browser."}</pre>
+      <div class="pp-prop"><span class="prop">Proposed</span> <span class="t3">code name; the refusal itself ships today</span></div>
+    </section>
+
+    <section aria-label="Empty and failed states">
+      <p class="pp-sc">I. No README; a page that could not load; a private or missing address (same answer).</p>
+      <div class="pp-readme"><div class="ph plain"><h2>README.md</h2></div><p class="quietline">No README.md or .nforge/home.md on main. <a class="lk" href="#">Browse the code</a></p></div>
+      <div class="notice" data-st="failed"><span class="st" data-st="failed"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>Could not load</span><p>Forge could not be reached. Nothing you starred is lost.</p><button type="button" class="btn sm">Retry</button></div>
+      <div class="empty"><h3>No public project at this address</h3><p>The address may be mistyped, or it is private, renamed or removed. Private projects are never listed.</p><a class="btn" href="#p-explore">Explore public projects</a></div>
+      <div class="empty"><h3>No match for “zzzz”</h3><p>Handles and project names are searched. Private projects are never listed here.</p><button type="button" class="btn">Clear the search</button></div>
+    </section>
+  </div>
+</div>
+
+<!-- ======================================================================================================== -->
+<p class="pp-cap pp-phonecap" id="pp-phones"><b>6. Phone, 390 px.</b> The same file, one page per frame; the theme and worst-case keys above apply to them too.</p>
+<div class="pp-phones">
+  <figure><iframe src="public-projects.html?only=project" title="Project page at 390 px" onload="ppSend()"></iframe><figcaption>Project: head, Clone first, README, then landings</figcaption></figure>
+  <figure><iframe src="public-projects.html?only=explore" title="Explore at 390 px" onload="ppSend()"></iframe><figcaption>Explore: stacked rows</figcaption></figure>
+  <figure><iframe src="public-projects.html?only=person" title="Person at 390 px" onload="ppSend()"></iframe><figcaption>Person</figcaption></figure>
+  <figure><iframe src="public-projects.html?only=org" title="Organisation at 390 px" onload="ppSend()"></iframe><figcaption>Organisation</figcaption></figure>
+  <figure><iframe src="public-projects.html?only=states" title="Star and sign-in at 390 px" onload="ppSend()"></iframe><figcaption>Star and sign-in: bottom sheets</figcaption></figure>
+</div>
+
+<script>
+  // The day grid: 26 weeks, Monday on top; ink only. Deterministic sample.
+  (function () {
+    var cal = document.getElementById('pp-cal'); if (!cal) return;
+    var seed = 7, html = '';
+    for (var w = 0; w < 26; w++) {
+      html += '<span class="cw' + (w < 13 ? ' old' : '') + '">';
+      for (var d = 0; d < 7; d++) { seed = (seed * 9301 + 49297) % 233280; var l = Math.floor((seed / 233280) * 6) - 1; html += '<i' + (l > 0 ? ' data-l="' + Math.min(l, 4) + '"' : '') + '></i>'; }
+      if (w % 4 === 0) html += '<b>' + ['Jun','Jun','Jul','Aug','Sep','Sep','Oct'][w / 4] + '</b>';
+      html += '</span>';
+    }
+    cal.innerHTML = html;
+  })();
+  ppSend();
+</script>
+</body>
+</html>
