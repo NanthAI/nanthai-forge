@@ -11,6 +11,9 @@ import '../../web/src/ds';
 import '../../web/src/app/app.css';
 import type { Id } from '../../convex/_generated/dataModel';
 import { review } from '../fixtures/review-findings.mjs';
+import { planningLineEvidence } from '../../src/planning-line-evidence';
+import type { ReadItem } from '../../web/src/app/plan/ItemDetail';
+import type { RunBatch } from '../../web/src/app/plan/batch';
 
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
@@ -18,6 +21,8 @@ const reader = params.get('viewer') === 'reader';
 const withThread = params.has('thread');
 const withPages = params.has('pages');
 const withNotePages = params.has('notePages');
+const stress = params.has('stress');
+const memberWriter = params.get('viewer') === 'writer';
 // `?files=1`: one comment carries four attachments (a small image, a large image, a PDF and an HTML file).
 const withFiles = params.has('files');
 // `?versions=N`: the Item has N versions, served newest first in pages of the size asked (Item 686ecdde).
@@ -90,6 +95,31 @@ if (params.has('review'))
     agent: 'keen-impala',
     text: JSON.stringify(review, null, 2),
   });
+const stressComments = Array.from({ length: 312 }, (_, index) => ({
+  id: uuid(1000 + index),
+  itemId: ITEM,
+  at: minutes(index),
+  ...author(index % 2 ? 'sample-two' : 'sample-one'),
+  text:
+    index === 300
+      ? 'Checked in landing 1234abcd.'
+      : index === 249
+        ? JSON.stringify(review)
+        : `Synthetic comment ${index + 1}`,
+  ...(index === 300 ? { decision: true, line: planningLineEvidence(1, 'א') } : {}),
+}));
+const longText = [
+  '**Readable Markdown**, with [a guide](https://docs.example.com/guide). <img src=x onerror=alert(1)>',
+  '```md\n- [ ] This is a literal example\n```',
+  ...Array.from({ length: 119 }, (_, index) => `Paragraph ${index + 1} ${'x'.repeat(180)}`),
+].join('\n\n');
+const longChecklist = Array.from({ length: 40 }, (_, index) =>
+  index === 0
+    ? '- [x] א'
+    : index === 1
+      ? '- [~] Follow-up (moved to Item 7be2c41a-0000-4000-8000-000000000002)'
+      : `- [ ] Synthetic criterion ${index + 1}`,
+).join('\n');
 const reactions = reader
   ? []
   : [
@@ -107,7 +137,7 @@ const rows = [
     version: 4,
     initiativeId: INITIATIVE,
     owner: reader ? null : 'sample-one',
-    doneWhen: [2, 4],
+    doneWhen: stress ? [1, 39] : [2, 4],
     inLane: true,
   },
 ];
@@ -125,6 +155,27 @@ const workspace = JSON.stringify({
 const calls: string[] = [];
 const writes: unknown[] = [];
 const versionReads: unknown[] = [];
+const commentReads: unknown[] = [];
+let version = 4;
+let body = `${longText}\n\nDone when:\n${longChecklist}`;
+let textReads = 0;
+const readItemText: ReadItem = async (_, full) => {
+  const at = minutes(10 + textReads++);
+  if (params.has('deferred') && !full) return null;
+  return { ...rows[1]!, kind: 'issue', body, version, author: 'sample-two', at };
+};
+const run: RunBatch = async writes => ({
+  undo: [],
+  kept: 0,
+  results: writes.map((write, index) => ({
+    itemId: write.itemId,
+    action: write.action,
+    index,
+    ...(write.action === 'put-planning-item' && write.expectedVersion !== version
+      ? ({ outcome: 'refused', code: 'ITEM_CHANGED', currentVersion: version } as const)
+      : ({ outcome: 'applied' } as const)),
+  })),
+});
 type PageArgs = {
   collection?: string;
   newestFirst?: boolean;
@@ -161,6 +212,12 @@ let newest = 3,
 Object.assign(window, {
   __calls: calls,
   __versionReads: versionReads,
+  __commentReads: commentReads,
+  textReads: () => textReads,
+  changeItem: () => {
+    body = body.replace('Readable Markdown', 'A teammate changed this');
+    version++;
+  },
   __writes: writes,
   changeThread: (change: 'append' | 'answer') => {
     if (change === 'append') newest++;
@@ -173,7 +230,7 @@ Object.assign(window, {
   },
 });
 type Before = { message?: [number, number, string] };
-function answer(name: string, before?: Before, noteCursor?: string | null, hydrate = false) {
+function answer(name: string, before?: Before, noteCursor?: string | null, hydrate = false, size = 20) {
   if (name === 'projectWorkIndex:workspace') return workspace;
   if (name === 'projectWorkIndex:records' && withNotePages) {
     const newestNote = noteCursor ? Number(noteCursor) - 1 : noteTotal;
@@ -200,6 +257,20 @@ function answer(name: string, before?: Before, noteCursor?: string | null, hydra
       isDone: oldestNote === 1,
       continueCursor: String(oldestNote),
       ...(archived ? { journalHistory: true } : {}),
+    };
+  }
+  if (name === 'projectWorkIndex:records' && stress) {
+    const end = noteCursor ? Number(noteCursor) : stressComments.length;
+    const start = Math.max(0, end - size);
+    return {
+      page: stressComments
+        .slice(start, end)
+        .reverse()
+        .map((comment, index) => ({ id: comment.id, position: end - index, value: JSON.stringify(comment) })),
+      isDone: start === 0,
+      continueCursor: String(start),
+      generationId: 'generation',
+      revision: 1,
     };
   }
   if (name === 'projectWorkIndex:records')
@@ -278,11 +349,12 @@ const client = {
     const name = getFunctionName(fn);
     calls.push(name);
     if (args.collection === 'planningVersions') versionReads.push(args);
+    if (args.collection === 'planningComments') commentReads.push(args.paginationOpts);
     return {
       localQueryResult: () =>
         args.collection === 'planningVersions'
           ? versionsPage(args)
-          : answer(name, args.before, args.paginationOpts?.cursor),
+          : answer(name, args.before, args.paginationOpts?.cursor, false, args.paginationOpts?.numItems),
       journal: () => undefined,
       onUpdate: (notify: () => void) => {
         watches.add(notify);
@@ -341,8 +413,15 @@ createRoot(document.getElementById('root')!).render(
         }}
         projectName="synthetic"
         feed={undefined}
-        read={{ rows: JSON.stringify(rows), more: false, settled: [], canEdit: !reader }}
+        read={{
+          rows: JSON.stringify(rows),
+          more: false,
+          settled: [],
+          canEdit: !reader && !memberWriter,
+          ...(memberWriter ? { canWriteItems: true as const } : {}),
+        }}
         put={async () => undefined}
+        {...(stress ? { run, readItemText } : {})}
         projectId={'project' as Id<'hostedProjects'>}
       />
     </main>

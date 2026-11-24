@@ -20,6 +20,7 @@ import { Attachments, sizeLabel, type ReadAttachment } from './Attachments';
 import { ATTACHMENT_LIMITS } from '../../../../src/discussion-attachment-limits';
 import { AttachmentProblem, attachmentRefusal } from './attachment-io';
 import { readReview, ReviewFindings } from './ReviewFindings';
+import { CommentFilters, useCommentFilters } from './CommentFilters';
 import {
   MAX_COMMENT_CHARACTERS,
   latest,
@@ -55,6 +56,7 @@ export type DiscussionProps = {
   readAttachment?: ReadAttachment;
   /** Threads shown before "Show earlier" (the latest ones). */
   pageSize?: number;
+  itemPage?: boolean;
   now?: Date;
   project?: WhoProject | undefined;
   title?: 'Comments' | 'Thread';
@@ -71,7 +73,16 @@ export type DiscussionProps = {
   };
 };
 
-export function Discussion({
+export function Discussion(props: DiscussionProps) {
+  return props.itemPage ? <ItemComments {...props} /> : <DiscussionContent {...props} />;
+}
+
+function ItemComments(props: DiscussionProps) {
+  const filters = useCommentFilters();
+  return <DiscussionContent {...props} filters={filters} />;
+}
+
+function DiscussionContent({
   comments,
   reactions = [],
   canWrite,
@@ -83,16 +94,19 @@ export function Discussion({
   onReact,
   readAttachment,
   pageSize = 20,
+  itemPage = false,
   now = new Date(),
   project,
   title = 'Comments',
   conversation,
   reportProjectId,
-}: DiscussionProps) {
+  filters,
+}: DiscussionProps & { filters?: ReturnType<typeof useCommentFilters> }) {
   const report = reportProjectId ? { reportProjectId } : {};
+  const matched = filters?.active ? comments.filter(filters.matches) : comments;
   const all = threads([
-    ...comments,
-    ...(conversation?.entries.map((row): DiscussionComment => ({
+    ...matched,
+    ...((filters?.active ? undefined : conversation)?.entries.map((row): DiscussionComment => ({
       id: row.id,
       itemId: '',
       text: row.text,
@@ -120,19 +134,25 @@ export function Discussion({
       !pending.includes(thread) && [thread.root, ...thread.replies].some(comment => comment.at >= frontier),
   );
   const anchor = useRef<HTMLElement>(null);
+  const hash = typeof location === 'undefined' ? '' : location.hash;
   useEffect(() => {
-    if (location.hash !== '#discussion') return;
-    anchor.current?.scrollIntoView();
-    anchor.current?.focus({ preventScroll: true });
-  }, []);
+    const id = hash.slice(1);
+    if (id !== 'discussion' && !id.startsWith('comment-')) return;
+    if (id === 'discussion') anchor.current?.focus({ preventScroll: true });
+    (document.getElementById(id) ?? anchor.current)?.scrollIntoView();
+  }, [hash, filters?.decisions]);
   const [shown, setShown] = useState(pageSize);
   const [replying, setReplying] = useState<string | null>(null);
-  const { visible, earlier } = latest(recent, shown);
+  const folded = latest(recent, shown);
+  // The cursor already bounds Item comments. Another client-side limit would hide loaded filter matches.
+  const visible = itemPage ? [...all.filter(thread => !pending.includes(thread))].reverse() : folded.visible;
+  const earlier = itemPage ? 0 : folded.earlier;
   const total = comments.length + (conversation?.entries.length ?? 0);
   const reading = loading || conversation?.loading;
   const earlierMessages = conversation?.loadEarlier;
-  const more =
-    earlierMessages || loadEarlier
+  const more = itemPage
+    ? (loadEarlier ?? (!filters?.active ? earlierMessages : undefined))
+    : earlierMessages || loadEarlier
       ? () => {
           earlierMessages?.();
           loadEarlier?.();
@@ -141,20 +161,43 @@ export function Discussion({
   const loadingMore = conversation?.loadingMore || loadingEarlier;
   const conversationActions = conversation ? { answer: conversation.answer } : {};
   return (
-    <section className="sec discussion" id="discussion" aria-label={title} ref={anchor} tabIndex={-1}>
-      <Band
-        title={title}
-        count={total}
-        hint={
-          reading || more
-            ? reading
-              ? 'reading the rest…'
-              : 'loaded so far'
-            : all.length !== total
-              ? `${all.length} ${all.length === 1 ? 'thread' : 'threads'}`
-              : undefined
-        }
-      />
+    <section
+      className={itemPage ? 'region discussion' : 'sec discussion'}
+      id="discussion"
+      aria-label={title}
+      ref={anchor}
+      tabIndex={-1}
+    >
+      {filters ? (
+        <>
+          <div className="ph plain">
+            <h2>{title}</h2>
+            <span className="cnt">{comments.length.toLocaleString()}</span>
+            <span className="hint">newest first{loadEarlier ? ' · loaded so far' : ''}</span>
+          </div>
+          <CommentFilters
+            filters={filters}
+            comments={comments}
+            matching={matched.length}
+            more={Boolean(loadEarlier || loadingEarlier)}
+            loading={Boolean(reading)}
+          />
+        </>
+      ) : (
+        <Band
+          title={title}
+          count={total}
+          hint={
+            reading || more
+              ? reading
+                ? 'reading the rest…'
+                : 'loaded so far'
+              : all.length !== total
+                ? `${all.length} ${all.length === 1 ? 'thread' : 'threads'}`
+                : undefined
+          }
+        />
+      )}
       {pending.map(({ root, replies }) => (
         <div key={root.id} className="thread-of" data-pinned="">
           <Comment
@@ -181,7 +224,7 @@ export function Discussion({
           ))}
         </div>
       ))}
-      {earlier || more || loadingMore ? (
+      {!itemPage && (earlier || more || loadingMore) ? (
         <div className="quietline">
           {earlier ? (
             <>
@@ -258,6 +301,31 @@ export function Discussion({
         </div>
       ))}
       {canWrite && onPost ? <Composer attachable={Boolean(readAttachment)} onPost={onPost} /> : null}
+      {itemPage ? (
+        <div className="pager">
+          <span className="n">
+            {comments.length.toLocaleString()} {comments.length === 1 ? 'comment' : 'comments'} loaded
+          </span>
+          {more || loadingMore ? (
+            <Key
+              size="sm"
+              aria-busy={loadingMore}
+              aria-disabled={!more || loadingMore}
+              onClick={() => {
+                if (!loadingMore) more?.();
+              }}
+            >
+              {loadingMore ? 'Loading earlier…' : loadEarlier ? 'Show 20 earlier' : 'Show earlier messages'}
+            </Key>
+          ) : null}
+          {commentsFailed ? (
+            <span role="alert">
+              Could not read {comments.length ? 'earlier ' : ''}comments. Reload the page to try again.
+            </span>
+          ) : null}
+          {conversation?.failed ? <span role="alert">Could not read earlier messages.</span> : null}
+        </div>
+      ) : null}
     </section>
   );
 }

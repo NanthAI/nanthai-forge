@@ -37,6 +37,7 @@ export async function applyWrites(
     restore?: string;
     prepare?: (write: BatchWrite, position: number) => Promise<BatchWrite | null>;
     atomic?: boolean;
+    planningTick?: true;
     /** Child writes a close or its Undo derives from the parents the caller chose: not charged
      * to the account limiter (the chosen writes are). */
     derived?: true;
@@ -71,6 +72,7 @@ export async function applyWrites(
           planning: options.planning,
           planningClose: options.lock,
           planningRestore: options.restore,
+          ...(options.planningTick ? { planningTick: true as const } : {}),
           ...(options.derived ? { server: true as const } : {}),
           onPlanningBatchState: state => {
             if ('replayed' in state) prior.replayed = true;

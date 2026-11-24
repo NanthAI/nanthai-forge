@@ -152,6 +152,9 @@ const planningAttachmentsSchema = z
  * hosted replay observed (public reads map it to a Forge handle); `agent` is the writing agent session's slug from the
  * fixed lists, so it can name no person; `replyTo` is the root comment of its thread; `decision` marks a comment whose
  * text was also written into the Item body's Decisions section. */
+const lineEvidence = z
+  .object({ position: z.number().int().positive(), digest: z.string().regex(/^[0-9a-f]{64}$/) })
+  .strict();
 const discussionFields = {
   author: z.string().min(1).max(200).optional(),
   agent: z.string().regex(agentSlugShape).optional(),
@@ -160,6 +163,7 @@ const discussionFields = {
   agentClient: z.string().regex(AGENT_CLIENT).optional(),
   replyTo: id.optional(),
   decision: z.literal(true).optional(),
+  line: lineEvidence.optional(),
   /** Files stored in R2 under this comment (src/discussion-attachment-limits.ts); the server sets them from committed bindings. */
   attachments: planningAttachmentsSchema.optional(),
 };
@@ -194,6 +198,7 @@ export const planningCommentCommandSchema = z.object({
   replyTo: id.optional(),
   /** Also write the text into the Item body's Decisions section, with the date and the author label. */
   decision: z.boolean().optional(),
+  line: lineEvidence.optional(),
   /** The writing agent session's slug; anything outside the fixed lists is dropped by the reducer. */
   agent: z.string().max(40).optional(),
   /** The writing agent session's declared client and model (`tool:model`); dropped without `agent` or off-shape. */

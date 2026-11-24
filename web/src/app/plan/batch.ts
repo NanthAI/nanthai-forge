@@ -68,7 +68,9 @@ export type FullItem = {
   kind: 'issue' | 'initiative';
   title: string;
   body: string;
+  at?: string;
   author?: string;
+  agent?: string;
   intentIds?: string[];
   relations?: { kind: 'depends-on' | 'duplicate-of' | 'related'; id: string }[];
   initiativeId?: string | null;
@@ -98,6 +100,24 @@ export async function readItems(
 ) {
   const ws = await workspace(client, projectId);
   return Promise.all(ids.map(id => readWorkRecord<FullItem>(client, projectId, ws, 'planningItems', id)));
+}
+
+export async function readItem(
+  client: Pick<ConvexReactClient, 'query'>,
+  projectId: Id<'hostedProjects'>,
+  id: string,
+  full = false,
+): Promise<FullItem | null> {
+  if (full) return (await readSelectedWorkRecord<FullItem>(client, projectId, 'planningItems', id)).value;
+  const result = await client.query(workIndex.detail, {
+    projectId,
+    collection: 'planningItems',
+    id,
+    inlineItemOnly: true,
+  });
+  if (result.deferred) return null;
+  if (!result.value) throw new Error('Item text is unavailable.');
+  return JSON.parse(result.value) as FullItem;
 }
 
 export type InitiativeDetails = FullItem & { creator?: string | undefined };

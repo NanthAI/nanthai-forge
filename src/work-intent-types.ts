@@ -97,8 +97,8 @@ export const purgeFieldClasses = {
   'comment-planning-item': {
     keep: ['action', 'operationId', 'itemId', 'replyTo', 'decision', 'agent', 'agentClient', 'decidedBy'],
     words: { authorLabel: '', text: 'Deleted comment' },
-    // File names are member text; the bindings themselves are removed by the same purge.
-    drop: ['attachments'],
+    // Bindings and the checklist wording digest must not survive the comment's purge.
+    drop: ['attachments', 'line'],
   },
   intent: {
     keep: ['action', 'base', 'baseChannel', 'hostedBase'],

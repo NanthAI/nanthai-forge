@@ -777,6 +777,7 @@ export const hostedAgentCommandSchemas = {
       agentClient: true,
       decidedBy: true,
       attachments: true,
+      line: true, // Only accepted by the atomic Item tick batch, not by standalone comments.
     }) // Set by the session and server.
     // Local file paths: the CLI uploads them to R2 and names them on the comment (src/hosted-agent-planning-attach.ts).
     .extend({ ...planningIssueFields, files: z.array(z.string()).max(4).optional() })

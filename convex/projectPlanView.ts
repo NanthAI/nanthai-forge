@@ -47,6 +47,7 @@ export const planViewResult = v.object({
     }),
   ),
   canEdit: v.boolean(),
+  canWriteItems: v.optional(v.literal(true)),
   closeReceipt: v.optional(v.string()),
 });
 type Result = typeof planViewResult.type;
@@ -65,7 +66,8 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
   const partition = generation.recordsGenerationId ? await ctx.db.get(generationId) : generation;
   // Settled compact pages retain positions only, so they cannot enforce Item visibility.
   // Role-less viewers use the existing exact-root fallback until those pages carry that metadata.
-  const member = !!(await readProjectRole(ctx, project, user.subject));
+  const role = await readProjectRole(ctx, project, user.subject);
+  const member = Boolean(role);
   const compact = member && partition?.planRowsVersion === 1;
   // Complete compact rows also prove search coverage. Old projected headers can omit the field,
   // including when compact rows were unavailable. Check those source headers only when needed.
@@ -157,6 +159,7 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
     more,
     ...(member ? { liveMore: liveMore || !searchComplete } : {}),
     canEdit,
+    ...(role === 'write' ? { canWriteItems: true as const } : {}),
   };
   const tallies =
     member && searchComplete && loadedInitiatives.length

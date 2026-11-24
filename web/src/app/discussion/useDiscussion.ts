@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // The hosted reads and writes behind an Item's Discussion (Item 9a3d6f5f). Comments are the Work index's comment pages
-// for the Item, newest first: one page of 100 on open, the next only when the reader asks for earlier comments, so an
+// for the Item, newest first: one page of 20 on open, the next only when the reader asks for earlier comments, so an
 // open reads the same however long the discussion grows (Item 686ecdde). Reactions are one bounded read.
 // Nothing polls and nothing reads on a clock, so an open idle Item makes no calls. A comment keeps one operation id
 // until it is sent, so a retry after a lost reply never posts twice. The server records who wrote it from the

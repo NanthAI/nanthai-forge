@@ -128,9 +128,20 @@ const planningHeadTimes = (head: Doc<'projectHostedRecordHeads'>) => {
   return { planningTimes: pinnedPlanningTimes(head) ?? ('stale' as const) };
 };
 
-export async function storeItemRow(ctx: QueryCtx, projectId: Id<'hostedProjects'>, id: string) {
+export async function storeItemRow(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  id: string,
+  inlineOnly = false,
+) {
   const head = await recordHead(ctx, projectId, 'issue', id);
-  return head ? { value: await headValue(ctx, 'planningItems', head), ...planningHeadTimes(head) } : null;
+  if (!head) return null;
+  const deferred = inlineOnly && head.value === undefined;
+  return {
+    value: deferred ? null : await headValue(ctx, 'planningItems', head),
+    deferred,
+    ...planningHeadTimes(head),
+  };
 }
 
 /** Order-free JSON, so a reader compare does not depend on key order. */

@@ -31,10 +31,11 @@ export function Capture({
   useEffect(() => setInitiativeId(initiative), [initiative]);
   const [type, setType] = useState('');
   const [doneWhen, setDoneWhen] = useState('');
+  const [description, setDescription] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   // One operation per Item written here, so a retry after a lost reply never files it twice.
-  const pending = useRef<{ itemId: string; key: string } | null>(null);
+  const pending = useRef<{ itemId: string; operationId: string; key: string } | null>(null);
   const initiatives = view.groups.flatMap(group => (group.initiative ? [group.initiative] : []));
   const similar =
     title.trim().length >= 3
@@ -43,6 +44,7 @@ export function Capture({
   const reset = () => {
     setTitle('');
     setDoneWhen('');
+    setDescription('');
     setType('');
     setError('');
     pending.current = null;
@@ -51,26 +53,32 @@ export function Capture({
     event.preventDefault();
     const text = title.trim();
     if (!text || busy) return;
-    const key = JSON.stringify([text, initiativeId, type, doneWhen]);
-    if (pending.current?.key !== key) pending.current = { itemId: crypto.randomUUID(), key };
+    const key = JSON.stringify([text, initiativeId, type, doneWhen, description]);
+    if (pending.current?.key !== key)
+      pending.current = { itemId: crypto.randomUUID(), operationId: crypto.randomUUID(), key };
     setBusy(true);
     setError('');
     try {
-      await put({
-        itemId: pending.current.itemId,
-        expectedVersion: 0,
-        kind: 'issue',
-        title: text,
-        body: captureBody(doneWhen),
-        status: 'open',
-        initiativeId: initiativeId || null,
-        ...(type ? { type } : {}),
-      });
+      await put(
+        {
+          itemId: pending.current.itemId,
+          expectedVersion: 0,
+          kind: 'issue',
+          title: text,
+          body: [description.trim(), captureBody(doneWhen)].filter(Boolean).join('\n\n'),
+          status: 'open',
+          initiativeId: initiativeId || null,
+          ...(type ? { type } : {}),
+        },
+        pending.current.operationId,
+      );
       announce(`${text} planned.`);
       reset();
       onOpenChange(false);
     } catch {
-      setError('Forge could not file it. Nothing was filed; try again.');
+      setError(
+        'Forge could not confirm the new Item. Your draft is still here; try again to check the original request.',
+      );
     } finally {
       setBusy(false);
     }
@@ -138,6 +146,15 @@ export function Capture({
               </option>
             ))}
           </select>
+        </label>
+        <label>
+          <span>Description (optional)</span>
+          <textarea
+            className="inp"
+            rows={3}
+            value={description}
+            onChange={event => setDescription(event.target.value)}
+          />
         </label>
         <label>
           <span>Done when (one line each)</span>

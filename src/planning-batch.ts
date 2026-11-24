@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { planningTaskLines } from './planning-search.js';
 import { isLive, type PlanRow } from './planning-model.js';
 import type { PlanningItem } from './work-planning-types.js';
 // Pure: also runs in the Convex non-Node runtime and in the web app. No I/O.
@@ -45,6 +46,8 @@ export type BatchComment = {
   itemId: string;
   text: string;
   authorLabel?: string;
+  decision?: true;
+  line?: import('./planning-line-evidence.js').PlanningLineEvidence;
 };
 export type BatchWrite = BatchPut | BatchComment;
 
@@ -188,14 +191,11 @@ export function detachAfterClose(closedIds: ReadonlySet<string>, liveRows: reado
 }
 
 // ---- Split -------------------------------------------------------------------------------------------------------
-const taskLine = /^\s*[-*]\s+\[([ xX])\]\s+(.*)$/;
-/** The body's Done-when lines in order (the task lines doneWhenCounts counts), with their text and tick. */
+/** The counted Done-when lines in order, with their text and tick. */
 export function doneWhenLines(body: string) {
-  return body
-    .split('\n')
-    .map((text, line) => ({ line, match: taskLine.exec(text) }))
-    .filter(entry => entry.match)
-    .map(entry => ({ line: entry.line, ticked: entry.match![1] !== ' ', text: entry.match![2]!.trim() }));
+  return Array.from(planningTaskLines(body.split('\n')))
+    .filter(({ match }) => match[2] !== '~')
+    .map(({ row, match }) => ({ line: row, ticked: match[2] !== ' ', text: match[4]!.trim() }));
 }
 
 export type SplitItem = {

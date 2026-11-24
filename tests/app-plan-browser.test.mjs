@@ -121,6 +121,9 @@ const linkBackend = fakeConvex({
         throw Error('Expected one first version on the current detail’s generation');
       return { generationId: 'generation', page: [{ value: JSON.stringify({ ...launch, version: 1, author: 'release-lead/amber-fox' }) }], isDone: false };
     }
+    if (name === 'projectWorkIndex:detail' && args.id === linkedOpen.id) return {
+      generationId: 'generation', revision: 1, value: JSON.stringify({...linkedOpen, body: ['Read the **parser** contract.', '', 'Done when:', '- [x] Read', '- [ ] Test', '- [ ] Land'].join(String.fromCharCode(10)) }),
+    };
     if (name === 'projectPlanView:read') return { ...read, rows: JSON.stringify(window.readItemWork ? [launch, linkedOpen] : [linkedOpen]) };
     if (name === 'projectPlanSettled:item') {
       const candidates = [linkedOpen, linkedDeleted, ...settledRows].filter(row => row.id.startsWith(args.id));
@@ -337,11 +340,15 @@ test('plan views and bulk bar: real components keep the view in the address and 
   };
   const check = async (page, label) => {
     await settleBrowserPage(page);
-    assert.equal(
-      await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
-      false,
-      `${label}: no sideways scroll`,
+    const overflowing = await page.evaluate(() =>
+      document.documentElement.scrollWidth > innerWidth
+        ? [...document.querySelectorAll('main *')]
+            .filter(el => el.getBoundingClientRect().right > innerWidth + 1)
+            .slice(0, 12)
+            .map(el => `${el.tagName}.${String(el.className)}`)
+        : null,
     );
+    assert.equal(overflowing, null, `${label}: no sideways scroll (${overflowing?.join(', ') ?? ''})`);
     await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
     const result = await page.evaluate(() =>
       window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] } }),
@@ -853,6 +860,15 @@ test('plan views and bulk bar: real components keep the view in the address and 
     });
     await page.getByRole('button', { name: /^New Item here/ }).click();
     assert.equal(await page.getByRole('combobox', { name: 'Initiative' }).inputValue(), launchId);
+    await page.getByRole('textbox', { name: 'Title' }).fill('Capture the parser contract');
+    await page.getByRole('textbox', { name: 'Description (optional)' }).fill('Steps for **streaming**.');
+    await page.getByRole('textbox', { name: 'Done when (one line each)' }).fill('Try one example');
+    await page.getByRole('button', { name: 'Plan it' }).click();
+    await page.waitForFunction(() => window.puts.length === 2);
+    assert.equal(
+      await page.evaluate(() => window.puts[1].body),
+      'Steps for **streaming**.\n\nDone when:\n- [ ] Try one example\n',
+    );
     assert.deepEqual(errors, []);
     await context.close();
   }
@@ -1259,8 +1275,18 @@ test('plan views and bulk bar: real components keep the view in the address and 
             await work.getByRole('button', { name: 'Lanes', exact: true }).getAttribute('aria-expanded'),
             'true',
           );
-          await work.getByRole('button', { name: 'Landings', exact: true }).click();
-          await work.getByRole('button', { name: 'Related', exact: true }).click();
+          for (const name of ['Landings', 'Related', 'History'])
+            assert.equal(
+              await work.getByRole('button', { name, exact: true }).getAttribute('aria-expanded'),
+              'true',
+            );
+          assert.equal(await lanes.count(), 3);
+          await work.getByRole('button', { name: 'Show 7 more', exact: true }).click();
+          const relatedPart = work
+            .getByRole('button', { name: 'Related', exact: true })
+            .locator('xpath=../..');
+          const relatedMore = relatedPart.getByRole('button', { name: /^Show \d+ more$/ });
+          if (await relatedMore.count()) await relatedMore.click();
           assert.equal(await lanes.first().textContent(), 'Synthetic outcome');
           assert.match(await lanes.first().locator('..').textContent(), /cobalt-fox.*1 save.*Last save/);
           assert.equal(await work.getByText('2 files changed', { exact: true }).count(), 1);
@@ -1318,7 +1344,12 @@ test('plan views and bulk bar: real components keep the view in the address and 
             await page.evaluate(() => window.scrollTo(0, 0));
             await page.screenshot({ path: join(shots, `item-work-${width}-${theme}.png`), fullPage: true });
           }
-          assert.deepEqual(await page.evaluate(() => window.planQueries), ['projectItemWork:read']);
+          await work.getByText('closed: all Done-when lines ticked').waitFor();
+          assert.deepEqual((await page.evaluate(() => window.planQueries)).sort(), [
+            'projectHostedPlanning:itemHistory',
+            'projectItemWork:read',
+            'projectWorkIndex:detail',
+          ]);
           assert.deepEqual((await page.evaluate(() => window.planSubscriptions())).sort(), [
             'projectDiscussionThread:read',
             'projectPlanCounts:read',
@@ -1333,25 +1364,29 @@ test('plan views and bulk bar: real components keep the view in the address and 
           assert.equal(await landings.count(), 2);
           assert.equal(await work.getByRole('link', { name: 'Define the wire format' }).count(), 1);
           assert.equal(await more.count(), 0);
-          assert.deepEqual(await page.evaluate(() => window.planQueries), [
+          assert.deepEqual((await page.evaluate(() => window.planQueries)).sort(), [
+            'projectHostedPlanning:itemHistory',
             'projectItemWork:read',
             'projectItemWork:read',
+            'projectWorkIndex:detail',
           ]);
-          // History is a closed disclosure: it reads one bounded page only when opened, and says who and which model.
-          assert.equal(
-            await work.getByRole('button', { name: 'History', exact: true }).getAttribute('aria-expanded'),
-            'false',
-          );
-          await work.getByRole('button', { name: 'History', exact: true }).click();
+          // Closing and reopening History keeps the already-read page and recorded actor evidence.
+          const history = work.getByRole('button', { name: 'History', exact: true });
+          await history.click();
+          assert.equal(await history.getAttribute('aria-expanded'), 'false');
+          await history.click();
           await work.getByText('closed: all Done-when lines ticked').waitFor();
           assert.equal(await work.getByText('status open → in-progress').count(), 1);
           assert.match(
             await work.getByText('closed: all Done-when lines ticked').locator('..').textContent(),
             /cobalt-fox/,
           );
-          assert.deepEqual((await page.evaluate(() => window.planQueries)).slice(2), [
-            'projectHostedPlanning:itemHistory',
-          ]);
+          assert.equal(
+            (await page.evaluate(() => window.planQueries)).filter(
+              name => name === 'projectHostedPlanning:itemHistory',
+            ).length,
+            1,
+          );
           if (shots)
             await page.screenshot({
               path: join(shots, `item-history-${width}-${theme}.png`),

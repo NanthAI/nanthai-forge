@@ -54,7 +54,11 @@ in your own tool. Forge does not call a model, edit the Item, or start a Lane. T
 
 ## Item Work
 
-Open an Item from the Plan, including its Done and Dropped lists. Work lists open Lanes
+Open an Item from the Plan, including its Done and Dropped lists. **Text** renders the Item's Markdown and folds long prose in place. **Done when** lists the task lines in their stored order: open (`[ ]`), done (`[x]`) or moved (`[~]`, not counted). Text and Done when use one selected Item read, refreshed only when the Item's live version changes. When a retained body doesn't fit in the first record, **Show all text** loads it on request. Task examples inside Markdown fences are prose, not checklist lines.
+
+The owner and current project writers can edit the text, add or edit a checklist line, mark it moved, reopen it, or remove it with Undo. **Tick and post** saves the tick and its decision comment together. A stale line edit retries only if it can still identify the unchanged line; a stale prose edit keeps the draft, offers the versions to compare and then lets you resume the draft against the newer version. New Item capture takes an optional Markdown description above the checklist. Readers cannot change Items. Managing the rest of the Plan, including shelving and deleting Items, remains owner-only.
+
+Work lists open Lanes
 first with their Intent titles and recorded saves. A landing links to Code at the
 accepted State, with its recorded check and changed-file count when available. Related
 links use the current titles of Initiatives, dependencies and split Items. The Item
@@ -62,8 +66,7 @@ discussion and Lane rows use the same identity mark as the rest of Forge.
 
 Work opens with one call to the same bounded reader as the agent CLI. Each request for
 more work reads one cursor page. The web details are optional and Work makes no idle
-calls. The Landings fold pages retained receipt notes by recorded time, then older
-Lane stamps. Check or file evidence unavailable in the retained records stays unknown.
+calls. Lanes, Landings and Related start open with three rows each; **Show more** reveals rows already held, without another read. History starts open with one page of 25 events, shows its first three, and reads another page only when asked. Folds remember the reader's choice. Landings pages retained receipt notes by recorded time, then older Lane stamps. Check or file evidence unavailable in the retained records stays unknown.
 Related resolves both directions from the current Plan records, including Done and
 Dropped Items. Reverse links use bounded pages of planning rows, so a later page may
 contain a link from an older Item.
@@ -231,8 +234,7 @@ ceilings. Verify the resulting Initiative statuses with the owner on dev; this d
 
 Archive and Delete are two different places an Item can be sent and brought back from. Both hide the Item from every
 plan view, count, agent list and public read; its links, Lanes, landings and comments stay, and so does its Intent's
-state. Archive has no time limit. The project owner archives, deletes and brings Items back (planning writes are
-owner-only).
+state. Archive has no time limit. Only the project owner archives, deletes and brings Items back.
 
 Each move is an ordinary put (`put-planning-item` with `"status":"archived"` or `"deleted"`), retry-safe by its
 operation id. That version stores `was`, the status the Item left; moving between the two keeps it. Unarchive and
@@ -712,6 +714,8 @@ The comment appears as `Forge`, with `system: true` and a `landing` object conta
 commit, main sequence, `landedBy` (`queue`, `agent` or `person`), `accepted` (`person` or `policy`) and the
 submitter's handle where the viewer can see it. Person acceptance includes carried owner approval.
 System comments take no reply or reaction. Agents see the `systemComments` advisory beside them.
+
+The web Item page opens the newest 20 member comments plus the existing bounded Forge notes. **Show 20 earlier** requests the next page. The loaded count does not claim a total while earlier pages remain. Decisions, review findings and author filters match only the loaded comments and make no requests. The page matches tick evidence to its line using the recorded position and wording; older or unmatched ticks say the landing was not reported and link to Decisions.
 
 Completion skips this comment for Intents created independently. Linking one to an Item later leaves the
 receipt available under Work. Older Intents without a recorded origin continue to produce notes.

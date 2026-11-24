@@ -77,7 +77,9 @@ function Part({
   lazy?: boolean;
   children: ReactNode;
 }) {
-  const [open, toggle] = useFold(fold, name === 'Lanes');
+  const [open, toggle] = useFold(fold, true);
+  // Retain the page after the first open; toggling its fold never rereads it.
+  const [visited, setVisited] = useState(open);
   const id = useId();
   return (
     <div className={`grp plan-grp${open ? '' : ' shut'}`} data-fold="">
@@ -94,13 +96,51 @@ function Part({
           aria-expanded={open}
           aria-controls={id}
           aria-label={name}
-          onClick={toggle}
+          onClick={() => {
+            setVisited(true);
+            toggle();
+          }}
         />
       </div>
       <div id={id} hidden={!open}>
-        {lazy && !open ? null : children}
+        {lazy && !open && !visited ? null : children}
       </div>
     </div>
+  );
+}
+
+function TopRows<T>({
+  rows,
+  draw,
+  empty,
+}: {
+  rows: readonly T[];
+  draw: (row: T) => ReactNode;
+  empty: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const id = useId();
+  if (!rows.length) return <div className="quietline">{empty}</div>;
+  return (
+    <>
+      {rows.slice(0, 3).map(draw)}
+      <div id={id} hidden={!expanded}>
+        {expanded ? rows.slice(3).map(draw) : null}
+      </div>
+      {rows.length > 3 ? (
+        <div className="ip-showmore">
+          <Key
+            size="sm"
+            kind="ghost"
+            aria-expanded={expanded}
+            aria-controls={id}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? 'Show fewer' : `Show ${(rows.length - 3).toLocaleString()} more`}
+          </Key>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -215,8 +255,10 @@ function ItemHistory({
   };
   return (
     <>
-      {history.events.length ? (
-        history.events.map(event => (
+      <TopRows
+        rows={history.events}
+        empty="No changes recorded."
+        draw={event => (
           <Row key={`${event.kind}:${event.id}`} cols="minmax(0, 1fr) auto">
             <div dir="auto">{event.summary}</div>
             <div className="meta">
@@ -229,10 +271,8 @@ function ItemHistory({
               <HistoryWho event={event} project={project} />
             </div>
           </Row>
-        ))
-      ) : (
-        <div className="quietline">No changes recorded.</div>
-      )}
+        )}
+      />
       {!history.completeFromCreation && history.historyStartsAt ? (
         <div className="quietline">
           History starts {new Date(history.historyStartsAt).toLocaleDateString()}.
@@ -354,8 +394,10 @@ export function ItemWork({
   return (
     <Region title="Work">
       <Part name="Lanes" fold={`${fold}:lanes`} count={work.total} atLeast={work.atLeast}>
-        {work.lanes.length ? (
-          work.lanes.map(lane => (
+        <TopRows
+          rows={work.lanes}
+          empty="No Lanes yet."
+          draw={lane => (
             <Row key={lane.laneId} cols="minmax(0, 1fr) auto" style={{ rowGap: 0 }}>
               <A className="lk ttl" href={at({ place: 'lanes', rest: lane.laneId })} dir="auto">
                 {lane.title ?? `Lane ${lane.laneId.slice(0, 8)}`}
@@ -392,10 +434,8 @@ export function ItemWork({
                 </A>
               </div>
             </Row>
-          ))
-        ) : (
-          <div className="quietline">No Lanes yet.</div>
-        )}
+          )}
+        />
       </Part>
       <Part
         name="Landings"
@@ -403,8 +443,10 @@ export function ItemWork({
         atLeast={Boolean(work.moreLandings)}
         fold={`${fold}:landings`}
       >
-        {landings.length ? (
-          landings.map(landing => (
+        <TopRows
+          rows={landings}
+          empty="No landings shown."
+          draw={landing => (
             <Row key={landing.receiptId} cols="minmax(0, 1fr) auto">
               <div>
                 <A
@@ -434,24 +476,22 @@ export function ItemWork({
                 </div>
               </div>
             </Row>
-          ))
-        ) : (
-          <div className="quietline">No landings shown.</div>
-        )}
+          )}
+        />
       </Part>
       <Part name="Related" fold={`${fold}:related`} count={related.size}>
-        {related.size ? (
-          [...related.values()].map(link => (
+        <TopRows
+          rows={[...related.values()]}
+          empty={work.moreRelated ? 'No links in this page.' : 'No related Items.'}
+          draw={link => (
             <Row key={`${link.kind}:${link.id}`} cols="8em minmax(0, 1fr)">
               <span className="t2">{link.kind}</span>
               <A className="lk ttl" href={at({ rest: link.id })} dir="auto">
                 {link.title}
               </A>
             </Row>
-          ))
-        ) : (
-          <div className="quietline">{work.moreRelated ? 'No links in this page.' : 'No related Items.'}</div>
-        )}
+          )}
+        />
       </Part>
       {readHistory ? (
         <Part name="History" fold={`${fold}:history`} lazy>

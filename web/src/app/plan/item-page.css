@@ -1,0 +1,48 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Copyright 2026 Ferdinando Valsecchi */
+[data-ds] {
+  .ip-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); grid-template-rows: auto 1fr; align-items: start; }
+  .ip-cols > * { min-width: 0; }
+  .ip-main, .ip-com { grid-column: 1; border-inline-end: var(--rule) solid var(--line); }
+  .ip-side { grid-column: 2; grid-row: 1 / 3; overflow-wrap: anywhere; }
+  .ip-text { padding: var(--s-3) var(--gut-head) var(--s-4); }
+  .ip-text .md { max-width: var(--m-read); font-size: var(--t-body); line-height: 1.55; overflow-wrap: anywhere; display: flow-root; }
+  .ip-text .ip-cut { max-height: calc(12 * 1.55 * var(--t-body)); overflow: hidden; }
+  .ip-text > .btn { margin-top: var(--s-2); }
+  .ip-lines { list-style: none; margin: 0; padding: 0; }
+  .ip-dw { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: var(--s-1) var(--s-3); align-items: start; min-height: 44px; padding: var(--s-2) var(--gut-head); border-bottom: var(--rule) solid var(--line); }
+  .ip-dw .ip-line { min-width: 0; overflow-wrap: anywhere; }
+  .ip-dw .ip-src { grid-column: 2 / -1; color: var(--text-2); font-size: var(--t-meta); overflow-wrap: anywhere; }
+  .ip-done .ip-line { color: var(--text-2); }
+  .ip-src .lk { text-decoration: underline; }
+  .ip-side .who.one .a-run { flex: 0 1 auto; min-width: 0; }
+  .ip-moved .ip-line { color: var(--text-3); }
+  .ip-reserve { min-height: calc(12 * 1.55 * var(--t-body)); }
+  .ip-side .kv { grid-template-columns: 96px minmax(0, 1fr); }
+  .ip-edit { display: grid; gap: var(--s-2); padding: var(--s-3) var(--gut-head) var(--s-4); min-width: 0; }
+  .ip-edit-text textarea.inp { min-height: 180px; font-family: var(--font-mono); max-width: var(--m-wide); }
+  .ip-acts { display: flex; flex-wrap: wrap; gap: var(--s-1); align-items: center; }
+  .ip-edit-add { grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; border-bottom: var(--rule) solid var(--line); padding-block: var(--s-2); }
+  .ip-edit-add > :is(.notice, [role="alert"]) { grid-column: 1 / -1; }
+  .ip-plus { text-align: center; color: var(--text-3); font-weight: var(--w-bold); }
+  .ip-dw .ip-edit { grid-column: 2 / -1; padding: var(--s-1) 0; }
+  .ip-dw.ip-editing { background: var(--surface-2); }
+  .ip-line-key { text-align: start; border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+  .ip-line-key:hover { text-decoration: underline; }
+  .ip-showmore { padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
+  .ip-com .ph { padding-inline: var(--gut-head); }
+  .ip-com .tbar, .ip-com .pager, .ip-filterline { padding-inline: var(--gut-head); }
+  .ip-filterline { padding-block: var(--s-2); border-bottom: var(--rule) solid var(--line); font-size: var(--t-meta); color: var(--text-2); }
+  .ip-word { font-size: var(--t-meta); font-weight: var(--w-strong); }
+  .ip-box { margin-top: var(--s-1); width: 16px; height: 16px; display: inline-grid; place-items: center; border: var(--rule) solid var(--text-3); border-radius: var(--r); }
+  .ip-done .ip-box { background: var(--passed); border-color: var(--passed); color: var(--surface); }
+  .ip-moved .ip-box { border-style: dashed; color: var(--text-3); }
+  @media (max-width: 860px) {
+    .ip-cols { display: block; }
+    .ip-main, .ip-com { border-inline-end: 0; }
+    .ip-text, .ip-dw, .ip-edit, .ip-com .tbar, .ip-com .pager, .ip-filterline { padding-inline: var(--gut); }
+    .ip-dw { grid-template-columns: 20px minmax(0, 1fr); }
+    .ip-dw .ip-word, .ip-dw .ip-acts { grid-column: 2; justify-self: start; }
+    .ip-box { width: 20px; height: 20px; }
+  }
+}

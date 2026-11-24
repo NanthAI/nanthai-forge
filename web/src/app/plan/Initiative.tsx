@@ -134,7 +134,7 @@ export function InitiativePage({
           </>
         }
       >
-        {view.canEdit && onNew ? (
+        {onNew ? (
           <Key size="sm" keys="n" onClick={onNew}>
             New Item here
           </Key>

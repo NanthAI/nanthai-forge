@@ -20,6 +20,8 @@ import { invariant } from '../src/errors';
 import { serverCommentWriter, serverPutWriter } from './planningCommentWriter';
 import { report } from './errors';
 import { activeProject } from './projectAuthority';
+import { planningTarget } from '../src/work-planning-unified';
+import { memberPlanningTarget, memberPlanningWrite } from './projectPlanningWriteAccess';
 import { intentAuthority } from './projectContributors';
 import { selectedGeneration, record, recordPartition } from './projectWorkIndexStore';
 import { generationHead } from './projectWorkHead';
@@ -44,6 +46,7 @@ export async function executeCommand(
     startGeneration?: NonNullable<Awaited<ReturnType<typeof selectedGeneration>>>;
     planningClose?: string | undefined;
     planningRestore?: string | undefined;
+    planningTick?: true;
     onPlanningBatchState?: (state: { replayed: true } | { before: PlanningItem | null }) => void;
     /** A server job writing as the owner, or a close cascade's derived child write: exempt from the account limiter (convex/accountLimits.ts). */
     server?: true;
@@ -76,6 +79,7 @@ export async function executeCommand(
     'BAD_ARGUMENT',
     'Use an original Work operation UUID.',
   );
+  const member = project.owner !== user.subject;
   let rawPutRequest: string | undefined;
   let rawPutCommand: string | undefined;
   if (
@@ -85,9 +89,12 @@ export async function executeCommand(
     command.action === 'purge-planning-comment'
   ) {
     invariant(
-      project.owner === user.subject,
+      !member ||
+        (!options.planning &&
+          (command.action === 'put-planning-item' || command.action === 'comment-planning-item') &&
+          memberPlanningWrite(command, Boolean(options.planningTick))),
       'PROJECT_UNAVAILABLE',
-      'Project planning is available to its current owner.',
+      'This planning change is available only to the project owner.',
     );
     invariant(
       command.operationId === input.operationId,
@@ -95,7 +102,14 @@ export async function executeCommand(
       'Use the planning command’s original operation UUID.',
     );
     // The writer, its agent marker and a decision's body line come from the sign-in, never from client text.
-    if (command.action === 'comment-planning-item') await serverCommentWriter(ctx, command, project);
+    if (command.action === 'comment-planning-item') {
+      invariant(
+        !command.line || options.planningTick,
+        'BAD_ARGUMENT',
+        'Post line evidence with its Done-when tick.',
+      );
+      await serverCommentWriter(ctx, command, project);
+    }
     if (command.action === 'put-planning-item') {
       if (command.agent === undefined && command.agentClient === undefined) {
         rawPutCommand = JSON.stringify(command);
@@ -182,11 +196,45 @@ export async function executeCommand(
   const lookup = (keys: { collection: string; key: string }[]) =>
     Promise.all(keys.map(key => load(key.collection, key.key)));
   const rows = await lookup(commandKeys(command, input));
+  if (member && command.action === 'put-planning-item' && command.expectedVersion === 0) {
+    // commandKeys already read all four identities the reducer can resolve this Item ID through.
+    invariant(
+      !rows.some(
+        row =>
+          row?.key === command.itemId &&
+          ['intents', 'intentAliases', 'initiatives', 'planningItems'].includes(row.collection),
+      ),
+      'PROJECT_UNAVAILABLE',
+      'Capture requires a new Item ID.',
+    );
+  }
   await commandAliasRows(rows, load);
   const unified = [16, 18, 20, 22, 24].includes(JSON.parse(generation.metadata).schema);
   if (unified) {
     await commandPayloadRows(rows, lookup);
     await commandPlanningRows(rows, command, lookup);
+  }
+  if (
+    member &&
+    (command.action === 'comment-planning-item' ||
+      (command.action === 'put-planning-item' && command.expectedVersion > 0))
+  ) {
+    const target = unified
+      ? planningTarget(
+          {
+            intents: commandValues(rows, 'intents'),
+            initiatives: commandValues(rows, 'initiatives'),
+            intentAliases: commandValues(rows, 'intentAliases'),
+          },
+          command.itemId,
+        )
+      : undefined;
+    const current = commandValues(rows, 'planningItems').find(item => item.id === command.itemId);
+    invariant(
+      (!target || (target.intent && target.historyId === command.itemId)) && memberPlanningTarget(current),
+      'PROJECT_UNAVAILABLE',
+      'Select an existing Item that is not archived or deleted.',
+    );
   }
   if (options.onPlanningBatchState && command.action === 'put-planning-item' && command.expectedVersion > 0) {
     // Undo captures the exact previous Item the versioned command already loaded.
@@ -303,6 +351,9 @@ export async function executeCommand(
     projection,
     planning: options.planning,
     planningRestore: options.planningRestore,
+    ...(member && (command.action === 'put-planning-item' || command.action === 'comment-planning-item')
+      ? { memberPlanning: options.planningTick ? ('tick' as const) : ('item' as const) }
+      : {}),
     ...(options.server ? { server: true as const } : {}),
   });
 }

@@ -17,11 +17,13 @@ import type { BatchWrite } from '../../../../src/planning-batch';
 export function Versions({
   projectId,
   itemId,
+  pair,
   restore: apply,
   onOpenChange,
 }: {
   projectId: Id<'hostedProjects'>;
   itemId: string;
+  pair?: readonly [number, number | undefined] | undefined;
   /** Present only when the reader may edit: runs the restore and shows its Undo. */
   restore: ((writes: BatchWrite[], words: string) => Promise<BatchOutcome>) | undefined;
   onOpenChange: (open: boolean) => void;
@@ -30,8 +32,8 @@ export function Versions({
   const versions = useWorkPage<PlanningItem>(projectId, workspace, 'planningVersions', itemId);
   const ordered = [...versions.records].sort((a, b) => b.version - a.version);
   const latest = ordered[0];
-  const [left, setLeft] = useState<number | null>(null);
-  const [right, setRight] = useState<number | null>(null);
+  const [left, setLeft] = useState<number | null>(pair?.[0] ?? null);
+  const [right, setRight] = useState<number | null>(pair?.[1] ?? null);
   const older = ordered.find(entry => entry.version === (left ?? ordered[1]?.version)) ?? null;
   const newer = ordered.find(entry => entry.version === (right ?? latest?.version)) ?? null;
   const a = useResolvedWorkValue(projectId, workspace, 'planningVersions', older);

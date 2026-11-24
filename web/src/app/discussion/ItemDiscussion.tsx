@@ -8,7 +8,7 @@ import { Discussion } from './Discussion';
 import { useDiscussion } from './useDiscussion';
 import { useAnswer, useConversation } from './useConversation';
 
-export default function ItemDiscussion({
+export function useItemDiscussion({
   projectId,
   itemId,
   project,
@@ -31,21 +31,25 @@ export default function ItemDiscussion({
   } = useDiscussion(projectId, itemId);
   const conversation = useConversation(projectId, 'item', itemId);
   const answer = useAnswer(projectId);
-  return (
-    <Discussion
-      comments={comments}
-      conversation={{ ...conversation, answer }}
-      project={project}
-      reportProjectId={projectId}
-      reactions={reactions}
-      canWrite={canWrite}
-      loading={loading}
-      loadEarlier={loadEarlier}
-      loadingEarlier={loadingEarlier}
-      commentsFailed={failed}
-      onPost={post}
-      onReact={react}
-      readAttachment={readAttachment}
-    />
-  );
+  return {
+    comments,
+    discussion: (
+      <Discussion
+        itemPage
+        comments={comments}
+        conversation={{ ...conversation, answer }}
+        project={project}
+        reportProjectId={projectId}
+        reactions={reactions}
+        canWrite={canWrite}
+        loading={loading}
+        loadEarlier={loadEarlier}
+        loadingEarlier={loadingEarlier}
+        commentsFailed={failed}
+        onPost={post}
+        onReact={react}
+        readAttachment={readAttachment}
+      />
+    ),
+  };
 }

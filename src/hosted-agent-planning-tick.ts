@@ -5,8 +5,8 @@
 // and a version race (ITEM_CHANGED) re-reads the Item and re-applies only this line. Loaded only by that command.
 import { ForgeError, invariant } from './errors.js';
 
-/** A checkbox line: indent/quote, optional bullet or number, `[ ]`/`[x]`, text (same shape the Done-when reconcile counts). */
-const box = /^([ \t>]*(?:(?:[-*+]|\d+[.)])\s+)?\[)([ xX])(\]\s?)(.*)$/;
+import { planningTaskLines } from './planning-search.js';
+
 const shownLength = 80;
 const maxAttempts = 6;
 
@@ -19,12 +19,18 @@ const normal = (text: string) => text.replace(/\s+/g, ' ').trim();
  * matches throw BAD_ARGUMENT listing the open candidates (index and first 80 characters). */
 export function tickBodyLine(body: string, line: number | string) {
   const rows = body.split('\n');
-  const boxes: (Candidate & { row: number })[] = [];
-  rows.forEach((row, at) => {
-    const match = box.exec(row.replace(/\r$/, ''));
-    if (match)
-      boxes.push({ index: boxes.length + 1, done: match[2] !== ' ', text: normal(match[4] ?? ''), row: at });
-  });
+  const boxes: (Candidate & { row: number; replacement: string })[] = [];
+  for (const { row, position, match } of planningTaskLines(rows)) {
+    const [, head, mark, tail, text, cr] = match;
+    if (mark === '~') continue;
+    boxes.push({
+      index: position,
+      done: mark !== ' ',
+      text: normal(text!),
+      row,
+      replacement: `${head}x${tail}${text}${cr}`,
+    });
+  }
   invariant(
     boxes.length > 0,
     'BAD_ARGUMENT',
@@ -53,10 +59,7 @@ export function tickBodyLine(body: string, line: number | string) {
   const found = matches[0]!;
   const open = boxes.filter(candidate => !candidate.done).length - (found.done ? 0 : 1);
   if (found.done) return { body, index: found.index, text: found.text, already: true as const, open };
-  rows[found.row] = rows[found.row]!.replace(
-    box,
-    (_all, head: string, _mark, tail: string, text: string) => `${head}x${tail}${text}`,
-  );
+  rows[found.row] = found.replacement;
   return { body: rows.join('\n'), index: found.index, text: found.text, already: false as const, open };
 }
 

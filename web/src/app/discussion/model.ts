@@ -20,6 +20,7 @@ export type DiscussionComment = {
   agentClient?: string;
   replyTo?: string;
   decision?: true;
+  line?: import('../../../../src/planning-line-evidence').PlanningLineEvidence;
   /** Files stored in R2 under this comment (Item 9a3d6f5f); the page reads each through the download route. */
   attachments?: PlanningAttachment[];
   /** Written by Forge from a landing receipt (Issue 3a733ee8), never by a member: no reply or reaction. */

@@ -164,6 +164,7 @@ type Discussed = {
   operationId: string;
   replyTo?: string | undefined;
   decision?: boolean | undefined;
+  line?: import('./planning-line-evidence.js').PlanningLineEvidence | undefined;
   agent?: string | undefined;
   agentClient?: string | undefined;
   attachments?: readonly PlanningAttachment[] | undefined;
@@ -191,7 +192,7 @@ export function discussionFields(comments: readonly Comment[], itemId: string, c
   return {
     ...(replyTo ? { replyTo } : {}),
     ...putAgentFields(command),
-    ...(command.decision ? { decision: true as const } : {}),
+    ...(command.decision ? { decision: true as const, ...(command.line ? { line: command.line } : {}) } : {}),
     ...(command.attachments?.length ? { attachments: [...command.attachments] } : {}),
   };
 }

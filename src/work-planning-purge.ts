@@ -78,9 +78,12 @@ export function applyPlanningPurge(
 /** One comment's purge (Item b6588425 line 2b): the comment keeps its id, Item, thread and time, and loses its words,
  * as its purged row replays. Earlier copies (the base checkpoint) are scrubbed the same way; nothing else changes. */
 export function applyCommentPurge(data: WorkData, command: PlanningCommentPurge) {
-  for (const comment of data.planningComments)
-    if (comment.id === command.commentId)
-      Object.assign(comment, { text: 'Deleted comment', authorLabel: '' });
+  for (const comment of data.planningComments) if (comment.id === command.commentId) scrubComment(comment);
+}
+
+function scrubComment(comment: { line?: unknown }) {
+  Object.assign(comment, { text: 'Deleted comment', authorLabel: '' });
+  delete comment.line;
 }
 
 /** Replace the words of every retained version and comment of the Item in this Work, whatever wrote them (the base
@@ -94,8 +97,7 @@ function scrubItemWords(data: WorkData, historyId: string) {
     item.body = '';
     for (const key of ['reason', 'type', 'owner', 'waitingOn', 'imported'] as const) delete item[key];
   }
-  for (const comment of data.planningComments)
-    if (comment.itemId === historyId) Object.assign(comment, { text: 'Deleted comment', authorLabel: '' });
+  for (const comment of data.planningComments) if (comment.itemId === historyId) scrubComment(comment);
 }
 
 /** The journal half of the one reader rule, for a whole journal in memory (export, local recovery). A purge lists
@@ -181,8 +183,7 @@ export function purgedIndexValue(
       'payloadKey',
       'payloadParts',
     );
-  } else if (collection === 'planningComments')
-    Object.assign(row, { text: 'Deleted comment', authorLabel: '' });
+  } else if (collection === 'planningComments') scrubComment(row);
   else if (collection === 'notes') {
     row.text = 'Deleted note';
     // A Lane handoff note's summary, tests and next steps are free text too; a replayed purged note has none.

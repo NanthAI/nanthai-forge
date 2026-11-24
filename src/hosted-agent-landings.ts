@@ -2,8 +2,10 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { z } from 'zod';
 import { invariant } from './errors.js';
-import { LANDINGS_MAX_LIMIT } from './hosted-landings-view.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+
+/** The wire request bound. Keep the server's landing-cost views off the cold CLI path. */
+const requestLimit = 30;
 
 const fileHistoryHelp =
   'For a file, use history {"op":"log","path":"FILE"} or history {"op":"blame","path":"FILE"}.';
@@ -22,7 +24,7 @@ export const hostedLandingsSchema = z
       message: z.literal(true).optional(),
       /** One canonical submission with its request message and cohort hold. */
       submissionId: z.uuid().optional(),
-      limit: z.number().int().min(1).max(LANDINGS_MAX_LIMIT).optional(),
+      limit: z.number().int().min(1).max(requestLimit).optional(),
       /** Only landings an agent run built, or only those a person built; `builtBy` on each row says which. */
       kind: z.enum(['agent', 'person']).optional(),
       /** `nextCursor` of the previous page of the same window. */

@@ -14,6 +14,7 @@ import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { commandProjection } from './projectWorkProjection';
+import { memberPlanningWrite } from './projectPlanningWriteAccess';
 import type { PlanningWriteContext } from './projectWorkCommandContext';
 import { workProject, setWorkHead } from './projectWorkHead';
 import { acceptanceEvidence } from './autonomyFields';
@@ -259,6 +260,8 @@ export async function appendWork(
     authorityEpoch?: number;
     planning?: PlanningWriteContext | undefined;
     planningRestore?: string | undefined;
+    /** In-process proof from executeCommand after checking the exact Item and the member-write allowlist. */
+    memberPlanning?: 'item' | 'tick';
     /** A server job writing as the owner (speed-budget Issues, a member's start): not charged. */
     server?: true;
   },
@@ -301,7 +304,10 @@ export async function appendWork(
       (parsed.data.action === 'put-planning-item' || parsed.data.action === 'comment-planning-item')
     ) {
       invariant(
-        project.owner === input.owner,
+        project.owner === input.owner ||
+          (input.memberPlanning &&
+            input.projection &&
+            memberPlanningWrite(parsed.data, input.memberPlanning === 'tick')),
         'PROJECT_UNAVAILABLE',
         'Project planning is available to its current owner.',
       );

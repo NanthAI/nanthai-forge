@@ -170,10 +170,11 @@ for (const [collection, parentId] of [
   ['planningVersions', 'item'],
   ['lanes', undefined],
 ])
-  test(`686ecdde: a ${collection} page open reads one newest page at 100 and at 10,000 rows`, async t => {
+  test(`686ecdde: a ${collection} page opens one bounded newest page regardless of collection size`, async t => {
+    const pageSize = collection === 'planningComments' ? 20 : 100;
     const measured = {};
     try {
-      for (const rows of [100, 10_000]) {
+      for (const rows of [pageSize, 10_000]) {
         const index = await loadIndex(rows);
         let page;
         // Re-render as a mounted page would; a bounded page never asks for the next one by itself.
@@ -182,19 +183,23 @@ for (const [collection, parentId] of [
         measured[rows] = { subscriptions: index.subscriptions(), records: page.records.length };
         assert.equal(page.initialLoading, false);
         assert.equal(page.loadingMore, false);
-        assert.equal(Boolean(page.more), rows > 100, 'more is offered only while rows remain');
-        if (rows > 100) {
+        assert.equal(Boolean(page.more), rows > pageSize, 'more is offered only while rows remain');
+        if (rows > pageSize) {
           assert.deepEqual(
             page.records.map(record => Number(record.id)),
-            Array.from({ length: 100 }, (_, n) => rows - 100 + n),
+            Array.from({ length: pageSize }, (_, n) => rows - pageSize + n),
             'the first page holds the newest rows, shown in order',
           );
           page.more();
           assert.equal(index.subscriptions(), 2, 'asking for more reads exactly one more page');
         }
       }
-      assert.deepEqual(measured[100], measured[10_000], 'reads per open stay flat as the collection grows');
-      assert.deepEqual(measured[10_000], { subscriptions: 1, records: 100 });
+      assert.deepEqual(
+        measured[pageSize],
+        measured[10_000],
+        'reads per open stay flat as the collection grows',
+      );
+      assert.deepEqual(measured[10_000], { subscriptions: 1, records: pageSize });
       t.diagnostic(JSON.stringify(measured));
     } finally {
       delete globalThis.__boundedReact;

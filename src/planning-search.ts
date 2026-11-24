@@ -6,12 +6,36 @@ import type { IndexEntry } from './work-hosted-index.js';
 import type { PlanningItem } from './work-planning-types.js';
 
 /** Done-when lines are the body's Markdown task lines ("- [ ]", "- [x]"): [ticked, total], or null when none. */
+export const planningTaskLine = /^([ \t]*(?:[-*+]|\d+[.)])[ \t]+\[)([ xX~])(\][ \t]+)(.*?)(\r?)$/;
+
+/** Browser and CLI address the same rows, including moved rows, excluding Markdown fences. */
+export function* planningTaskLines(rows: readonly string[]) {
+  let fence: string | undefined;
+  let position = 0;
+  for (const [row, raw] of rows.entries()) {
+    if (fence) {
+      const end = /^[ \t]*(`{3,}|~{3,})[ \t]*\r?$/.exec(raw)?.[1];
+      if (end?.startsWith(fence)) fence = undefined;
+      continue;
+    }
+    const start = /^[ \t]*(`{3,})[^`\r]*\r?$|^[ \t]*(~{3,})[^\r]*\r?$/.exec(raw);
+    const marker = start?.[1] ?? start?.[2];
+    if (marker) {
+      fence = marker;
+      continue;
+    }
+    const match = planningTaskLine.exec(raw);
+    if (match) yield { row, raw, position: ++position, match };
+  }
+}
+
 export function doneWhenCounts(body: string): [number, number] | null {
   let ticked = 0,
     total = 0;
-  for (const match of body.matchAll(/^\s*[-*]\s+\[([ xX])\]\s/gm)) {
+  for (const { match } of planningTaskLines(body.split('\n'))) {
+    if (match[2] === '~') continue;
     total++;
-    if (match[1] !== ' ') ticked++;
+    if (match[2] !== ' ') ticked++;
   }
   return total ? [ticked, total] : null;
 }

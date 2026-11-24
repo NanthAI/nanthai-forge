@@ -10,9 +10,9 @@
 // - "next" derived from state, never stored;
 // - Initiative progress from counted children, never a typed percentage;
 // - one public-plan visibility rule for every public read.
-// It imports nothing, so the web app's Plan screen gets no zod or Convex code from it. The stored schema
-// (src/work-planning-types.ts) and the search rows (src/planning-search.ts) keep their own copies of the rank pattern,
-// relation kinds and Done-when counter, so the CLI loads no extra module; tests/planning-model.test.mjs ties them.
+// The stored schema (src/work-planning-types.ts) keeps its own rank pattern and relation kinds so the CLI
+// loads no extra module; tests/planning-model.test.mjs ties them. Task references and counts are shared with
+// the search projection.
 
 export type StoredStatus =
   | 'proposed'
@@ -260,16 +260,7 @@ export function progress(rows: readonly Pick<PlanRow, 'status'>[]) {
   return { ...counts, live: counts.inProgress + counts.notStarted, total };
 }
 
-/** Done-when lines are the body's Markdown task lines ("- [ ]", "- [x]"): [ticked, total], or null when none. */
-export function doneWhenCounts(body: string): [number, number] | null {
-  let ticked = 0,
-    total = 0;
-  for (const match of body.matchAll(/^\s*[-*]\s+\[([ xX])\]\s/gm)) {
-    total++;
-    if (match[1] !== ' ') ticked++;
-  }
-  return total ? [ticked, total] : null;
-}
+export { doneWhenCounts } from './planning-search.js';
 
 // ---- Public plan visibility -------------------------------------------------------------------------------------
 /** Project setting. Absent means public: on a public project anyone may read the plan (owner decision 2026-11-16). */

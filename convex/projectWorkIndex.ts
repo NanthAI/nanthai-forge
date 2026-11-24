@@ -141,11 +141,13 @@ export const detail = query({
     ...selection,
     collection: v.string(),
     id: v.string(),
+    inlineItemOnly: v.optional(v.literal(true)),
     planningHistory: v.optional(v.literal(true)),
   },
   returns: v.object({
     ...identity,
     value: v.union(v.string(), v.null()),
+    deferred: v.optional(v.literal(true)),
     editable: v.boolean(),
     intentPin: v.union(v.string(), v.null()),
   }),
@@ -174,7 +176,7 @@ export const detail = query({
             )
           : value;
       if (input.collection === 'planningItems' && readsStore(project, input.collection)) {
-        const item = await storeItemRow(ctx, project._id, input.id);
+        const item = await storeItemRow(ctx, project._id, input.id, input.inlineItemOnly);
         return {
           generationId: generation._id,
           revision: generation.initialRevision,
@@ -184,12 +186,29 @@ export const detail = query({
                 item.planningTimes,
               )
             : null,
+          ...(item?.deferred ? { deferred: true as const } : {}),
           editable: project.owner === user.subject,
           intentPin: null,
         };
       }
-      const row = await record(ctx, recordPartition(generation), input.collection, input.id),
-        main = await hostedMain(ctx, generation);
+      const row = await record(ctx, recordPartition(generation), input.collection, input.id);
+      if (
+        input.inlineItemOnly &&
+        input.collection === 'planningItems' &&
+        row &&
+        JSON.parse(row.value).payloadKey
+      )
+        return {
+          generationId: generation._id,
+          revision: generation.initialRevision,
+          value: null,
+          deferred: true as const,
+          editable: project.owner === user.subject,
+          intentPin: null,
+        };
+      const main = ['lanes', 'views', 'runs'].includes(input.collection)
+        ? await hostedMain(ctx, generation)
+        : null;
       let editable = project.owner === user.subject,
         intentPin: string | null = null;
       if (input.collection === 'intents') {

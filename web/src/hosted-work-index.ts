@@ -24,6 +24,7 @@ type Detail = {
   generationId: string | null;
   revision: number | null;
   value: string | null;
+  deferred?: true;
   editable: boolean;
   intentPin: string | null;
 };
@@ -34,7 +35,7 @@ export const workIndex = {
   ),
   detail: makeFunctionReference<
     'query',
-    Project & { generationId?: string; collection: string; id: string },
+    Project & { generationId?: string; collection: string; id: string; inlineItemOnly?: true },
     Detail
   >('projectWorkIndex:detail'),
   checksum: makeFunctionReference<'action', Project, string>('projectWorkIndexActions:checksum'),
@@ -122,10 +123,9 @@ function useWorkRows(
           ...(parentId === undefined ? {} : { parentId }),
         }
       : 'skip';
-  // Match the server's existing 100-row window. Smaller pages kept the same
-  // complete histories but multiplied queries and ancestry/authority reads.
-  const initialNumItems = 100;
   const itemDiscussion = collection === 'planningComments' && parentId !== undefined;
+  // An Item's discussion opens with twenty member comments; other Work windows stay at 100.
+  const initialNumItems = itemDiscussion && !follow ? 20 : 100;
   const archiveCapable = collection === 'planningVersions' || itemDiscussion;
   // A refused or failed page is `status: 'Error'`, reported as `failed`, not thrown into the root boundary.
   const ordinary = useSafePaginatedQuery(workIndex.records, archiveCapable ? 'skip' : selection, {
@@ -139,7 +139,7 @@ function useWorkRows(
   const { results, status, loadMore } = archiveCapable ? archived : ordinary;
   // Convex splits any page longer than twice `initialNumItems` into two new subscriptions; larger
   // continuation pages would each be re-read and split twice before the page settles.
-  const pageSize = Math.min(100, initialNumItems * 2);
+  const pageSize = initialNumItems;
   useEffect(() => {
     if (follow && enabled && workspace && status === 'CanLoadMore') loadMore(pageSize);
   }, [follow, enabled, workspace?.generationId, status, loadMore, results.length, pageSize]);

@@ -14,6 +14,7 @@ import { applyWrites, type BatchInput } from './projectPlanningBatchWrites';
 import { closeBatch } from './projectPlanningClose';
 import { invariant } from '../src/errors';
 import { planningBatchLimit, type BatchWrite } from '../src/planning-batch';
+import { isPlanningTick } from '../src/planning-line-evidence';
 
 const uuid = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 export async function applyBatch(ctx: MutationCtx, input: BatchInput) {
@@ -35,6 +36,31 @@ export async function applyBatch(ctx: MutationCtx, input: BatchInput) {
     `A batch holds 1 to ${planningBatchLimit} planning writes. A close Undo names its original operation.`,
   );
   if (input.close || input.undoClose) return closeBatch(ctx, input, user.subject, writes);
+  const evidence = writes.find(
+    write => write?.action === 'comment-planning-item' && write.line !== undefined,
+  );
+  if (evidence?.action === 'comment-planning-item' && evidence.line) {
+    const [put, comment] = writes;
+    invariant(
+      writes.length === 2 &&
+        put?.action === 'put-planning-item' &&
+        typeof put.body === 'string' &&
+        comment === evidence &&
+        comment.decision === true &&
+        put.itemId === comment.itemId,
+      'BAD_ARGUMENT',
+      'Tick one Done-when line with its evidence in the same batch.',
+    );
+    const results = await applyWrites(ctx, input, user.subject, writes, { atomic: true, planningTick: true });
+    const before = results[0]?.before?.body;
+    invariant(
+      results.every(result => result.outcome === 'replayed') ||
+        (typeof before === 'string' && isPlanningTick(before, put.body, evidence.line)),
+      'BAD_ARGUMENT',
+      'The evidence must name the open line this batch ticks.',
+    );
+    return JSON.stringify({ operationId: input.operationId, results });
+  }
   const results = await applyWrites(ctx, input, user.subject, writes);
   return JSON.stringify({ operationId: input.operationId, results });
 }

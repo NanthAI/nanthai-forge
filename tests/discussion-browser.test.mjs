@@ -90,7 +90,8 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
       if (url.hostname !== 'forge.test') return route.abort();
       if (url.pathname === '/discussion/attachment')
         return route.fulfill({ status: 200, contentType: 'image/png', body: png });
-      if (url.pathname === '/discussion.html') return route.fulfill({ contentType: 'text/html', body: html });
+      if (url.pathname === '/discussion.html' || url.pathname.startsWith('/sample-one/synthetic/plan/'))
+        return route.fulfill({ contentType: 'text/html', body: html });
       const file = join(out, url.pathname.slice(1));
       if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
       const contentType = file.endsWith('.js')
@@ -100,7 +101,10 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
           : 'text/html';
       return route.fulfill({ contentType, body: readFileSync(file) });
     });
-    await page.goto(`https://forge.test/discussion.html?${query}`);
+    const path = query.includes('stress')
+      ? '/sample-one/synthetic/plan/7be2c41a-0000-4000-8000-000000000001'
+      : '/discussion.html';
+    await page.goto(`https://forge.test${path}?${query}`);
     await page
       .locator('section[aria-label="Comments"] article')
       .first()
@@ -122,15 +126,15 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
       async t => {
         const page = await open(t, DESK);
         const section = page.locator('section[aria-label="Comments"]');
-        assert.equal(await section.locator('.band .cnt').textContent(), '4');
+        assert.equal(await section.locator('.ph .cnt').textContent(), '4');
         assert.equal(await section.locator('article').count(), 4);
         assert.equal(await section.locator('article.re').count(), 1, 'the reply sits under its root');
         assert.match(
-          await section.locator('article').nth(2).locator('.by').textContent(),
+          await section.locator('article').nth(1).locator('.by').textContent(),
           /keen-impala.*model not declared.*@sample-one/,
         );
         assert.match(
-          await section.locator('article').nth(3).locator('.by').textContent(),
+          await section.locator('article').first().locator('.by').textContent(),
           /sample-threenot verified/,
         );
         assert.equal(await section.locator('img, script').count(), 0, 'member HTML never becomes elements');
@@ -168,12 +172,11 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
       async t => {
         const page = await open(t, DESK, 'notePages=1');
         const section = page.locator('section[aria-label="Comments"]');
-        const count = 'section[aria-label="Comments"] .band .cnt';
+        const count = 'section[aria-label="Comments"] .ph .cnt';
         // Item 686ecdde: an open reads one page, the newest 50 notes; the older page is read only when asked.
         await page.waitForFunction(selector => document.querySelector(selector)?.textContent === '50', count);
-        assert.match(await section.locator('.band').textContent(), /loaded so far/);
-        await section.getByRole('button', { name: /^Show .* earlier$/ }).click();
-        await section.getByRole('button', { name: /^Show .* earlier$/ }).click();
+        assert.match(await section.locator('.ph').textContent(), /loaded so far/);
+        await section.getByRole('button', { name: 'Show 20 earlier' }).click();
         await page.waitForFunction(selector => document.querySelector(selector)?.textContent === '51', count);
         // A new landing moves the first page's boundary; the older page re-reads from the new cut.
         await page.evaluate(() => window.addLandingNote());
@@ -238,18 +241,126 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
       async t => {
         const page = await open(t, DESK, 'pages=1');
         const section = page.locator('section[aria-label="Comments"]');
-        await section.getByRole('button', { name: 'Show 20 earlier' }).click();
+        await section.getByRole('button', { name: 'Show earlier messages' }).click();
         await section.getByRole('button', { name: 'Pick A' }).waitFor();
         await page.evaluate(() => window.changeThread('answer'));
         await section.getByText('Chosen elsewhere').waitFor();
         assert.equal(await section.getByRole('button', { name: 'Pick A' }).count(), 0);
         await page.evaluate(() => window.changeThread('append'));
         await section.getByText('Message 4', { exact: true }).waitFor();
-        await section.getByRole('button', { name: 'Show 20 earlier' }).click();
+        await section.getByRole('button', { name: 'Show earlier messages' }).click();
         await section.getByText('Message 2', { exact: true }).waitFor();
         assert.equal(await section.getByText('Chosen elsewhere').count(), 1);
       },
     );
+
+    await t.test(
+      'Item text, 40 lines and 312 comments stay usable at both widths and themes with one page per request',
+      async t => {
+        for (const viewport of [DESK, PHONE])
+          for (const theme of ['dark', 'light']) {
+            const page = await open(t, viewport, `stress=1&theme=${theme}&viewer=writer`);
+            const text = page.getByRole('region', { name: 'Text', exact: true });
+            const list = page.getByRole('region', { name: 'Done when', exact: true });
+            const section = page.getByRole('region', { name: 'Comments', exact: true });
+            const more = section.getByRole('button', { name: 'Show 20 earlier', exact: true });
+            const reads = () =>
+              page.evaluate(() =>
+                [...new Set(window.__commentReads.map(read => JSON.stringify(read)))].map(JSON.parse),
+              );
+            await list.getByText('א', { exact: true }).waitFor();
+            assert.equal(await list.locator('li').count(), 40);
+            assert.match(await list.textContent(), /1\/39.*1 moved/);
+            assert.equal(await text.locator('img').count(), 0);
+            assert.equal(await text.locator('strong').textContent(), 'Readable Markdown');
+            assert.match(await text.locator('pre').textContent(), /This is a literal example/);
+            assert.equal(await text.locator('.ip-cut').count(), 1);
+            await text.getByRole('button', { name: /^Show all text/ }).click();
+            assert.equal(await text.locator('.ip-cut').count(), 0);
+            await text.getByRole('button', { name: 'Show less text' }).click();
+            assert.equal(await page.evaluate(() => window.textReads()), 1);
+            assert.deepEqual(await reads(), [{ cursor: null, numItems: 20 }]);
+            assert.equal(await section.locator('article').count(), 20);
+            await list.getByRole('link', { name: 'evidence' }).click();
+            await section.getByText('1 of 20 loaded', { exact: true }).waitFor();
+            assert.equal(await section.locator('article').count(), 1);
+            await section.getByRole('button', { name: 'Clear Decisions' }).click();
+            await section.getByRole('button', { name: 'Filter comments: Author any' }).click();
+            await page.getByRole('menuitem', { name: '@sample-one' }).click();
+            await section.getByText('10 of 20 loaded', { exact: true }).waitFor();
+            await section.getByRole('button', { name: 'Clear author' }).click();
+            await section.getByRole('button', { name: /Review findings/ }).click();
+            await section.getByText('No review findings in the 20 loaded comments.').waitFor();
+            assert.deepEqual(await reads(), [{ cursor: null, numItems: 20 }]);
+            await more.click();
+            await section.getByText('0 of 40 loaded', { exact: true }).waitFor();
+            await section.getByRole('button', { name: 'Clear filters' }).click();
+            await settleBrowserPage(page);
+            assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), viewport.width);
+            await page.addScriptTag({ path: axePath });
+            const failures = await page.evaluate(async () =>
+              (
+                await window.axe.run(document, {
+                  runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] },
+                })
+              ).violations.map(v => ({ id: v.id, targets: v.nodes.map(n => n.target) })),
+            );
+            assert.deepEqual(failures, [], `${viewport.width} ${theme}`);
+            if (viewport === PHONE && theme === 'light') {
+              for (let loaded = 60; loaded <= 320; loaded += 20) {
+                await more.click();
+                await section
+                  .getByText(`${Math.min(loaded, 312)} comments loaded`, { exact: true })
+                  .waitFor();
+              }
+              assert.equal(await section.locator('article').count(), 312);
+              assert.equal(await more.count(), 0);
+              assert.equal((await reads()).length, 16);
+              assert((await reads()).every(page => page.numItems === 20));
+              assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), viewport.width);
+            }
+            await shot(page, `item-long-${viewport.width}-${theme}`);
+          }
+      },
+    );
+
+    await t.test('large retained text does not load or offer an edit until explicitly requested', async t => {
+      const page = await open(t, PHONE, 'stress=1&deferred=1&viewer=writer');
+      const text = page.getByRole('region', { name: 'Text', exact: true });
+      const show = text.getByRole('button', { name: 'Show all text', exact: true });
+      await show.waitFor();
+      await settleBrowserPage(page);
+      assert.equal(await page.evaluate(() => window.textReads()), 1);
+      assert.equal(await text.getByRole('button', { name: 'Edit text' }).count(), 0);
+      await show.click();
+      await text.getByRole('button', { name: 'Edit text' }).waitFor();
+      assert.equal(await page.evaluate(() => window.textReads()), 2);
+    });
+
+    await t.test('a stale text edit retains the draft and identifies the version that changed', async t => {
+      const page = await open(t, PHONE, 'stress=1&viewer=writer&versions=5');
+      const text = page.getByRole('region', { name: 'Text', exact: true });
+      await text.getByRole('button', { name: 'Edit text', exact: true }).click();
+      await text.getByRole('textbox', { name: 'Item text' }).fill('My unpublished draft');
+      await page.evaluate(() => window.changeItem());
+      await text.getByRole('button', { name: /^Save text/ }).click();
+      await text.getByText(/saved version 5 while you edited/).waitFor();
+      assert.equal(
+        await text.getByRole('textbox', { name: 'Item text' }).inputValue(),
+        'My unpublished draft',
+      );
+      await text.getByRole('button', { name: 'Compare and redo' }).click();
+      const comparison = page.getByRole('dialog', { name: 'Version 4 beside version 5' });
+      await comparison.waitFor();
+      await page.keyboard.press('Escape');
+      await comparison.waitFor({ state: 'hidden' });
+      await text.getByRole('button', { name: 'Resume draft on version 5' }).click();
+      const draft = text.getByRole('textbox', { name: 'Item text' });
+      assert.equal(await draft.inputValue(), 'My unpublished draft');
+      assert.equal(await draft.getAttribute('readonly'), null);
+      await text.getByRole('button', { name: /^Save text/ }).click();
+      await text.getByRole('button', { name: 'Edit text' }).waitFor();
+    });
 
     await t.test(
       '686ecdde: Versions reads the newest 100 on open and older ones only when asked',

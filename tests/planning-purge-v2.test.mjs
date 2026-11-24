@@ -19,7 +19,8 @@ import {
   purgedFactsSchema,
   redactPlanningWrite,
 } from '../dist/work-intent-types.js';
-import { checkPurgedJournal } from '../dist/work-planning-purge.js';
+import { applyCommentPurge, checkPurgedJournal, purgedIndexValue } from '../dist/work-planning-purge.js';
+import { planningLineEvidence } from '../dist/planning-line-evidence.js';
 import { decisionOperationId } from '../dist/work-planning-put.js';
 import { purgedDecisionRequest } from '../dist/work-planning-state.js';
 
@@ -123,6 +124,25 @@ test('every field of every purgeable command is classified, and stored facts wit
   const note = { action: 'note', intentId: randomUUID(), text: SECRET, kind: 'comment' };
   assert.equal(redactPlanningWrite(note).text, 'Deleted note');
   assert.equal(purgedFactsSchema.safeParse(note).success, false, 'a note with words is not purged facts');
+});
+
+test('purging decision evidence removes the line digest from journal facts, index and checkpoint copies', () => {
+  const id = randomUUID();
+  const itemId = randomUUID();
+  const line = planningLineEvidence(1, SECRET);
+  const words = { itemId, text: SECRET, authorLabel: 'Fixture', decision: true, line };
+  const comment = { id, ...words };
+  const facts = redactPlanningWrite(
+    purgeableCommandSchema.parse({ ...words, action: 'comment-planning-item', operationId: id }),
+  );
+  const index = purgedIndexValue('planningComments', comment, randomUUID());
+  applyCommentPurge({ planningComments: [comment] }, { commentId: id });
+  for (const value of [facts, index, comment]) {
+    assert.equal(value.itemId, itemId);
+    assert.equal(value.text, 'Deleted comment');
+    assert.equal(value.decision, true);
+    assert(!Object.hasOwn(value, 'line'));
+  }
 });
 
 test('an Intent-born Item’s intent, put and note rows purge, and a rebuild and full load find none of its words', async t => {

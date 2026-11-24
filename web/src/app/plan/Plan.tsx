@@ -33,7 +33,9 @@ import type { PlaceProps } from '../screens';
 import {
   readComments,
   readInitiative,
+  readItem,
   readItems,
+  type FullItem,
   runBatch,
   batchApply,
   type BatchOutcome,
@@ -46,7 +48,7 @@ import { isShut, NO_INITIATIVE, usePlanFolds } from './fold';
 import { Groups } from './Groups';
 import { InitiativePage } from './Initiative';
 import type { ReadInitiativeWork } from './InitiativeWork';
-import { COLS, DoneWhen, Line, Owner, Status } from './rows';
+import { COLS, Line, Owner, Status } from './rows';
 import { useWorkers, type ActiveLane, type Workers } from './workers';
 import { itemLanes, lanesNeedingYou } from './lane-words';
 import type { NeedsRead } from '../needs/count';
@@ -74,6 +76,8 @@ import { filtered, keeps, readQuery, sortRows, writeQuery, type PlanQuery } from
 import { Toolbar } from './Views';
 import { useProjectPages } from '../project-pages';
 import { ItemWork, type ReadItemHistory, type ReadItemWork } from './ItemWork';
+import type { ReadItem } from './ItemDetail';
+import { itemBody } from './item-body';
 import './plan.css';
 
 const planRead = makeFunctionReference<
@@ -97,10 +101,10 @@ const settledPage = makeFunctionReference<
   },
   PaginationResult<string>
 >('projectPlanSettled:page');
-/** An Item's comments (Item 9a3d6f5f) load with the Item page only, so the list never loads the Markdown renderer. */
-const ItemDiscussion = lazy(() => import('../discussion/ItemDiscussion'));
+/** Text and comments load together, so the Plan list never loads the Markdown renderer. */
+const ItemDetail = lazy(() => import('./ItemDetail'));
 
-export type Put = (command: Record<string, unknown>) => Promise<unknown>;
+export type Put = (command: Record<string, unknown>, operationId?: string) => Promise<unknown>;
 
 export default function Plan(props: PlaceProps) {
   return <PlanScreen {...props} />;
@@ -186,6 +190,10 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle, needsRe
   const deleteForever = useAction(api.projectItemRetention.deleteForever);
   const apply = useMutation(batchApply);
   const client = useConvex();
+  const readItemText = useCallback<ReadItem>(
+    (id, full) => readItem(client, projectId, id, full),
+    [client, projectId],
+  );
   const readItemWork = useCallback<ReadItemWork>(
     (itemId, cursor) =>
       client.query(api.projectItemWork.read, { projectId, itemId, limit: 10, cursor, details: true }),
@@ -200,8 +208,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle, needsRe
     initiativeId => client.query(api.projectInitiativeWork.read, { projectId, initiativeId }),
     [client, projectId],
   );
-  const put: Put = command => {
-    const operationId = crypto.randomUUID();
+  const put: Put = (command, operationId = crypto.randomUUID()) => {
     return mutate({
       projectId,
       operationId,
@@ -244,6 +251,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle, needsRe
       run={run}
       purge={input => deleteForever({ projectId, ...input })}
       reads={reads}
+      readItemText={readItemText}
       readItemWork={readItemWork}
       readItemHistory={readItemHistory}
       readInitiativeWork={readInitiativeWork}
@@ -292,6 +300,7 @@ export function PlanScreenView({
   run,
   purge,
   reads,
+  readItemText,
   readItemWork,
   readItemHistory,
   readInitiativeWork,
@@ -327,6 +336,7 @@ export function PlanScreenView({
   run?: RunBatch;
   purge?: PurgeItem;
   reads?: Reads;
+  readItemText?: ReadItem | undefined;
   readItemWork?: ReadItemWork | undefined;
   readItemHistory?: ReadItemHistory | undefined;
   readInitiativeWork?: ReadInitiativeWork | undefined;
@@ -343,7 +353,10 @@ export function PlanScreenView({
   const [orders, setOrders] = useState<ReadonlyMap<string, string>>(new Map());
   const [capture, setCapture] = useState(false);
   const [split, setSplit] = useState(false);
-  const [versions, setVersions] = useState(false);
+  const [versions, setVersions] = useState<{
+    itemId: string;
+    pair?: readonly [number, number | undefined] | undefined;
+  }>();
   const [purging, setPurging] = useState<PlanRow | null>(null);
   const [error, setError] = useState('');
   const [cli, setCli] = useState(false);
@@ -368,7 +381,8 @@ export function PlanScreenView({
         entry => entry.kind === 'initiative' && entry.id.startsWith(itemKey),
       )
     : undefined;
-  const canCapture = Boolean(view?.canEdit) && (!route.rest || Boolean(initiativeRow));
+  const canWriteItems = Boolean(read?.canEdit || read?.canWriteItems);
+  const canCapture = canWriteItems && (!route.rest || Boolean(initiativeRow));
   useEffect(() => {
     if (!canCapture) return;
     // "n" opens New Item, as its key shows, unless the reader is typing or holding a modifier.
@@ -500,6 +514,7 @@ export function PlanScreenView({
   if (route.rest && !initiativeRow)
     return (
       <ItemPage
+        key={`${projectId}:${itemRow?.id ?? route.rest}`}
         route={route}
         row={whole && (linkedItem !== 'loading' || here) ? itemRow : undefined}
         projectName={projectName}
@@ -507,10 +522,26 @@ export function PlanScreenView({
         workers={workers}
         at={at}
         projectId={projectId}
+        readItemText={readItemText}
         readItemWork={readItemWork}
         readItemHistory={readItemHistory}
         onSplit={whole?.canEdit && reads && run ? () => setSplit(true) : undefined}
-        onVersions={projectId ? () => setVersions(true) : undefined}
+        onVersions={projectId && itemRow ? pair => setVersions({ itemId: itemRow.id, pair }) : undefined}
+        edit={
+          canWriteItems && run
+            ? {
+                run,
+                undo: (outcome, words) => {
+                  setToast({ outcome, words });
+                  announce(words);
+                },
+                compare:
+                  projectId && itemRow
+                    ? (base, current) => setVersions({ itemId: itemRow.id, pair: [base, current] })
+                    : undefined,
+              }
+            : undefined
+        }
         onShelve={whole?.canEdit && run ? (row, to) => void shelfMove(shelve([row], to), row, to) : undefined}
         shelved={here}
         onBack={here && run ? () => void shelfMove([here.back], here.row, null) : undefined}
@@ -523,10 +554,12 @@ export function PlanScreenView({
         announcement={<Announcer message={message} />}
         error={error}
         versions={
-          versions && projectId ? (
+          versions && projectId && versions.itemId === itemRow?.id ? (
             <Versions
+              key={`${versions.itemId}:${versions.pair}`}
               projectId={projectId}
-              itemId={here?.row.id ?? itemRow?.id ?? route.rest}
+              itemId={versions.itemId}
+              pair={versions.pair}
               restore={
                 whole?.canEdit && run
                   ? async (writes, words) => {
@@ -540,7 +573,9 @@ export function PlanScreenView({
                     }
                   : undefined
               }
-              onOpenChange={setVersions}
+              onOpenChange={open => {
+                if (!open) setVersions(undefined);
+              }}
             />
           ) : null
         }
@@ -713,16 +748,17 @@ export function PlanScreenView({
       },
     );
   };
-  const captureSheet = view?.canEdit ? (
-    <Capture
-      open={capture}
-      onOpenChange={setCapture}
-      view={view}
-      put={put}
-      announce={announce}
-      initiative={initiativeRow?.id ?? ''}
-    />
-  ) : null;
+  const captureSheet =
+    view && canCapture ? (
+      <Capture
+        open={capture}
+        onOpenChange={setCapture}
+        view={view}
+        put={put}
+        announce={announce}
+        initiative={initiativeRow?.id ?? ''}
+      />
+    ) : null;
   if (initiativeRow && whole)
     return (
       <>
@@ -744,7 +780,7 @@ export function PlanScreenView({
           onShowDone={showDone}
           onMove={move}
           error={error}
-          onNew={() => setCapture(true)}
+          onNew={canCapture ? () => setCapture(true) : undefined}
           announce={announce}
         />
         {captureSheet}
@@ -803,7 +839,7 @@ export function PlanScreenView({
           )
         }
       >
-        {view?.canEdit && !boardEmpty ? (
+        {view && canCapture && !boardEmpty ? (
           <Key size="sm" keys="n" onClick={() => setCapture(true)}>
             New Item
           </Key>
@@ -923,7 +959,7 @@ export function PlanScreenView({
               <div className="empty">
                 <h3>Nothing is planned yet</h3>
                 <p>Items appear here as they are added, by you or by an agent. A title is enough to start.</p>
-                {view.canEdit ? (
+                {canCapture ? (
                   <Key kind="primary" onClick={() => setCapture(true)}>
                     New Item
                   </Key>
@@ -1146,10 +1182,12 @@ function ItemPage({
   workers,
   at,
   projectId,
+  readItemText,
   readItemWork,
   readItemHistory,
   onSplit,
   onVersions,
+  edit,
   onShelve,
   shelved,
   onBack,
@@ -1168,10 +1206,12 @@ function ItemPage({
   workers: Workers;
   at: (patch: Partial<PlaceProps['route']>) => string;
   projectId: Id<'hostedProjects'> | undefined;
+  readItemText?: ReadItem | undefined;
   readItemWork?: ReadItemWork | undefined;
   readItemHistory?: ReadItemHistory | undefined;
   onSplit?: (() => void) | undefined;
-  onVersions?: (() => void) | undefined;
+  onVersions?: ((pair?: readonly [number, number | undefined]) => void) | undefined;
+  edit?: import('./item-edit').EditItemPorts | undefined;
   /** Archive or Delete this Item (the owner only). */
   onShelve?: ((row: PlanRow, to: Shelf) => void) | undefined;
   /** This page's Item when it is Archived or Deleted (just sent, or opened by its link); onBack brings it back. */
@@ -1185,7 +1225,20 @@ function ItemPage({
   split?: ReactNode;
   toast?: ReactNode;
 }) {
+  const [full, setFull] = useState<FullItem>();
+  const moved = full ? itemBody(full.body).lines.filter(line => line.state === 'moved').length : 0;
   const workItem = row?.id ?? (row === null ? shelved?.row.id : undefined);
+  const work =
+    workItem && readItemWork ? (
+      <ItemWork
+        key={`${projectId}:${workItem}`}
+        itemId={workItem}
+        read={readItemWork}
+        readHistory={readItemHistory}
+        at={at}
+        project={route}
+      />
+    ) : null;
   const group = row
     ? view?.groups.find(entry => entry.lines.some(line => line.row.id === row.id))
     : undefined;
@@ -1201,7 +1254,6 @@ function ItemPage({
             : 'No Initiative',
         ],
         ['Owner', <Owner key="o" owner={row.owner} workers={workers.get(row.id)} />],
-        ['Done when', row.doneWhen ? <DoneWhen key="d" row={row} /> : 'no checklist'],
         ...(row.type ? ([['Type', row.type]] as [string, ReactNode][]) : []),
         ...(row.hidden ? ([['Public plan', 'hidden']] as [string, ReactNode][]) : []),
       ]
@@ -1227,13 +1279,17 @@ function ItemPage({
           ) : (
             <>
               <b dir="auto">{row.title}</b> {itemStatusLabel[statusOf(row)]}
-              {line?.next ? ', and it is the next free one.' : '.'}
+              {row.doneWhen || moved
+                ? `: ${row.doneWhen?.[0] ?? 0} of ${row.doneWhen?.[1] ?? 0} Done-when lines ticked${moved ? `, ${moved} moved` : ''}.`
+                : line?.next
+                  ? ', and it is the next free one.'
+                  : '.'}
             </>
           )
         }
       >
         {row && onVersions ? (
-          <Key size="sm" onClick={onVersions}>
+          <Key size="sm" onClick={() => onVersions()}>
             Versions
           </Key>
         ) : null}
@@ -1278,22 +1334,31 @@ function ItemPage({
       {versions}
       {toast}
       {row ? (
-        <Region title="Item">
-          <div className="plan-item-cols">
-            <dl className="kv">
-              {facts.map(([label, value]) => (
-                <FactRow key={label} label={label}>
-                  {value}
-                </FactRow>
-              ))}
-            </dl>
-            {projectId ? (
-              <Suspense fallback={<div className="quietline">Loading the comments…</div>}>
-                <ItemDiscussion key={row.id} projectId={projectId} itemId={row.id} project={route} />
-              </Suspense>
-            ) : null}
-          </div>
-        </Region>
+        <Suspense fallback={<div className="quietline">Loading Item details…</div>}>
+          <ItemDetail
+            row={row}
+            read={readItemText}
+            onItem={setFull}
+            projectId={projectId}
+            project={route}
+            href={id => at({ rest: id })}
+            edit={edit}
+            aside={
+              <>
+                <Region title="Item">
+                  <dl className="kv">
+                    {facts.map(([label, value]) => (
+                      <FactRow key={label} label={label}>
+                        {value}
+                      </FactRow>
+                    ))}
+                  </dl>
+                </Region>
+                {work}
+              </>
+            }
+          />
+        </Suspense>
       ) : row === null && shelved ? (
         <Region title="Item">
           <div className="quietline" role="status">
@@ -1316,16 +1381,7 @@ function ItemPage({
           </div>
         </Region>
       ) : null}
-      {workItem && readItemWork ? (
-        <ItemWork
-          key={`${projectId}:${workItem}`}
-          itemId={workItem}
-          read={readItemWork}
-          readHistory={readItemHistory}
-          at={at}
-          project={route}
-        />
-      ) : null}
+      {row ? null : work}
     </div>
   );
 }
