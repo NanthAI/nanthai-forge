@@ -10,16 +10,23 @@ import { objectDocument } from './projectObjectFields';
 import { projectBackupDocument } from './schema';
 
 /** One-off converter for Item c0af6cfa family F6: clears old Convex file-storage pointers
- * (`storageId`) on live object rows whose bytes already read from a committed R2 object. Byte
- * readers pick R2 first for those rows (`isR2Object`), so clearing changes no read. It never
- * clears a row whose pointer still has a job: removed, purged or native-only rows, an object
- * that a saved source continuation names (its ownership proof, projectConvexSourceOwnership),
- * or any backup (its id can be an archive lookup alias, r2ArchiveSource). Those are `blocked`.
- * Pointer writers refuse with R2_REQUIRED before this runs. Dev ran it before the pointer
- * readers were deleted; prod runs it from the pinned in-between release (P8 runbook in
+ * (`storageId`) on rows whose bytes already read from a committed R2 object: live object rows,
+ * backups, and a backup's archive receipt. Byte readers pick R2 first for those rows
+ * (`isR2Object`, `archiveDownload`), so clearing changes no read. It never clears a row whose
+ * pointer still has a job: removed, purged or native-only rows, a backup or receipt without a
+ * committed R2 copy, or an object that a saved source continuation names (its ownership proof,
+ * projectConvexSourceOwnership). Those are `blocked`. A backup's old id stops resolving as an
+ * archive alias (lead decision d5850d3d: no outside links, the backup reads through its R2
+ * record). Pointer writers refuse with R2_REQUIRED before this runs. Dev ran it before the
+ * pointer readers were deleted; prod runs it from the pinned in-between release (P8 runbook in
  * docs/operations/legacy-storage-cleanup.md). */
-const tables = ['projectObjects', 'projectBackups'] as const;
-type Table = (typeof tables)[number];
+const targets = {
+  projectObjects: { field: 'storageId' },
+  projectBackups: { field: 'storageId' },
+  projectBackupArchives: { field: 'archiveReceipt.storageId' },
+} as const;
+const tables = Object.keys(targets) as (keyof typeof targets)[];
+type Table = keyof typeof targets;
 const pageRows = 256;
 const pageBytes = 1024 * 1024;
 const blockedDetail = 20;
@@ -28,14 +35,22 @@ const maxPasses = 3;
 
 type Row = Doc<'projectObjects'> | Doc<'projectBackups'>;
 type Cursor = { id: string; at: number };
-const eligible = (table: Table, row: Row, owned: ReadonlySet<string>) =>
-  table === 'projectObjects' &&
-  !(row as Doc<'projectObjects'>).removed &&
-  !(row as Doc<'projectObjects'>).purged &&
-  row.location === 'r2' &&
-  !!row.r2Committed &&
-  !!row.r2Key &&
-  !owned.has(row.storageId!);
+const pointerOf = (table: Table, row: Row) =>
+  table === 'projectBackupArchives'
+    ? (row as Doc<'projectBackups'>).archiveReceipt?.storageId
+    : row.storageId;
+/** R2 holds the committed bytes the pointer once named, and no saved continuation names it. */
+const eligible = (table: Table, row: Row, owned: ReadonlySet<string>) => {
+  if (owned.has(pointerOf(table, row)!)) return false;
+  if (table === 'projectObjects') {
+    const object = row as Doc<'projectObjects'>;
+    return (
+      !object.removed && !object.purged && !!object.r2Committed && object.location === 'r2' && !!object.r2Key
+    );
+  }
+  const copy = table === 'projectBackups' ? row : (row as Doc<'projectBackups'>).archiveReceipt!;
+  return copy.location === 'r2' && !!copy.r2Committed && !!copy.r2Key;
+};
 
 const pageResult = {
   cursor: v.union(v.string(), v.null()),
@@ -47,7 +62,7 @@ const pageResult = {
   writtenBytes: v.number(),
 };
 
-/** Exact keyset page over the set ids of `by_storage`, highest id first. The cursor names the
+/** Exact keyset page over the set ids of the target's pointer index, highest id first. The cursor names the
  * last row by (storageId, _creationTime), so a page stops at its row and byte caps even inside one
  * large group of equal ids and the next page resumes inside that group. A cleared row leaves the
  * range. At most `pageRows` rows and `pageBytes` read (a single larger row is read alone). */
@@ -63,19 +78,20 @@ export const page = internalMutation({
     invariant(owned.length <= maxContinuationRefs, 'BAD_ARGUMENT', 'Too many continuation refs.');
     const keep = new Set(owned);
     const after: Cursor | null = cursor === null ? null : JSON.parse(cursor);
-    // oxlint-disable-next-line typescript/no-explicit-any -- one range shape over both tables' by_storage
+    const { field } = targets[table];
+    // oxlint-disable-next-line typescript/no-explicit-any -- one range shape over every target's pointer index
     const index = (range: (q: any) => any) =>
-      ctx.db
-        .query(table as Table)
-        .withIndex('by_storage', range)
-        .order('desc') as unknown as AsyncIterable<Row>;
+      (table === 'projectBackupArchives'
+        ? ctx.db.query('projectBackups').withIndex('by_archive_storage', range)
+        : ctx.db.query(table as 'projectObjects' | 'projectBackups').withIndex('by_storage', range)
+      ).order('desc') as unknown as AsyncIterable<Row>;
     const ranges = after
       ? [
           // The rest of the group the last page stopped in, then every lower id.
-          index(q => q.eq('storageId', after.id as Id<'_storage'>).lt('_creationTime', after.at)),
-          index(q => q.gt('storageId', undefined).lt('storageId', after.id as Id<'_storage'>)),
+          index(q => q.eq(field, after.id as Id<'_storage'>).lt('_creationTime', after.at)),
+          index(q => q.gt(field, undefined).lt(field, after.id as Id<'_storage'>)),
         ]
-      : [index(q => q.gt('storageId', undefined))];
+      : [index(q => q.gt(field, undefined))];
     const out = {
       scanned: 0,
       cleared: 0,
@@ -95,7 +111,7 @@ export const page = internalMutation({
         }
         out.readBytes += size;
         out.scanned++;
-        last = { id: row.storageId!, at: row._creationTime };
+        last = { id: pointerOf(table, row)!, at: row._creationTime };
         if (!eligible(table, row, keep)) {
           out.blocked++;
           if (out.blockedIds.length < blockedDetail) out.blockedIds.push(row._id);
@@ -103,9 +119,15 @@ export const page = internalMutation({
         }
         out.cleared++;
         if (!apply) continue;
-        await ctx.db.patch(row._id, { storageId: undefined });
+        if (table === 'projectBackupArchives') {
+          const { archiveReceipt } = row as Doc<'projectBackups'>;
+          await ctx.db.patch(row._id as Id<'projectBackups'>, {
+            archiveReceipt: { ...archiveReceipt!, storageId: undefined },
+          });
+        } else await ctx.db.patch(row._id as Id<'projectObjects'>, { storageId: undefined });
         // The rewritten row is the read row less its pointer.
-        out.writtenBytes += size - getDocumentSize({ storageId: row.storageId! }) + getDocumentSize({});
+        out.writtenBytes +=
+          size - getDocumentSize({ storageId: pointerOf(table, row)! }) + getDocumentSize({});
       }
     return { ...out, cursor: full && last ? JSON.stringify(last) : null };
   },

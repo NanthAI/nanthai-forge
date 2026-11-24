@@ -186,7 +186,7 @@ test('F6 review 77acbe23: run catches a pointer written behind its cursor mid-sc
   );
 });
 
-test('F6 review 77acbe23: an object a saved source continuation names, and every backup alias, stay blocked', async () => {
+test('F6 review 77acbe23: an object a saved source continuation names stays blocked', async () => {
   const s = state();
   s.tables.projectObjects.set(
     'owned',
@@ -206,10 +206,6 @@ test('F6 review 77acbe23: an object a saved source continuation names, and every
       },
     ],
   ]);
-  s.tables.projectBackups.set(
-    'backup',
-    backupRow({ _id: 'backup', storageId: 'storage-backup', ...r2('c'.repeat(64)) }),
-  );
   const result = await run._handler(runner(s), { apply: true });
   assert.equal(result.continuationRefs, 1);
   assert.equal(
@@ -218,13 +214,77 @@ test('F6 review 77acbe23: an object a saved source continuation names, and every
     'its ownership proof survives',
   );
   assert.equal(s.tables.projectObjects.get('free').storageId, undefined);
-  assert.equal(
-    s.tables.projectBackups.get('backup').storageId,
-    'storage-backup',
-    'archive aliases keep resolving',
+  assert.equal(result.passes[0][0].blocked, 1);
+});
+
+test('F6 d5850d3d: a backup and its archive receipt with a committed R2 copy lose their old id; a native-only one is blocked', async () => {
+  const s = state();
+  s.tables.projectBackups.set(
+    'backup',
+    backupRow({ _id: 'backup', storageId: 'storage-backup', ...r2('c'.repeat(64)) }),
   );
-  const [objects, backups] = result.passes[0];
-  assert.deepEqual([objects.blocked, backups.blocked], [1, 1]);
+  s.tables.projectBackups.set(
+    'archived',
+    backupRow({
+      _id: 'archived',
+      _creationTime: 2,
+      archiveReceipt: {
+        digest: 'd'.repeat(64),
+        size: 1,
+        storageId: 'storage-archive',
+        ...r2('d'.repeat(64)),
+        operationId: 'op',
+        at: 0,
+      },
+    }),
+  );
+  s.tables.projectBackups.set(
+    'native',
+    backupRow({ _id: 'native', _creationTime: 3, storageId: 'storage-native' }),
+  );
+  s.tables.projectBackups.set(
+    'native-archive',
+    backupRow({
+      _id: 'native-archive',
+      _creationTime: 4,
+      archiveReceipt: {
+        digest: 'e'.repeat(64),
+        size: 1,
+        storageId: 'storage-native-2',
+        operationId: 'op',
+        at: 0,
+      },
+    }),
+  );
+  const dry = await run._handler(runner(s), { apply: false });
+  assert.deepEqual(
+    dry.passes[0].map(pass => [pass.table, pass.scanned, pass.cleared, pass.blocked]),
+    [
+      ['projectObjects', 0, 0, 0],
+      ['projectBackups', 2, 1, 1],
+      ['projectBackupArchives', 2, 1, 1],
+    ],
+  );
+  assert.equal(s.tables.projectBackups.get('backup').storageId, 'storage-backup', 'a dry run writes nothing');
+  const result = await run._handler(runner(s), { apply: true });
+  assert.equal(s.tables.projectBackups.get('backup').storageId, undefined);
+  assert.equal(s.tables.projectBackups.get('archived').archiveReceipt.storageId, undefined);
+  assert.equal(
+    s.tables.projectBackups.get('archived').archiveReceipt.r2Key,
+    `v1/p/project/o/${'d'.repeat(64)}`,
+  );
+  assert.equal(s.tables.projectBackups.get('native').storageId, 'storage-native');
+  assert.equal(s.tables.projectBackups.get('native-archive').archiveReceipt.storageId, 'storage-native-2');
+  const replay = await run._handler(runner(s), { apply: true });
+  assert.deepEqual(
+    replay.passes.at(-1).map(pass => pass.cleared),
+    [0, 0, 0],
+    'a replay clears nothing',
+  );
+  assert.equal(
+    result.passes.at(-1).every(pass => pass.cleared === 0),
+    true,
+  );
 });
 
 test('F6 review 77acbe23: the byte proof refuses a missing or repeated row instead of returning less', async () => {

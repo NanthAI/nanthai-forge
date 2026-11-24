@@ -46,12 +46,15 @@ operation and a new lead go.
 ## Pointer retirement (one shape)
 
 Rows whose bytes already read from a committed R2 object can still carry an old
-`storageId`. Byte readers pick R2 first for those rows (`isR2Object`), so the
-pointer is unused. `storagePointerRetire:run` clears it on live
-`projectObjects` rows: `{"apply":false}` is the dry run, `{"apply":true}`
-writes. It never clears a removed, purged or native-only row, an object a saved
-source continuation names (its ownership proof), or any backup (its old id is an
-archive alias). Those come back as `blocked` with up to 20 ids per table.
+`storageId`. Byte readers pick R2 first for those rows (`isR2Object`,
+`archiveDownload`), so the pointer is unused. `storagePointerRetire:run` clears
+it on live `projectObjects` rows, on `projectBackups` and on a backup's
+`archiveReceipt`: `{"apply":false}` is the dry run, `{"apply":true}` writes. It
+never clears a removed, purged or native-only row, a backup or receipt without
+a committed R2 copy, or an object a saved source continuation names (its
+ownership proof). Those come back as `blocked` with up to 20 ids per table. A
+cleared backup no longer resolves its old id as an archive alias (lead decision
+d5850d3d: there are no outside links; it reads through its R2 record).
 
 Dev ran it from the refs-only landing of Lane 79793887 before the pointer
 readers were deleted. Prod (Item c0af6cfa, sign-off point 4) runs it from the
@@ -63,8 +66,8 @@ on any miss.
    it (`nforge agent . show` with that `state` and `path`). Confirm the deploy
    at that State succeeded and that the deployment answers
    `storagePointerRetire:run`. Commands target one deployment explicitly: dev
-   with `CONVEX_DEPLOYMENT=dev:<name>` on `npx convex run`, prod with `--prod`,
-   and prod only with the owner's go for that run.
+   with `--deployment <name>` on `npx convex run`, prod with `--prod`, and prod
+   only with the owner's go for that run. Remove `.env.local` after any CLI use.
 2. **Writers stopped.** At that State, pointer writers refuse with
    `R2_REQUIRED` (source output, finish, derived artifacts, backups, proposals,
    imports, bootstrap, seed, archive migration). Do not run against a release
@@ -84,10 +87,10 @@ on any miss.
    alias resolution for backups). Keep the output.
 5. **Dry run.** `run {"apply":false}` reads every pointer row once plus every
    continuation row (dev scale: about 19 MB of continuations, 28 MB of
-   pointers). The blocked rows must be exactly the expected set (backups,
-   continuation-named objects); any removed, purged or native-only blocker
-   stops the run. More than 1,000 continuation refs refuses: settle those jobs
-   first.
+   pointers). The blocked rows must be exactly the expected set
+   (continuation-named objects; none on dev); any removed, purged,
+   native-only or R2-less blocker stops the run. More than 1,000 continuation
+   refs refuses: settle those jobs first.
 6. **Apply.** `run {"apply":true}` writes one mutation per page (256 rows or
    1 MiB) and ends with a rescan that clears nothing; `WORK_STALE` means a
    writer still sets pointers: stop and find it. A partial run (timeout, error)
@@ -95,7 +98,7 @@ on any miss.
 7. **Replay.** A second `run {"apply":true}` must clear 0 and block the same
    rows.
 8. **Proof after.** The same ids give the same `sha256` and `size`, `pointer`
-   false for cleared rows and true for blocked ones, and an unchanged `alias`.
+   false for every cleared row, and an unchanged `alias` for blocked ones.
    Only then may the release that deletes the pointer readers, the schema field
    and these two modules go out.
 
