@@ -5,18 +5,32 @@ change it. The format and its checks are local functions (`src/sealed-proposal.t
 the public checks that need no key are shared with the server
 (`src/sealed-proposal-check.ts`). Forge stores Development proposals.
 
-Commands (`src/sealed-proposal-client.ts`). An agent that changes or removes an existing
-Development value with `nforge secret set` or `nforge secret rm` makes a proposal
-instead; adding a new name stays a direct write. `nforge secret proposals` lists the
+Commands (`src/sealed-proposal-client.ts`). An agent that changes or removes a
+Development name that exists or existed (a removed name's tombstone counts) with
+`nforge secret set` or `nforge secret rm` makes a proposal instead, so re-adding a
+removed name is an addition proposal; only a name the head has never held is a direct
+write. `nforge secret proposals` lists the
 waiting proposals by id, operation, name, proposer fingerprint and age, never a value,
 and marks one that fails the public checks on this device's verified view. A person
 on a terminal applies one with `nforge secret apply ID` in an ordinary signed head
 write, and `nforge secret reject ID` rejects one; an id is at least 8 hex characters.
-Apply works only from a confirmed view (a device that trusted Development on first use
-applies nothing) on a write device, and retries a lost compare-and-swap race up to
-three times. The device keeps the ids it applied or rejected (the last 256 per set) in
-its pin file, under the pin MAC, and refuses one it has seen, whatever the server
-lists. A proposal that is no longer current teaches `nforge secret proposals`.
+Before signing, apply shows the operation, name, kind (env or file), proposer
+fingerprint, age and full id and asks yes or no; without a terminal it refuses, and
+there is no flag that answers for the person. Every attempt then signs only the
+proposal with that full id and the same listed bytes (SHA-256), so a proposal its
+proposer replaced after the prompt is a conflict. Apply works only from a confirmed
+view (a device that trusted Development on first use applies nothing) on a write
+device, and retries a lost compare-and-swap race up to three times. Rejecting another
+device's proposal takes the same trust: a person, a confirmed view and a write device;
+a device withdraws its own proposals without them. The device keeps the ids it applied
+or rejected (the last 256 per set) in its pin file, under the pin MAC, and refuses one
+it has seen, whatever the server lists. A repin keeps that journal from the old pin
+file when it still verifies, and starts it empty when the files show a rollback, since
+a restored older file would miss later ids; the server's list of resolved ids then
+covers the gap while the server is honest. A proposal the server still lists but this
+device will not apply (already resolved here, invalid, or its base changed) teaches
+`nforge secret reject ID`; one that is no longer current teaches
+`nforge secret proposals`.
 
 Storing. `sealedSecrets:propose` takes one record for the active Development set from
 a stable CLI device sign-in with write access. Before it stores anything, the server

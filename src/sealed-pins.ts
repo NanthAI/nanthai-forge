@@ -367,8 +367,11 @@ export class SecretPins {
         ...previous.kinds,
         [request.setKind]: { pin: result.pin, cache: reply, fetchedAt: Date.now() },
       },
-      // A rebuild keeps the applied-proposal journal when the old file still verified.
-      ...(previous.resolvedProposals ? { resolvedProposals: previous.resolvedProposals } : {}),
+      // A rebuild keeps the applied-proposal journal when the old file still verified, unless the files show a
+      // rollback: a restored older file's journal would silently miss later ids, so it starts empty (review N1).
+      ...(previous.resolvedProposals && !lostSiblings
+        ? { resolvedProposals: previous.resolvedProposals }
+        : {}),
     };
     index.counter = counter;
     index.files[name] = { counter: file.counter, kinds: knownKinds(file) };

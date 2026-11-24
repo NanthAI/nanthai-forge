@@ -345,21 +345,40 @@ test('sealed reads and writes refuse stable devices without a current approval',
   assert.equal(s.tables.sealedSecretHistory.size, 0);
 });
 test('agent entry points add new names; a change or removal of an existing record is only proposed', async t => {
-  const { client, project, account, keys, pins, transport } = setup(t),
+  const { s, client, project, account, keys, pins, transport } = setup(t),
     agent = new SealedClient(project, account, keys, pins, transport, true);
   await agent.write('API_TOKEN', Buffer.from('agent-new-synthetic-value'));
+  const set = () => [...s.tables.sealedSecretSets.values()].find(row => row.kind === 1);
+  const head = Buffer.from(set().headHash),
+    history = s.tables.sealedSecretHistory.size;
   // Item 6466c6a5: the change and the removal wait as proposals; the stored value is unchanged.
-  assert.match(
-    (await agent.write('API_TOKEN', Buffer.from('agent-changed-value'))).proposed,
-    /^[0-9a-f]{32}$/,
+  const change = await agent.write('API_TOKEN', Buffer.from('agent-changed-value'));
+  assert.match(change.proposed, /^[0-9a-f]{32}$/);
+  assert.equal(change.op, 'change');
+  const removal = await agent.write('API_TOKEN', null);
+  assert.equal(removal.op, 'remove');
+  // Review N4: the head is untouched, and the removal replaced the change, so exactly one proposal waits.
+  assert(Buffer.from(set().headHash).equals(head));
+  assert.equal(s.tables.sealedSecretHistory.size, history);
+  assert.deepEqual(
+    set().proposals.map(p => Buffer.from(p.proposalId).toString('hex')),
+    [removal.proposed],
   );
-  assert.match((await agent.write('API_TOKEN', null)).proposed, /^[0-9a-f]{32}$/);
   await assert.rejects(
     agent.write('PIP_INDEX_URL', Buffer.from('https://synthetic.invalid')),
     code('PERSON_REQUIRED'),
   );
+  // A name that existed before, then was removed, is still an existing name: re-adding it is an addition proposal.
+  await client.write('OLD_TOKEN', Buffer.from('person-synthetic-value'));
+  await client.write('OLD_TOKEN', null);
+  const readd = await agent.write('OLD_TOKEN', Buffer.from('agent-readded-value'));
+  assert.match(readd.proposed, /^[0-9a-f]{32}$/);
+  assert.equal(readd.op, 'add');
   const read = await client.read();
-  assert.equal(read.secrets[0].value.toString(), 'agent-new-synthetic-value');
+  assert.deepEqual(
+    read.secrets.map(secret => [secret.name, secret.value.toString()]),
+    [['API_TOKEN', 'agent-new-synthetic-value']],
+  );
   clear(read);
 });
 test('an unknown write outcome replays its exact ciphertext rather than sealing a second mutation', async t => {

@@ -114,7 +114,7 @@ async function readValue(file = false): Promise<Buffer> {
     process.stdin.on('data', data);
   });
 }
-async function confirmRepin(summary: string) {
+async function askYes(summary: string) {
   process.stderr.write(`${summary} [y/N] `);
   const { createInterface } = await import('node:readline/promises');
   const line = createInterface({ input: process.stdin, output: process.stderr });
@@ -167,9 +167,10 @@ export async function sealedCli(args: string[]) {
       try {
         const receipt = await client.write(name!, value, { file, ...(operationId ? { operationId } : {}) });
         const proposed = 'proposed' in receipt ? receipt.proposed?.slice(0, 8) : undefined;
+        const op = 'op' in receipt ? receipt.op : undefined;
         process.stdout.write(
           proposed
-            ? `Proposed a ${command === 'rm' ? 'removal of' : 'change to'} ${name} in Development: proposal ${proposed} waits for a person (nforge secret apply ${proposed}).\n`
+            ? `Proposed ${op === 'remove' ? 'removing' : op === 'add' ? 'adding' : 'a new value for'} ${safeSecretName(name!)} in Development: proposal ${proposed} waits for a person (nforge secret apply ${proposed}).\n`
             : `${'replay' in receipt && receipt.replay ? 'Confirmed original operation for' : command === 'rm' ? 'Removed' : 'Set'} ${name} in Development. Operation ${receipt.operationId}.\n`,
         );
       } finally {
@@ -194,7 +195,7 @@ export async function sealedCli(args: string[]) {
         const lines = await proposals.listProposals(client);
         process.stdout.write(lines.length ? `${lines.join('\n')}\n` : 'No proposals wait in Development.\n');
       } else if (command === 'apply') {
-        const done = await proposals.applyWaiting(client, proposalId!);
+        const done = await proposals.applyWaiting(client, proposalId!, askYes);
         process.stdout.write(
           `Applied proposal ${done.id.slice(0, 8)} (${done.op} ${safeSecretName(done.name)}) in Development${done.mode === 'adopted' ? ', signed by this device after a compaction' : ''}.\n`,
         );
@@ -204,7 +205,7 @@ export async function sealedCli(args: string[]) {
       }
     } else if (command === 'resolve') {
       invariant(operationId, 'BAD_ARGUMENT', 'Use nforge secret resolve --operation-id UUID.');
-      const result = await client.resolve(operationId, agent ? undefined : confirmRepin);
+      const result = await client.resolve(operationId, agent ? undefined : askYes);
       process.stdout.write(
         `Operation ${operationId}: ${result.resolved}. Use a new operation for any new change.\n`,
       );
@@ -248,7 +249,7 @@ export async function sealedCli(args: string[]) {
       );
       const wire = await client.transport.read({ kind: 1 });
       invariant(wire, 'SECRETS_NOT_SET_UP', 'Development is not set up.');
-      const result = await client.pins.rebuild(sealedRead(wire), client.request(), true, confirmRepin);
+      const result = await client.pins.rebuild(sealedRead(wire), client.request(), true, askYes);
       result.key?.fill(0);
       for (const secret of result.secrets) secret.value.fill(0);
       process.stdout.write('Development trust rebuilt from this device’s signed head.\n');

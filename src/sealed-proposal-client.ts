@@ -4,7 +4,7 @@
 // person lists the waiting proposals, applies one in a normal signed head write, or rejects it. The server stores and
 // drops proposals (convex/sealedSecrets.ts propose, proposals, reject); the trust decisions are made here, on this
 // device's verified view, never on what the server says about a proposal.
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { ForgeError, invariant } from './errors.js';
 import { framedHash } from './sealed-format.js';
 import { headBytes } from './sealed-records.js';
@@ -31,6 +31,8 @@ const wipe = (state: Verified | null) => {
 };
 const conflict = (message: string) => new ForgeError('WORK_CONFLICT', message);
 const OP = { 1: 'add', 2: 'change', 3: 'remove' } as const;
+/** Review N4 (eb8eb545): a name that existed before, a removed one included, is proposed; re-adding it is an `add`. */
+const OPS = { 1: 'adding', 2: 'a new value for', 3: 'removing' } as const;
 
 function transportOf(client: SealedClient) {
   const { propose, proposals, reject } = client.transport;
@@ -72,29 +74,32 @@ export async function proposeChange(
     }
     const id = hex(proposal.proposalId);
     client.notice(
-      `Proposed ${value === null ? 'removing' : 'a new value for'} ${safeSecretName(name)}; a person applies it with nforge secret apply ${id.slice(0, 8)}.`,
+      `Proposed ${OPS[proposal.op]} ${safeSecretName(name)}; a person applies it with nforge secret apply ${id.slice(0, 8)}.`,
     );
-    return { operationId, name, removed: false, proposed: id };
+    return { operationId, name, removed: false, proposed: id, op: OP[proposal.op] };
   } finally {
     wipe(state);
   }
 }
 
-type Listed = { id: string; proposal: SealedProposal | null; problem?: string };
+/** `hash` is the SHA-256 of the exact bytes the server listed: apply signs only the proposal a person was shown. */
+type Listed = { id: string; proposal: SealedProposal | null; problem?: string; hash: Buffer };
 async function waiting(client: SealedClient, state: Verified): Promise<Listed[]> {
   const rows = await transportOf(client).proposals({ kind: 1 });
   const view = { roster: state.reply.roster, head: state.reply.head, revoked: state.reply.revoked };
   return rows.map(row => {
     let p: SealedProposal | null = null;
+    const hash = createHash('sha256').update(new Uint8Array(row)).digest();
     try {
       p = decodeSealedProposal(decodeSealedWire(new Uint8Array(row)));
       checkProposal(view, p);
-      return { id: hex(p.proposalId), proposal: p };
+      return { id: hex(p.proposalId), proposal: p, hash };
     } catch (error) {
       return {
         id: p ? hex(p.proposalId) : '?',
         proposal: p,
         problem: error instanceof ForgeError ? error.code : 'SECRETS_FORMAT_REFUSED',
+        hash,
       };
     }
   });
@@ -135,16 +140,29 @@ export async function listProposals(client: SealedClient) {
   }
 }
 
+/** What a person approves before apply signs: operation, name, kind, proposer, age and the full id (review F1). */
+function applySummary(p: SealedProposal, now: number) {
+  return `Apply ${OP[p.op]} ${safeSecretName(p.name)} (${p.kind === 2 ? 'file' : p.kind === 1 ? 'env' : 'removal'}) from fp ${deviceFingerprint(p.proposerId)}, proposed ${Math.max(0, Math.round((now - p.proposedAt) / 60000))} min ago, id ${hex(p.proposalId)}?`;
+}
+
 /** A person applies a waiting proposal in a signed head write on its fresh verified view (Gate B2 L7: a confirmed,
  * not trusted-on-first-use, writer). A proposal this device already applied or rejected is refused from its own
- * journal (L1), whatever the server lists. Retries a lost compare-and-swap race up to three times. */
-export async function applyWaiting(client: SealedClient, prefix: string) {
+ * journal (L1), whatever the server lists. `confirm` shows the person `applySummary` and must say yes before anything
+ * is signed; every attempt then signs only the proposal with that full id and the same listed bytes, so a proposal
+ * the proposer replaced after the prompt is a conflict (review F1). Retries a lost compare-and-swap race up to three
+ * times. */
+export async function applyWaiting(
+  client: SealedClient,
+  prefix: string,
+  confirm?: (summary: string) => Promise<boolean>,
+) {
   invariant(
-    !client.agent,
+    !client.agent && confirm,
     'PERSON_REQUIRED',
     'A person applies a proposal: run nforge secret apply on a terminal.',
   );
-  let removedMarked = false;
+  let removedMarked = false,
+    shown: { id: string; hash: Buffer } | undefined;
   for (let attempt = 0; attempt < 4; attempt++) {
     const state = await client.read();
     if (await removeMarkedFirst(client, state, removedMarked)) {
@@ -165,14 +183,22 @@ export async function applyWaiting(client: SealedClient, prefix: string) {
         'SECRETS_NOT_ALLOWED',
         'Only a device of a write member or owner holding Development applies a proposal.',
       );
-      const chosen = pick(await waiting(client, state), prefix);
+      const chosen = pick(await waiting(client, state), shown?.id ?? prefix);
       if ((await client.pins.resolvedProposals(client.project, 1)).some(id => hex(id) === chosen.id))
-        throw conflict('This proposal was already applied or rejected on this device. Make a new proposal.');
+        throw conflict(
+          `This proposal was already applied or rejected on this device. Reject it: nforge secret reject ${chosen.id.slice(0, 8)}.`,
+        );
       if (chosen.problem || !chosen.proposal)
         throw new ForgeError(
           chosen.problem ?? 'SECRETS_FORMAT_REFUSED',
-          'This proposal is not valid; reject it.',
+          `This proposal is not valid; reject it: nforge secret reject ${chosen.id.slice(0, 8)}.`,
         );
+      if (!shown) {
+        if (!(await confirm!(applySummary(chosen.proposal, Date.now()))))
+          throw new ForgeError('CANCELLED', 'Nothing was applied.');
+        shown = { id: chosen.id, hash: chosen.hash };
+      } else if (!chosen.hash.equals(shown.hash))
+        throw conflict('This proposal changed after you confirmed it. List the proposals again.');
       const previous = framedHash(headBytes(state.reply.head));
       const reply = nextReply(client, state);
       key = state.key!;
@@ -230,11 +256,20 @@ export async function rejectWaiting(client: SealedClient, prefix: string) {
       'Development is not set up. The owner runs nforge secret set NAME.',
     );
     const chosen = pick(await waiting(client, state), prefix);
-    invariant(
-      !client.agent || (chosen.proposal && sameId(chosen.proposal.proposerId, client.keys.id)),
-      'PERSON_REQUIRED',
-      'An agent withdraws only its own proposals; a person rejects the others.',
-    );
+    // Review N3 (eb8eb545): rejecting another device's proposal takes the same trust as applying one.
+    if (!chosen.proposal || !sameId(chosen.proposal.proposerId, client.keys.id)) {
+      invariant(
+        !client.agent,
+        'PERSON_REQUIRED',
+        'An agent withdraws only its own proposals; a person rejects the others.',
+      );
+      requireConfirmedWriter(state.pin);
+      invariant(
+        writeDevice(findEntry(state.reply.roster, client.keys.id), state.reply.roster.setKind),
+        'SECRETS_NOT_ALLOWED',
+        'Only a device of a write member or owner holding Development rejects another device’s proposal.',
+      );
+    }
     const id = Buffer.from(chosen.id, 'hex');
     try {
       await transportOf(client).reject({ kind: 1, proposalIds: [buffer(id)] });

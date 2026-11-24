@@ -207,7 +207,10 @@ export function applyProposal(
     'Only a device with write authority applies a proposal.',
   );
   const label = safeSecretName(p.name);
-  conflict(baseUnchanged(p, h), `${label} changed after this proposal was made. Ask for a new proposal.`);
+  conflict(
+    baseUnchanged(p, h),
+    `${label} changed after this proposal was made. Reject it (nforge secret reject ${Buffer.from(p.proposalId).toString('hex').slice(0, 8)}) and ask for a new proposal.`,
+  );
   const valueVersion = nextValueVersion(h, p.name),
     current = h.names.find(n => n.name === p.name && n.kind !== 3);
   const signed = proposedRecord(p, valueVersion);

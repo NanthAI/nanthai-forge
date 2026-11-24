@@ -195,3 +195,17 @@ test('T94 rebuilding one project cannot erase the lost trust of another project'
   await assert.rejects(pins.load('another-project', 1), { code: 'SECRETS_PIN_LOST' });
   assert.equal(await pins.load('never-pinned-project', 1), null);
 });
+test('review N1: a repin after a restored older pin file starts the proposal journal empty', async t => {
+  const { directory, f, pins } = setup(t);
+  clear(await pins.verifyAndSave(f.reply, f.request, 1));
+  const first = Buffer.alloc(16, 1),
+    later = Buffer.alloc(16, 2);
+  await pins.rememberProposals('fixture-project', 1, [first]);
+  const older = readFileSync(pinPath(directory, 'fixture-project'));
+  await pins.rememberProposals('fixture-project', 1, [later]);
+  // The older file is MAC-valid but misses the later id: restoring it is a rollback, refused on load.
+  writeFileSync(pinPath(directory, 'fixture-project'), older, { mode: 0o600 });
+  await assert.rejects(pins.load('fixture-project', 1), { code: 'SECRETS_PIN_LOST' });
+  clear(await pins.rebuild(f.reply, f.request, true, async () => true));
+  assert.deepEqual(await pins.resolvedProposals('fixture-project', 1), []);
+});

@@ -130,9 +130,11 @@ const teachingByMessage: readonly (readonly [RegExp, Entry])[] = [
     /^(?:Agent |No open Lane or active session |Recipient .* (?:is not a write member|is not a valid agent handle))/,
     { learn: 'board', next: `nforge agent <root> lanes '{}'` },
   ],
-  // Item 6466c6a5: a proposal that is no longer current is not a Lane conflict.
+  // Item 6466c6a5: a proposal that is no longer current is not a Lane conflict. One the server still lists but this
+  // device will not apply (already resolved here, invalid, or its base changed) is cleared by rejecting it (review F2).
+  [/\breject it\b/i, { learn: 'retry', next: 'nforge secret reject ID' }],
   [
-    /Ask for a new proposal|List the proposals again|Make a new proposal|the proposal is no longer current/i,
+    /Ask for a new proposal|List the proposals again|the proposal is no longer current/i,
     { learn: 'retry', next: 'nforge secret proposals' },
   ],
 ];
