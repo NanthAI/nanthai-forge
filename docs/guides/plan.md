@@ -16,6 +16,10 @@ An active Plan read includes proposals and work in progress. Continue a returned
 
 An empty Plan read shows how to propose an Item. A fresh Forge-native host prepares Plan when its initial Work projection fits one transaction. Retained Work and larger projections can use the paged rebuild. If Forge returns `PROJECT_WORK_INDEX_MISSING`, follow the owner's recovery command in `next`. From the clone, run `nforge hosted-work ROOT '{"action":"rebuild-index"}'` and retry the read or write. The rebuild resumes from the project's index state.
 
+## Capture several Items
+
+In Plan, open **New Item**, choose an Initiative if needed, then enter a title and press Enter. Forge plans the Item, clears the saved draft except for the Initiative and parent, and returns focus to the title. Anything you type while the save is in progress stays in the sheet. Type the next title, or press Escape when finished. Selecting **Plan it** instead saves the Item and closes the sheet.
+
 ## Start from the outcome
 
 ```sh

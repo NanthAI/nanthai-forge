@@ -231,7 +231,10 @@ window.purges = [];
 const purge = async input => { window.purges.push(input); return Date.now(); };
 window.puts = [];
 window.doneFor = [];
-const put = async command => { window.puts.push(command); };
+const put = async (command, operationId) => {
+  window.puts.push(command);
+  await window.capturePut?.(command, operationId);
+};
 const reads = {
   items: async ids => ids.map(id => ({ id, version: 1, kind: 'issue', title: id, body: '' })),
   initiative: id => readInitiative(linkBackend.client, 'synthetic', id),
@@ -1290,6 +1293,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
     await page.getByRole('textbox', { name: 'Text' }).fill('Scope for the next release.');
     await page.getByRole('button', { name: 'Create Initiative' }).click();
     await page.waitForFunction(() => window.puts.length === 4);
+    await page.getByRole('dialog', { name: 'New Item' }).waitFor({ state: 'hidden' });
     const { itemId, ...initiative } = await page.evaluate(() => window.puts[3]);
     assert.ok(itemId);
     assert.deepEqual(initiative, {
@@ -1302,6 +1306,134 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.deepEqual(errors, []);
     await context.close();
   }
+  for (const [width, theme] of [
+    [1440, 'dark'],
+    [1440, 'light'],
+    [390, 'dark'],
+    [390, 'light'],
+  ]) {
+    await t.test(`Enter captures consecutive Items in the same Initiative at ${width} ${theme}`, async () => {
+      const { page, context } = await open(width, theme);
+      await page.getByRole('button', { name: 'New Item', exact: true }).click();
+      const sheet = page.getByRole('dialog', { name: 'New Item' });
+      const title = sheet.getByRole('textbox', { name: 'Title' });
+      const initiative = sheet.getByRole('combobox', { name: 'Initiative' });
+      const initiativeId = '00000000-0000-4000-8000-000000000002';
+      await initiative.selectOption(initiativeId);
+      const description = sheet.getByRole('textbox', { name: 'Description (optional)' });
+      await description.fill('Only the first Item needs this description.');
+      await title.fill('Capture the first Item');
+      await title.press('Enter');
+      await sheet.getByText('Capture the first Item planned.', { exact: true }).waitFor();
+      assert.equal(await title.inputValue(), '');
+      assert.equal(await title.evaluate(field => field === document.activeElement), true);
+      assert.equal(await description.inputValue(), '');
+      assert.equal(await initiative.inputValue(), initiativeId);
+      await check(page, `consecutive capture at ${width} ${theme}`);
+      if (shots) await page.screenshot({ path: join(shots, `quick-capture-${width}-${theme}.png`) });
+      await title.fill('Capture the second Item');
+      await title.press('Enter');
+      await sheet
+        .getByText('Capture the second Item planned. 2 Items planned in this sheet.', { exact: true })
+        .waitFor();
+      const created = await page.evaluate(() => window.puts);
+      assert.deepEqual(
+        created.map(row => [row.title, row.initiativeId, row.status, row.body]),
+        [
+          ['Capture the first Item', initiativeId, 'open', 'Only the first Item needs this description.'],
+          ['Capture the second Item', initiativeId, 'open', ''],
+        ],
+      );
+      assert.notEqual(created[0].itemId, created[1].itemId);
+      await page.keyboard.press('Escape');
+      await sheet.waitFor({ state: 'hidden' });
+      await page
+        .getByRole('status')
+        .filter({ hasText: /^2 Items planned\.$/ })
+        .first()
+        .waitFor({ state: 'attached' });
+      await context.close();
+    });
+  }
+  await t.test(
+    'quick capture preserves the next draft and clears stale success during a failed save',
+    async () => {
+      const { page, context } = await open(1440, 'dark');
+      const first = Promise.withResolvers();
+      const second = Promise.withResolvers();
+      const secondStarted = Promise.withResolvers();
+      const operations = [];
+      await page.exposeFunction('capturePut', (_command, operationId) => {
+        operations.push(operationId);
+        if (operations.length === 1) return first.promise;
+        if (operations.length === 2) {
+          secondStarted.resolve();
+          return second.promise;
+        }
+      });
+      await page.getByRole('button', { name: 'New Item', exact: true }).click();
+      const sheet = page.getByRole('dialog', { name: 'New Item' });
+      const title = sheet.getByRole('textbox', { name: 'Title' });
+      const status = sheet.getByRole('status');
+      const description = sheet.getByRole('textbox', { name: 'Description (optional)' });
+      assert.equal(await status.textContent(), '');
+      await title.fill('The first draft');
+      await title.evaluate(field =>
+        field.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            keyCode: 229,
+            isComposing: false,
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      );
+      assert.equal(await page.evaluate(() => window.puts.length), 0, 'IME commit is not an Item save');
+      await title.press('Enter');
+      await title.press('Enter');
+      await title.fill('The next draft');
+      await description.fill('Typed while the first save was in flight.');
+      first.resolve();
+      await status.filter({ hasText: 'The first draft planned.' }).waitFor();
+      assert.equal(
+        await page.evaluate(() => window.puts.length),
+        1,
+        'double Enter cannot duplicate a pending Item',
+      );
+      assert.equal(await title.inputValue(), 'The next draft');
+      assert.equal(await description.inputValue(), 'Typed while the first save was in flight.');
+      await title.press('Enter');
+      await sheet.getByRole('button', { name: 'Filing…', exact: true }).waitFor();
+      assert.equal(await status.textContent(), '');
+      await secondStarted.promise;
+      second.reject(new Error('Lost reply'));
+      await sheet.getByText(/Your draft is still here/).waitFor();
+      assert.equal(await title.inputValue(), 'The next draft');
+      assert.equal(await status.textContent(), '');
+      await sheet.getByRole('button', { name: 'Plan it', exact: true }).click();
+      await sheet.waitFor({ state: 'hidden' });
+      assert.equal(operations.length, 3);
+      assert.equal(operations[1], operations[2], 'retry reconciles the original request');
+      await context.close();
+    },
+  );
+  await t.test('an identical capture updates the same status region after each save', async () => {
+    const { page, context } = await open(390, 'dark');
+    await page.getByRole('button', { name: 'New Item', exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: 'New Item' });
+    const title = sheet.getByRole('textbox', { name: 'Title' });
+    const status = sheet.getByRole('status');
+    const region = await status.elementHandle();
+    await title.fill('Repeatable capture');
+    await title.press('Enter');
+    await status.filter({ hasText: /^Repeatable capture planned\.$/ }).waitFor();
+    await title.fill('Repeatable capture');
+    await title.press('Enter');
+    await status.filter({ hasText: '2 Items planned in this sheet.' }).waitFor();
+    assert.equal(await status.evaluate((current, original) => current === original, region), true);
+    await context.close();
+  });
   await t.test(
     'an Initiative with live work under another parent links to its Items in the Plan tree',
     async () => {

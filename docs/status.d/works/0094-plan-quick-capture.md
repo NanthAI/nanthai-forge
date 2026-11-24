@@ -1,0 +1,1 @@
+- [Plan quick capture](../../guides/plan.md#capture-several-items) keeps the New Item sheet open after Enter in the title. Forge confirms the save, clears the saved draft except for the Initiative and parent, and refocuses the title. Text typed during the save stays in the sheet.

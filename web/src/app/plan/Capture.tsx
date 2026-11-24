@@ -41,6 +41,9 @@ export function Capture({
   const [description, setDescription] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [captured, setCaptured] = useState(0);
+  const titleField = useRef<HTMLInputElement>(null);
   // One operation per Item written here, so a retry after a lost reply never files it twice.
   const pending = useRef<{ itemId: string; operationId: string; key: string } | null>(null);
   const initiatives = view.groups.flatMap(group => (group.initiative ? [group.initiative] : []));
@@ -51,8 +54,10 @@ export function Capture({
   const reset = () => {
     setKind('issue');
     setParent(undefined);
-    setPickingParent(false);
     setInitiativeId(initiative);
+    setConfirmation('');
+    setCaptured(0);
+    setPickingParent(false);
     setTitle('');
     setDoneWhen('');
     setDescription('');
@@ -60,7 +65,12 @@ export function Capture({
     setError('');
     pending.current = null;
   };
-  const submit = async (event: FormEvent) => {
+  const close = () => {
+    if (captured) announce(`${captured} ${captured === 1 ? 'Item' : 'Items'} planned.`);
+    reset();
+    onOpenChange(false);
+  };
+  const submit = async (event: FormEvent, keepCapturing = false) => {
     event.preventDefault();
     const text = title.trim();
     if (!text || busy) return;
@@ -76,27 +86,47 @@ export function Capture({
     const key = JSON.stringify([text, kind, fields]);
     if (pending.current?.key !== key)
       pending.current = { itemId: crypto.randomUUID(), operationId: crypto.randomUUID(), key };
+    const request = pending.current;
     setBusy(true);
     setError('');
+    setConfirmation('');
     try {
       await put(
         {
-          itemId: pending.current.itemId,
+          itemId: request.itemId,
           expectedVersion: 0,
           kind,
           title: text,
           status: 'open',
           ...fields,
         },
-        pending.current.operationId,
+        request.operationId,
       );
-      announce(kind === 'initiative' ? `Created Initiative “${text}”.` : `${text} planned.`);
-      reset();
-      onOpenChange(false);
+      const message = kind === 'initiative' ? `Created Initiative “${text}”.` : `${text} planned.`;
+      if (pending.current !== request) {
+        // The sheet was dismissed while this save was in flight; don't touch a new draft.
+        announce(message);
+      } else if (keepCapturing) {
+        pending.current = null;
+        setTitle(value => (value === title ? '' : value));
+        setDescription(value => (value === description ? '' : value));
+        setDoneWhen(value => (value === doneWhen ? '' : value));
+        setType(value => (value === type ? '' : value));
+        setPickingParent(false);
+        const count = captured + 1;
+        setCaptured(count);
+        setConfirmation(count === 1 ? message : `${message} ${count} Items planned in this sheet.`);
+        titleField.current?.focus();
+      } else {
+        reset();
+        announce(message);
+        onOpenChange(false);
+      }
     } catch {
-      setError(
-        'Forge could not confirm the new Item. Your draft is still here; try again to check the original request.',
-      );
+      if (pending.current === request)
+        setError(
+          'Forge could not confirm the new Item. Your draft is still here; try again to check the original request.',
+        );
     } finally {
       setBusy(false);
     }
@@ -104,28 +134,18 @@ export function Capture({
   return (
     <Sheet
       open={open}
-      onOpenChange={next => {
-        if (!next) reset();
-        onOpenChange(next);
-      }}
+      onOpenChange={next => (next ? onOpenChange(true) : close())}
       title="New Item"
       footer={
         <>
-          <Key
-            onClick={() => {
-              reset();
-              onOpenChange(false);
-            }}
-          >
-            Cancel
-          </Key>
+          <Key onClick={close}>Cancel</Key>
           <Key kind="primary" type="submit" form="plan-capture" disabled={!title.trim() || busy}>
             {busy ? 'Filing…' : kind === 'initiative' ? 'Create Initiative' : 'Plan it'}
           </Key>
         </>
       }
     >
-      <form id="plan-capture" className="plan-capture" onSubmit={submit}>
+      <form id="plan-capture" className="plan-capture" onSubmit={event => void submit(event)}>
         <div className="seg" role="group" aria-label="Create kind">
           <button type="button" aria-pressed={kind === 'issue'} onClick={() => setKind('issue')}>
             Item
@@ -138,12 +158,26 @@ export function Capture({
           <span>Title</span>
           <input
             className="inp"
+            ref={titleField}
             value={title}
             onChange={event => setTitle(event.target.value)}
+            onKeyDown={event => {
+              if (
+                kind === 'issue' &&
+                event.key === 'Enter' &&
+                !event.nativeEvent.isComposing &&
+                event.nativeEvent.keyCode !== 229 &&
+                title.trim()
+              )
+                void submit(event, true);
+            }}
             required
             autoFocus
           />
         </label>
+        <div className={confirmation ? 't2' : 'sr'} role="status" aria-live="polite">
+          {confirmation}
+        </div>
         {similar.length ? (
           <div className="plan-similar" role="status">
             <span className="t2">Already in open work:</span>
