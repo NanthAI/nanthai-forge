@@ -1246,6 +1246,8 @@ The Worker reads the visitor's address from `CF-Connecting-IP` and forwards only
 digest of everything served), and stamps the build version into the public page footer (`index.html`) and `<html data-build-version>` on `app.html` (read synchronously by the signed-in app rail with no extra request). `cf deploy --prebuilt --no-provision`, run in `OUT`, uploads it. The `cf` CLI is
 pinned with its own lockfile in `site/deploy/`, so only the deploy job downloads it.
 
+The Worker's `PUBLIC_PAGES` R2 binding (the public snapshot bucket that site/public-read.ts reads, so a signed-out or crawler cache miss makes no Convex call) comes from the repository variable `FORGE_PUBLIC_PAGES_BUCKET`, which the dev web deploy passes to `build-site.mjs` (`scripts/site-worker-env.mjs`). The variable holds the same bucket the Convex snapshot writer writes to; the repo never names it. Unset or empty leaves the binding off and the Worker keeps its Convex read; a malformed name fails the build without printing it. Setting or changing the variable takes effect on the next web deploy, because the binding is part of the build's digest.
+
 **When it deploys.** Both `.github/workflows/convex-deploy.yml` and `.github/workflows/web-deploy.yml` start straight from
 Forge main landings via `workflow_dispatch` (`convex/projectDeployDispatch.ts`, called from `enqueueGithubMirror` ahead of the
 mirror queue so a stopped or paused mirror never blocks dev deploys); neither workflow triggers on GitHub pushes. Each run

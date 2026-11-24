@@ -88,6 +88,8 @@ jobs:
         env:
           DEPLOY_HEAD: ${{ steps.plan.outputs.head }}
           DEPLOY_SEQUENCE: ${{ steps.plan.outputs.sequence }}
+          # The R2 bucket the snapshot writer fills; unset leaves the Worker's PUBLIC_PAGES binding off.
+          FORGE_PUBLIC_PAGES_BUCKET: ${{ vars.FORGE_PUBLIC_PAGES_BUCKET }}
         run: node scripts/build-site.mjs site-output --commit "$(git rev-parse HEAD)" --state "$DEPLOY_HEAD" --sequence "$DEPLOY_SEQUENCE"
       - name: Compare with the live site
         id: compare

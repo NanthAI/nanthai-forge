@@ -17,6 +17,7 @@ import { parseArgs } from 'node:util';
 import { build } from 'vite';
 import { SITE_RECORD, servedSources } from './site-deploy-plan.mjs';
 import { errorCodeDigest } from './site-error-codes.mjs';
+import { siteWorkerEnv } from './site-worker-env.mjs';
 import { headersFile } from '../site/headers.ts';
 
 const { values, positionals } = parseArgs({
@@ -73,7 +74,6 @@ const name = values.name;
 if (!/^[a-z0-9-]{1,63}$/.test(name))
   throw new Error('The Worker name is lowercase letters, digits and dashes.');
 await writeFile(join(output, 'config.json'), JSON.stringify({ buildContext: { isPreview: false } }));
-const secret = { type: 'secret' };
 await writeFile(
   join(worker, 'worker.config.json'),
   JSON.stringify({
@@ -85,19 +85,7 @@ await writeFile(
     // the Worker. "/" runs the Worker first too, one request per front-page visit, so the workers.dev address can
     // redirect to the canonical one (site/worker.ts); the Worker serves the static page from ASSETS otherwise.
     assets: { htmlHandling: 'auto-trailing-slash', notFoundHandling: 'none', runWorkerFirst: ['/'] },
-    env: {
-      ASSETS: { type: 'assets' },
-      // Per-address backstops before any backend call: 60 public reads and 10 sign-in starts a minute.
-      PUBLIC_LIMIT: { type: 'rate-limit', namespace: '7201', simple: { limit: 60, period: 60 } },
-      DEVICE_LIMIT: { type: 'rate-limit', namespace: '7202', simple: { limit: 10, period: 60 } },
-      FORGE_WEB_URL: secret,
-      FORGE_CONVEX_SITE_URL: secret,
-      FORGE_PUBLIC_READ_SECRET: secret,
-      // FORGE_PUBLIC_CODE_WORKER_URL is optional (docs/r2-storage-plan.md#dev-deployment): declare it here when the
-      // public code Worker route is turned on, because every declared secret is required.
-      FORGE_CLIENT_HASH_KEY: secret,
-      FORGE_SITE_DEVICE_KEY: secret,
-    },
+    env: siteWorkerEnv(),
     manifest: { type: 'complete', mainModule: module, modules: { [module]: { type: 'esm' } } },
   }),
 );
