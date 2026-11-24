@@ -434,3 +434,64 @@ test('a lost action lease retries the same generation once; a finished lease doe
   await jobs.lost._handler(f.ctx, recovery.args);
   assert.equal(f.next('project/ada/atlas'), retry);
 });
+
+function withoutEdgePurge(t, mode) {
+  const names = [
+    'FORGE_PUBLIC_SNAPSHOT_ZONE',
+    'FORGE_PUBLIC_SNAPSHOT_PURGE_TOKEN',
+    'FORGE_PUBLIC_SNAPSHOT_PURGE',
+  ];
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  for (const name of names) delete process.env[name];
+  if (mode) process.env.FORGE_PUBLIC_SNAPSHOT_PURGE = mode;
+  t.after(() => {
+    for (const [name, value] of Object.entries(previous))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+}
+
+test('dev incident: a deployment with no purge binding stops at its first attempt, alerts once and keeps the owner profile hidden', async t => {
+  const f = await publishingFixture(t);
+  const error = t.mock.method(console, 'error', () => {});
+  withoutEdgePurge(t);
+  await f.event(true);
+  await f.start('profile/ada');
+  const row = f.row('profile/ada');
+  assert.equal(
+    f.read('profile/ada').state,
+    'hidden',
+    'a revocation that cannot purge never serves the old copy',
+  );
+  assert.deepEqual([row.phase, row.attempt, row.task], ['failed', 1, undefined]);
+  assert.equal(error.mock.callCount(), 1);
+  assert.equal(f.purged.size, 0);
+});
+
+test('dev incident: with the explicit TTL mode the owner profile is hidden, rewritten and confirmed without a purge call', async t => {
+  const f = await publishingFixture(t);
+  withoutEdgePurge(t, 'ttl');
+  await f.event(true);
+  await f.start('profile/ada');
+  assert.equal(f.read('profile/ada').state, 'hidden');
+  await f.start('profile/ada');
+  assert.equal(f.read('profile/ada').state, 'public', 'the redacted profile replaces the tombstone');
+  const second = f.next('profile/ada');
+  assert.equal(second.at, NOW + 60_000, 'the edge lifetime plus the longest in-flight fill');
+  await f.drain();
+  for (const key of ['profile/ada', 'project/ada/atlas', 'directory']) {
+    const row = f.row(key);
+    assert.deepEqual([row.phase, row.urgent, row.confirmedGeneration], ['idle', false, row.generation]);
+  }
+  assert.equal(f.purged.size, 0, 'no provider call is made without a binding');
+});
+
+test('a configured purge binding wins over the TTL mode and keeps the 30-second second purge', async t => {
+  const f = await publishingFixture(t);
+  process.env.FORGE_PUBLIC_SNAPSHOT_PURGE = 'ttl';
+  t.after(() => delete process.env.FORGE_PUBLIC_SNAPSHOT_PURGE);
+  await f.event(true);
+  await f.start('project/ada/atlas');
+  assert.equal(f.next('project/ada/atlas').at, NOW + 30_000);
+  assert.ok(f.purged.size > 0);
+});

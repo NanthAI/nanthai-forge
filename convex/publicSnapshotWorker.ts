@@ -8,7 +8,7 @@ import { internalAction } from './server';
 import { buildPublicDirectory } from './publicDirectoryProjection';
 import { directoryWritePlan, writeDirectoryBatch } from './publicDirectoryWrites';
 import { readDirectoryInput, commitDirectoryInput } from './publicDirectoryInput';
-import { purgePublicSnapshotCache } from './publicSnapshotPurge';
+import { purgePublicSnapshotCache, ttlPurge } from './publicSnapshotPurge';
 import { publishSnapshot } from './publicSnapshotStorage';
 import { fitPublicEntity } from './publicSnapshotFit';
 import { r2Config } from './r2';
@@ -27,6 +27,7 @@ async function purge(ctx: ActionCtx, job: Job, paths: readonly string[]) {
     FORGE_PUBLIC_SNAPSHOT_ZONE: zone,
     FORGE_PUBLIC_SNAPSHOT_PURGE_TOKEN: token,
   } = process.env;
+  if (ttlPurge()) return current(ctx, job);
   invariant(
     origin && zone && token,
     'R2_NOT_CONFIGURED',
@@ -176,7 +177,8 @@ export const run = internalAction({
             });
     } catch (error) {
       // Unknown outcomes re-observe ETags on retry. Do not echo storage/provider responses into job logs.
-      permanent = error instanceof ForgeError && error.code === 'BAD_ARGUMENT';
+      // A missing binding or an invalid projection cannot recover by itself: stop, alert once, resume after the fix.
+      permanent = error instanceof ForgeError && ['BAD_ARGUMENT', 'R2_NOT_CONFIGURED'].includes(error.code);
     }
     await ctx.runMutation(internal.publicSnapshotJobs.settle, {
       ...args,

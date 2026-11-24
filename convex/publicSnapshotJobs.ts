@@ -8,6 +8,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import { internalMutation, internalQuery } from './server';
 import { cancelPendingTask } from './schedulerCancel';
 import { accountFor } from './urlIdentity';
+import { purgeWaitMs } from './publicSnapshotPurge';
 import { retirePublishedDependencies, startProfileRevocation } from './publicProfileDependencies';
 
 type Job = Doc<'publicSnapshotJobs'>;
@@ -309,11 +310,11 @@ export const settle = internalMutation({
         step: 'publish',
         attempt: 0,
         generation: row.generation + 1,
-        purgeAfter: now + 30_000,
+        purgeAfter: now + purgeWaitMs(),
       });
     if (dependencies) await retirePublishedDependencies(ctx, id, dependencies);
     if (row.urgent && row.step === 'publish')
-      return schedule(ctx, row, Math.max(now, row.purgeAfter ?? now + 30_000), {
+      return schedule(ctx, row, Math.max(now, row.purgeAfter ?? now + purgeWaitMs()), {
         step: 'purgeAgain',
         attempt: 0,
       });

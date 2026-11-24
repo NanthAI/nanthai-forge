@@ -6,6 +6,15 @@ import { snapshotCacheUrl } from '../src/public-snapshot-contract';
 
 type PurgeConfig = { zone: string; token: string; origin: string };
 
+/** A deployment with no edge purge binding may opt in to `FORGE_PUBLIC_SNAPSHOT_PURGE=ttl`: it then
+ * relies on the Worker's 30-second edge lifetime instead of a purge call. The second step waits 60 seconds,
+ * so a copy cached by a read that began before the tombstone has expired too. A binding always wins. */
+export const ttlPurge = () =>
+  process.env.FORGE_PUBLIC_SNAPSHOT_PURGE === 'ttl' &&
+  !process.env.FORGE_PUBLIC_SNAPSHOT_ZONE &&
+  !process.env.FORGE_PUBLIC_SNAPSHOT_PURGE_TOKEN;
+export const purgeWaitMs = () => (ttlPurge() ? 60_000 : 30_000);
+
 /** Purge exactly the entries the Worker caches. Only the fixed Cloudflare API receives the token.
  * A non-success is not completion; keep the R2 fence and retry this same page of keys. */
 export async function purgePublicSnapshotCache(config: PurgeConfig, paths: readonly string[]) {

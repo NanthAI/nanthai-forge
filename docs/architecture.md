@@ -47,6 +47,13 @@ It uses a lease to recover a lost action, and stops after seven failed
 attempts per step (or a deterministic invalid projection), logging one
 `FORGE_PUBLIC_SNAPSHOT_FAILED` alert for operator recovery. Unconfirmed work
 stays unconfirmed. It purges after publishing and again 30 seconds later.
+A missing purge binding (`FORGE_PUBLIC_SNAPSHOT_ZONE` and `_PURGE_TOKEN`) is a configuration error:
+the job stops at its first attempt with the one alert and leaves the key hidden. A deployment without a
+binding, such as shared dev, may set `FORGE_PUBLIC_SNAPSHOT_PURGE=ttl`: no purge call is made, and the
+second step waits 60 seconds (the Worker's 30-second edge lifetime plus a fill that began before the
+tombstone), so confirmation still follows the last cached copy. Like the second purge, this assumes a
+fill finishes within that gap. A configured binding always wins; change the mode only while no
+revocation is queued. Production keeps the binding.
 Only the canonical hostname serves bound snapshots; other hostnames redirect
 before any cache or storage read.
 Project settings and Trash show hiding in progress until the requested jobs
