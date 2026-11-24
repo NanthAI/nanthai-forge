@@ -12,12 +12,15 @@ import { Key, Region } from '../../ds';
 import { A } from '../frames';
 import { crumbsFor, Head } from '../Place';
 import { hrefFor } from '../paths';
+import { errorCode } from '../session';
 import type { PlaceProps, ProjectRoute } from '../screen-route';
 import { SecretsHolders } from './SecretsHolders';
 import { SecretsNames } from './SecretsNames';
 import { SecretsNeeds } from './SecretsNeeds';
 import {
   LIST_COMMAND,
+  accessDenied,
+  appendPage,
   clock,
   exact,
   listOutput,
@@ -172,36 +175,50 @@ export function SecretsScreen({
   );
 }
 
+const denied = (error: unknown) => accessDenied(errorCode(error));
+
 /** The page's one read and its pages. `convex.query` is one-shot: nothing subscribes to a set row, so a write by
- * anyone costs this page nothing, and there is no timer. */
+ * anyone costs this page nothing, and there is no timer. Every read (open, Refresh, Retry) starts a new generation;
+ * a reply from an older one is dropped, and a "Show the next" page is applied only to the snapshot that asked for it. */
 export default function Secrets({ route, projectId, projectName }: PlaceProps) {
   const convex = useConvex();
   const [view, setView] = useState<SecretsView>({ status: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const current = useRef<Id<'hostedProjects'> | null>(null);
+  const generation = useRef(0);
   const read = useCallback(
     async (id: Id<'hostedProjects'>, previous?: Overview) => {
+      const mine = ++generation.current;
+      setBusy(false);
+      const live = () => current.current === id && generation.current === mine;
       try {
         const result = await convex.query(api.sealedSecrets.overview, { projectId: id });
-        if (current.current !== id) return;
+        if (!live()) return;
         setView(
           result.status === 'reader'
             ? { status: 'reader' }
             : { status: 'ready', data: result, shownAt: Date.now() },
         );
-      } catch {
-        if (current.current !== id) return;
-        setView({ status: 'failed', ...(previous ? { previous, lastShown: Date.now() } : {}) });
+      } catch (error) {
+        if (!live()) return;
+        setView(
+          previous && !denied(error)
+            ? { status: 'failed', previous, lastShown: Date.now() }
+            : { status: 'failed' },
+        );
       } finally {
-        if (current.current === id) setRefreshing(false);
+        if (live()) setRefreshing(false);
       }
     },
     [convex],
   );
   useEffect(() => {
     current.current = projectId;
+    generation.current++;
     setView({ status: 'loading' });
+    setBusy(false);
+    setRefreshing(false);
     if (projectId) void read(projectId);
     return () => {
       current.current = null;
@@ -217,8 +234,11 @@ export default function Secrets({ route, projectId, projectName }: PlaceProps) {
   };
   const onMore = async (kind: SetKind, part: 'names' | 'people' | 'rotate') => {
     if (!projectId || view.status !== 'ready') return;
-    const set = view.data.sets.find(s => s.kind === kind)?.[part];
-    if (!set?.next) return;
+    const snapshot = view.data.sets.find(s => s.kind === kind);
+    const set = snapshot?.[part];
+    if (!snapshot || !set?.next) return;
+    const mine = generation.current;
+    const live = () => current.current === projectId && generation.current === mine;
     setBusy(true);
     try {
       const result = await convex.query(api.sealedSecrets.overview, {
@@ -227,31 +247,23 @@ export default function Secrets({ route, projectId, projectName }: PlaceProps) {
         part,
         after: set.next,
       });
-      if (result.status !== 'ok') return;
-      const page = result.sets[0]?.[part];
-      if (!page) return;
-      setView(now =>
-        now.status !== 'ready'
-          ? now
-          : {
-              ...now,
-              data: {
-                ...now.data,
-                sets: now.data.sets.map(s =>
-                  s.kind === kind
-                    ? ({
-                        ...s,
-                        [part]: { ...page, page: [...(s[part]?.page ?? []), ...page.page] },
-                      } as typeof s)
-                    : s,
-                ),
-              },
-            },
+      if (!live()) return;
+      const next = appendPage(view.data, kind, part, result);
+      if (next.to === 'reader') setView({ status: 'reader' });
+      else if (next.to === 'ready') setView({ status: 'ready', data: next.data, shownAt: view.shownAt });
+      else {
+        setRefreshing(true);
+        void read(projectId, view.data);
+      }
+    } catch (error) {
+      if (!live()) return;
+      setView(
+        denied(error)
+          ? { status: 'failed' }
+          : { status: 'failed', previous: view.data, lastShown: lastAt ?? Date.now() },
       );
-    } catch {
-      setView({ status: 'failed', previous: view.data, lastShown: lastAt ?? Date.now() });
     } finally {
-      setBusy(false);
+      if (live()) setBusy(false);
     }
   };
   return (

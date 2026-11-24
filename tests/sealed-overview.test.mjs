@@ -16,6 +16,7 @@ import { verifySealedReply } from '../dist/sealed-verify.js';
 const contributors = await import(moduleUrl('../convex/projectContributors.ts'));
 const fields = await import(moduleUrl('../convex/sealedSecretOverviewFields.ts'));
 const needsMe = await import(moduleUrl('../convex/projectNeedsMe.ts'));
+const init = await import(moduleUrl('../convex/sealedSecretNeedsInit.ts'));
 const code = expected => error => (error.code ?? error.data?.code) === expected;
 const clear = result => {
   result?.key?.fill(0);
@@ -97,7 +98,7 @@ test('slice 4: removal, re-key and a new value move the take-out and rotate rows
   // A new value takes the last name off the list and the counter back to zero, which is not stored.
   await o.client.write('OTHER_TOKEN', ROTATED);
   assert.equal(counter(h), undefined);
-  assert.equal(set(h).needs, undefined);
+  assert.equal(set(h).needs, 0, 'a counted set stores its zero, so an uncounted row is told apart');
   assert.equal((await needsMe.read._handler(h.s.ctx, { projectId: h.project })).secrets, undefined);
 });
 
@@ -116,4 +117,107 @@ test('slice 4: the overview refuses an outsider, shows a reader nothing, and its
   assert.equal(carriesBytes(result), false);
   assert.equal(result.sets[0].people.page[0].role, 'owner');
   assert.equal(result.sets[0].people.page[0].computers.length, 1);
+});
+
+/** A set row and project row as stored before slice 4: no per-set `needs`, no project counter. */
+function legacy(h) {
+  delete set(h).needs;
+  delete h.s.tables.hostedProjects.get(h.project).secretsNeeds;
+}
+const project = h => h.s.tables.hostedProjects.get(h.project);
+
+test('slice 4 review: the initialiser counts work pending at rollout (dry run first, replay writes nothing) and a later write never subtracts an uncounted total', async t => {
+  const h = setup(t),
+    o = owner(h);
+  h.s.tables.forgeAccounts.set('fa-1', {
+    _id: 'fa-1',
+    _creationTime: 1,
+    owner: 'fixture-member',
+    handle: 'dana',
+  });
+  await o.client.write('API_TOKEN', VALUE);
+  await o.client.write('OTHER_TOKEN', OTHER);
+  await joined(h, t, o, 'fixture-member');
+  await contributors.remove._handler(h.s.ctx, { projectId: h.project, contributor: 'fixture-member' });
+  assert.equal(counter(h), 1);
+  legacy(h);
+  assert.equal(counter(h), undefined, 'the top bar shows nothing for work the page lists');
+  // Dry run: counts what it would change and writes nothing.
+  const writes = h.io.writes;
+  const dry = await init.initialise._handler(h.s.ctx, { apply: false });
+  assert.deepEqual(dry, {
+    projects: 1,
+    sets: 1,
+    setsChanged: 1,
+    projectsChanged: 1,
+    needsTotal: 1,
+    next: null,
+  });
+  assert.equal(h.io.writes, writes);
+  assert.equal(counter(h), undefined);
+  assert.equal(set(h).needs, undefined);
+  // Apply: the set row and the project counter now hold the pending total.
+  assert.deepEqual(await init.initialise._handler(h.s.ctx, { apply: true }), dry);
+  assert.equal(set(h).needs, 1);
+  assert.equal(counter(h), 1);
+  // Replay: nothing differs, so nothing is written.
+  const before = h.io.writes;
+  assert.deepEqual(await init.initialise._handler(h.s.ctx, { apply: true }), {
+    projects: 1,
+    sets: 1,
+    setsChanged: 0,
+    projectsChanged: 0,
+    needsTotal: 1,
+    next: null,
+  });
+  assert.equal(h.io.writes, before);
+  // The next write moves the counter from what it holds: the person is taken out, two names stay to rotate.
+  await o.client.write('API_TOKEN', ROTATED);
+  assert.equal(counter(h), 1, 'one name left to rotate');
+  assert.equal(set(h).needs, 1);
+  await o.client.write('OTHER_TOKEN', ROTATED);
+  assert.equal(counter(h), undefined);
+  assert.equal(set(h).needs, 0);
+});
+
+test('slice 4 review: the first write on an uncounted row adds its whole total, never subtracting what was never counted', async t => {
+  const h = setup(t),
+    o = owner(h);
+  h.s.tables.forgeAccounts.set('fa-1', {
+    _id: 'fa-1',
+    _creationTime: 1,
+    owner: 'fixture-member',
+    handle: 'dana',
+  });
+  await o.client.write('API_TOKEN', VALUE);
+  await o.client.write('OTHER_TOKEN', OTHER);
+  await joined(h, t, o, 'fixture-member');
+  await contributors.remove._handler(h.s.ctx, { projectId: h.project, contributor: 'fixture-member' });
+  legacy(h);
+  // The owner's write takes the person out and re-keys: API_TOKEN is replaced, OTHER_TOKEN waits to rotate.
+  await o.client.write('API_TOKEN', ROTATED);
+  assert.equal(set(h).needs, 1);
+  assert.equal(counter(h), 1, 'the pending name is counted by this write, not lost');
+});
+
+test('slice 4 review: the initialiser pages by project, repairs a wrong counter and refuses a bad limit', async t => {
+  const h = setup(t),
+    o = owner(h);
+  await o.client.write('API_TOKEN', VALUE);
+  // A second project holding a copy of the same set row.
+  const second = 'fixture-project-2';
+  h.s.tables.hostedProjects.set(second, { ...structuredClone(project(h)), _id: second });
+  h.s.tables.sealedSecretSets.set('copy', { ...structuredClone(set(h)), _id: 'copy', projectId: second });
+  project(h).secretsNeeds = 5;
+  const first = await init.initialise._handler(h.s.ctx, { apply: true, limit: 1 });
+  assert.equal(first.projects, 1);
+  assert.equal(first.projectsChanged, 1);
+  assert.equal(counter(h), undefined, 'a counter above the measured zero is repaired');
+  assert.notEqual(first.next, null);
+  const rest = await init.initialise._handler(h.s.ctx, { apply: true, limit: 1, after: first.next });
+  assert.equal(rest.projects, 1);
+  // A full page may have more behind it, so the walk ends on the call that finds nothing.
+  const end = await init.initialise._handler(h.s.ctx, { apply: true, limit: 1, after: rest.next });
+  assert.deepEqual([end.projects, end.next], [0, null]);
+  await assert.rejects(init.initialise._handler(h.s.ctx, { apply: false, limit: 17 }), code('BAD_ARGUMENT'));
 });

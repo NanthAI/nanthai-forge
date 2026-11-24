@@ -20,7 +20,6 @@ import {
   rememberResolved,
   SEALED_PROPOSALS,
   sealedWriteFacts,
-  storedNeeds,
   storedRoster,
 } from './sealedSecretGate';
 import { linkSealedDevice } from './sealedSecretMarkers';
@@ -209,7 +208,7 @@ export const write = mutation({
         state.revoked.map(id => new Uint8Array(id)),
         state.proposals.length,
       );
-      const needsBefore = set ? (set.needs ?? storedNeeds(set)) : 0;
+      const needsBefore = set?.needs ?? 0;
       const next = {
         projectId: args.projectId,
         kind: args.kind,
@@ -224,7 +223,7 @@ export const write = mutation({
         ...(state.revoked.length ? { revoked: state.revoked } : {}),
         ...(handles.revokedNotes.length ? { revokedNotes: handles.revokedNotes } : {}),
         ...(handles.formerHandles.length ? { formerHandles: handles.formerHandles } : {}),
-        ...(needs ? { needs } : {}),
+        needs,
         ...(state.joinRequests.length ? { joinRequests: state.joinRequests } : {}),
         // A sweep's later marking steps still skip the device its issuing browser kept, after this write too.
         ...(set?.sweptKept ? { sweptKept: set.sweptKept } : {}),

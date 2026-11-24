@@ -112,7 +112,9 @@ export function holderRows(
     const accountId = entries[0]!.accountId;
     const mine = equalBytes(accountId, self);
     const notes = entries.flatMap(e => set.notes.filter(n => equalBytes(n.id, e.id)));
-    const left = entries.every(e => marked(set, e.id)) ? (notes.find(n => n.handle) ?? notes[0]) : undefined;
+    // Left the project only when a marker kept the person's handle (convex/sealedSecretMarkers.ts mark); a person who
+    // signed out their only listed computer and still writes the project has marked entries but has not left.
+    const left = entries.every(e => marked(set, e.id)) ? notes.find(n => n.handle) : undefined;
     return {
       key,
       handle: notes.find(n => n.handle)?.handle ?? handleOf(accountId),

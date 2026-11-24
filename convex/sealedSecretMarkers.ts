@@ -52,7 +52,13 @@ async function mark(
   const at = Date.now();
   for (const set of sets) {
     const next = markers(set);
-    if (!next) continue;
+    if (!next) {
+      // Nothing new to mark, but a computer signed out earlier may now belong to a person who left: its marker takes
+      // their public handle, so the page says they left rather than that a computer was signed out.
+      const notes = handles.size ? nextMarkNotes(set, set.revoked ?? [], handles, at) : null;
+      if (notes) await ctx.db.patch(set._id, { revokedNotes: notes });
+      continue;
+    }
     // Review F2: a marked proposer's waiting proposals leave in the same mutation (at most 32 deletes, no read).
     const { proposals, dropped } = unmarkedProposals(set, next.revoked);
     for (const p of dropped) await ctx.db.delete(p.id);

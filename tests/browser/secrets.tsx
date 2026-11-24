@@ -3,9 +3,11 @@
 // Synthetic names, codes and public handles only (Item 41a0df87, slice 4). This entry is never a production Vite input
 // or an app route. It draws the real SecretsScreen inside the real project frame from fixed overview data.
 import { createRoot } from 'react-dom/client';
+import { ConvexError } from 'convex/values';
+import { ConvexProvider } from 'convex/react';
 import { useState } from 'react';
 import { ProjectFrame } from '../../web/src/app/frames';
-import { SecretsScreen } from '../../web/src/app/secrets/Secrets';
+import Secrets, { SecretsScreen } from '../../web/src/app/secrets/Secrets';
 import type { Overview, OverviewSet, SecretsView } from '../../web/src/app/secrets/secrets-model';
 import '../../web/src/app/app.css';
 import '../../web/src/ui/mark.css';
@@ -275,6 +277,88 @@ function state(which: string): SecretsView {
   }
 }
 
+/** The real container (reads, pages, Refresh, denial) over a client whose answers the test settles by hand. Every
+ * query it makes waits in `queries` until the test resolves or rejects it. */
+function Container() {
+  const query = new URLSearchParams(location.search);
+  document.documentElement.dataset.ds = '';
+  document.documentElement.dataset.theme = query.get('theme') ?? 'dark';
+  const queries: { args: Record<string, unknown>; settle(result: unknown, error?: boolean): void }[] = [];
+  const client = {
+    query: (_ref: unknown, args: Record<string, unknown>) =>
+      new Promise((resolve, reject) =>
+        queries.push({ args, settle: (result, error) => (error ? reject(result) : resolve(result)) }),
+      ),
+  };
+  const data = (state('worst') as Extract<SecretsView, { status: 'ready' }>).data;
+  (window as unknown as { secretsContainer: unknown }).secretsContainer = {
+    queries: () => queries.map(q => q.args),
+    /** Answers query `index` with the worst-case overview. */
+    overview: (index: number, patch: Record<string, unknown> = {}) =>
+      queries[index]!.settle({ ...data, ...patch }),
+    /** Answers a "Show the next" query with one more page of a set, as `headVersion` and `total` describe it. */
+    page: (index: number, part: string, total: number, headVersion: number, names: string[]) =>
+      queries[index]!.settle({
+        status: 'ok',
+        now: 0,
+        needs: 0,
+        sets: [
+          {
+            kind: 1,
+            sharing: 'automatic',
+            headVersion,
+            [part]: {
+              total,
+              next: null,
+              page: names.map(n => ({
+                name: n,
+                kind: 1,
+                version: 1,
+                devices: [],
+                more: 0,
+                at: 1,
+                by: null,
+                waits: 0,
+              })),
+            },
+          },
+        ],
+      }),
+    reader: (index: number) => queries[index]!.settle({ status: 'reader' }),
+    fail: (index: number, code?: string) =>
+      queries[index]!.settle(code ? new ConvexError({ code }) : new Error('network'), true),
+    headVersion: data.sets[0]!.headVersion,
+  };
+  const route = {
+    frame: 'project',
+    handle: 'river',
+    project: 'test-project',
+    place: 'settings',
+    section: 'secrets',
+    rest: '',
+  } as const;
+  return (
+    <ConvexProvider client={client as never}>
+      <ProjectFrame
+        route={route}
+        name="test-project"
+        feed={{ lanes: [], more: 0, moreIsLowerBound: false, main: null }}
+        needs={undefined}
+        projects={null}
+        controls={{ viewerHandle: 'river', onPalette() {}, onKeys() {} }}
+      >
+        <Secrets
+          route={route}
+          projectId={'project-1' as never}
+          projectName="test-project"
+          feed={undefined}
+          viewerHandle="river"
+        />
+      </ProjectFrame>
+    </ConvexProvider>
+  );
+}
+
 function Fixture() {
   const query = new URLSearchParams(location.search);
   const [view, setView] = useState<SecretsView>(() => state(query.get('state') ?? 'calm'));
@@ -312,4 +396,6 @@ function Fixture() {
   );
 }
 
-createRoot(document.getElementById('root')!).render(<Fixture />);
+createRoot(document.getElementById('root')!).render(
+  new URLSearchParams(location.search).get('container') ? <Container /> : <Fixture />,
+);

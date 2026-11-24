@@ -21,6 +21,7 @@ import { rotateList } from '../dist/sealed-unshare.js';
 const credentials = await import(moduleUrl('../convex/deviceCredentials.ts'));
 const markers = await import(moduleUrl('../convex/sealedSecretMarkers.ts'));
 const gate = await import(moduleUrl('../convex/sealedSecretGate.ts'));
+const contributors = await import(moduleUrl('../convex/projectContributors.ts'));
 const code = expected => error => (error.code ?? error.data?.code) === expected;
 const VALUE = Buffer.from('synthetic-device-removal-value-0123456789');
 const clear = result => {
@@ -322,4 +323,45 @@ test('M3 review M1: a device linked before links existed records itself on its n
     m.client.read(),
     e => e.code === 'SECRETS_ROSTER_REFUSED' && /Forge marked this device for removal/.test(e.message),
   );
+});
+
+test('slice 4 review: signing out a lone computer is not leaving the project, and leaving later says so', async t => {
+  const h = setup(t),
+    o = owner(h);
+  h.s.tables.forgeAccounts.set('fa-1', {
+    _id: 'fa-1',
+    _creationTime: 1,
+    owner: 'fixture-member',
+    handle: 'dana',
+  });
+  await o.client.write('API_TOKEN', VALUE);
+  await joined(h, t, o, 'fixture-member');
+  await end(h, 'fixture-member-device', { subject: 'fixture-member' });
+  assert.equal(marks(h).length, 1);
+  const read = async () => {
+    const result = await server.overview._handler(h.s.ctx, { projectId: h.project });
+    const development = result.sets.find(s => s.kind === 1);
+    return {
+      holder: development.people.page.find(p => p.role === 'write'),
+      takeOut: development.takeOut[0],
+    };
+  };
+  let seen = await read();
+  assert.equal(seen.holder.left, undefined, 'the holder list does not say they left');
+  assert.equal(seen.holder.computers[0].marked, true);
+  assert.equal(seen.takeOut.left, false, 'the take-out list says a computer was signed out');
+  assert.equal(seen.takeOut.handle, 'dana');
+  // The person then loses project access: the marker already set takes their public handle, the reason changes.
+  await contributors.remove._handler(h.s.ctx, { projectId: h.project, contributor: 'fixture-member' });
+  assert.equal(marks(h).length, 1, 'no second marker');
+  seen = await read();
+  assert.equal(seen.holder.left, true);
+  assert.equal(seen.takeOut.left, true);
+  assert.equal(seen.takeOut.handle, 'dana');
+  // Replay: removing again writes nothing.
+  const writes = h.io.writes;
+  await contributors.remove
+    ._handler(h.s.ctx, { projectId: h.project, contributor: 'fixture-member' })
+    .catch(() => {});
+  assert.equal(h.io.writes, writes);
 });

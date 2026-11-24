@@ -24,8 +24,13 @@ export const count = (n: number, one: string, many = `${one}s`) =>
 /** Names are ASCII today (safeSecretName); anything else is quoted as one shell argument and never run. */
 const shellWord = (value: string) =>
   /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
-export const setCommand = (name: string, kind: 1 | 2 | 3) =>
-  `nforge secret set ${shellWord(name)}${kind === 2 ? ' --file' : ''}`;
+/** The command that sets `name` in the set it was listed under: Development is the CLI's default, Checks needs
+ * `--set checks` (so a Checks row can never overwrite the Development value of the same name), and Production has no
+ * CLI selector, so it gets no command at all (null). `kind` is the value's kind (2 is a file). */
+export const setCommand = (name: string, kind: 1 | 2 | 3, set: SetKind = 1) =>
+  set === 3
+    ? null
+    : `nforge secret set ${shellWord(name)}${set === 2 ? ' --set checks' : ''}${kind === 2 ? ' --file' : ''}`;
 export const applyCommand = (id: string) => `nforge secret apply ${shellWord(id)}`;
 export const rejectCommand = (id: string) => `nforge secret reject ${shellWord(id)}`;
 export const UNSHARE_MARKED = 'nforge secret unshare --marked';
@@ -108,4 +113,38 @@ export function listOutput(data: Overview) {
   if (rotating.size)
     lines.push(`To rotate (a removed computer could open these): ${[...rotating].slice(0, 12).join(', ')}`);
   return lines.join('\n');
+}
+
+/** True for a refusal that says this person can no longer read the project's secrets (a lost grant, a signed-out or
+ * revoked sign-in, a project that is gone). Such a refusal clears the page's rows; any other failure keeps them. */
+export const accessDenied = (code: string | undefined) =>
+  code !== undefined && (code.startsWith('AUTH_') || code === 'PROJECT_UNAVAILABLE');
+
+/** What a "Show the next" reply does to the snapshot that asked for it. A reader reply is an access denial and
+ * clears the page. A page of a set whose head or total moved on (someone rotated, joined or removed meanwhile) is
+ * never appended to the old rows: the page reads the whole overview again. Otherwise the page is appended. */
+export function appendPage(
+  data: Overview,
+  kind: SetKind,
+  part: 'names' | 'people' | 'rotate',
+  reply: { status: 'reader' } | { status: 'ok'; sets: readonly Partial<OverviewSet>[] },
+): { to: 'reader' } | { to: 'again' } | { to: 'ready'; data: Overview } {
+  if (reply.status === 'reader') return { to: 'reader' };
+  const asked = data.sets.find(s => s.kind === kind);
+  const got = reply.sets[0];
+  const page = got?.[part];
+  if (!asked || !got || !page || got.kind !== kind || got.headVersion !== asked.headVersion)
+    return { to: 'again' };
+  if (page.total !== asked[part]?.total) return { to: 'again' };
+  return {
+    to: 'ready',
+    data: {
+      ...data,
+      sets: data.sets.map(s =>
+        s.kind === kind
+          ? ({ ...s, [part]: { ...page, page: [...(s[part]?.page ?? []), ...page.page] } } as typeof s)
+          : s,
+      ),
+    },
+  };
 }

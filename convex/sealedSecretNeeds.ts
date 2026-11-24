@@ -23,16 +23,17 @@ export async function moveSecretsNeeds(
   if (project) project.secretsNeeds = secretsNeeds || undefined;
 }
 
-/** Patches a set row and keeps its `needs` and the project counter in step in the same mutation. The needs total
- * is worked out from the patched row (one decode of its payload); a row stored before slice 4 is measured first. */
+/** Patches a set row and keeps its `needs` and the project counter in step in the same mutation. A row with no `needs`
+ * has contributed nothing to the counter (a row stored before slice 4, until the one-off initialiser in
+ * sealedSecretNeedsInit.ts counts it), so its first write adds its whole total and never subtracts an uncounted one.
+ * The total is worked out from the patched row (one decode of its payload) and stored, zero included. */
 export async function patchSetKeepingNeeds(
   ctx: MutationCtx,
   set: Doc<'sealedSecretSets'>,
   patch: Partial<Doc<'sealedSecretSets'>>,
 ) {
   const next = { ...set, ...patch } as StoredSealedSet;
-  const before = set.needs ?? storedNeeds(set as StoredSealedSet);
   const after = storedNeeds(next);
-  await ctx.db.patch(set._id, { ...patch, needs: after || undefined });
-  await moveSecretsNeeds(ctx, set.projectId, after - before);
+  await ctx.db.patch(set._id, { ...patch, needs: after });
+  await moveSecretsNeeds(ctx, set.projectId, after - (set.needs ?? 0));
 }

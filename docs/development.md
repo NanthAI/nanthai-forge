@@ -1089,19 +1089,45 @@ person entries by account, and holders group a roster's device entries by accoun
 project's owner, direct writers or linked-team writers; anyone else shows "Not reported".
 
 **Needs-you counter.** Each set row keeps `needs` (removed people still listed + names to
-rotate + waiting proposals) and the project row keeps their sum, `secretsNeeds`
-(`convex/sealedSecretNeeds.ts`). The writes that change them move it in the same
-mutation: a head write, `propose`, `reject`, and every marker add or clear. It is absent
-at zero, adds one small number to the project row the Needs me read already holds (no
-extra read on project load, no idle cost), and `projectNeedsMe:read` returns it as
-`secrets` to write members only. The top-bar count and the Needs me page include it, as
-one row pointing at Secrets.
+rotate + waiting proposals), zero included, and the project row keeps their sum,
+`secretsNeeds` (`convex/sealedSecretNeeds.ts`). The writes that change them move it in
+the same mutation: a head write, `propose`, `reject`, and every marker add or clear. A set
+row with no `needs` was stored before slice 4 and has contributed nothing to the counter,
+so its first write adds its whole total and never subtracts an uncounted one. The project
+counter is absent at zero, adds one small number to the project row the Needs me read
+already holds (no extra read on project load, no idle cost), and `projectNeedsMe:read`
+returns it as `secrets` to write members only. The top-bar count and the Needs me page
+include it, as one row pointing at Secrets.
+
+**Rollout initialiser.** `sealedSecretNeedsInit:initialise { apply, after?, limit? }` is a
+one-off internal mutation (delete it once every deployment has run it). It reads at most
+`limit` set rows (default 8, at most 16) by index in project order, measures each active
+row from its signed records, and sets each row's `needs` and each project's counter to the
+measured sum. `apply:false` writes nothing and returns the counts it would change; a run
+with nothing to change writes nothing, so replays are free. Repeat with `after` set to the
+returned `next` until it is null. It is never scheduled, so idle costs zero.
+
+**Command per set.** A copied rotate command carries the set it was listed under:
+Development is the CLI's default, Checks adds `--set checks`, so a Checks row can never
+overwrite the Development value of the same name. Production has no CLI selector and gets
+no command.
+
+**Access and stale replies.** Any access denial clears the page's rows: a `reader` reply
+(on open, Refresh or a "Show the next" page) or an authorization error (`AUTH_*`,
+`PROJECT_UNAVAILABLE`); any other failure keeps the last snapshot, marked stale. Every
+read starts a new generation, and a reply of an older one is dropped. A "Show the next"
+page joins only the snapshot that asked for it: when its set head or total differs, the
+page reads the whole overview again instead of combining two snapshots.
 
 **Kept beside markers.** A marker keeps when it was set and, when the person left the
 project, their public Forge handle (`revokedNotes`; handles only, never names or
 emails). A re-key moves the handles of the entries it removes to `formerHandles`, so
 "after @handle left" survives the re-key. `propose` keeps the proposal's operation and
-kind on the pending facts so the page names them without opening the sealed bytes.
+kind on the pending facts so the page names them without opening the sealed bytes. A
+computer's sign-in ending and a person leaving the project are separate reasons: a marker
+carries the handle only when the person left, so the holder list says "left the project"
+only then, and a marker set for a signed-out computer takes the handle when its person
+later loses project access.
 
 See [trust boundaries and current check-secret guidance](security.md#secrets-for-checks).
 

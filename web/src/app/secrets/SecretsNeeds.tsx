@@ -91,39 +91,42 @@ function Rotate({
             : 'a removed computer could open these values: replace each at its provider, then set it'
         }
       />
-      {rows.map(row => (
-        <div className="secret-need" key={`${row.set}:${row.name}`}>
-          <div className="secret-what">
-            <span className="mono" translate="no">
-              {row.name}
-            </span>{' '}
-            <span className="t2">
-              {KIND_WORD[row.kind]} · {setLabel(row.set)}
-            </span>
-            <span className="meta">
-              <State word="Needs you" state="waiting">
-                To rotate
-              </State>{' '}
-              {row.devices.length ? <> · fp </> : ' · '}
-              {row.devices.map((device, i) => (
-                <span key={device.code}>
-                  {i ? ', ' : ''}
-                  <span className="dcode">{device.code}</span> (
-                  {device.handle ? `@${device.handle}` : 'not reported'})
-                </span>
-              ))}
-              {row.more ? ` and ${count(row.more, 'more computer')}` : ''}
-              {row.machines?.length
-                ? `${row.devices.length ? ', ' : ''}CI machine ${row.machines.join(', ')}`
-                : ''}{' '}
-              could open v{row.version.toLocaleString()}
-            </span>
+      {rows.map(row => {
+        const command = setCommand(row.name, row.kind === 2 ? 2 : 1, row.set);
+        return (
+          <div className="secret-need" key={`${row.set}:${row.name}`}>
+            <div className="secret-what">
+              <span className="mono" translate="no">
+                {row.name}
+              </span>{' '}
+              <span className="t2">
+                {KIND_WORD[row.kind]} · {setLabel(row.set)}
+              </span>
+              <span className="meta">
+                <State word="Needs you" state="waiting">
+                  To rotate
+                </State>{' '}
+                {row.devices.length ? <> · fp </> : ' · '}
+                {row.devices.map((device, i) => (
+                  <span key={device.code}>
+                    {i ? ', ' : ''}
+                    <span className="dcode">{device.code}</span> (
+                    {device.handle ? `@${device.handle}` : 'not reported'})
+                  </span>
+                ))}
+                {row.more ? ` and ${count(row.more, 'more computer')}` : ''}
+                {row.machines?.length
+                  ? `${row.devices.length ? ', ' : ''}CI machine ${row.machines.join(', ')}`
+                  : ''}{' '}
+                could open v{row.version.toLocaleString()}
+              </span>
+            </div>
+            <div className="btns">
+              {command ? <SecretCommand command={command} label="Copy command" /> : null}
+            </div>
           </div>
-          <div className="btns">
-            <SecretCommand command={setCommand(row.name, row.kind === 2 ? 2 : 1)} label="Copy command" />
-          </div>
-        </div>
-      ))}
+        );
+      })}
       {more ? (
         <p className="pf">
           {rows.length.toLocaleString()} of {total.toLocaleString()} to rotate shown ·{' '}

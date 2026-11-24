@@ -77,6 +77,9 @@ test('the page words follow the design copy and each command is one value-free l
   assert.equal(model.rejectCommand(id), `nforge secret reject ${id}`);
   assert.equal(model.setCommand('SIGNING_KEY.pem', 2), 'nforge secret set SIGNING_KEY.pem --file');
   assert.equal(model.setCommand("x' ; $(false)", 1), "nforge secret set 'x'\\'' ; $(false)'");
+  assert.equal(model.setCommand('API_TOKEN', 1, 2), 'nforge secret set API_TOKEN --set checks');
+  assert.equal(model.setCommand('KEY.pem', 2, 2), 'nforge secret set KEY.pem --set checks --file');
+  assert.equal(model.setCommand('API_TOKEN', 1, 3), null, 'Production has no CLI selector, so no command');
   assert.equal(model.relative(1000, 1000 + 12 * 60_000), '12 min ago');
   assert.equal(model.relative(0, 3 * 86_400_000), '3 d ago');
   assert.equal(model.relative(0, 86_400_000 + 5), 'yesterday');
@@ -111,6 +114,49 @@ test('guard: the page reads names once, one-shot; it never references a value, c
       /sealedSecrets[.:](read|proposals|write|join|link|propose|reject)\b/,
       file,
     );
+});
+
+test('slice 4 review: a Show-the-next page joins only the snapshot that asked for it; a denial clears the page', () => {
+  const page = (names, extra = {}) => ({
+    total: 3,
+    page: names.map(name => ({ name })),
+    next: null,
+    ...extra,
+  });
+  const data = {
+    status: 'ok',
+    now: 0,
+    needs: 0,
+    sets: [
+      { kind: 1, headVersion: 4, rotate: page(['A', 'B'], { next: 'B' }) },
+      { kind: 2, headVersion: 9, rotate: page(['Z'], { total: 1 }) },
+    ],
+  };
+  const reply = (kind, headVersion, rotate) => ({ status: 'ok', sets: [{ kind, headVersion, rotate }] });
+  // The same head and total: the page joins, and other sets are untouched.
+  const joined = model.appendPage(data, 1, 'rotate', reply(1, 4, page(['C'])));
+  assert.equal(joined.to, 'ready');
+  assert.deepEqual(
+    joined.data.sets[0].rotate.page.map(r => r.name),
+    ['A', 'B', 'C'],
+  );
+  assert.equal(joined.data.sets[1], data.sets[1]);
+  assert.equal(joined.data.sets[0].rotate.next, null);
+  // Someone rotated 2 of 3 meanwhile: the reply is one name of a total of one. Old rows are not kept.
+  assert.deepEqual(model.appendPage(data, 1, 'rotate', reply(1, 4, page(['C'], { total: 1 }))), {
+    to: 'again',
+  });
+  // A new head with an unchanged total is also another snapshot.
+  assert.deepEqual(model.appendPage(data, 1, 'rotate', reply(1, 5, page(['C']))), { to: 'again' });
+  // A reply for another set, or without the part, never joins.
+  assert.deepEqual(model.appendPage(data, 1, 'rotate', reply(2, 4, page(['C']))), { to: 'again' });
+  assert.deepEqual(model.appendPage(data, 1, 'rotate', { status: 'ok', sets: [] }), { to: 'again' });
+  // A reader reply is an access denial.
+  assert.deepEqual(model.appendPage(data, 1, 'rotate', { status: 'reader' }), { to: 'reader' });
+  for (const code of ['AUTH_REQUIRED', 'AUTH_REVOKED', 'AUTH_SCOPE_DENIED', 'PROJECT_UNAVAILABLE'])
+    assert.equal(model.accessDenied(code), true, code);
+  for (const code of [undefined, 'RATE_LIMITED', 'SECRETS_NOT_ALLOWED'])
+    assert.equal(model.accessDenied(code), false, String(code));
 });
 
 test('Secrets: value-free screen, honest states, accessible themes, no sideways scroll', async t => {
@@ -280,6 +326,74 @@ test('Secrets: value-free screen, honest states, accessible themes, no sideways 
       assert.deepEqual(await page.evaluate(() => window.secretsFixture.more), ['1:people']);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       await capture('worst');
+    },
+  );
+
+  await t.test(
+    'the container: a denial clears the page, a stale reply is dropped, a page of another snapshot restarts the read',
+    async () => {
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      const container = async () => {
+        await page.goto(`${base}/fixture.html?container=1&theme=dark`);
+        await page.evaluate(() => window.secretsContainer.overview(0));
+        await page.getByRole('region', { name: 'Needs you' }).waitFor();
+      };
+      const call = (fn, ...args) =>
+        page.evaluate(([fn, args]) => window.secretsContainer[fn](...args), [fn, args]);
+      const asked = () => page.evaluate(() => window.secretsContainer.queries().length);
+      const rows = () => page.locator('.secret-need').count();
+      const more = () =>
+        page.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: 'Show the next 100' });
+      const version = () => page.evaluate(() => window.secretsContainer.headVersion);
+      // A reader reply to a page is an access denial: nothing the page showed stays.
+      await container();
+      const before = await rows();
+      await more().click();
+      await call('reader', 1);
+      await page.getByText('Secrets are for people who can write.').waitFor();
+      assert.equal(await page.locator('.secret-need, .row.secret-name').count(), 0);
+      // An authorization error clears it too; any other failure keeps the last snapshot.
+      await container();
+      await more().click();
+      await call('fail', 1, 'AUTH_REVOKED');
+      await page.getByText('No secret names were returned.').waitFor();
+      assert.equal(await page.locator('.secret-need, .row.secret-name').count(), 0);
+      await container();
+      await more().click();
+      await call('fail', 1);
+      await page.getByText(/Below is what this page last showed/).waitFor();
+      assert.equal(await rows(), before);
+      // The first read's error, a lost grant: no snapshot to keep.
+      await container();
+      await page.getByRole('button', { name: 'Refresh' }).click();
+      await call('fail', 1, 'PROJECT_UNAVAILABLE');
+      await page.getByText('No secret names were returned.').waitFor();
+      // Refresh while a page is out: the page's reply is dropped, then the fresh overview replaces the rows.
+      await container();
+      await more().click();
+      await page.getByRole('button', { name: 'Refresh' }).click();
+      assert.equal(await asked(), 3);
+      await call('page', 1, 'rotate', 787, await version(), ['LATE_ROW']);
+      assert.equal(await rows(), before, 'a superseded reply changes nothing');
+      await call('overview', 2);
+      await page.getByRole('button', { name: 'Refresh' }).waitFor();
+      assert.equal(await page.getByText('LATE_ROW').count(), 0);
+      // The set moved on before the page came back (a total of 1): the old rows are not combined with it.
+      await container();
+      await more().click();
+      await call('page', 1, 'rotate', 1, await version(), ['LAST_ROW']);
+      await page.waitForFunction(() => window.secretsContainer.queries().length === 3);
+      assert.equal(await page.getByText('LAST_ROW').count(), 0);
+      assert.equal(await rows(), before, 'the rows stay as shown until the new read arrives');
+      await call('overview', 2);
+      await page.getByRole('button', { name: 'Refresh' }).waitFor();
+      // An unchanged snapshot takes the page: 100 shown, 787 to rotate, one more row.
+      await container();
+      await more().click();
+      await call('page', 1, 'rotate', 787, await version(), ['NEXT_ROW']);
+      await page.getByText('NEXT_ROW').waitFor();
+      assert.equal(await rows(), before + 1);
+      assert.equal(await asked(), 2, 'a page costs one read, nothing restarts');
     },
   );
 

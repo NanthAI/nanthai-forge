@@ -553,8 +553,9 @@ export function storedNeeds(set: StoredSealedSet) {
 }
 /** Marker notes after `revoked` is set on `set`: each new marker is stamped with `at` and, when its account is in
  * `handles` (hex account id to public Forge handle, known only when the person left the project), that handle.
- * Notes of markers that are gone are dropped. Null when nothing changes. One decode of the roster, and only when a
- * marker is new. */
+ * A marker already set for a signed-out computer takes the handle when its person later leaves the project, so the
+ * reason a marker shows follows the latest fact. Notes of markers that are gone are dropped. Null when nothing
+ * changes. One decode of the roster, only when a marker is new or a kept one can take a handle. */
 export function nextMarkNotes(
   set: StoredSealedSet,
   revoked: readonly ArrayBuffer[],
@@ -563,12 +564,19 @@ export function nextMarkNotes(
 ) {
   const kept = (set.revokedNotes ?? []).filter(n => revoked.some(id => equalBytes(u8(id), u8(n.id))));
   const added = revoked.filter(id => !set.revoked?.some(old => equalBytes(u8(old), u8(id))));
-  const roster = added.length ? (decodeSealedWire(u8(set.payload)) as Payload).roster : null;
+  const upgradable = handles.size > 0 && kept.some(n => !n.handle);
+  const roster = added.length || upgradable ? (decodeSealedWire(u8(set.payload)) as Payload).roster : null;
+  const handleOf = (id: ArrayBuffer) => {
+    const entry = roster?.entries.find(e => equalBytes(e.id, u8(id)));
+    return entry ? handles.get(hex(entry.accountId)) : undefined;
+  };
   const notes = [
-    ...kept,
+    ...kept.map(n => {
+      const handle = n.handle ? undefined : handleOf(n.id);
+      return handle ? { ...n, handle } : n;
+    }),
     ...added.map(id => {
-      const entry = roster?.entries.find(e => equalBytes(e.id, u8(id)));
-      const handle = entry ? handles.get(hex(entry.accountId)) : undefined;
+      const handle = handleOf(id);
       return { id, at, ...(handle ? { handle } : {}) };
     }),
   ];
