@@ -6,7 +6,7 @@ import { parseWork } from '../src/work-unified-types';
 import { commandPayloadRows, commandPlanningRows, commandValues } from './projectWorkCommandRows';
 import { v } from 'convex/values';
 import { mutation, type MutationCtx } from './cliServer';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { hostedWorkEventDocument } from './schema';
 import { metadataCommandSchema } from '../src/work-intent-types';
 import {
@@ -45,6 +45,7 @@ export async function executeCommand(
   options: {
     purge?: true;
     planning?: PlanningWriteContext | undefined;
+    ownerBatch?: (project: Doc<'hostedProjects'>) => Promise<PlanningWriteContext>;
     /** A start has already checked that this generation is ready, in the same transaction. */
     startGeneration?: NonNullable<Awaited<ReturnType<typeof selectedGeneration>>>;
     planningClose?: string | undefined;
@@ -197,18 +198,18 @@ export async function executeCommand(
       record: { ...intent, version: intent.version + 1, status: command.status },
     });
   }
-  const selected =
-    options.planning?.selected ?? options.startGeneration ?? (await selectedGeneration(ctx, project));
+  const planning = options.planning ?? (member ? undefined : await options.ownerBatch?.(project));
+  const selected = planning?.selected ?? options.startGeneration ?? (await selectedGeneration(ctx, project));
   invariant(selected, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before writing.');
-  const generation = options.planning?.generation ?? (await generationHead(ctx, selected));
-  const backup = options.planning?.backup ?? (await ctx.db.get(generation.backupId));
+  const generation = planning?.generation ?? (await generationHead(ctx, selected));
+  const backup = planning?.backup ?? (await ctx.db.get(generation.backupId));
   invariant(
     backup?.projectId === project._id && backup.status === 'stored',
     'PROJECT_UNAVAILABLE',
     'Select this project’s stored source.',
   );
   const load = (collection: string, key: string) =>
-    options.planning?.record(collection, key) ?? record(ctx, recordPartition(generation), collection, key);
+    planning?.record(collection, key) ?? record(ctx, recordPartition(generation), collection, key);
   const lookup = (keys: { collection: string; key: string }[]) =>
     Promise.all(keys.map(key => load(key.collection, key.key)));
   const rows = await lookup(commandKeys(command, input));
@@ -433,7 +434,7 @@ export async function executeCommand(
     previousRevision: revision,
     command: JSON.stringify(command),
     projection,
-    planning: options.planning,
+    planning,
     planningRestore: options.planningRestore,
     ...(member && (command.action === 'put-planning-item' || command.action === 'comment-planning-item')
       ? { memberPlanning: options.planningTick ? ('tick' as const) : ('item' as const) }

@@ -13,6 +13,7 @@ import { invariant } from '../src/errors';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { hostedRecordBody, readHostedRecord, recordVersion } from './projectHostedRecords';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { inboundPointers } from './projectPlanningInboundStore';
 
 type ReadIdentity = { projectId: Id<'hostedProjects'>; actor: string };
 type Link = { kind: string; id: string; title: string };
@@ -119,6 +120,9 @@ export async function itemWorkLandingDetails<T extends { receiptId: string; comm
   );
 }
 
+const RELATED_LIMIT = 50;
+const RELATED_BYTES = 128 * 1024;
+
 /** Work uses a position cursor over planning roots. Read one page and at most
  * one lookahead row, and admit a valid oversized root when it starts the page. */
 export async function planningWorkPage(rows: AsyncIterable<Doc<'projectPlanningRecords'>>, limit: number) {
@@ -126,7 +130,7 @@ export async function planningWorkPage(rows: AsyncIterable<Doc<'projectPlanningR
   let bytes = 0;
   for await (const row of rows) {
     const size = getDocumentSize(row);
-    if (page.length === limit || (page.length && bytes + size > 128 * 1024)) return { page, more: true };
+    if (page.length === limit || (page.length && bytes + size > RELATED_BYTES)) return { page, more: true };
     page.push(row);
     bytes += size;
   }
@@ -145,7 +149,39 @@ async function workItem(ctx: QueryCtx, partition: Id<'projectWorkGenerations'>, 
   return row && allowedWorkItem(row, owner) ? row : null;
 }
 
-type ItemWorkPlan = { item: Preview; partition: Id<'projectWorkGenerations'>; owner: boolean };
+type ItemWorkPlan = {
+  item: Preview;
+  partition: Id<'projectWorkGenerations'>;
+  generation: Doc<'projectWorkGenerations'>;
+  owner: boolean;
+};
+
+async function readInbound(
+  ctx: QueryCtx,
+  partition: ItemWorkPlan['partition'],
+  epoch: string,
+  owner: boolean,
+  itemId: string,
+  position: number | undefined,
+  visit: (row: { value: string }) => void,
+) {
+  const pointers = inboundPointers(ctx, partition, epoch, itemId, position, owner);
+  let count = 0,
+    bytes = 0,
+    last = position;
+  for await (const pointer of pointers) {
+    if (count === RELATED_LIMIT) return last;
+    const source = pointer.key.slice(0, -(itemId.length + 1));
+    const row = await record(ctx, partition, 'planningSearch', source);
+    const size = row ? getDocumentSize(row) : 0;
+    if (count && bytes + size > RELATED_BYTES) return last;
+    count++;
+    bytes += size;
+    last = pointer.position;
+    if (row?.position === last && row.planning?.kind === 'issue') visit(row);
+  }
+  return undefined;
+}
 
 export async function visibleItemWork(
   ctx: QueryCtx,
@@ -157,12 +193,12 @@ export async function visibleItemWork(
   if (!generation) return null;
   const partition = recordPartition(generation);
   const item = await workItem(ctx, partition, itemId, owner);
-  return item?.kind === 'issue' ? { item, partition, owner } : null;
+  return item?.kind === 'issue' ? { item, partition, generation, owner } : null;
 }
 
 export async function itemWorkRelated(
   ctx: QueryCtx,
-  { item, partition, owner }: ItemWorkPlan,
+  { item, partition, generation, owner }: ItemWorkPlan,
   cursor: string | null,
 ) {
   const itemId = item.id;
@@ -211,8 +247,25 @@ export async function itemWorkRelated(
       inbound(other);
     }
   }
-  // Reverse links use the current projection, including settled Items and old relations.
-  // Bound the indexed page by rows and stored bytes rather than loading the board.
+  const visit = (row: { value: string }) => {
+    const other = JSON.parse(row.value) as Preview;
+    if (other.id !== itemId && allowedWorkItem(other, owner)) inbound(other);
+  };
+  // The physical partition owns coverage; a source-return alias cannot prove it.
+  const scope = generation._id === partition ? generation : await ctx.db.get(partition);
+  if (scope?.planningInboundVersion) {
+    const next = await readInbound(
+      ctx,
+      partition,
+      scope.planningInboundVersion,
+      owner,
+      itemId,
+      position,
+      visit,
+    );
+    return { links: [...links.values()], next: next === undefined ? null : `${partition}:${next}` };
+  }
+  // Unprepared partitions keep the original reverse scan and position cursor.
   const reverse = await planningWorkPage(
     ctx.db
       .query('projectPlanningRecords')
@@ -224,12 +277,9 @@ export async function itemWorkRelated(
         return position === undefined ? range : range.lt('position', position);
       })
       .order('desc'),
-    50,
+    RELATED_LIMIT,
   );
-  for (const row of reverse.page) {
-    const other = JSON.parse(row.value) as Preview;
-    if (other.id !== itemId && allowedWorkItem(other, owner)) inbound(other);
-  }
+  for (const row of reverse.page) visit(row);
   return {
     links: [...links.values()],
     next: reverse.more ? `${partition}:${reverse.page.at(-1)!.position}` : null,

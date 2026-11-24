@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import type { MutationCtx } from './server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { executeCommand } from './projectWorkCommand';
-import type { PlanningWriteContext } from './projectWorkCommandContext';
+import { planningWriteContext, type PlanningWriteContext } from './projectWorkCommandContext';
 import { ForgeError, invariant } from '../src/errors';
 import { digest } from '../src/state/hash';
 import { undoableFields, type BatchBefore, type BatchResult, type BatchWrite } from '../src/planning-batch';
@@ -45,6 +45,9 @@ export async function applyWrites(
   } = {},
 ) {
   const results: BatchResult[] = [];
+  let shared: PlanningWriteContext | undefined;
+  const ownerBatch = async (project: Doc<'hostedProjects'>) =>
+    (shared ??= await planningWriteContext(ctx, project));
   for (const [position, original] of writes.entries()) {
     const write = options.prepare ? await options.prepare(original, position) : original;
     if (options.prepare && !write) continue;
@@ -71,6 +74,9 @@ export async function applyWrites(
         actor,
         {
           planning: options.planning,
+          // Reuse the close/Undo context for ordinary owner batches too. Members
+          // keep their existing per-command checks; replays need no Work index.
+          ...(writes.length > 1 && !options.planning ? { ownerBatch } : {}),
           planningClose: options.lock,
           planningRestore: options.restore,
           ...(options.planningTick ? { planningTick: true as const } : {}),

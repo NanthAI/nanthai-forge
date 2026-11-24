@@ -44,6 +44,17 @@ export const generationFields = {
   recordTables: v.optional(v.union(v.literal('copying'), v.literal('split'))),
   recordTablesProgress: v.optional(v.string()),
   planningSearchVersion: v.optional(v.union(v.literal(1), v.literal(2))),
+  /** Complete inverse relation projection in this record partition (not an alias). */
+  planningInboundVersion: v.optional(v.string()),
+  planningInboundPreparation: v.optional(
+    v.object({
+      id: v.string(),
+      after: v.string(),
+      previous: v.union(v.string(), v.null()),
+      retired: v.optional(v.string()),
+      phase: v.union(v.literal('paused'), v.literal('roots'), v.literal('retire')),
+    }),
+  ),
   /** Source blobs resolve through the project object catalog (no per-blob record). */
   objectCatalog: v.optional(v.literal(true)),
   ensureCursor: v.optional(v.string()),

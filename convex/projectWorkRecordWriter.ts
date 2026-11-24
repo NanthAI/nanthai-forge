@@ -8,6 +8,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { layoutRecordTable, splitRecordTable } from './projectWorkRecordTables';
 import { isDataRouted, layoutMarkerFields, noteLayout, partitionLayout } from './projectWorkRecordLayout';
 import { initiativeWorkPlanning } from './projectInitiativeWorkPlanning';
+import { changePlanningInbound } from './projectPlanningInboundStore';
 
 const tag = Symbol('workRecordWriter');
 const workTables = new Set(['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords']);
@@ -39,6 +40,23 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
   // partition is mirrored to its data-table copy, found by key.
   const identities = new Map<string, { generationId: string; collection: string; key: string }>();
   const layouts = new Map<string, boolean>();
+  const inboundEpochs = new Map<Id<'projectWorkGenerations'>, Promise<string | null>>();
+  const inboundEpoch = (partition: Id<'projectWorkGenerations'>) => {
+    let epoch = inboundEpochs.get(partition);
+    if (!epoch) {
+      epoch = db()
+        .get(partition)
+        .then(
+          scope =>
+            scope?.planningInboundVersion ??
+            (scope?.planningInboundPreparation?.phase === 'roots'
+              ? scope.planningInboundPreparation.id
+              : null),
+        );
+      inboundEpochs.set(partition, epoch);
+    }
+    return epoch;
+  };
   const waitingRepairs = new Set<string>();
   const repairs = new Set<Id<'projectWorkGenerations'>>();
   let preparing = false;
@@ -182,8 +200,10 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
             const id = await db().insert('projectWorkGenerations', {
               ...input,
               planRowsVersion: 1,
+              planningInboundVersion: 'birth',
             } as never);
             layouts.set(id, true);
+            inboundEpochs.set(id, Promise.resolve('birth'));
             // Its planning counts start complete: every root of this partition passes through this writer.
             await db().insert('projectWorkDataRecords', planCountsBirth(input.projectId as never, id));
             // Its Item history and Work events live in the 8-copy data table from birth.
@@ -198,6 +218,8 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
             // Repair state belongs to the shared record partition, never its aliases.
             const alias = { ...input };
             delete alias.planRowsPreparation;
+            delete alias.planningInboundPreparation;
+            delete alias.planningInboundVersion;
             return db().insert('projectWorkGenerations', alias as never);
           }
           if (table === 'projectWorkRecords') table = splitRecordTable(String(input.collection));
@@ -216,6 +238,7 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
             await serial(async () => {
               remember({ ...input, _id: id });
               await plan().change(null, input as Row);
+              await changePlanningInbound(db(), null, input as Row, inboundEpoch);
               counts().change(null, input as Row);
               if (!preparing) work().change(null, input as Row);
             });
@@ -229,7 +252,13 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
               : method === 'replace'
                 ? db().replace(id as never, value as never)
                 : db().patch(id as never, value as never);
-          if (db().normalizeId('projectWorkGenerations', id)) {
+          const generationId = db().normalizeId('projectWorkGenerations', id);
+          if (generationId) {
+            if (
+              method !== 'patch' ||
+              (value && ('planningInboundVersion' in value || 'planningInboundPreparation' in value))
+            )
+              inboundEpochs.delete(generationId);
             if (value && 'planRowsPreparation' in value) {
               if (value.planRowsPreparation && !(value.planRowsPreparation as { task?: string }).task)
                 waitingRepairs.add(id);
@@ -289,6 +318,7 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
               if (next) remember({ ...next, _id: id });
               if (old.collection === 'planningSearch' || next?.collection === 'planningSearch') {
                 await plan().change(old, next);
+                await changePlanningInbound(db(), old, next, inboundEpoch);
                 counts().change(old, next);
                 if (!preparing) work().change(old, next);
               }

@@ -433,6 +433,49 @@ async function transactionCost(s, run, failAfterVersions = Infinity) {
   }
 }
 
+test('100 Items can replace 20 Related pairs each without exhausting one batch transaction', async t => {
+  const targets = Array.from({ length: 40 }, id);
+  const sources = Array.from({ length: 100 }, id);
+  const links = ids => ids.map(id => ({ kind: 'related', id }));
+  const before = links(targets.slice(0, 20));
+  const after = links(targets.slice(20));
+  const s = await setup(t, true, async (_root, local) => {
+    for (const itemId of [...targets, ...sources])
+      await local.dispatch(
+        {
+          action: 'put-planning-item',
+          operationId: id(),
+          itemId,
+          expectedVersion: 0,
+          kind: 'issue',
+          title: 'Related batch fixture',
+          status: 'open',
+          ...(sources.includes(itemId) ? { relations: before } : {}),
+        },
+        local.status().revision,
+      );
+  });
+  const writes = sources.map(itemId => ({
+    action: 'put-planning-item',
+    itemId,
+    expectedVersion: 1,
+    relations: after,
+  }));
+  let result;
+  const cost = await transactionCost(s, async () => {
+    result = await planBatch(s, writes, { atomic: true });
+  });
+  assert.equal(result.results.length, 100);
+  assert(result.results.every(row => row.outcome === 'applied'));
+  assert(cost.indexRanges <= 4096, JSON.stringify(cost));
+  const projected = [...s.tables.projectWorkDataRecords.values()].filter(row =>
+    row.collection.startsWith('_workStorePlanningInbound:'),
+  );
+  assert.equal(projected.length, 2000);
+  assert(projected.every(row => targets.slice(20).includes(row.parent.slice('live:'.length))));
+  t.diagnostic(`100 replacements: ${cost.indexRanges} ranges`);
+});
+
 async function pressureRollsBack(s, run) {
   const before = structuredClone(s.tables);
   const scheduled = s.scheduled.slice();
