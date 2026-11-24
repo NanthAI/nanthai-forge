@@ -15,6 +15,9 @@ const plan = await import(moduleUrl('../convex/projectPlanView.ts'));
 const itemWork = await import(moduleUrl('../convex/projectItemWork.ts'));
 const lifecycle = await import(moduleUrl('../convex/projectHostedLifecycle.ts'));
 const backfill = await import(moduleUrl('../convex/projectPlanLaneBackfill.ts'));
+const { setPin } = await import(moduleUrl('../convex/projectHostedLanePin.ts'));
+const { rollupWorkReader } = await import(moduleUrl('../convex/projectPlanRollupFacts.ts'));
+const { verifiedItemMembership } = await import(moduleUrl('../convex/projectItemMembershipVersion.ts'));
 const batch = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
 const work = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
@@ -373,6 +376,140 @@ test('backfill restores an existing successor link, pages old work, and replays 
   await close(f, linked.lane.laneId);
   assert.equal((await rows(f)).find(row => row.id === id).inLane, undefined);
 });
+
+const dev = t =>
+  t.mock.property(process, 'env', {
+    ...process.env,
+    CONVEX_CLOUD_URL: 'https://benevolent-wildebeest-974.convex.cloud',
+  });
+const verifyMarks = f => f.store.transaction('verify', backfill.verify, { projectId: f.projectId });
+async function certifyMarks(f) {
+  let next = { phase: 'lanes', cursor: null };
+  let marked = 0;
+  for (let i = 0; next && i < 12; i++) {
+    const result = await f.store.transaction('verifiedMarkPass', backfill.run, {
+      projectId: f.projectId,
+      ...next,
+    });
+    assert(result.scanned <= 8);
+    marked += result.marked;
+    next = result.next;
+  }
+  assert.equal(next, null);
+  assert.equal(await verifyMarks(f), true);
+  return marked;
+}
+const workFor = (f, itemId) =>
+  f.store.transaction(
+    'rollupFacts',
+    {
+      _handler: async ctx => {
+        const project = await ctx.db.get(f.projectId);
+        const generation = await ctx.db.get(project.work.generationId);
+        return (
+          await rollupWorkReader(ctx, project, generation, 32).read({
+            id: itemId,
+            kind: 'issue',
+            status: 'open',
+          })
+        ).work;
+      },
+    },
+    {},
+  );
+
+test('membership alone does not certify an unmarked open Lane for roll-up', async t => {
+  dev(t);
+  const f = await acceptanceFixture();
+  const itemId = randomUUID();
+  addPlan(f, [itemId]);
+  const started = await begin(f, planned(itemId));
+  const overlap = [...f.tables.projectHostedOverlapLanes.values()].find(
+    row => row.laneId === started.lane.laneId,
+  );
+  f.tables.projectFinishReadRows.delete(overlap.planLaneMark);
+  f.patch('projectHostedOverlapLanes', overlap._id, { planLaneMark: undefined, planLanePin: undefined });
+  f.patch('hostedProjects', f.projectId, { itemLaneMembership: verifiedItemMembership });
+  await assert.rejects(verifyMarks(f), { code: 'WORK_STALE' });
+  assert.equal(
+    await workFor(f, itemId),
+    'active',
+    'unverified projects retain the legacy open-Lane evidence',
+  );
+  await assert.rejects(
+    f.store.transaction('forgedFrontier', backfill.run, {
+      projectId: f.projectId,
+      phase: 'lanes',
+      cursor: 'not-a-retained-cursor',
+    }),
+    { code: 'WORK_STALE' },
+  );
+  assert.equal(await certifyMarks(f), 1);
+  assert.equal(await certifyMarks(f), 0);
+  assert.equal(await workFor(f, itemId), 'active');
+  assert.equal(JSON.parse(markRow(f, itemId).value).open, 1);
+});
+
+for (const older of [false, true])
+  test(`pin and unpin maintain roll-up evidence for a landed keep-open Lane on the ${older ? 'older' : 'newest'} Intent`, async t => {
+    dev(t);
+    const f = await acceptanceFixture();
+    const itemId = randomUUID();
+    addPlan(f, [itemId]);
+    f.patch('hostedProjects', f.projectId, { itemLaneMembership: verifiedItemMembership });
+    const started = await begin(f, planned(itemId));
+    const lane = await f.changeLane(started.lane.laneId, { head: f.state.sha256, sourceVersion: 1 });
+    const composed = await f.makeCandidate([
+      {
+        laneId: lane.id,
+        head: lane.head,
+        version: lane.version,
+        sourceVersion: lane.sourceVersion,
+        lifecycleVersion: lane.lifecycleVersion,
+        state: { object: { sha256: lane.head, size: f.state.size }, recipe: null },
+      },
+    ]);
+    const { state } = await f.ready(composed, { keepOpen: true });
+    const accepted = await f.accept(state);
+    await f.materialize(accepted.receipt.id);
+    assert.equal((await f.readLane(lane.id)).state, 'active');
+    assert.equal(markRow(f, itemId), undefined);
+    const set = async pinned =>
+      JSON.parse(
+        await f.store.transaction('setPin', setPin, {
+          projectId: f.projectId,
+          authorityEpoch: 1,
+          laneId: lane.id,
+          pinned,
+        }),
+      );
+    if (older) {
+      const record = await f.runAcceptance('previousIntent', readHostedRecord, {
+        ...f.auth,
+        kind: 'intent',
+        key: itemId,
+      });
+      const old = JSON.parse(record.value);
+      if (old.status !== 'completed')
+        await f.runAcceptance('finishPreviousIntent', writeHostedRecord, {
+          ...f.auth,
+          expectedVersion: old.version,
+          record: { ...old, version: old.version + 1, status: 'completed' },
+        });
+      const successor = await begin(f, planned(itemId));
+      assert.notEqual(successor.intentId, itemId);
+      await close(f, successor.lane.laneId);
+    }
+    assert.equal(await certifyMarks(f), 0);
+    assert.notEqual(await workFor(f, itemId), 'active');
+    assert.equal((await set(true)).changed, true);
+    assert.equal((await set(true)).changed, false);
+    assert.equal(JSON.parse(markRow(f, itemId).value).open, 1);
+    assert.equal(await workFor(f, itemId), 'active');
+    assert.equal((await set(false)).changed, true);
+    assert.equal(markRow(f, itemId), undefined);
+    assert.notEqual(await workFor(f, itemId), 'active');
+  });
 
 test('an Intent cascade removes its staged Lane marks when abandonment becomes visible', async () => {
   const f = await acceptanceFixture();

@@ -8,6 +8,8 @@ import { moduleUrl } from './convex-module.mjs';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 
 const { page } = await import(moduleUrl('../convex/projectPlanRollupPreview.ts'));
+const { addPlanLane, removePlanLanes } = await import(moduleUrl('../convex/projectPlanLaneMarks.ts'));
+const { verifiedItemMembership } = await import(moduleUrl('../convex/projectItemMembershipVersion.ts'));
 const row = (id, fields) => ({
   id,
   kind: 'issue',
@@ -76,11 +78,10 @@ async function fixture() {
     work: { backupId, generationId, operationId: 'synthetic-index', initialRevision: 1, revision: 1 },
   });
   const headId = await s.ctx.db.insert('projectWorkHeads', { projectId, backupId, revision: 2 });
-  const put = (id, fields) =>
-    s.ctx.db.insert('projectPlanningRecords', {
+  const put = async (id, fields) => {
+    const row = {
       projectId,
       generationId,
-      collection: 'planningItems',
       key: id,
       parent: '',
       position: 0,
@@ -93,8 +94,11 @@ async function fixture() {
         title: 'Synthetic private title',
         ...fields,
       }),
-    });
-  const intent = (key, status) =>
+    };
+    await s.ctx.db.insert('projectPlanningRecords', { ...row, collection: 'planningItems' });
+    await s.ctx.db.insert('projectPlanningRecords', { ...row, collection: 'planningSearch' });
+  };
+  const intent = (key, status, planningItemId) =>
     s.ctx.db.insert('projectHostedRecordHeads', {
       projectId,
       kind: 'intent',
@@ -103,10 +107,70 @@ async function fixture() {
       version: 1,
       parent: '',
       recordId: 'synthetic-work-pointer',
+      ...(planningItemId ? { planningItemId } : {}),
     });
   const read = (extra = {}) => s.call('preview', page, { projectId, after: '', ...extra });
-  return { ...s, projectId, read, put, intent, headId };
+  return { ...s, projectId, generationId, read, put, intent, headId };
 }
+
+test('verified roll-up uses the open-Lane tally across earlier Intents and latest completion without a history walk', async t => {
+  const s = await fixture();
+  t.mock.property(process, 'env', {
+    ...process.env,
+    CONVEX_CLOUD_URL: 'https://benevolent-wildebeest-974.convex.cloud',
+  });
+  await s.put('a', {});
+  await s.intent('a', 'abandoned', 'a');
+  let id = 'a';
+  for (let i = 0; i < 23; i++) await s.intent((id = successorIntentId(id)), 'abandoned', 'a');
+  await s.intent(successorIntentId(id), 'completed', 'a');
+  const earlier = successorIntentId('a');
+  const lane = await s.ctx.db.insert('projectHostedRecordHeads', {
+    projectId: s.projectId,
+    kind: 'lane',
+    key: 'earlier-lane',
+    parent: earlier,
+    status: 'active',
+    version: 1,
+    recordId: 'synthetic-lane-pointer',
+    planningItemId: 'a',
+  });
+  const mark = await addPlanLane(s.ctx, s.projectId, { id: 'a', kind: 'issue', status: 'open', position: 0 });
+  await s.put('b', { intentIds: ['a'] });
+  await s.put('c', { intentIds: [earlier] });
+  const legacy = await s.read();
+  assert.equal(legacy.rows[0].work, 'active');
+  const legacyCost = s.counts.at(-1);
+
+  await s.ctx.db.patch(s.projectId, {
+    itemLaneMembership: verifiedItemMembership,
+    planLaneMarkCoverage: { generationId: s.generationId, cursor: null },
+  });
+  const indexed = await s.read();
+  const indexedCost = s.counts.at(-1);
+  assert.deepEqual(
+    indexed.rows.map(({ id, work }) => [id, work]),
+    [
+      ['a', 'active'],
+      ['b', 'active'],
+      ['c', 'active'],
+    ],
+  );
+  assert.equal(indexed.intentKeys, 4);
+  assert(indexedCost.documents < legacyCost.documents);
+  assert(indexedCost.readBytes < legacyCost.readBytes);
+  t.diagnostic(
+    `legacy ${legacyCost.documents} docs/${legacyCost.readBytes} bytes; verified ${indexedCost.documents} docs/${indexedCost.readBytes} bytes`,
+  );
+
+  await removePlanLanes(s.ctx, mark, [undefined]);
+  await s.ctx.db.patch(lane, { status: 'completed' });
+  const settled = await s.read();
+  assert.equal(settled.rows[0].work, 'completed');
+  assert.notEqual(settled.rows[0].workStamp, indexed.rows[0].workStamp, 'the tally is fenced for apply');
+  assert.equal(settled.rows[1].work, 'completed', 'an Item-root link keeps its successor completion');
+  assert.equal(settled.rows[2].work, 'abandoned', 'a bare Intent does not borrow a foreign Item tally');
+});
 
 test('dry-run pages are read only, fence the Work head, and omit bodies and pin identities', async t => {
   const s = await fixture();

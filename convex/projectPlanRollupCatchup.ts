@@ -114,7 +114,7 @@ export const page = internalMutation({
       .paginate({ cursor: null, numItems: 50, maximumRowsRead: 50, maximumBytesRead: 256 * 1024 });
     const last = source.page.at(-1)?.key;
     if (!source.isDone && (!last || last <= progress.after)) return stop('page-could-not-advance');
-    const read = rollupWorkReader(ctx, projectId, 150);
+    const read = rollupWorkReader(ctx, project, generation, 150);
     const pending = progress.pending && new Map(progress.pending.map(move => [move.id, move]));
     const targets = [];
     for (const root of source.page) {

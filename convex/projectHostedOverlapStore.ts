@@ -26,6 +26,7 @@ import { closeConflictNotices, closeLeftConflicts, planTrialMerge } from './proj
 import { appendOverlapMainLog } from './projectHostedOverlapMainLog';
 import { addPlanLane, planLaneItem, removePlanLanes } from './projectPlanLaneMarks';
 import { recordHead } from './projectHostedRecords';
+import { landedAtLaneHead } from './projectHostedOpenLaneEvidence';
 import { recordFeedEvent } from './projectFeedStore';
 
 /** Loose ends details (Item fc1831eb), computed from the row this write already read. `saves` counts moved heads (the
@@ -225,15 +226,17 @@ export async function trackHostedOverlapLane(
     (origin?.intentId === lane.intentId ? origin.planningItemId : undefined);
   let planningItemId = itemId ?? undefined;
   let planLaneMark = old?.planLaneMark;
-  if (!open && planLaneMark) {
+  const landed = sameHead && landedAtLaneHead(old);
+  const markOpen = open && (!landed || lane.pinned || planning?.reopened);
+  if (!markOpen && planLaneMark) {
     await removePlanLanes(ctx, planLaneMark, [old?.lifecyclePlanId]);
     planLaneMark = undefined;
   } else if (
     !planLaneMark &&
-    open &&
+    markOpen &&
     planning?.project.work?.generationId &&
     itemId !== null &&
-    (planning.newLane || planning.reopened || (planningItemId && !sameHead))
+    (planning.newLane || planning.reopened || (planningItemId && !sameHead) || (landed && lane.pinned))
   ) {
     let item = planning.openingItem;
     if (item === undefined) {
@@ -284,7 +287,11 @@ export async function trackHostedOverlapLane(
     ...(planLaneMark
       ? {
           planLaneMark,
-          planLanePin: { sourceVersion: lane.sourceVersion, lifecycleVersion: lane.lifecycleVersion },
+          planLanePin: {
+            sourceVersion: lane.sourceVersion,
+            lifecycleVersion: lane.lifecycleVersion,
+            ...(lane.pinned ? { pinned: true as const } : {}),
+          },
         }
       : {}),
     // An unchanged pending save must not erase a staged lifecycle association.

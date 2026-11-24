@@ -68,7 +68,11 @@ export const page = internalQuery({
     );
     const project = await ctx.db.get(args.projectId);
     const selected = project && !project.removal && (await selectedGeneration(ctx, project));
-    invariant(selected, 'PROJECT_WORK_INDEX_MISSING', 'Select a ready project Plan before preview.');
+    invariant(
+      project && selected,
+      'PROJECT_WORK_INDEX_MISSING',
+      'Select a ready project Plan before preview.',
+    );
     const generation = await generationHead(ctx, selected);
     invariant(
       args.expected
@@ -90,7 +94,7 @@ export const page = internalQuery({
       'WORK_STALE',
       'The bounded preview could not advance.',
     );
-    const read = rollupWorkReader(ctx, args.projectId, INTENT_KEYS);
+    const read = rollupWorkReader(ctx, project, generation, INTENT_KEYS);
     const rows = await Promise.all(
       source.page.map(async row => {
         const item: PreviewRoot = JSON.parse(row.value);

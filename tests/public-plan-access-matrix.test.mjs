@@ -251,6 +251,80 @@ test('a public Item link preserves the source Item’s landing-note visibility',
   }
 });
 
+test('verified public Plan shows visible exact successors and rechecks visibility on continuation', async t => {
+  const { s, items } = await world(t, 'hidden-initiative');
+  as(s, 'owner');
+  await s.ctx.db.patch(s.projectId, { itemLaneMembership: 'verified-v2' });
+  const make = async item => {
+    let intentId = item.itemId;
+    for (let i = 0; i < 24; i++) intentId = successorIntentId(intentId);
+    const base = { head: 'a'.repeat(64), receiptId: 'receipt' };
+    const write = record =>
+      records.writeHostedRecord(s.ctx, {
+        projectId: s.projectId,
+        actor: 'owner',
+        authorityEpoch: 1,
+        expectedVersion: null,
+        planningItemId: item.itemId,
+        record,
+      });
+    await write({
+      kind: 'intent',
+      id: intentId,
+      version: 0,
+      at: new Date(NOW).toISOString(),
+      outcome: item.title,
+      constraints: item.body,
+      creatorAccountId: 'owner',
+      assigneeAccountIds: [],
+      base,
+      status: 'active',
+    });
+    for (let i = 0; i < 2; i++)
+      await write({
+        kind: 'lane',
+        id: randomUUID(),
+        version: 0,
+        at: new Date(NOW).toISOString(),
+        intentId,
+        actor: 'owner',
+        base,
+        head: 'b'.repeat(64),
+        sourceVersion: 0,
+        lifecycleVersion: 0,
+        state: 'active',
+        authorityEpoch: 1,
+      });
+    return intentId;
+  };
+  const visible = await make(items.loose);
+  const hidden = await make(items.under);
+  const read = async (intentId, cursor = null) =>
+    JSON.parse(
+      await liveLanes.list._handler(s.ctx, {
+        projectId: s.projectId,
+        intentId,
+        cursor,
+        limit: 1,
+      }),
+    );
+  as(s, 'stranger');
+  const first = await read(visible);
+  assert.equal(first.page.length, 1);
+  assert(first.continueCursor);
+  assert.deepEqual(await read(hidden), await read(randomUUID()));
+  assert.equal((await read(visible, first.continueCursor)).page.length, 1);
+  as(s, 'reader');
+  const member = await read(hidden);
+  assert.equal(member.page.length, 1);
+  assert(member.continueCursor);
+  s.tables.projectReaders.delete('r');
+  assert.deepEqual(
+    await seen(() => read(hidden, member.continueCursor)),
+    await seen(() => read(randomUUID(), member.continueCursor)),
+  );
+});
+
 for (const policy of POLICIES)
   test(`plan access matrix: ${policy}`, async t => {
     const { s, items, p } = await world(t, policy);

@@ -25,6 +25,16 @@ const lookup = (ctx: QueryCtx, projectId: ProjectId, item: Pick<Source, 'id' | '
     )
     .unique();
 
+/** A roll-up needs the same open-work fact as the Plan, without enumerating finished Intents. */
+export async function planItemOpenLaneMark(
+  ctx: QueryCtx,
+  projectId: ProjectId,
+  item: Pick<Source, 'id' | 'status'>,
+) {
+  const row = await lookup(ctx, projectId, item);
+  return row ? { id: row._id, open: countOf(row).open } : null;
+}
+
 /** A compact count row is shared only by Lanes serving the same Item. The Lane retains this row's id,
  * so ending a Lane needs one bounded point read and one write, with no planning generation lookup. */
 export async function addPlanLane(ctx: MutationCtx, projectId: ProjectId, item: Placement, count = 1) {
@@ -92,15 +102,19 @@ export async function changePlanLaneCascade(
 }
 
 export async function planLaneItem(
-  ctx: MutationCtx,
+  ctx: QueryCtx,
   project: Doc<'hostedProjects'>,
   itemId: string,
   starting = false,
+  partition?: Id<'projectWorkGenerations'>,
 ): Promise<Placement | null> {
   if (!itemId) return null; // The Intent was explicitly created independently.
-  const generation = await selectedGeneration(ctx, project);
-  if (!generation) return null;
-  const root = await workRecordLookup(ctx, recordPartition(generation), 'planningSearch', itemId);
+  if (!partition) {
+    const generation = await selectedGeneration(ctx, project);
+    if (!generation) return null;
+    partition = recordPartition(generation);
+  }
+  const root = await workRecordLookup(ctx, partition, 'planningSearch', itemId);
   if (!root) return null;
   const item = JSON.parse(root.value) as Source;
   invariant(

@@ -8,6 +8,7 @@ import { maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import { getDocumentSize } from 'convex/values';
 import { hostedOperationRow } from './projectHostedOperationLookup';
 import { pendingPlanningApply, publicPlanRoot } from './projectPlanningCloseProgress';
+import { verifiedItemMembership } from './projectItemMembershipVersion';
 export type PublicPlanRoot = PlanRow & Record<string, unknown>;
 type LookupBudget = { take: () => boolean; refund: (size: number) => void };
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
@@ -103,11 +104,27 @@ export function publicWorkPlan(
     return rowAllowed(await lookup(id));
   };
   let chains: Map<string, string> | undefined;
-  /** The Item an Intent belongs to, when the read can tie it: the Intent is that Item (one cached indexed lookup), or a
-   * follow-up Intent of an Item this read already loaded (follow-up ids are hashes of the Item id: computed, never
-   * read). Null when the read cannot tie it to an Item. */
+  const bindings = new Map<string, Promise<string | null>>();
+  /** Verified projects resolve exact Intent membership from its head, then apply the current Item policy.
+   * No membership is inferred from derived IDs once the project has verified the repair. This exact
+   * binding lookup is cached by Intent within the bounded selection/result page; visibleLoaded's
+   * separate relation-budgeted walk never calls it. */
   const itemOf = async (intentId: string): Promise<string | null> => {
     if (await lookup(intentId)) return intentId;
+    if (project.itemLaneMembership === verifiedItemMembership) {
+      let pending = bindings.get(intentId);
+      if (!pending) {
+        pending = ctx.db
+          .query('projectHostedRecordHeads')
+          .withIndex('by_project_and_kind_and_key', q =>
+            q.eq('projectId', project._id).eq('kind', 'intent').eq('key', intentId),
+          )
+          .unique()
+          .then(head => head?.planningItemId || null);
+        bindings.set(intentId, pending);
+      }
+      return pending;
+    }
     if (!chains) {
       chains = new Map();
       for (const [id, root] of [...known])

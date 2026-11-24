@@ -2,7 +2,18 @@
 // Copyright 2026 Ferdinando Valsecchi
 
 /** The earlier boolean and its partial frontiers predate stamp-preserving purge and lifecycle writers. */
+import type { Doc, Id } from './_generated/dataModel';
+
 export const verifiedItemMembership = 'verified-v2';
+
+/** Membership proves head bindings; only a finished mark pass proves the running-work tally. */
+export const verifiedRollupMembership = (
+  project: Doc<'hostedProjects'>,
+  generationId: Id<'projectWorkGenerations'>,
+) =>
+  project.itemLaneMembership === verifiedItemMembership &&
+  project.planLaneMarkCoverage?.generationId === generationId &&
+  project.planLaneMarkCoverage.cursor === null;
 const repairPrefix = 'repair-v2:';
 export const itemMembershipFrontier = (stored: string | true | undefined) =>
   typeof stored === 'string' && stored.startsWith(repairPrefix) ? stored : null;

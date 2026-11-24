@@ -94,6 +94,7 @@ export async function retireLandedOverlapLanes(
     if (!row.open && stamped) continue;
     const closesMark =
       row.planLaneMark &&
+      !row.planLanePin?.pinned &&
       (!row.planLanePin ||
         (row.planLanePin.sourceVersion === lane.data.sourceVersion &&
           row.planLanePin.lifecycleVersion === lane.data.lifecycleVersion));

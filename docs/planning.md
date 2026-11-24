@@ -246,9 +246,14 @@ existing reads, is `2 + 2(H + I)` point reads for decisions and at most `1 + H +
 is the number of affected ancestors and `I` the number of distinct affected Initiatives (at most `H + 1`). There
 are at most two maintained counter updates per changed Item and one wake per nonempty page needing a successor.
 For one parent and one Initiative this means at most six decision reads, four counter updates and three version
-appends, instead of two record selections and one version append. Those counts exclude open-Lane verification:
-one indexed query per distinct hosted Intent, at most nine active Lane heads and at most eight overlap lookups
-for retained landed placeholders (one marker lookup only for a staged cascade). The worker caps distinct Intent
+appends, instead of two record selections and one version append. Once both Item membership and Plan Lane-mark
+coverage are verified, roll-up reads the newest Intent for an Item's completion and checks its open Lanes. It
+also reads the existing open-Lane tally to include running work on earlier Intents. A link to another Item
+uses the same facts for that Item; a link to a bare Intent checks that Intent. A pinned keep-open Lane still
+counts as running after landing, until it is unpinned, closed or abandoned. A project without both proofs keeps
+the legacy reader. Each Item needs one bounded newest-head lookup (with one possible direct-root fallback) and
+one tally lookup; a distinct explicit link can also need one Plan lookup. For each selected Intent the active
+Lane probe reads at most nine heads and eight overlap rows, plus a marker lookup for a staged cascade. The worker caps distinct Intent
 lookups at 32, and recompute at 150 per page; unknown evidence does not authorize a change. An abandonment of
 linked work refreshes its contribution in one worker step without writing an Item status. A landing with no due
 status work adds no ancestor reads or writes. A cohort batches by page before these counts apply.
@@ -730,16 +735,16 @@ Lanes list, queue, conflict notices and History (each names a hidden Item nowher
 a stand-in Intent id) and People: on a members-only plan a viewer without a role sees no Items-closed or comment
 counts. A members-only plan's pages are empty and finished for such a viewer. Agent briefings are for members: they
 render Lane names and the project's recent messages. With the Lane-title opt-in on, a viewer without a role sees a Lane's title only
-when the read ties its Intent to a visible Item: the Intent is that Item, or a follow-up Intent of an Item the read
-loaded (the public project page loads the open ones). A Lane on a hidden Item, one the read cannot tie to a visible
+when the read ties its Intent to a visible Item: the Intent shares the Item's id, or its verified membership names
+that Item. Until membership is verified, the read can tie a follow-up only to an Item it already loaded. A Lane on a hidden Item, one the read cannot tie to a visible
 Item (including Lanes started without an Item) and every Lane of a members-only plan shows no title. An Intent's
 constraints (the Item body a planned start copies) never reach a viewer without a role. A read that selects plan work
 by Item, Initiative or Intent (an Item and its comments, its work as `planning {id}` and the Item page read it,
 `lanes {planningItemId|intentId}`, History by Item, a Plan page by Initiative, Work records of an Intent or of its
 Lanes, each Intent of a list such as the related coordination feed), live or from journal history, runs for a viewer
-without a role as for an id no record has, cursors, totals and errors included, unless the id is a visible Item (an
-Item's first Intent shares its id). A Lane row names a hidden Item by no field: a stand-in id takes its place. A follow-up Intent
-cannot be tied to its Item without reading the plan, so a filter by one answers as absent: filter by the Item instead.
+without a role as for an id no record has, cursors, totals and errors included, unless the selection resolves to a
+currently visible Item. Exact follow-up Intent selections require verified membership. Each continuation checks
+current access again. A Lane row names a hidden Item by no field: a stand-in id takes its place.
 
 On a public plan, a hidden Item still leaves a visitor's settled, list or search page shorter than asked, and a
 search cursor can show that a term matched more than one page, and its Lanes stay listed without title, under a

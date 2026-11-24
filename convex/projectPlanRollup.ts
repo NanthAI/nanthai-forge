@@ -135,7 +135,7 @@ export const advance = internalMutation({
     if (item.payload || item.payloadKey || typeof item.body !== 'string') return 'blocked' as const;
     if ('planningClose' in row && row.planningClose) return 'blocked' as const;
     if (!enabled && (path.length || item.kind === 'initiative')) return 'unchanged' as const;
-    const { work } = await rollupWorkReader(ctx, args.projectId, 32).read(item);
+    const { work } = await rollupWorkReader(ctx, project, generation, 32).read(item);
     if (work === 'unknown') return 'blocked' as const;
     // This is a versioned lifecycle event, not a fact that live roll-up or recompute can infer.
     const event = args.source === 'lifecycle' && args.reopen;
