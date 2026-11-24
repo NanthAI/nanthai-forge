@@ -40,7 +40,7 @@
   "tests/browser-hosted-landing.test.mjs": {"date":1},
   "tests/browser-r2-bytes.test.mjs": {"sleep":1},
   "tests/browser/lane-duplicate-keys.tsx": {"date":1},
-  "tests/browser/lane-review.tsx": {"date":5},
+  "tests/browser/lane-review.tsx": {"date":4},
   "tests/browser/lanes-progress.tsx": {"date":1},
   "tests/browser/needs-progress.tsx": {"date":1},
   "tests/browser/r2-bytes.ts": {"sleep":1},

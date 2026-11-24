@@ -136,7 +136,12 @@ you opened it. If the title cannot be read, the short id appears with “title u
 Long titles truncate while retaining their full title on hover. Detail visits add
 browser history; in-page tabs, filters and Intent layouts replace the current
 entry so Back returns to the previous page. Lane **Browse source** opens Code at
-that Lane's latest save, with the Lane named in the Source picker.
+that Lane's latest save, with the Lane named in the Source picker. For a recorded conflict,
+“Ask your agent to resolve this conflict” offers a copyable prompt with the Lane, its
+saved head, the recorded file and line evidence, and the exact predecessor
+command when available. Otherwise it directs the agent to the current Lane status
+for recovery advice. “Show prompt” exposes the text for manual copying; the
+browser does not edit or resolve the conflict.
 
 Action menus share one popover: opening one closes the previous menu; outside
 click, Escape and choosing an action close it. Arrow keys, Home and End move among

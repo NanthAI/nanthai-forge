@@ -363,10 +363,6 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         await page.locator('section[aria-label="The change"] .ph .hint').textContent(),
         /^1 of 17 files read$/,
       );
-      assert.match(
-        await page.locator('.cmd').first().textContent(),
-        /^nforge agent \. save --sync '\{"laneId":.*"predecessor":\{/,
-      );
       // An older save's row counts the body it opened.
       const docs = page.locator('.lr-file', { hasText: 'docs/parser.md' });
       await docs.locator('summary').click();
@@ -375,6 +371,59 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
       await shot(page, 'lane-review-open-1440-dark');
     });
 
+    await t.test(
+      'Q24: copy the exact predecessor command and evidence, or read the prompt by hand',
+      async t => {
+        const page = await open(t, DESK, 's=two-conflicts');
+        const heading = page.getByRole('heading', { name: 'Ask your agent to resolve this conflict' });
+        await heading.waitFor();
+        await page
+          .context()
+          .grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://forge.test' });
+        const copy = page.getByRole('button', { name: 'Copy prompt', exact: true });
+        await copy.focus();
+        await page.keyboard.press('Enter');
+        await page.getByRole('status').filter({ hasText: 'Copied' }).waitFor();
+        const copied = await page.evaluate(() => navigator.clipboard.readText());
+        const laneId = '7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+        const predecessor = {
+          submissionId: '1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9',
+          head: 'a1'.repeat(32),
+          receiptId: '0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d',
+        };
+        assert.ok(copied.includes(`https://forge.test/sample-owner/tide-pool/lanes/${laneId}`));
+        assert.ok(copied.includes(`nforge agent . save --sync '${JSON.stringify({ laneId, predecessor })}'`));
+        assert.ok(
+          copied.includes('{"path":"src/parser/stream-parser.ts","mine":[[22,24]],"theirs":[[22,24]]}'),
+        );
+        assert.ok(
+          copied.includes('Other side: main\n{"path":"package.json","mine":[[2,2]],"theirs":[[2,2]]}'),
+        );
+        assert.ok(copied.includes('Other side: 3c1f9a20-5b7e-4d2a-9c11-2f0e6b8a4d19'));
+        await page.getByText('Show prompt', { exact: true }).click();
+        assert.equal(await page.locator('details[open] > .cmd').textContent(), copied);
+        assert.equal(await calls(page), 0, 'copy and disclosure issue no Convex request');
+
+        const main = await open(t, PHONE, 's=main-conflict');
+        await main.evaluate(() => Object.defineProperty(navigator, 'clipboard', { value: undefined }));
+        await main.getByRole('button', { name: 'Copy prompt', exact: true }).click();
+        await main.getByRole('status').filter({ hasText: 'Select the text to copy' }).waitFor();
+        await main.getByText('Show prompt', { exact: true }).click();
+        const manual = await main.locator('details[open] > .cmd').textContent();
+        assert.ok(manual.includes(`nforge agent . status '${JSON.stringify({ laneId })}'`));
+        assert.ok(manual.includes('Other side: main'));
+        assert.ok(
+          !manual.includes('save --sync'),
+          'an unpinned conflict never suggests a guessed resolution',
+        );
+        assert.equal(await calls(main), 0);
+
+        const combined = await open(t, PHONE, 's=combined-notice');
+        await combined.getByRole('heading', { name: 'Combined result' }).waitFor();
+        assert.equal(await combined.getByRole('button', { name: 'Copy prompt' }).count(), 0);
+      },
+    );
+
     await t.test('once landed or set aside, read marks and the needs-eyes order are gone', async t => {
       for (const s of ['landed', 'abandoned']) {
         const page = await open(t, DESK, `s=${s}`);
@@ -382,6 +431,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         await page.locator('.lr-more').first().click();
         assert.equal(await page.locator('.lr-file .tick').count(), 0, `${s}: no Read box`);
         assert.equal(await page.getByRole('button', { name: 'Needs eyes first' }).count(), 0, s);
+        assert.equal(await page.getByRole('button', { name: 'Copy prompt' }).count(), 0, s);
         assert.equal(await page.locator('section[aria-label="The change"] .ph .hint').count(), 0, s);
         assert.equal(await page.locator('.lr-file .fstat').count(), 15, `${s}: counts stay`);
         await shot(page, `lane-review-${s}-files-1440-dark`);
@@ -656,7 +706,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
 
     await t.test('axe and widths: both themes, desk and phone', async t => {
       for (const viewport of [DESK, PHONE])
-        for (const s of ['review', 'combined', 'parked', 'asked', 'declined', 'granted']) {
+        for (const s of ['review', 'main-conflict', 'combined', 'parked', 'asked', 'declined', 'granted']) {
           const page = await open(t, viewport, `s=${s}`);
           await page.locator('.lr-file').first().locator('summary').click();
           await page.locator('.lr-file').first().locator('.code').first().waitFor();
@@ -682,6 +732,22 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
             });
             assert.deepEqual(violations, [], `axe at ${viewport.width} ${s} ${theme}`);
             await shot(page, `lane-review-${s}-${viewport.width}-${theme}`);
+            if (s === 'review' || s === 'main-conflict') {
+              const disclosure = page.getByText('Show prompt', { exact: true });
+              await disclosure.click();
+              const [width, openViolations] = await page.evaluate(async () => [
+                document.documentElement.scrollWidth,
+                (await window.axe.run(document.querySelector('.lr-lead'))).violations.map(v => v.id),
+              ]);
+              assert.ok(width <= viewport.width, `opened ${s} prompt fits at ${viewport.width}`);
+              assert.deepEqual(
+                openViolations,
+                [],
+                `axe with opened ${s} prompt at ${viewport.width} ${theme}`,
+              );
+              await shot(page, `lane-review-${s}-prompt-${viewport.width}-${theme}`);
+              await disclosure.click();
+            }
           }
         }
     });

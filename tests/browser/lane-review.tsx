@@ -207,7 +207,12 @@ async function reply(): Promise<Reply> {
       })),
     )),
   ];
-  const combined = scenario === 'combined';
+  const combined = scenario === 'combined' || scenario === 'combined-notice';
+  const mainConflict: Reply['conflicts'][number] = {
+    with: 'main',
+    flaggedAt: '2026-11-22T12:00:00.000Z',
+    files: [{ path: 'package.json', mine: [[2, 2]], theirs: [[2, 2]] }],
+  };
   return {
     lane: {
       laneId: LANE,
@@ -288,23 +293,27 @@ async function reply(): Promise<Reply> {
     supervised: true,
     protectedRules: 2,
     files: { current: true, complete: true, total: files.length, offset: 0, nextOffset: null, items: files },
-    conflicts: combined
-      ? []
-      : [
-          {
-            with: PEER,
-            goal: 'Parser: carry partial bytes',
-            flaggedAt: new Date(Date.now() - 9 * 60_000).toISOString(),
-            files: [{ path: 'src/parser/stream-parser.ts', mine: [[22, 24]], theirs: [[22, 24]] }],
-            earlyResolution: {
-              predecessor: {
-                submissionId: '1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9',
-                head: AHEAD_HEAD,
-                receiptId: '0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d',
+    conflicts:
+      scenario === 'combined'
+        ? []
+        : scenario === 'main-conflict'
+          ? [mainConflict]
+          : [
+              ...(scenario === 'two-conflicts' ? [mainConflict] : []),
+              {
+                with: PEER,
+                goal: 'Parser: carry partial bytes',
+                flaggedAt: mainConflict.flaggedAt,
+                files: [{ path: 'src/parser/stream-parser.ts', mine: [[22, 24]], theirs: [[22, 24]] }],
+                earlyResolution: {
+                  predecessor: {
+                    submissionId: '1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9',
+                    head: AHEAD_HEAD,
+                    receiptId: '0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d',
+                  },
+                },
               },
-            },
-          },
-        ],
+            ],
     peers: [
       {
         laneId: PEER,
