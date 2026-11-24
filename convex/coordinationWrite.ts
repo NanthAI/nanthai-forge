@@ -183,11 +183,26 @@ export async function applyCommand(
     };
     // An answer is addressed to the asker only while they are on the team; otherwise it is recorded, not delivered.
     if (parsed.choice === undefined || !(await hasWriteRole(ctx, project, message.actor))) return context;
+    let replySession: string | undefined;
+    const senderSession =
+      'sessionId' in message.command && message.command.sessionId ? message.command.sessionId : undefined;
+    if (senderSession) {
+      const askerSession = await session(ctx, projectId, senderSession);
+      if (askerSession?.actor === message.actor) replySession = askerSession.sessionId;
+    } else if (
+      message.recipientSession &&
+      message.actor === actor &&
+      message.laneId &&
+      message.laneId !== message.recipientSession
+    ) {
+      // When two builders on the same account coordinate via a session-directed ask without an explicit
+      // sender sessionId, route the answer back to the asking Lane's active session.
+      const askerLane = await session(ctx, projectId, message.laneId);
+      if (askerLane?.actor === message.actor) replySession = askerLane.sessionId;
+    }
     return {
       recipientActor: message.actor,
-      ...('sessionId' in message.command && message.command.sessionId
-        ? { recipientSession: message.command.sessionId }
-        : {}),
+      ...(replySession ? { recipientSession: replySession } : {}),
       ...context,
       ...(conversation ? { resumePrompt: answerPrompt(message, parsed.choice, parsed.text) } : {}),
     };

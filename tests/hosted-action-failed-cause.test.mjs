@@ -5,9 +5,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { createServer } from 'node:http';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { getFunctionName } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { agentFixture } from './hosted-agent-fixture.mjs';
@@ -21,7 +24,7 @@ import {
 } from '../dist/preflight-kept-static.js';
 import { hostedFailureReply } from '../dist/hosted-failure-reply.js';
 import { waitFailure } from '../dist/wait-failure.js';
-import { ForgeError } from '../dist/errors.js';
+import { ForgeError, localFailureOf, withLocalFailure } from '../dist/errors.js';
 
 const failed = error => error.code === 'HOSTED_ACTION_FAILED';
 const serverError = () => new Error('[Request ID: 5e7a1f] Server Error\nUncaught Error: synthetic');
@@ -278,4 +281,153 @@ test('tests read: a server failure replays the retained read once; one that pers
     s.transport(),
   );
   assert.equal(resumed.result.action, 'tests');
+});
+
+test('Item 3f76a3df guard: ForgeError and ConvexError cross bundled/unbundled boundaries and ask never prints INTERNAL_ERROR', async t => {
+  // 1. Separate module copies of ForgeError (like dist/cli-entry.js bundle vs dist/hosted-conversation.js)
+  // still pass instanceof ForgeError and preserve localFailureOf.
+  const other = await import('../dist/errors.js?cross-copy=1');
+  assert.notEqual(other.ForgeError, ForgeError);
+  const cause = new Error('local boom');
+  const fromSibling = other.withLocalFailure(new other.ForgeError('BAD_ARGUMENT', 'Cross-copy error'), cause);
+  assert.equal(fromSibling instanceof ForgeError, true);
+  assert.equal(localFailureOf(fromSibling), cause);
+
+  // 2. A ConvexError thrown by another ConvexError copy (bundled ConvexHttpClient -> unbundled hosted-conversation)
+  // keeps its typed server code instead of being misclassified as HOSTED_ACTION_FAILED (cause: server-exception).
+  const crossConvex = Object.assign(
+    new Error('[Request ID: 3e05726d2fc93cf5] Server Error\nUncaught ConvexError: synthetic'),
+    {
+      name: 'ConvexError',
+      data: { code: 'BAD_ARGUMENT', message: 'Choose a person who contributes to this project.' },
+    },
+  );
+  const unwrapped = hostedActionError(crossConvex, 'ask');
+  assert.equal(unwrapped.code, 'BAD_ARGUMENT');
+  assert.equal(unwrapped.message, 'Choose a person who contributes to this project.');
+
+  // 3. Genuine server failure on ask returns HOSTED_ACTION_FAILED with cause, retryable and a replay command.
+  const s = agentFixture(t);
+  const operationId = randomUUID();
+  const transport = s.transport();
+  t.mock.method(transport, 'mutation', () => {
+    throw new Error('[Request ID: 7c192fd2eec32adc] Server Error\nUncaught Error: synthetic');
+  });
+  const askError = await hostedAgentCli(
+    s.root,
+    'ask',
+    { laneId: s.lane.laneId, to: 'owner', text: 'Coord?', choices: ['A', 'B'], operationId },
+    s.address,
+    transport,
+  ).then(
+    () => assert.fail('ask server failure should reject'),
+    caught => caught,
+  );
+  assert.equal(askError.code, 'HOSTED_ACTION_FAILED');
+  assert.doesNotMatch(askError.message, /Push again/i);
+  assert.match(askError.message, /Run next: it replays the same operation/);
+  assert.equal(askError.recovery.cause, 'server-exception');
+  assert.equal(askError.recovery.retryable, true);
+  assert.equal(askError.recovery.operationId, operationId);
+  assert.match(askError.recovery.command, new RegExp(`ask '.*${operationId}.*'`));
+
+  // 4. End-to-end bundled CLI (dist/cli-entry.js) invoking unbundled dist/hosted-conversation.js:
+  // never returns INTERNAL_ERROR on Lane+Item mix, typed ConvexError, or raw server exception.
+  let mode = 'not-found';
+  const server = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (mode === 'not-found') {
+      res.end(
+        JSON.stringify({
+          status: 'error',
+          errorMessage: '[Request ID: 3e05726d2fc93cf5] Server Error\nUncaught ConvexError',
+          errorData: {
+            code: 'NOT_FOUND',
+            message: 'Agent thevarsek/civic-ox has no open Lane or active session in this project.',
+          },
+        }),
+      );
+      return;
+    }
+    res.end(
+      JSON.stringify({
+        status: 'error',
+        errorMessage: '[Request ID: 7c192fd2eec32adc] Server Error\nUncaught Error: synthetic boom',
+      }),
+    );
+  });
+  await new Promise(done => server.listen(0, '127.0.0.1', done));
+  t.after(() => new Promise(done => server.close(done)));
+  const laneDir = mkdtempSync(join(tmpdir(), 'forge-ask-cli-'));
+  const homeDir = mkdtempSync(join(tmpdir(), 'forge-ask-home-'));
+  t.after(() => {
+    rmSync(laneDir, { recursive: true, force: true });
+    rmSync(`${laneDir}.forge-client`, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  });
+  const laneId = randomUUID();
+  const planningItemId = randomUUID();
+  const endpoint = `http://127.0.0.1:${server.address().port}`;
+  mkdirSync(join(`${laneDir}.forge-client`, 'agent'), { recursive: true });
+  writeFileSync(
+    join(`${laneDir}.forge-client`, 'agent', 'address.json'),
+    JSON.stringify({ url: endpoint, projectId: 'project-1' }),
+  );
+  const env = {
+    ...process.env,
+    HOME: homeDir,
+    XDG_STATE_HOME: join(homeDir, 'state'),
+    FORGE_AUTH_TOKEN: 'synthetic-jwt',
+    FORGE_DEPLOYMENT_URL: endpoint,
+    FORGE_CLI_SKIP_UPDATE: '1',
+    FORGE_DISABLE_FIRST_WRITE_HOOKS: '1',
+  };
+  const runAsk = async body => {
+    try {
+      await promisify(execFile)(
+        process.execPath,
+        [resolve('dist/cli-entry.js'), 'agent', laneDir, 'ask', JSON.stringify(body)],
+        { env },
+      );
+      assert.fail('expected ask to exit non-zero');
+    } catch (err) {
+      return JSON.parse(err.stderr.trim().split('\n').at(-1));
+    }
+  };
+  const mixed = await runAsk({
+    laneId,
+    planningItemId,
+    to: 'thevarsek/civic-ox',
+    text: 'Which one?',
+    choices: ['A', 'B'],
+  });
+  assert.equal(mixed.error.code, 'BAD_ARGUMENT');
+  assert.match(mixed.error.message, new RegExp(`${laneId}.*${planningItemId}`));
+
+  mode = 'not-found';
+  const refused = await runAsk({
+    laneId,
+    to: 'thevarsek/civic-ox',
+    text: 'Which one?',
+    choices: ['A', 'B'],
+  });
+  assert.equal(refused.error.code, 'NOT_FOUND');
+  assert.match(refused.error.message, /thevarsek\/civic-ox/);
+  assert.match(refused.error.next, /lanes '\{\}'/);
+
+  mode = 'server-exception';
+  const opId = randomUUID();
+  const failedAsk = await runAsk({
+    laneId,
+    operationId: opId,
+    to: 'thevarsek/civic-ox',
+    text: 'Which one?',
+    choices: ['A', 'B'],
+  });
+  assert.equal(failedAsk.error.code, 'HOSTED_ACTION_FAILED');
+  assert.equal(failedAsk.error.recovery.cause, 'server-exception');
+  assert.equal(failedAsk.error.recovery.operationId, opId);
+  assert.match(failedAsk.error.next, new RegExp(`ask '.*${opId}.*'`));
 });

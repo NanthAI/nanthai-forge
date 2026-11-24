@@ -215,17 +215,7 @@ async function main(args: string[]): Promise<unknown> {
     const { agentConnect } = (await import(
       /* @vite-ignore */ new URL('./agent-connect-cli.js', import.meta.url).href
     )) as typeof import('./agent-connect-cli.js');
-    try {
-      return agentConnect(args.slice(1));
-    } catch (error) {
-      // The compiled sibling and the bundle have separate copies of ForgeError.
-      const { ForgeError: LocalForgeError } = (await import(
-        /* @vite-ignore */ new URL('./errors.js', import.meta.url).href
-      )) as typeof import('./errors.js');
-      if (error instanceof LocalForgeError)
-        throw new ForgeError(error.code, error.message, error.retryAt, error.recovery);
-      throw error;
-    }
+    return agentConnect(args.slice(1));
   }
   if (args[0] === 'plugin-config') {
     invariant(

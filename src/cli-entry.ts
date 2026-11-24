@@ -4,7 +4,7 @@
 import { beginCheckoutPrepObservation } from './checkout-prep-observation.js';
 import { isAbsolute } from 'node:path';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
-import { ForgeError, invariant } from './errors.js';
+import { invariant } from './errors.js';
 import { reportFailure } from './system-errors.js';
 import { cliTeachContext } from './error-teaching.js';
 
@@ -51,17 +51,8 @@ try {
     const { activateMeasurementSubmitter } = (await import(
       /* @vite-ignore */ new URL('./hosted-land-measurement.js', import.meta.url).href
     )) as typeof import('./hosted-land-measurement.js');
-    try {
-      if (!(await activateMeasurementSubmitter(process.argv[3]!, JSON.parse(process.argv[5]!))))
-        process.exit(1);
-    } catch (error) {
-      const { ForgeError: LocalForgeError } = (await import(
-        /* @vite-ignore */ new URL('./errors.js', import.meta.url).href
-      )) as typeof import('./errors.js');
-      if (error instanceof LocalForgeError)
-        throw new ForgeError(error.code, error.message, error.retryAt, error.recovery);
-      throw error;
-    }
+    if (!(await activateMeasurementSubmitter(process.argv[3]!, JSON.parse(process.argv[5]!))))
+      process.exit(1);
   }
   const { cliStartup } = await import('./cli-version.js');
   runCommand = await cliStartup();

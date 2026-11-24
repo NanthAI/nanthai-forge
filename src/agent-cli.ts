@@ -107,16 +107,7 @@ async function measurementCall<T>(run: (module: typeof import('./hosted-land-mea
   const module = (await import(
     /* @vite-ignore */ new URL('./hosted-land-measurement.js', import.meta.url).href
   )) as typeof import('./hosted-land-measurement.js');
-  try {
-    return await run(module);
-  } catch (error) {
-    const { ForgeError: LocalForgeError } = (await import(
-      /* @vite-ignore */ new URL('./errors.js', import.meta.url).href
-    )) as typeof import('./errors.js');
-    if (error instanceof LocalForgeError)
-      throw new ForgeError(error.code, error.message, error.retryAt, error.recovery);
-    throw error;
-  }
+  return run(module);
 }
 
 /** Preserve consumed or mutable inputs on a refused command, without printing their contents. */

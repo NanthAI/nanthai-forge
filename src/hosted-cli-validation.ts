@@ -91,6 +91,14 @@ export function validateHostedCliCommand(
       'start needs one of: planningItemId (an Issue id), intentId (join an Intent), or outcome (a new one).',
     );
   }
+  if (requestedAction === 'ask') {
+    const asked = parsed.data as { laneId?: string; planningItemId?: string };
+    invariant(
+      !(asked.laneId && asked.planningItemId),
+      'BAD_ARGUMENT',
+      `Pass either laneId (${asked.laneId}) or planningItemId (${asked.planningItemId}), not both. Omit laneId inside a Lane to use it, or drop laneId to ask on the Item.`,
+    );
+  }
   if (requestedAction === 'wait') {
     invariant(
       [

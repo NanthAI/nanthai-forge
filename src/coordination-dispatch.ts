@@ -2,10 +2,9 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
 import { randomUUID } from 'node:crypto';
-import { ConvexError } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import type { CoordinationTransport } from './coordination-client.js';
-import { ForgeError, invariant } from './errors.js';
+import { convexErrorData, ForgeError, invariant } from './errors.js';
 import {
   coordinationRequestSchema,
   type CoordinationCommand,
@@ -25,10 +24,7 @@ async function call<T>(work: () => Promise<unknown>): Promise<T> {
   try {
     return (await work()) as T;
   } catch (error) {
-    const data =
-      error instanceof ConvexError && error.data && typeof error.data === 'object'
-        ? (error.data as { code?: unknown; message?: unknown })
-        : null;
+    const data = convexErrorData(error);
     if (typeof data?.code === 'string' && typeof data.message === 'string')
       throw new ForgeError(data.code, data.message);
     throw new ForgeError(

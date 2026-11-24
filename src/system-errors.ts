@@ -3,7 +3,7 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ForgeError, localFailureOf } from './errors.js';
+import { convexErrorData, ForgeError, localFailureOf } from './errors.js';
 import { type TeachContext, withTeaching } from './error-teaching.js';
 import { refuseRealUserState } from './test-isolation.js';
 
@@ -60,9 +60,9 @@ export function describeFailure(error: unknown, context?: TeachContext): Failure
  * its code and message instead of printing as INTERNAL_ERROR (Item 9d3c407d: diff and show hid PURGED).
  * Duck-typed so the CLI startup loads no Convex client. The server's own generic wraps stay unexpected. */
 function serverRefusal(error: unknown): ForgeError | undefined {
-  const raw = error as { name?: unknown; data?: { code?: unknown; message?: unknown } } | null;
-  if (raw?.name !== 'ConvexError' || !raw.data || typeof raw.data !== 'object') return undefined;
-  const { code, message } = raw.data;
+  const data = convexErrorData(error);
+  if (!data) return undefined;
+  const { code, message } = data;
   return typeof code === 'string' &&
     typeof message === 'string' &&
     code !== 'INTERNAL_ERROR' &&

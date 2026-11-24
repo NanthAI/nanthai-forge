@@ -125,6 +125,10 @@ const teachingByMessage: readonly (readonly [RegExp, Entry])[] = [
     /^cleanOnly restacks a stacked Lane/,
     { learn: 'lanes', next: `nforge agent <root> save --sync '<lane>'` },
   ],
+  [
+    /^(?:Agent |No open Lane or active session |Recipient .* (?:is not a write member|is not a valid agent handle))/,
+    { learn: 'board', next: `nforge agent <root> lanes '{}'` },
+  ],
 ];
 
 export function teachingEntry(code: string): Entry | undefined {

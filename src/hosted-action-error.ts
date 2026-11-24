@@ -3,7 +3,7 @@
 import { networkFailure } from './network-fetch.js';
 import { ConvexError } from 'convex/values';
 import { sourceAuthoritySchema, SourceAuthorityStaleError } from './hosted-source-authority.js';
-import { ForgeError } from './errors.js';
+import { convexErrorData, ForgeError } from './errors.js';
 
 /** Why a hosted action failed, as a fixed word (never the raw message: it can carry private source or
  * credentials, 5a22ee20, friction 514b8223). `server-*` and `connection` happened at or on the way to
@@ -51,8 +51,10 @@ export function localErrno(error: unknown) {
   const code = (error as { code?: unknown } | null)?.code;
   return typeof code === 'string' && /^E[A-Z0-9_]{2,40}$/.test(code) ? code : undefined;
 }
+const isConvexError = (error: unknown) =>
+  error instanceof ConvexError || (error instanceof Error && error.name === 'ConvexError');
 const fromServer = (error: unknown, text: string) =>
-  error instanceof ConvexError || /\[Request ID:|Server Error|Uncaught /i.test(text);
+  isConvexError(error) || /\[Request ID:|Server Error|Uncaught /i.test(text);
 /** What kind of failure an error was, from its class, system code and message only. */
 export function hostedFailureCause(error: unknown): HostedFailureCause {
   const text = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
@@ -97,14 +99,8 @@ export const hostedFailureCauseOf = (message: string) =>
 export function hostedActionError(error: unknown, phase: string): ForgeError {
   if (error instanceof ForgeError) return error;
   if (networkFailure(error)) return new ForgeError(error.code, error.message);
-  if (error instanceof ConvexError && error.data && typeof error.data === 'object') {
-    const data = error.data as {
-      code?: unknown;
-      message?: unknown;
-      authority?: unknown;
-      retryAt?: unknown;
-      recovery?: unknown;
-    };
+  const data = convexErrorData(error);
+  if (data) {
     if (data.code === 'SOURCE_AUTHORITY_STALE') {
       const authority = sourceAuthoritySchema.safeParse(data.authority);
       if (authority.success) return new SourceAuthorityStaleError(authority.data);
@@ -129,7 +125,7 @@ export function hostedActionError(error: unknown, phase: string): ForgeError {
   }
   const requestId =
     error instanceof Error ? /\[Request ID:\s*([a-f0-9]+)\]/i.exec(error.message)?.[1] : undefined;
-  const cause = error instanceof ConvexError ? 'server-exception' : hostedFailureCause(error);
+  const cause = isConvexError(error) ? 'server-exception' : hostedFailureCause(error);
   const local = cause.startsWith('local-') || cause === 'cancelled';
   const errno = local ? localErrno(error) : undefined;
   const detail = `cause: ${cause}${errno ? `; ${errno}` : ''}${requestId ? `; Convex request ID: ${requestId}` : ''}`;

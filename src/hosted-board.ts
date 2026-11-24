@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { ConvexError } from 'convex/values';
 import { z } from 'zod';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { assertBoardText } from './board-text.js';
@@ -15,7 +14,7 @@ import {
   writeBoardCursor,
   writeBoardProjectCursor,
 } from './board-local.js';
-import { ForgeError, invariant } from './errors.js';
+import { convexErrorData, ForgeError, invariant } from './errors.js';
 import { exactConflictNotice, exactConflictsSchema } from './hosted-conflict-notice.js';
 import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
@@ -73,8 +72,7 @@ function unsupported(error: unknown, resolving = false): never {
     );
   // The server's typed refusals (LANE_NOT_ACTIVE, NOT_FOUND, BAD_ARGUMENT, ...) reach the agent
   // with their code and message, never as INTERNAL_ERROR (fd8dc28e, ce974f90).
-  if (error instanceof ConvexError && error.data && typeof error.data === 'object')
-    throw hostedActionError(error, 'board');
+  if (convexErrorData(error)) throw hostedActionError(error, 'board');
   throw error;
 }
 

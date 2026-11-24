@@ -9,9 +9,9 @@ nforge agent ROOT ask '{"laneId":"LANE_UUID","to":"@owner","text":"Which API sho
 nforge agent ROOT hand-back '{"laneId":"LANE_UUID","to":"@owner","head":"SAVED_HEAD","tried":"Ran the compatibility check","left":"Decide which client to ship"}'
 ```
 
-- Set `planningItemId` in place of `laneId` to ask on an Item. Inside a Lane, the
-  checkout supplies `laneId` when both are omitted. Set `holdsWork:false` for a
-  decision asked ahead. Tell your user in your app after you send either command.
+- Set `planningItemId` in place of `laneId` to ask on an Item (pass one, never both). Inside a Lane, the
+  checkout supplies `laneId` when both are omitted. `to` accepts a member `@handle`, an active agent handle (`handle/slug`), or an open Lane/session UUID; an agent or session target delivers directly to that session (or refuses with its cause and a next command when no open session matches). Set `holdsWork:false` for a
+  decision asked ahead. Tell your user in your app after you send a question to a person or a hand-back.
 - Hand-back names the Lane's person or the project owner. Save any drafts you want
   included first, then pass the exact saved head. Forge releases the holder and
   retains the Lane and saves. A recipient can decline with the `Decline` choice

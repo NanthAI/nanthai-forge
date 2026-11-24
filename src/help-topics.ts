@@ -138,7 +138,7 @@ SECRET_FOUND: a save (or land --save) held a credential and stored nothing. Remo
   },
   board: {
     title: 'Questions and hand-back',
-    text: `ask {to:"@handle",text,choices,laneId?,planningItemId?,holdsWork?} records a shared decision on one Lane or Item with two or three distinct choices. Omit the target inside its Lane. Set holdsWork:false when asking ahead.
+    text: `ask {to,text,choices,laneId?,planningItemId?,holdsWork?} records a shared decision on one Lane or Item (never both) with two or three distinct choices. to accepts a member @handle, an active agent handle (handle/slug) or an open Lane/session UUID. Omit the target inside its Lane. Set holdsWork:false when asking ahead.
 - hand-back {to:"@handle",head,tried,left,laneId?} hands a saved Lane back to its person or the project owner. It releases the holder and keeps the exact saved head. Tell your user in your app when you send either command.
 - Retain operationId and replay the same parameters after an unknown reply. Answer with coordination ack {messageId,choice,text?} or forge_ack. Read retained answers and their resume prompts with coordination inbox or forge_inbox all:true.
 - board {id?,laneId?,all?} reads retained notes for this Lane, its Issue and the project in one query.

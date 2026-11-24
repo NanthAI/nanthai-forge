@@ -137,12 +137,13 @@ export const publish = mutation({
         if (current) await ctx.db.patch(current._id, value);
         else await ctx.db.insert('projectCoordinationSessions', value);
       } else {
+        const isAsk = parsed.kind === 'message' && parsed.question;
         invariant(
-          !sessionId || current,
+          !sessionId || current || isAsk,
           'BAD_ARGUMENT',
           'Announce this session before sending its messages.',
         );
-        if (parsed.kind === 'message' && parsed.question) fields = await ask(ctx, project, actor, parsed);
+        if (isAsk) fields = await ask(ctx, project, actor, parsed);
         else if (parsed.kind === 'handoff' && parsed.handBack)
           fields = await handBack(ctx, project, actor, parsed, input.holderSessionId);
         else fields = await applyCommand(ctx, project, actor, input.operationId, parsed, at);

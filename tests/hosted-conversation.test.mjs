@@ -11,6 +11,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { lifecycleFixture, code } from './hosted-lane-lifecycle-fixture.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
+import { validateHostedCliCommand } from '../dist/hosted-cli-validation.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 import { dispatchCoordination } from '../dist/coordination-client.js';
 import { sessionAgentIdentity } from '../dist/agent-slug-session.js';
@@ -508,5 +509,275 @@ test('the question on a closed Lane is historical and a legacy handoff remains d
   assert.equal(
     (await f.invoke('owner', 'projectNeedsMe:read', {})).asks.some(row => row.id === question.operationId),
     false,
+  );
+});
+
+test('Item 3f76a3df replay: two builders on one Item coordinate by ask (agent handle and Lane UUID)', async t => {
+  const f = await fixture(t);
+  f.insert('accountHandles', { owner: 'owner', handle: 'thevarsek' });
+  const planningItemId = randomUUID();
+  // Two builders under the same account working on the same Item (frictions 35ae7725, c4399c23, e6834fdd).
+  const laneA = await f.addLane({ actor: 'owner', intentId: planningItemId });
+  const laneB = await f.addLane({ actor: 'owner', intentId: planningItemId });
+  const backupId = 'projectBackups-fixture';
+  const generationId = f.insert('projectWorkGenerations', {
+    projectId: f.projectId,
+    backupId,
+    format: HOSTED_WORK_INDEX_FORMAT,
+    status: 'ready',
+    initialRevision: 0,
+    revision: 0,
+    nextBatch: 0,
+    metadata: '{"schema":24}',
+  });
+  f.patch('hostedProjects', f.projectId, {
+    work: { operationId: randomUUID(), initialRevision: 0, revision: 0, backupId, generationId },
+  });
+  f.insert('projectPlanningRecords', {
+    projectId: f.projectId,
+    generationId,
+    collection: 'planningSearch',
+    key: planningItemId,
+    parent: '',
+    position: 1,
+    value: JSON.stringify({ id: planningItemId, kind: 'issue', status: 'open' }),
+  });
+  const enroll = (laneId, slug) => {
+    const existing = [...f.tables.projectCoordinationSessions.values()].find(row => row.sessionId === laneId);
+    assert(existing, 'addLane auto-enrols a coordination session for the open Lane');
+    f.patch('projectCoordinationSessions', existing._id, { name: slug });
+  };
+  enroll(laneA.id, 'clear-ox');
+  enroll(laneB.id, 'civic-ox');
+  f.insert('cliCredentials', {
+    owner: 'owner',
+    name: 'fixture-device',
+    scope: 'cli',
+    credentialId: 'cred-1',
+    tokenHash: 'synthetic-hash',
+    issuedAt: 100,
+    expiresAt: 4_102_444_800_000,
+    revoked: false,
+  });
+  const deviceInvoke = (actor, name, args) => {
+    const [module, method] = name.split(':');
+    return f.transaction(
+      name,
+      modules[module][method],
+      { projectId: f.projectId, ...args },
+      { subject: actor, forgeCredential: 'cred-1' },
+    );
+  };
+  const deviceCoord = (actor, input) => {
+    const run = (ref, { projectId: _, ...args }) => deviceInvoke(actor, getFunctionName(ref), args);
+    return dispatchCoordination({ query: run, mutation: run }, f.projectId, input);
+  };
+  t.mock.method(f.transport, 'mutation', (name, args) => deviceInvoke('owner', name, args));
+  // Builder A asks Builder B by agent handle (thevarsek/civic-ox) on Lane A.
+  const sent = await f.cli('ask', {
+    laneId: laneA.id,
+    to: 'thevarsek/civic-ox',
+    text: 'Both our Lanes edit web/src/app/lanes/model.ts. Who lands first?',
+    choices: ['You land first', 'I land first'],
+  });
+  assert.equal(sent.result.kind, 'question');
+  assert.equal(sent.result.to, laneB.id);
+  assert.match(sent.result.next, new RegExp(laneB.id));
+  // On a device credential, Builder A's session does not see and cannot answer Builder B's question.
+  assert.deepEqual((await deviceCoord('owner', { action: 'unacked', sessionId: laneA.id })).items, []);
+  await assert.rejects(
+    deviceCoord('owner', {
+      action: 'ack',
+      sessionId: laneA.id,
+      messageId: sent.operationId,
+      choice: 'I land first',
+    }),
+    /recipient session/,
+  );
+  // Builder B sees the question in its own session inbox and answers it.
+  const bUnacked = await deviceCoord('owner', { action: 'unacked', sessionId: laneB.id });
+  assert.deepEqual(
+    bUnacked.items.map(item => item.id),
+    [sent.operationId],
+  );
+  await deviceCoord('owner', {
+    action: 'ack',
+    sessionId: laneB.id,
+    messageId: sent.operationId,
+    choice: 'You land first',
+    text: 'Go ahead; I will sync after you land.',
+  });
+  // Answer routes back to Builder A's Lane session; Builder B's unacked is now empty.
+  assert.deepEqual((await deviceCoord('owner', { action: 'unacked', sessionId: laneB.id })).items, []);
+  const aUnacked = await deviceCoord('owner', { action: 'unacked', sessionId: laneA.id });
+  assert.equal(aUnacked.items.length, 1);
+  assert.equal(aUnacked.items[0].kind, 'answer');
+  assert.equal(aUnacked.items[0].choice, 'You land first');
+  assert.match(aUnacked.items[0].resumePrompt, /"You land first"/);
+  await deviceCoord('owner', { action: 'ack', sessionId: laneA.id, messageId: aUnacked.items[0].id });
+  assert.deepEqual((await deviceCoord('owner', { action: 'unacked', sessionId: laneA.id })).items, []);
+
+  // Also works when addressing the peer by its open Lane UUID or on the shared Item (planningItemId),
+  // routing the answer back to Builder A's session even for an Item-scoped ask (review finding 1).
+  const itemAsk = await deviceInvoke('owner', 'projectCoordination:publish', {
+    operationId: randomUUID(),
+    command: {
+      kind: 'message',
+      sessionId: laneA.id,
+      recipient: laneB.id,
+      text: 'Ready to split Touching.tsx?',
+      choices: ['Yes', 'Wait'],
+      question: { planningItemId, holdsWork: true },
+      context: {},
+    },
+  });
+  assert.equal(itemAsk.recipientSession, laneB.id);
+  assert.equal(itemAsk.planningItemId, planningItemId);
+  await deviceCoord('owner', {
+    action: 'ack',
+    sessionId: laneB.id,
+    messageId: itemAsk.operationId,
+    choice: 'Yes',
+    text: 'Split away.',
+  });
+  assert.deepEqual((await deviceCoord('owner', { action: 'unacked', sessionId: laneB.id })).items, []);
+  const aItemAnswer = await deviceCoord('owner', { action: 'unacked', sessionId: laneA.id });
+  assert.equal(aItemAnswer.items.length, 1);
+  assert.equal(aItemAnswer.items[0].choice, 'Yes');
+  assert.equal(aItemAnswer.items[0].planningItemId, planningItemId);
+  await deviceCoord('owner', { action: 'ack', sessionId: laneA.id, messageId: aItemAnswer.items[0].id });
+
+  // A completed or closed-Lane session is never selected for an agent handle (review finding 2).
+  const closedSessionId = randomUUID();
+  f.insert('projectCoordinationSessions', {
+    projectId: f.projectId,
+    sessionId: closedSessionId,
+    operationId: `lane-session:${closedSessionId}`,
+    actor: 'owner',
+    sequence: 1,
+    name: 'civic-ox',
+    environment: 'Lane',
+    status: 'working',
+    summary: 'Closed lane session',
+    context: { laneId: closedSessionId, intentId: planningItemId },
+    lastSeen: 9999,
+    lastActivity: 9999,
+    kind: 'agent',
+  });
+  const bySlug = await f.cli('ask', {
+    laneId: laneA.id,
+    to: '@thevarsek/civic-ox',
+    text: 'Confirming @handle/slug skips closed Lane sessions?',
+    choices: ['Confirmed', 'Hold'],
+  });
+  assert.equal(bySlug.result.to, laneB.id);
+  await assert.rejects(
+    f.cli('ask', { laneId: laneA.id, to: closedSessionId, text: 'Closed?', choices: ['A', 'B'] }),
+    error => error.code === 'NOT_FOUND' && /No open Lane or active session/.test(error.message),
+  );
+});
+
+test('Item 3f76a3df: ask Lane+Item mix is BAD_ARGUMENT naming both and bad targets refuse with cause and next command', async t => {
+  const f = await fixture(t);
+  f.insert('accountHandles', { owner: 'owner', handle: 'thevarsek' });
+  const planningItemId = randomUUID();
+  const mix = {
+    laneId: f.lane.id,
+    planningItemId,
+    to: 'owner',
+    text: 'Pick one?',
+    choices: ['A', 'B'],
+  };
+  assert.throws(
+    () => validateHostedCliCommand('/repo', 'ask', mix),
+    error =>
+      error.code === 'BAD_ARGUMENT' &&
+      error.message.includes(f.lane.id) &&
+      error.message.includes(planningItemId),
+  );
+  await assert.rejects(
+    f.cli('ask', mix),
+    error =>
+      error.code === 'BAD_ARGUMENT' &&
+      error.message.includes(f.lane.id) &&
+      error.message.includes(planningItemId),
+  );
+  await assert.rejects(
+    f.invoke('writer', 'projectCoordination:publish', {
+      operationId: randomUUID(),
+      command: {
+        kind: 'message',
+        recipient: 'owner',
+        text: 'Pick one?',
+        choices: ['A', 'B'],
+        question: { planningItemId },
+        context: { laneId: f.lane.id },
+      },
+    }),
+    error =>
+      error.data?.code === 'BAD_ARGUMENT' &&
+      error.data.message.includes(f.lane.id) &&
+      error.data.message.includes(planningItemId),
+  );
+  // Invalid schema raises structured BAD_ARGUMENT, never raw ZodError/INTERNAL_ERROR.
+  await assert.rejects(
+    f.cli('ask', { laneId: f.lane.id, to: 'owner', text: 'Dup?', choices: ['Same', 'Same'] }),
+    code('BAD_ARGUMENT'),
+  );
+  // Closed or absent agent handle refuses with NOT_FOUND, cause and a lanes next command.
+  await assert.rejects(
+    f.cli('ask', {
+      laneId: f.lane.id,
+      to: 'thevarsek/calm-fox',
+      text: 'Still open?',
+      choices: ['Yes', 'No'],
+    }),
+    error =>
+      error.code === 'NOT_FOUND' &&
+      /no open Lane or active session/i.test(error.message) &&
+      /lanes '\{\}'/.test(error.recovery?.command ?? ''),
+  );
+  // Closed or unknown Lane/session UUID refuses with NOT_FOUND, cause and a lanes next command.
+  await assert.rejects(
+    f.cli('ask', { laneId: f.lane.id, to: randomUUID(), text: 'Still open?', choices: ['Yes', 'No'] }),
+    error =>
+      error.code === 'NOT_FOUND' &&
+      /No open Lane or active session/i.test(error.message) &&
+      /lanes '\{\}'/.test(error.recovery?.command ?? ''),
+  );
+  // Non-member agent handle and revoked member's stale session are refused (negative auth).
+  await assert.rejects(
+    f.cli('ask', { laneId: f.lane.id, to: 'outsider/civic-ox', text: 'Hi?', choices: ['A', 'B'] }),
+    error =>
+      error.code === 'BAD_ARGUMENT' &&
+      /not a write member/i.test(error.message) &&
+      /lanes '\{\}'/.test(error.recovery?.command ?? ''),
+  );
+  const formerSession = randomUUID();
+  f.insert('projectCoordinationSessions', {
+    projectId: f.projectId,
+    sessionId: formerSession,
+    operationId: `lane-session:${formerSession}`,
+    actor: 'former-member',
+    sequence: 1,
+    name: 'civic-ox',
+    environment: 'Lane',
+    status: 'working',
+    summary: 'Old work',
+    context: {},
+    lastSeen: 100,
+    kind: 'agent',
+  });
+  await assert.rejects(
+    f.cli('ask', { laneId: f.lane.id, to: formerSession, text: 'Hi?', choices: ['A', 'B'] }),
+    error => error.code === 'BAD_ARGUMENT' && /not a write member/i.test(error.message),
+  );
+  // Malformed agent slug refuses with BAD_ARGUMENT and next command.
+  await assert.rejects(
+    f.cli('ask', { laneId: f.lane.id, to: 'thevarsek/not-a-slug', text: 'Hi?', choices: ['A', 'B'] }),
+    error =>
+      error.code === 'BAD_ARGUMENT' &&
+      /not a valid agent handle/i.test(error.message) &&
+      /lanes '\{\}'/.test(error.recovery?.command ?? ''),
   );
 });
