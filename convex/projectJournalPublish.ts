@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
 import { internalMutation } from './server';
+import { logIoAttribution } from './ioAttribution';
 import { landingCapsulePointer } from './projectLandingCapsuleFields';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
@@ -10,6 +11,7 @@ import { journalFragmentTexts } from '../src/journal-fragments';
 import { invariant } from '../src/errors';
 import {
   journalRunArgs,
+  journalIoMode,
   phaseKey,
   pageKey,
   receiptRow,
@@ -30,6 +32,11 @@ export const page = internalMutation({
   },
   returns: v.string(),
   handler: async (ctx, input) => {
+    const mode = journalIoMode(input);
+    const reply = async (outcome: string, result: string) => {
+      await logIoAttribution(ctx, `journal-publish/${mode}/${outcome}`);
+      return result;
+    };
     const first = input.pointers[0];
     if (first) {
       const old = await ctx.db
@@ -46,25 +53,28 @@ export const page = internalMutation({
       void originalPointers;
       void originalHashes;
       if (saved?.fragmentClaim === invocationClaim)
-        return canonicalPayload({ archived: 0, segments: 1, next: request });
+        return reply('replay', canonicalPayload({ archived: 0, segments: 1, next: request }));
       if (old?.pageId === pageKey(input) && Array.isArray(saved.pageReceipt)) {
         const receipt = saved.pageReceipt;
-        return canonicalPayload({
-          archived: receipt[0],
-          segments: receipt[1],
-          ...(receipt.length > 2
-            ? { next: { ...request, phase: receipt[2], part: receipt[3] } }
-            : { done: true }),
-        });
+        return reply(
+          'replay',
+          canonicalPayload({
+            archived: receipt[0],
+            segments: receipt[1],
+            ...(receipt.length > 2
+              ? { next: { ...request, phase: receipt[2], part: receipt[3] } }
+              : { done: true }),
+          }),
+        );
       }
     }
     const row = await receiptRow(ctx, input.projectId, phaseKey(input));
     const control: Control = row ? JSON.parse(row.envelope) : {};
-    if (control.last?.pageId === pageKey(input)) return control.last.result;
+    if (control.last?.pageId === pageKey(input)) return reply('replay', control.last.result);
     const claimRow = await pendingJournal(ctx, input.projectId);
     const active = claimRow ? JSON.parse(claimRow.envelope) : null;
     if (active && (active.control !== phaseKey(input) || active.claim !== input.claim))
-      return canonicalPayload({ deferred: 'claimed', retryAt: active.until });
+      return reply('claimed', canonicalPayload({ deferred: 'claimed', retryAt: active.until }));
     const pending = control.pending;
     invariant(pending && pending.claim === input.claim, 'WORK_STALE', 'Archive capture claim changed.');
     invariant(
@@ -74,7 +84,7 @@ export const page = internalMutation({
       'Uploaded journal bytes differ from the capture pins.',
     );
     const rows = await loadCaptured(ctx, pending);
-    if (!rows && pending.planned) return canonicalPayload({ staleCapture: true });
+    if (!rows && pending.planned) return reply('stale', canonicalPayload({ staleCapture: true }));
     invariant(rows, 'WORK_STALE', 'Captured source changed before archive publication.');
     const segments = await logicalSegments(pending, rows);
     let fragmented = false,
@@ -214,6 +224,6 @@ export const page = internalMutation({
           claimRow,
         );
     }
-    return result;
+    return reply(fragmented ? 'fragment' : rows.length ? 'selected' : 'empty', result);
   },
 });

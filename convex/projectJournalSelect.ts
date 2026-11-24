@@ -34,6 +34,11 @@ import {
   type Proof,
 } from './projectJournalMaintenance';
 const size = (row: object) => new TextEncoder().encode(canonicalPayload(row)).length;
+const maxScanRows = 100;
+const maxScanBytes = 400 * 1024;
+// Keep the original byte ceiling and productive row cap. Up to four narrow
+// row windows share the same transaction when the preceding windows found nothing.
+const maxScanWindows = 4;
 const headFor = (ctx: MutationCtx, row: Doc<'projectHostedRecords'>) =>
   ctx.db
     .query('projectHostedRecordHeads')
@@ -117,6 +122,7 @@ export async function selectJournal(
     groups: Group[] = [];
   let scanned = 0,
     bytes = 0,
+    windows = 1,
     selectedBytes = 0,
     next = cursor,
     done = true;
@@ -132,9 +138,13 @@ export async function selectJournal(
     const row = candidate;
     // Include related reads in the work budget. One provider document can exceed a page;
     // that single row is framed, never truncated, and no second candidate is read.
-    if (scanned >= 100 || bytes >= 400 * 1024 || refs.length >= 98 || selectedBytes >= 48 * 1024) {
-      done = false;
-      break;
+    if (scanned >= maxScanRows || bytes >= maxScanBytes || refs.length >= 98 || selectedBytes >= 48 * 1024) {
+      if (refs.length || bytes >= maxScanBytes || windows === maxScanWindows) {
+        done = false;
+        break;
+      }
+      windows++;
+      scanned = 0;
     }
     scanned++;
     bytes += size(row);

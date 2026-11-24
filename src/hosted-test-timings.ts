@@ -4,9 +4,11 @@ import { parseTimingHistory, updateTimingHistory, timingHistoryLimits } from '..
 import type { HostedCheckRun } from './hosted-check.js';
 export { parseTimingHistory } from '../scripts/test-shards.mjs';
 
-/** Same advisory history/EWMA as .forge/work/test-timings.json. Hosted results
- * carry observed files, not a source inventory; retain unselected samples until
- * the shared caps age them out. No source bytes or run-history scan is needed. */
+const staleTimingMs = 30 * 86_400_000;
+
+/** Same advisory EWMA as .forge/work/test-timings.json. Hosted results carry
+ * observations, not an inventory. Drop stale observations on final write, after
+ * all this run's pages could refresh their files. No source or history scan. */
 export function updateHostedTimingHistory(
   previous: string,
   run: HostedCheckRun,
@@ -15,6 +17,7 @@ export function updateHostedTimingHistory(
   final = true,
 ) {
   const history = parseTimingHistory(previous);
+  if (history.runs.includes(run.id)) return previous;
   const durations =
     supplied ??
     Object.fromEntries(
@@ -30,6 +33,11 @@ export function updateHostedTimingHistory(
     ...(sourceRun ? { sourceRun } : {}),
   });
   if (!final) next.runs = history.runs;
+  else {
+    const cutoff = Date.parse(run.endedAt!) - staleTimingMs;
+    for (const [file, sample] of Object.entries(next.files))
+      if (Date.parse(sample.updatedAt) < cutoff) delete next.files[file];
+  }
   const encoder = new TextEncoder();
   let text = JSON.stringify(next);
   const oldest = Object.keys(next.files).reverse();

@@ -39,6 +39,7 @@ import { decisionActor, decisionOperationId } from '../src/work-planning-put';
 import { planningParent, restoredTopLevelNotice } from './projectPlanningParent';
 import { workRecordTable } from './projectWorkRecordTables';
 import { digest } from '../src/state/hash';
+import { logIoAttribution } from './ioAttribution';
 
 const legacyStatusMessage =
   'The server now follows Work status. Update Forge; planning reads no longer move Items.';
@@ -612,7 +613,17 @@ export const command = mutation({
   returns: hostedWorkEventDocument,
   handler: async (ctx, input) => {
     try {
-      return await executeCommand(ctx, input);
+      const result = await executeCommand(ctx, input);
+      // The reducer has already validated the action. A telemetry parse must not affect the write.
+      let mode = 'unknown';
+      try {
+        const action: unknown = JSON.parse(input.command)?.action;
+        if (typeof action === 'string') mode = action;
+      } catch {
+        // Keep the successful write even if the telemetry payload cannot be read.
+      }
+      await logIoAttribution(ctx, `work-command/${mode}`);
+      return result;
     } catch (error) {
       return report(error);
     }

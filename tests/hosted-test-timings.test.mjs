@@ -107,6 +107,73 @@ test('600-file completed hosted results train one indexed document inside the re
   );
 });
 
+test('final timing pages prune only dormant weights and shrink the capped history on its existing write', async t => {
+  const f = lanesFixture();
+  const projectId = f.insert('hostedProjects', {
+    owner: 'synthetic',
+    key: randomUUID(),
+    name: 'Timing expiry',
+    currentBackup: null,
+    revision: 0,
+  });
+  const endedAt = '2026-03-03T00:00:00.000Z';
+  const past = '2026-02-01T23:59:59.999Z';
+  const cutoff = '2026-02-01T00:00:00.000Z';
+  const file = i => `tests/synthetic-check-file-${String(i).padStart(4, '0')}.test.mjs`;
+  const original = {
+    version: 1,
+    generation: randomUUID(),
+    sample: 99,
+    runs: ['previous'],
+    files: Object.fromEntries(
+      Array.from({ length: 4096 }, (_, i) => [
+        file(i),
+        {
+          durationMs: 100,
+          updatedAt: i < 1480 ? '2026-03-02T00:00:00.000Z' : '2026-01-01T00:00:00.000Z',
+          sourceRun: 99,
+        },
+      ]),
+    ),
+  };
+  original.files[file(1478)].updatedAt = '2026-02-01T00:00:00.001Z';
+  original.files[file(1479)].updatedAt = cutoff;
+  original.files[file(1480)].updatedAt = '2026-01-31T23:59:59.999Z';
+  original.files[file(0)].updatedAt = past;
+  const before = JSON.stringify(original);
+  f.insert('projectHostedTestTimings', { projectId, history: before });
+  const run = { id: randomUUID(), status: 'passed', endedAt };
+  const record = (durations, final) =>
+    f.transaction(
+      'timing-expiry',
+      {
+        _handler: ctx => recordHostedTestTimings(ctx, projectId, run, durations, final),
+      },
+      {},
+    );
+  const read = () => [...f.tables.projectHostedTestTimings.values()][0].history;
+  await record({ [file(0)]: 200 }, false);
+  assert.equal(Object.keys(parseTimingHistory(read()).files).length, 4096);
+  await record({ [file(4095)]: 200 }, true);
+  const after = read();
+  const { files, generation, sample, runs } = parseTimingHistory(after);
+  assert.equal(Object.keys(files).length, 1481);
+  assert.equal(files[file(0)].durationMs, 130);
+  assert.equal(files[file(4095)].durationMs, 130, 'a late page can still refresh a dormant weight');
+  assert.deepEqual(files[file(1478)], original.files[file(1478)], 'one millisecond inside the window stays');
+  assert.deepEqual(files[file(1479)], original.files[file(1479)], 'a weight at the cutoff stays');
+  assert.equal(files[file(1480)], undefined, 'one millisecond outside the window is pruned');
+  assert.deepEqual([generation, sample, runs], [original.generation, original.sample, ['previous', run.id]]);
+  await record({}, true);
+  assert.equal(read(), after, 'replay of a completed run keeps identical history');
+  assert(
+    f.counts.filter(row => row.name === 'timing-expiry').every(row => row.documents === 1 && row.writes <= 1),
+  );
+  const storedBytes = history => Buffer.byteLength(JSON.stringify({ projectId, history }));
+  t.diagnostic(JSON.stringify({ before: storedBytes(before), after: storedBytes(after) }));
+  assert(storedBytes(after) < storedBytes(before) * 0.4);
+});
+
 test('R2 timing stamps distinguish same-millisecond runs without repeating a long identity on every file', async () => {
   const f = lanesFixture();
   const projectId = f.insert('hostedProjects', {

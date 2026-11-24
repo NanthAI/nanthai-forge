@@ -63,6 +63,17 @@ export type Control = {
   last?: { pageId: string; result: string };
 };
 export const journalEnabled = () => process.env.FORGE_JOURNAL_SEGMENTS === '1';
+export const journalIoMode = (input: JournalRunInput) => {
+  const phase = ['records', 'operations', 'saves', 'events', 'coordination'][input.phase ?? 0] ?? 'other';
+  const scope = input.laneId
+    ? 'lane'
+    : input.existing
+      ? 'existing'
+      : input.operationId.startsWith('drain:')
+        ? 'drain'
+        : 'project';
+  return `${phase}/${scope}-${input.part ? 'next' : 'first'}`;
+};
 export const phaseKey = (input: JournalRunInput) =>
   `journal-control:${input.phase ?? 0}:${input.laneId ?? (input.existing && (input.phase ?? 0) < 3 ? 'existing' : 'live')}`;
 export const pageKey = (input: JournalRunInput) =>

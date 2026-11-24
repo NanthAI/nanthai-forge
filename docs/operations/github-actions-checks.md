@@ -722,8 +722,10 @@ format and EWMA as the local `.forge/work/test-timings.json`, with `timingHistor
 Local history is not uploaded. On a missing hosted
 history document, the session bootstraps from at most the latest passed and latest
 failed hosted run's retained reports through their status indexes. With no usable
-reports, planning uses round-robin. Partial hosted selections
-retain earlier samples for unselected paths, bounded by those limits.
+reports, planning uses round-robin. A final timing write drops weights older
+than 30 days as of that run's completion. It updates observed files first, so
+partial selections and argument pages retain recent unselected weights and can
+refresh a dormant weight in the same run. No cleanup job or extra read runs.
 
 `/checks/actions` accepts only GitHub-signed OIDC tokens for this exact site audience,
 repository, `forge-check.yml@refs/heads/main`, `workflow_dispatch`, first attempt,

@@ -7,6 +7,7 @@ import { submitHostedSync } from './projectHostedSyncJobs';
 import { submitHostedCompose } from './projectHostedComposeJobs';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { logIoAttribution } from './ioAttribution';
 
 /** The submit transaction of `projectSourceRun:submit`, for the authenticated actor that action
  * read. The same submit as the public mutation, with the dispatch inline. */
@@ -40,6 +41,8 @@ export const submit = internalMutation({
       return JSON.stringify(submitted);
     } catch (error) {
       return report(error);
+    } finally {
+      await logIoAttribution(ctx, `source-submit/${kind}/${background ? 'background' : 'inline'}`);
     }
   },
 });

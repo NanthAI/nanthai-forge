@@ -30,6 +30,7 @@ import {
 } from './projectConvexSourceActive';
 export { activeStep, sourceStep } from './projectConvexSourceActive';
 import { sourceMutation } from './projectConvexSourceErrors';
+import { logIoAttribution } from './ioAttribution';
 import { hostedWriteProject } from './projectHostedRecords';
 import { drainSourcePool, requeueSourceBatch } from './projectConvexSourcePool';
 import { ForgeError } from '../src/errors';
@@ -428,13 +429,18 @@ export const commit = sourceMutation({
   handler: async (originalCtx, args) => {
     const ctx = sourceCommitReads(originalCtx, args.projectId);
     const active = await activeStep(ctx, { ...args, generation: args.generation ?? 0 });
-    if (!active) return null;
+    if (!active) {
+      await logIoAttribution(originalCtx, 'source-commit/inactive');
+      return null;
+    }
     const terminal = !!args.output || !!args.failure;
+    const label = `source-commit/${active.job.jobKind}/${args.failure ? 'failure' : terminal ? 'complete' : 'continue'}`;
     const now = Date.now();
     // A terminal result may win the race with the watch, but expired work must
     // never schedule another quantum or discard the retained failure context.
     if (!terminal && sourceRetryExpired(active)) {
       await exhaustSourceExecution(ctx, args, active.row.lastFailure);
+      await logIoAttribution(originalCtx, `source-commit/${active.job.jobKind}/expired`);
       return null;
     }
     invariant(args.objects.length <= 100, 'SOURCE_JOB_INVALID', 'Commit source output in bounded windows.');
@@ -520,7 +526,10 @@ export const commit = sourceMutation({
           )
         : null;
       // A job with no operation row to publish (none in production) keeps the complete action.
-      if (published) return published;
+      if (published) {
+        await logIoAttribution(originalCtx, `source-commit/${kind}/inline`);
+        return published;
+      }
       if (kind !== 'register-state')
         await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>(`${api}:complete`), {
           projectId: args.projectId,
@@ -543,6 +552,7 @@ export const commit = sourceMutation({
           );
       await ctx.db.patch(active.row._id, { scheduledId, repairWakeId });
     }
+    await logIoAttribution(originalCtx, label);
     return null;
   },
 });

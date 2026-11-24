@@ -18,6 +18,7 @@ import { effectivePolicy } from '../src/autonomy-policy';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query } from './cliServer';
+import { logIoAttribution } from './ioAttribution';
 import { accessibleProject, readProjectRole } from './projectAuthority';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { invariant } from '../src/errors';
@@ -142,7 +143,20 @@ export const records = query({
     ...paginationResultValidator(v.object({ id: v.string(), position: v.number(), value: v.string() }))
       .fields,
   }),
-  handler: journalWorkRecordsRead,
+  handler: async (ctx, input) => {
+    const mode = input.counts
+      ? 'counts'
+      : input.collection === 'planningComments'
+        ? 'comments'
+        : input.collection === 'planningItems'
+          ? 'list'
+          : 'other';
+    try {
+      return await journalWorkRecordsRead(ctx, input);
+    } finally {
+      await logIoAttribution(ctx, `work-index/${mode}`);
+    }
+  },
 });
 export const detail = query({
   args: {
@@ -267,6 +281,8 @@ export const detail = query({
       };
     } catch (error) {
       return report(error);
+    } finally {
+      await logIoAttribution(ctx, 'work-index/detail');
     }
   },
 });

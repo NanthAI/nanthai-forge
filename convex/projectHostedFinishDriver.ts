@@ -10,6 +10,7 @@ import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import type { FinishCommand } from '../src/hosted-finish';
+import { logIoAttribution } from './ioAttribution';
 import { composeRow, composeStateSchema, hostedComposeInput } from './projectHostedComposeStore';
 import { r2Config, r2Key, presignPut } from './r2';
 import { verifyArchiveUpload } from './archiveUpload';
@@ -144,7 +145,11 @@ export const retry = internalMutation({
 });
 async function settleStep(ctx: MutationCtx, input: FinishIdentity): Promise<null> {
   const command = await finishStep(ctx, input);
-  if (!command) return null;
+  const label = `finish-settle/${command?.kind ?? 'local'}`;
+  if (!command) {
+    await logIoAttribution(ctx, label);
+    return null;
+  }
   if (command.kind === 'page' || (command.kind === 'plan' && !command.source)) {
     // Review ba9ce962 L2: the step armed its retained retry as a mutation (retryFinish);
     // it stays as this generation's backstop. The wake is due now, so one
@@ -159,6 +164,7 @@ async function settleStep(ctx: MutationCtx, input: FinishIdentity): Promise<null
         input,
       );
     }
+    await logIoAttribution(ctx, label);
     return null;
   }
   await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedFinishDriver:drive'), {
@@ -167,6 +173,7 @@ async function settleStep(ctx: MutationCtx, input: FinishIdentity): Promise<null
       command.kind === 'plan' ? { kind: 'plan', pin: command.pin, source: command.source } : command,
     ),
   });
+  await logIoAttribution(ctx, label);
   return null;
 }
 /** The exact bytes of a settled solo plan: one indexed compose read, rebuilt the way

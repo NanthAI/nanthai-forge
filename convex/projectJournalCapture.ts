@@ -9,8 +9,10 @@ import { invariant } from '../src/errors';
 import { journalFragmentTexts } from '../src/journal-fragments';
 import { wakeJournal, journalEligibilityKey } from './projectJournalWake';
 import { selectJournal } from './projectJournalSelect';
+import { logIoAttribution } from './ioAttribution';
 import {
   journalRunArgs,
+  journalIoMode,
   journalEnabled,
   phaseKey,
   pageKey,
@@ -31,7 +33,12 @@ export const page = internalMutation({
   },
   returns: v.string(),
   handler: async (ctx, { discarded, discardExpired, ...input }) => {
-    if (!discardExpired && !journalEnabled()) return canonicalPayload({ kept: 'disabled' });
+    const mode = journalIoMode(input);
+    const reply = async (outcome: string, result: unknown) => {
+      await logIoAttribution(ctx, `journal-capture/${mode}/${outcome}`);
+      return canonicalPayload(result);
+    };
+    if (!discardExpired && !journalEnabled()) return reply('disabled', { kept: 'disabled' });
     const claimRow = await pendingJournal(ctx, input.projectId);
     const active = claimRow ? JSON.parse(claimRow.envelope) : null;
     if (
@@ -39,43 +46,49 @@ export const page = internalMutation({
       active.until > Date.now() &&
       (active.control !== phaseKey(input) || active.claim !== input.claim)
     )
-      return canonicalPayload({ deferred: 'claimed', retryAt: active.until });
+      return reply('claimed', { deferred: 'claimed', retryAt: active.until });
     const controlRow = await receiptRow(ctx, input.projectId, phaseKey(input));
     const control: Control = controlRow ? JSON.parse(controlRow.envelope) : {};
     // A legacy control can predate the project pointer. Its original claim still
     // owns this frontier until expiry; recapture publishes the same pointer.
     let pending = control.pending;
     if (pending && pending.claim !== input.claim && pending.until > Date.now())
-      return canonicalPayload({ deferred: 'claimed', retryAt: pending.until });
+      return reply('claimed', { deferred: 'claimed', retryAt: pending.until });
     const wakeKey = journalEligibilityKey(input.operationId);
     if (wakeKey) {
       const wake = await receiptRow(ctx, input.projectId, wakeKey);
       if (wake) await ctx.db.delete(wake._id);
     }
     const pageId = pageKey(input);
-    if (discardExpired && pending?.pageId !== pageId) return canonicalPayload({ kept: 'capture-changed' });
-    if (input.existing && (input.phase ?? 0) < 3 && control.runId !== input.operationId && !control.pending) {
+    if (discardExpired && pending?.pageId !== pageId) return reply('changed', { kept: 'capture-changed' });
+    if (input.existing && (input.phase ?? 0) < 3 && control.runId !== input.operationId && !pending) {
       delete control.cursor;
       control.runId = input.operationId;
     }
-    if (control.last?.pageId === pageId) return control.last.result;
+    if (control.last?.pageId === pageId) {
+      await logIoAttribution(ctx, `journal-capture/${mode}/replay`);
+      return control.last.result;
+    }
     const [published] = await ctx.db
       .query('projectJournalSegments')
       .withIndex('by_project_and_page', q => q.eq('projectId', input.projectId).eq('pageId', pageId))
       .take(1);
     if (published) {
       const saved = JSON.parse(published.value).pageReceipt;
-      if (typeof saved === 'string') return saved;
+      if (typeof saved === 'string') {
+        await logIoAttribution(ctx, `journal-capture/${mode}/replay`);
+        return saved;
+      }
       const { claim: ignoredClaim, ...request } = input;
       void ignoredClaim;
-      return canonicalPayload({
+      return reply('replay', {
         archived: saved[0],
         segments: saved[1],
         ...(saved.length > 2 ? { next: { ...request, phase: saved[2], part: saved[3] } } : { done: true }),
       });
     }
     const project = await ctx.db.get(input.projectId);
-    if (!project || project.removal) return canonicalPayload({ kept: 'unavailable' });
+    if (!project || project.removal) return reply('unavailable', { kept: 'unavailable' });
     let future: { input: JournalRunInput; dueAt: number }[] = [];
     if (!pending) {
       // Expired scheduling dedup facts are derived metadata, not logical history.
@@ -90,12 +103,21 @@ export const page = internalMutation({
         )
         .take(100);
       for (const marker of expired) await ctx.db.delete(marker._id);
+      // Use the already-retained predecessor as the live ready-index cursor fence.
+      // A new drain (or an intervening drain) starts at the ready frontier again.
+      const part = input.part ?? 0;
+      const cursor =
+        !input.existing &&
+        (input.phase ?? 0) < 2 &&
+        (part === 0 || control.last?.pageId !== pageKey({ ...input, part: part - 1 }))
+          ? []
+          : control.cursor;
       const { future: known, ...selected } = expired.length
-        ? { refs: [], proofs: [], groups: [], cursor: control.cursor ?? [], done: false, future: [] }
+        ? { refs: [], proofs: [], groups: [], cursor: cursor ?? [], done: false, future: [] }
         : await selectJournal(
             ctx,
             input,
-            !input.existing && (input.phase ?? 0) < 2 ? [] : control.cursor,
+            cursor,
             new Set(
               project.itemPurges?.flatMap(purge =>
                 purge.purgedAt === undefined && purge.commentId === undefined
@@ -133,6 +155,7 @@ export const page = internalMutation({
             claimRow,
           );
         for (const wake of future) await wakeJournal(ctx, wake.input, wake.dueAt);
+        await logIoAttribution(ctx, `journal-capture/${mode}/${expired.length ? 'pruned' : 'empty'}`);
         return result;
       }
       pending = {
@@ -171,7 +194,7 @@ export const page = internalMutation({
       if (retired.length && !discarded) {
         control.pending = pending;
         await putControl(ctx, input, control, controlRow, claimRow);
-        return canonicalPayload({ discard: retired });
+        return reply('discard', { discard: retired });
       }
       if (discarded) {
         invariant(
@@ -185,7 +208,7 @@ export const page = internalMutation({
       await putControl(ctx, input, control, controlRow, claimRow);
       const { claim: ignoredClaim, ...request } = input;
       void ignoredClaim;
-      return canonicalPayload({ stale: true, next: request });
+      return reply('stale', { stale: true, next: request });
     }
     const segments = await logicalSegments(pending, rows);
     const texts: string[] = [];
@@ -224,6 +247,6 @@ export const page = internalMutation({
     control.pending = pending;
     await putControl(ctx, input, control, controlRow, claimRow);
     for (const wake of future) await wakeJournal(ctx, wake.input, wake.dueAt);
-    return canonicalPayload({ pending, texts, fragmented });
+    return reply(fragmented || pending.fragment ? 'fragment' : 'selected', { pending, texts, fragmented });
   },
 });

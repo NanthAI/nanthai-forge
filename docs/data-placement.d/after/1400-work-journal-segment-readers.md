@@ -52,8 +52,12 @@ with the same operation id reconciles published pages. A failed in-flight captur
 can be resumed after its ten-minute internal claim lease. This is an operator
 maintenance entry point, not a new user action or confirmation.
 
-Each page uses one capture and one publication mutation, at most 100 original
-rows, and at most 500 KiB of capture transport. Capture budgets include related
+A productive page uses one capture and one publication mutation, at most 100
+original rows, and at most 500 KiB of capture transport. Empty pages skip
+publication. Capture can fold up to four consecutive 100-row scan windows in one
+transaction if earlier windows found no archive rows, within the original scan
+byte budget. Ready-index continuations advance the cursor within one drain;
+a new drain restarts from the ready frontier. Capture budgets include related
 head/body reads; an individual existing provider row can exceed the transport
 page and is re-read and framed without truncation. Publication revalidates source
 hashes, head identity and body sharing after the verified PUT/GET. Original rows

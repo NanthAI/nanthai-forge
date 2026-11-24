@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { logIoAttribution } from './ioAttribution';
 import { workRecordTable, planningRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
 import type { QueryCtx, MutationCtx } from './server';
@@ -197,6 +198,8 @@ export const search = query({
       return canonicalPayload(await searchPlanning(ctx, project, input, false, true, memberHistory));
     } catch (error) {
       return report(error);
+    } finally {
+      await logIoAttribution(ctx, 'work-index/search');
     }
   },
 });

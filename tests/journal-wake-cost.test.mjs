@@ -84,6 +84,113 @@ for (const dogfood of [false, true])
     assert.equal(w.queue.length, 0, 'finite frontier leaves no periodic work');
   });
 
+test('empty scan windows share the fixed capture reads without skipping the eligible tail', async t => {
+  const w = await journalMaintenanceFixture(t);
+  await w.drain();
+  const retained = [];
+  for (let n = 0; n < 450; n++)
+    retained.push(
+      await w.insert('projectCoordinationEvents', {
+        projectId: w.f.projectId,
+        actor: 'owner',
+        operationId: randomUUID(),
+        at: w.f.now(),
+        command: { kind: 'message', text: 'Retained', context: {} },
+      }),
+    );
+  const eligible = await w.insert('projectCoordinationEvents', {
+    projectId: w.f.projectId,
+    actor: 'owner',
+    operationId: randomUUID(),
+    at: w.f.now(),
+    command: { kind: 'change', source: 'work' },
+  });
+  w.f.advanceClock(15 * 86_400_000);
+  const start = w.io.length,
+    requests = w.requests.length;
+  const results = await w.drain({ projectId: w.f.projectId, phase: 4, operationId: randomUUID() });
+  const io = w.io.slice(start);
+  t.diagnostic(
+    JSON.stringify({
+      actions: results.length,
+      readBytes: io.reduce((n, row) => n + row.readBytes, 0),
+      writeBytes: io.reduce((n, row) => n + row.writeBytes, 0),
+      readRanges: io.reduce((n, row) => n + row.reads, 0),
+    }),
+  );
+  assert.equal(results.length, 2, 'bounded first page plus the productive tail');
+  assert.equal(results[0].archived, 0);
+  assert.equal(results[1].archived, 1);
+  assert.equal(io.length, 3, 'two capture calls and one publication');
+  assert.equal(w.requests.slice(requests).filter(method => method === 'PUT').length, 1);
+  assert(retained.every(id => w.f.tables.projectCoordinationEvents.has(id)));
+  assert(!w.f.tables.projectCoordinationEvents.has(eligible));
+  assert.equal(w.queue.length, 0);
+});
+
+async function readyIndexWithPendingPrefix(t) {
+  const w = await journalMaintenanceFixture(t);
+  const prior = [...w.f.tables.projectHostedOperations.values()].find(row => JSON.parse(row.value).terminal);
+  assert(prior);
+  await w.drain();
+  const now = w.f.now();
+  const add = async (due, pending) => {
+    const operationId = randomUUID();
+    const value = JSON.parse(prior.value);
+    value.operationId = value.firstAttempt.operationId = operationId;
+    if (pending) value.terminal = null;
+    return w.insert('projectHostedOperations', {
+      projectId: w.f.projectId,
+      actor: prior.actor,
+      operationId,
+      journalReadyAt: due,
+      value: JSON.stringify(value),
+    });
+  };
+  for (let n = 0; n < 401; n++) await add(now - 2, true);
+  const request = { projectId: w.f.projectId, phase: 1, operationId: `drain:${now}` };
+  return { w, now, add, request };
+}
+
+test('a folded live ready-index page replays, then sees a new row after its cursor', async t => {
+  const { w, now, add, request } = await readyIndexWithPendingPrefix(t);
+  const first = await w.pack(request);
+  assert.equal(first.archived, 0);
+  assert.equal(first.next.part, 1);
+  const calls = w.io.length,
+    requests = w.requests.length;
+  const replay = await w.pack(request);
+  assert.deepEqual(replay.next, first.next);
+  assert.equal(replay.archived, 0);
+  assert.equal(
+    w.io.slice(calls).reduce((n, row) => n + row.writes, 0),
+    0,
+  );
+  assert.equal(w.requests.length, requests);
+  assert.deepEqual(w.queue.splice(0), [first.next, replay.next]);
+  const tail = await add(now - 1, false);
+  const earlier = await add(now - 3, false);
+  const next = await w.pack(first.next);
+  assert.equal(next.archived, 1);
+  assert(w.f.tables.projectHostedOperations.get(tail).journalSegment);
+  assert.equal(w.f.tables.projectHostedOperations.get(earlier).journalSegment, undefined);
+  w.queue.length = 0;
+  await w.drain({ ...request, operationId: `drain:${now + 1}` });
+  assert(w.f.tables.projectHostedOperations.get(earlier).journalSegment);
+});
+
+test('a ready-index continuation restarts if a different drain replaced its predecessor', async t => {
+  const { w, now, add, request } = await readyIndexWithPendingPrefix(t);
+  const first = await w.pack(request);
+  assert.equal(first.next.part, 1);
+  const other = await w.pack({ ...request, operationId: `drain:${now + 1}` });
+  assert.equal(other.next.part, 1);
+  const earlier = await add(now - 3, false);
+  w.queue.length = 0;
+  assert.equal((await w.pack(first.next)).archived, 1);
+  assert(w.f.tables.projectHostedOperations.get(earlier).journalSegment);
+});
+
 test('legacy no-op wakes skip capture leases, source reloads, publication and archive I/O', async t => {
   const w = await journalMaintenanceFixture(t);
   await w.drain();

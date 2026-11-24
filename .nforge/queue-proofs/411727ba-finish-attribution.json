@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedFinishDriver.ts": "41d47dcd1c0cd9f340583a8f9933aa8228e935ef1dd66dc30220b7861011ca50"
+  },
+  "replay": {
+    "incident": "70477a56",
+    "test": "GitHub inbound: main moved after proof keeps a full check",
+    "receipt": "0248343a-db4d-4f02-8c65-989778b5d420"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3A92cca076-9968-4aa4-8c69-67a4656aef4f",
+  "review": {
+    "model": "claude-sonnet-5-5",
+    "session": "thread:delegated-task:command%3Amcp%3Af64762ca-b1aa-4432-a0f5-e648bc63a058%3Adelegate-task%3Ac5e37b88-d52d-4782-993f-90942f3c3264",
+    "receipt": "806d05f2-5b01-4ca0-ba08-6fa9771c5d7f"
+  },
+  "exercised": {
+    "convex/projectHostedFinishDriver.ts": {
+      "executed": [
+        "drive",
+        "planValue",
+        "resume",
+        "settle",
+        "settleStep",
+        "step",
+        "uploadFinishPlan"
+      ],
+      "digest": "dbceed7afe9717c3d6c9da168d4757de9740defd5520be970b55bebfd24a7125",
+      "units": [
+        [
+          "candidateFileListSchema",
+          "9a226f1ea148ae7871d7c07b4a40d1b10bf9fde81a44b59babd359fb0236034d"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "composeRow",
+          "6d1690ca7576a44d53b47bba902f7bdff2078a397da53ffdaebea4a436702a1c"
+        ],
+        [
+          "composeStateSchema",
+          "c969701c240a5d71d76d456e0c36ae96f696b8415b0bb91af6f5ce62b00a419f"
+        ],
+        [
+          "dependents",
+          "dbb95a5c3bbac9744229bed3438a6df4d735446293dc6dccc1c8c86c936faf2d"
+        ],
+        [
+          "digest",
+          "5f605f8606bb3242a28c6a44a95e70e8b39f3555b7f0838c11f4e606795a3e50"
+        ],
+        [
+          "drive",
+          "3183e9230ca22909cee2be2661609a3e52bde535b16242dcce6035c4a9818681"
+        ],
+        [
+          "exchangeFetch",
+          "7c98e70418bfa5bb39133f287db9f44604adaad49739c78f5aeefa556bf07795"
+        ],
+        [
+          "filePin",
+          "89add0c2c986f1f902887a60b7ca85dfab062b32d3ec6a7789250c796956bba4"
+        ],
+        [
+          "findObject",
+          "24c72de797e426b1cba65ee78a72f180ff603f3d0d03c64c6474e34622c2ba51"
+        ],
+        [
+          "finishRow",
+          "42f05b1aac53a7d0d1b32027b90939cd2afcd2e8f6f2648e459e44a2ca8c92b5"
+        ],
+        [
+          "finishStep",
+          "dd5f3e7545f5fe9893871c9510b43734e07cd103a5dbd5826448eb5b4e34edee"
+        ],
+        [
+          "hostedComposeInput",
+          "f714b6f1f2e1c0826e6d209123a866aa8723fb156e37354cb6f55b68513093e9"
+        ],
+        [
+          "hostedWriteProject",
+          "3a2dcfd149cab0cc00290a015bc2bf96315135dd3f5c0643e4bb3178451cd869"
+        ],
+        [
+          "identity",
+          "6a83e98edc5c5b34e04f129be0806f4f9ca23ce770cae9db47b4871273dea641"
+        ],
+        [
+          "internalAction",
+          "e8a3213694f58fe6f1b30f5e7262dce2d0b36c87d9a016867a8f5735a4c6b10d"
+        ],
+        [
+          "internalMutation",
+          "2d2e8c5fe8c87a66a55fab17b47bc1e8d757288506b6d2be6e2bbd8f4d58d9e4"
+        ],
+        [
+          "internalQuery",
+          "65ec7e7cd9e33bb1c9390e6d1128ca051603dc0f56204042314a223b2f58a990"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "isStored",
+          "b9b9e00074d66f7069753f1558ce5f0991302e5007a6ba7c8b21537e93baf41a"
+        ],
+        [
+          "loadLanding",
+          "ebcbbc4824870ad74803810ad5144fbbc671303f4a51f289356b20578d07ace2"
+        ],
+        [
+          "logIoAttribution",
+          "ff3c6d23c40a163650d6b895110d9a95359ab0b869676941faf00b3f281966f7"
+        ],
+        [
+          "makeFunctionReference",
+          "90760cdb0f99f8303180da5ca3bbe536fdac31c89e78b170e62dbf914920e3e4"
+        ],
+        [
+          "packHeaders",
+          "0c742778d2baadc990cca70b57b4508134dcde07509ea5876d15070c492ed897"
+        ],
+        [
+          "packRange",
+          "3f417a6e8a6bc9a4c167bbd90a23e0a9af2713d154ebf02eb9d99b8b8d261155"
+        ],
+        [
+          "planValue",
+          "f2cb2ff4e7b389f2bf5797a8683bcfe90fbae6bbb6ec2ad8f187b83b4441c678"
+        ],
+        [
+          "presignGet",
+          "403c89ec97a9a01e8741958d713772eae18dc4b041151fdd1309e17bf155c17b"
+        ],
+        [
+          "presignPut",
+          "3159739f5e30f10aabdf5b1927a4d9b716af9b40941690c2358abe2c9ca85e6f"
+        ],
+        [
+          "protectedEntries",
+          "fef8a34062d83b3217501effbe4b9d0da3ee292854b557f3d55984a5d16e4c69"
+        ],
+        [
+          "r2Config",
+          "d2ad95dc420459f86ba5411296e8abd9e570a3862752b67ea047db825f010c1b"
+        ],
+        [
+          "r2Key",
+          "6139c7ecb1ef81acde791e2ca521e084af827cd6c6564dbe999d38f290e52426"
+        ],
+        [
+          "readExactObject",
+          "7aff58c18f4dd651cc2888af96a1e963d2834dddb13abab374f5f2bd5cf65469"
+        ],
+        [
+          "resume",
+          "75b3f9d90bcc18a4da92722ca3f1dffeda526a6014b17f5c3b93f7ff6728709a"
+        ],
+        [
+          "resumeFinishIO",
+          "09b6b14184350d880c2cef71752e2d517635966cb1db790fea4debb9678e2349"
+        ],
+        [
+          "retry",
+          "931f86e058bf941c1cc9d140b1fd6ce015bd8910fb4813c558d74d0a612fea42"
+        ],
+        [
+          "reviewFiles",
+          "6b2b083f97332a11e21394062dcd8e4a13196c82779b78ff24f22310fcc701bb"
+        ],
+        [
+          "reviewedDigests",
+          "0723fed6703d4b48397adb8ded9953c61a4569aefc38de516f14b3e4c51274af"
+        ],
+        [
+          "sameReviewedFiles",
+          "40b37daa09cbda175082b8c8e7cc602fd86d670b52f7d730346fff2fc7dab4a6"
+        ],
+        [
+          "scheduleFinish",
+          "bc3cadba879b5c49ac45c5ecc1015ab368ca31081a5275a7d1879d701431ce65"
+        ],
+        [
+          "settle",
+          "9a23de6f9a9263c3795d30573a6bb713f7f169c6878f3b9410263738aa047e97"
+        ],
+        [
+          "settleStep",
+          "04afe29a5470386c2c137bf2e37f935b730a3fc5741ab118765edbbd66a3542b"
+        ],
+        [
+          "step",
+          "072693a4c27acd1237b2254c1055d513118c79dc631fb7b0adbb58d01a2de49b"
+        ],
+        [
+          "stepIdentity",
+          "3a77b9a1f42401885934c26b10d9854d475a41bc6d628fc205c83ae70f8dc059"
+        ],
+        [
+          "uploadFinishPlan",
+          "61a355aee61100b666c019e10f20d67fbc9045898d27e96fd36a3d798f19ec35"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ],
+        [
+          "verifyArchiveUpload",
+          "7585342f41641bafc6e4e27aa80c7d7c7ab45651ef04f4e508feea5578161116"
+        ]
+      ],
+      "shell": "387b1c738866cda7866192823c2fa1b791dd78966625401ad58b12e4e2bbe103"
+    }
+  }
+}
