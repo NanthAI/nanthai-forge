@@ -10,6 +10,7 @@ import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { hostedLaneSelectionSchema } from '../dist/hosted-lane.js';
 import * as laneHint from '../dist/hosted-lane.js';
 import { successorIntentId } from '../dist/hosted-intent-chain.js';
+import { hostedRecordIndex, hostedRecordValue } from '../dist/hosted-records.js';
 const start = await import(moduleUrl('../convex/projectHostedStart.ts'));
 const reads = await import(moduleUrl('../convex/projectHostedLanes.ts'));
 const channels = await import(moduleUrl('../convex/projectHostedChannels.ts'));
@@ -796,6 +797,54 @@ test('planned start gives the Intent the Issue id, adds sibling Lanes, continues
   );
   // Another account cannot attach Lanes to someone else's Intent by naming its Issue id.
   await assert.rejects(s.begin(s.input({ ...planned, intentId: first.intentId }), 'stranger'));
+});
+
+test('incident 846c635b: the legacy continuation boundary refuses before any Lane or operation write', async () => {
+  for (const history of [17, 24]) {
+    const s = await setup();
+    const issue = randomUUID();
+    let id = issue;
+    for (let i = 0; i < history; i++, id = successorIntentId(id)) {
+      const { record, ref, value } = hostedRecordValue({
+        kind: 'intent',
+        id,
+        version: 1,
+        at: '2026-11-10T00:00:00.000Z',
+        outcome: 'Retained Item work',
+        constraints: '',
+        creatorAccountId: 'owner',
+        assigneeAccountIds: [],
+        base: { head, receiptId: 'main-0' },
+        status: 'completed',
+      });
+      const indexed = {
+        projectId: s.projectId,
+        kind: 'intent',
+        key: id,
+        version: record.version,
+        ...hostedRecordIndex(record),
+      };
+      const bodyId = s.insert('projectHostedRecordBodies', { projectId: s.projectId, value });
+      const recordId = s.insert('projectHostedRecords', {
+        ...indexed,
+        bodyId,
+        digest: ref.digest,
+        bytes: ref.bytes,
+      });
+      // The root may predate the marker. Follow-up starts have always kept the Item's id on their head.
+      s.insert('projectHostedRecordHeads', {
+        ...indexed,
+        recordId,
+        ...(i > 0 ? { planningItemId: issue } : {}),
+      });
+    }
+    const input = s.input({ kind: 'planned', intentId: issue, outcome: 'More work on this Item' });
+    const operations = s.tables.projectHostedOperations.size;
+    await assert.rejects(s.call('start', start.start, input), code('INTENT_CLOSED'));
+    assert.equal(s.counts.at(-1).writes, 0);
+    assert.equal(s.tables.projectHostedOperations.size, operations);
+    assert.equal(s.tables.projectHostedRecordHeads.size, history);
+  }
 });
 
 // Flip 5 (Issue 0695ab24): an Intent copied from the Work journal is owned by the journal until a Lane

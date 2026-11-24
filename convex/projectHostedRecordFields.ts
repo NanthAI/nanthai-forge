@@ -135,6 +135,10 @@ export const hostedRecordTables = {
     // index-order: caller: convex/projectWorkStore.ts#journalWorkStoreCompare; order: planning comparison exposes newest-first creation-time pages of Issues.
     .index('by_project_and_kind', ['projectId', 'kind'])
     .index('by_project_and_kind_and_key', ['projectId', 'kind', 'key'])
+    .index('by_project_and_kind_and_item', {
+      fields: ['projectId', 'kind', 'planningItemId'],
+      staged: true,
+    })
     // index-order: caller: convex/projectHostedDormancy.ts#landedByReceipt; order: receipt discovery selects the newest Candidate by creation time within an Intent.
     .index('by_project_and_kind_and_parent', ['projectId', 'kind', 'parent'])
     // An Issue's comments or its Intent's notes, without reading the other.
