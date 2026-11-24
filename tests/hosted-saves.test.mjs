@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { saveBytes } from '../dist/hosted-save.js';
 import { saveFixture, api, jobApi, maxima } from './hosted-saves-fixture.mjs';
 const code = value => error => (error.data?.code ?? error.code) === value;
 
@@ -13,6 +14,12 @@ test('lost stage, submit and final replies reconcile exactly one save without re
   await s.stage(x);
   const first = await s.submit(x),
     second = await s.submit(x);
+  for (const io of s.counts.filter(row => row.name === 'submit'))
+    assert.equal(
+      io.readDocumentsByTable.projectHostedSaves,
+      1,
+      'a staged submit or its retry reads one save',
+    );
   assert.equal(first.jobId, second.jobId);
   assert.equal(s.tables.projectHostedRecordHeads.size, 2); // Lane + one source job.
   const output = await s.work(x),
@@ -33,6 +40,34 @@ test('lost stage, submit and final replies reconcile exactly one save without re
   assert.equal([...s.tables.projectHostedRecordHeads.values()].filter(row => row.kind === 'save').length, 2);
   assert.deepEqual(output.reads.map(p => p.sha256).includes(s.hidden.sha256), false);
 });
+test('final-page submit reads its save once, fences unfinished writes and replays a terminal receipt', async t => {
+  const s = await saveFixture();
+  const prepare = async change => {
+    const x = await s.prepare([s.change(change)]);
+    const page = x.pages[0].value;
+    s.put(saveBytes(page));
+    s.put(saveBytes(x.result.input));
+    return { x, input: { index: 0, page: JSON.stringify(page) } };
+  };
+  const { x, input } = await prepare('change through final-page submit');
+  const stale = await prepare('prepared before the authority changed');
+  const submitted = await s.submit(x, input, true);
+  assert.equal(submitted.status, 'submitted');
+  assert.equal(s.tables.projectHostedSavePages.size, 1);
+  const io = s.counts.findLast(row => row.name === 'submit');
+  t.diagnostic(
+    `final-page submit: ${io.documents} docs / ${io.readBytes} B read; ${io.writeBytes} B written`,
+  );
+  assert.equal(io.readDocumentsByTable.projectHostedSaves, 1);
+  const terminal = await s.publish(await s.work(x));
+  assert.equal(terminal.outcome.status, 'completed');
+
+  s.patch('hostedProjects', s.projectId, { sourceAuthority: { mode: 'server', epoch: 2 } });
+  await assert.rejects(s.submit(stale.x, stale.input, true), code('SOURCE_AUTHORITY_CHANGED'));
+  assert.equal(s.tables.projectHostedSavePages.size, 1, 'the stale final page binds no data');
+  assert.deepEqual(await s.submit(x, input, true), terminal, 'completed receipts replay across epochs');
+});
+
 test('two concurrently publishing saves have one CAS winner and retain the stale loser delta', async () => {
   const s = await saveFixture(),
     a = await s.prepare([s.change('a')]),

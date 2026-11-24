@@ -164,7 +164,10 @@ export async function batchesFixture(
         },
       });
     }
-    const lane = await f.c.lane(pin, { intentId, ...member.lane }),
+    // `member.laneFrom(c)`: a Lane whose head a real save produced, instead of one seeded at `pin`.
+    const lane = member.laneFrom
+        ? await member.laneFrom(f.c)
+        : await f.c.lane(pin, { intentId, ...member.lane }),
       selection = f.c.selection([lane]);
     const main = f.currentMain();
     selection.request.expectedMain = { head: main.head, receiptId: main.receipt.id };

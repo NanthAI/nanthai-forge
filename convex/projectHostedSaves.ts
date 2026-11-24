@@ -254,20 +254,20 @@ export const stage = mutation({
   handler: async (ctx, input) => {
     try {
       const auth = await caller(ctx, input);
-      return canonicalPayload(await stageSavePage(ctx, auth, input));
+      return canonicalPayload(await stageSavePage(ctx, auth, input, await loadSave(ctx, auth)));
     } catch (error) {
       return report(error);
     }
   },
 });
-/** Stage the next exact original delta page (or confirm a staged one); returns the save state.
- * `projectHostedSaveJobs:submit` runs it for the last page in its own transaction. */
+/** Stage the next exact original delta page (or confirm a staged one); returns the resulting save state.
+ * The caller already loaded this operation and checked its write epoch in this transaction. */
 export async function stageSavePage(
   ctx: MutationCtx,
   auth: SaveIdentity,
   input: { index: number; page: string },
+  { row, state, operation }: Awaited<ReturnType<typeof loadSave>>,
 ) {
-  const { row, state, operation } = await loadSave(ctx, auth);
   const { page, lastPath } = validateSavePage(
       JSON.parse(input.page),
       input.index === state.stagedPages ? state.lastPath : null,

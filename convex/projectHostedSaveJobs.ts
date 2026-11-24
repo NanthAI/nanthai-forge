@@ -30,6 +30,7 @@ import { savePin, saveDurationMs } from '../src/hosted-save';
 import { blobStore } from './blobStore';
 import { presignGet, r2Config } from './r2';
 import { invariant } from '../src/errors';
+import { requireWriteEpoch } from './projectHostedRecords';
 import { readExactObject } from './projectR2ExactRead';
 import { report } from './errors';
 import { finishHostedOperation } from './projectHostedOperations';
@@ -87,9 +88,11 @@ export async function submitHostedSave(
     'BAD_ARGUMENT',
     'Submit a delta page with its index.',
   );
-  if (page !== undefined) await stageSavePage(ctx, auth, { index: index!, page });
-  const { row, state, operation } = page === undefined ? prior : await loadSave(ctx, auth, false);
-  await loadSave(ctx, auth);
+  const { row, operation, project } = prior;
+  requireWriteEpoch(project, prior.state.request.authorityEpoch);
+  // Staging returns the new state; it does not change the operation or the row's job identity.
+  const state =
+    page === undefined ? prior.state : await stageSavePage(ctx, auth, { index: index!, page }, prior);
   if (!state.request.pages)
     return {
       payload: canonicalPayload(await publishHostedSave(ctx, { ...auth, result: null, clientMs })),

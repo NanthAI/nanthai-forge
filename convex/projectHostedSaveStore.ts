@@ -6,7 +6,7 @@ import { sessionMetadataSchema } from '../src/hosted-lane';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { activeProject, readProjectRole } from './projectAuthority';
-import { readHostedRecord, recordHead, hostedWriteProject } from './projectHostedRecords';
+import { readHostedRecord, recordHead, requireWriteEpoch } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { saveRequestSchema, saveWorkerObjectSchema, saveObjectSchema } from '../src/hosted-save';
 import { hostedOperationSchema, canonicalPayload } from '../src/hosted-source-operation';
@@ -54,7 +54,7 @@ export async function loadSave(ctx: QueryCtx | MutationCtx, input: SaveIdentity,
   const row = await saveRow(ctx, input);
   invariant(row, 'NOT_FOUND', 'Prepare this original hosted save first.');
   const state = saveStateSchema.parse(JSON.parse(row.value));
-  if (writing) await hostedWriteProject(ctx, input.projectId, input.actor, state.request.authorityEpoch);
+  if (writing) requireWriteEpoch(project, state.request.authorityEpoch);
   const opRow = await hostedOperationRow(ctx, input.projectId, input.actor, input.operationId);
   invariant(opRow, 'SOURCE_UNAVAILABLE', 'The original save operation is unavailable.');
   return { row, state, project, operation: hostedOperationSchema.parse(JSON.parse(opRow.value)) };
