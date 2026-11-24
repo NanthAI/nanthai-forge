@@ -14239,6 +14239,13 @@
         "src/scoped-recheck-policy.ts"
       ],
       "test": "incident replay friction 1cb3caa2: a proof a peer made stale in a ran unit is kept and its replay joins a scoped check"
+    },
+    {
+      "incident": "789b7b21",
+      "what": "agent ROOT open into a non-existent folder redirected into Forge addressed state instead of creating ROOT and its checkout, breaking bench forge-arm.mjs:137",
+      "file": "tests/hosted-agent-cli.test.mjs",
+      "paths": [],
+      "test": "incident 789b7b21: agent ROOT open into a non-existent folder creates ROOT and its checkout instead of redirecting to addressed state"
     }
   ]
 }

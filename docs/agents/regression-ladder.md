@@ -144,6 +144,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `92396235` | A Lane green on its own base failed the landing check on the composed Candidate in table-registrations and project-purge-inventory (a peer had added the cliCredentials table), found only after every shard ran (9.8 min, 89.4 runner-minutes). The planning job now runs the cheap contract pins first and a failing pin ends the check there with the same cause (Item 13ea93bf, `tests/hosted-actions-job.test.mjs`) |
 | `573ae136` | Frictions 7a05167d, b70dccdf, 0ed89858: touching a file refused a save or landing on a credential-shaped line main already held, or on a key name assigned a property access in code. The hosted Actions plan now drops findings main's copy of the file holds (one per occurrence), while a literal moved into a new file still fails |
 | `1cb3caa2` | A queue proof a peer landing made stale in a unit its replay ran: the planner keeps it while the Lane kept its proven bytes, and the landing check re-runs the replay |
+| `789b7b21` | `nforge agent ROOT open` into a folder that does not exist yet redirected into Forge's addressed state dir instead of creating ROOT and its checkout (breaking `scripts/bench-t3code/forge-arm.mjs:137`); checkout-creating commands now keep ROOT while address-only commands keep `59f0e296` behaviour |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

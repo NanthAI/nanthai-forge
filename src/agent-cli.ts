@@ -138,6 +138,12 @@ function fileRetry(error: unknown, inputs: EffectiveCall['inputs']): unknown {
   }
 }
 
+/** Actions whose job is to create the checkout at ROOT (friction 789b7b21): a missing ROOT is the
+ * destination to materialize, never an address-only placeholder to redirect into Forge state. */
+function createsCheckoutAtRoot(action: string, selected: Record<string, unknown>) {
+  return action === 'open' && selected.handoff === undefined;
+}
+
 /** Alias notices print only after the command succeeds, so error stderr stays one JSON object. */
 export async function agentCli(args: string[], options: AgentCliOptions = {}): Promise<unknown> {
   const notices: string[] = [];
@@ -339,8 +345,9 @@ async function runAgentCli(
     return configureEditHooks(resolve(root), selected, action === 'uninstall-hooks');
   }
   const hosted = hostedAgentAddress(root, selected);
-  if (hosted) effective.root = root = addressOnlyRoot(root, hosted);
   action = canonical(lowerVerb(form!, Boolean(hosted)));
+  if (hosted && !createsCheckoutAtRoot(action, selected))
+    effective.root = root = addressOnlyRoot(root, hosted);
   if (
     hosted &&
     options.process &&

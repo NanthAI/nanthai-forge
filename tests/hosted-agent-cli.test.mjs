@@ -52,15 +52,22 @@ function http(t, s) {
     else process.env.FORGE_AUTH_TOKEN = previous;
   });
   t.mock.method(globalThis, 'fetch', async (url, init) => {
-    assert(String(url).startsWith(s.address.url), 'No real HTTP calls');
+    const href = String(url);
+    assert(href.startsWith(s.address.url), 'No real HTTP calls');
+    if (href.startsWith(`${s.address.url}/objects/`)) {
+      const id = href.slice(`${s.address.url}/objects/`.length);
+      return new Response(s.objects.get(id), { headers: { 'content-type': 'application/octet-stream' } });
+    }
     const body = JSON.parse(init.body),
       args = body.args[0];
     const name = body.path;
     const { makeFunctionReference } = await import('convex/server');
     const ref = makeFunctionReference(name);
-    const value = await (String(url).endsWith('/api/query')
+    let value = await (href.endsWith('/api/query')
       ? s.exchange.client.query(ref, args)
       : s.exchange.client.mutation(ref, args));
+    if (name === 'projectObjectDownloads:lanePage' && args.signed)
+      value = value.map(row => ({ ...row, url: `${s.address.url}/objects/${row.digest}` }));
     return new Response(JSON.stringify({ status: 'success', value }), {
       headers: { 'content-type': 'application/json' },
     });
@@ -98,6 +105,114 @@ test('an address-only call whose ROOT does not exist writes nothing beside ROOT 
   ]);
   assert.equal(next.operationId, first.operationId);
   assert.deepEqual(readdirSync(folder).sort(), before);
+});
+
+test('incident 789b7b21: agent ROOT open into a non-existent folder creates ROOT and its checkout instead of redirecting to addressed state', async t => {
+  const s = agentFixture(t);
+  http(t, s);
+  agentSession(t, 'bench-open-session');
+  const state = realpathSync(mkdtempSync(join(tmpdir(), 'forge-addressed-state-'))),
+    previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = state;
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    rmSync(state, { recursive: true, force: true });
+  });
+  // Bench harness shape (scripts/bench-t3code/forge-arm.mjs:129-137): start from an anchor folder,
+  // then open the Lane into a non-existent ROOT with explicit url + projectId and no prior mkdir.
+  const ws = dirname(s.root),
+    anchor = join(ws, '.anchor');
+  mkdirSync(anchor, { recursive: true });
+  const started = await agentCli([
+    anchor,
+    'start',
+    JSON.stringify({ ...s.address, operationId: randomUUID(), outcome: 'Bench open shape' }),
+  ]);
+  const laneId = started.result.lane.laneId;
+  const target = join(ws, 'task-checkout');
+  assert(!existsSync(target), 'ROOT does not exist before open');
+  const callsBefore = s.calls.length;
+  const opened = await agentCli([target, 'open', JSON.stringify({ ...s.address, laneId })]);
+  assert.equal(opened.action, 'open');
+  assert.equal(opened.result.root, realpathSync(target));
+  assert(existsSync(join(target, '.forge', 'hosted-lane.json')), 'checkout marker created at ROOT');
+  assert(existsSync(join(target, 'lane-edit.txt')), 'Lane source materialized at ROOT');
+  assert(
+    !existsSync(join(state, 'forge', 'addressed')),
+    'open does not redirect ROOT into Forge addressed state',
+  );
+  // Follow-up commands from the newly created ROOT work without repeating url + projectId.
+  const status = await agentCli([target, 'status', JSON.stringify({ laneId })]);
+  assert.equal(status.result.head, s.lane.head);
+  // Canonical spelling `start --open` into a nested non-existent ROOT creates parent and checkout too.
+  const nested = join(ws, 'nested-parent', 'start-open-checkout');
+  assert(!existsSync(dirname(nested)));
+  const callsBeforeNested = s.calls.length;
+  const openedCanonical = await agentCli([
+    nested,
+    'start',
+    '--open',
+    JSON.stringify({ ...s.address, laneId }),
+  ]);
+  assert.equal(openedCanonical.action, 'open');
+  assert.equal(openedCanonical.result.root, realpathSync(nested));
+  assert(existsSync(join(nested, '.forge', 'hosted-lane.json')));
+  assert(existsSync(join(nested, 'lane-edit.txt')));
+  assert(!existsSync(join(state, 'forge', 'addressed')));
+  // Scale: opening into a non-existent ROOT makes the exact same Convex calls as an existing empty folder.
+  const nestedCalls = s.calls.slice(callsBeforeNested).map(c => c.name);
+  const precreated = join(ws, 'precreated-checkout');
+  mkdirSync(precreated);
+  const callsBeforePrecreated = s.calls.length;
+  await agentCli([precreated, 'open', JSON.stringify({ ...s.address, laneId })]);
+  assert.deepEqual(
+    nestedCalls,
+    s.calls.slice(callsBeforePrecreated).map(c => c.name),
+    'non-existent ROOT open adds no Convex call over an existing empty folder',
+  );
+  assert(callsBefore < callsBeforeNested);
+});
+
+test('address-only commands and open handoff with a missing ROOT still keep state in Forge addressed state (59f0e296, 789b7b21)', async t => {
+  const s = agentFixture(t);
+  http(t, s);
+  agentSession(t, 'address-only-check-session');
+  const state = realpathSync(mkdtempSync(join(tmpdir(), 'forge-addressed-state-'))),
+    previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = state;
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    rmSync(state, { recursive: true, force: true });
+  });
+  const missing = join(dirname(s.root), 'project-id-placeholder'),
+    folder = dirname(missing),
+    before = readdirSync(folder).sort();
+  assert(!existsSync(missing));
+  // Address-only read keeps client state in Forge state and writes nothing beside ROOT.
+  const status = await agentCli([missing, 'status', JSON.stringify({ ...s.address, laneId: s.lane.laneId })]);
+  assert.equal(status.result.head, s.lane.head);
+  assert.deepEqual(readdirSync(folder).sort(), before, 'status writes nothing beside missing ROOT');
+  assert(
+    readdirSync(join(state, 'forge', 'addressed')).some(name => name.endsWith('.forge-client')),
+    'address-only status state lives in Forge state',
+  );
+  // Open with handoff never creates a checkout at ROOT, so it stays address-only too.
+  await assert.rejects(
+    agentCli([
+      missing,
+      'open',
+      JSON.stringify({ ...s.address, laneId: s.lane.laneId, handoff: { sessionId: 'a'.repeat(64) } }),
+    ]),
+    errorCode('CLI_UPGRADE_REQUIRED'),
+  );
+  assert.deepEqual(readdirSync(folder).sort(), before, 'open handoff writes nothing beside missing ROOT');
+  // A subsequent real open on that same previously-addressed ROOT (without repeating url + projectId)
+  // resolves the retained address and creates the checkout at ROOT.
+  const opened = await agentCli([missing, 'open', JSON.stringify({ laneId: s.lane.laneId })]);
+  assert.equal(opened.result.root, realpathSync(missing));
+  assert(existsSync(join(missing, '.forge', 'hosted-lane.json')));
 });
 
 test('the actual agent CLI routes explicit hosted addressing before native owner construction and retains the address', async t => {

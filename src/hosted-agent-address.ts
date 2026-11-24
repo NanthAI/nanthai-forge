@@ -73,10 +73,11 @@ function addressedRootIndex(root: string) {
 /** An address-only call (explicit url + projectId) whose ROOT does not exist, such as a project
  * id typed as ROOT (Issue 59f0e296), keeps its client state (journals, board cursor, Lanes) in
  * Forge's own state folder, one per address, never as `ROOT.forge-client` under the caller's
- * directory; a small index there keeps the retained address for that ROOT. An existing folder
- * keeps binding the address beside it; so do a Lane or checkout above a missing ROOT, and a
- * missing ROOT that already has client state, so earlier journals still resolve. Local only:
- * at most one mkdir and one small write, no network. */
+ * directory; a small index there keeps the retained address for that ROOT. Commands whose job is
+ * to create the checkout at ROOT (such as `open` without `handoff`, friction 789b7b21) keep ROOT
+ * instead of calling this. An existing folder keeps binding the address beside it; so do a Lane
+ * or checkout above a missing ROOT, and a missing ROOT that already has client state, so earlier
+ * journals still resolve. Local only: at most one mkdir and one small write, no network. */
 export function addressOnlyRoot(root: string, address: HostedAgentAddress) {
   const base = hostedAgentRoot(root),
     state = addressedState(),
