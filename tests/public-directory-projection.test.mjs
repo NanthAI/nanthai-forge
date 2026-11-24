@@ -7,7 +7,9 @@ import { fixture, NOW } from './public-discovery-fixture.mjs';
 
 const { readSlice } = await import(moduleUrl('../convex/publicDirectorySource.ts'));
 const { buildPublicDirectory } = await import(moduleUrl('../convex/publicDirectoryProjection.ts'));
-const { collectPublicSearch, readSearchShard } = await import(moduleUrl('../src/public-explore-pages.ts'));
+const { collectPublicSearch, orderSearchRows, readSearchShard } = await import(
+  moduleUrl('../src/public-explore-pages.ts')
+);
 const deployment = 'https://example.convex.cloud';
 const fence = {
   v: 1,
@@ -45,6 +47,35 @@ test('an Explore page clips only its display name and packs whole UTF-8 rows und
   }
   assert.equal(index[0].projects[0][1], rows[0].slug);
   assert.match(rows[0].name, /^🌊{100}$/u);
+});
+
+test('Explore pages and local search rank by Forge activity and stars without reflecting GitHub metrics', () => {
+  const rows = [
+    { ...row(1), landings: 9, timeToMain: 11, main: 'unchecked', stars: 1 },
+    { ...row(2), landings: 8, timeToMain: 2, stars: 901 },
+    { ...row(3), landings: 9, timeToMain: 8, main: 'unchecked', stars: 0 },
+    { ...row(4), landings: 9, timeToMain: 11, stars: 4 },
+    { ...row(5), landings: 9, timeToMain: 11, stars: 5 },
+  ];
+  const first = buildPublicDirectory(rows, deployment);
+  const changed = buildPublicDirectory(
+    rows.map((r, n) => ({ ...r, githubStars: 800_000 - n * 70_000 })),
+    deployment,
+  );
+  assert.deepEqual(changed, first, 'an imported metric changes neither ranking nor the bytes sent to R2');
+  const expected = { active: [3, 5, 4, 1, 2], stars: [2, 5, 4, 1, 3], newest: [5, 4, 3, 2, 1] };
+  for (const { order, pages } of first.orders) {
+    const slugs = expected[order].map(n => `project-${n}`);
+    assert.deepEqual(
+      pages.flatMap(page => page.projects.map(project => project.slug)),
+      slugs,
+    );
+    const searchRows = first.index.flatMap(shard => shard.projects);
+    assert.deepEqual(
+      searchRows.sort((a, b) => orderSearchRows(order, a, b)).map(r => r[1]),
+      slugs,
+    );
+  }
 });
 
 test('the directory rebuild applies current visibility even when its indexed listing is stale', async () => {

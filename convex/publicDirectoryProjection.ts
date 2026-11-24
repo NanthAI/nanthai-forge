@@ -12,11 +12,13 @@ import { invariant } from '../src/errors';
 
 type Listed = {
   handle: string;
+  id: string;
   slug: string;
   name: string;
   since: number;
   stars: number;
   landings: number;
+  days: number[];
   main: 'passing' | 'unchecked';
   timeToMain?: number;
 };
@@ -90,10 +92,21 @@ function partition<Row>(
 
 /** One redacted source set supplies all orders and the compact search index. Never hash the clock
  * into data: a rebuild with unchanged figures must be a no-op at the storage boundary. */
-export function buildPublicDirectory<Row extends Listed>(rows: Row[], deployment: string) {
+export function buildPublicDirectory(rows: Listed[], deployment: string) {
   const rank = rows.map(input => {
     const name = directoryDisplayName(input.name);
-    const project = { ...input, name };
+    const project = {
+      handle: input.handle,
+      id: input.id,
+      slug: input.slug,
+      name,
+      since: input.since,
+      stars: input.stars,
+      landings: input.landings,
+      days: input.days,
+      main: input.main,
+      ...(input.timeToMain === undefined ? {} : { timeToMain: input.timeToMain }),
+    };
     const search: SearchRow = [
       project.handle,
       project.slug,
