@@ -728,7 +728,7 @@ update of `main`. A large change builds its tree in pieces of at most 500 entrie
 chained through `base_tree`. When GitHub times a piece out (HTTP 422 "request timed out"), the piece
 is halved down to 25 entries. If that still times out, each changed directory is built
 children-first as one POST of its full entries without `base_tree`. A tree cursor in the job's plan
-resumes the build after a retry or across steps. The commit keeps the supplied landing message and trailers, falling back to the
+resumes the build after a retry or across steps. The commit keeps the supplied landing message and trailers, falling back to the landed save's message (following through syncs when needed and ignoring default placeholder notes) and then to the
 Intent outcome when no message was supplied, and uses the existing noreply sync identity. Its last
 paragraph is one trailer block: every message's trailers, a `Co-Authored-By:` credit for each covered
 landing's declared agent client unless its own message names a co-author, then Forge's trailers. A source-unchanged landing
