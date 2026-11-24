@@ -23,6 +23,37 @@ function project(s, extra = {}) {
   });
 }
 
+test('revoked CLI credentials cannot change personal setup preferences', async () => {
+  const s = lanesFixture();
+  const projectId = project(s);
+  const credentialId = randomUUID();
+  s.insert('cliCredentials', {
+    credentialId,
+    owner: 'owner',
+    name: 'Synthetic device',
+    tokenHash: 'synthetic-hash',
+    issuedAt: 1_700_000_000_000,
+    expiresAt: 4_102_444_800_000,
+    scope: 'cli',
+    revoked: true,
+  });
+  await assert.rejects(
+    s.call(
+      'setupPreferences',
+      setup.setPreferences,
+      {
+        projectId,
+        change: { visibility: 'hidden' },
+        operationId: randomUUID(),
+        expectedRevision: 0,
+      },
+      { subject: 'owner', forgeCredential: credentialId },
+    ),
+    error => error.data?.code === 'AUTH_REVOKED',
+  );
+  assert.equal(s.counts.at(-1).writes, 0);
+});
+
 test('a new project reads as imported by its owner, with every later step still open', async () => {
   const s = lanesFixture();
   const projectId = project(s);
@@ -72,6 +103,11 @@ test('each step done records who did it and when; the first landing ends the set
   const view = await s.call('setupRead', setup.read, { projectId });
   assert.deepEqual(view.repository, { fullName: 'someone/shop', at: 1234, by: 'ada' });
   assert.equal(view.mirror.repository, 'someone/shop');
+  assert.equal(s.counts.at(-1).readRangesByTable.projectGithubMirrors, 1);
+  const checklist = await s.call('setupRead', setup.read, { projectId, checklist: true });
+  assert.deepEqual(checklist, { ...view, mirror: null });
+  assert.equal(s.counts.at(-1).readRangesByTable.projectGithubMirrors ?? 0, 0);
+  assert(s.counts.at(-1).documents <= 8);
   assert.deepEqual(
     [view.check.kind, view.check.repository, view.check.workflow],
     ['ci-file', 'someone/shop', '.github/workflows/ci.yml'],

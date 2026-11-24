@@ -14,6 +14,7 @@ import { moduleUrl } from './convex-module.mjs';
 const fyi = await import(moduleUrl('../convex/projectNeedsFyi.ts'));
 const needs = await import(moduleUrl('../convex/projectNeedsMe.ts'));
 const toRead = await import(moduleUrl('../convex/projectLandingReads.ts'));
+const setup = await import(moduleUrl('../convex/projectSetup.ts'));
 const { policyPreset } = await import(moduleUrl('../src/autonomy-policy.ts'));
 
 const DAY = Date.UTC(2026, 10, 17, 9);
@@ -114,6 +115,70 @@ test('FYI lists landings newest first and messages that ask nothing; a question 
     [[ask, ['Mine', 'Theirs']]],
     'the question waits on the reader',
   );
+});
+
+test('personal setup survives hide and restore on the existing FYI row with one write and no added lookup', async () => {
+  const f = fixture();
+  const write = (change, expectedRevision, operationId = randomUUID(), actor = 'owner') =>
+    f.s.call(
+      'setupPreferences',
+      setup.setPreferences,
+      { projectId: f.projectId, change, expectedRevision, operationId },
+      actor,
+    );
+  await f.dismiss({ keys: ['check:old@1'] });
+  const before = await f.read();
+  const ranges = f.s.counts.at(-1).ranges;
+  assert.equal(before.setup, undefined);
+
+  const skip = { step: 'agent', skip: true };
+  const operationId = randomUUID();
+  const skipped = await write(skip, 0, operationId);
+  const meter = f.s.counts.at(-1);
+  assert.equal(meter.readRangesByTable.projectLandingReads, 1);
+  assert.equal(meter.writes, 1);
+  assert(meter.writeBytes < 1024);
+  assert.deepEqual(await write(skip, 0, operationId), skipped);
+  assert.equal(f.s.counts.at(-1).writes, 0);
+
+  const hidden = await write({ visibility: 'hidden' }, 1);
+  assert.deepEqual(hidden, { visibility: 'hidden', skipped: ['agent'], revision: 2 });
+  const after = await f.read();
+  assert.deepEqual(after.setup, hidden, 'another device sees the persisted choices');
+  assert.deepEqual(after.state, before.state);
+  assert.equal(f.s.counts.at(-1).ranges, ranges);
+  assert.equal((await f.read('another-reader')).setup, undefined);
+  await assert.rejects(write(skip, 0, operationId), error => error.data?.code === 'WORK_STALE');
+  const restored = await write({ visibility: 'shown' }, 2);
+  assert.deepEqual(restored, { visibility: 'shown', skipped: ['agent'], revision: 3 });
+});
+
+test('personal setup cannot be written by a stranger to a private project', async () => {
+  const f = fixture();
+  const privateProject = f.s.insert('hostedProjects', {
+    key: 'private',
+    name: 'Private',
+    owner: 'owner',
+    visibility: 'private',
+    currentBackup: null,
+    revision: 0,
+    sourceAuthority: { mode: 'server', epoch: 1 },
+  });
+  await assert.rejects(
+    f.s.call(
+      'setupPreferences',
+      setup.setPreferences,
+      {
+        projectId: privateProject,
+        change: { visibility: 'hidden' },
+        expectedRevision: 0,
+        operationId: randomUUID(),
+      },
+      'stranger',
+    ),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
+  );
+  assert.equal(f.s.counts.at(-1).writes, 0);
 });
 
 test('Flow receives the latest full pass time from the existing FYI audit page', async () => {

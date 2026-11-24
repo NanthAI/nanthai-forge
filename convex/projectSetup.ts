@@ -4,16 +4,24 @@
 // Settings > Landing and checks show, from rows that already exist. One bounded read: the project, its first GitHub
 // repository connection, its mirror, the check runner setting, the first accepted landing and the handles of the
 // people named. At most 8 documents; no Work, no source, no paths. A subscription re-runs only when one of those rows
-// is written. The mirror row moves with each mirrored landing, so Getting started subscribes only until the first
-// landing and its one question are settled, and Landing and checks reads once when it opens.
+// is written. The checklist excludes the mirror row (which moves on each mirror push); only Landing and checks
+// reads it. Personal visibility and skips travel with Needs me's existing FYI read, not this read.
 import { v } from 'convex/values';
-import { query } from './cliServer';
+import { z } from 'zod';
+import { invariant } from '../src/errors';
+import { mutation, query } from './cliServer';
+import type { QueryCtx } from './server';
+import {
+  landingReadState,
+  setupPreferences,
+  setupVisibility,
+  skippableSetupStep,
+} from './projectLandingReadFields';
 import { report } from './errors';
 import { accessibleProject } from './projectAuthority';
 import { checkSetting } from './projectHostedCheckStore';
 import { accountFor } from './urlIdentity';
 import type { Id } from './_generated/dataModel';
-import type { QueryCtx } from './server';
 
 const stamp = v.object({ at: v.number(), by: v.union(v.string(), v.null()) });
 const check = v.union(
@@ -76,18 +84,78 @@ function checkView(value: string, chosenAt: number) {
 }
 
 export const read = query({
-  args: { projectId: v.id('hostedProjects') },
+  args: { projectId: v.id('hostedProjects'), checklist: v.optional(v.boolean()) },
   returns: setupView,
   handler: async (ctx, input) => {
     try {
-      return await setup(ctx, input.projectId);
+      return await setup(ctx, input.projectId, input.checklist === true);
     } catch (error) {
       return report(error);
     }
   },
 });
 
-async function setup(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+/** Personal presentation only: never changes access, checks, or the project's actual setup. */
+export const setPreferences = mutation({
+  args: {
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    expectedRevision: v.number(),
+    change: v.union(
+      v.object({ visibility: setupVisibility }),
+      v.object({ step: skippableSetupStep, skip: v.boolean() }),
+    ),
+  },
+  returns: setupPreferences,
+  handler: async (ctx, { projectId, operationId, expectedRevision, change }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to change your Getting started preferences.');
+      await accessibleProject(ctx, projectId, user.subject);
+      invariant(z.uuid().safeParse(operationId).success, 'BAD_ARGUMENT', 'Use an operation UUID.');
+      const row = await landingReadState(ctx, projectId, user.subject);
+      const { operationId: previous, ...before } = row?.setup ?? {
+        visibility: 'automatic' as const,
+        skipped: [],
+        revision: 0,
+        operationId: undefined,
+      };
+      if (operationId === previous) return before;
+      invariant(
+        expectedRevision === before.revision,
+        'WORK_STALE',
+        'Getting started changed on another tab or device. Review it and try again.',
+      );
+      const after =
+        'visibility' in change
+          ? { ...before, visibility: change.visibility }
+          : {
+              ...before,
+              skipped: [
+                ...before.skipped.filter(step => step !== change.step),
+                ...(change.skip ? [change.step] : []),
+              ],
+            };
+      after.revision++;
+      const setup = { ...after, operationId };
+      if (row) await ctx.db.patch(row._id, { setup });
+      else
+        await ctx.db.insert('projectLandingReads', {
+          projectId,
+          account: user.subject,
+          through: -1,
+          read: [],
+          at: Date.now(),
+          setup,
+        });
+      return after;
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+async function setup(ctx: QueryCtx, projectId: Id<'hostedProjects'>, checklist: boolean) {
   const user = await ctx.auth.getUserIdentity();
   const project = await accessibleProject(ctx, projectId, user?.subject ?? '');
   const [binding, mirror, runner, first] = await Promise.all([
@@ -95,10 +163,12 @@ async function setup(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
       .query('projectGithubBindings')
       .withIndex('by_project_and_name', q => q.eq('projectId', projectId))
       .first(),
-    ctx.db
-      .query('projectGithubMirrors')
-      .withIndex('by_project', q => q.eq('projectId', projectId))
-      .unique(),
+    checklist
+      ? null
+      : ctx.db
+          .query('projectGithubMirrors')
+          .withIndex('by_project', q => q.eq('projectId', projectId))
+          .unique(),
     checkSetting(ctx, projectId, 'runner', 'runner'),
     ctx.db
       .query('projectHostedAcceptances')

@@ -3,7 +3,7 @@
 // The shared parts that need no behaviour library: keys, rows, bands, regions with folds that remember, the first
 // stop's edge, chips, the phone tabs, tables, the Markdown and diff containers and the standing line. Rules for
 // choosing each: DESIGN.md. They render at first paint; the interactive parts are in ds/interactive.tsx.
-import { useCallback, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react';
+import { useCallback, useState, type ComponentPropsWithoutRef, type ReactNode, type Ref } from 'react';
 import { useFirstStop } from './first-stop';
 import { Count, Glyph, type StateKind } from './marks';
 import { SoloRegionProvider, useSoloRegion } from './solo-region';
@@ -61,6 +61,8 @@ export function useFold(id: string | undefined, openByDefault = true): [boolean,
 
 export type RegionProps = {
   title: string;
+  /** Programmatic focus when the region replaces the control that opened it. */
+  headingRef?: Ref<HTMLHeadingElement>;
   /** Heading level inside the page: h2 by default. */
   level?: 2 | 3;
   weight?: Weight;
@@ -86,6 +88,7 @@ export type RegionProps = {
 /** A region: one surface, a head with its name and count, then bands and rows separated by seams. */
 export function Region({
   title,
+  headingRef,
   level = 2,
   weight,
   waiting = 0,
@@ -105,7 +108,7 @@ export function Region({
   const [open, toggle] = foldState ?? own;
   const first = useFirstStop<HTMLElement>(weight === 'act' ? waiting : 'none');
   // The only region in its Dock: no bar to carry a handle, only the name for assistive technology.
-  const bare = useSoloRegion() && !fold && !foldState && !tools;
+  const bare = useSoloRegion() && !fold && !foldState && !tools && !headingRef;
   const H = level === 2 ? 'h2' : 'h3';
   const bodyId = fold ? `fold-${fold}` : undefined;
   return (
@@ -120,7 +123,7 @@ export function Region({
       ) : (
         <div className={cx('ph', !handle && 'plain')}>
           {handle}
-          <H>
+          <H ref={headingRef} tabIndex={headingRef ? -1 : undefined}>
             {fold ? (
               <button
                 type="button"

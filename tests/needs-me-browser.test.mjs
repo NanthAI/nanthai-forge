@@ -149,6 +149,119 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
   const region = (page, name) => page.locator(`section.region[aria-label="${name}"]`);
   try {
     await t.test(
+      'Getting started: skip and undo in place, hide and restore without a hidden setup read',
+      async t => {
+        const focused = target => target.evaluate(node => node === document.activeElement);
+        const tabTo = async (page, target) => {
+          await target.waitFor();
+          for (let i = 0; i < 60; i++) {
+            if (await focused(target)) return;
+            await page.keyboard.press('Tab');
+          }
+          assert.fail(`Not reachable by Tab: ${await target.innerText()}`);
+        };
+        for (const viewport of [DESK, PHONE]) {
+          for (const theme of ['light', 'dark']) {
+            const label = `${viewport.width} ${theme}`;
+            const page = await open(t, viewport, 'getting-started', theme, { fixture: '/progress.html' });
+            const card = region(page, 'Getting started');
+            const agent = card.locator('.gs-row').filter({ hasText: 'Connect an agent' });
+            const check = card
+              .locator('.gs-row')
+              .filter({ hasText: 'Choose the check that decides a landing' });
+            await card.getByText('1 of 4 done').waitFor();
+            assert.equal((await page.evaluate(() => window.setupStats())).reads, 1, label);
+            assert.equal(
+              await card.getByText('Connect GitHub (optional)', { exact: true }).count(),
+              1,
+              label,
+            );
+            assert.match(await check.innerText(), /Bring your own CI/);
+            assert.equal(await check.getByRole('button', { name: /skip/i }).count(), 0);
+            assert.match(
+              await check.getByRole('link', { name: 'Choose' }).getAttribute('href'),
+              /settings\/checks$/,
+            );
+            const skip = agent.getByRole('button', { name: 'Skip: Connect an agent' });
+            await tabTo(page, skip);
+            await page.keyboard.press('Space');
+            await agent.getByText('Skipped', { exact: true }).waitFor();
+            await card.getByText('1 of 3 done').waitFor();
+            assert(await focused(agent.getByRole('button', { name: 'Undo skip: Connect an agent' })));
+            await page.keyboard.press('Enter');
+            await card.getByText('1 of 4 done').waitFor();
+            assert(await focused(skip));
+            await page.addScriptTag({ path: axePath });
+            assert.deepEqual(
+              await card.evaluate(async node =>
+                (
+                  await window.axe.run(node, {
+                    runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] },
+                  })
+                ).violations.map(({ id }) => id),
+              ),
+              [],
+              label,
+            );
+            assert.equal(
+              await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+              true,
+              label,
+            );
+            if (shots)
+              await card.screenshot({ path: join(shots, `getting-started-${viewport.width}-${theme}.png`) });
+            await tabTo(page, card.getByRole('button', { name: 'Hide getting started' }));
+            await page.keyboard.press('Enter');
+            await card.waitFor({ state: 'detached' });
+            assert(await focused(page.getByRole('button', { name: 'Show getting started' })));
+            await page.waitForFunction(() => window.setupStats().live === 0);
+            assert.deepEqual((await page.evaluate(() => window.setupStats())).writes, [
+              { step: 'agent', skip: true },
+              { step: 'agent', skip: false },
+              { visibility: 'hidden' },
+            ]);
+            await tabTo(page, page.getByRole('button', { name: 'Undo', exact: true }));
+            await page.keyboard.press('Enter');
+            await card.getByText('1 of 4 done').waitFor();
+            assert(await focused(card.getByRole('heading', { name: 'Getting started' })));
+
+            const otherDevice = await open(t, viewport, 'getting-started', theme, {
+              fixture: '/progress.html',
+              query: { hidden: '1' },
+            });
+            const show = otherDevice.getByRole('button', { name: 'Show getting started' });
+            await show.waitFor();
+            assert.deepEqual(
+              await otherDevice.evaluate(() => window.setupStats()),
+              { reads: 0, live: 0, writes: [] },
+              label,
+            );
+            await tabTo(otherDevice, show);
+            await otherDevice.keyboard.press('Space');
+            const restored = region(otherDevice, 'Getting started');
+            await restored.getByText('1 of 3 done').waitFor();
+            assert(await focused(restored.getByRole('heading', { name: 'Getting started' })));
+            await restored.getByRole('button', { name: 'Undo skip: Connect an agent' }).waitFor();
+            assert.deepEqual((await otherDevice.evaluate(() => window.setupStats())).writes, [
+              { visibility: 'shown' },
+            ]);
+          }
+        }
+      },
+    );
+    await t.test('settled setup does not read even while the viewer handle is unresolved', async t => {
+      for (const viewer of [{}, { 'missing-viewer': '1' }]) {
+        const page = await open(t, DESK, 'getting-started', 'dark', {
+          fixture: '/progress.html',
+          query: { settled: '1', ...viewer },
+        });
+        await page.waitForFunction(() =>
+          document.querySelector('.head')?.textContent?.includes('Nothing needs you'),
+        );
+        assert.deepEqual(await page.evaluate(() => window.setupStats()), { reads: 0, live: 0, writes: [] });
+      }
+    });
+    await t.test(
       'Needs me does not skip a pending check; Not now grants nothing and double-click approves once',
       async t => {
         const label = 'Approve before the check finishes';

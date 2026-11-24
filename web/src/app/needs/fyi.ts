@@ -7,6 +7,7 @@
 // when the state changes anywhere (web, CLI or agent). A dismissal is keyed to the row's version, so a newer version
 // shows again. Nothing here holds work: approvals and questions are never FYI rows. Pure: tests/app-needs-fyi.test.mjs.
 import type { StateWord } from '../../ds';
+import type { SetupPreferences } from '../start/setup-model';
 import type { NowRow } from './model';
 import { whoOf } from './model';
 
@@ -14,6 +15,7 @@ export type FyiState = { clearedAt: number | null; clearedSequence: number | nul
 export type FyiRead = {
   owner: boolean;
   state: FyiState;
+  setup?: SetupPreferences;
   landings: {
     receiptId: string;
     sequence: number;

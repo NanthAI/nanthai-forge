@@ -16,8 +16,9 @@
 // page windows rows by the clear line or the start of today itself, so idle and hidden tabs cost nothing.
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
-import type { MutationCtx, QueryCtx } from './_generated/server';
-import type { Doc, Id } from './_generated/dataModel';
+import type { QueryCtx } from './_generated/server';
+import type { Doc } from './_generated/dataModel';
+import { landingReadState } from './projectLandingReadFields';
 import { accessibleProject, coordinationAccess } from './projectAuthority';
 import { shareQueryRoles } from './projectRole';
 import { finishRow } from './projectHostedFinishWake';
@@ -41,15 +42,7 @@ export const FYI_DISMISS_BATCH = 50;
 const TEXT = 280;
 const KEY = /^[a-z]{2,12}:[A-Za-z0-9._:-]{1,100}@[A-Za-z0-9._:-]{1,40}$/;
 
-type Ctx = QueryCtx | MutationCtx;
 export type FyiState = { clearedAt: number | null; clearedSequence: number | null; dismissed: string[] };
-
-async function stateRow(ctx: Ctx, projectId: Id<'hostedProjects'>, account: string) {
-  return ctx.db
-    .query('projectLandingReads')
-    .withIndex('by_project_and_account', q => q.eq('projectId', projectId).eq('account', account))
-    .unique();
-}
 const stateOf = (row: Doc<'projectLandingReads'> | null): FyiState => ({
   clearedAt: row?.fyi?.clearedAt ?? null,
   clearedSequence: row?.fyi?.clearedSequence ?? null,
@@ -178,7 +171,9 @@ export const read = query({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what happened.');
       const project = await accessibleProject(ctx, projectId, user.subject);
       const owner = project.owner === user.subject;
-      const state = stateOf(await stateRow(ctx, projectId, user.subject));
+      const row = await landingReadState(ctx, projectId, user.subject);
+      const state = stateOf(row);
+      const setup = row?.setup;
       const since = state.clearedSequence ?? -1;
       const [accepted, audits, messages] = await Promise.all([
         ctx.db
@@ -300,6 +295,9 @@ export const read = query({
       return JSON.stringify({
         owner,
         state,
+        ...(setup
+          ? { setup: { visibility: setup.visibility, skipped: setup.skipped, revision: setup.revision } }
+          : {}),
         landings,
         landingsMore: accepted.length > FYI_LANDINGS,
         broke,
@@ -350,7 +348,7 @@ export const dismiss = mutation({
         'BAD_ARGUMENT',
         'Restore only a state this mutation returned.',
       );
-      const row = await stateRow(ctx, projectId, user.subject);
+      const row = await landingReadState(ctx, projectId, user.subject);
       const before = stateOf(row);
       let next: FyiState;
       if (restore) next = restore;

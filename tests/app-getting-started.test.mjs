@@ -151,18 +151,19 @@ const view = (over = {}) => ({
 });
 const states = steps => Object.fromEntries(steps.map(step => [step.id, step.state]));
 
-test('setup rows record who and when, and point at the one next step', () => {
+test('setup records who and when; GitHub neither counts nor gates the required check', () => {
   const fresh = model.setupSteps(view(), 'shop', 0);
   assert.deepEqual(states(fresh), {
     import: 'done',
-    repository: 'next',
-    mirror: 'later',
+    github: 'next',
     // Choosing a check never waits for GitHub: a project whose CI is not on GitHub has no mirror to turn on.
     check: 'next',
     agent: 'next',
     land: 'later',
   });
   assert.deepEqual([fresh[0].by, fresh[0].at], ['ada', 1]);
+  assert.deepEqual(model.setupProgress(fresh), { done: 1, total: 4 });
+  assert.match(fresh.find(step => step.id === 'check').fact, /Bring your own CI/);
   const ready = model.setupSteps(
     view({
       repository: { fullName: 'someone/shop', at: 2, by: 'ada' },
@@ -179,14 +180,14 @@ test('setup rows record who and when, and point at the one next step', () => {
   );
   assert.deepEqual(states(ready), {
     import: 'done',
-    repository: 'done',
-    mirror: 'done',
+    github: 'done',
     check: 'done',
     agent: 'done',
     land: 'moving',
   });
-  assert.equal(ready[3].fact, '.github/workflows/ci.yml, on someone/shop GitHub Actions');
-  assert.deepEqual([ready[1].by, ready[1].at, ready[3].at], ['ada', 2, 4]);
+  assert.equal(ready[2].fact, '.github/workflows/ci.yml, on someone/shop GitHub Actions');
+  assert.deepEqual([ready[1].by, ready[1].at, ready[2].at], ['ada', 2, 4]);
+  assert.deepEqual(model.setupProgress(ready), { done: 3, total: 4 });
 });
 
 test('after the first landing the owner is asked once who approves, then it goes away', () => {

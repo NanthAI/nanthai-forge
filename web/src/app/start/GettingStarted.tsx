@@ -2,15 +2,15 @@
 // Copyright 2026 Ferdinando Valsecchi
 // Getting started on Needs me (Items 6beca32b, c3e4a838): the first things a new project needs, not a wizard. Each
 // step says who did it and when, from the setup read (convex/projectSetup.ts); the line feed the frame already holds
-// says whether a Lane is moving. It shows until the first landing, then once more to ask who approves the next
-// landings, and is gone once that is answered. It reads once when Needs me opens and subscribes only while setup is
-// unfinished; once it is settled this browser remembers that per project and makes no read at all.
+// says whether a Lane is moving. Needs me supplies the reader's preferences from its existing FYI read; hidden
+// projects don't subscribe. Automatic mode retires the checklist after the first landing and approval choice.
 import { useEffect, useState } from 'react';
-import { useConvex, useQuery } from 'convex/react';
+import { useConvex } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import type { AutonomyPolicy } from '../../../../src/autonomy-policy';
 import { Key, Region, Row, State, Who } from '../../ds';
+import { useSafeQuery } from '../../safe-query';
 import { A } from '../frames';
 import { hrefFor, type AppRoute } from '../paths';
 import { agentAppsSummary, deploymentUrl, joinPrompt } from './agent-apps';
@@ -19,9 +19,11 @@ import { ConnectSteps, CopyKey } from './parts';
 import {
   askWhoApproves,
   gettingStartedShown,
+  setupProgress,
   setupSteps,
+  type SetupChange,
+  type SetupPreferences,
   type SetupStep,
-  type SetupView,
 } from './setup-model';
 import './start.css';
 
@@ -53,6 +55,7 @@ function remember(key: string) {
 
 function Tick({ state }: { state: SetupStep['state'] }) {
   if (state === 'moving') return <State word="Working" />;
+  if (state === 'skipped') return <span className="ck" aria-hidden="true" />;
   return (
     <span
       className={state === 'done' ? 'ck on' : 'ck'}
@@ -68,30 +71,44 @@ function Tick({ state }: { state: SetupStep['state'] }) {
   );
 }
 
-function StepRow({ step, route }: { step: SetupStep; route: ProjectRoute }) {
+function StepRow({
+  step,
+  route,
+  change,
+  busy,
+}: {
+  step: SetupStep;
+  route: ProjectRoute;
+  change: (change: SetupChange) => void;
+  busy: boolean;
+}) {
   const settings = (section: string) => hrefFor({ ...route, place: 'settings', section, rest: '' });
+  const { id } = step;
+  const skipped = step.state === 'skipped';
   const go =
-    step.state !== 'next'
-      ? null
-      : step.id === 'check'
+    !skipped && step.id === 'github'
+      ? { href: settings('mirror'), label: 'Open the mirror' }
+      : step.id === 'check' && step.state === 'next'
         ? { href: settings('checks'), label: 'Choose' }
-        : step.id === 'repository' || step.id === 'mirror'
-          ? { href: settings('mirror'), label: 'Open the mirror' }
-          : null;
+        : null;
   return (
-    <Row weight={step.state === 'done' ? 'ref' : 'watch'} cols="auto minmax(0, 1fr) auto" className="gs-row">
+    <Row
+      weight={step.state === 'done' || skipped ? 'ref' : 'watch'}
+      cols="auto minmax(0, 1fr) auto"
+      className="gs-row"
+    >
       <Tick state={step.state} />
       <div>
         <div className="ttl" dir="auto">
           {step.title}
         </div>
         <div className="meta" dir="auto">
-          {step.fact}
+          {skipped ? 'Skipped' : step.fact}
         </div>
       </div>
       <span className="gs-by">
-        {step.by ? <Who handle={`@${step.by}`} /> : null}
-        {step.at ? (
+        {!skipped && step.by ? <Who handle={`@${step.by}`} /> : null}
+        {!skipped && step.at ? (
           <span className="num t3" title={new Date(step.at).toLocaleString()}>
             {when(step.at)}
           </span>
@@ -100,6 +117,17 @@ function StepRow({ step, route }: { step: SetupStep; route: ProjectRoute }) {
           <A className="btn sm" href={go.href}>
             {go.label}
           </A>
+        ) : null}
+        {id !== 'check' ? (
+          <Key
+            kind="ghost"
+            size="sm"
+            aria-label={`${skipped ? 'Undo skip' : 'Skip'}: ${step.title}`}
+            aria-disabled={busy}
+            onClick={() => change({ step: id, skip: !skipped })}
+          >
+            {skipped ? 'Undo' : 'Skip'}
+          </Key>
         ) : null}
       </span>
     </Row>
@@ -176,38 +204,47 @@ export default function GettingStarted({
   route,
   project,
   lanes,
+  viewer,
+  preferences,
+  change,
+  busy,
+  headingRef,
 }: {
   projectId: Id<'hostedProjects'>;
   route: ProjectRoute;
   project: string;
   /** Lanes on the line now (the frame's feed). */
   lanes: number;
+  viewer: string;
+  preferences: SetupPreferences;
+  headingRef: (heading: HTMLHeadingElement | null) => void;
+  change: (change: SetupChange) => void;
+  busy: boolean;
 }) {
   const client = useConvex();
-  const memo = `forge.setup.settled.${projectId}`;
-  // null: not known yet (one read decides); true: subscribe while setup is unfinished; false: settled, no reads.
-  const [live, setLive] = useState<boolean | null>(() => (recall(memo) ? false : null));
+  const memo = `forge.setup.settled.${projectId}.${viewer}`;
+  const [settled, setSettled] = useState(() => recall(memo));
+  const automatic = preferences.visibility === 'automatic';
+  const live = preferences.visibility === 'shown' || (automatic && !settled);
+  const { value: view, error } = useSafeQuery(
+    api.projectSetup.read,
+    live ? { projectId, checklist: true } : 'skip',
+  );
+  const finished = view !== undefined && !gettingStartedShown(view);
   useEffect(() => {
-    if (live !== null) return;
-    let on = true;
-    void client
-      .query(api.projectSetup.read, { projectId })
-      .then(first => on && setLive(gettingStartedShown(first as SetupView)))
-      .catch(() => on && setLive(false));
-    return () => {
-      on = false;
-    };
-  }, [client, projectId, live]);
-  const view = useQuery(api.projectSetup.read, live ? { projectId } : 'skip') as SetupView | undefined;
-  const settled = live === false || (view !== undefined && !gettingStartedShown(view));
-  useEffect(() => {
-    if (!settled) return;
+    if (!automatic || !finished) return;
     remember(memo);
-    setLive(false);
-  }, [settled, memo]);
-  if (!view || settled) return null;
-  const steps = setupSteps(view, project, lanes);
-  const done = steps.filter(step => step.state === 'done').length;
+    setSettled(true);
+  }, [automatic, finished, memo]);
+  if (error)
+    return (
+      <Region title="Getting started" weight="watch" headingRef={headingRef}>
+        <p className="quietline">Getting started could not be read. Reload this page to try again.</p>
+      </Region>
+    );
+  if (!view || (automatic && finished)) return null;
+  const steps = setupSteps(view, project, lanes, preferences.skipped);
+  const { done, total } = setupProgress(steps);
   const projectUrl = `${location.origin}/${route.handle}/${route.project}`;
   const agentNext = steps.some(step => step.id === 'agent' && step.state === 'next');
   return (
@@ -215,15 +252,16 @@ export default function GettingStarted({
       <Region
         title="Getting started"
         weight="watch"
+        headingRef={headingRef}
         hint={
-          view.firstLanding
-            ? 'All done. This is the last time you see it.'
-            : `${done} of ${steps.length} done. This goes away after the first landing.`
+          <span aria-live="polite">
+            {done} of {total} done
+          </span>
         }
       >
         {askWhoApproves(view) ? <WhoApproves projectId={projectId} /> : null}
         {steps.map(step => (
-          <StepRow key={step.id} step={step} route={route} />
+          <StepRow key={step.id} step={step} route={route} change={change} busy={busy} />
         ))}
         {agentNext ? (
           <div className="pad btns">
@@ -241,6 +279,9 @@ export default function GettingStarted({
             Who approves landings
           </A>
           <A href={hrefFor({ ...route, place: 'settings', section: '', rest: '' })}>Invite a teammate</A>
+          <Key kind="ghost" size="sm" aria-disabled={busy} onClick={() => change({ visibility: 'hidden' })}>
+            Hide getting started
+          </Key>
         </p>
       </Region>
       {agentNext ? (

@@ -37,6 +37,9 @@ import { Head, Placeholder, crumbsFor } from '../Place';
 import { progressCells, progressOf, type PlanCountsRead } from '../progress';
 import type { PlaceProps } from '../screens';
 import GettingStarted from '../start/GettingStarted';
+import { defaultSetupPreferences } from '../start/setup-model';
+import { useSetupPreferences } from '../start/setup-preferences';
+import { Toasts } from '../trash/Toasts';
 import { FlowRegion } from '../flow/Flow';
 import { isConflict, type ConflictNote } from '../lane-state';
 import { useConflictNotes } from '../lanes/reads';
@@ -112,13 +115,30 @@ export default function NeedsMe(props: PlaceProps) {
   return <NeedsMeScreen {...props} />;
 }
 
-function NeedsMeScreen({ route, projectId, projectName, feed, feedError, feedReadAt }: PlaceProps) {
+function NeedsMeScreen({
+  route,
+  projectId,
+  projectName,
+  feed,
+  feedError,
+  feedReadAt,
+  viewerHandle,
+}: PlaceProps) {
   const read = useQuery(needsRead, { projectId });
   const fyiLive = useQuery(fyiRead, { projectId });
   const fyi = useMemo(
     () => (fyiLive === undefined ? undefined : (JSON.parse(fyiLive) as FyiRead)),
     [fyiLive],
   );
+  const setupPreferences = fyi?.setup ?? defaultSetupPreferences;
+  const setupHidden = setupPreferences.visibility === 'hidden';
+  const {
+    change: changeSetup,
+    busy: setupBusy,
+    toast,
+    clear,
+    focusAfterChange,
+  } = useSetupPreferences(projectId, setupPreferences);
   const counts = useQuery(api.projectPlanCounts.read, { projectId });
   usePageCritical('Needs me', {
     feed: Boolean(feed),
@@ -134,39 +154,64 @@ function NeedsMeScreen({ route, projectId, projectName, feed, feedError, feedRea
   const dismissMutation = useMutation(fyiDismiss);
   const abandon = useMutation(dormantAbandon);
   return (
-    <NeedsMeView
-      route={route}
-      projectName={projectName}
-      feed={feed}
-      feedError={feedError}
-      feedReadAt={feedReadAt}
-      drawer={props => <StationDrawer {...props} projectId={projectId} />}
-      conflicts={conflicts}
-      read={read}
-      fyi={fyi}
-      counts={counts}
-      decide={decide}
-      answer={answer}
-      dismissAsk={dismissAsk}
-      dismiss={input => dismissMutation({ projectId, ...input })}
-      loose={open => (
-        <LooseFold
-          projectId={projectId}
-          open={open}
-          setAside={(epoch, ids) => abandon({ projectId, authorityEpoch: epoch, abandon: ids })}
-          allHref={hrefFor({ ...route, section: 'loose-ends', rest: '' })}
-        />
-      )}
-      settingDetail={laneId => <HeldSetting projectId={projectId} laneId={laneId} />}
-      setup={
-        <GettingStarted
-          projectId={projectId}
-          route={route}
-          project={projectName}
-          lanes={feed ? feed.lanes.length : 0}
-        />
-      }
-    />
+    <>
+      <NeedsMeView
+        route={route}
+        projectName={projectName}
+        feed={feed}
+        feedError={feedError}
+        feedReadAt={feedReadAt}
+        drawer={props => <StationDrawer {...props} projectId={projectId} />}
+        conflicts={conflicts}
+        read={read}
+        fyi={fyi}
+        counts={counts}
+        decide={decide}
+        answer={answer}
+        dismissAsk={dismissAsk}
+        dismiss={input => dismissMutation({ projectId, ...input })}
+        loose={open => (
+          <LooseFold
+            projectId={projectId}
+            open={open}
+            setAside={(epoch, ids) => abandon({ projectId, authorityEpoch: epoch, abandon: ids })}
+            allHref={hrefFor({ ...route, section: 'loose-ends', rest: '' })}
+          />
+        )}
+        settingDetail={laneId => <HeldSetting projectId={projectId} laneId={laneId} />}
+        setup={
+          fyi && viewerHandle && !setupHidden ? (
+            <GettingStarted
+              key={`${projectId}:${viewerHandle}`}
+              projectId={projectId}
+              route={route}
+              project={projectName}
+              lanes={feed ? feed.lanes.length : 0}
+              viewer={viewerHandle}
+              preferences={setupPreferences}
+              change={changeSetup}
+              busy={setupBusy}
+              headingRef={focusAfterChange('heading')}
+            />
+          ) : null
+        }
+        setupPinned={setupPreferences.visibility === 'shown'}
+        setupHelp={
+          setupHidden ? (
+            <button
+              type="button"
+              className="lk"
+              ref={focusAfterChange('help')}
+              aria-disabled={setupBusy}
+              onClick={() => changeSetup({ visibility: 'shown' })}
+            >
+              Show getting started
+            </button>
+          ) : null
+        }
+      />
+      <Toasts toast={toast} onGone={clear} />
+    </>
   );
 }
 
@@ -193,6 +238,8 @@ export function NeedsMeView({
   dismiss,
   loose,
   setup,
+  setupPinned,
+  setupHelp,
   settingDetail,
   conflicts,
   now,
@@ -209,6 +256,9 @@ export function NeedsMeView({
   loose?: (open: boolean) => ReactNode;
   /** Getting started (start/GettingStarted.tsx), shown while nothing waits; it hides itself once setup is done. */
   setup?: ReactNode;
+  setupPinned?: boolean;
+  /** Help can restore a hidden checklist even when another decision is waiting. */
+  setupHelp?: ReactNode;
   /** A held settings change, readable (Item 16093ed1); read only while its row is open. */
   settingDetail?: (laneId: string) => ReactNode;
   /** Each Conflict Lane's open notices, for its hover on the picture. */
@@ -622,6 +672,7 @@ export function NeedsMeView({
         ) : null}
       </Head>
       <LaneHelp />
+      {setupHelp ? <p className="needs-help">Help: {setupHelp}</p> : null}
       {setup && view && !view.count ? setup : null}
       <Standing
         of="app"
@@ -645,6 +696,7 @@ export function NeedsMeView({
         onReset={resetLayout}
         singleColumn={phone}
       />
+      {setupPinned && view?.count ? setup : null}
       <Announcer message={message} />
     </div>
   );

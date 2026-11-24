@@ -162,6 +162,10 @@ cached objects and Lane directories.
 
 ## Configure the first hosted check
 
+On the project's **Needs me** page, **Getting started** links to **Settings → Landing and checks** to choose the required check. Bring your own CI; GitHub is not required. **Connect GitHub (optional)** links to the mirror settings if you want to mirror `main` or use a CI file from GitHub Actions, and does not count toward checklist progress.
+
+Use **Skip** on any other step and **Undo** on the same row to restore it. To put the whole checklist away, select **Hide getting started**; restore it from **Needs me → Help → Show getting started**. Forge keeps your choices for that project across devices without changing anyone else's setup or the landing rules. With the checklist hidden, the owner can still choose who approves landings in **Settings → Landing and checks**.
+
 A new project has source but needs a check definition and a runner before the
 first checked landing. In the commands below, replace `ROOT` with the path to
 your hosted clone. The project owner can inspect existing setup with

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { ConvexProvider, type ConvexReactClient } from 'convex/react';
+import { getFunctionName, type FunctionReference } from 'convex/server';
 import { createRoot } from 'react-dom/client';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { PlanRow } from '../../src/planning-model';
@@ -8,6 +9,7 @@ import { ProjectFrame } from '../../web/src/app/frames';
 import type { NeedsRead } from '../../web/src/app/needs/count';
 import type { PlanCountsRead } from '../../web/src/app/progress';
 import type { ProjectRoute } from '../../web/src/app/screen-route';
+import type { SetupChange, SetupPreferences, SetupView } from '../../web/src/app/start/setup-model';
 import '../../web/src/app/app.css';
 import { fakeConvex } from '../convex-fake.mjs';
 
@@ -69,10 +71,80 @@ const reads = new Map<string, unknown>([
   ['projectNeedsMe:read', needs],
   ['projectPlanWorkers:read', JSON.stringify({ lanes: [] })],
 ]);
+const setupFixture = data === 'getting-started';
+const settled = params.has('settled');
+if (settled) localStorage.setItem(`forge.setup.settled.${projectId}.${viewerHandle}`, '1');
+let preferences: SetupPreferences = {
+  visibility: params.has('hidden') ? 'hidden' : 'automatic',
+  skipped: params.has('hidden') ? ['agent'] : [],
+  revision: params.has('hidden') ? 2 : 0,
+};
+const setup: SetupView = {
+  owner: viewerHandle,
+  viewerIsOwner: true,
+  created: { at: 1, by: viewerHandle },
+  repository: null,
+  mirror: null,
+  check: null,
+  firstLanding: settled ? { at: 2 } : null,
+  approvalsAnswered: settled,
+};
+let setupReads = 0;
+const setupWrites: SetupChange[] = [];
 const backend = fakeConvex({
-  resolve: (name: string, args: { projectId?: string }) =>
-    args.projectId === projectId ? reads.get(name) : undefined,
+  resolve: (name: string, args: { projectId?: string }) => {
+    if (args.projectId !== projectId) return undefined;
+    if (setupFixture && name === 'projectNeedsFyi:read')
+      return JSON.stringify({
+        setup: preferences,
+        owner: true,
+        state: { clearedAt: null, clearedSequence: null, dismissed: [] },
+        landings: [],
+        broke: [],
+        settings: [],
+        access: [],
+        messages: [],
+      });
+    if (setupFixture && name === 'projectSetup:read') {
+      setupReads++;
+      return setup;
+    }
+    return reads.get(name);
+  },
 });
+if (setupFixture) {
+  Object.assign(window, {
+    setupStats: () => ({ reads: setupReads, live: backend.count('projectSetup:read'), writes: setupWrites }),
+  });
+  Object.assign(backend.client, {
+    async mutation(
+      ref: FunctionReference<'mutation'>,
+      {
+        change,
+        expectedRevision,
+      }: {
+        change: SetupChange;
+        expectedRevision: number;
+      },
+    ) {
+      if (getFunctionName(ref) !== 'projectSetup:setPreferences' || expectedRevision !== preferences.revision)
+        throw new Error('Unexpected setup write');
+      setupWrites.push(change);
+      preferences =
+        'visibility' in change
+          ? { ...preferences, visibility: change.visibility, revision: preferences.revision + 1 }
+          : {
+              ...preferences,
+              skipped: change.skip
+                ? [...preferences.skipped, change.step]
+                : preferences.skipped.filter(step => step !== change.step),
+              revision: preferences.revision + 1,
+            };
+      backend.invalidate();
+      return preferences;
+    },
+  });
+}
 const { default: Screen } =
   route.place === 'plan'
     ? await import('../../web/src/app/plan/Plan')
@@ -91,7 +163,7 @@ createRoot(document.getElementById('root')!).render(
         route={route}
         projectId={projectId}
         projectName={projectName}
-        viewerHandle={viewerHandle}
+        viewerHandle={params.has('missing-viewer') ? undefined : viewerHandle}
         feed={undefined}
       />
     </ProjectFrame>

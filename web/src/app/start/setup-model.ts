@@ -21,9 +21,20 @@ export type SetupView = {
   approvalsAnswered: boolean;
 };
 
-type StepState = 'done' | 'next' | 'moving' | 'later';
+export type SkippableStep = 'import' | 'github' | 'agent' | 'land';
+export type SetupVisibility = 'automatic' | 'hidden' | 'shown';
+export type SetupPreferences = { visibility: SetupVisibility; skipped: SkippableStep[]; revision: number };
+export type SetupChange = { visibility: SetupVisibility } | { step: SkippableStep; skip: boolean };
+export const defaultSetupPreferences: SetupPreferences = {
+  visibility: 'automatic',
+  skipped: [],
+  revision: 0,
+};
+
+type StepState = 'done' | 'next' | 'moving' | 'later' | 'skipped';
 export type SetupStep = {
-  id: 'import' | 'repository' | 'mirror' | 'check' | 'agent' | 'land';
+  id: SkippableStep | 'check';
+  optional?: boolean;
   title: string;
   fact: string;
   state: StepState;
@@ -46,7 +57,12 @@ export function checkWords(check: NonNullable<SetupView['check']>) {
 }
 
 /** The steps in the order they usually happen; any order works. `lanes` is how many Lanes the line shows now. */
-export function setupSteps(view: SetupView, project: string, lanes: number): SetupStep[] {
+export function setupSteps(
+  view: SetupView,
+  project: string,
+  lanes: number,
+  skipped: readonly SkippableStep[] = [],
+): SetupStep[] {
   const landed = !!view.firstLanding;
   const steps: SetupStep[] = [
     {
@@ -57,37 +73,17 @@ export function setupSteps(view: SetupView, project: string, lanes: number): Set
       by: view.created.by,
       at: view.created.at,
     },
-    view.repository
-      ? {
-          id: 'repository',
-          title: 'Connect the GitHub repository',
-          fact: view.repository.fullName,
-          state: 'done',
-          by: view.repository.by,
-          at: view.repository.at,
-        }
-      : {
-          id: 'repository',
-          title: 'Connect the GitHub repository',
-          fact: 'Only you can allow Forge on GitHub.',
-          state: 'next',
-        },
-    view.mirror
-      ? {
-          id: 'mirror',
-          title: 'Mirror main to GitHub',
-          fact: `On. Each landing pushes one commit to ${view.mirror.repository}.`,
-          state: 'done',
-          at: view.mirror.at,
-        }
-      : {
-          id: 'mirror',
-          title: 'Mirror main to GitHub',
-          fact: view.repository
-            ? 'Off. A CI file checks Forge’s branches only through the mirror.'
-            : 'After the repository.',
-          state: view.repository ? 'next' : 'later',
-        },
+    {
+      id: 'github',
+      optional: true,
+      title: 'Connect GitHub (optional)',
+      fact: view.repository
+        ? `${view.repository.fullName} connected. Use it to mirror main or run a CI file on GitHub Actions.`
+        : 'Connect for a mirror or to run a CI file on GitHub Actions.',
+      state: view.repository ? 'done' : 'next',
+      by: view.repository?.by,
+      at: view.repository?.at,
+    },
     view.check
       ? {
           id: 'check',
@@ -99,8 +95,7 @@ export function setupSteps(view: SetupView, project: string, lanes: number): Set
       : {
           id: 'check',
           title: 'Choose the check that decides a landing',
-          fact: 'Nothing can land until a check is chosen.',
-          // Not held behind the GitHub mirror: only a CI file on GitHub needs it, and any CI can decide a landing.
+          fact: 'A check is required to land. Bring your own CI; GitHub is not required.',
           state: 'next',
         },
     lanes > 0 || landed
@@ -133,7 +128,14 @@ export function setupSteps(view: SetupView, project: string, lanes: number): Set
             state: 'later',
           },
   ];
-  return steps;
+  return steps.map(step =>
+    step.id !== 'check' && skipped.includes(step.id) ? { ...step, state: 'skipped' } : step,
+  );
+}
+
+export function setupProgress(steps: SetupStep[]) {
+  const counted = steps.filter(step => !step.optional && step.state !== 'skipped');
+  return { done: counted.filter(step => step.state === 'done').length, total: counted.length };
 }
 
 /** Getting started shows until the first landing; then once more for the one question, until it is answered. */
