@@ -9,7 +9,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { itemWorkFixture as fixture } from './item-work-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-const { liveLanes } = await import(moduleUrl('../src/hosted-live-lanes.ts'));
+import { successorIntentId } from '../dist/hosted-intent-chain.js';
+const { liveLanes, liveLanesInput } = await import(moduleUrl('../src/hosted-live-lanes.ts'));
+const fill = await import(moduleUrl('../convex/projectItemLaneBackfill.ts'));
+const { verifiedItemMembership } = await import(moduleUrl('../convex/projectItemMembershipVersion.ts'));
 const other = 'b'.repeat(64);
 const at = '2026-01-01T00:00:00.000Z';
 
@@ -73,6 +76,185 @@ test('an Item read lists its Lanes in every state, landed ones with receipt, com
   // overlap point read: 30 documents, about 8 KB.
   assert(count.documents <= 32, JSON.stringify(count));
   assert(count.readBytes < 12 * 1024, JSON.stringify(count));
+});
+
+test('the Item Lane fill resumes and newest-first pages include older history without rereading it', async t => {
+  const s = await fixture({ details: true, extra: 65 });
+  const projectId = s.auth.projectId;
+  const newest = { ...s.abandoned, id: randomUUID() };
+  await s.put(newest);
+  await s.read({ limit: 7 });
+  const legacy = s.counts.at(-1);
+  dev(t);
+  const backfill = after => repair(s, after);
+  const firstFill = await backfill(null);
+  assert(firstFill.next);
+  assert.equal((await s.ctx.db.get(projectId)).itemLaneMembership, firstFill.next);
+  assert.deepEqual(await backfill(null), { scanned: 0, patched: 0, next: firstFill.next });
+  await finishRepair(s, firstFill.next);
+  assert.equal((await s.ctx.db.get(projectId)).itemLaneMembership, verifiedItemMembership);
+  const first = await s.read({ limit: 7 });
+  const indexed = s.counts.at(-1);
+  assert.equal(first.lanes[0].laneId, newest.id, 'a newer abandoned Lane appears before an older open Lane');
+  assert.equal(first.atLeast, true);
+  assert(first.nextCursor);
+  const seen = first.lanes.map(lane => lane.laneId);
+  let page = first;
+  for (let step = 0; page.nextCursor && step < 15; step++) {
+    page = await s.read({ limit: 7, cursor: page.nextCursor });
+    seen.push(...page.lanes.map(lane => lane.laneId));
+  }
+  assert.equal(page.nextCursor, null);
+  assert.equal(page.total, 70);
+  assert.equal(new Set(seen).size, 70);
+  assert.equal(seen.length, 70);
+  assert(seen.includes(s.abandoned.id));
+  t.diagnostic(
+    JSON.stringify({
+      legacy: legacy.readBytes,
+      indexed: indexed.readBytes,
+      saved: legacy.readBytes - indexed.readBytes,
+    }),
+  );
+  assert(indexed.readBytes < legacy.readBytes);
+});
+
+test('the released CLI and MCP Lane parser can resume a server-issued indexed Item Work cursor', async t => {
+  const s = await fixture({ details: true, extra: 2 });
+  dev(t);
+  const legacy = await s.read({ limit: 1 });
+  await finishRepair(s, null);
+  const first = await s.read({ limit: 1 });
+  assert(first.nextCursor);
+  const input = { planningItemId: s.itemId, state: 'all', cursor: first.nextCursor, limit: 1 };
+  assert(liveLanesInput.safeParse(input).success, 'released wire envelope accepted by the MCP parser');
+  let calls = 0;
+  const transport = {
+    query: (fn, args) => {
+      assert.equal(fn, 'projectItemWork:read');
+      calls++;
+      return s.read(args);
+    },
+  };
+  const next = await liveLanes(transport, input);
+  assert.equal(calls, 1);
+  assert.equal(next.result.page.length, 1);
+  assert.notEqual(next.result.page[0].laneId, first.lanes[0].laneId);
+  assert.equal((await s.read({ limit: 1, cursor: legacy.nextCursor })).lanes.length, 1);
+});
+
+test('old coverage cannot hide a Lane whose legacy lifecycle materialization dropped its stamp', async t => {
+  const s = await fixture({ details: true });
+  dev(t);
+  const projectId = s.auth.projectId;
+  const lane = [...s.tables.projectHostedRecordHeads.values()].find(
+    head => head.kind === 'lane' && head.key === s.abandoned.id,
+  );
+  assert(lane);
+  // Replay the old deployment’s persisted state immediately after a cascade replaced the head.
+  await s.ctx.db.patch(lane._id, { planningItemId: undefined });
+  await s.ctx.db.patch(projectId, { itemLaneMembership: true });
+  assert((await s.read()).lanes.some(row => row.laneId === s.abandoned.id));
+  await finishRepair(s, null);
+  assert.equal((await s.ctx.db.get(lane._id)).planningItemId, s.itemId);
+  assert((await s.read()).lanes.some(row => row.laneId === s.abandoned.id));
+});
+
+function dev(t) {
+  const before = process.env.CONVEX_CLOUD_URL;
+  process.env.CONVEX_CLOUD_URL = 'https://benevolent-wildebeest-974.convex.cloud';
+  t.after(() => {
+    if (before === undefined) delete process.env.CONVEX_CLOUD_URL;
+    else process.env.CONVEX_CLOUD_URL = before;
+  });
+}
+
+const repair = (s, after) => s.call('fill', fill.run, { projectId: s.auth.projectId, after });
+async function finishRepair(s, after = null) {
+  for (let pages = 0; pages < 20; pages++) {
+    const result = await repair(s, after);
+    if (result.next === null) return;
+    assert.notEqual(result.next, after, 'checkpoint advances');
+    after = result.next;
+  }
+  assert.fail('repair did not complete in the fixture');
+}
+
+test('the dev repair follows a 70-hop markerless chain and keeps Intent-born and legacy Resolution Lanes visible', async t => {
+  dev(t);
+  const s = await fixture({ details: true });
+  const intent = [...s.tables.projectHostedRecordHeads.values()].find(row => row.kind === 'intent');
+  await s.ctx.db.patch(intent._id, { planningItemId: '' });
+  let id = s.itemId;
+  for (let i = 1; i <= 70; i++) {
+    id = successorIntentId(id);
+    await s.put({
+      kind: 'intent',
+      id,
+      version: 0,
+      at,
+      outcome: 'Prior Item work',
+      constraints: '',
+      creatorAccountId: 'owner',
+      assigneeAccountIds: [],
+      base: s.open.base,
+      status: 'completed',
+    });
+  }
+  const older = {
+    ...s.open,
+    id: randomUUID(),
+    intentId: successorIntentId(s.itemId),
+    resolution: {
+      candidateId: null,
+      conflicts: { sha256: other, size: 5 },
+      left: other,
+      right: other,
+      draftHead: other,
+      status: 'pending',
+    },
+  };
+  const newest = { ...s.open, id: randomUUID(), intentId: id };
+  await s.put(older);
+  await s.put(newest);
+  const neighbor = successorIntentId(id);
+  await s.planning(neighbor, { title: 'A separate same-ID Item must keep its ownership' });
+  await s.put({
+    kind: 'intent',
+    id: neighbor,
+    version: 0,
+    at,
+    outcome: 'Separate Item',
+    constraints: '',
+    creatorAccountId: 'owner',
+    assigneeAccountIds: [],
+    base: s.open.base,
+    status: 'active',
+  });
+  const unrelated = { ...s.open, id: randomUUID(), intentId: neighbor };
+  await s.put(unrelated);
+  const existing = [...s.tables.projectHostedRecordHeads.values()].find(row => row.key === s.open.id);
+  await s.ctx.db.patch(existing._id, { planningItemId: '' });
+  await finishRepair(s);
+  const result = await s.read({ limit: 20 });
+  assert.equal(result.intent, 'completed');
+  assert.equal((await s.read({ details: true, limit: 20 })).intent, result.intent);
+  for (const lane of [s.open, older, newest]) assert(result.lanes.some(row => row.laneId === lane.id));
+  assert(!result.lanes.some(row => row.laneId === unrelated.id));
+  assert((await s.read({ itemId: neighbor })).lanes.some(row => row.laneId === unrelated.id));
+  const repaired = [...s.tables.projectHostedRecordHeads.values()].filter(
+    row => row.kind === 'intent' && row.planningItemId === s.itemId,
+  );
+  assert.equal(repaired.length, 71);
+});
+
+test('Item membership repair refuses to write from a deployment other than dev', async t => {
+  const s = await fixture();
+  dev(t);
+  process.env.CONVEX_CLOUD_URL = 'https://fixture-prod.convex.cloud';
+  await assert.rejects(repair(s, null), error => error.code === 'PROJECT_UNAVAILABLE');
+  const project = await s.ctx.db.get(s.auth.projectId);
+  assert.equal(project.itemLaneMembership, undefined);
 });
 
 test('Item-page details link recorded saves, acceptance evidence and settled relation titles without writes', async () => {

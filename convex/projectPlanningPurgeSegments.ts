@@ -8,8 +8,9 @@ import type { Id } from './_generated/dataModel';
 import { internalMutation, internalQuery, type MutationCtx } from './server';
 import { landingCapsulePointer } from './projectLandingCapsuleFields';
 import { purgeRows, type ItemPurge } from './projectPlanningPurgeRedact';
-import { purgeIntentChain } from './projectPlanningPurgeSelect';
-import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { itemIntentPage, type ItemIntentPosition } from './projectItemIntentPages';
+import { recordHead } from './projectHostedRecords';
+import { intentBelongsToItem } from './projectItemIntentHeads';
 import { indexedSweepPage } from './projectPlanningArchiveSweep';
 import { archiveSegmentRow } from './projectPlanningArchiveIndex';
 
@@ -53,15 +54,47 @@ export const page = internalQuery({
   args: {
     projectId: v.id('hostedProjects'),
     after: v.union(v.string(), v.null()),
-    indexed: v.optional(v.object({ ids: v.array(v.string()), intentKeys: v.array(v.string()) })),
+    indexed: v.optional(
+      v.object({
+        ids: v.array(v.string()),
+        itemId: v.string(),
+        legacyKeys: v.optional(v.array(v.string())),
+      }),
+    ),
   },
   returns: v.any(),
   handler: async (ctx, input) => {
-    if (input.indexed) {
-      const result = await indexedSweepPage(ctx, input.projectId, input.indexed, input.after);
+    if (input.indexed?.legacyKeys) {
+      const { ids, legacyKeys: intentKeys } = input.indexed;
+      const result = await indexedSweepPage(ctx, input.projectId, { ids, intentKeys }, input.after);
       return {
-        ...result,
         entries: result.entries.map(row => ({ key: row.key, index: JSON.parse(row.value) as JournalIndex })),
+        after: result.after,
+        done: result.done,
+        intentKeys,
+      };
+    }
+    if (input.indexed) {
+      const prefix = 'item-intents-v1:';
+      // Older indexed sweeps restart their idempotent pass when first resumed after this deploy.
+      const position: { membership: ItemIntentPosition | null; child: string | null } =
+        input.after?.startsWith(prefix)
+          ? JSON.parse(input.after.slice(prefix.length))
+          : { membership: null, child: null };
+      const group = await itemIntentPage(ctx, input.projectId, input.indexed.itemId, position.membership, 16);
+      const intentKeys = group.heads.map(head => head.key);
+      const ids = position.membership === null ? input.indexed.ids : [];
+      const result = await indexedSweepPage(ctx, input.projectId, { ids, intentKeys }, position.child);
+      const done = result.done && group.next === null;
+      const next = result.done
+        ? { membership: group.next, child: null }
+        : { ...position, child: result.after };
+      return {
+        entries: result.entries.map(row => ({ key: row.key, index: JSON.parse(row.value) as JournalIndex })),
+        after: done ? null : prefix + JSON.stringify(next),
+        done,
+        intentKeys,
+        scope: JSON.stringify(position.membership),
       };
     }
     const selected = ctx.db.query('projectJournalSegments').withIndex('by_project_and_key', q => {
@@ -88,7 +121,7 @@ export const claim = internalMutation({
   args: claimed,
   returns: v.any(),
   handler: async (ctx, input) => {
-    const { project, purge, sweep, save } = await sweepEntry(ctx, input);
+    const { purge, sweep, save } = await sweepEntry(ctx, input);
     if (sweep.done || purge.purgedAt !== undefined) return null;
     invariant(
       !sweep.claim || sweep.claim.id === input.claim || sweep.claim.until <= Date.now(),
@@ -97,16 +130,29 @@ export const claim = internalMutation({
     );
     // Outlast the action's hard deadline so a replacement worker cannot race the original R2 upload.
     await save({ ...sweep, claim: { id: input.claim, until: Date.now() + 11 * 60_000 } });
-    const generation = await selectedGeneration(ctx, project);
-    invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before purging.');
-    const intentKeys =
-      purge.intentKeys ??
-      (await purgeIntentChain(ctx, input.projectId, purge.itemId, recordPartition(generation)));
     return {
-      purge: { ...purge, intentKeys },
+      purge,
       sweep,
       rows: await purgeRows(ctx, input.projectId, input.operationId),
     };
+  },
+});
+
+/** Legacy archive pages have no complete record index. Resolve their verified headers in
+ * bounded batches against the same Item relation before removing any archived bytes. */
+export const members = internalQuery({
+  args: { ...purgeSegmentIdentity, keys: v.array(v.string()) },
+  returns: v.array(v.string()),
+  handler: async (ctx, input) => {
+    invariant(input.keys.length <= 128, 'BAD_ARGUMENT', 'Read at most 128 archive Intent keys at a time.');
+    const project = await ctx.db.get(input.projectId);
+    const purge = project?.itemPurges?.find(entry => entry.operationId === input.operationId);
+    invariant(purge && purge.purgedAt === undefined, 'WORK_STALE', 'The Item purge is not active.');
+    const keys = [...new Set(input.keys)];
+    const legacyKeys = purge.intentKeys;
+    if (legacyKeys) return keys.filter(key => legacyKeys.includes(key));
+    const heads = await Promise.all(keys.map(key => recordHead(ctx, input.projectId, 'intent', key)));
+    return heads.flatMap(head => (head && intentBelongsToItem(head, purge.itemId) ? [head.key] : []));
   },
 });
 

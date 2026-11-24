@@ -14,7 +14,8 @@ import {
   purgedFactsText,
   redactPlanningWrite,
 } from '../src/work-intent-types';
-import { purgedIndexValue, purgedIntentKeys, purgedIntentRecord } from '../src/work-planning-purge';
+import { purgedIndexValue, purgedIntentRecord } from '../src/work-planning-purge';
+import { itemIntentPage, type ItemIntentPosition } from './projectItemIntentPages';
 import { hostedRecordIndex, hostedRecordValue } from '../src/hosted-records';
 import { PURGED_ITEM_TITLE } from '../src/work-planning-types';
 import { indexedRecord } from '../src/work-hosted-index';
@@ -23,7 +24,6 @@ import { record, recordPartition, selectedGeneration } from './projectWorkIndexS
 import { hostedRecordBody, recordHead, recordVersion } from './projectHostedRecords';
 import { fingerprintHostedIntent } from './projectWorkStoreFingerprintWrites';
 import { purgeLifecyclePlans } from './projectPlanningPurgeLifecycle';
-import { purgeIntentChain } from './projectPlanningPurgeSelect';
 import { removeArtifact } from './artifactStorage';
 import { projectPrefix } from './r2Operations';
 
@@ -225,15 +225,8 @@ async function pageOf(
     const artifacts = await discussionArtifacts(ctx, apply, projectId, purge.itemId, null);
     return { changes: heads.changes + artifacts.changes, after: artifacts.after };
   }
-  if (input.step === 'lifecyclePlans') {
-    const project = await ctx.db.get(input.projectId);
-    const generation = project && (await selectedGeneration(ctx, project));
-    invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before purging.');
-    const keys =
-      purge.intentKeys ??
-      (await purgeIntentChain(ctx, input.projectId, purge.itemId, recordPartition(generation)));
-    return purgeLifecyclePlans(ctx, write, input.projectId, keys, input.after);
-  }
+  if (input.step === 'lifecyclePlans')
+    return purgeLifecyclePlans(ctx, write, input.projectId, purge, input.after);
   if (input.step === 'storeIntents') return storeIntents(ctx, write, input.projectId, purge, input.after);
   if (input.step === 'overlapLanes') return overlapLanes(ctx, write, input.projectId, purge, input.after);
   const parentStep = parentSteps.find(([collection]) => collection === input.step);
@@ -518,8 +511,7 @@ const BODY_OWNER_LIMIT = 16;
 
 /** The work store's versions of the Item's Intent and of each successor Intent a later start continued it on (they
  * copy its outcome): the head becomes a new 'Deleted Item' version (purgedIntentRecord) and every older version is
- * purged (marker, no inline, body emptied), journal copies and Lane-pinned versions alike. One page of one Intent;
- * the chain ends at the first id with no record. Cursor: "<chain index>|<index cursor>". */
+ * purged (marker, no inline, body emptied), journal copies and Lane-pinned versions alike. One page of one Intent. */
 async function storeIntents(
   ctx: Ctx,
   write: MutationCtx['db'] | undefined,
@@ -527,13 +519,13 @@ async function storeIntents(
   purge: ItemPurge,
   after: string | null,
 ) {
-  const at = after === null ? 0 : Number(after.split('|')[0]),
-    cursor = after === null ? null : after.slice(after.indexOf('|') + 1) || null;
-  const { key, keys } = await chainKey(ctx, projectId, purge, at);
-  let head = key === null ? null : await recordHead(ctx, projectId, 'intent', key);
-  if (!head || key === null) return { changes: 0, after: null };
+  const selection = await intentChildPage(ctx, projectId, purge, after);
+  const key = selection.key;
+  if (!key) return { changes: 0, after: null };
+  let head = selection.head ?? (await recordHead(ctx, projectId, 'intent', key));
+  if (!head) return { changes: 0, after: selection.advance({ isDone: true, continueCursor: '' }) };
   let changes = 0;
-  if (cursor === null) {
+  if (selection.child === null) {
     const deleted = await deletedIntentVersion(ctx, write, projectId, purge, head);
     changes += deleted;
     if (deleted && write) head = (await recordHead(ctx, projectId, 'intent', key))!;
@@ -543,31 +535,60 @@ async function storeIntents(
     .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
       q.eq('projectId', projectId).eq('kind', 'intent').eq('key', key),
     )
-    .paginate({ cursor, numItems: PURGE_PAGE });
+    .paginate({ cursor: selection.child, numItems: PURGE_PAGE });
   for (const row of page.page)
     if (row._id !== head.recordId) changes += await storeRecord(ctx, write, row, purge);
-  return {
-    changes,
-    after: !page.isDone ? `${at}|${page.continueCursor}` : at + 1 < keys.length ? `${at + 1}|` : null,
-  };
+  return { changes, after: selection.advance(page) };
 }
 
-/** The chain's Intent id at `at`, or null where the chain ends: a successor id that names a planning Item of its own
- * (an Issue someone created under that id) is that Issue's, never this one's. One indexed read per successor. */
-async function chainKey(ctx: Ctx, projectId: Id<'hostedProjects'>, purge: ItemPurge, at: number) {
-  const keys = purgedIntentKeys(purge.itemId),
-    key = keys[at]!;
-  if (at === 0) return { key, keys };
-  const project = await ctx.db.get(projectId);
-  const generation = project && (await selectedGeneration(ctx, project));
-  invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before purging.');
-  const own = await record(ctx, recordPartition(generation), 'planningItems', key);
-  return { key: own ? null : key, keys };
+// Old numeric cursors restart this idempotent phase. New cursors bind to an immutable Intent
+// index position and the child pagination token; neither contains the Item's growing history.
+async function intentChildPage(
+  ctx: Ctx,
+  projectId: Id<'hostedProjects'>,
+  purge: ItemPurge,
+  after: string | null,
+) {
+  // The old writer could replace a head without its stamp. The persisted set is authoritative
+  // for such a purge, including on retries of an already partially swept phase.
+  if (purge.intentKeys) {
+    const [index, ...tail] = after && !after.startsWith('{') ? after.split('|') : ['0'];
+    const at = Number(index);
+    return {
+      key: purge.intentKeys[at],
+      head: undefined,
+      child: tail.join('|') || null,
+      advance: (page: { isDone: boolean; continueCursor: string }) =>
+        !page.isDone
+          ? `${at}|${page.continueCursor}`
+          : at + 1 < purge.intentKeys!.length
+            ? `${at + 1}|`
+            : null,
+    };
+  }
+  const { position, child }: { position: ItemIntentPosition | null; child: string | null } =
+    after?.startsWith('{') ? JSON.parse(after) : { position: null, child: null };
+  const {
+    heads: [head],
+    next,
+  } = await itemIntentPage(ctx, projectId, purge.itemId, position, 1);
+  return {
+    key: head?.key,
+    head,
+    child,
+    advance: (page: { isDone: boolean; continueCursor: string }) =>
+      page.isDone && next === null
+        ? null
+        : JSON.stringify({
+            position: page.isDone ? next : position,
+            child: page.isDone ? null : page.continueCursor,
+          }),
+  };
 }
 
 /** Each Lane on the Item's Intents keeps the Intent's outcome (cut to 160 characters) on its overlap row, for overlap
  * and presence notices (convex/projectHostedOverlapStore.ts): it takes the 'Deleted Item' form. One page of Lane
- * heads of one chain Intent. Cursor: "<chain index>|<index cursor>". */
+ * heads of one Intent. */
 async function overlapLanes(
   ctx: Ctx,
   write: MutationCtx['db'] | undefined,
@@ -575,16 +596,15 @@ async function overlapLanes(
   purge: ItemPurge,
   after: string | null,
 ) {
-  const at = after === null ? 0 : Number(after.split('|')[0]),
-    cursor = after === null ? null : after.slice(after.indexOf('|') + 1) || null;
-  const { key, keys } = await chainKey(ctx, projectId, purge, at);
-  if (key === null || !(await recordHead(ctx, projectId, 'intent', key))) return { changes: 0, after: null };
+  const selection = await intentChildPage(ctx, projectId, purge, after);
+  const key = selection.key;
+  if (!key) return { changes: 0, after: null };
   const page = await ctx.db
     .query('projectHostedRecordHeads')
     .withIndex('by_project_and_kind_and_parent', q =>
       q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', key),
     )
-    .paginate({ cursor, numItems: PURGE_PAGE });
+    .paginate({ cursor: selection.child, numItems: PURGE_PAGE });
   let changes = 0;
   for (const lane of page.page) {
     const row = await ctx.db
@@ -595,10 +615,7 @@ async function overlapLanes(
     changes++;
     if (write) await write.patch(row._id, { intent: PURGED_ITEM_TITLE });
   }
-  return {
-    changes,
-    after: !page.isDone ? `${at}|${page.continueCursor}` : at + 1 < keys.length ? `${at + 1}|` : null,
-  };
+  return { changes, after: selection.advance(page) };
 }
 
 /** Write the head's 'Deleted Item' version unless the head already is one (1 when it was, or would be, written). */
@@ -633,7 +650,12 @@ async function deletedIntentVersion(
     digest: ref.digest,
     bytes: ref.bytes,
   });
-  await write.replace(head._id, { ...identity, ...indexed, recordId });
+  await write.replace(head._id, {
+    ...identity,
+    ...indexed,
+    recordId,
+    ...(head.planningItemId !== undefined ? { planningItemId: head.planningItemId } : {}),
+  });
   // The same store fingerprint a hosted Intent write keeps (convex/projectHostedRecords.ts writeHostedRecord).
   const project = await ctx.db.get(projectId);
   if (project)

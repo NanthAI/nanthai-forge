@@ -100,7 +100,7 @@ export async function based(
   // A base converted to Intents keeps the pre-conversion planning records inline (legacyIntentMerge).
   if (legacy)
     data.legacyIntentMerge = {
-      intents: [],
+      intents: typeof legacy === 'function' ? legacy(item.itemId) : [],
       planningItems: data.planningItems.map(row => ({ ...row, body: `${row.body} legacy` })),
       planningComments: structuredClone(data.planningComments),
       fields: {},

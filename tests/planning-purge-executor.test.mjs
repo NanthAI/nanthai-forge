@@ -678,6 +678,7 @@ async function pinAndContinue(s, itemId) {
       authorityEpoch: 1,
       record,
       expectedVersion,
+      ...(expectedVersion === null ? { planningItemId: itemId } : {}),
     });
   const base = { head: 'b'.repeat(64), receiptId: 'receipt-1' };
   await write({ ...stored, version: head.version + 1, base, status: 'active' }, head.version);
@@ -701,9 +702,60 @@ async function pinAndContinue(s, itemId) {
   return successor;
 }
 
-test('purge Lane 3, records mode: an Intent-born Item (Lane-pinned, continued on a successor, with a handoff) ends with a Deleted Item Intent version, every older version purged, and its words in no table', async t => {
+async function repairLegacyMembership(s) {
+  const old = process.env.CONVEX_CLOUD_URL;
+  process.env.CONVEX_CLOUD_URL = 'https://benevolent-wildebeest-974.convex.cloud';
+  try {
+    const { run } = await import(moduleUrl('../convex/projectItemLaneBackfill.ts'));
+    let after = null;
+    for (let i = 0; i < 10; i++) {
+      const result = await run._handler(s.ctx, { projectId: s.projectId, after });
+      if (result.next === null) return;
+      after = result.next;
+    }
+    assert.fail('the fixture repair did not finish');
+  } finally {
+    if (old === undefined) delete process.env.CONVEX_CLOUD_URL;
+    else process.env.CONVEX_CLOUD_URL = old;
+  }
+}
+
+async function oldSuccessor(s, itemId) {
+  const successor = await pinAndContinue(s, itemId);
+  const head = await hostedRecords.recordHead(s.ctx, s.projectId, 'intent', successor);
+  const row = await readIntent(s, successor);
+  const record = JSON.parse(row.value);
+  await hostedRecords.writeHostedRecord(s.ctx, {
+    projectId: s.projectId,
+    actor: 'owner',
+    authorityEpoch: 1,
+    expectedVersion: head.version,
+    record: { ...record, status: 'completed', version: head.version + 1 },
+  });
+  await s.ctx.db.patch(head._id, { planningItemId: undefined });
+  return successor;
+}
+
+test('incident 846c635b: purge leaves no words in 25 Intent histories (including a repaired markerless successor), overlaps, or handoffs', async t => {
   const { s, itemId } = await deletedItem(t, { records: true });
   const successor = await pinAndContinue(s, itemId);
+  const members = [itemId, successor];
+  const previous = JSON.parse((await readIntent(s, successor)).value);
+  while (members.length < 25) {
+    const key = successorIntentId(members.at(-1));
+    await hostedRecords.writeHostedRecord(s.ctx, {
+      projectId: s.projectId,
+      actor: 'owner',
+      authorityEpoch: 1,
+      record: { ...previous, id: key, status: 'completed' },
+      expectedVersion: null,
+      planningItemId: itemId,
+    });
+    members.push(key);
+  }
+  const markerless = await hostedRecords.recordHead(s.ctx, s.projectId, 'intent', successor);
+  await s.ctx.db.patch(markerless._id, { planningItemId: undefined });
+  await repairLegacyMembership(s);
   // A legacy handoff note: the Intent header lists its summary and the note keeps the handoff's free text.
   const project = s.tables.hostedProjects.get(s.projectId);
   for (const row of workRecordRows(s.tables))
@@ -721,31 +773,33 @@ test('purge Lane 3, records mode: an Intent-born Item (Lane-pinned, continued on
       row.value = JSON.stringify(value);
     }
   // The Lane on the Intent keeps the outcome on its overlap row (review finding 2).
-  const laneId = randomUUID();
-  await s.ctx.db.insert('projectHostedRecordHeads', {
-    projectId: s.projectId,
-    kind: 'lane',
-    key: laneId,
-    parent: itemId,
-    status: 'completed',
-    version: 0,
-    recordId: 'lane-record',
-  });
-  await s.ctx.db.insert('projectHostedOverlapLanes', {
-    projectId: s.projectId,
-    laneId,
-    intentId: itemId,
-    actor: 'owner',
-    intent: `Title ${SECRET}`,
-    head: 'h',
-    baseHead: 'h',
-    baseReceiptId: 'receipt-1',
-    baseSequence: null,
-    recordVersion: 0,
-    open: false,
-    pathSummary: { paths: [], pathCount: 0 },
-    complete: true,
-  });
+  for (const intentId of members) {
+    const laneId = randomUUID();
+    await s.ctx.db.insert('projectHostedRecordHeads', {
+      projectId: s.projectId,
+      kind: 'lane',
+      key: laneId,
+      parent: intentId,
+      status: 'completed',
+      version: 0,
+      recordId: 'lane-record',
+    });
+    await s.ctx.db.insert('projectHostedOverlapLanes', {
+      projectId: s.projectId,
+      laneId,
+      intentId,
+      actor: 'owner',
+      intent: `Title ${SECRET}`,
+      head: 'h',
+      baseHead: 'h',
+      baseReceiptId: 'receipt-1',
+      baseSequence: null,
+      recordVersion: 0,
+      open: false,
+      pathSummary: { paths: [], pathCount: 0 },
+      complete: true,
+    });
+  }
   const before = storeIntents(s, itemId);
   assert.ok(before.length >= 3 && storeIntents(s, successor).length === 1);
   const done = await executor(s).run(itemId, randomUUID());
@@ -759,7 +813,7 @@ test('purge Lane 3, records mode: an Intent-born Item (Lane-pinned, continued on
     [],
     'no table holds the words: Intent versions, successor and handoffs included',
   );
-  for (const key of [itemId, successor]) {
+  for (const key of members) {
     const versions = storeIntents(s, key),
       head = versions.at(-1);
     // The Intent copy reads 'Deleted Item' in a new version (its head), and keeps its status and base.
@@ -1228,6 +1282,87 @@ async function purgeArchiveFixture(t, { history, indexed }) {
   assert.deepEqual(secretRows(s), []);
 }
 
+test('indexed archive purge retires an archive holding a repaired markerless successor version', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const successor = await oldSuccessor(s, itemId);
+  const old = await oldIntentSegment(s, r2, successor);
+  await repairLegacyMembership(s);
+  s.tables.hostedProjects.get(s.projectId).journalRevision = 1;
+  const worker = executor(s);
+  await backfillArchive(s, worker.ctx);
+  const purgeId = randomUUID();
+  const done = await worker.run(itemId, purgeId);
+  assert.equal(typeof done.purgedAt, 'number');
+  assert(old.keys.every(key => !r2.objects.has(key)));
+  assert.equal(s.tables.projectHostedRecords.get(old.record._id).purged, purgeId);
+  assert.equal(
+    [...r2.objects.values()].some(bytes => gunzipSync(bytes).includes(SECRET)),
+    false,
+  );
+  assert.deepEqual(secretRows(s), []);
+});
+
+test('a purge resumed across the Item membership cutover scrubs the old writer’s unstamped successor', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const successor = await oldSuccessor(s, itemId);
+  const old = await oldIntentSegment(s, r2, successor);
+  await repairLegacyMembership(s);
+  const project = s.tables.hostedProjects.get(s.projectId);
+  project.journalRevision = 1;
+  const laneId = randomUUID();
+  await s.ctx.db.insert('projectHostedRecordHeads', {
+    projectId: s.projectId,
+    kind: 'lane',
+    key: laneId,
+    parent: successor,
+    status: 'completed',
+    version: 0,
+    recordId: 'lane-record',
+  });
+  const overlap = await s.ctx.db.insert('projectHostedOverlapLanes', {
+    projectId: s.projectId,
+    laneId,
+    intentId: successor,
+    actor: 'owner',
+    intent: `Title ${SECRET}`,
+    head: 'h',
+    baseHead: 'h',
+    baseReceiptId: 'receipt-1',
+    baseSequence: null,
+    recordVersion: 0,
+    open: false,
+    pathSummary: { paths: [], pathCount: 0 },
+    complete: true,
+  });
+  const purgeId = randomUUID();
+  const interrupted = executor(s, Infinity, async (module, name, args) => {
+    if (module !== 'projectPlanningPurge' || name !== 'redact' || args.step !== 'overlapLanes') return;
+    const head = await hostedRecords.recordHead(s.ctx, s.projectId, 'intent', successor);
+    assert.equal(JSON.parse((await readIntent(s, successor)).value).outcome, 'Deleted Item');
+    // Persist exactly the old writer's state: begin recorded the bounded chain; replace omitted its stamp.
+    await s.ctx.db.patch(head._id, { planningItemId: undefined });
+    const current = s.tables.hostedProjects.get(s.projectId);
+    const [purge, ...others] = current.itemPurges;
+    assert.equal(purge.operationId, purgeId);
+    assert.equal(purge.segmentSweep.indexed, true);
+    await s.ctx.db.patch(s.projectId, {
+      itemPurges: [{ ...purge, intentKeys: [itemId, successor] }, ...others],
+    });
+    throw new Error('deploy cutover');
+  });
+  await backfillArchive(s, interrupted.ctx);
+  await assert.rejects(interrupted.run(itemId, purgeId), /deploy cutover/);
+  assert.equal((await s.ctx.db.get(overlap)).intent, `Title ${SECRET}`);
+  assert(old.keys.some(key => r2.objects.has(key)));
+  const done = await executor(s).run(itemId, purgeId);
+  assert.equal(typeof done.purgedAt, 'number');
+  assert.equal((await s.ctx.db.get(overlap)).intent, 'Deleted Item');
+  assert(old.keys.every(key => !r2.objects.has(key)));
+  assert.deepEqual(secretRows(s), []);
+});
+
 test('purge rewrites only the affected archive objects, preserves original event retries, and rebuilds without fixture text', t =>
   purgeArchiveFixture(t, { history: 20, indexed: false }));
 test('indexed purge visits only its archive segments with ordinary history', t =>
@@ -1505,6 +1640,33 @@ test('an interrupted purge retires the original R2 object on retry without uploa
 test('indexed retirement retries the original delete and then visits the rest of the page', t =>
   retryArchiveRetirement(t, true));
 
+test('a linked successor cannot retain a new lifecycle reason during an Item purge', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true });
+  const intentId = await pinAndContinue(s, itemId);
+  const stopped = executor(s, Infinity, (module, name, args) => {
+    if (module === 'projectPlanningPurge' && name === 'redact' && args.step === 'overlapLanes')
+      throw new Error('executor stopped after lifecycle redaction');
+  });
+  await assert.rejects(stopped.run(itemId, randomUUID()), /stopped after lifecycle redaction/);
+  const head = await hostedRecords.recordHead(s.ctx, s.projectId, 'intent', intentId);
+  const lifecycle = await import(moduleUrl('../convex/projectHostedLifecycle.ts'));
+  const operationId = randomUUID();
+  const request = canonicalPayload({
+    operationId,
+    authorityEpoch: 1,
+    action: 'abandon',
+    reason: `Do not retain ${SECRET}`,
+    target: { kind: 'intent', intentId, version: head.version },
+  });
+  await lifecycle.transition._handler(s.ctx, { projectId: s.projectId, request });
+  const plan = [...s.tables.projectHostedLifecyclePlans.values()].find(
+    row => row.operationId === operationId,
+  );
+  const event = [...s.tables.projectHostedLifecycleEvents.values()].find(row => row.planId === plan._id);
+  assert(event, 'the lifecycle transition applied');
+  assert.equal(JSON.stringify([plan, event]).includes(SECRET), false);
+});
+
 test('purge scrubs lifecycle plans and child events and fences an earlier recovery selection', async t => {
   const { s, itemId } = await deletedItem(t, { records: true, intentBorn: false });
   const head = await hostedRecords.recordHead(s.ctx, s.projectId, 'intent', itemId);
@@ -1596,16 +1758,29 @@ test('purge scrubs lifecycle plans and child events and fences an earlier recove
   );
 });
 
-test('purge recovers an expired staged Intent upload even when packing has been disabled', async t => {
+test('journal capture cannot pack an Intent-born Item while its purge is active', async t => {
   const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
-  const r2 = storage(t);
-  const previous = process.env.FORGE_JOURNAL_SEGMENTS;
+  const oldEnv = process.env.FORGE_JOURNAL_SEGMENTS;
   process.env.FORGE_JOURNAL_SEGMENTS = '1';
   t.after(() => {
-    if (previous === undefined) delete process.env.FORGE_JOURNAL_SEGMENTS;
-    else process.env.FORGE_JOURNAL_SEGMENTS = previous;
+    if (oldEnv === undefined) delete process.env.FORGE_JOURNAL_SEGMENTS;
+    else process.env.FORGE_JOURNAL_SEGMENTS = oldEnv;
   });
-  const [old] = storeIntents(s, itemId);
+  const head = await hostedRecords.recordHead(s.ctx, s.projectId, 'intent', itemId);
+  assert.equal(head.planningItemId, '', 'Intent-born root has the standalone legacy marker');
+  await pinAndContinue(s, itemId);
+  const old = storeIntents(s, itemId).at(-2);
+  assert(old && old._id !== head.recordId);
+  const stopped = executor(s, Infinity, (module, name, args) => {
+    if (module === 'projectPlanningPurge' && name === 'redact' && args.step === 'journal')
+      throw new Error('executor stopped');
+  });
+  await assert.rejects(stopped.run(itemId, randomUUID()), /executor stopped/);
+  assert.equal(
+    s.tables.projectHostedRecords.get(old._id).purged,
+    undefined,
+    'the hot pass has not removed the record yet',
+  );
   await s.ctx.db.patch(old._id, { journalReadyAt: 1 });
   const capture = JSON.parse(
     await modules.projectJournalCapture.page._handler(s.ctx, {
@@ -1615,7 +1790,33 @@ test('purge recovers an expired staged Intent upload even when packing has been 
       phase: 0,
     }),
   );
-  assert.deepEqual(capture.pending.intentKeys, [itemId]);
+  assert(!capture.pending?.intentKeys.includes(itemId));
+  assert.equal(s.tables.projectHostedRecords.get(old._id).journalReadyAt, undefined);
+});
+
+test('purge waits for a pending archive on a repaired markerless successor, then retires its expired upload', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const r2 = storage(t);
+  const previous = process.env.FORGE_JOURNAL_SEGMENTS;
+  process.env.FORGE_JOURNAL_SEGMENTS = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env.FORGE_JOURNAL_SEGMENTS;
+    else process.env.FORGE_JOURNAL_SEGMENTS = previous;
+  });
+  const successor = await oldSuccessor(s, itemId);
+  for (const row of storeIntents(s, itemId)) await s.ctx.db.patch(row._id, { journalReadyAt: undefined });
+  const [old] = storeIntents(s, successor);
+  await s.ctx.db.patch(old._id, { journalReadyAt: 1 });
+  const capture = JSON.parse(
+    await modules.projectJournalCapture.page._handler(s.ctx, {
+      projectId: s.projectId,
+      operationId: randomUUID(),
+      claim: randomUUID(),
+      phase: 0,
+    }),
+  );
+  assert.deepEqual(capture.pending.intentKeys, [successor]);
+  await repairLegacyMembership(s);
   const { encodePlannedJournal } = await import(moduleUrl('../convex/projectJournalArchivePlan.ts'));
   for (const text of capture.texts) {
     const { body, pointer } = encodePlannedJournal(text, JSON.parse(text));

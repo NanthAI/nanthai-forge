@@ -684,13 +684,14 @@ test('planned start gives the Intent the Issue id, adds sibling Lanes, continues
     ids: [issue, randomUUID()],
   });
   assert.deepEqual(JSON.parse(states), { [issue]: 'active' });
-  // One project read plus one indexed head read per Issue; never a body or a scan.
-  assert(s.counts.at(-1).documents <= 3 && s.counts.at(-1).writes === 0, 'head reads only');
+  // One head per started Issue and two empty ranges for a never-started/markerless root.
+  assert(s.counts.at(-1).returnedDocuments <= 3 && s.counts.at(-1).writes === 0, 'head reads only');
   await s.call('states', planning.intentStates, {
     projectId: s.projectId,
     ids: Array.from({ length: 100 }, () => randomUUID()),
   });
-  assert(s.counts.at(-1).documents <= 101 && s.counts.at(-1).writes === 0, '100 Issues: 101 reads');
+  const absent = s.counts.at(-1);
+  assert(absent.returnedDocuments <= 1 && absent.ranges <= 201 && absent.writes === 0, '100 absent Issues');
   await assert.rejects(
     s.invoke('states', planning.intentStates, {
       projectId: s.projectId,
@@ -799,9 +800,11 @@ test('planned start gives the Intent the Issue id, adds sibling Lanes, continues
   await assert.rejects(s.begin(s.input({ ...planned, intentId: first.intentId }), 'stranger'));
 });
 
-test('incident 846c635b: the legacy continuation boundary refuses before any Lane or operation write', async () => {
-  for (const history of [17, 24]) {
+test('incident 846c635b: planned start reads and selects only the newest execution Intent before the creation boundary', async t => {
+  const costs = [];
+  for (const history of [4, 14, 17, 24]) {
     const s = await setup();
+    s.patch('hostedProjects', s.projectId, { itemLaneMembership: 'verified-v2' });
     const issue = randomUUID();
     let id = issue;
     for (let i = 0; i < history; i++, id = successorIntentId(id)) {
@@ -840,11 +843,119 @@ test('incident 846c635b: the legacy continuation boundary refuses before any Lan
     }
     const input = s.input({ kind: 'planned', intentId: issue, outcome: 'More work on this Item' });
     const operations = s.tables.projectHostedOperations.size;
-    await assert.rejects(s.call('start', start.start, input), code('INTENT_CLOSED'));
-    assert.equal(s.counts.at(-1).writes, 0);
-    assert.equal(s.tables.projectHostedOperations.size, operations);
-    assert.equal(s.tables.projectHostedRecordHeads.size, history);
+    if (history >= 17) {
+      await assert.rejects(s.call('start', start.start, input), code('INTENT_CLOSED'));
+      assert.equal(s.counts.at(-1).writes, 0);
+      assert.equal(s.tables.projectHostedOperations.size, operations);
+      assert.equal(s.tables.projectHostedRecordHeads.size, history);
+    } else {
+      const reply = JSON.parse(await s.call('start', start.start, input));
+      assert.equal(reply.intentId, id);
+      assert.equal(reply.lane.intentId, id);
+      const { documents, ranges, readBytes } = s.counts.at(-1);
+      costs.push({ documents, ranges, readBytes });
+      t.diagnostic(JSON.stringify({ history, documents, ranges, readBytes }));
+    }
   }
+  assert.deepEqual(costs[0], costs[1], 'adding ten retained Intents must not add reads or ranges');
+});
+
+test('a purge committed during planned start fences its retry without retaining an Intent or Lane', async () => {
+  const s = await setup();
+  const issue = randomUUID();
+  const payload = s.input({ kind: 'planned', intentId: issue, outcome: 'Do not leave a copy of this title' });
+  const before = [
+    s.tables.projectHostedRecordHeads.size,
+    s.tables.projectHostedRecords.size,
+    s.tables.projectHostedRecordBodies.size,
+    s.tables.projectHostedOverlapLanes.size,
+    s.tables.projectHostedOperations.size,
+  ];
+  let fenced = false;
+  s.decorateContext(ctx => {
+    const insert = ctx.db.insert;
+    ctx.db.insert = async (table, row) => {
+      if (!fenced && table === 'projectHostedRecordHeads' && row.kind === 'lane') {
+        fenced = true;
+        await s.call('purge-begin', {
+          _handler: inner =>
+            inner.db.patch(s.projectId, {
+              itemPurges: [
+                {
+                  operationId: randomUUID(),
+                  itemId: issue,
+                  ids: [issue],
+                  version: 1,
+                  decisions: [],
+                  rows: 1,
+                  startedAt: Date.parse('2026-11-10T00:00:00.000Z'),
+                },
+              ],
+            }),
+        });
+      }
+      return insert(table, row);
+    };
+  });
+  await assert.rejects(s.call('start', start.start, payload), code('INTENT_CLOSED'));
+  assert.equal(fenced, true);
+  await assert.rejects(s.call('start', start.start, payload), code('INTENT_CLOSED'));
+  assert.deepEqual(
+    [
+      s.tables.projectHostedRecordHeads.size,
+      s.tables.projectHostedRecords.size,
+      s.tables.projectHostedRecordBodies.size,
+      s.tables.projectHostedOverlapLanes.size,
+      s.tables.projectHostedOperations.size,
+    ],
+    before,
+  );
+});
+
+test('planned start joins a repaired markerless successor instead of recreating it', async () => {
+  const s = await setup();
+  const id = randomUUID();
+  await s.begin(s.input({ kind: 'planned', intentId: id, outcome: 'Continue the legacy Item' }));
+  const successor = successorIntentId(id);
+  await s.call('seed', {
+    _handler: async ctx => {
+      const auth = { projectId: s.projectId, actor: 'owner', authorityEpoch: 1 };
+      const row = await records.readHostedRecord(ctx, { ...auth, key: id, kind: 'intent' });
+      const intent = JSON.parse(row.value);
+      await records.writeHostedRecord(ctx, {
+        ...auth,
+        expectedVersion: 0,
+        record: { ...intent, status: 'completed', version: 1 },
+      });
+      await records.writeHostedRecord(ctx, {
+        ...auth,
+        expectedVersion: null,
+        record: { ...intent, id: successor },
+      });
+    },
+  });
+  const { run } = await import(moduleUrl('../convex/projectItemLaneBackfill.ts'));
+  const old = process.env.CONVEX_CLOUD_URL;
+  process.env.CONVEX_CLOUD_URL = 'https://benevolent-wildebeest-974.convex.cloud';
+  try {
+    let after = null;
+    for (let i = 0; i < 3; i++) {
+      const result = await s.call('fill', run, { projectId: s.projectId, after });
+      after = result.next;
+      if (after === null) break;
+    }
+    assert.equal(after, null);
+  } finally {
+    if (old === undefined) delete process.env.CONVEX_CLOUD_URL;
+    else process.env.CONVEX_CLOUD_URL = old;
+  }
+  const reply = await s.begin(s.input({ kind: 'planned', intentId: id, outcome: 'Continue after repair' }));
+  assert.equal(reply.intentId, successor);
+  assert.equal(reply.lane.intentId, successor);
+  assert.equal(
+    [...s.tables.projectHostedRecordHeads.values()].filter(row => row.kind === 'intent').length,
+    2,
+  );
 });
 
 function purgingFixture(s, itemId) {

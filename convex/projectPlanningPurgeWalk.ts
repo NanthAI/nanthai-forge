@@ -90,5 +90,5 @@ export async function walkPurge(
     // A rebuild left work after the first pass. Keep the existing number of repair rounds.
     walk = start(walk.round + 1, 'redact');
   }
-  return { done: true };
+  invariant(false, 'WORK_STALE', 'The Item purge still has unverified rows. Run the same purge to resume.');
 }

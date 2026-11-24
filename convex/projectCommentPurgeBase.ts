@@ -111,8 +111,21 @@ async function scrubScope(
       projectId: input.projectId,
       operationId: input.operationId,
     });
+    const { intentsAfter, ...scope } = item;
+    let after = intentsAfter;
+    const intentKeys = new Set(item.intentKeys);
+    while (after !== null) {
+      const page = await ctx.runQuery(internal.projectCommentPurgeBaseStore.itemIntentTargets, {
+        projectId: input.projectId,
+        operationId: input.operationId,
+        after,
+      });
+      for (const key of page.keys) intentKeys.add(key);
+      after = page.next;
+    }
     return itemScrub({
-      ...item,
+      ...scope,
+      intentKeys: [...intentKeys],
       purgeOperationId: input.operationId,
       decisions: new Map(item.decisions as [string, string][]),
     });

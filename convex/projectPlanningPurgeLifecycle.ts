@@ -5,6 +5,9 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import { hostedLifecycleRequestSchema } from '../src/hosted-lifecycle';
 import { purgedLifecycleReason } from '../src/work-planning-purge';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import { recordHead } from './projectHostedRecords';
+import { intentBelongsToItem } from './projectItemIntentHeads';
+import type { ItemPurge } from './projectPlanningPurgeRedact';
 
 type Cursor = { plans: string | null; offset: number; event?: number };
 const PAGE = 32;
@@ -15,10 +18,9 @@ export async function purgeLifecyclePlans(
   ctx: QueryCtx,
   write: MutationCtx['db'] | undefined,
   projectId: Id<'hostedProjects'>,
-  intentKeys: readonly string[],
+  purge: ItemPurge,
   after: string | null,
 ) {
-  if (!intentKeys.length) return { changes: 0, after: null };
   const cursor: Cursor = after ? JSON.parse(after) : { plans: null, offset: 0 };
   const plans = await ctx.db
     .query('projectHostedLifecyclePlans')
@@ -26,9 +28,19 @@ export async function purgeLifecyclePlans(
     .paginate({ cursor: cursor.plans, numItems: PAGE });
   let changes = 0,
     remaining = PAGE;
+  const matches = new Map<string, boolean>();
   for (let offset = cursor.offset; offset < plans.page.length; offset++) {
     const plan = plans.page[offset]!;
-    if (!intentKeys.includes(plan.intentId)) continue;
+    let belongs = matches.get(plan.intentId);
+    if (belongs === undefined) {
+      if (purge.intentKeys) belongs = purge.intentKeys.includes(plan.intentId);
+      else {
+        const head = await recordHead(ctx, projectId, 'intent', plan.intentId);
+        belongs = head !== null && intentBelongsToItem(head, purge.itemId);
+      }
+      matches.set(plan.intentId, belongs);
+    }
+    if (!belongs) continue;
     const request = hostedLifecycleRequestSchema.parse(JSON.parse(plan.request));
     const reason = purgedLifecycleReason(request.action);
     if (request.reason !== reason) {

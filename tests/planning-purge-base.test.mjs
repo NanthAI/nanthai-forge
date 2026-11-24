@@ -15,6 +15,7 @@ import { purgedIndexValue } from '../dist/work-planning-purge.js';
 import { jsonChunks } from '../dist/json-chunks.js';
 import { buildObjectRecipe, ObjectRecipeBuilder } from '../dist/object-chunks.js';
 import { digest } from '../dist/hash.js';
+import { successorIntentId } from '../dist/hosted-intent-chain.js';
 import { upload } from './project-exchange-fixture.mjs';
 import {
   SECRET,
@@ -171,6 +172,41 @@ test('review finding 1: a base converted to Intents keeps the Item’s pre-conve
   assert.ok(legacy, 'the legacy copy stays');
   assert.equal(JSON.stringify(legacy).includes('Kept body legacy'), false, 'the Item’s legacy body is gone');
   assert.ok(JSON.stringify(legacy).includes(KEEP), 'the kept Item’s legacy record stays');
+});
+
+test('base purge replaces a linked successor’s archived Intent payload without retained intentKeys', async t => {
+  const words = 'private-base-successor-fixture';
+  const intent = itemId => ({
+    kind: 'intent',
+    id: successorIntentId(itemId),
+    version: 0,
+    at: '2026-11-01T10:00:00.000Z',
+    outcome: words,
+    constraints: words,
+    creatorAccountId: 'owner',
+    assigneeAccountIds: [],
+    base: { head: 'b'.repeat(64), receiptId: 'main-fixture' },
+    status: 'completed',
+  });
+  const { s, itemId } = await deletedBase(t, { legacy: itemId => [intent(itemId)] });
+  const hosted = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+  await s.ctx.db.patch(s.projectId, {
+    sourceAuthority: { mode: 'server', epoch: 1 },
+    itemLaneMembership: 'verified-v2',
+  });
+  await hosted.writeHostedRecord(s.ctx, {
+    projectId: s.projectId,
+    actor: 'owner',
+    authorityEpoch: 1,
+    expectedVersion: null,
+    record: intent(itemId),
+    planningItemId: itemId,
+  });
+  assert(storedWords(s, words).length, 'the original base has the successor payload');
+  const done = await purge(s, itemId, randomUUID());
+  assert(done?.purgedAt !== undefined);
+  assert.deepEqual(storedWords(s, words), [], 'the original and replacement R2 base are clean');
+  assert.deepEqual(tableWords(s, words), []);
 });
 
 /** The old whole Work's chunks in order, as its recipe stores them. */

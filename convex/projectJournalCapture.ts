@@ -98,7 +98,9 @@ export const page = internalMutation({
             !input.existing && (input.phase ?? 0) < 2 ? [] : control.cursor,
             new Set(
               project.itemPurges?.flatMap(purge =>
-                purge.purgedAt === undefined ? (purge.intentKeys ?? []) : [],
+                purge.purgedAt === undefined && purge.commentId === undefined
+                  ? [purge.itemId, ...(purge.intentKeys ?? [])]
+                  : [],
               ),
             ),
           );

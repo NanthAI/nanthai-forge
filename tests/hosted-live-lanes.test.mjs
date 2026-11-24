@@ -16,8 +16,10 @@ async function fixture() {
   s.ctx.auth = { getUserIdentity: async () => ({ subject: 'owner' }) };
   await s.ctx.db.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
   await s.ctx.db.insert('accountHandles', { owner: 'owner', handle: 'synthetic-owner' });
-  const put = record =>
-    s.run('put', () => records.writeHostedRecord(s.ctx, { ...auth, record, expectedVersion: null }));
+  const put = (record, planningItemId) =>
+    s.run('put', () =>
+      records.writeHostedRecord(s.ctx, { ...auth, record, expectedVersion: null, planningItemId }),
+    );
   return { ...s, auth, put };
 }
 test('live Lanes are paged with joined Intent, actor, save and landing metadata; read cost stays O(page)', async t => {
@@ -335,31 +337,33 @@ test('Issue and Intent filters page only indexed matching Lanes at project scale
   t.diagnostic(JSON.stringify({ unrelatedLanes: 10000, page: 2, callsPerPage: 1, ...before }));
 });
 
-test('Issue filtering follows the same bounded successor Intent chain as planned start', async () => {
+test('indexed open Lane pages skip closed siblings, reach earlier Intents, and preserve exact-Intent cursors', async () => {
   const { successorIntentId } = await import('../dist/hosted-intent-chain.js');
   const s = await fixture(),
     issue = randomUUID(),
     successor = successorIntentId(issue);
   for (const id of [issue, successor])
-    await s.put({
-      kind: 'intent',
-      id,
-      version: 0,
-      at,
-      outcome: 'Reopened Issue',
-      constraints: '',
-      creatorAccountId: 'owner',
-      assigneeAccountIds: [],
-      base: { head: hash, receiptId: randomUUID() },
-      status: id === issue ? 'completed' : 'active',
-    });
-  const lane = randomUUID();
-  await s.put({
+    await s.put(
+      {
+        kind: 'intent',
+        id,
+        version: 0,
+        at,
+        outcome: 'Reopened Issue',
+        constraints: '',
+        creatorAccountId: 'owner',
+        assigneeAccountIds: [],
+        base: { head: hash, receiptId: randomUUID() },
+        status: 'active',
+      },
+      issue,
+    );
+  const older = {
     kind: 'lane',
-    id: lane,
+    id: randomUUID(),
     version: 0,
     at,
-    intentId: successor,
+    intentId: issue,
     actor: 'owner',
     base: { head: hash, receiptId: randomUUID() },
     head: hash,
@@ -367,19 +371,55 @@ test('Issue filtering follows the same bounded successor Intent chain as planned
     lifecycleVersion: 0,
     state: 'active',
     authorityEpoch: 1,
-  });
+  };
+  const newer = { ...older, id: randomUUID(), intentId: successor };
+  await s.put(older, issue);
+  await s.put(newer, issue);
+  const newest = { ...newer, id: randomUUID() };
+  await s.put(newest, issue);
+  for (let i = 0; i < 101; i++) await s.put({ ...newer, id: randomUUID(), state: 'completed' }, issue);
   const read = params =>
     s
-      .call('reopened', api.list, { projectId: s.auth.projectId, cursor: null, limit: 10, ...params })
+      .call('reopened', api.list, { projectId: s.auth.projectId, cursor: null, limit: 1, ...params })
       .then(JSON.parse);
+  const filter = { planningItemId: issue };
+  const exact = { intentId: successor };
+  const before = await read(exact);
+  assert(before.continueCursor);
+  await s.ctx.db.patch(s.auth.projectId, { itemLaneMembership: 'verified-v2' });
   assert.deepEqual(
-    (await read({ planningItemId: issue })).page.map(row => row.laneId),
-    [lane],
+    (await read({ ...exact, cursor: before.continueCursor })).page.map(row => row.laneId),
+    [newer.id],
   );
-  assert.deepEqual((await read({ intentId: issue })).page, []);
+  const current = await read({ ...filter, limit: 50 });
   assert.deepEqual(
-    (await read({ planningItemId: issue, intentId: successor })).page.map(row => row.laneId),
-    [lane],
+    current.page.map(row => row.laneId),
+    [newest.id, newer.id],
+  );
+  const first = await read(filter);
+  assert.deepEqual(
+    first.page.map(row => row.laneId),
+    [newest.id],
+  );
+  assert(first.continueCursor);
+  const second = await read({ ...filter, cursor: first.continueCursor });
+  assert.deepEqual(
+    second.page.map(row => row.laneId),
+    [newer.id],
+  );
+  const third = await read({ ...filter, cursor: second.continueCursor });
+  assert.deepEqual(
+    third.page.map(row => row.laneId),
+    [older.id],
+  );
+  assert.equal(third.continueCursor, null);
+  assert.deepEqual(
+    (await read({ ...filter, intentId: issue })).page.map(row => row.laneId),
+    [older.id],
+  );
+  await assert.rejects(
+    read({ ...filter, intentId: issue, cursor: first.continueCursor }),
+    error => error.data?.code === 'BAD_ARGUMENT',
   );
 });
 

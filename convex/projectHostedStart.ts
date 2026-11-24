@@ -33,6 +33,8 @@ import { dormantCutoff } from './projectHostedDormancy';
 import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import { executeCommand } from './projectWorkCommand';
 import { selectedGeneration } from './projectWorkIndexStore';
+import { latestItemIntentHead } from './projectItemIntentHeads';
+import { verifiedItemMembership } from './projectItemMembershipVersion';
 
 const args = {
   projectId: v.id('hostedProjects'),
@@ -171,7 +173,6 @@ async function execute(
   // The Intent a planned/existing start joins, or the successor it creates after the Issue's earlier
   // Intent finished (e4a71127). Absent for a new outcome.
   let targetIntentId = payload.intent.kind === 'new' ? undefined : payload.intent.intentId;
-  let successor = false;
   let planningItemId =
     payload.intent.kind === 'planned'
       ? payload.intent.intentId
@@ -181,12 +182,19 @@ async function execute(
   // An Intent copied from the Work journal that no Lane has pinned yet (flip 5): this start pins it.
   let unpinned: ReturnType<typeof hostedIntentSchema.parse> | undefined;
   if (payload.intent.kind === 'existing' || payload.intent.kind === 'planned') {
+    const indexed = project.itemLaneMembership === verifiedItemMembership;
+    const selectedHead =
+      payload.intent.kind === 'planned' && indexed
+        ? await latestItemIntentHead(ctx, projectId, payload.intent.intentId)
+        : undefined;
     const row = await readHostedRecord(ctx, {
       projectId,
       actor,
       kind: 'intent',
-      key: payload.intent.intentId,
+      key: selectedHead?.key ?? payload.intent.intentId,
+      ...(selectedHead !== undefined ? { selectedHead } : {}),
     });
+    invariant(!selectedHead || row, 'SOURCE_UNAVAILABLE', 'The Item’s latest Intent is unavailable.');
     plannedExists = Boolean(row);
     planningItemId ??= row?.planningItemId;
     // An Issue's Intent the planner wrote has no marker yet. Starting it by Intent id pins it: mark it with its
@@ -204,30 +212,39 @@ async function execute(
     );
     if (row) {
       let intent = hostedIntentSchema.parse(JSON.parse(row.value));
+      targetIntentId = intent.id;
       // A journal-owned status is planning history, not execution: the first Lane pins it as active.
       if (!intent.base?.receiptId) unpinned = intent;
-      else if (payload.intent.kind === 'planned') {
-        // A finished Intent never restarts: the Issue continues on the next Intent in its chain, joined
-        // when it exists, created by this start when it does not.
+      else if (payload.intent.kind === 'planned' && !indexed) {
         for (let hop = 0; intentFinished(intent.status); hop++) {
           invariant(
             hop < maxIntentChain,
             'INTENT_CLOSED',
             'This Issue already continued on many finished Intents. Open a new Issue for the next piece of work.',
           );
-          const nextId = successorIntentId(intent.id);
-          const next = await readHostedRecord(ctx, { projectId, actor, kind: 'intent', key: nextId });
+          targetIntentId = successorIntentId(intent.id);
+          const next = await readHostedRecord(ctx, { projectId, actor, kind: 'intent', key: targetIntentId });
           if (!next) {
-            successor = true;
-            targetIntentId = nextId;
+            plannedExists = false;
             break;
           }
           intent = hostedIntentSchema.parse(JSON.parse(next.value));
-          targetIntentId = intent.id;
         }
+      } else if (payload.intent.kind === 'planned' && intentFinished(intent.status)) {
+        // Keep the existing creation boundary until every reader and purge is safe beyond it.
+        // This temporary check derives ids in memory; it does not read any earlier Intent.
+        let id = payload.intent.intentId;
+        let hop = 0;
+        for (; id !== intent.id && hop < maxIntentChain; hop++) id = successorIntentId(id);
+        invariant(
+          hop < maxIntentChain,
+          'INTENT_CLOSED',
+          'This Issue already continued on many finished Intents. Open a new Issue for the next piece of work.',
+        );
+        plannedExists = false;
+        targetIntentId = successorIntentId(intent.id);
       }
-      if (successor) plannedExists = false;
-      else overlapIntent = intent.outcome;
+      if (plannedExists) overlapIntent = intent.outcome;
       if (!intentFinished(intent.status)) recovery = intent.needsFix;
       // A planned start on an unpinned Intent is the start that used to create it: any project member.
       invariant(

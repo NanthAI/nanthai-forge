@@ -116,7 +116,7 @@ export const hostedRecordTables = {
         overlapRowId: v.optional(v.id('projectHostedOverlapLanes')),
       }),
     ),
-    /** The Item at the root of this Intent's chain. Empty means independent, absent means legacy. */
+    /** The Item this Intent or Lane serves. Empty means explicitly independent; absent is unprojected. */
     planningItemId: v.optional(v.string()),
     /** Work store kinds (issue, comment, lifecycle): the current version as its journal row read, so a
      * planning page reads one document per row. Absent on other kinds; a replace without it drops it. */
@@ -135,10 +135,7 @@ export const hostedRecordTables = {
     // index-order: caller: convex/projectWorkStore.ts#journalWorkStoreCompare; order: planning comparison exposes newest-first creation-time pages of Issues.
     .index('by_project_and_kind', ['projectId', 'kind'])
     .index('by_project_and_kind_and_key', ['projectId', 'kind', 'key'])
-    .index('by_project_and_kind_and_item', {
-      fields: ['projectId', 'kind', 'planningItemId'],
-      staged: true,
-    })
+    .index('by_project_and_kind_and_item', ['projectId', 'kind', 'planningItemId'])
     // index-order: caller: convex/projectHostedDormancy.ts#landedByReceipt; order: receipt discovery selects the newest Candidate by creation time within an Intent.
     .index('by_project_and_kind_and_parent', ['projectId', 'kind', 'parent'])
     // An Issue's comments or its Intent's notes, without reading the other.

@@ -385,7 +385,7 @@ test('new projects have no legacy membership to repair, but a creation retry nev
   const s = state([]);
   const input = { owner: 'owner', key: randomUUID(), name: 'Membership coverage' };
   const project = await creation.createProject(s.ctx, input);
-  assert.equal(project.itemLaneMembership, true);
+  assert.equal(project.itemLaneMembership, 'verified-v2');
   await s.ctx.db.patch(project._id, { itemLaneMembership: undefined });
   assert.equal((await creation.createProject(s.ctx, input)).itemLaneMembership, undefined);
 });

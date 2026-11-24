@@ -20,6 +20,31 @@ import { record, recordPartition, selectedGeneration } from './projectWorkIndexS
 import { findObject, purgeTargetRow } from './projectObjectFind';
 import { settledRecordTable } from './projectWorkRecordTables';
 import { purgeRows } from './projectPlanningPurgeRedact';
+import { itemIntentPage } from './projectItemIntentPages';
+
+const intentPosition = v.union(
+  v.literal('indexed'),
+  v.object({ time: v.number(), id: v.string() }),
+  v.null(),
+);
+const baseIntentPage = async (
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  itemId: string,
+  after: 'indexed' | { time: number; id: string } | null,
+) => {
+  const page = await itemIntentPage(
+    ctx,
+    projectId,
+    itemId,
+    after && after !== 'indexed' ? [after.time, after.id] : after,
+    64,
+  );
+  return {
+    keys: page.heads.map(head => head.key),
+    next: page.next && page.next !== 'indexed' ? { time: page.next[0], id: page.next[1] } : page.next,
+  };
+};
 import { notBusy, tombstoneObject } from './projectSavePurgeStore';
 
 const identity = {
@@ -214,6 +239,7 @@ export const itemTargets = internalQuery({
     historyId: v.string(),
     ids: v.array(v.string()),
     intentKeys: v.array(v.string()),
+    intentsAfter: intentPosition,
     version: v.number(),
     rows: v.array(v.string()),
     comments: v.array(v.string()),
@@ -225,10 +251,14 @@ export const itemTargets = internalQuery({
     const entry = entryOf(project, input);
     invariant(entry?.baseScrub, 'WORK_STALE', 'Run the Item’s purge first.');
     const comments = await itemComments(ctx, project, entry.itemId);
+    const membership = entry.intentKeys
+      ? { keys: entry.intentKeys, next: null }
+      : await baseIntentPage(ctx, input.projectId, entry.itemId, null);
     return {
       historyId: entry.itemId,
       ids: entry.ids,
-      intentKeys: [...new Set([...(entry.intentId ? [entry.intentId] : []), ...(entry.intentKeys ?? [])])],
+      intentKeys: [...new Set([...(entry.intentId ? [entry.intentId] : []), ...membership.keys])],
+      intentsAfter: membership.next,
       version: entry.version,
       rows: (await purgeRows(ctx, input.projectId, input.operationId)).map(([row]) => row),
       comments: comments.map(row => row.key),
@@ -236,6 +266,17 @@ export const itemTargets = internalQuery({
     };
   },
 });
+export const itemIntentTargets = internalQuery({
+  args: { projectId: v.id('hostedProjects'), operationId: v.string(), after: intentPosition },
+  returns: v.object({ keys: v.array(v.string()), next: intentPosition }),
+  handler: async (ctx, input) => {
+    const project = await ctx.db.get(input.projectId);
+    const entry = project && entryOf(project, input);
+    invariant(entry?.baseScrub && entry.purgedAt === undefined, 'WORK_STALE', 'Run the Item’s purge first.');
+    return baseIntentPage(ctx, input.projectId, entry.itemId, input.after);
+  },
+});
+
 /** Comments one Item purge scrubs from the base (its rows are capped at PURGE_ROW_LIMIT; imported comments add). */
 const COMMENT_LIMIT = 2 * PURGE_ROW_LIMIT;
 /** The Item's comments in the selected Work index (an imported comment has no row), refused above COMMENT_LIMIT. */

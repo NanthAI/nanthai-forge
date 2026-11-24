@@ -126,6 +126,25 @@ Before switching readers, drain the dev census `projectItemLaneBackfill:coverage
 as `after`. Record that the sum of `covered` equals the sum of `checked` over all pages. Use returned
 incomplete frontiers to resume; a partial repair does not qualify for the reader switch.
 
+Item membership (`846c635b`) replaces the start-time Intent walk and the full Lane history's per-Intent
+ranges after fill. `projectHostedRecordHeads.by_project_and_kind_and_item` adds one entry per current head,
+including an undefined Item key on an unlinked head; it does not add a row per version or landing. No second
+status index is needed. In isolation, the fresh retained index measure was 429 → 433 entries and 33,262 → 33,523
+logical key bytes; dogfood retained was 29,314 → 29,320 and 2,189,966 → 2,190,369 bytes. Fresh and dogfood index
+writes were 1,603 → 1,612 and 3,003 → 3,020. The P6 serving-I/O fixture's measured call, byte and R2 quantities
+were unchanged by index enablement; modeled index key bytes are not a provider bill.
+
+A linked Lane adds one Item key to its existing metadata, not a second document write. The explicit dev-only
+membership repair verifies same-ID roots and follows deterministic successor keys, stopping at a foreign binding
+or another Item's root. After repairing Intent heads it fills Lane heads from their parent, including Resolution
+Lanes. `projectItemLaneBackfill:run` takes a project id and `after` (`null` initially), confirms the durable frontier,
+and returns `next`; retry the same frontier after an unknown outcome. A transaction processes at most 62 steps,
+with at most 192 reads, 132 ranges, 64 writes, 8 MiB read and 4 MiB patch payload. No idle jobs or R2 objects.
+Before enabling index-only readers on a deployment, drain `projectItemLaneBackfill:coverage` and record every
+non-removing project covered (`checked == covered` across all pages). An unfinished repair is not cutoff evidence.
+In the 14-Intent fixture, start reads went from 22,134 to 5,325 bytes. A seven-Lane page over a 70-Lane Item read
+21,954 bytes on the legacy reader and 11,383 after projection in the local fixture.
+
 ## Plan projection storage budget
 
 The current partition's `_workStorePlan` collection shares `projectWorkDataRecords`; it is disposable metadata,

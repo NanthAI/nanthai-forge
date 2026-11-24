@@ -21,8 +21,8 @@ import {
   baseRevision,
   DISPLAY_BLOCK,
   displaySnapshots,
+  legacyPurgeIntentKeys,
   purgeJournalTables,
-  purgeIntentChain,
   purgeTarget,
   selectRows,
 } from './projectPlanningPurgeSelect';
@@ -152,7 +152,7 @@ export const begin = internalMutation({
       'BAD_ARGUMENT',
       `This Item has more than ${PURGE_ROW_LIMIT} Work rows; a purge removes at most ${PURGE_ROW_LIMIT}.`,
     );
-    // The store's Intent chain and every reader's purged-version check start from the Item id (purgedIntentKeys).
+    // The legacy Work index can hold a separate Intent alias; the base scrub still requires a same-id root.
     invariant(
       !target.intentId || target.intentId === target.historyId,
       'BAD_ARGUMENT',
@@ -177,9 +177,9 @@ export const begin = internalMutation({
         after = tail.after;
       }
     }
-    const intentKeys = await purgeIntentChain(ctx, input.projectId, target.historyId, target.partition);
+    const intentKeys = await legacyPurgeIntentKeys(ctx, target);
     invariant(
-      !(await pendingIntentArchives(ctx, input.projectId, intentKeys)).length,
+      !(await pendingIntentArchives(ctx, input.projectId, target.historyId, intentKeys)).length,
       'WORK_STALE',
       'The journal is archiving one of this Item’s Intent versions. Run the same purge again to resume.',
     );
@@ -204,7 +204,7 @@ export const begin = internalMutation({
       itemId: target.historyId,
       ids: target.ids,
       ...(target.intentId ? { intentId: target.intentId } : {}),
-      intentKeys,
+      ...(intentKeys ? { intentKeys } : {}),
       version: target.item.version,
       decisions: input.selection.decisions,
       rows: input.selection.rows.length,

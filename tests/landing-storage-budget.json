@@ -64,18 +64,18 @@
     },
     "indexes": {
       "before": {
-        "entries": 231,
-        "keyBytes": 16621
+        "entries": 235,
+        "keyBytes": 16882
       },
       "immediate": {
-        "entries": 424,
-        "keyBytes": 32961
+        "entries": 428,
+        "keyBytes": 33222
       },
       "retained": {
-        "entries": 429,
-        "keyBytes": 33262
+        "entries": 433,
+        "keyBytes": 33523
       },
-      "written": 1611
+      "written": 1612
     },
     "metricAliases": {
       "before": {
@@ -158,18 +158,18 @@
     },
     "indexes": {
       "before": {
-        "entries": 28889,
-        "keyBytes": 2154715
+        "entries": 28893,
+        "keyBytes": 2154982
       },
       "immediate": {
-        "entries": 29281,
-        "keyBytes": 2187219
+        "entries": 29287,
+        "keyBytes": 2187622
       },
       "retained": {
-        "entries": 29314,
-        "keyBytes": 2189966
+        "entries": 29320,
+        "keyBytes": 2190369
       },
-      "written": 3028
+      "written": 3020
     },
     "metricAliases": {
       "before": {
@@ -207,7 +207,7 @@
   },
   "tenLandingIndexes": {
     "landings": 10,
-    "written": 13890,
+    "written": 12796,
     "metricAliases": {
       "written": 77,
       "stored": [
@@ -231,20 +231,20 @@
     },
     "stored": [
       {
-        "entries": 878,
-        "keyBytes": 53937
+        "entries": 882,
+        "keyBytes": 54198
       },
       {
-        "entries": 1078,
-        "keyBytes": 69593
+        "entries": 1084,
+        "keyBytes": 69988
       },
       {
-        "entries": 2229,
-        "keyBytes": 160888
+        "entries": 2131,
+        "keyBytes": 153547
       },
       {
-        "entries": 2229,
-        "keyBytes": 160888
+        "entries": 2131,
+        "keyBytes": 153547
       }
     ]
   }

@@ -21,13 +21,11 @@ const isLooseEndsCursor = (value: string) =>
 export const liveLanesInput = z
   .object({
     planningItemId: issueRef
-      .describe(
-        'Issue key (canonical): full UUID or the 8-character id. Selects its current execution Intent.',
-      )
+      .describe('Issue key (canonical): full UUID or the 8-character id. Lists its linked Lanes.')
       .optional(),
     id: issueRef.describe('Alias for planningItemId.').optional(),
     itemId: issueRef.describe('Alias for planningItemId.').optional(),
-    /** Exact execution Intent; planningItemId selects the Issue's current execution Intent. */
+    /** Exact execution Intent. Filter using planningItemId to list work for the Issue. */
     intentId: z.uuid().optional(),
     /** `open` (default) lists open Lanes; `all` (with planningItemId) lists the Issue's Lanes in every state, landed
      * ones with their receipt, through the same read as `planning {id}` `work`. */

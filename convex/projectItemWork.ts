@@ -15,6 +15,9 @@ import {
 } from './projectItemWorkDetails';
 import { readHostedRecord } from './projectHostedRecords';
 import { itemIntentChain } from './projectIntentLandingNotes';
+import { itemLanePage, itemLanePosition } from './projectItemLanePage';
+import { latestItemIntentHead } from './projectItemIntentHeads';
+import { verifiedItemMembership } from './projectItemMembershipVersion';
 import {
   cursorJson,
   itemLandingHistory,
@@ -39,9 +42,11 @@ const WORK_PAGE = 20;
 const WORK_PAGE_MAX = 50;
 const CURSOR = 'forge-item-work-v1:';
 const WEB_CURSOR = 'forge-item-work-v2:';
+// Released CLI and MCP clients validate this envelope before sending the opaque cursor.
+const KEYSET_CURSOR = `${CURSOR}{`;
 
 const webPage = z.object({
-  lane: z.number().int().min(0).nullable(),
+  lane: z.union([z.number().int().min(0), itemLanePosition]).nullable(),
   history: landingHistoryCursor.nullable().optional(),
   related: z.string().nullable().optional(),
 });
@@ -56,6 +61,11 @@ function workPage(cursor: string | null, detailed: boolean): WebPage {
       'cursor: expected the nextCursor from this Item work read. Restart without a cursor.',
     );
     return page.data;
+  }
+  if (cursor?.startsWith(KEYSET_CURSOR)) {
+    const key = itemLanePosition.safeParse(cursorJson(cursor.slice(CURSOR.length)));
+    invariant(key.success, 'BAD_ARGUMENT', 'Cursor is invalid. Restart without a cursor.');
+    return { lane: key.data };
   }
   return { lane: decodeOffset(cursor) };
 }
@@ -95,11 +105,49 @@ function decodeOffset(cursor: string | null) {
   return offset;
 }
 
+// Before a project has verified its projection, preserve its complete pre-cap legacy pages.
+async function legacyLanePage(
+  ctx: import('./_generated/server').QueryCtx,
+  projectId: Doc<'hostedProjects'>['_id'],
+  intents: string[],
+  offset: number,
+  shown: number,
+  visible: boolean,
+) {
+  let atLeast = false;
+  const heads: Doc<'projectHostedRecordHeads'>[] = [];
+  const completeHeads = new Map<string, Doc<'projectHostedRecordHeads'>[]>();
+  for (const intentId of intents) {
+    const rows = await ctx.db
+      .query('projectHostedRecordHeads')
+      .withIndex('by_project_and_kind_and_parent', q =>
+        q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', intentId),
+      )
+      .order('desc')
+      .take(LANES_COUNTED + 1);
+    if (rows.length > LANES_COUNTED) atLeast = true;
+    else if (visible) completeHeads.set(intentId, rows);
+    heads.push(...rows.slice(0, LANES_COUNTED));
+  }
+  heads.sort(
+    (a, b) =>
+      Number(b.status === 'active') - Number(a.status === 'active') || b._creationTime - a._creationTime,
+  );
+  const next = offset + shown;
+  return {
+    heads: heads.slice(offset, next),
+    next: next < heads.length ? next : null,
+    total: heads.length,
+    atLeast,
+    completeHeads,
+  };
+}
+
 export const read = query({
   args: {
     projectId: v.id('hostedProjects'),
     itemId: v.string(),
-    /** Lanes per page, open first then newest. Web details use pages of up to 10, CLI up to 50. */
+    /** Lanes per page. Web details use pages of up to 10, CLI up to 50. */
     limit: v.optional(v.number()),
     cursor: v.optional(v.union(v.string(), v.null())),
     details: v.optional(v.boolean()),
@@ -125,34 +173,42 @@ export const read = query({
       const shown = detailed
         ? Math.min(Math.max(Math.trunc(limit ?? 10), 1), 10)
         : Math.min(Math.max(Math.trunc(limit ?? WORK_PAGE), 1), WORK_PAGE_MAX);
-      const { intents, state } = await itemIntentChain(ctx, projectId, itemId);
-
-      // Every Lane of the chain, any state: small head rows only, bounded per Intent.
-      let total = 0;
-      let atLeast = false;
-      const heads: Doc<'projectHostedRecordHeads'>[] = [];
-      const completeHeads = new Map<string, Doc<'projectHostedRecordHeads'>[]>();
-      for (const intentId of !readLanes || work.lane === null ? [] : intents) {
-        const rows = await ctx.db
-          .query('projectHostedRecordHeads')
-          .withIndex('by_project_and_kind_and_parent', q =>
-            q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', intentId),
-          )
-          .order('desc')
-          .take(LANES_COUNTED + 1);
-        if (rows.length > LANES_COUNTED) atLeast = true;
-        else if (visible) completeHeads.set(intentId, rows);
-        total += Math.min(rows.length, LANES_COUNTED);
-        heads.push(...rows.slice(0, LANES_COUNTED));
-      }
-      heads.sort(
-        (a, b) =>
-          Number(b.status === 'active') - Number(a.status === 'active') || b._creationTime - a._creationTime,
+      const position = work.lane;
+      const indexed =
+        project.itemLaneMembership === verifiedItemMembership &&
+        (position === null || !cursor || typeof position === 'object');
+      invariant(
+        indexed || position === null || typeof position === 'number',
+        'BAD_ARGUMENT',
+        'Restart without a cursor.',
       );
-      const page = !readLanes || work.lane === null ? [] : heads.slice(work.lane, work.lane + shown);
+      const historyRequested = readLandings && Boolean(visible && work.history !== null);
+      const chain = !indexed || historyRequested ? await itemIntentChain(ctx, projectId, itemId) : null;
+      const indexedPage =
+        readLanes && indexed && position !== null
+          ? await itemLanePage(ctx, projectId, itemId, typeof position === 'object' ? position : null, shown)
+          : null;
+      const legacy =
+        readLanes && !indexed && typeof position === 'number'
+          ? await legacyLanePage(ctx, projectId, chain!.intents, position, shown, Boolean(visible))
+          : null;
+      const stateHead = indexed ? await latestItemIntentHead(ctx, projectId, itemId) : null;
+      const state = indexed
+        ? stateHead?.status.startsWith('journal:')
+          ? null
+          : (stateHead?.status ?? null)
+        : (chain?.state ?? null);
+      const page = indexedPage ?? legacy;
+      const intents = chain?.intents ?? [];
       const lanes: LaneRecord[] = [];
-      for (const head of page) {
-        const row = await readHostedRecord(ctx, { projectId, actor, kind: 'lane', key: head.key });
+      for (const head of page?.heads ?? []) {
+        const row = await readHostedRecord(ctx, {
+          projectId,
+          actor,
+          kind: 'lane',
+          key: head.key,
+          selectedHead: head,
+        });
         if (row) lanes.push(JSON.parse(row.value) as LaneRecord);
       }
 
@@ -227,7 +283,7 @@ export const read = query({
             !readLandings || !visible || work.history === null
               ? undefined
               : itemLandingHistory(ctx, projectId, intents, work.history ?? {}, undefined, {
-                  heads: completeHeads,
+                  heads: legacy?.completeHeads ?? new Map(),
                   stamps,
                 }),
             !readRelated || !visible || work.related === null
@@ -283,8 +339,7 @@ export const read = query({
           ...(laneState === 'landed' || landing ? { receipt: landing ?? null } : {}),
         };
       });
-      const next = work.lane === null ? null : work.lane + shown;
-      const lane = !readLanes ? work.lane : next !== null && next < heads.length ? next : null;
+      const lane = !readLanes ? work.lane : (page?.next ?? null);
       const nextHistory = !readLandings ? work.history : history ? history.next : null;
       const nextRelated = !readRelated ? work.related : (related?.next ?? null);
       const continuation = {
@@ -296,7 +351,7 @@ export const read = query({
       return canonicalPayload({
         role: true,
         intent: state,
-        intents: intents.length,
+        ...(chain ? { intents: intents.length } : {}),
         lanes: rows,
         ...(landings
           ? {
@@ -305,14 +360,16 @@ export const read = query({
             }
           : {}),
         ...(related ? { related: related.links, moreRelated: related.next !== null } : {}),
-        ...(readLanes && work.lane !== null ? { total, atLeast } : {}),
+        ...(page ? { total: page.total, atLeast: page.atLeast } : {}),
         nextCursor: detailed
           ? hasContinuation
             ? WEB_CURSOR + JSON.stringify(continuation)
             : null
           : lane === null
             ? null
-            : `${CURSOR}${lane}`,
+            : typeof lane === 'number'
+              ? `${CURSOR}${lane}`
+              : CURSOR + JSON.stringify(lane),
       });
     } catch (error) {
       return report(error);

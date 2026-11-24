@@ -5,41 +5,30 @@ import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { recordCaller } from './projectHostedFrictionStore';
-import { recordHead } from './projectHostedRecords';
+import { latestItemIntentHead, legacyItemIntentHead } from './projectItemIntentHeads';
+import { verifiedItemMembership } from './projectItemMembershipVersion';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { isPlanningPrefix, isPlanningUuid, planningIdMaxCandidates } from '../src/planning-id';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
-import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import { report } from './errors';
 import { accessibleProject, readProjectRole } from './projectAuthority';
 import { readItemAuditHistory } from './projectPlanningAudit';
 import { readBacklogWindowAudit } from './projectPlanningWindow';
 
-/** Lane Intent status for planned Issues: one indexed head read per id (one more per follow-up Intent), no bodies. Ids without a
- * started Intent are absent. Lets a backlog read show which Issues are finished, without a scan. */
+/** Latest execution Intent status for each Issue, independent of earlier landings. No bodies. */
 export const intentStates = query({
   args: { projectId: v.id('hostedProjects'), ids: v.array(v.string()) },
   returns: v.string(),
   handler: async (ctx, { projectId, ids }) => {
     try {
-      await recordCaller(ctx, projectId);
+      const { project } = await recordCaller(ctx, projectId);
       invariant(ids.length <= 100, 'BAD_ARGUMENT', 'Read at most 100 Issues at a time.');
       const states: Record<string, string> = {};
+      const select =
+        project.itemLaneMembership === verifiedItemMembership ? latestItemIntentHead : legacyItemIntentHead;
       for (const id of new Set(ids)) {
-        let head = await recordHead(ctx, projectId, 'intent', id);
-        // A finished Intent whose Issue continued (e4a71127) reports the latest Intent's state.
-        let at = id;
-        for (
-          let hop = 0;
-          head && intentFinished(head.status.replace(/^journal:/, '')) && hop < maxIntentChain;
-          hop++
-        ) {
-          const next = await recordHead(ctx, projectId, 'intent', successorIntentId(at));
-          if (!next) break;
-          head = next;
-          at = successorIntentId(at);
-        }
+        const head = await select(ctx, projectId, id);
         if (head && !head.status.startsWith('journal:')) states[id] = head.status;
       }
       return canonicalPayload(states);

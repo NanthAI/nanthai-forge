@@ -86,6 +86,7 @@ export async function materializeLifecycleLane(
     ...(row.ownerOnly !== undefined ? { ownerOnly: row.ownerOnly } : {}),
     ...(row.pinned ? { pinned: true } : {}),
     recordId: row._id,
+    ...(head.planningItemId !== undefined ? { planningItemId: head.planningItemId } : {}),
     ...(head.saveFailure ? { saveFailure: head.saveFailure } : {}),
   });
   await materializeHostedOverlapLifecycle(ctx, projectId, laneId, row.version);

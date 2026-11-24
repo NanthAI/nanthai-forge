@@ -9,6 +9,8 @@ import type { LandingCapsulePointer } from '../src/hosted-landing';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { phaseKey, receiptRow, type Control } from './projectJournalMaintenance';
+import { recordHead } from './projectHostedRecords';
+import { intentBelongsToItem } from './projectItemIntentHeads';
 
 export const journalObjectKey = (projectId: string, sha256: string) =>
   `v1/p/${projectId}/journal-segments/${sha256}`;
@@ -63,9 +65,9 @@ export function decodeJournalBytes(body: Uint8Array, pointer: LandingCapsulePoin
 export async function pendingIntentArchives(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
-  keys: readonly string[],
+  itemId: string,
+  legacyKeys?: readonly string[],
 ) {
-  if (!keys.length) return [];
   const controls = await Promise.all(
     [false, true].map(existing =>
       receiptRow(ctx, projectId, phaseKey({ projectId, operationId: '', existing })),
@@ -77,14 +79,21 @@ export async function pendingIntentArchives(
   });
   const related = await Promise.all(
     pending.map(async capture => {
-      if (capture.intentKeys) return capture.intentKeys.some(key => keys.includes(key));
-      // A capture left by the earlier writer has no derived hint. The source headers are still live.
-      const rows = await Promise.all(
-        capture.refs
-          .filter(ref => ref.table === 'projectHostedRecords')
-          .map(ref => ctx.db.get(ref.id as Id<'projectHostedRecords'>)),
-      );
-      return rows.some(row => row?.kind === 'intent' && keys.includes(row.key));
+      const keys =
+        capture.intentKeys ??
+        (
+          await Promise.all(
+            capture.refs
+              .filter(ref => ref.table === 'projectHostedRecords')
+              .map(ref => ctx.db.get(ref.id as Id<'projectHostedRecords'>)),
+          )
+        ).flatMap(row => (row?.kind === 'intent' ? [row.key] : []));
+      if (legacyKeys) return keys.some(key => legacyKeys.includes(key));
+      for (const key of new Set(keys)) {
+        const head = await recordHead(ctx, projectId, 'intent', key);
+        if (head && intentBelongsToItem(head, itemId)) return true;
+      }
+      return false;
     }),
   );
   return pending.flatMap((capture, i) =>

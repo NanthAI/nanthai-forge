@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
-import { query } from './cliServer';
+import { query, type QueryCtx } from './cliServer';
+import type { Id } from './_generated/dataModel';
 import { recordCaller } from './projectHostedFrictionStore';
 import {
   readHostedIntentLabel,
@@ -9,6 +10,10 @@ import {
   hostedRecordBody,
   recordHead,
 } from './projectHostedRecords';
+import { intentBelongsToItem, legacyItemIntentHead } from './projectItemIntentHeads';
+import { itemIntentPage, type ItemIntentPosition } from './projectItemIntentPages';
+import { verifiedItemMembership } from './projectItemMembershipVersion';
+import { z } from 'zod';
 import { isAgentSlug } from '../src/agent-slug';
 import { storedLandingStateSchema } from '../src/hosted-landing';
 import { landingStateOf, type LandingStateName } from '../src/landing-state';
@@ -17,7 +22,6 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 import { abandonClass, dormantCutoff, landedByReceipt, overlapEvidence } from './projectHostedDormancy';
-import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import { isPlanningUuid } from '../src/planning-id';
 import { presenceMayShare } from '../src/hosted-presence';
 import { saveFailureForViewer } from './projectHostedSaveStore';
@@ -26,7 +30,77 @@ import { supersededSummary } from '../src/hosted-overlap';
 import { laneConflicts } from './projectHostedConflicts';
 import { NOTICE_PATHS } from '../src/conflict-notice-paths';
 
-/** One bounded indexed page, selected metadata only; no source objects or idle work. */
+const openPosition = z.object({
+  next: z.union([z.literal('indexed'), z.tuple([z.number(), z.string()])]).nullable(),
+  child: z.object({ intentId: z.string(), cursor: z.string() }).optional(),
+});
+
+function activeHeads(ctx: QueryCtx, projectId: Id<'hostedProjects'>, parent?: string) {
+  const heads = ctx.db.query('projectHostedRecordHeads');
+  return parent
+    ? heads.withIndex('by_project_and_kind_and_parent_and_status', q =>
+        q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', parent).eq('status', 'active'),
+      )
+    : heads.withIndex('by_project_and_kind_and_status', q =>
+        q.eq('projectId', projectId).eq('kind', 'lane').eq('status', 'active'),
+      );
+}
+
+/** Page the newest Intent's active index first, then earlier Intent membership. Closed Lanes
+ * never consume the page budget. A continuation pins the exact parent while paging its Lanes. */
+async function indexedOpenPage(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  itemId: string,
+  cursor: string | null,
+  limit: number,
+) {
+  let position: z.infer<typeof openPosition> = { next: null };
+  if (cursor !== null) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(cursor);
+    } catch {
+      /* Invalid below. */
+    }
+    const parsed = openPosition.safeParse(raw);
+    invariant(parsed.success, 'BAD_ARGUMENT', 'Use the continueCursor from this Item’s open Lanes.');
+    position = parsed.data;
+  }
+  let next: ItemIntentPosition | null = position.next;
+  let head;
+  if (position.child) {
+    head = await recordHead(ctx, projectId, 'intent', position.child.intentId);
+    invariant(
+      head && intentBelongsToItem(head, itemId),
+      'BAD_ARGUMENT',
+      'The cursor’s Intent no longer belongs to this Item.',
+    );
+  } else {
+    const group = await itemIntentPage(ctx, projectId, itemId, next, 1, 'desc');
+    head = group.heads[0];
+    next = group.next;
+  }
+  if (!head) return { page: [], isDone: true, continueCursor: null };
+  const page = await activeHeads(ctx, projectId, head.key)
+    .order('desc')
+    .paginate({
+      cursor: position.child?.cursor ?? null,
+      numItems: limit,
+      maximumRowsRead: limit,
+    });
+  const isDone = page.isDone && next === null;
+  return {
+    page: page.page,
+    isDone,
+    continueCursor: isDone
+      ? null
+      : JSON.stringify({
+          next,
+          ...(!page.isDone ? { child: { intentId: head.key, cursor: page.continueCursor } } : {}),
+        }),
+  };
+}
 
 /** Overlap peers listed per Lane in `lanes {"view":"tree"}` (57c6f3ec), and shared paths named per peer. */
 const TREE_OVERLAPS = 5;
@@ -118,35 +192,36 @@ export const list = query({
         'BAD_ARGUMENT',
         'Use planningItemId with a full Issue UUID, or intentId with a full execution Intent UUID.',
       );
+      const verified = project.itemLaneMembership === verifiedItemMembership;
+      const indexedItem = !intentId && verified ? planningItemId : undefined;
       let parent = intentId;
-      if (planningItemId) {
-        // Match planned start and planning reconciliation, including reopened Issues. Head-only
-        // point reads, bounded by the existing chain bound; no Lane scans or client follow-ups.
-        let current = planningItemId;
-        let head = await recordHead(ctx, projectId, 'intent', current);
-        for (
-          let hop = 0;
-          head && intentFinished(head.status.replace(/^journal:/, '')) && hop < maxIntentChain;
-          hop++
-        ) {
-          const nextId = successorIntentId(current);
-          const next = await recordHead(ctx, projectId, 'intent', nextId);
-          if (!next) break;
-          current = nextId;
-          head = next;
+      if (planningItemId && !indexedItem) {
+        if (intentId && verified) {
+          const head = await recordHead(ctx, projectId, 'intent', intentId);
+          invariant(
+            head && intentBelongsToItem(head, planningItemId),
+            'BAD_ARGUMENT',
+            'planningItemId and intentId select different work.',
+          );
+        } else {
+          const current = (await legacyItemIntentHead(ctx, projectId, planningItemId))?.key ?? planningItemId;
+          invariant(
+            !intentId || intentId === current,
+            'BAD_ARGUMENT',
+            'planningItemId and intentId select different work.',
+          );
+          parent = current;
         }
-        invariant(
-          !intentId || intentId === current,
-          'BAD_ARGUMENT',
-          'planningItemId and intentId select different work. Use planningItemId for the Issue, or intentId for one execution Intent.',
-        );
-        parent = current;
       }
-      const binding = canonicalPayload({
+      const legacyBinding = {
         planningItemId: planningItemId ?? null,
         intentId: parent ?? null,
         view: view ?? 'all',
-      });
+      };
+      // Keep the released CLI envelope. Version the bound stream, not the opaque outer prefix.
+      const binding = canonicalPayload(
+        indexedItem ? { ...legacyBinding, projectId, stream: 'item-v2' } : legacyBinding,
+      );
       let providerCursor = cursor === null ? null : cursor.slice('forge-lanes-v1:'.length);
       if (providerCursor?.startsWith('filter:')) {
         let retained;
@@ -158,33 +233,35 @@ export const list = query({
         invariant(
           retained?.binding === binding && typeof retained.cursor === 'string',
           'BAD_ARGUMENT',
-          'Lane filters changed or cursor is invalid. Restart lanes with planningItemId or intentId and no cursor.',
+          indexedItem
+            ? 'The Item’s open-Lane stream changed. Restart lanes with planningItemId and no cursor.'
+            : 'Lane filters changed or cursor is invalid. Restart lanes with planningItemId or intentId and no cursor.',
         );
         providerCursor = retained.cursor;
       } else
         invariant(
-          !providerCursor || !parent,
+          !providerCursor || (!parent && !indexedItem),
           'BAD_ARGUMENT',
           'Use the continueCursor returned for this planningItemId or intentId filter.',
         );
       const cutoff = dormantCutoff(project);
-      const heads = ctx.db.query('projectHostedRecordHeads');
-      const matching = parent
-        ? heads.withIndex('by_project_and_kind_and_parent_and_status', q =>
-            q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', parent).eq('status', 'active'),
-          )
-        : heads.withIndex('by_project_and_kind_and_status', q =>
-            q.eq('projectId', projectId).eq('kind', 'lane').eq('status', 'active'),
-          );
-      const page = await matching
-        .order('desc')
-        .paginate({ cursor: providerCursor, numItems: limit, maximumRowsRead: limit });
+      const page = indexedItem
+        ? await indexedOpenPage(ctx, projectId, indexedItem, providerCursor, limit)
+        : await activeHeads(ctx, projectId, parent)
+            .order('desc')
+            .paginate({ cursor: providerCursor, numItems: limit, maximumRowsRead: limit });
       const lanes = [];
       const tree = view === 'tree',
         treeRows: TreeRow[] = [];
       for (const head of page.page) {
         // Includes staged lifecycle overlays, so completed cascades never appear live.
-        const row = await readHostedRecord(ctx, { projectId, actor, kind: 'lane', key: head.key });
+        const row = await readHostedRecord(ctx, {
+          projectId,
+          actor,
+          kind: 'lane',
+          key: head.key,
+          selectedHead: head,
+        });
         if (!row) continue;
         const lane = hostedLaneSchema.parse(JSON.parse(row.value));
         if (lane.state !== 'active') continue;
@@ -352,7 +429,7 @@ export const list = query({
         isDone: page.isDone,
         continueCursor: page.isDone
           ? null
-          : `forge-lanes-v1:${parent ? `filter:${canonicalPayload({ binding, cursor: page.continueCursor })}` : page.continueCursor}`,
+          : `forge-lanes-v1:${parent || indexedItem ? `filter:${canonicalPayload({ binding, cursor: page.continueCursor })}` : page.continueCursor}`,
       });
     } catch (error) {
       if (error instanceof Error && /(?:InvalidCursor|invalid cursor|pagination cursor)/i.test(error.message))

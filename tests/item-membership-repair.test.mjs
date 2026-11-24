@@ -7,6 +7,7 @@ import { successorIntentId } from '../dist/hosted-intent-chain.js';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const repair = await import(moduleUrl('../convex/projectItemLaneBackfill.ts'));
+const { verifiedItemMembership } = await import(moduleUrl('../convex/projectItemMembershipVersion.ts'));
 
 function deployment(t, url = 'https://benevolent-wildebeest-974.convex.cloud') {
   const before = process.env.CONVEX_CLOUD_URL;
@@ -65,7 +66,7 @@ test('repair resumes across a long markerless chain, projects its Lanes, and doe
   assert.equal(after, null);
   for (const id of [rootHead, rootLane, ...members]) assert.equal(heads.get(id).planningItemId, root);
   for (const id of [neighborIntent, neighborLane]) assert.equal(heads.get(id).planningItemId, neighbor);
-  assert.equal((await s.ctx.db.get(projectId)).itemLaneMembership, true);
+  assert.equal((await s.ctx.db.get(projectId)).itemLaneMembership, verifiedItemMembership);
   assert.deepEqual(await run(first.next), { scanned: 0, patched: 0, next: null });
 });
 
@@ -74,9 +75,10 @@ test('the deployment census reports incomplete projects on later pages; a finish
   const s = recordsFixture();
   for (let i = 0; i < 62; i++) {
     const { projectId } = await s.setup();
-    await s.ctx.db.patch(projectId, { itemLaneMembership: true });
+    await s.ctx.db.patch(projectId, { itemLaneMembership: verifiedItemMembership });
   }
   const { projectId } = await s.setup();
+  await s.ctx.db.patch(projectId, { itemLaneMembership: true }); // pre-writer receipt is stale
   const census = after => s.call('census', repair.coverage, { after });
   const first = await census(null);
   assert(first.next);

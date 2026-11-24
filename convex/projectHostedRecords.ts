@@ -311,11 +311,22 @@ export async function readHostedRecord(
     key: string;
     version?: number;
     withSaveFailure?: boolean;
+    /** Head selected in this transaction by an alternate exact index. Undefined uses the key index. */
+    selectedHead?: Doc<'projectHostedRecordHeads'> | null;
   },
 ) {
   await accessibleProject(ctx, input.projectId, input.actor);
   const head =
-    input.version === undefined ? await recordHead(ctx, input.projectId, input.kind, input.key) : null;
+    input.version !== undefined
+      ? null
+      : input.selectedHead === undefined
+        ? await recordHead(ctx, input.projectId, input.kind, input.key)
+        : input.selectedHead;
+  invariant(
+    !head || (head.projectId === input.projectId && head.kind === input.kind && head.key === input.key),
+    'WORK_STALE',
+    'The selected record head does not match this read.',
+  );
   let row =
     input.version === undefined
       ? head

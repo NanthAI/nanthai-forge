@@ -6,6 +6,12 @@ import { recordHead } from './projectHostedRecords';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { successorIntentId } from '../src/hosted-intent-chain';
 import { invariant } from '../src/errors';
+import {
+  decodeItemMembershipFrontier,
+  encodeItemMembershipFrontier,
+  itemMembershipFrontier,
+  verifiedItemMembership,
+} from './projectItemMembershipVersion';
 
 const DEV = 'https://benevolent-wildebeest-974.convex.cloud';
 const onlyDev = () =>
@@ -31,8 +37,8 @@ export const run = internalMutation({
     onlyDev();
     const project = await ctx.db.get(projectId);
     invariant(project && !project.removal, 'PROJECT_UNAVAILABLE', 'This project is unavailable.');
-    if (project.itemLaneMembership === true) return { scanned: 0, patched: 0, next: null };
-    const previous = project.itemLaneMembership ?? null;
+    if (project.itemLaneMembership === verifiedItemMembership) return { scanned: 0, patched: 0, next: null };
+    const previous = itemMembershipFrontier(project.itemLaneMembership);
     // A duplicate request returns the durable frontier without reapplying the page.
     if (after !== previous) return { scanned: 0, patched: 0, next: previous };
     invariant(
@@ -54,7 +60,7 @@ export const run = internalMutation({
         'Rebuild the Work index before repairing Item membership.',
       );
       // Certify the empty ranges and write the checkpoint in the same transaction.
-      await ctx.db.patch(projectId, { itemLaneMembership: true });
+      await ctx.db.patch(projectId, { itemLaneMembership: verifiedItemMembership });
       return {
         scanned: 0,
         patched: 0,
@@ -63,7 +69,9 @@ export const run = internalMutation({
         writeBytes: bytes(project) + 1024,
       };
     }
-    const current: Frontier = after?.startsWith('{') ? JSON.parse(after) : { phase: 'roots', key: null };
+    const current: Frontier = previous
+      ? decodeItemMembershipFrontier(previous)
+      : { phase: 'roots', key: null };
     const workItem = (id: string) =>
       generation
         ? record(ctx, recordPartition(generation), 'planningSearch', id)
@@ -139,13 +147,13 @@ export const run = internalMutation({
       if (next.phase === phase && page.isDone && visited === page.page.length)
         next = phase === 'roots' ? { phase: 'lanes', key: null } : null;
     }
-    const cursor = next === null ? null : JSON.stringify(next);
+    const cursor = next === null ? null : encodeItemMembershipFrontier(next);
     invariant(
       cursor === null || cursor !== after,
       'WORK_STALE',
       'Membership repair could not advance its cursor.',
     );
-    await ctx.db.patch(projectId, { itemLaneMembership: cursor ?? true });
+    await ctx.db.patch(projectId, { itemLaneMembership: cursor ?? verifiedItemMembership });
     return { scanned, patched, next: cursor, readBytes, writeBytes };
   },
 });
@@ -169,9 +177,9 @@ export const coverage = internalQuery({
       .paginate({ cursor: after, numItems: PAGE, maximumRowsRead: PAGE, maximumBytesRead: MIB });
     const projects = page.page.filter(project => !project.removal);
     const incomplete = projects.flatMap(project =>
-      project.itemLaneMembership === true
+      project.itemLaneMembership === verifiedItemMembership
         ? []
-        : [{ projectId: project._id, after: project.itemLaneMembership ?? null }],
+        : [{ projectId: project._id, after: itemMembershipFrontier(project.itemLaneMembership) }],
     );
     return {
       checked: projects.length,

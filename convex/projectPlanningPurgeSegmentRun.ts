@@ -37,7 +37,7 @@ import type { ItemPurge } from './projectPlanningPurgeRedact';
 import type { ArchivePin, ArchiveSelection, SelectionProgress } from './projectPlanningPurgeArchiveSelection';
 
 type Entry = { key: string; index: JournalIndex };
-type Page = { entries: Entry[]; after: string | null; done: boolean };
+type Page = { entries: Entry[]; after: string | null; done: boolean; intentKeys?: string[]; scope?: string };
 
 type Identity = { projectId: Id<'hostedProjects'>; operationId: string };
 const archiveBatch = 8;
@@ -217,8 +217,13 @@ export const run = internalAction({
       }
       const rows = new Map(state.rows);
       const scannedKeys = new Set<string>();
+      let scannedScope: string | undefined;
       const indexed = state.sweep.indexed
-        ? { ids: state.purge.ids, intentKeys: state.purge.intentKeys! }
+        ? {
+            ids: state.purge.ids,
+            itemId: state.purge.itemId,
+            ...(state.purge.intentKeys ? { legacyKeys: state.purge.intentKeys } : {}),
+          }
         : undefined;
       while (Date.now() < deadline) {
         const page: Page = await ctx.runQuery(store.page, {
@@ -226,10 +231,15 @@ export const run = internalAction({
           after,
           ...(indexed ? { indexed } : {}),
         });
+        if (scannedScope !== page.scope) {
+          scannedKeys.clear();
+          scannedScope = page.scope;
+        }
         const entries = indexed ? page.entries.filter(entry => !scannedKeys.has(entry.key)) : page.entries;
         let scanned = 0;
         for await (const { entry, segment } of verifiedEntries(input, entries, tally, deadline, signal)) {
-          const redacted = redactSegment(segment, state.purge, rows);
+          const intentKeys = page.intentKeys ?? (await segmentIntentKeys(ctx, input, segment));
+          const redacted = redactSegment(segment, { ...state.purge, intentKeys }, rows);
           if (redacted.next !== segment) {
             if (signal.aborted || Date.now() >= deadline) break;
             const hashes = await rewrite(ctx, id, entry, redacted, signal);
@@ -263,6 +273,25 @@ export const run = internalAction({
     }
   },
 });
+
+async function segmentIntentKeys(ctx: ActionCtx, input: Identity, segment: JournalSegment) {
+  const keys = [
+    ...new Set(
+      (segment.tables.projectHostedRecords ?? []).flatMap(text => {
+        const row = JSON.parse(text) as Doc<'projectHostedRecords'>;
+        return row.kind === 'intent'
+          ? [row.key]
+          : row.kind === 'lifecycle' || row.kind === 'comment'
+            ? [row.parent]
+            : [];
+      }),
+    ),
+  ];
+  const matches: string[] = [];
+  for (let i = 0; i < keys.length; i += 128)
+    matches.push(...(await ctx.runQuery(store.members, { ...input, keys: keys.slice(i, i + 128) })));
+  return matches;
+}
 
 async function rewrite(
   ctx: ActionCtx,

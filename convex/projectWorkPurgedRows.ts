@@ -14,6 +14,8 @@ import { planningCommentPurgeSchema, planningPurgeSchema } from '../src/work-pla
 import { purgedFactsDigest, purgedPlanningRowSchema, type PurgedPlanningRow } from '../src/work-intent-types';
 import { metadataRequest } from '../src/work-metadata';
 import { purgedIntentKeys } from '../src/work-planning-purge';
+import { recordHead } from './projectHostedRecords';
+import { intentBelongsToItem } from './projectItemIntentHeads';
 
 /** A purge command: an Item's (every row of it) or one comment's (`commentId`, that row only). */
 type Purge = { revision: number; itemId: string; commentId?: string; rows: Map<string, string> } | null;
@@ -139,10 +141,17 @@ export async function verifiedPurgedRecord(
     return row.kind === 'comment' && row.key === purge.commentId && row.parent === purge.itemId
       ? { itemId: purge.itemId, commentId: purge.commentId }
       : null;
-  if (row.kind === 'intent' || row.kind === 'lifecycle')
-    return purgedIntentKeys(purge.itemId).includes(row.kind === 'intent' ? row.key : row.parent)
+  if (row.kind === 'intent' || row.kind === 'lifecycle') {
+    const key = row.kind === 'intent' ? row.key : row.parent;
+    if (key === purge.itemId) return { itemId: purge.itemId };
+    const head = await recordHead(ctx, row.projectId, 'intent', key);
+    // Earlier purge writers removed the metadata with the old head, so retained purged
+    // versions from that layout still prove their bounded legacy successor identity.
+    return (head && intentBelongsToItem(head, purge.itemId)) ||
+      (head?.planningItemId === undefined && purgedIntentKeys(purge.itemId).includes(key))
       ? { itemId: purge.itemId }
       : null;
+  }
   const itemId = row.kind === 'comment' ? row.parent : row.key;
   return ['issue', 'comment'].includes(row.kind) && purge.itemId === itemId ? { itemId } : null;
 }

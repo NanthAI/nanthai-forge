@@ -45,7 +45,7 @@ export async function selectJournal(
   ctx: MutationCtx,
   input: JournalRunInput,
   cursor: Pending['cursor'] = [],
-  purgingIntents: ReadonlySet<string> = new Set(),
+  purgingItems: ReadonlySet<string> = new Set(),
 ) {
   const phase = input.phase ?? 0,
     now = Date.now();
@@ -143,17 +143,19 @@ export async function selectJournal(
     if (phase === 0) {
       const record = row as Doc<'projectHostedRecords'>;
       // Planning versions and already redacted headers stay hot.
-      if (
-        wordsKinds.has(record.kind) ||
-        record.purged !== undefined ||
-        (record.kind === 'intent' && purgingIntents.has(record.key))
-      ) {
+      if (wordsKinds.has(record.kind) || record.purged !== undefined) {
         if (record.journalReadyAt !== undefined)
           await ctx.db.patch(record._id, { journalReadyAt: undefined });
       } else if (!record.journalSegment && !record.lifecyclePlanId) {
         const head = await headFor(ctx, record);
         if (head) bytes += size(head);
-        if (head && head.recordId !== record._id) {
+        const purging =
+          record.kind === 'intent' &&
+          (purgingItems.has(record.key) || (head?.planningItemId && purgingItems.has(head.planningItemId)));
+        if (purging) {
+          if (record.journalReadyAt !== undefined)
+            await ctx.db.patch(record._id, { journalReadyAt: undefined });
+        } else if (head && head.recordId !== record._id) {
           const current = await ctx.db.get(head.recordId);
           if (current) bytes += size(current);
           const dueAt = record.journalReadyAt ?? (current?._creationTime ?? now) + journalGraceMs;
