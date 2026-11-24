@@ -17,11 +17,20 @@ Optionally send `tokens` with `land --save`: a whole number, the tokens your own
 
 ## Hosted checkouts
 
-- `start {planningItemId}` (or `{outcome}`) prints the Lane path to edit in and the Issue's other `openLanes`. A new Lane that replaces one of them abandons the old one: `abandon {laneId,reason:"Replaced by Lane NEW"}`. Save after meaningful steps and act on `behindMain` and `conflictNotice` (saved files only: unsaved peer edits are excluded). `peers {laneId,path?,detail?}` reads saved overlap evidence; missing evidence never proves independence.
+- `start {planningItemId}` (or `{outcome}`) prints the Lane path to edit in and the Item's other `openLanes`. A new Lane that replaces one of them abandons the old one: `abandon {laneId,reason:"Replaced by Lane NEW"}`. Save after meaningful steps and act on `behindMain` and `conflictNotice` (saved files only: unsaved peer edits are excluded). `peers {laneId,path?,detail?}` reads saved overlap evidence; missing evidence never proves independence.
 - `diff {laneId,paths?,byteBudget?,cursor?}` compares pinned base to saved head. `show {state?,candidateId?,laneId?,path}` reads exact bytes, never unsaved files or a substituted revision. Follow `nextCursor` on the original pair.
 - `history {op:"log",path:"FILE"}` reads file history (Git commits when imported from GitHub, otherwise the landings that changed it; continue with `cursor`); `history {op:"blame",path:"FILE",start:1,end:100}` answers who changed lines; `op:"show",commit,path` reads an old file. MCP: `forge_review` action `history`.
 - Read `protectedPathNotice` before checks and `policy` for the full rules. Never bypass a held review by changing policy.
 - Removed with native mode: `brief`, `review`, `candidate`/`candidates`, `link`, `handoff`, `report`, `making-of`, `improve`, `save --preview` and `x undo-sync`. See [hosted parity](../../docs/agents/hosted-parity.md).
+
+## Write a good planning Item
+
+- Read the live backlog with `planning {status:"active",reconcile:false}`. Before filing, check once with `planning {search:"outcome words",status:"all",limit:10}`. If an Item already covers it, comment there; don't page for a duplicate check.
+- Capture with `put-planning-item {kind:"item",title:"Resume an interrupted checkout without losing edits"}`. A title is enough. Say what will be true, not what you will investigate. Add the named `initiativeId`, if known; Idea, Task and Bug are labels, not hierarchy. Use `status:"proposed"` for a suggestion; make it Planned only with clear approval, and record who gave it.
+- When refining, add why it matters, the scope, and observable `- [ ]` Done-when lines. Prefer “Retrying the original operation returns the same Lane id” to “Retries work.” Link relevant paths or Item ids. State what is still unknown; don't invent estimates or evidence.
+- Split work if its parts can land separately. Name their common outcome with `fields.parentId`. Record findings and decisions in discussion, not as silent changes to the Item. Apply agreed edits with `expectedVersion`.
+- Keep AI refinement separate from capture. Use `planning {id:"ITEM",refine:true}` before asking a model for suggestions; if `refinement.enabled` is false, stop the model path. Capture and refinement do not start work: `start {planningItemId}` does.
+- Tick each proven line with `tick-planning-item {planningItemId,line,evidence}` and the exact receipt or test result. Leave unverified lines open. The [planning guide](../../docs/planning.md) covers the same commands in CLI and MCP (`forge_planning`).
 
 ## Working from idea to main
 
