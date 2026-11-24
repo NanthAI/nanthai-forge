@@ -360,6 +360,29 @@ test('plan views and bulk bar: real components keep the view in the address and 
       }));
     });
 
+  await t.test('closed Items stay off the default Plan and Find can select them in Closed', async () => {
+    const { page, errors, context } = await open(1440, 'light', '', false, true);
+    try {
+      const main = page.locator('main');
+      const done = main.getByRole('link', { name: /Old reader removed/ });
+      const dropped = main.getByRole('link', { name: /Ship a second parser/ });
+      const find = main.getByRole('searchbox', { name: 'Find in the plan' });
+      await main.getByRole('link', { name: /Stream parser: preserve split bytes across reads/ }).waitFor();
+      assert.equal(await done.count(), 0);
+      assert.equal(await dropped.count(), 0);
+      await page.goto('https://forge.test/example-builder/synthetic/plan?scope=closed');
+      await done.waitFor();
+      await dropped.waitFor();
+      await find.fill('old reader');
+      await page.waitForFunction(() => new URLSearchParams(location.search).get('q') === 'old reader');
+      await dropped.waitFor({ state: 'detached' });
+      await done.waitFor();
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+    }
+  });
+
   // Behaviour at desk width: filters in the address, only ticked rows change, a refused row is named.
   {
     const { page, errors, context } = await open(1440, 'dark');

@@ -200,7 +200,7 @@ const run = (p, action, input, operationId) =>
 const put = (p, input) => run(p, 'put-planning-item', input);
 const list = (p, input = {}) => run(p, 'planning', input).then(response => response.result);
 
-test('the Closed view status list returns both Done and dropped Items, including in ranked search', async t => {
+test('active search hides settled Items and an explicit Closed search finds both Done and dropped Items', async t => {
   const s = await setup(t);
   const p = port(s);
   for (const status of ['open', 'closed', 'abandoned', 'archived', 'deleted']) {
@@ -209,6 +209,16 @@ test('the Closed view status list returns both Done and dropped Items, including
     if (status !== 'open')
       await s.send(s.item({ itemId: row.itemId, expectedVersion: 1, status, title: row.title }));
   }
+  const alive = await list(p, { status: 'active', reconcile: false });
+  assert.deepEqual(
+    alive.items.map(item => item.status),
+    ['open'],
+  );
+  const defaultSearch = await list(p, { search: 'parser', reconcile: false });
+  assert.deepEqual(
+    defaultSearch.items.map(item => item.status),
+    ['open'],
+  );
   for (const search of [undefined, 'parser']) {
     const result = await list(p, { status: ['closed', 'abandoned'], search, reconcile: false });
     assert.deepEqual(result.items.map(item => item.status).sort(), ['abandoned', 'closed']);

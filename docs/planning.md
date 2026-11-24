@@ -67,6 +67,16 @@ uses open Lanes active within 48 hours. When it does not cover all open Lanes
 reported by Work, the panel shows a lower bound if some agents are known.
 The panel makes no idle calls.
 
+## Open work and closed history
+
+Plan opens in **Open work**: Proposed, Planned and In progress. Done and dropped Items do not appear there.
+Switch to **Closed** and use Find to narrow the loaded history by title or Item id. Find cannot see
+older rows until **Load more** reads them. For an indexed search across closed history (including bodies),
+use `nforge agent ROOT planning '{"search":"words","status":["closed","abandoned"],"kind":"issue"}'`,
+or send the same fields with `action: "planning"` to `forge_planning` in MCP. Search without a status
+only finds active work. A `nextCursor` means the search is incomplete, even if the current page has
+no matches. Continue with the same filters and `cursor: nextCursor` until you find the Item or the cursor is null.
+
 ## Status
 
 Stored status words never change. Screens and agent replies show the visible word:
