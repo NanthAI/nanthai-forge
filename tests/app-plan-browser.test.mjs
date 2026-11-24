@@ -13,6 +13,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -151,14 +152,14 @@ const linkBackend = fakeConvex({
     if (name === 'projectPlanWorkers:read') return '{"lanes":[]}';
     if (name === 'projectDiscussionThread:read') return { canRead: true, entries: [], before: null };
     if (name === 'projectItemWork:read') return window.readItemWork?.(args) ?? '{"role":false}';
-    if (name === 'projectHostedPlanning:itemHistory') return JSON.stringify({
-      historyStartsAt: '2026-10-02T09:00:00.000Z', completeFromCreation: true, nextCursor: null,
-      events: [
-        { kind: 'version', id: 'v3', at: '2026-11-23T10:00:00.000Z', summary: 'closed: all Done-when lines ticked', actor: 'example-builder/cobalt-fox', actorKind: 'agent', model: 'claude-opus-5-5' },
-        { kind: 'version', id: 'v2', at: '2026-11-22T09:00:00.000Z', summary: 'status open → in-progress', actor: 'example-builder', actorKind: 'person', model: null },
-        { kind: 'version', id: 'v1', at: '2026-11-20T09:00:00.000Z', summary: 'created issue (open)', actorKind: 'unknown', model: null },
-      ],
-    });
+    if (name === 'projectHostedPlanning:itemHistory') {
+      (window.historyLimits ??= []).push(args.limit);
+      if (args.limit > 3 && window.failHistoryOnce) {
+        window.failHistoryOnce = false;
+        throw Error('History unavailable');
+      }
+      return window.readItemHistory?.(args) ?? '{"events":[],"nextCursor":null}';
+    }
     if (name === 'projectPlanSettled:page') return {
       page: settledRows.filter(row => row.status === args.status).map(row => JSON.stringify(row)),
       isDone: true, continueCursor: '',
@@ -302,6 +303,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
     livePlan = false,
     readItemWork,
     virtualClock = false,
+    readItemHistory,
   ) => {
     // One locale on every machine, so dates read the same locally and on the runner ("1 Nov", never "Nov 1" or "1 ott").
     const context = await browser.newContext({
@@ -311,6 +313,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
     if (held) await context.addInitScript(() => (window.heldFeed = true));
     if (livePlan) await context.addInitScript(() => (window.livePlan = true));
     if (readItemWork) await context.exposeFunction('readItemWork', readItemWork);
+    if (readItemHistory) await context.exposeFunction('readItemHistory', readItemHistory);
     // Every layout shift from the first paint on, for the no-shift check below.
     await context.addInitScript(() => {
       window.shifts = [];
@@ -1330,6 +1333,14 @@ test('plan views and bulk bar: real components keep the view in the address and 
     details: true,
   });
   const { itemId } = workFixture;
+  await workFixture.seedHistory();
+  const fullHistory = JSON.parse(await workFixture.readHistoryRaw({ limit: 25, cursor: null }));
+  assert(fullHistory.nextCursor, 'the synthetic history has a second real page');
+  const olderHistory = JSON.parse(
+    await workFixture.readHistoryRaw({ limit: 25, cursor: fullHistory.nextCursor }),
+  );
+  assert.equal(olderHistory.nextCursor, null);
+  const allHistory = [...fullHistory.events, ...olderHistory.events].map(event => event.summary);
   let workCosts;
   for (const unrelated of [0, 10_000]) {
     await t.test(`Item Work reads one bounded page on open with ${unrelated} unrelated Lanes`, async t => {
@@ -1367,6 +1378,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
             return reply;
           },
           unrelated === 0 && width === 1440,
+          async ({ cursor, limit }) => workFixture.readHistoryRaw({ limit, cursor }),
         );
         try {
           const work = page.getByRole('region', { name: 'Work', exact: true });
@@ -1387,7 +1399,20 @@ test('plan views and bulk bar: real components keep the view in the address and 
               'true',
             );
           assert.equal(await lanes.count(), 3);
-          await work.getByRole('button', { name: 'Show 7 more', exact: true }).click();
+          assert.deepEqual(calls.slice(-1), [
+            { itemId, projectId: 'synthetic', limit: 3, cursor: null, details: true },
+          ]);
+          const expandedFirst = width === 1440;
+          if (expandedFirst) {
+            await work.getByRole('button', { name: 'Show more Lanes' }).click();
+            await lanes.nth(9).waitFor();
+            assert.equal(calls.at(-1).cursor, null);
+          } else {
+            await more.click();
+            await lanes.nth(11).waitFor();
+            assert(calls.at(-1).cursor?.startsWith('forge-item-work-v2:'));
+            assert.equal(await more.count(), 0);
+          }
           const relatedPart = work
             .getByRole('button', { name: 'Related', exact: true })
             .locator('xpath=../..');
@@ -1410,8 +1435,8 @@ test('plan views and bulk bar: real components keep the view in the address and 
           );
           assert.doesNotMatch(await page.locator('.head .crumb').textContent(), /00000000/);
           const landings = work.getByRole('link', { name: /^Landing / });
-          assert.equal(await lanes.count(), 10);
-          assert.equal(await laneThreads.count(), 10);
+          assert.equal(await lanes.count(), expandedFirst ? 10 : 12);
+          assert.equal(await laneThreads.count(), expandedFirst ? 10 : 12);
           assert.equal(
             await laneThreads.first().getAttribute('href'),
             `/example-builder/synthetic/lanes/${workFixture.open.id}/thread`,
@@ -1425,9 +1450,6 @@ test('plan views and bulk bar: real components keep the view in the address and 
             await landings.first().getAttribute('href'),
             `/example-builder/synthetic/code/files?at=${'c'.repeat(64)}`,
           );
-          assert.deepEqual(calls.slice(-1), [
-            { itemId, projectId: 'synthetic', limit: 10, cursor: null, details: true },
-          ]);
           await check(page, `Item Work ${width} ${theme}`);
           assert.equal(
             await lanes.evaluateAll(links =>
@@ -1450,9 +1472,10 @@ test('plan views and bulk bar: real components keep the view in the address and 
             await page.evaluate(() => window.scrollTo(0, 0));
             await page.screenshot({ path: join(shots, `item-work-${width}-${theme}.png`), fullPage: true });
           }
-          await work.getByText('closed: all Done-when lines ticked').waitFor();
+          await work.getByText(fullHistory.events[0].summary, { exact: true }).waitFor();
           assert.deepEqual((await page.evaluate(() => window.planQueries)).sort(), [
             'projectHostedPlanning:itemHistory',
+            'projectItemWork:read',
             'projectItemWork:read',
             'projectWorkIndex:detail',
           ]);
@@ -1462,8 +1485,8 @@ test('plan views and bulk bar: real components keep the view in the address and 
             'projectPlanView:read',
             'projectWorkIndex:workspace',
           ]);
-          await more.click();
-          await lanes.filter({ hasText: 'Synthetic outcome' }).last().waitFor();
+          if (expandedFirst) await more.click();
+          await lanes.nth(11).waitFor();
           await work.locator(`a[href$="/lanes/${workFixture.abandoned.id}"]`).waitFor();
           assert.equal(await lanes.count(), 12);
           assert.equal(await laneThreads.count(), 12);
@@ -1474,24 +1497,54 @@ test('plan views and bulk bar: real components keep the view in the address and 
             'projectHostedPlanning:itemHistory',
             'projectItemWork:read',
             'projectItemWork:read',
+            ...(expandedFirst ? ['projectItemWork:read'] : []),
             'projectWorkIndex:detail',
           ]);
-          // Closing and reopening History keeps the already-read page and recorded actor evidence.
           const history = work.getByRole('button', { name: 'History', exact: true });
+          const historyPart = history.locator('xpath=../..');
+          const summaries = () => historyPart.locator('.row > div[dir="auto"]').allTextContents();
+          const firstOlderEvent = historyPart.getByText(olderHistory.events[0].summary, { exact: true });
+          assert.deepEqual(await summaries(), allHistory.slice(0, 3));
+          assert.deepEqual(await page.evaluate(() => window.historyLimits), [3]);
+          const showHistory = historyPart.getByRole('button', { name: 'Show more history' });
+          const checkRetry = unrelated === 0 && width === 1440;
+          if (checkRetry) {
+            await page.evaluate(() => {
+              window.failHistoryOnce = true;
+            });
+            await showHistory.click();
+            await historyPart.getByText('More history could not be loaded. Try again.').waitFor();
+            assert.deepEqual(await summaries(), allHistory.slice(0, 3));
+          }
+          await showHistory.click();
+          const olderButton = historyPart.getByRole('button', { name: 'Show older changes' });
+          await olderButton.waitFor();
+          assert.deepEqual(await summaries(), allHistory.slice(0, 25));
+          await olderButton.click();
+          await firstOlderEvent.waitFor();
+          assert.deepEqual(
+            await summaries(),
+            allHistory,
+            'the original audit cursor continues without gaps or duplicates',
+          );
+          await historyPart.getByRole('button', { name: 'Show fewer' }).click();
+          await historyPart.getByRole('button', { name: `Show ${allHistory.length - 3} more` }).click();
+          await firstOlderEvent.waitFor();
+          // Closing and reopening History keeps the already-read page and recorded actor evidence.
           await history.click();
           assert.equal(await history.getAttribute('aria-expanded'), 'false');
           await history.click();
-          await work.getByText('closed: all Done-when lines ticked').waitFor();
-          assert.equal(await work.getByText('status open → in-progress').count(), 1);
+          await firstOlderEvent.waitFor();
           assert.match(
-            await work.getByText('closed: all Done-when lines ticked').locator('..').textContent(),
+            await historyPart
+              .getByText(fullHistory.events[0].summary, { exact: true })
+              .locator('..')
+              .textContent(),
             /cobalt-fox/,
           );
-          assert.equal(
-            (await page.evaluate(() => window.planQueries)).filter(
-              name => name === 'projectHostedPlanning:itemHistory',
-            ).length,
-            1,
+          assert.deepEqual(
+            await page.evaluate(() => window.historyLimits),
+            checkRetry ? [3, 25, 25, 25] : [3, 25, 25],
           );
           if (shots)
             await page.screenshot({
@@ -1516,7 +1569,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
           await context.close();
         }
       }
-      assert.equal(calls.length, 4);
+      assert.equal(calls.length, 5);
       for (const cost of costs) {
         assert.equal(cost.writes, 0);
         assert(cost.ranges <= 85, JSON.stringify(cost));
@@ -1530,6 +1583,76 @@ test('plan views and bulk bar: real components keep the view in the address and 
       else workCosts = costs;
     });
   }
+  await t.test(
+    'Lanes expansion within the first full page retries locally and does not promise a second Work page',
+    async () => {
+      const short = await itemWorkFixture({ itemId, initiativeId: launchId, extra: 1, details: true });
+      let failExpansion = true;
+      const { page, context, errors } = await open(390, 'dark', `/${itemId}`, false, true, args => {
+        if (args.limit === 10 && failExpansion) {
+          failExpansion = false;
+          throw Error('Lane details unavailable');
+        }
+        return short.readRaw({ limit: args.limit, cursor: args.cursor, details: args.details });
+      });
+      try {
+        const work = page.getByRole('region', { name: 'Work', exact: true });
+        const part = work.getByRole('button', { name: 'Lanes', exact: true }).locator('xpath=../..');
+        const show = part.getByRole('button', { name: 'Show more Lanes' });
+        const lanes = part.locator('a.ttl[href*="/lanes/"]');
+        await show.waitFor();
+        assert.equal(await lanes.count(), 3);
+        const moreWork = work.getByRole('button', { name: 'Show more work' });
+        assert.equal(await moreWork.count(), 0);
+        await show.click();
+        await part.getByText('More Lanes could not be loaded. Try again.', { exact: true }).waitFor();
+        assert.equal(await lanes.count(), 3);
+        await show.click();
+        await lanes.nth(4).waitFor();
+        assert.equal(await moreWork.count(), 0);
+        assert.deepEqual(errors, []);
+      } finally {
+        await context.close();
+      }
+    },
+  );
+  await t.test(
+    'an unavailable Lane body does not invent a Lane expansion when Related has a continuation',
+    async () => {
+      const short = await itemWorkFixture({ itemId, initiativeId: launchId, details: true });
+      const head = [...short.tables.projectHostedRecordHeads.values()].find(row => row.key === short.open.id);
+      short.tables.projectHostedRecords.delete(head.recordId);
+      const abandoned = [...short.tables.projectHostedRecordHeads.values()].find(
+        row => row.key === short.abandoned.id,
+      );
+      short.tables.projectHostedRecordHeads.delete(abandoned._id);
+      const reverse = randomUUID();
+      await short.planning(reverse, {
+        title: 'Older reverse link',
+        relations: [{ kind: 'depends-on', id: itemId }],
+      });
+      for (let i = 0; i < 50; i++) await short.planning(randomUUID(), { title: `Unrelated root ${i}` });
+      const { page, context, errors } = await open(1440, 'dark', `/${itemId}`, false, true, args =>
+        short.readRaw({ limit: args.limit, cursor: args.cursor, details: args.details }),
+      );
+      try {
+        const work = page.getByRole('region', { name: 'Work', exact: true });
+        const more = work.getByRole('button', { name: 'Show more work' });
+        const older = work.getByRole('link', { name: 'Older reverse link' });
+        await more.waitFor();
+        assert.equal(await work.locator('a.ttl[href*="/lanes/"]').count(), 2);
+        assert.equal(await work.getByRole('button', { name: 'Show more Lanes' }).count(), 0);
+        assert.equal(await older.count(), 0);
+        await more.click();
+        await older.waitFor();
+        assert.equal(await work.locator('a.ttl[href*="/lanes/"]').count(), 2);
+        assert.equal(await more.count(), 0);
+        assert.deepEqual(errors, []);
+      } finally {
+        await context.close();
+      }
+    },
+  );
   // The board as system rows (d3357f40, design cecab403, decision f4e28113): no cards, bands across the columns that
   // fold, one Group chip in the address for List and Board, each head's total equal to its rows (with "+" when the
   // read is partial), a sub-item rolled into its parent, the Done and Won't do columns only with the settled scope.

@@ -66,7 +66,7 @@ discussion and Lane rows use the same identity mark as the rest of Forge.
 
 Work opens with one call to the same bounded reader as the agent CLI. Each request for
 more work reads one cursor page. The web details are optional and Work makes no idle
-calls. Lanes, Landings and Related start open with three rows each; **Show more** reveals rows already held, without another read. History starts open with one page of 25 events, shows its first three, and reads another page only when asked. Folds remember the reader's choice. Landings pages retained receipt notes by recorded time, then older Lane stamps. Check or file evidence unavailable in the retained records stays unknown.
+calls. Lanes, Landings, Related and History start open with up to three visible rows each. The first Work read loads details for at most three Lanes; expanding Lanes reads the full first Work page only when needed. History starts with a three-event read; **Show more history** reads the full first page of up to 25 events, and **Show older changes** follows its cursor. Expanding Landings and Related reveals already loaded rows. Folds remember the reader’s choice and reopening them reuses loaded pages. Landings pages retained receipt notes by recorded time, then older Lane stamps. Check or file evidence unavailable in the retained records stays unknown.
 Related resolves both directions from the current Plan records, including Done and
 Dropped Items. Reverse links use bounded pages of planning rows, so a later page may
 contain a link from an older Item.

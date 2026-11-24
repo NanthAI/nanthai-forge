@@ -7,6 +7,7 @@ import { recordsFixture } from './hosted-records-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const work = await import(moduleUrl('../convex/projectItemWork.ts'));
+const hostedPlanning = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
 const initiativeWork = await import(moduleUrl('../convex/projectInitiativeWork.ts'));
 const rebuild = await import(moduleUrl('../convex/projectInitiativeWorkRebuild.ts'));
 const fold = await import(moduleUrl('../convex/projectInitiativeWorkFold.ts'));
@@ -274,6 +275,60 @@ export async function itemWorkFixture({
   const readRaw = (args = {}, name = 'read') =>
     s.call(name, work.read, { projectId: auth.projectId, itemId, ...args });
   const read = async (...args) => JSON.parse(await readRaw(...args));
+  const seedHistory = async () => {
+    const root = [...s.tables.projectPlanningRecords.values()].find(
+      row => row.collection === 'planningItems' && row.key === itemId,
+    );
+    const snapshots = [];
+    for (const [version, status, body] of [
+      [1, 'open', 'Done when:\n- [ ] Ship the parser'],
+      [2, 'in-progress', 'Done when:\n- [ ] Ship the parser'],
+      [3, 'closed', 'Done when:\n- [x] Ship the parser'],
+    ]) {
+      const snapshot = {
+        ...JSON.parse(root.value),
+        version,
+        status,
+        body,
+        operationId: randomUUID(),
+        at: `2026-11-${20 + version}T09:00:00.000Z`,
+        author: 'owner',
+        agent: 'cobalt-fox',
+        agentClient: 'codex:gpt-6.2-sol',
+      };
+      snapshots.push(snapshot);
+      await s.ctx.db.insert('projectPlanningRecords', {
+        projectId: auth.projectId,
+        generationId,
+        collection: 'planningVersions',
+        key: `${itemId}:${version}`,
+        position: version - 1,
+        parent: itemId,
+        value: JSON.stringify(snapshot),
+      });
+    }
+    await s.ctx.db.patch(root._id, { value: JSON.stringify(snapshots.at(-1)) });
+    for (let i = 0; i < 30; i++) {
+      const id = randomUUID();
+      await s.ctx.db.insert('projectPlanningRecords', {
+        projectId: auth.projectId,
+        generationId,
+        collection: 'planningComments',
+        key: id,
+        position: i,
+        parent: itemId,
+        value: JSON.stringify({
+          id,
+          itemId,
+          text: `Parser evidence ${i}`,
+          author: 'owner',
+          at: new Date(Date.UTC(2026, 9, i + 1)).toISOString(),
+        }),
+      });
+    }
+  };
+  const readHistoryRaw = args =>
+    s.call('itemHistory', hostedPlanning.itemHistory, { projectId: auth.projectId, itemId, ...args });
   const readInitiativeRaw = (args = {}, name = 'initiative') =>
     s.call(name, initiativeWork.read, { projectId: auth.projectId, initiativeId, ...args });
   const workTasks = [];
@@ -334,6 +389,8 @@ export async function itemWorkFixture({
     stampReceipt,
     read,
     readRaw,
+    seedHistory,
+    readHistoryRaw,
     addUnrelatedLanes,
   };
 }

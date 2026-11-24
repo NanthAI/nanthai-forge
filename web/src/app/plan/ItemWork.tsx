@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Avatar, Count, Glyph, Key, Region, Row, State, Who, useFold, type StateWord } from '../../ds';
 import { age } from '../../ui/status';
 import { A } from '../frames';
 import type { ProjectRoute } from '../screen-route';
 import { whoLinks, type WhoProject } from '../who-links';
 
-export type ReadItemWork = (itemId: string, cursor: string | null) => Promise<string>;
-export type ReadItemHistory = (itemId: string, cursor: string | null) => Promise<string>;
+type ReadPage = (itemId: string, cursor: string | null, limit: number) => Promise<string>;
+export type ReadItemWork = ReadPage;
+export type ReadItemHistory = ReadPage;
+
+const VISIBLE_ROWS = 3;
+const WORK_PAGE = 10;
+const HISTORY_PAGE = 25;
 
 const stateWords = {
   open: 'Working',
@@ -39,6 +44,7 @@ type Lane = {
   lastSaveAt: string | null;
 };
 type Related = { kind: string; id: string; title: string };
+const linkKey = (link: Related) => `${link.kind}:${link.id}`;
 type Work =
   | { role: false }
   | {
@@ -113,31 +119,54 @@ function TopRows<T>({
   rows,
   draw,
   empty,
+  more,
+  reveal = 0,
+  error,
 }: {
   rows: readonly T[];
   draw: (row: T) => ReactNode;
   empty: string;
+  more?: { label: string; busy: boolean; load: () => Promise<boolean> } | undefined;
+  reveal?: number;
+  error?: string | undefined;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [choice, setChoice] = useState({ reveal, expanded: false });
+  const expanded = choice.reveal === reveal ? choice.expanded : reveal > 0;
+  const setExpanded = (value: boolean) => setChoice({ reveal, expanded: value });
   const id = useId();
-  if (!rows.length) return <div className="quietline">{empty}</div>;
   return (
     <>
-      {rows.slice(0, 3).map(draw)}
+      {rows.length
+        ? rows.slice(0, VISIBLE_ROWS).map(draw)
+        : !more && <div className="quietline">{empty}</div>}
       <div id={id} hidden={!expanded}>
-        {expanded ? rows.slice(3).map(draw) : null}
+        {expanded ? rows.slice(VISIBLE_ROWS).map(draw) : null}
       </div>
-      {rows.length > 3 ? (
+      {rows.length > VISIBLE_ROWS || more ? (
         <div className="ip-showmore">
           <Key
             size="sm"
             kind="ghost"
             aria-expanded={expanded}
             aria-controls={id}
-            onClick={() => setExpanded(!expanded)}
+            disabled={more?.busy}
+            onClick={() => {
+              if (!more || expanded) setExpanded(!expanded);
+              else
+                void more.load().then(loaded => {
+                  if (loaded) setExpanded(true);
+                });
+            }}
           >
-            {expanded ? 'Show fewer' : `Show ${(rows.length - 3).toLocaleString()} more`}
+            {expanded
+              ? 'Show fewer'
+              : (more?.label ?? `Show ${(rows.length - VISIBLE_ROWS).toLocaleString()} more`)}
           </Key>
+        </div>
+      ) : null}
+      {error ? (
+        <div className="pad" role="status">
+          {error}
         </div>
       ) : null}
     </>
@@ -196,7 +225,7 @@ function HistoryWho({ event, project }: { event: HistoryEvent; project: WhoProje
   );
 }
 
-/** One bounded page (25 events) read when the part is first opened; older events only on an explicit request. */
+/** The open part reads only its three visible events. Expansion opens the original full audit page. */
 function ItemHistory({
   itemId,
   read,
@@ -207,20 +236,26 @@ function ItemHistory({
   project: WhoProject;
 }) {
   const [history, setHistory] = useState<History | 'failed' | null>(null);
+  const [full, setFull] = useState(false);
   const [paging, setPaging] = useState(false);
   const [pageFailed, setPageFailed] = useState(false);
   const [attempt, retry] = useState(0);
+  const epoch = useRef(0);
   useEffect(() => {
-    let current = true;
-    read(itemId, null)
+    const source = ++epoch.current;
+    setHistory(null);
+    setFull(false);
+    setPageFailed(false);
+    setPaging(false);
+    read(itemId, null, VISIBLE_ROWS)
       .then(raw => {
-        if (current) setHistory(JSON.parse(raw) as History);
+        if (source === epoch.current) setHistory(JSON.parse(raw) as History);
       })
       .catch(() => {
-        if (current) setHistory('failed');
+        if (source === epoch.current) setHistory('failed');
       });
     return () => {
-      current = false;
+      epoch.current++;
     };
   }, [itemId, read, attempt]);
   if (history === null || history === 'failed' || !Array.isArray(history.events))
@@ -240,17 +275,23 @@ function ItemHistory({
         ) : null}
       </div>
     );
-  const more = async () => {
-    if (paging || !history.nextCursor) return;
+  const loadHistory = async (first: boolean) => {
+    if (paging || !history.nextCursor) return false;
     setPaging(true);
     setPageFailed(false);
+    const source = epoch.current;
     try {
-      const next = JSON.parse(await read(itemId, history.nextCursor)) as History;
-      setHistory({ ...next, events: [...history.events, ...next.events] });
+      const next = JSON.parse(await read(itemId, first ? null : history.nextCursor, HISTORY_PAGE)) as History;
+      if (source !== epoch.current) return false;
+      if (!Array.isArray(next.events)) throw new Error('History page unavailable.');
+      setHistory(first ? next : { ...next, events: [...history.events, ...next.events] });
+      setFull(true);
+      return true;
     } catch {
-      setPageFailed(true);
+      if (source === epoch.current) setPageFailed(true);
+      return false;
     } finally {
-      setPaging(false);
+      if (source === epoch.current) setPaging(false);
     }
   };
   return (
@@ -258,6 +299,15 @@ function ItemHistory({
       <TopRows
         rows={history.events}
         empty="No changes recorded."
+        more={
+          !full && history.nextCursor
+            ? {
+                label: paging ? 'Loading history…' : 'Show more history',
+                busy: paging,
+                load: () => loadHistory(true),
+              }
+            : undefined
+        }
         draw={event => (
           <Row key={`${event.kind}:${event.id}`} cols="minmax(0, 1fr) auto">
             <div dir="auto">{event.summary}</div>
@@ -278,12 +328,16 @@ function ItemHistory({
           History starts {new Date(history.historyStartsAt).toLocaleDateString()}.
         </div>
       ) : null}
-      {history.nextCursor ? (
+      {full && history.nextCursor ? (
         <div className="pad">
-          <Key size="sm" onClick={() => void more()} disabled={paging}>
+          <Key size="sm" onClick={() => void loadHistory(false)} disabled={paging}>
             {paging ? 'Loading older changes…' : 'Show older changes'}
           </Key>
-          {pageFailed ? <p role="status">Older changes could not be loaded. Try again.</p> : null}
+        </div>
+      ) : null}
+      {pageFailed ? (
+        <div className="pad" role="status">
+          More history could not be loaded. Try again.
         </div>
       ) : null}
     </>
@@ -305,21 +359,30 @@ export function ItemWork({
   project: WhoProject;
 }) {
   const [work, setWork] = useState<Work | 'failed' | null>(null);
+  const [full, setFull] = useState(false);
   const [paging, setPaging] = useState(false);
-  const [pageFailed, setPageFailed] = useState(false);
+  const [pageFailed, setPageFailed] = useState<'lanes' | 'work' | null>(null);
   const [stale, setStale] = useState(false);
+  const [revealed, reveal] = useState({ lanes: 0, landings: 0, related: 0 });
   const [attempt, retry] = useState(0);
+  const epoch = useRef(0);
   useEffect(() => {
-    let current = true;
-    read(itemId, null)
+    const source = ++epoch.current;
+    setWork(null);
+    setFull(false);
+    setStale(false);
+    setPageFailed(null);
+    setPaging(false);
+    reveal({ lanes: 0, landings: 0, related: 0 });
+    read(itemId, null, VISIBLE_ROWS)
       .then(raw => {
-        if (current) setWork(JSON.parse(raw) as Work);
+        if (source === epoch.current) setWork(JSON.parse(raw) as Work);
       })
       .catch(() => {
-        if (current) setWork('failed');
+        if (source === epoch.current) setWork('failed');
       });
     return () => {
-      current = false;
+      epoch.current++;
     };
   }, [itemId, read, attempt]);
 
@@ -347,21 +410,37 @@ export function ItemWork({
       </Region>
     );
 
-  const showMore = async () => {
-    if (paging || !work.nextCursor) return;
+  // total counts heads, not readable Lanes. A missing body within the first window is not another page.
+  const expandLanes = !full && work.total > VISIBLE_ROWS && work.nextCursor !== null;
+  const continueWork =
+    work.nextCursor !== null && (full || work.total > WORK_PAGE || work.moreLandings || work.moreRelated);
+  const loadWork = async (part: 'lanes' | 'work') => {
+    if (paging || !work.nextCursor) return false;
     setPaging(true);
-    setPageFailed(false);
+    setPageFailed(null);
+    const source = epoch.current;
     try {
-      const next = JSON.parse(await read(itemId, stale ? null : work.nextCursor)) as Work;
+      const fromStart = part === 'lanes' || stale;
+      const next = JSON.parse(await read(itemId, fromStart ? null : work.nextCursor, WORK_PAGE)) as Work;
+      if (source !== epoch.current) return false;
       setStale(false);
-      if (!next.role || stale) {
+      setFull(true);
+      if (!next.role || fromStart) {
         setWork(next);
-        return;
+        return next.role;
       }
       const lanes = new Map([...work.lanes, ...next.lanes].map(lane => [lane.laneId, lane]));
       const landings = new Map(
         [...(work.landings ?? []), ...(next.landings ?? [])].map(landing => [landing.receiptId, landing]),
       );
+      const related = [...(work.related ?? []), ...(next.related ?? [])];
+      reveal(before => ({
+        lanes: before.lanes + Number(lanes.size > work.lanes.length),
+        landings: before.landings + Number(landings.size > (work.landings?.length ?? 0)),
+        related:
+          before.related +
+          Number(new Set(related.map(linkKey)).size > new Set(work.related?.map(linkKey)).size),
+      }));
       setWork({
         ...next,
         lanes: [...lanes.values()],
@@ -369,26 +448,30 @@ export function ItemWork({
         moreLandings: Boolean(next.moreLandings ?? work.moreLandings),
         total: next.total ?? work.total,
         atLeast: next.atLeast ?? work.atLeast,
-        related: [...(work.related ?? []), ...(next.related ?? [])],
+        related,
       });
+      return true;
     } catch (error) {
-      setStale(stale || (error instanceof Error && /WORK_STALE/.test(error.message)));
-      setPageFailed(true);
+      if (source === epoch.current) {
+        setStale(stale || (error instanceof Error && /WORK_STALE/.test(error.message)));
+        setPageFailed(part);
+      }
+      return false;
     } finally {
-      setPaging(false);
+      if (source === epoch.current) setPaging(false);
     }
   };
   const landings = [...(work.landings ?? [])].sort(
     (a, b) => b.at.localeCompare(a.at) || (b.sequence ?? 0) - (a.sequence ?? 0),
   );
-  const related = new Map((work.related ?? []).map(link => [`${link.kind}:${link.id}`, link]));
+  const related = new Map((work.related ?? []).map(link => [linkKey(link), link]));
   const fold = `item-work:${project.handle}/${project.project}:${itemId}`;
-  const more = work.nextCursor ? (
+  const more = continueWork ? (
     <div className="pad">
-      <Key size="sm" onClick={() => void showMore()} disabled={paging}>
+      <Key size="sm" onClick={() => void loadWork('work')} disabled={paging}>
         {paging ? 'Loading more work…' : 'Show more work'}
       </Key>
-      {pageFailed ? <p role="status">More work could not be loaded.</p> : null}
+      {pageFailed === 'work' ? <p role="status">More work could not be loaded. Try again.</p> : null}
     </div>
   ) : null;
   return (
@@ -397,6 +480,17 @@ export function ItemWork({
         <TopRows
           rows={work.lanes}
           empty="No Lanes yet."
+          reveal={revealed.lanes}
+          error={pageFailed === 'lanes' ? 'More Lanes could not be loaded. Try again.' : undefined}
+          more={
+            expandLanes
+              ? {
+                  label: paging ? 'Loading more Lanes…' : 'Show more Lanes',
+                  busy: paging,
+                  load: () => loadWork('lanes'),
+                }
+              : undefined
+          }
           draw={lane => (
             <Row key={lane.laneId} cols="minmax(0, 1fr) auto" style={{ rowGap: 0 }}>
               <A className="lk ttl" href={at({ place: 'lanes', rest: lane.laneId })} dir="auto">
@@ -445,6 +539,7 @@ export function ItemWork({
       >
         <TopRows
           rows={landings}
+          reveal={revealed.landings}
           empty="No landings shown."
           draw={landing => (
             <Row key={landing.receiptId} cols="minmax(0, 1fr) auto">
@@ -482,6 +577,7 @@ export function ItemWork({
       <Part name="Related" fold={`${fold}:related`} count={related.size}>
         <TopRows
           rows={[...related.values()]}
+          reveal={revealed.related}
           empty={work.moreRelated ? 'No links in this page.' : 'No related Items.'}
           draw={link => (
             <Row key={`${link.kind}:${link.id}`} cols="8em minmax(0, 1fr)">
