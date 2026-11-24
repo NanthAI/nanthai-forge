@@ -757,29 +757,29 @@ export function PlanScreenView({
       },
     );
   };
-  /** An Initiative moved among those shown: one order write between its new neighbours, as for an Item. */
-  const moveInitiative = (id: string, toIndex: number) => {
-    const shown = (view?.groups ?? []).flatMap(group =>
-      group.initiative && (!filtered(query) || group.lines.length) ? [group.initiative] : [],
-    );
+  /** An Initiative shares the batch Undo path. The live Plan read, not a local rank, draws the accepted order. */
+  const moveInitiative = async (id: string, toIndex: number) => {
+    if (!run || !view?.canEdit || !byHand) return;
+    const shown = view.groups.flatMap(group => (group.initiative ? [group.initiative] : []));
+    if (shown.findIndex(row => row.id === id) === toIndex) return;
     const ids = shown.map(row => row.id).filter(other => other !== id);
     ids.splice(toIndex, 0, id);
     const order = movedInitiativeRank(shown, ids, id);
-    const row = view?.byId.get(id);
+    const row = view.byId.get(id);
     if (!order || !row) return;
-    setOrders(previous => new Map(previous).set(id, order));
     setError('');
-    put({ itemId: id, expectedVersion: row.version ?? 0, order }).then(
-      () => announce(`${row.title} moved to position ${toIndex + 1} of ${shown.length}.`),
-      () => {
-        setOrders(previous => {
-          const next = new Map(previous);
-          next.delete(id);
-          return next;
-        });
-        setError(`Forge could not move ${row.title}; it is back where it was.`);
-      },
-    );
+    try {
+      const outcome = await run([
+        { action: 'put-planning-item', itemId: id, expectedVersion: row.version ?? 0, order },
+      ]);
+      const words = outcome.results.some(result => result.outcome === 'refused')
+        ? outcomeWords(outcome, view.byId)
+        : `${row.title} moved to position ${toIndex + 1} of ${shown.length}.`;
+      setToast({ outcome, words });
+      announce(words);
+    } catch {
+      setError(`Forge could not confirm the move of ${row.title}. Check its position and try again.`);
+    }
   };
   const captureSheet =
     view && canCapture ? (
@@ -1063,7 +1063,7 @@ export function PlanScreenView({
                   workers={workers}
                   onToggle={toggleFold}
                   onMove={move}
-                  onMoveInitiative={view.canEdit && byHand ? moveInitiative : undefined}
+                  onMoveInitiative={canEdit && byHand ? moveInitiative : undefined}
                 />
               ) : null}
               {openShown && !view.live && !view.groups.length ? (

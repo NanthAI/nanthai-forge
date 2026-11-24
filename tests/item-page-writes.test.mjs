@@ -8,6 +8,7 @@ import { setup } from './hosted-planning-fixture.mjs';
 import { establishedAccount } from './account-tier-fixture.mjs';
 import { meterWorkIO } from './hosted-read-set.mjs';
 import { doneWhenCounts } from '../dist/planning-search.js';
+import { batchUndo } from '../dist/planning-batch.js';
 import { isPlanningTick, planningLineEvidence } from '../dist/planning-line-evidence.js';
 import { tickBodyLine } from '../dist/hosted-agent-planning-tick.js';
 
@@ -249,6 +250,33 @@ test('only writers can create Initiatives or edit Item hierarchy; Initiative set
       [target.itemId, 'Moved in'],
     ],
   );
+});
+
+test('a rank can be moved and restored through the same versioned puts by the owner for Initiatives and by writers for Items', async t => {
+  const s = await project(t);
+  const initiative = { ...s.capture(), kind: 'initiative', order: 'a' };
+  const item = { ...s.capture(), initiativeId: initiative.itemId, order: 'b' };
+  await s.send(initiative);
+  await s.send(item);
+  for (const [row, role] of [
+    [initiative, 'owner'],
+    [item, 'writer'],
+  ]) {
+    s.caller(role);
+    const move = { action: 'put-planning-item', itemId: row.itemId, expectedVersion: 1, order: 'c' };
+    const { results } = await s.batch([move]);
+    assert.equal(results[0].outcome, 'applied');
+    s.caller('owner');
+    assert.equal((await s.latest(row.itemId)).order, 'c');
+    s.caller(role);
+    const { undo } = batchUndo([move], results);
+    assert.equal(undo.length, 1);
+    // A direct put (including from an agent) uses the same versioned rank as batch Undo.
+    await s.send({ ...undo[0], operationId: randomUUID() });
+    s.caller('owner');
+    assert.equal((await s.latest(row.itemId)).order, row.order);
+    assert.equal((await s.latest(row.itemId)).version, 3);
+  }
 });
 
 test('a writer can undo their fresh child, not abandon another author’s child', async t => {

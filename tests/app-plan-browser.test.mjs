@@ -217,7 +217,10 @@ const run = async (writes, options) => {
   }
   const results = writes.map((write, index) => index === 1 && writes.length > 1 && window.calls.length === 1
     ? { index, itemId: write.itemId, action: write.action, outcome: 'refused', code: 'ITEM_CHANGED', currentVersion: 3 }
-    : { index, itemId: write.itemId, action: write.action, outcome: 'applied', version: (write.expectedVersion || 0) + 1, before: { owner: null, status: 'open', type: null, initiativeId: null } });
+    : { index, itemId: write.itemId, action: write.action, outcome: 'applied', version: (write.expectedVersion || 0) + 1, before: {
+      owner: null, status: 'open', type: null, initiativeId: null,
+      order: JSON.parse(read.rows).find(row => row.id === write.itemId)?.order ?? null,
+    } });
   return { results, ...batchUndo(writes, results) };
 };
 window.purges = [];
@@ -926,14 +929,20 @@ test('plan views and bulk bar: real components keep the view in the address and 
     await page.locator('.plan .ph').first().waitFor();
     assert.doesNotMatch(await main.textContent(), /Stream parser/, 'the fold is remembered');
     assert.match(await main.textContent(), /Write the recovery guide/);
-    // Moving an open Initiative's header: one put with only an order, before the Initiative above it.
+    // Moving an open Initiative's header: one order-only batch and one Undo using the accepted version.
     await page.getByRole('button', { name: 'Move Documentation and recovery paths' }).click();
     await page.getByRole('menuitem', { name: 'To the top' }).click();
-    await page.waitForFunction(() => window.puts.length === 1);
-    const [moved] = await page.evaluate(() => window.puts);
-    assert.deepEqual(Object.keys(moved).sort(), ['expectedVersion', 'itemId', 'order']);
+    await page.waitForFunction(() => window.calls.length === 1);
+    const [[moved]] = await page.evaluate(() => window.calls);
+    assert.deepEqual(Object.keys(moved).sort(), ['action', 'expectedVersion', 'itemId', 'order']);
     assert.equal(moved.itemId, docsId);
+    assert.equal(moved.expectedVersion, 1);
     assert.ok(moved.order < 'L000000V', 'ranks before Launch the parser, which was never moved');
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await page.waitForFunction(() => window.calls.length === 2);
+    assert.deepEqual(await page.evaluate(() => window.calls[1]), [
+      { action: 'put-planning-item', itemId: docsId, expectedVersion: 2, order: null },
+    ]);
     await page.getByRole('button', { name: 'Collapse all' }).click();
     assert.equal(await page.getByRole('grid', { name: 'Initiatives, in order' }).count(), 1, 'the overview');
     assert.doesNotMatch(await main.textContent(), /Write the recovery guide/);
@@ -958,8 +967,12 @@ test('plan views and bulk bar: real components keep the view in the address and 
           // Phones move a row through its handle's menu.
           await page.locator('.ds-move[aria-label="Move Documentation and recovery paths"]').click();
           await page.getByRole('menuitem', { name: 'Down one' }).click();
-          await page.waitForFunction(() => window.puts.length === 1);
-          assert.equal((await page.evaluate(() => window.puts[0])).itemId, docsId);
+          await page.waitForFunction(() => window.calls.length === 1);
+          const [[moved]] = await page.evaluate(() => window.calls);
+          assert.equal(moved.itemId, docsId);
+          assert.equal(moved.expectedVersion, 1);
+          await page.getByRole('button', { name: 'Undo', exact: true }).click();
+          await page.waitForFunction(() => window.calls.length === 2);
         }
         await check(page, `overview ${width} ${theme}`);
         if (shots)
