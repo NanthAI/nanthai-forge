@@ -157,3 +157,29 @@ test('review 4: a removed entry nobody can name is marked, and no later write de
   const again = names.nextHandles({ ...set(h), formerHandles: first.formerHandles }, [], roster, poison);
   assert.deepEqual(again.formerHandles, first.formerHandles);
 });
+
+test('walk 2026-11-25: an agent device that only proposes still keeps its approved name (real propose mutation)', async t => {
+  const h = setup(t);
+  // The walk's device: signed in as "MacBook Air", its roster entry signed before names were passed on ("this device").
+  h.s.tables.cliCredentials.get('device-row').name = 'MacBook Air';
+  const person = owner(h);
+  await person.client.write('API_TOKEN', VALUE);
+  assert.equal(set(h).entryNames?.[0]?.name, 'MacBook Air', 'a person write keeps it');
+  delete set(h).entryNames; // a row stored before names were kept
+  assert.equal((await overview(h)).sets[0].people.page[0].computers[0].name, undefined);
+  // An agent never changes a held name directly: it proposes, which signs no head. That call must still name the device.
+  const agent = person.make({ agent: true });
+  const receipt = await agent.write('API_TOKEN', ROTATED);
+  assert.ok(receipt.proposed, 'the agent made a proposal, not a head write');
+  assert.equal(set(h).headVersion, 1, 'no head was written');
+  assert.deepEqual(
+    set(h).entryNames?.map(n => n.name),
+    ['MacBook Air'],
+    'the proposal recorded the device name',
+  );
+  assert.equal((await overview(h)).sets[0].people.page[0].computers[0].name, 'MacBook Air');
+  // A second proposal adds nothing and never duplicates the entry.
+  await agent.write('OTHER_TOKEN', ROTATED);
+  await agent.write('API_TOKEN', VALUE);
+  assert.equal(set(h).entryNames?.length, 1);
+});

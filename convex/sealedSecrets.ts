@@ -395,7 +395,12 @@ export const propose = mutation({
         'Development is not set up yet. The owner runs nforge secret set NAME.',
       );
       const at = Date.now(),
-        facts = proposalFacts(set, args.proposal, forgeSecretId('account', user.subject), at);
+        { facts, roster, author } = proposalFacts(
+          set,
+          args.proposal,
+          forgeSecretId('account', user.subject),
+          at,
+        );
       const pending = set.proposals ?? [],
         existing = pending.find(p =>
           equalBytes(new Uint8Array(p.proposalId), new Uint8Array(facts.proposalId)),
@@ -440,14 +445,20 @@ export const propose = mutation({
         at,
       });
       const proposals = [...kept, { id, ...facts }];
+      // Item fcfc7e62: an agent's device may only ever propose (it never signs a head), so its approved name is kept
+      // from this verified proposal's author too, in the same patch (the roster is already decoded: no read, no decode).
+      const entryNames = nextEntryNames(set, roster, { id: author.id, name: forgeDevice.name });
       // The set row keeps room under its cap for the facts it now lists, so the next head write still fits.
       invariant(
-        getConvexSize({ ...set, proposals }) + 128 <= 512 * 1024,
+        getConvexSize({ ...set, proposals, entryNames }) + 128 <= 512 * 1024,
         'SECRETS_NOT_ALLOWED',
         'Too many proposals are waiting for Development. A holder applies or rejects them first.',
       );
       for (const p of replaced) await ctx.db.delete(p.id);
-      await patchSetKeepingNeeds(ctx, set, { proposals });
+      await patchSetKeepingNeeds(ctx, set, {
+        proposals,
+        entryNames: entryNames.length ? entryNames : undefined,
+      });
       return { accepted: true, replay: false };
     } catch (error) {
       return report(error);

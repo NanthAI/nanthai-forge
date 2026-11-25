@@ -392,14 +392,19 @@ export function proposalFacts(set: StoredSealedSet, bytes: ArrayBuffer, accountI
     'A proposal is made by a device of the signed-in account.',
   );
   return {
-    proposalId: Uint8Array.from(p.proposalId).buffer,
-    proposerId: Uint8Array.from(p.proposerId).buffer,
-    name: p.name,
-    epoch: p.epoch,
-    size: bytes.byteLength,
-    at,
-    op: p.op,
-    kind: p.kind,
+    facts: {
+      proposalId: Uint8Array.from(p.proposalId).buffer,
+      proposerId: Uint8Array.from(p.proposerId).buffer,
+      name: p.name,
+      epoch: p.epoch,
+      size: bytes.byteLength,
+      at,
+      op: p.op,
+      kind: p.kind,
+    },
+    // The signed roster the proposal was checked against, so the caller can name its author with no further decode.
+    roster,
+    author,
   };
 }
 
