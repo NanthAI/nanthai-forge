@@ -1,0 +1,2183 @@
+{
+ "holdThenRatchet": {
+  "trace": [
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-01",
+       40
+      ],
+      "days": []
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-02",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 6
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-03",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 5
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-04",
+       40
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 4
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-05",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 3
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-06",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ],
+       [
+        "2026-11-05",
+        41
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 2
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-07",
+       40
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ],
+       [
+        "2026-11-05",
+        41
+       ],
+       [
+        "2026-11-06",
+        42
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 1
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-08",
+       41
+      ],
+      "days": [],
+      "line": 56,
+      "fromMax": 100,
+      "from": 100,
+      "at": "2026-11-08T12:00:00.000Z",
+      "landing": "landing-7",
+      "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+     },
+     "line": 56,
+     "ratcheted": {
+      "from": 100,
+      "to": 56,
+      "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+     }
+    },
+    "status": {
+     "line": 56,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7,
+     "since": "2026-11-08T12:00:00.000Z",
+     "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "line": 56,
+      "fromMax": 100,
+      "from": 100,
+      "at": "2026-11-08T12:00:00.000Z",
+      "landing": "landing-7",
+      "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56.",
+      "open": [
+       "2026-11-09",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-08",
+        41
+       ]
+      ]
+     },
+     "line": 56
+    },
+    "status": {
+     "line": 56,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 6,
+     "since": "2026-11-08T12:00:00.000Z",
+     "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "line": 56,
+      "fromMax": 100,
+      "from": 100,
+      "at": "2026-11-08T12:00:00.000Z",
+      "landing": "landing-7",
+      "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56.",
+      "open": [
+       "2026-11-10",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-08",
+        41
+       ],
+       [
+        "2026-11-09",
+        42
+       ]
+      ]
+     },
+     "line": 56
+    },
+    "status": {
+     "line": 56,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 5,
+     "since": "2026-11-08T12:00:00.000Z",
+     "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+    }
+   }
+  ],
+  "changed": {
+   "entry": {
+    "open": [
+     "2026-12-01",
+     10
+    ],
+    "days": []
+   },
+   "line": 110
+  },
+  "statusChangedMax": {
+   "line": 110,
+   "pinned": false,
+   "automatic": null,
+   "daysLeft": 5
+  }
+ },
+ "undoWithinMax": {
+  "trace": [
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-01",
+       40
+      ],
+      "days": []
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-02",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 6
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-03",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 5
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-04",
+       40
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 4
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-05",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 3
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-06",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ],
+       [
+        "2026-11-05",
+        41
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 2
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-07",
+       40
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ],
+       [
+        "2026-11-05",
+        41
+       ],
+       [
+        "2026-11-06",
+        42
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 1
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-08",
+       41
+      ],
+      "days": [],
+      "line": 56,
+      "fromMax": 100,
+      "from": 100,
+      "at": "2026-11-08T12:00:00.000Z",
+      "landing": "landing-7",
+      "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+     },
+     "line": 56,
+     "ratcheted": {
+      "from": 100,
+      "to": 56,
+      "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+     }
+    },
+    "status": {
+     "line": 56,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7,
+     "since": "2026-11-08T12:00:00.000Z",
+     "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "line": 56,
+      "fromMax": 100,
+      "from": 100,
+      "at": "2026-11-08T12:00:00.000Z",
+      "landing": "landing-7",
+      "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56.",
+      "open": [
+       "2026-11-09",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-08",
+        41
+       ]
+      ]
+     },
+     "line": 56
+    },
+    "status": {
+     "line": 56,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 6,
+     "since": "2026-11-08T12:00:00.000Z",
+     "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "line": 56,
+      "fromMax": 100,
+      "from": 100,
+      "at": "2026-11-08T12:00:00.000Z",
+      "landing": "landing-7",
+      "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56.",
+      "open": [
+       "2026-11-10",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-08",
+        41
+       ],
+       [
+        "2026-11-09",
+        42
+       ]
+      ]
+     },
+     "line": 56
+    },
+    "status": {
+     "line": 56,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 5,
+     "since": "2026-11-08T12:00:00.000Z",
+     "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-11",
+       90
+      ],
+      "days": [],
+      "undos": [
+       [
+        "2026-11-11",
+        56,
+        100,
+        0,
+        0
+       ]
+      ]
+     },
+     "line": 100,
+     "undone": {
+      "from": 56,
+      "to": 100,
+      "reason": "Ratchet undone: the window reached 90, over the ratcheted line 56 2 days after it tightened; line back to 100 (the file max). Flow: 0 landings landed while it held; it changed 0 of their outcomes (a speed line only sends alerts).",
+      "landed": 0,
+      "changed": 0
+     }
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "undos": [
+       [
+        "2026-11-11",
+        56,
+        100,
+        0,
+        0
+       ]
+      ],
+      "open": [
+       "2026-11-12",
+       30
+      ],
+      "days": [
+       [
+        "2026-11-11",
+        90
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 6
+    }
+   }
+  ],
+  "changed": {
+   "entry": {
+    "undos": [
+     [
+      "2026-11-11",
+      56,
+      100,
+      0,
+      0
+     ]
+    ],
+    "open": [
+     "2026-12-01",
+     10
+    ],
+    "days": [
+     [
+      "2026-11-11",
+      90
+     ],
+     [
+      "2026-11-12",
+      30
+     ]
+    ]
+   },
+   "line": 110
+  },
+  "statusChangedMax": {
+   "line": 110,
+   "pinned": false,
+   "automatic": null,
+   "daysLeft": 6
+  }
+ },
+ "undoOverMax": {
+  "trace": [
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-01",
+       40
+      ],
+      "days": []
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-02",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 6
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-03",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 5
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-04",
+       40
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 4
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-05",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 3
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-06",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ],
+       [
+        "2026-11-05",
+        41
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 2
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-07",
+       40
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ],
+       [
+        "2026-11-05",
+        41
+       ],
+       [
+        "2026-11-06",
+        42
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 1
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-08",
+       41
+      ],
+      "days": [],
+      "line": 56,
+      "fromMax": 100,
+      "from": 100,
+      "at": "2026-11-08T12:00:00.000Z",
+      "landing": "landing-7",
+      "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+     },
+     "line": 56,
+     "ratcheted": {
+      "from": 100,
+      "to": 56,
+      "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+     }
+    },
+    "status": {
+     "line": 56,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7,
+     "since": "2026-11-08T12:00:00.000Z",
+     "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "line": 56,
+      "fromMax": 100,
+      "from": 100,
+      "at": "2026-11-08T12:00:00.000Z",
+      "landing": "landing-7",
+      "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56.",
+      "open": [
+       "2026-11-09",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-08",
+        41
+       ]
+      ]
+     },
+     "line": 56
+    },
+    "status": {
+     "line": 56,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 6,
+     "since": "2026-11-08T12:00:00.000Z",
+     "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "line": 56,
+      "fromMax": 100,
+      "from": 100,
+      "at": "2026-11-08T12:00:00.000Z",
+      "landing": "landing-7",
+      "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56.",
+      "open": [
+       "2026-11-10",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-08",
+        41
+       ],
+       [
+        "2026-11-09",
+        42
+       ]
+      ]
+     },
+     "line": 56
+    },
+    "status": {
+     "line": 56,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 5,
+     "since": "2026-11-08T12:00:00.000Z",
+     "reason": "Held at or under 100 for 7 closed days, 2026-11-01 to 2026-11-07: worst 42, median 41, band 15 (3 x 1.4826 x MAD, at least 15% of the line); line 100 -> 56."
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-11",
+       140
+      ],
+      "days": [],
+      "undos": [
+       [
+        "2026-11-11",
+        56,
+        100,
+        0,
+        0
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7
+    }
+   }
+  ],
+  "changed": {
+   "entry": {
+    "undos": [
+     [
+      "2026-11-11",
+      56,
+      100,
+      0,
+      0
+     ]
+    ],
+    "open": [
+     "2026-12-01",
+     10
+    ],
+    "days": []
+   },
+   "line": 110
+  },
+  "statusChangedMax": {
+   "line": 110,
+   "pinned": false,
+   "automatic": null,
+   "daysLeft": 7
+  }
+ },
+ "breakResetsHold": {
+  "trace": [
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-01",
+       40
+      ],
+      "days": []
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-02",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 6
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-03",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 5
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-04",
+       40
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 4
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-05",
+       120
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 3
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-06",
+       40
+      ],
+      "days": []
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-07",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-06",
+        40
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 6
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-08",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-06",
+        40
+       ],
+       [
+        "2026-11-07",
+        41
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 5
+    }
+   }
+  ],
+  "changed": {
+   "entry": {
+    "open": [
+     "2026-12-01",
+     10
+    ],
+    "days": [
+     [
+      "2026-11-06",
+      40
+     ],
+     [
+      "2026-11-07",
+      41
+     ],
+     [
+      "2026-11-08",
+      42
+     ]
+    ]
+   },
+   "line": 110
+  },
+  "statusChangedMax": {
+   "line": 110,
+   "pinned": false,
+   "automatic": null,
+   "daysLeft": 5
+  }
+ },
+ "pinned": {
+  "trace": [
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-01",
+       40
+      ],
+      "days": []
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": true,
+     "automatic": null,
+     "daysLeft": 7
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-02",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": true,
+     "automatic": null,
+     "daysLeft": 6
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-03",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": true,
+     "automatic": null,
+     "daysLeft": 5
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-04",
+       40
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": true,
+     "automatic": null,
+     "daysLeft": 4
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-05",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": true,
+     "automatic": null,
+     "daysLeft": 3
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-06",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ],
+       [
+        "2026-11-05",
+        41
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": true,
+     "automatic": null,
+     "daysLeft": 2
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-07",
+       40
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ],
+       [
+        "2026-11-05",
+        41
+       ],
+       [
+        "2026-11-06",
+        42
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": true,
+     "automatic": null,
+     "daysLeft": 1
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-08",
+       41
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        40
+       ],
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ],
+       [
+        "2026-11-05",
+        41
+       ],
+       [
+        "2026-11-06",
+        42
+       ],
+       [
+        "2026-11-07",
+        40
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": true,
+     "automatic": 56,
+     "daysLeft": 0
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-09",
+       42
+      ],
+      "days": [
+       [
+        "2026-11-02",
+        41
+       ],
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ],
+       [
+        "2026-11-05",
+        41
+       ],
+       [
+        "2026-11-06",
+        42
+       ],
+       [
+        "2026-11-07",
+        40
+       ],
+       [
+        "2026-11-08",
+        41
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": true,
+     "automatic": 56,
+     "daysLeft": 0
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-10",
+       40
+      ],
+      "days": [
+       [
+        "2026-11-03",
+        42
+       ],
+       [
+        "2026-11-04",
+        40
+       ],
+       [
+        "2026-11-05",
+        41
+       ],
+       [
+        "2026-11-06",
+        42
+       ],
+       [
+        "2026-11-07",
+        40
+       ],
+       [
+        "2026-11-08",
+        41
+       ],
+       [
+        "2026-11-09",
+        42
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": true,
+     "automatic": 56,
+     "daysLeft": 0
+    }
+   }
+  ],
+  "changed": {
+   "entry": {
+    "open": [
+     "2026-12-01",
+     10
+    ],
+    "days": [
+     [
+      "2026-11-04",
+      40
+     ],
+     [
+      "2026-11-05",
+      41
+     ],
+     [
+      "2026-11-06",
+      42
+     ],
+     [
+      "2026-11-07",
+      40
+     ],
+     [
+      "2026-11-08",
+      41
+     ],
+     [
+      "2026-11-09",
+      42
+     ],
+     [
+      "2026-11-10",
+      40
+     ]
+    ]
+   },
+   "line": 110
+  },
+  "statusChangedMax": {
+   "line": 110,
+   "pinned": true,
+   "automatic": 58,
+   "daysLeft": 0
+  }
+ },
+ "closedDayBudget": {
+  "trace": [
+   {
+    "step": {
+     "entry": {
+      "days": [
+       [
+        "2026-11-01",
+        20
+       ]
+      ]
+     },
+     "line": 50
+    },
+    "status": {
+     "line": 50,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 6
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "days": [
+       [
+        "2026-11-01",
+        20
+       ],
+       [
+        "2026-11-02",
+        21
+       ]
+      ]
+     },
+     "line": 50
+    },
+    "status": {
+     "line": 50,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 5
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "days": [
+       [
+        "2026-11-01",
+        20
+       ],
+       [
+        "2026-11-02",
+        21
+       ],
+       [
+        "2026-11-03",
+        22
+       ]
+      ]
+     },
+     "line": 50
+    },
+    "status": {
+     "line": 50,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 4
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "days": [
+       [
+        "2026-11-01",
+        20
+       ],
+       [
+        "2026-11-02",
+        21
+       ],
+       [
+        "2026-11-03",
+        22
+       ],
+       [
+        "2026-11-04",
+        20
+       ]
+      ]
+     },
+     "line": 50
+    },
+    "status": {
+     "line": 50,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 3
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "days": [
+       [
+        "2026-11-01",
+        20
+       ],
+       [
+        "2026-11-02",
+        21
+       ],
+       [
+        "2026-11-03",
+        22
+       ],
+       [
+        "2026-11-04",
+        20
+       ],
+       [
+        "2026-11-05",
+        21
+       ]
+      ]
+     },
+     "line": 50
+    },
+    "status": {
+     "line": 50,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 2
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "days": [
+       [
+        "2026-11-01",
+        20
+       ],
+       [
+        "2026-11-02",
+        21
+       ],
+       [
+        "2026-11-03",
+        22
+       ],
+       [
+        "2026-11-04",
+        20
+       ],
+       [
+        "2026-11-05",
+        21
+       ],
+       [
+        "2026-11-06",
+        22
+       ]
+      ]
+     },
+     "line": 50
+    },
+    "status": {
+     "line": 50,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 1
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "days": [],
+      "line": 29,
+      "fromMax": 50,
+      "from": 50,
+      "at": "2026-11-07T12:00:00.000Z",
+      "landing": "landing-6",
+      "reason": "Held at or under 50 for 7 closed days, 2026-11-01 to 2026-11-07: worst 22, median 21, band 7.5 (3 x 1.4826 x MAD, at least 15% of the line); line 50 -> 29."
+     },
+     "line": 29,
+     "ratcheted": {
+      "from": 50,
+      "to": 29,
+      "reason": "Held at or under 50 for 7 closed days, 2026-11-01 to 2026-11-07: worst 22, median 21, band 7.5 (3 x 1.4826 x MAD, at least 15% of the line); line 50 -> 29."
+     }
+    },
+    "status": {
+     "line": 29,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7,
+     "since": "2026-11-07T12:00:00.000Z",
+     "reason": "Held at or under 50 for 7 closed days, 2026-11-01 to 2026-11-07: worst 22, median 21, band 7.5 (3 x 1.4826 x MAD, at least 15% of the line); line 50 -> 29."
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "line": 29,
+      "fromMax": 50,
+      "from": 50,
+      "at": "2026-11-07T12:00:00.000Z",
+      "landing": "landing-6",
+      "reason": "Held at or under 50 for 7 closed days, 2026-11-01 to 2026-11-07: worst 22, median 21, band 7.5 (3 x 1.4826 x MAD, at least 15% of the line); line 50 -> 29.",
+      "days": [
+       [
+        "2026-11-08",
+        21
+       ]
+      ]
+     },
+     "line": 29
+    },
+    "status": {
+     "line": 29,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 6,
+     "since": "2026-11-07T12:00:00.000Z",
+     "reason": "Held at or under 50 for 7 closed days, 2026-11-01 to 2026-11-07: worst 22, median 21, band 7.5 (3 x 1.4826 x MAD, at least 15% of the line); line 50 -> 29."
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "line": 29,
+      "fromMax": 50,
+      "from": 50,
+      "at": "2026-11-07T12:00:00.000Z",
+      "landing": "landing-6",
+      "reason": "Held at or under 50 for 7 closed days, 2026-11-01 to 2026-11-07: worst 22, median 21, band 7.5 (3 x 1.4826 x MAD, at least 15% of the line); line 50 -> 29.",
+      "days": [
+       [
+        "2026-11-08",
+        21
+       ],
+       [
+        "2026-11-09",
+        22
+       ]
+      ]
+     },
+     "line": 29
+    },
+    "status": {
+     "line": 29,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 5,
+     "since": "2026-11-07T12:00:00.000Z",
+     "reason": "Held at or under 50 for 7 closed days, 2026-11-01 to 2026-11-07: worst 22, median 21, band 7.5 (3 x 1.4826 x MAD, at least 15% of the line); line 50 -> 29."
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "line": 29,
+      "fromMax": 50,
+      "from": 50,
+      "at": "2026-11-07T12:00:00.000Z",
+      "landing": "landing-6",
+      "reason": "Held at or under 50 for 7 closed days, 2026-11-01 to 2026-11-07: worst 22, median 21, band 7.5 (3 x 1.4826 x MAD, at least 15% of the line); line 50 -> 29.",
+      "days": [
+       [
+        "2026-11-08",
+        21
+       ],
+       [
+        "2026-11-09",
+        22
+       ],
+       [
+        "2026-11-10",
+        20
+       ]
+      ]
+     },
+     "line": 29
+    },
+    "status": {
+     "line": 29,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 4,
+     "since": "2026-11-07T12:00:00.000Z",
+     "reason": "Held at or under 50 for 7 closed days, 2026-11-01 to 2026-11-07: worst 22, median 21, band 7.5 (3 x 1.4826 x MAD, at least 15% of the line); line 50 -> 29."
+    }
+   }
+  ],
+  "changed": {
+   "entry": {
+    "days": [
+     [
+      "2026-12-01",
+      10
+     ]
+    ]
+   },
+   "line": 60
+  },
+  "statusChangedMax": {
+   "line": 60,
+   "pinned": false,
+   "automatic": null,
+   "daysLeft": 4
+  }
+ },
+ "sameDayMax": {
+  "trace": [
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-01",
+       10
+      ],
+      "days": []
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-01",
+       30
+      ],
+      "days": []
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-01",
+       30
+      ],
+      "days": []
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 7
+    }
+   },
+   {
+    "step": {
+     "entry": {
+      "open": [
+       "2026-11-02",
+       5
+      ],
+      "days": [
+       [
+        "2026-11-01",
+        30
+       ]
+      ]
+     },
+     "line": 100
+    },
+    "status": {
+     "line": 100,
+     "pinned": false,
+     "automatic": null,
+     "daysLeft": 6
+    }
+   }
+  ],
+  "changed": {
+   "entry": {
+    "open": [
+     "2026-12-01",
+     10
+    ],
+    "days": [
+     [
+      "2026-11-01",
+      30
+     ],
+     [
+      "2026-11-02",
+      5
+     ]
+    ]
+   },
+   "line": 110
+  },
+  "statusChangedMax": {
+   "line": 110,
+   "pinned": false,
+   "automatic": null,
+   "daysLeft": 6
+  }
+ }
+}

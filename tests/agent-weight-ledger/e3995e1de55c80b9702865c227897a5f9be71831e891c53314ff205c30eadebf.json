@@ -1,0 +1,4 @@
+{
+  "issue": "4e8d6bbf",
+  "reason": "MCP module ceiling 827 -> 828 (+1): the landing speed ratchet math moved from landing-speed-alerts into its own speed-ratchet module (Item 4e8d6bbf, pure refactor, +1 module load of about 230 lines). Bytes, CPU, calls and CLI module ceilings unchanged; MCP inventory and count edited by hand from the source build, the landing check re-measures."
+}
