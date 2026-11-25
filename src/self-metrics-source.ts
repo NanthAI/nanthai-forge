@@ -17,7 +17,6 @@ import { sourceAuthority } from './hosted-source-authority.js';
 import { hostedAgentAddress } from './hosted-agent-address.js';
 import { ConvexExchange } from './exchange-client.js';
 import { makeFunctionReference } from 'convex/server';
-import { nativeSelfMetricsReader } from './self-metrics-native.js';
 import { readHostedMetricPages, type MetricQuery } from './self-metrics-hosted-pages.js';
 import type { WorkStore } from './work-store.js';
 import type { MetricRecords, MetricPeriod } from './self-metrics-types.js';
@@ -95,11 +94,14 @@ export async function readMetricRecords(
   } = {},
 ) {
   const selected = options.address ? { owner: root, address: options.address } : metricAddress(root);
-  if (!selected.address)
+  const readNative = async () => {
+    const { nativeSelfMetricsReader } = await import('./self-metrics-native.js');
     return nativeSelfMetricsReader(
       selected.owner,
       options.pointer ? { pointer: options.pointer } : {},
     ).read();
+  };
+  if (!selected.address) return readNative();
   const query = options.query ?? metricQuery(selected.address);
   const { records, cutover } = await readHostedMetricPages(
     Object.assign((name: string, args: Record<string, unknown>) => query(name, args), {
@@ -113,10 +115,7 @@ export async function readMetricRecords(
   if (cutover && Date.parse(period.from) < Date.parse(cutover)) {
     // Hosted-only checkouts have no owner history. Do not manufacture native evidence.
     try {
-      const native = await nativeSelfMetricsReader(
-        selected.owner,
-        options.pointer ? { pointer: options.pointer } : {},
-      ).read();
+      const native = await readNative();
       return joinMetricAuthority(native, records, cutover);
     } catch (error) {
       if (!(error instanceof Error) || !/Owner Work records are unavailable|ENOENT/.test(error.message))

@@ -8,10 +8,8 @@ import { frictionEventSchema } from './friction-types.js';
 import { checkEnvironmentSchema } from './check-environment-schema.js';
 export { checkEnvironmentSchema } from './check-environment-schema.js';
 import { landingEntrySchema, landingBatchSchema } from './landing-batch-types.js';
-import { checkBackendSchema } from './check-backend.js';
 import { hostedRecoverySchema } from './recovery-hosted-protocol.js';
 import { z } from 'zod';
-import { docsPathsSchema, globalRiskPathsSchema } from './docs-paths.js';
 import { landingMessageSchema, cohortMessagesSchema } from './landing-message.js';
 import { deliveryHandoffSchema } from './agent-handoff-types.js';
 import { githubSyncSchema, githubSyncHistorySchema, githubAutoPushSchema } from './github-sync-types.js';
@@ -39,7 +37,6 @@ import { nativeContributionReceiptSchema } from './native-contribution-types.js'
 import { historicalWorkSchema } from './native-history-types.js';
 import { companionReceiptSchema } from './native-companion-types.js';
 export type { DeclaredInput, InputObservation, InputAssessmentCommand } from './work-input-types.js';
-import { declaredInputSchema, inputObservationSchema } from './work-input-types.js';
 import { planningItemSchema, planningCommentSchema } from './work-planning-types.js';
 export {
   planningItemSchema,
@@ -50,21 +47,28 @@ export {
   type PlanningWrite,
 } from './work-planning-types.js';
 import { safeRelative } from './safe-relative.js';
-import { actionsCacheSchema, actionsToolchainsSchema } from './actions-toolchains.js';
+
+import { checkSchema, defineCheckCommandSchema } from './work-check-definition.js';
+export { checkSelectionDeclaration, checkSchema, defineCheckCommandSchema } from './work-check-definition.js';
+import {
+  checkRunSchema,
+  explicitTestsSchema,
+  interactionRequestSchema,
+  recoveryCheckSchema,
+} from './work-check-evidence.js';
+export {
+  checkRunSchema,
+  explicitTestsSchema,
+  interactionEvidenceSchema,
+  interactionRequestSchema,
+  recoveryCheckSchema,
+} from './work-check-evidence.js';
+import { dependencySchema, viewInputsSchema } from './work-view-inputs.js';
+export { dependencySchema } from './work-view-inputs.js';
 
 const id = z.string().uuid();
 const oid = z.string().regex(/^[0-9a-f]{40,64}$/);
 export type ChannelBase = z.infer<typeof channelBaseSchema>;
-export const dependencySchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('view'), viewId: id, head: oid }),
-  z.object({
-    kind: z.literal('pr'),
-    intentId: id,
-    observation: z.number().int().nonnegative(),
-    part: z.enum(['head', 'base']).optional(),
-    head: oid,
-  }),
-]);
 export type DependencyPin = z.infer<typeof dependencySchema>;
 export const noteSchema = z.object({
   id: z.uuid().optional(),
@@ -273,11 +277,6 @@ export const intentSchema = z.object({
   baseChannel: channelBaseSchema.optional(),
   hostedBase: channelBaseSchema.optional(),
 });
-export const recoveryCheckSchema = z.object({
-  auditRunId: id,
-  phase: z.enum(['retry', 'bisect', 'revert']),
-  tests: z.array(z.string()).optional(),
-});
 export const viewSchema = z.object({
   semanticPlan: semanticPlanSchema.optional(),
   optimistic: z.boolean().optional(),
@@ -289,7 +288,7 @@ export const viewSchema = z.object({
   mainCheck: z.object({ channel: z.string() }).optional(),
   resolution: z.object({ viewId: id, laneId: id, head: oid }).optional(),
   operation: z.object({ id, request: oid }).optional(),
-  inputs: z.array(z.object({ laneId: id, head: oid })),
+  inputs: viewInputsSchema,
   status: z.enum(['clean', 'conflict']),
   head: oid.optional(),
   details: z.string(),
@@ -329,208 +328,6 @@ export const githubWorkSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('check-pr'), intentId: id }),
   z.object({ action: z.literal('check-publication'), publicationId: id }),
 ]);
-const artifactPaths = z.array(
-  z
-    .string()
-    .refine(
-      path => safeRelative(path) && !path.toLowerCase().split('/').includes('.git'),
-      'Select relative build-output file paths.',
-    ),
-);
-const checkEnvNames = z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/));
-/** Optional fixed Actions supervisor preparation; never a verdict or source hook. */
-const checkActions = z
-  .object({
-    setup: z.object({ executable: z.string().trim().min(1), args: z.array(z.string()).default([]) }).strict(),
-  })
-  .strict();
-/** Pinned Actions workflow steps (src/actions-toolchains.ts). Sibling fields, not under `actions`,
- * so released CLIs that require `actions.setup` keep parsing every check reply. */
-const actionsDeclarationFields = {
-  actionsToolchains: actionsToolchainsSchema.optional(),
-  actionsCache: actionsCacheSchema.optional(),
-};
-/** A configured command's selection contract (docs/workflows.md#check-command-scope).
- * `scope`: the command reads the changed-paths file and may run less than everything; Forge
- * counts its reduced run as scoped evidence, never as full. `shards`: the command runs one
- * `FORGE_CHECK_SHARD` part per job. Absent: the command runs in full in one job. */
-export const checkSelectionDeclaration = z
-  .object({
-    scope: z.literal('changed-paths').optional(),
-    shards: z.number().int().min(2).max(20).optional(),
-  })
-  .strict()
-  .refine(value => value.scope !== undefined || value.shards !== undefined, 'Declare scope or shards.');
-export const checkSchema = z.object({
-  id,
-  name: z.string().trim().min(1),
-  executable: z.string().trim().min(1),
-  args: z.array(z.string()),
-  environmentLabel: z.string(),
-  env: checkEnvNames.optional(),
-  credentials: checkEnvNames.optional(),
-  artifactPaths: artifactPaths.optional(),
-  static: z.boolean().optional(),
-  measureResources: z.boolean().optional(),
-  declaredInputs: z.array(declaredInputSchema).optional(),
-  actions: checkActions.optional(),
-  selection: checkSelectionDeclaration.optional(),
-  docsPaths: docsPathsSchema.optional(),
-  globalRiskPaths: globalRiskPathsSchema.optional(),
-  /** false: checks keep submodule pointers instead of fetching their pinned trees. */
-  submodules: z.boolean().optional(),
-  ...actionsDeclarationFields,
-  definition: oid,
-  at: z.string(),
-});
-const artifactSchema = z.discriminatedUnion('status', [
-  z.object({
-    status: z.literal('retained'),
-    sourcePath: z.string(),
-    filename: z.string().regex(/^artifact-[0-9]+\.bin$/),
-    size: z.number().safe().nonnegative(),
-    sha256: z.string().regex(/^[0-9a-f]{64}$/),
-  }),
-  z.object({ status: z.literal('unavailable'), sourcePath: z.string(), details: z.string() }),
-]);
-const resourceUsageSchema = z.discriminatedUnion('status', [
-  z.object({
-    status: z.literal('measured'),
-    producer: z.string(),
-    realSeconds: z.number().finite().nonnegative(),
-    userSeconds: z.number().finite().nonnegative(),
-    systemSeconds: z.number().finite().nonnegative(),
-    peakRssBytes: z.number().safe().nonnegative(),
-    report: z.string(),
-    details: z.string(),
-  }),
-  z.object({ status: z.literal('unavailable'), producer: z.string().optional(), details: z.string() }),
-]);
-export const interactionRequestSchema = z.object({
-  version: z.literal(1),
-  reusedRunId: id,
-  base: oid,
-  checkedHead: oid,
-  main: oid,
-});
-export const interactionEvidenceSchema = interactionRequestSchema.extend({
-  mergedHead: oid,
-  eligible: z.boolean(),
-  reason: z.string(),
-  mainRunId: id.optional(),
-  basis: z.enum(['docs-overlap', 'main-full-coverage']).optional(),
-  lanePaths: z.array(z.string()),
-  mainPaths: z.array(z.string()),
-  overlap: z.array(z.string()),
-});
-export const explicitTestsSchema = z
-  .array(
-    z.string().refine(
-      // Which files are tests is the check's: Forge's standard check takes tests/*.test.mjs, any
-      // other check its project test runner's files (src/explicit-test-runner.ts, at the head).
-      path => safeRelative(path) && path.length <= 1024 && !/[\x00-\x1f\x7f*?\[\]{}!]/.test(path),
-      'Use a relative test file path (no globs).',
-    ),
-  )
-  .transform(tests => [...new Set(tests)].sort());
-export const checkRunSchema = z
-  .object({
-    reuseKey: oid.optional(),
-    reusedFrom: z.object({ runId: id, endedAt: z.string(), evidence: oid }).optional(),
-    supersessionBaseline: id.optional(),
-    optimistic: z.boolean().optional(),
-    recovery: recoveryCheckSchema.optional(),
-    backend: checkBackendSchema.optional(),
-    id,
-    detailRef: z
-      .object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().safe().nonnegative() })
-      .optional(),
-    detailSummary: z
-      .object({
-        tests: z.number().safe().nonnegative(),
-        coverageTests: z.number().safe().nonnegative(),
-        verdicts: z.record(z.string(), z.number().safe().nonnegative()),
-        failedTests: z.array(z.string().max(512)).max(20),
-      })
-      .optional(),
-    failureSummary: z.string().max(4096).optional(),
-    mainCheck: z.object({ channel: z.string() }).optional(),
-    viewId: id,
-    head: oid,
-    base: oid,
-    inputs: viewSchema.shape.inputs,
-    dependencies: z.array(dependencySchema),
-    check: checkSchema,
-    environment: checkEnvironmentSchema,
-    inputObservations: z.array(inputObservationSchema).optional(),
-    comparisonBase: oid.optional(),
-    interaction: interactionEvidenceSchema.nullable().optional(),
-    checkSelection: z
-      .object({
-        partial: z.boolean().optional(),
-        scope: z.enum(['docs', 'interaction', 'scoped', 'full', 'partial']),
-        reason: z.string(),
-        tests: z.array(z.string()),
-        coverage: z
-          .object({
-            mode: z.literal('shadow'),
-            head: oid.optional(),
-            age: z.number().int().nonnegative().optional(),
-            currentCount: z.number().int().nonnegative(),
-            coverageCount: z.number().int().nonnegative(),
-            tests: z.array(z.string()),
-            fallback: z.string().nullable(),
-          })
-          .optional(),
-      })
-      .optional(),
-    status: z.enum([
-      'queued',
-      'preparing',
-      'running',
-      'passed',
-      'failed',
-      'cancelled',
-      'interrupted',
-      'runner-unavailable',
-      'runner-budget-exhausted',
-    ]),
-    startedAt: z.string(),
-    endedAt: z.string().optional(),
-    // A virtual reuse receipt has no process. Older readers reject PID 0 rather
-    // than stripping reusedFrom and treating it as an independently executed pass.
-    runner: z
-      .object({ pid: z.number().int().nonnegative(), host: z.string(), startTime: z.string().optional() })
-      .refine(runner => runner.pid > 0 || runner.host === 'retained-check'),
-    childPid: z.number().int().positive().optional(),
-    childStartTime: z.string().optional(),
-    queuedAt: z.string().optional(),
-    warnings: z.array(z.string()).optional(),
-    error: z.object({ code: z.string(), message: z.string() }).optional(),
-    cancellation: z
-      .object({
-        reason: z.enum(['command', 'superseded', 'signal', 'queue']),
-        at: z.string(),
-        actor: z
-          .union([workActorSchema, z.object({ kind: z.literal('system'), name: z.string() })])
-          .optional(),
-        details: z.string().optional(),
-        signal: z.string().optional(),
-        supersededBy: id.optional(),
-      })
-      .optional(),
-    cancelRequested: z.boolean().optional(),
-    exitCode: z.number().int().nullable().optional(),
-    signal: z.string().nullable().optional(),
-    details: z.string(),
-    playbookRunId: id.optional(),
-    artifacts: z.array(artifactSchema).optional(),
-    resourceUsage: resourceUsageSchema.optional(),
-  })
-  .refine(run => (run.runner.pid === 0) === Boolean(run.reusedFrom), {
-    message:
-      'A virtual check must retain its source run; executed checks must retain their process identity.',
-  });
 export const playbookSchema = z.object({
   id,
   name: z.string().trim().min(1),
@@ -1205,26 +1002,6 @@ export const interactionCommandSchema = z.object({
 });
 export type InteractionCommand = z.infer<typeof interactionCommandSchema>;
 
-export const defineCheckCommandSchema = z.object({
-  action: z.literal('define-check'),
-  checkId: id.optional(),
-  name: z.string().trim().min(1),
-  executable: z.string().trim().min(1),
-  args: z.array(z.string()).default([]),
-  environmentLabel: z.string().default(''),
-  env: checkEnvNames.optional(),
-  credentials: checkEnvNames.optional(),
-  artifactPaths: artifactPaths.optional(),
-  static: z.boolean().optional(),
-  measureResources: z.boolean().optional(),
-  declaredInputs: z.array(declaredInputSchema).optional(),
-  actions: checkActions.optional(),
-  selection: checkSelectionDeclaration.optional(),
-  docsPaths: docsPathsSchema.optional(),
-  globalRiskPaths: globalRiskPathsSchema.optional(),
-  submodules: z.boolean().optional(),
-  ...actionsDeclarationFields,
-});
 export const commandSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('resolve-native-view'),
