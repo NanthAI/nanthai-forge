@@ -19,6 +19,8 @@ const identity = {
   laneIds: v.array(v.string()),
   viaLaneId: v.optional(v.string()),
   revertOf: v.optional(v.string()),
+  /** Set on a `landed` note when a revert of it is accepted: the revert's receipt (Item c0af6cfa). */
+  revertedBy: v.optional(v.string()),
 };
 
 /** One row per Intent, receipt and kind. A verified capsule replaces the hot body with a reference
@@ -39,12 +41,15 @@ export const intentLandingNoteTables = {
       }),
       v.object({
         ...identity,
+        // Item c0af6cfa: the landing time keeps the row in place when its body moves out; the one-off
+        // job sets it on notes archived before this field existed, then this becomes required.
+        at: v.optional(v.string()),
         capsule: v.string(),
         landedBy: v.optional(v.object({ by: landingPublisher })),
       }),
     ),
   )
     .index('by_project_and_receipt_and_intent_and_kind', ['projectId', 'receiptId', 'intentId', 'kind'])
-    // index-order: caller: convex/projectIntentLandingNoteArchive.ts#landingNoteWindow; order: the newest notes of one Intent by creation time.
-    .index('by_project_and_intent', ['projectId', 'intentId']),
+    // index-order: caller: convex/projectIntentLandingNoteArchive.ts#landingNoteWindow; order: the newest notes of one Intent by landing time (`at`), the key every reader selects, pages and shows by.
+    .index('by_project_and_intent_and_at', ['projectId', 'intentId', 'at']),
 };

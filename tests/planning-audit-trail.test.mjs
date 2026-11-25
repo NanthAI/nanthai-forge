@@ -1375,3 +1375,37 @@ test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decisio
   assert.ok(lines.some(line => line.includes('(synth-forge-model)')));
   assert.ok(lines.some(line => line.includes('(not declared)')));
 });
+
+test('the Item audit pages landing notes by landing time: landings written late for old receipts stay in order across pages', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-18T10:00:00.000Z') });
+  const s = await setup(t);
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  addDeviceAndAccounts(s);
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
+  const port = makePort(s);
+  const itemId = (await runPut(port, { kind: 'issue', title: 'Late landing notes' })).itemId;
+  const post = (day, label) =>
+    notes.postIntentLandingNote(s.ctx, s.projectId, {
+      intentId: itemId,
+      receiptId: `${label}-${randomUUID()}`,
+      kind: 'landed',
+      at: `2026-11-${day}T12:00:00.000Z`,
+      laneIds: [],
+      commit: 'c'.repeat(64),
+      sequence: Number(day),
+      actor: 'owner',
+      landedBy: { by: 'agent', review: 'none' },
+    });
+  // Recent landings first, then a conversion writes the older ones last (their rows are the newest).
+  for (const day of ['20', '21', '22', '23', '24', '25']) await post(day, 'recent');
+  for (const day of ['02', '03', '04', '05', '06', '07']) await post(day, 'converted');
+  const landingDays = [];
+  let cursor;
+  for (let pageIndex = 0; pageIndex < 12; pageIndex++) {
+    const page = await runPlanning(port, { planningItemId: itemId, history: true, limit: 4, cursor });
+    landingDays.push(...page.events.filter(e => e.kind === 'landing').map(e => e.at.slice(8, 10)));
+    cursor = page.nextCursor;
+    if (!cursor) break;
+  }
+  assert.deepEqual(landingDays, ['25', '24', '23', '22', '21', '20', '07', '06', '05', '04', '03', '02']);
+});

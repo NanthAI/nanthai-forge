@@ -28,9 +28,11 @@ export async function retainLandingNoteReference(
     intentId: row.intentId,
     receiptId: row.receiptId,
     kind: row.kind,
+    at: row.at,
     laneIds: row.laneIds,
     ...(row.viaLaneId ? { viaLaneId: row.viaLaneId } : {}),
     ...(row.revertOf ? { revertOf: row.revertOf } : {}),
+    ...(row.revertedBy ? { revertedBy: row.revertedBy } : {}),
     ...(row.landedBy ? { landedBy: { by: row.landedBy.by } } : {}),
     capsule: submissionId,
   });
@@ -41,15 +43,15 @@ export async function landingNoteWindow(
   projectId: Id<'hostedProjects'>,
   intentId: string,
   limit: number,
-  through?: number,
+  through?: string,
   includeThrough = true,
 ) {
   return await ctx.db
     .query('projectIntentLandingNotes')
-    .withIndex('by_project_and_intent', q => {
+    .withIndex('by_project_and_intent_and_at', q => {
       const range = q.eq('projectId', projectId).eq('intentId', intentId);
       if (through === undefined) return range;
-      return includeThrough ? range.lte('_creationTime', through) : range.lt('_creationTime', through);
+      return includeThrough ? range.lte('at', through) : range.lt('at', through);
     })
     .order('desc')
     .take(limit);

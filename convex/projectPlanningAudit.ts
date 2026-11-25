@@ -16,6 +16,7 @@ import { hostedRecordBody } from './projectHostedRecords';
 import { hostedRecordValue } from './hostedRecordValue';
 import { itemIntents } from './projectItemIntentPages';
 import { landingNoteWindow } from './projectIntentLandingNoteArchive';
+import { notePosition, notePositionAfter, skipNoteTies } from './projectLandingNotePosition';
 import { cursorJson, itemLandingFromNote } from './projectItemLandingHistory';
 import { legacyVersions, legacyVersionValue, planningHistoryBudget } from './projectPlanningHistory';
 import { record } from './projectWorkIndexStore';
@@ -31,17 +32,20 @@ const PAGE_BYTES = 2 * 1024 * 1024;
 
 const timePosition = z.object({ at: z.number().min(0), skip: z.number().int().min(1).max(512) });
 const streamPos = z.union([timePosition, z.literal(false), z.null()]);
+// Landing notes page by landing time, not by row creation time (Item c0af6cfa).
+const noteStreamPos = z.union([notePosition, z.literal(false), z.null()]);
 const auditCursorSchema = z
   .object({
     v: z.number().int().min(1).nullable(),
     c: z.union([timePosition, z.number().int().min(0), z.literal(false), z.null()]),
     l: z.array(streamPos).max(maxIntentChain + 1),
-    n: z.array(streamPos).max(maxIntentChain + 1),
+    n: z.array(noteStreamPos).max(maxIntentChain + 1),
   })
   .strict();
 
 type TimePosition = z.infer<typeof timePosition>;
 type StreamPos = z.infer<typeof streamPos>;
+type NoteStreamPos = z.infer<typeof noteStreamPos>;
 type AuditCursor = z.infer<typeof auditCursorSchema>;
 type Budget = ReturnType<typeof planningHistoryBudget>;
 
@@ -284,7 +288,7 @@ function decodeCursor(
     'cursor: expected the nextCursor returned by planning Item history.',
   );
   const data = parsed.data;
-  const pad = (list: StreamPos[]) =>
+  const pad = <T>(list: T[]) =>
     Array.from({ length: intentCount }, (_, i) => (i < list.length ? list[i]! : null));
   return { v: data.v, c: data.c, l: pad(data.l), n: pad(data.n) };
 }
@@ -676,7 +680,13 @@ export async function readItemAuditHistory(
   }
 
   // 4. Landings and reverts per Intent in chain (hot + archived capsules).
-  const landingStreams: TimedStream[] = [];
+  type NoteStream = {
+    entries: TimedStreamEntry[];
+    examined: Awaited<ReturnType<typeof landingNoteWindow>>;
+    hasMore: boolean;
+    incoming: NoteStreamPos;
+  };
+  const landingStreams: NoteStream[] = [];
   for (let i = 0; i < intents.length; i++) {
     const incoming = state.n[i]!;
     if (incoming === null || charge.exhausted) {
@@ -691,10 +701,10 @@ export async function readItemAuditHistory(
       workCap + 1 + (time?.skip ?? 0),
       time?.at,
     );
-    const trimmed = skipTies(rows, time);
+    const trimmed = skipNoteTies(rows, time);
     let hasMore = trimmed.length > workCap;
     const entries: TimedStreamEntry[] = [];
-    const examined: { _creationTime: number }[] = [];
+    const examined: NoteStream['examined'] = [];
     for (const note of trimmed.slice(0, workCap)) {
       // The note plus its receipt lookup, charged at the note's size.
       if (!charge.spend(2 * JSON.stringify(note).length)) {
@@ -853,7 +863,19 @@ export async function readItemAuditHistory(
       ? null
       : advanceTimed(stream, typeof stream.incoming === 'object' ? stream.incoming : false, consumed);
   const nextL = laneStreams.map((stream, i) => timed(stream, streams[2 + i]!.index));
-  const nextN = landingStreams.map((stream, i) => timed(stream, streams[2 + intents.length + i]!.index));
+  const nextN = landingStreams.map((stream, i) => {
+    if (stream.incoming === null) return null;
+    const consumed = streams[2 + intents.length + i]!.index;
+    const from = stream.incoming || undefined;
+    if (consumed < stream.entries.length)
+      return consumed === 0
+        ? stream.incoming
+        : notePositionAfter(stream.examined, stream.entries[consumed - 1]!.examined + 1, from);
+    if (!stream.hasMore) return null;
+    return stream.examined.length
+      ? notePositionAfter(stream.examined, stream.examined.length, from)
+      : stream.incoming;
+  });
 
   const hasNext =
     nextV !== null || nextC !== null || nextL.some(p => p !== null) || nextN.some(p => p !== null);

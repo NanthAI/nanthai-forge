@@ -7,7 +7,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { acceptancePage, acceptanceRow } from './projectHostedAcceptanceStore';
 import { independentIntentItem, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { postSystemLaneNote } from './projectBoardSystem';
-import { postIntentLandingNote } from './projectIntentLandingNotes';
+import { markNoteReverted, postIntentLandingNote } from './projectIntentLandingNotes';
 import { accessibleProject } from './projectAuthority';
 import { requireMemberAuthority } from './projectLaneAuthority';
 import { withoutRawId } from './projectNeedsMe';
@@ -107,8 +107,10 @@ export async function noticeRevert(ctx: MutationCtx, input: Revert) {
     ...(input.auto ? {} : { by: input.actor, ...(input.agent ? { agent: input.agent } : {}) }),
     ...first,
   });
-  // Issue 3a733ee8: the reverted Intent's Item gets a system note matching its landing note.
-  if (itemNoteIntentId)
+  // Issue 3a733ee8: the reverted Intent's Item gets a system note matching its landing note, and the landing
+  // note names the revert (Item c0af6cfa).
+  if (itemNoteIntentId) {
+    await markNoteReverted(ctx, input.projectId, itemNoteIntentId, original.id, revert.id);
     await postIntentLandingNote(ctx, input.projectId, {
       intentId: itemNoteIntentId,
       receiptId: revert.id,
@@ -122,6 +124,7 @@ export async function noticeRevert(ctx: MutationCtx, input: Revert) {
       agentClient: revert.agentClient,
       revertOf: original.id,
     });
+  }
   return { lanes: lanes.length, notes, needsFix };
 }
 

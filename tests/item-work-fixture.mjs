@@ -143,7 +143,8 @@ export async function itemWorkFixture({
       intentId: itemId,
       receiptId: randomUUID(),
       kind: 'landed',
-      at,
+      // A landing sits at its own time: later sequences land later (the notes are selected and paged by it).
+      at: new Date(Date.parse(at) + sequence * 1000).toISOString(),
       laneIds: [open.id],
       commit: other,
       sequence,

@@ -154,19 +154,13 @@ export const read = query({
       );
       for (const intentId of landingIntents) {
         const notes = await landingNoteWindow(ctx, projectId, intentId, LANDING_NOTES_PER_ITEM);
-        const reverted = new Map(
-          notes.filter(note => note.kind === 'reverted' && note.revertOf).map(note => [note.revertOf!, note]),
-        );
         for (const note of notes) {
           if (note.kind !== 'landed') continue;
           const laneIds = [...note.laneIds, ...(note.viaLaneId ? [note.viaLaneId] : [])].filter(
             id => lanes.some(lane => lane.id === id) && !landed.has(id),
           );
           if (!laneIds.length) continue;
-          const receipt = {
-            ...(await itemLandingFromNote(ctx, projectId, note)),
-            ...(reverted.has(note.receiptId) ? { revertedBy: reverted.get(note.receiptId)!.receiptId } : {}),
-          };
+          const receipt = await itemLandingFromNote(ctx, projectId, note);
           for (const laneId of laneIds) landed.set(laneId, receipt);
         }
       }
@@ -193,11 +187,7 @@ export const read = query({
               )
               .unique()
           : null;
-        if (stamp && note)
-          landed.set(lane.id, {
-            ...(await itemLandingFromNote(ctx, projectId, note)),
-            ...(stamp.revertedBy ? { revertedBy: stamp.revertedBy.receiptId } : {}),
-          });
+        if (stamp && note) landed.set(lane.id, await itemLandingFromNote(ctx, projectId, note));
       }
 
       // Open Lanes: the Intent's live submission (its newest Candidate's newest landing request).

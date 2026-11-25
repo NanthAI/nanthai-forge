@@ -227,7 +227,12 @@ test('an Item reopened onto a successor Intent shows the notes of every Intent i
   f.advanceClock(1000);
   await f.c.run('successorNote', (ctx, input) => notes.postIntentLandingNote(ctx, ...input), [
     f.projectId,
-    { ...template, intentId: successor, receiptId: 'later-receipt', at: new Date().toISOString() },
+    {
+      ...template,
+      intentId: successor,
+      receiptId: 'later-receipt',
+      at: new Date(Date.parse(template.at) + 1000).toISOString(),
+    },
   ]);
   const { comments: shown } = await f.c.run(
     'itemComments',
@@ -279,6 +284,11 @@ test('a revert posts a matching reverted note on the reverted Item, once', async
   assert.equal(reverted[0].revertOf, receipt.id);
   assert.equal(reverted[0].receiptId, final.acceptance.receiptId);
   assert.deepEqual(reverted[0].laneIds, originalNote.laneIds);
+  assert.equal(
+    [...f.tables.projectIntentLandingNotes.values()].find(row => row._id === originalNote._id).revertedBy,
+    final.acceptance.receiptId,
+    'the original landing note names its revert, so no page has to find the revert note',
+  );
   // J08: the project's notice also names the Lane and who took it out, so the web can word its card; the summary and
   // undo the agents read are the same text as before.
   const entry = Object.values(f.tables.hostedProjects.get(f.projectId).needsFix ?? {}).map(JSON.parse)[0];
@@ -392,6 +402,19 @@ test('the Item comment read shows its landing notes once, at the newest end, bet
   assert.equal(last.isDone, true);
   assert.deepEqual(texts(last), [landingNoteText(note), 'After the landing']);
   assert(last.page[0].position > first.page[0].position, 'sorted between the comments around it');
+  // A converted landing (Item c0af6cfa) is a new row for an old landing: its position is its landing time, so the
+  // record-store read (which positions comments by creation time) sorts it below the comments written after it landed.
+  const old = {
+    ...note,
+    receiptId: randomUUID(),
+    at: new Date(Date.parse(note.at) - 60_000).toISOString(),
+    sequence: 3,
+  };
+  assert.equal(await notes.postIntentLandingNote(s.ctx, s.projectId, old), true);
+  const { comments } = await notes.intentLandingComments(s.ctx, s.projectId, item.itemId);
+  const position = receiptId => comments.find(row => row.value.landing.receiptId === receiptId).position;
+  assert.equal(position(old.receiptId), Date.parse(old.at));
+  assert(position(old.receiptId) < position(note.receiptId), 'the converted note sorts by its landing time');
   // An Item without a started Intent reads exactly as before.
   const other = s.item({ title: 'Unstarted' });
   await s.send(other);

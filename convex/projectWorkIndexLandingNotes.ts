@@ -46,7 +46,7 @@ const linkedCursor = z.object({
   recordsCursor: z.string(),
   recordsDone: z.boolean(),
   noteBefore: z
-    .object({ at: z.number().nonnegative(), intentId: z.string(), skip: z.number().int().min(1).max(512) })
+    .object({ at: z.string().min(1).max(40), intentId: z.string(), skip: z.number().int().min(1).max(512) })
     .optional(),
 });
 type LinkedCursor = z.infer<typeof linkedCursor>;

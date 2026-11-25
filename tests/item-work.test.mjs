@@ -197,6 +197,71 @@ test('Item Work preserves earlier landings of a Lane that was kept open and page
   assert.equal(next.moreLandings, false);
 });
 
+test('the landing history names the revert from the landing note itself, on any page', async () => {
+  const s = await fixture({ details: true });
+  const original = randomUUID();
+  const revert = randomUUID();
+  // A landing, ten newer landings, then the landing's revert: the revert note sits above the first page.
+  await s.addLandingNote(70, { receiptId: original, revertedBy: revert });
+  for (let sequence = 71; sequence < 81; sequence++) await s.addLandingNote(sequence);
+  await s.addLandingNote(81, { kind: 'reverted', receiptId: revert, revertOf: original });
+  const first = await s.read({ details: true });
+  assert(!first.landings.some(landing => landing.receiptId === original), 'the original is on a later page');
+  const next = await s.read({ details: true, cursor: first.nextCursor });
+  const row = next.landings.find(landing => landing.receiptId === original);
+  assert.equal(row.revertedBy, revert, 'the link survives the page boundary');
+  assert(
+    ![...first.landings, ...next.landings].some(landing => landing.receiptId === revert),
+    'a revert is not a landing row',
+  );
+  assert.equal(
+    next.landings.find(landing => landing.receiptId === s.noteReceipt)?.revertedBy,
+    undefined,
+    'a landing nothing reverted names no revert',
+  );
+});
+
+test('landings written late sit at their landing time: a page shows the newest landings, not the newest rows', async () => {
+  const s = await fixture({ details: true });
+  for (const note of [...s.tables.projectIntentLandingNotes.values()]) await s.ctx.db.delete(note._id);
+  // Twelve recent landings, then a conversion writes twelve older landings afterwards.
+  for (let sequence = 200; sequence < 212; sequence++) await s.addLandingNote(sequence);
+  for (let sequence = 1; sequence < 13; sequence++) await s.addLandingNote(sequence);
+  const first = await s.read({ details: true });
+  assert.deepEqual(
+    first.landings.map(landing => landing.sequence),
+    Array.from({ length: 10 }, (_, i) => 211 - i),
+    'the first page holds the genuinely recent landings',
+  );
+  const second = await s.read({ details: true, cursor: first.nextCursor });
+  assert.deepEqual(
+    second.landings.map(landing => landing.sequence),
+    [201, 200, ...Array.from({ length: 8 }, (_, i) => 12 - i)],
+  );
+});
+
+test('the discussion pages landing notes by landing time, so notes written late for old landings never take a recent page', async () => {
+  const { intentLandingComments } = await import(moduleUrl('../convex/projectIntentLandingNotes.ts'));
+  const s = await fixture({ details: true });
+  for (const note of [...s.tables.projectIntentLandingNotes.values()]) await s.ctx.db.delete(note._id);
+  // Six recent landings, then a conversion writes six older ones afterwards (larger row creation times).
+  for (let sequence = 200; sequence < 206; sequence++) await s.addLandingNote(sequence);
+  for (let sequence = 1; sequence < 7; sequence++) await s.addLandingNote(sequence);
+  const seen = [];
+  let before;
+  for (let pageIndex = 0; pageIndex < 6; pageIndex++) {
+    const page = await intentLandingComments(s.ctx, s.auth.projectId, s.itemId, 4, [s.itemId], before);
+    seen.push(page.comments.map(row => row.value.landing.sequence));
+    before = page.before;
+    if (!before) break;
+  }
+  assert.deepEqual(seen, [
+    [205, 204, 203, 202],
+    [201, 200, 6, 5],
+    [4, 3, 2, 1],
+  ]);
+});
+
 test('Item Work keeps Lane attribution and receipt history after a landing note moves to its capsule', async () => {
   const s = await fixture({ details: true });
   const { retainLandingNoteReference } = await import(
@@ -694,14 +759,10 @@ test('a Lane older than the newest landing notes still reads its receipt, with i
   const revert = randomUUID();
   const overlap = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === s.noted.id);
   await s.ctx.db.patch(overlap._id, {
-    landed: {
-      receiptId: s.noteReceipt,
-      commit: 'c'.repeat(64),
-      laneHead: other,
-      at,
-      revertedBy: { receiptId: revert, at },
-    },
+    landed: { receiptId: s.noteReceipt, commit: 'c'.repeat(64), laneHead: other, at },
   });
+  const note = [...s.tables.projectIntentLandingNotes.values()].find(row => row.receiptId === s.noteReceipt);
+  await s.ctx.db.patch(note._id, { revertedBy: revert });
   const work = await s.read({ limit: 20 });
   const lane = work.lanes.find(row => row.laneId === s.noted.id);
   assert.deepEqual(

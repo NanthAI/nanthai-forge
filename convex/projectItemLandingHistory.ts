@@ -5,6 +5,7 @@ import { maxIntentChain } from '../src/hosted-intent-chain';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { landingNoteWindow } from './projectIntentLandingNoteArchive';
+import { newerNote, notePosition, notePositionAfter, skipNoteTies } from './projectLandingNotePosition';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import { invariant } from '../src/errors';
@@ -20,23 +21,21 @@ export type ItemLanding = {
   revertedBy?: string;
 };
 
-// Creation-time ties can occur between adjacent writes. Keep cursor lookbehind
+// Landing-time ties can occur between adjacent landings. Keep cursor lookbehind
 // proportional to a small batch, including when someone constructs a cursor.
-const timePosition = z.object({ at: z.number().min(0), skip: z.number().int().min(1).max(512) });
-const notePosition = z.union([timePosition, z.literal(false), z.null()]);
+const streamPosition = z.union([notePosition, z.literal(false), z.null()]);
 export const landingHistoryCursor = z.object({
   notes: z
-    .array(notePosition)
+    .array(streamPosition)
     .max(maxIntentChain + 1)
     .nullable()
     .optional(),
 });
 type HistoryCursor = z.infer<typeof landingHistoryCursor>;
-type TimePosition = z.infer<typeof timePosition>;
-type NotePosition = z.infer<typeof notePosition>;
+type StreamPosition = z.infer<typeof streamPosition>;
 type NoteWindow = Awaited<ReturnType<typeof landingNoteWindow>>;
 
-/** Archive routes retain Lane membership. Canonical receipts already hold the other Item Work fields. */
+/** Archive routes retain Lane membership and the revert link. Canonical receipts already hold the other Item Work fields. */
 export async function itemLandingFromNote(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
@@ -55,35 +54,18 @@ export async function itemLandingFromNote(
     receiptId: note.receiptId,
     ...evidence,
     ...(note.landedBy ? { landedBy: note.landedBy.by } : {}),
+    ...(note.revertedBy ? { revertedBy: note.revertedBy } : {}),
   };
 }
 
-function windowFrom<T extends { _creationTime: number }>(rows: T[], from: TimePosition | undefined) {
-  if (!from) return rows;
-  let offset = 0;
-  while (offset < from.skip && rows[offset]?._creationTime === from.at) offset++;
-  return rows.slice(offset);
-}
-
-function windowAfter(
-  rows: readonly { _creationTime: number }[],
-  consumed: number,
-  from: TimePosition | undefined,
-): TimePosition {
-  const at = rows[consumed - 1]!._creationTime;
-  let skip = from?.at === at ? from.skip : 0;
-  while (consumed > 0 && rows[--consumed]!._creationTime === at) skip++;
-  return { at, skip };
-}
-
-/** Merge the recorded note windows without adding an index to the landing path.
- * A cursor consumes rows only from the windows it showed. Writes above the
- * boundary do not shift older rows, and tied creation times advance per Intent. */
+/** Merge the recorded note windows by landing time. A cursor consumes rows only from the windows it
+ * showed. Notes written above the boundary (a conversion writes old landings late) do not shift older rows,
+ * and tied landing times advance per Intent. */
 async function notePage(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
   intents: readonly string[],
-  from: NotePosition[] | undefined,
+  from: StreamPosition[] | undefined,
   limit: number,
 ) {
   const rawLimit = 2 * limit;
@@ -99,11 +81,11 @@ async function notePage(
         rawLimit + 1 + (time?.skip ?? 0),
         time?.at,
       );
-      return { position, rows: windowFrom(rows, time), consumed: 0 };
+      return { position, rows: skipNoteTies(rows, time), consumed: 0 };
     }),
   );
   const merged = streams.flatMap(stream => stream.rows.map(note => ({ note, stream })));
-  merged.sort((a, b) => b.note._creationTime - a.note._creationTime);
+  merged.sort((a, b) => newerNote(a.note, b.note));
   const receipts = new Map<string, NoteWindow[number]>();
   for (const { note, stream } of merged.slice(0, rawLimit)) {
     stream.consumed++;
@@ -112,7 +94,11 @@ async function notePage(
     if (receipts.size === limit) break;
   }
   const next = streams.map(({ position, rows, consumed }) =>
-    consumed >= rows.length ? null : consumed ? windowAfter(rows, consumed, position || undefined) : position,
+    consumed >= rows.length
+      ? null
+      : consumed
+        ? notePositionAfter(rows, consumed, position || undefined)
+        : position,
   );
   return {
     rows: await Promise.all([...receipts.values()].map(note => itemLandingFromNote(ctx, projectId, note))),

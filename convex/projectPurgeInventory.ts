@@ -156,7 +156,7 @@ export const projectPurgeTables = {
   projectHostedOverlapMainLog: 'by_project_and_sequence',
   projectBoardMessages: 'by_project_and_id',
   projectBoardInboxes: 'by_project_and_key',
-  projectIntentLandingNotes: 'by_project_and_intent',
+  projectIntentLandingNotes: 'by_project_and_intent_and_at',
   projectInitiativeWorkMembers: 'by_project_and_initiative_and_kind_and_key',
   projectBoardSenders: 'by_project_and_key',
   projectReadBudgets: 'by_project_and_shard',

@@ -19,6 +19,7 @@ import {
   type ArchivedNote,
   type LoadedLandingNote,
 } from './projectIntentLandingNoteArchive';
+import { newerNote, noteAt } from './projectLandingNotePosition';
 import { invariant } from '../src/errors';
 import {
   LANDING_NOTE_LANES,
@@ -82,8 +83,32 @@ export async function postIntentLandingNote(
   return true;
 }
 
+/** A revert was accepted: its original landing note names it, so the landing history and Item Work show the
+ * link from the note alone, on any page (Item c0af6cfa). One indexed read, only when a revert lands. */
+export async function markNoteReverted(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  intentId: string,
+  revertOf: string,
+  revertedBy: string,
+) {
+  const original = await ctx.db
+    .query('projectIntentLandingNotes')
+    .withIndex('by_project_and_receipt_and_intent_and_kind', q =>
+      q.eq('projectId', projectId).eq('receiptId', revertOf).eq('intentId', intentId).eq('kind', 'landed'),
+    )
+    .unique();
+  if (original && !original.revertedBy) await ctx.db.patch(original._id, { revertedBy });
+}
+
+/** A note sits at its landing time, the key it was selected and paged by (never its creation time: a
+ * converted landing was written long after it landed, Item c0af6cfa). */
+function commentAt<T extends { at: string }>(note: { _creationTime: number }, value: T) {
+  return { position: Date.parse(value.at) || note._creationTime, value };
+}
+
 /** System landing comments from the Item's own Intent chain and its linked chains, newest first. */
-export type DiscussionNoteCursor = { at: number; intentId: string; skip: number };
+export type DiscussionNoteCursor = { at: string; intentId: string; skip: number };
 export async function intentLandingComments(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
@@ -114,9 +139,9 @@ export async function intentLandingComments(
       includeThrough,
     );
     let offset = 0;
-    while (offset < alreadyShown && window[offset]?._creationTime === before?.at) offset++;
+    while (offset < alreadyShown && window[offset] && noteAt(window[offset]!) === before?.at) offset++;
     notes.push(...window.slice(offset));
-    notes.sort((a, b) => b._creationTime - a._creationTime);
+    notes.sort(newerNote);
     if (notes.length > limit + 1) notes.length = limit + 1;
   }
   const selected = notes.slice(0, limit);
@@ -144,17 +169,16 @@ export async function intentLandingComments(
         pending.push(reference);
         return [];
       }
-      return [{ position: note._creationTime, value: landingNoteComment(itemId, stored.row) }];
+      return [commentAt(note, landingNoteComment(itemId, stored.row))];
     }
-    return [{ position: note._creationTime, value: landingNoteComment(itemId, note) }];
+    return [commentAt(note, landingNoteComment(itemId, note))];
   });
   const last = notes.length > limit ? selected.at(-1) : undefined;
   if (!last) return { comments, pending };
-  const at = last._creationTime;
+  const at = noteAt(last);
   const { intentId } = last;
   const previous = before?.at === at && before.intentId === intentId ? before.skip : 0;
-  const skip =
-    previous + selected.filter(note => note._creationTime === at && note.intentId === intentId).length;
+  const skip = previous + selected.filter(note => noteAt(note) === at && note.intentId === intentId).length;
   return { comments, pending, before: { at, intentId, skip } };
 }
 
@@ -176,7 +200,7 @@ export const exportPage = internalQuery({
     await ownedProject(ctx, projectId, owner);
     const page = await ctx.db
       .query('projectIntentLandingNotes')
-      .withIndex('by_project_and_intent', q => q.eq('projectId', projectId))
+      .withIndex('by_project_and_intent_and_at', q => q.eq('projectId', projectId))
       .paginate({ cursor, numItems: 200 });
     const archived = page.page.flatMap(row => ('capsule' in row ? [archiveNoteReference(row)] : []));
     const notes = page.page.flatMap(row =>
