@@ -16,6 +16,8 @@ const identity = {
   intentId: v.string(),
   receiptId: v.string(),
   kind: v.union(v.literal('landed'), v.literal('reverted')),
+  /** The landing time, the key every reader selects, pages and shows a note by (Item c0af6cfa). */
+  at: v.string(),
   laneIds: v.array(v.string()),
   viaLaneId: v.optional(v.string()),
   revertOf: v.optional(v.string()),
@@ -30,7 +32,6 @@ export const intentLandingNoteTables = {
     v.union(
       v.object({
         ...identity,
-        at: v.string(),
         commit: v.string(),
         sequence: v.number(),
         /** Submitter account, mapped to a handle per viewer on read. */
@@ -41,9 +42,6 @@ export const intentLandingNoteTables = {
       }),
       v.object({
         ...identity,
-        // Item c0af6cfa: the landing time keeps the row in place when its body moves out; the one-off
-        // job sets it on notes archived before this field existed, then this becomes required.
-        at: v.optional(v.string()),
         capsule: v.string(),
         landedBy: v.optional(v.object({ by: landingPublisher })),
       }),

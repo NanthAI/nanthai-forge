@@ -8,7 +8,7 @@ import type { LandingCapsulePointer } from '../src/hosted-landing';
 import { landingNoteId } from '../src/intent-landing-note';
 
 type NoteRow = Doc<'projectIntentLandingNotes'>;
-export type HotLandingNote = Extract<NoteRow, { at: string }>;
+export type HotLandingNote = Extract<NoteRow, { commit: string }>;
 export type ArchivedNote = { key: string; submissionId: string; intentId: string };
 export type ArchivedNotePin = ArchivedNote & { pointer: LandingCapsulePointer };
 export type LoadedLandingNote = ArchivedNote & { sha256: string; row: HotLandingNote };

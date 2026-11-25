@@ -19,7 +19,7 @@ import {
   type ArchivedNote,
   type LoadedLandingNote,
 } from './projectIntentLandingNoteArchive';
-import { newerNote, noteAt } from './projectLandingNotePosition';
+import { newerNote } from './projectLandingNotePosition';
 import { invariant } from '../src/errors';
 import {
   LANDING_NOTE_LANES,
@@ -139,7 +139,7 @@ export async function intentLandingComments(
       includeThrough,
     );
     let offset = 0;
-    while (offset < alreadyShown && window[offset] && noteAt(window[offset]!) === before?.at) offset++;
+    while (offset < alreadyShown && window[offset]?.at === before?.at) offset++;
     notes.push(...window.slice(offset));
     notes.sort(newerNote);
     if (notes.length > limit + 1) notes.length = limit + 1;
@@ -175,10 +175,10 @@ export async function intentLandingComments(
   });
   const last = notes.length > limit ? selected.at(-1) : undefined;
   if (!last) return { comments, pending };
-  const at = noteAt(last);
+  const { at } = last;
   const { intentId } = last;
   const previous = before?.at === at && before.intentId === intentId ? before.skip : 0;
-  const skip = previous + selected.filter(note => noteAt(note) === at && note.intentId === intentId).length;
+  const skip = previous + selected.filter(note => note.at === at && note.intentId === intentId).length;
   return { comments, pending, before: { at, intentId, skip } };
 }
 
