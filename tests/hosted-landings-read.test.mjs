@@ -435,6 +435,27 @@ test('landings: refuses a bad window, a foreign cursor and an over-limit page wi
   assert(capped.landings.length <= 30);
 });
 
+test('landings {limit:N} alone returns the newest N, oldest first, in one page', async () => {
+  const f = fixture();
+  for (let n = 1; n <= 8; n++) f.landing(n, { at: n * 10 });
+  const page = await f.read({ from: undefined, to: undefined, limit: 3 });
+  assert.deepEqual(
+    page.landings.map(row => row.receiptId),
+    [6, 7, 8].map(n => id('receipt', n)),
+  );
+  assert.equal(page.nextCursor, null);
+  assert.equal(page.newest, 3);
+  for (let n = 9; n <= 40; n++) f.landing(n, { at: n * 10 });
+  const all = await f.read({ from: undefined, to: undefined, limit: 1000 });
+  assert.equal(all.landings.length, 30);
+  assert.equal(all.landings.at(-1).receiptId, id('receipt', 40));
+  const { hostedLandingsSchema } = await import('../dist/hosted-agent-landings.js');
+  assert(hostedLandingsSchema.safeParse({}).success);
+  assert(hostedLandingsSchema.safeParse({ limit: 5 }).success);
+  assert(!hostedLandingsSchema.safeParse({ limit: 5, cursor: 'x' }).success);
+  assert(!hostedLandingsSchema.safeParse({ from: '2026-01-01' }).success);
+});
+
 /** Incident 19328518 counter-example (2026-11-07, receipt 68cc9092, operation 23938f96): the
  * stored attempt rows of that landing and of #752 ahead of it, with synthetic ids. The revert
  * composed at 22:58:27 and its check passed at 23:06:32, then it waited behind #752 until

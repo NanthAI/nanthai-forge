@@ -135,7 +135,7 @@ SECRET_FOUND: a save (or land --save) held a credential and stored nothing. Remo
 - LANDING_CANCELLED: the landing was withdrawn or cancelled; the Lane and its saves stay. Fix if needed and land --save again.
 - LANDING_STALLED: run the receipt's exact repair command; do not resubmit a live landing. If none is present, read queue '{}' and observe {operationId}. A terminal-failed receipt may explicitly direct a retry in the same Lane.
 - REVIEW_REQUIRED: wait {approval:LANE_ID} after request-approval, or ask the owner.
-- landings {from,to,kind?,limit?,cursor?} lists accepted landings in a UTC window, oldest first; kind agent|person filters builtBy. Continue with nextCursor. For a file, use history {op:"log"|"blame",path:"FILE"}.`,
+- landings {limit?:N≤30} lists the newest landings; {from,to,kind?,limit?,cursor?} a UTC window, oldest first (kind agent|person filters builtBy; continue with nextCursor). For a file, use history {op:"log"|"blame",path:"FILE"}.`,
   },
   board: {
     title: 'Questions and hand-back',

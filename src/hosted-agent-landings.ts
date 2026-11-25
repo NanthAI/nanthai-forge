@@ -44,8 +44,8 @@ export const hostedLandingsSchema = z
           !input.cursor &&
           !input.kind &&
           !(input.submissionId && (input.receiptId || input.message))
-        : !input.message && input.from && input.to,
-    'Pass from and to for a window (optional kind: agent or person), receiptId with optional message:true, or submissionId alone.',
+        : !input.message && (input.cursor ? input.from && input.to : !input.from === !input.to),
+    'Pass from and to for a window, nothing or limit alone for the newest landings (max 30, one page), kind: agent or person to filter, receiptId with optional message:true, or submissionId alone.',
   );
 /** One bounded page of accepted landings (Issue b78ca196), read from rows already stored. */
 export async function landingsHostedSource(transport: HostedAgentTransport, input: unknown) {

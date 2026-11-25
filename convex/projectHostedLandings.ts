@@ -439,25 +439,39 @@ export const read = query({
         }
         return JSON.stringify(await oneLanding(ctx, project, input.receiptId));
       }
-      const from = Date.parse(input.from ?? ''),
-        to = Date.parse(input.to ?? '');
-      invariant(
-        Number.isFinite(from) && Number.isFinite(to) && from < to,
-        'BAD_ARGUMENT',
-        'Use a finite window [from,to).',
-      );
-      const { resume, skip } = readCreationCursor(input.cursor, from, to);
+      // `limit` alone (no window, no cursor): the newest N landings, oldest first, one page, no cursor.
+      const newest = input.from === undefined && input.to === undefined && input.cursor === undefined;
       const limit = Math.max(
         1,
         Math.min(LANDINGS_MAX_LIMIT, Math.floor(input.limit ?? LANDINGS_DEFAULT_LIMIT)),
       );
-      const fetched = await ctx.db
-        .query('projectHostedAcceptances')
-        .withIndex('by_project', q =>
-          q.eq('projectId', input.projectId).gte('_creationTime', resume).lt('_creationTime', to),
-        )
-        .order('asc')
-        .take(skip + limit + 1);
+      let fetched: Doc<'projectHostedAcceptances'>[],
+        skip = 0;
+      if (newest) {
+        // Newest first here so the byte budget drops the oldest rows; the rows are reversed on return.
+        fetched = await ctx.db
+          .query('projectHostedAcceptances')
+          .withIndex('by_project', q => q.eq('projectId', input.projectId))
+          .order('desc')
+          .take(limit);
+      } else {
+        const from = Date.parse(input.from ?? ''),
+          to = Date.parse(input.to ?? '');
+        invariant(
+          Number.isFinite(from) && Number.isFinite(to) && from < to,
+          'BAD_ARGUMENT',
+          'Use a finite window [from,to).',
+        );
+        const { resume, skip: skipped } = readCreationCursor(input.cursor, from, to);
+        skip = skipped;
+        fetched = await ctx.db
+          .query('projectHostedAcceptances')
+          .withIndex('by_project', q =>
+            q.eq('projectId', input.projectId).gte('_creationTime', resume).lt('_creationTime', to),
+          )
+          .order('asc')
+          .take(skip + limit + 1);
+      }
       const receipts = fetched.slice(skip);
       const rows: Awaited<ReturnType<typeof evidence>>['row'][] = [];
       let read = 0,
@@ -469,7 +483,7 @@ export const read = query({
           // After any scanned receipt (a filter that matches nothing still stops at the read budget).
           (index > 0 && (read >= LANDINGS_READ_BYTES || output >= LANDINGS_OUTPUT_BYTES))
         ) {
-          next = nextCreationCursor(fetched, skip + index);
+          next = newest ? null : nextCreationCursor(fetched, skip + index);
           break;
         }
         const parsed = JSON.parse(receipt.value) as HostedAcceptance;
@@ -490,8 +504,8 @@ export const read = query({
       }
       return JSON.stringify({
         schema: 1,
-        window: { from: input.from, to: input.to },
-        landings: rows,
+        ...(newest ? { newest: limit } : { window: { from: input.from, to: input.to } }),
+        landings: newest ? rows.reverse() : rows,
         nextCursor: next,
         bytesRead: read,
       });
