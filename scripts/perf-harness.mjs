@@ -5,6 +5,7 @@ import { homedir, cpus, totalmem, release } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mkdir, writeFile, rename, stat } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { budgets, bundleSummary, landingTiming, measurement, runtimeBuildHash } from './perf/report.mjs';
 import { agentCommands, firstNetworkSamples } from './perf/cli-first-network.mjs';
@@ -97,6 +98,21 @@ export function cpuMs(timeOutput) {
     : Math.round((Number(user) + Number(system)) * 1000);
 }
 
+/** The core build the harness measures: `dist/cli-entry.js` must be the bundled entry (it imports
+ * `cli-bundle-*` chunks that exist). A missing build or a plain `tsc` run over dist/ (which replaces the
+ * bundle with unbundled output) is named here instead of failing later as "invalid options". */
+export function coreBuildProblem(dist = 'dist') {
+  const entry = join(dist, 'cli-entry.js');
+  if (!existsSync(entry)) return `core build missing (${entry}); run npm run build:core`;
+  const chunks = [...readFileSync(entry, 'utf8').matchAll(/from "\.\/(cli-bundle-[\w.-]+\.js)"/g)].map(
+    m => m[1],
+  );
+  if (!chunks.length)
+    return `${entry} is not the bundled entry (plain tsc overwrote it?); run npm run build:core`;
+  const gone = chunks.find(name => !existsSync(join(dist, name)));
+  return gone ? `${entry} imports ${gone}, which is missing; run npm run build:core` : null;
+}
+
 export async function main(args) {
   const config = options(args);
   if (config.help) {
@@ -104,6 +120,8 @@ export async function main(args) {
     return;
   }
   process.chdir(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
+  const problem = coreBuildProblem();
+  if (problem) throw Object.assign(new Error(problem), { buildProblem: true });
   const record = {
     schemaVersion: 1,
     startedAt: new Date().toISOString(),
@@ -271,9 +289,11 @@ export async function main(args) {
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url)
-  main(process.argv.slice(2)).catch(() => {
+  main(process.argv.slice(2)).catch(error => {
     console.error(
-      'PERF_HARNESS_FAILED: invalid options or result write failed; details redacted. Use --help.',
+      error?.buildProblem
+        ? `PERF_HARNESS_FAILED: ${error.message}.`
+        : 'PERF_HARNESS_FAILED: invalid options or result write failed; details redacted. Use --help.',
     );
     process.exitCode = 1;
   });

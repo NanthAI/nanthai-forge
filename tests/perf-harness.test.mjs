@@ -8,7 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { budgets, measurement, eagerFiles, landingTiming } from '../scripts/perf/report.mjs';
-import { cliColdStartSamples, cpuMs, options } from '../scripts/perf-harness.mjs';
+import { cliColdStartSamples, coreBuildProblem, cpuMs, options } from '../scripts/perf-harness.mjs';
 import { agentCommands, firstNetworkSamples } from '../scripts/perf/cli-first-network.mjs';
 import { agentSurfaceFindings, readWeightBaseline } from '../scripts/agent-weight.mjs';
 import { agentActionNames } from '../scripts/check-growth.mjs';
@@ -332,4 +332,22 @@ test('ad80e037: the agent weight guard triggers on every script the built CLI or
     [],
     'add these to the agent weight guard inputs in package.json',
   );
+});
+
+test('perf-harness names a missing core build and a bundle overwritten by plain tsc', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'perf-dist-'));
+  try {
+    assert.match(coreBuildProblem(dir), /core build missing/);
+    writeFileSync(join(dir, 'cli-entry.js'), 'import { main } from "./cli.js";\n');
+    assert.match(coreBuildProblem(dir), /not the bundled entry/);
+    writeFileSync(join(dir, 'cli-entry.js'), 'import { a } from "./cli-bundle-x-AbC.js";\n');
+    assert.match(coreBuildProblem(dir), /cli-bundle-x-AbC\.js, which is missing/);
+    writeFileSync(join(dir, 'cli-bundle-x-AbC.js'), '');
+    assert.equal(coreBuildProblem(dir), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
