@@ -342,6 +342,7 @@ for (const workStore of ['journal', 'records'])
         actor: 'owner',
         authorityEpoch: 1,
         expectedVersion: null,
+        planningItemId: duplicate.itemId,
         record: {
           kind: 'intent',
           id: duplicate.itemId,
@@ -403,6 +404,7 @@ test('linked landing notes use bounded comment continuations without dropping no
       actor: 'owner',
       authorityEpoch: 1,
       expectedVersion: null,
+      planningItemId: id,
       record: {
         kind: 'intent',
         id,

@@ -43,9 +43,16 @@ const notesOf = (f, intentId) =>
 /** What the planning path writes for an Intent that belongs to an Item: its marker. Fixture Intents are written
  * without one; only a marked Intent posts a landing note (Item fc1831eb removed the legacy no-marker fallback). */
 const markLinked = (f, keys) => {
+  const marked = new Set();
   for (const head of f.tables.projectHostedRecordHeads.values())
-    if (head.kind === 'intent' && head.planningItemId === undefined && (!keys || keys.includes(head.key)))
+    if (head.kind === 'intent' && head.planningItemId === undefined && (!keys || keys.includes(head.key))) {
       f.patch('projectHostedRecordHeads', head._id, { planningItemId: head.key });
+      marked.add(head.key);
+    }
+  // Lane heads carry their Item too: the Item read lists Lanes only through that binding.
+  for (const head of f.tables.projectHostedRecordHeads.values())
+    if (head.kind === 'lane' && head.planningItemId === undefined && marked.has(head.parent))
+      f.patch('projectHostedRecordHeads', head._id, { planningItemId: head.parent });
 };
 
 /** Incident 2bf85ddf (2026-11-17): the builder submitted, its landing parked behind an older entry, the
@@ -330,6 +337,7 @@ test('the Item comment read shows its landing notes once, at the newest end, bet
     actor: 'owner',
     authorityEpoch: 1,
     expectedVersion: null,
+    planningItemId: item.itemId,
     record: {
       kind: 'intent',
       id: item.itemId,
@@ -471,4 +479,44 @@ test('the identity mapper leaves a note publisher alone even when an account onc
   // The fixture does resolve the alias: the old `by` key was rewritten to the squatter's handle.
   const old = await read(owner, { ...comment, landing: { ...withoutPublisher, by: 'queue' } });
   assert.equal(old.landing.by, 'renamed-x');
+});
+
+test('a link that names one Intent shows that Intent’s landing notes even when another Item owns it', async t => {
+  const s = await planningSetup(t);
+  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
+  const [owner, reader] = [s.item({ title: 'Owner' }), s.item({ title: 'Reader' })];
+  await s.send(owner);
+  await s.send(reader);
+  const followUp = successorIntentId(owner.itemId);
+  await records.writeHostedRecord(s.ctx, {
+    projectId: s.projectId,
+    actor: 'owner',
+    authorityEpoch: 1,
+    expectedVersion: null,
+    planningItemId: owner.itemId,
+    record: {
+      kind: 'intent',
+      id: followUp,
+      version: 0,
+      at: '2026-01-01T00:00:00.000Z',
+      outcome: 'Follow-up',
+      constraints: '',
+      creatorAccountId: 'owner',
+      assigneeAccountIds: [],
+      base: { head: 'a'.repeat(64), receiptId: 'receipt' },
+      status: 'active',
+    },
+  });
+  await notes.postIntentLandingNote(s.ctx, s.projectId, {
+    intentId: followUp,
+    receiptId: randomUUID(),
+    kind: 'landed',
+    at: '2026-01-01T00:00:00.000Z',
+    laneIds: [randomUUID()],
+    commit: 'b'.repeat(64),
+    sequence: 9,
+    actor: 'owner',
+  });
+  const { comments } = await notes.intentLandingComments(s.ctx, s.projectId, reader.itemId, 50, [followUp]);
+  assert.equal(comments.length, 1, 'the exact linked Intent is read');
 });

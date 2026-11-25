@@ -34,7 +34,6 @@ import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted
 import { executeCommand } from './projectWorkCommand';
 import { selectedGeneration } from './projectWorkIndexStore';
 import { latestItemIntentHead } from './projectItemIntentHeads';
-import { verifiedItemMembership } from './projectItemMembershipVersion';
 
 const args = {
   projectId: v.id('hostedProjects'),
@@ -182,10 +181,9 @@ async function execute(
   // An Intent copied from the Work journal that no Lane has pinned yet (flip 5): this start pins it.
   let unpinned: ReturnType<typeof hostedIntentSchema.parse> | undefined;
   if (payload.intent.kind === 'existing' || payload.intent.kind === 'planned') {
-    const indexed = project.itemLaneMembership === verifiedItemMembership;
     const selectedHead =
-      payload.intent.kind === 'planned' && indexed
-        ? await latestItemIntentHead(ctx, projectId, payload.intent.intentId)
+      payload.intent.kind === 'planned'
+        ? ((await latestItemIntentHead(ctx, projectId, payload.intent.intentId)) ?? undefined)
         : undefined;
     const row = await readHostedRecord(ctx, {
       projectId,
@@ -211,26 +209,11 @@ async function execute(
       'Hosted Intent not found on this project.',
     );
     if (row) {
-      let intent = hostedIntentSchema.parse(JSON.parse(row.value));
+      const intent = hostedIntentSchema.parse(JSON.parse(row.value));
       targetIntentId = intent.id;
       // A journal-owned status is planning history, not execution: the first Lane pins it as active.
       if (!intent.base?.receiptId) unpinned = intent;
-      else if (payload.intent.kind === 'planned' && !indexed) {
-        for (let hop = 0; intentFinished(intent.status); hop++) {
-          invariant(
-            hop < maxIntentChain,
-            'INTENT_CLOSED',
-            'This Issue already continued on many finished Intents. Open a new Issue for the next piece of work.',
-          );
-          targetIntentId = successorIntentId(intent.id);
-          const next = await readHostedRecord(ctx, { projectId, actor, kind: 'intent', key: targetIntentId });
-          if (!next) {
-            plannedExists = false;
-            break;
-          }
-          intent = hostedIntentSchema.parse(JSON.parse(next.value));
-        }
-      } else if (payload.intent.kind === 'planned' && intentFinished(intent.status)) {
+      else if (payload.intent.kind === 'planned' && intentFinished(intent.status)) {
         // Keep the existing creation boundary until every reader and purge is safe beyond it.
         // This temporary check derives ids in memory; it does not read any earlier Intent.
         let id = payload.intent.intentId;

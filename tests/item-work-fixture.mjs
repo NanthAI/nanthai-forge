@@ -31,8 +31,11 @@ export async function itemWorkFixture({
   as('owner');
   await s.ctx.db.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
   await s.ctx.db.insert('accountHandles', { owner: 'owner', handle: 'synthetic-owner' });
-  const put = record =>
-    s.run('put', () => records.writeHostedRecord(s.ctx, { ...auth, record, expectedVersion: null }));
+  // Every Intent and Lane head is bound to its Item at write time, like a planned start.
+  const put = (record, planningItemId = itemId) =>
+    s.run('put', () =>
+      records.writeHostedRecord(s.ctx, { ...auth, record, expectedVersion: null, planningItemId }),
+    );
   await put({
     kind: 'intent',
     id: itemId,
@@ -75,7 +78,7 @@ export async function itemWorkFixture({
       : undefined,
   );
   for (let i = 0; i < extraOpen; i++) await lane('active');
-  // A landing since 3a733ee8 writes a note per Intent; an older one left only the overlap row's stamp.
+  // A landing writes one note per Intent (3a733ee8).
   const noteReceipt = randomUUID(),
     stampReceipt = randomUUID();
   await s.ctx.db.insert('projectIntentLandingNotes', {
@@ -90,26 +93,18 @@ export async function itemWorkFixture({
     actor: 'owner',
     landedBy: { by: 'queue', review: 'none' },
   });
-  const overlap = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === stamped.id);
-  const stamp = { landed: { receiptId: stampReceipt, commit: 'd'.repeat(64), laneHead: other, at } };
-  if (overlap) await s.ctx.db.patch(overlap._id, stamp);
-  else
-    await s.ctx.db.insert('projectHostedOverlapLanes', {
-      lastActivityAt: 4_000_000_000_000,
-      projectId: auth.projectId,
-      laneId: stamped.id,
-      intentId: itemId,
-      actor: 'owner',
-      head: other,
-      baseHead: hash,
-      baseReceiptId: randomUUID(),
-      baseSequence: 1,
-      recordVersion: 0,
-      open: false,
-      pathSummary: { paths: [], pathCount: 0 },
-      complete: true,
-      ...stamp,
-    });
+  // A receipt that landed through a note the acceptance row does not back keeps no check or file count.
+  await s.ctx.db.insert('projectIntentLandingNotes', {
+    projectId: auth.projectId,
+    intentId: itemId,
+    receiptId: stampReceipt,
+    kind: 'landed',
+    at,
+    laneIds: [stamped.id],
+    commit: 'd'.repeat(64),
+    sequence: 41,
+    actor: 'owner',
+  });
   const dependencyId = randomUUID();
   const followUpId = randomUUID();
   const settledBlockerId = randomUUID();

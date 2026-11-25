@@ -21,7 +21,6 @@ import {
   baseRevision,
   DISPLAY_BLOCK,
   displaySnapshots,
-  legacyPurgeIntentKeys,
   purgeJournalTables,
   purgeTarget,
   selectRows,
@@ -177,9 +176,8 @@ export const begin = internalMutation({
         after = tail.after;
       }
     }
-    const intentKeys = await legacyPurgeIntentKeys(ctx, target);
     invariant(
-      !(await pendingIntentArchives(ctx, input.projectId, target.historyId, intentKeys)).length,
+      !(await pendingIntentArchives(ctx, input.projectId, target.historyId)).length,
       'WORK_STALE',
       'The journal is archiving one of this Item’s Intent versions. Run the same purge again to resume.',
     );
@@ -204,7 +202,6 @@ export const begin = internalMutation({
       itemId: target.historyId,
       ids: target.ids,
       ...(target.intentId ? { intentId: target.intentId } : {}),
-      ...(intentKeys ? { intentKeys } : {}),
       version: target.item.version,
       decisions: input.selection.decisions,
       rows: input.selection.rows.length,

@@ -109,22 +109,14 @@ measurements, excluding system/search indexes and provider B-tree overhead; they
 are not billed physical index storage. Live row counts come from the read-only
 inventory above, and physical reclamation needs provider storage evidence.
 
-### Item membership repair
+### Item membership
 
-New and reopened Lanes carry verified Item membership on their existing head. The explicit dev-only
-repair follows verified successor IDs from each root, then fills Lane heads from their parent Intent.
-It does not enable the staged index, change the selected readers or remove the start cap. Run
-`projectItemLaneBackfill:run` with a project id and `after` (`null` initially), then use the returned
-`next` until complete. Retrying a previously committed frontier returns the durable position. The
-repair processes at most 62 steps in one transaction, with at most 192 reads, 132 ranges, 64 writes,
-8 MiB read and 4 MiB patch payload. With Work metadata but no valid selected index, repair
-certifies coverage only if two indexed reads in the checkpoint transaction find neither a hosted
-Intent head nor a hosted Lane head. If either exists, repair refuses with `PROJECT_WORK_INDEX_MISSING`
-and leaves coverage unchanged. It makes no R2 calls and schedules no idle work.
-
-Before switching readers, drain the dev census `projectItemLaneBackfill:coverage`, passing its `next`
-as `after`. Record that the sum of `covered` equals the sum of `checked` over all pages. Use returned
-incomplete frontiers to resume; a partial repair does not qualify for the reader switch.
+An Item's Intents and Lanes are the heads bound to it: every start and every Lane open writes the Item on the head,
+and every reader (Item Work, the Lanes list, Item history, landing comments, public Plan, purge, start) reads that
+binding through `by_project_and_kind_and_item` and nothing else. No reader derives membership from successor IDs or
+from a same-ID Intent that carries no binding. A new Intent head named like an existing Item is born bound to it
+(`projectWorkStore.storeIntent`). The one-off conversion `legacyItemShapes` binds older rows once per deployment and lives only in the pinned
+in-between release, see [legacy Item shapes](legacy-item-shapes.md).
 
 Item membership (`846c635b`) replaces the start-time Intent walk and the full Lane history's per-Intent
 ranges after fill. `projectHostedRecordHeads.by_project_and_kind_and_item` adds one entry per current head,
@@ -134,14 +126,7 @@ logical key bytes; dogfood retained was 29,314 → 29,320 and 2,189,966 → 2,19
 writes were 1,603 → 1,612 and 3,003 → 3,020. The P6 serving-I/O fixture's measured call, byte and R2 quantities
 were unchanged by index enablement; modeled index key bytes are not a provider bill.
 
-A linked Lane adds one Item key to its existing metadata, not a second document write. The explicit dev-only
-membership repair verifies same-ID roots and follows deterministic successor keys, stopping at a foreign binding
-or another Item's root. After repairing Intent heads it fills Lane heads from their parent, including Resolution
-Lanes. `projectItemLaneBackfill:run` takes a project id and `after` (`null` initially), confirms the durable frontier,
-and returns `next`; retry the same frontier after an unknown outcome. A transaction processes at most 62 steps,
-with at most 192 reads, 132 ranges, 64 writes, 8 MiB read and 4 MiB patch payload. No idle jobs or R2 objects.
-Before enabling index-only readers on a deployment, drain `projectItemLaneBackfill:coverage` and record every
-non-removing project covered (`checked == covered` across all pages). An unfinished repair is not cutoff evidence.
+A linked Lane adds one Item key to its existing metadata, not a second document write.
 In the 14-Intent fixture, start reads went from 22,134 to 5,325 bytes. A seven-Lane page over a 70-Lane Item read
 21,954 bytes on the legacy reader and 11,383 after projection in the local fixture.
 

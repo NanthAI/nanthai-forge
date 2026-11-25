@@ -21,7 +21,7 @@ import {
   type InitiativeWorkIdentity,
 } from './projectInitiativeWorkStore';
 import { itemLandingHistory } from './projectItemLandingHistory';
-import { itemIntentChain } from './projectIntentLandingNotes';
+import { itemIntents } from './projectItemIntentPages';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 
 type History = Awaited<ReturnType<typeof itemLandingHistory>>;
@@ -94,12 +94,7 @@ async function rebuildHistory(
   itemId: string,
   cursor?: Cursor['history'],
 ) {
-  const legacy: Id<'projectHostedRecordHeads'>[] = [];
-  const { intents } = await itemIntentChain(ctx, projectId, itemId, cursor ? undefined : legacy);
-  // Repair proven links before reading notes. A completion racing this write
-  // either records its note for this scan or observes the repaired link.
-  for (const id of legacy) await ctx.db.patch(id, { planningItemId: itemId });
-  return itemLandingHistory(ctx, projectId, intents, cursor ?? {});
+  return itemLandingHistory(ctx, projectId, await itemIntents(ctx, projectId, itemId), cursor ?? {});
 }
 
 export const advance = internalMutation({

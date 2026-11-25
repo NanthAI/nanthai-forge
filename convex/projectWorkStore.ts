@@ -279,6 +279,19 @@ async function insertVersion(
   }
 }
 
+/** Whether an Item of this id exists (the index generation, or the hosted Issue head). */
+export async function itemOwnsIntent(
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  id: string,
+) {
+  const project = await ctx.db.get(projectId);
+  const generation = project && (await selectedGeneration(ctx, project));
+  return generation
+    ? Boolean(await indexRecord(ctx, recordPartition(generation), 'planningSearch', id))
+    : Boolean(await recordHead(ctx, projectId, 'issue', id));
+}
+
 /** The journal Intent `value` against its stored head. `hosted`: a Lane pinned it, so hosted paths own it.
  * `same`: the head already holds these bytes. With `write`, a missing Intent is stored at version 0 and a
  * changed one as the next version; without it a change is only reported (`different`). */
@@ -289,7 +302,7 @@ export async function storeIntent(
   value: unknown,
   write: boolean,
   provenance?: WorkProvenance,
-  { migrationDigests = true, createdIndependently = false } = {},
+  { migrationDigests = true, createdIndependently = false, bound = false } = {},
 ): Promise<'copied' | 'same' | 'different' | 'hosted' | 'missing'> {
   const id = (value as { id: string }).id;
   const head = await recordHead(ctx, projectId, 'intent', id);
@@ -316,7 +329,7 @@ export async function storeIntent(
     head,
     provenance,
     migrationDigests,
-    !head && createdIndependently ? independentIntentItem : undefined,
+    head ? undefined : createdIndependently ? independentIntentItem : bound ? id : undefined,
   );
   return 'copied';
 }
@@ -347,6 +360,7 @@ export async function storeProjection(
           : command.action === 'put-planning-item' || command.action === 'purge-planning-item'
             ? 'planningVersions'
             : 'planningComments';
+  const items = new Set(entries.filter(e => e.collection === 'planningSearch').map(e => e.key));
   for (const entry of entries) {
     if (
       !(workStoreSources as readonly string[]).includes(entry.collection) &&
@@ -370,6 +384,8 @@ export async function storeProjection(
         await storeIntent(ctx, projectId, owner, value, true, audit, {
           migrationDigests: Boolean(partition),
           createdIndependently: entry.key === createdIntentId,
+          // The Item and its same-id Intent are written by one projection: the Intent is born bound to it.
+          bound: items.has(entry.key),
         });
       else if (entry.collection !== 'planningItems')
         await storeVersion(

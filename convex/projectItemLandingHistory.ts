@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { maxIntentChain } from '../src/hosted-intent-chain';
 import type { QueryCtx } from './_generated/server';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Id } from './_generated/dataModel';
 import { landingNoteWindow } from './projectIntentLandingNoteArchive';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
@@ -20,47 +20,20 @@ export type ItemLanding = {
   revertedBy?: string;
 };
 
-type LaneStamp = NonNullable<Doc<'projectHostedOverlapLanes'>['landed']>;
-type LaneEvidence = {
-  heads: ReadonlyMap<string, Doc<'projectHostedRecordHeads'>[]>;
-  stamps: ReadonlyMap<string, LaneStamp | undefined>;
-};
-
-export function itemLandingStamp(stamp: LaneStamp): ItemLanding {
-  return {
-    receiptId: stamp.receiptId,
-    commit: stamp.commit,
-    at: stamp.at,
-    ...(stamp.revertedBy ? { revertedBy: stamp.revertedBy.receiptId } : {}),
-  };
-}
-
-export async function itemLaneLandingStamp(ctx: QueryCtx, projectId: Id<'hostedProjects'>, laneId: string) {
-  return (
-    await ctx.db
-      .query('projectHostedOverlapLanes')
-      .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
-      .unique()
-  )?.landed;
-}
-
 // Creation-time ties can occur between adjacent writes. Keep cursor lookbehind
 // proportional to a small batch, including when someone constructs a cursor.
 const timePosition = z.object({ at: z.number().min(0), skip: z.number().int().min(1).max(512) });
 const notePosition = z.union([timePosition, z.literal(false), z.null()]);
-const legacyPosition = z.object({ intent: z.number().int().min(0), time: timePosition.optional() });
 export const landingHistoryCursor = z.object({
   notes: z
     .array(notePosition)
     .max(maxIntentChain + 1)
     .nullable()
     .optional(),
-  legacy: legacyPosition.nullable().optional(),
 });
 type HistoryCursor = z.infer<typeof landingHistoryCursor>;
 type TimePosition = z.infer<typeof timePosition>;
 type NotePosition = z.infer<typeof notePosition>;
-type LegacyPosition = z.infer<typeof legacyPosition>;
 type NoteWindow = Awaited<ReturnType<typeof landingNoteWindow>>;
 
 /** Archive routes retain Lane membership. Canonical receipts already hold the other Item Work fields. */
@@ -147,95 +120,21 @@ async function notePage(
   };
 }
 
-async function hasLandingNote(
-  ctx: QueryCtx,
-  projectId: Id<'hostedProjects'>,
-  intentId: string,
-  receiptId: string,
-) {
-  const hot = await ctx.db
-    .query('projectIntentLandingNotes')
-    .withIndex('by_project_and_receipt_and_intent_and_kind', q =>
-      q.eq('projectId', projectId).eq('receiptId', receiptId).eq('intentId', intentId).eq('kind', 'landed'),
-    )
-    .unique();
-  return !!hot;
-}
-
-/** Older projects recorded their last landing per Lane. Walk only the Item's Lane
- * heads, probing at most one page of stamps and omitting any covered by notes. */
-async function legacyLandingPage(
-  ctx: QueryCtx,
-  projectId: Id<'hostedProjects'>,
-  intents: readonly string[],
-  from: LegacyPosition | undefined,
-  limit: number,
-  existing?: LaneEvidence,
-) {
-  const receipts = new Map<string, ItemLanding>();
-  let remaining = limit;
-  for (let i = from?.intent ?? 0; i < intents.length; i++) {
-    const intentId = intents[i]!;
-    const time = from?.intent === i ? from.time : undefined;
-    const known = existing?.heads.get(intentId);
-    const heads = known
-      ? known.filter(head => !time || head._creationTime <= time.at)
-      : await ctx.db
-          .query('projectHostedRecordHeads')
-          .withIndex('by_project_and_kind_and_parent', q => {
-            const range = q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', intentId);
-            return time ? range.lte('_creationTime', time.at) : range;
-          })
-          .order('desc')
-          .take(remaining + 1 + (time?.skip ?? 0));
-    const older = windowFrom(heads, time);
-    const page = older.slice(0, remaining);
-    const stamps = await Promise.all(
-      page.map(async lane => {
-        const stamp = existing?.stamps.has(lane.key)
-          ? existing.stamps.get(lane.key)
-          : await itemLaneLandingStamp(ctx, projectId, lane.key);
-        return stamp && !(await hasLandingNote(ctx, projectId, intentId, stamp.receiptId)) ? stamp : null;
-      }),
-    );
-    for (const stamp of stamps) if (stamp) receipts.set(stamp.receiptId, itemLandingStamp(stamp));
-    if (older.length > remaining)
-      return {
-        rows: [...receipts.values()],
-        used: limit,
-        next: { intent: i, time: windowAfter(page, page.length, time) },
-      };
-    remaining -= page.length;
-    if (remaining === 0 && i + 1 < intents.length)
-      return { rows: [...receipts.values()], used: limit, next: { intent: i + 1 } };
-  }
-  return { rows: [...receipts.values()], used: limit - remaining, next: null };
-}
-
-/** A single bounded page, with the legacy scan continuing after the notes. */
+/** A single bounded page of landing notes. */
 export async function itemLandingHistory(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
   intents: readonly string[],
   cursor: HistoryCursor,
   limit = ITEM_LANDINGS_PAGE,
-  existing?: LaneEvidence,
 ) {
   const notes =
     cursor.notes === null ? undefined : await notePage(ctx, projectId, intents, cursor.notes, limit);
-  const nextNotes = notes?.next ?? null;
-  const remaining = limit - (notes?.rows.length ?? 0);
-  const stamps =
-    nextNotes === null && cursor.legacy !== null && remaining
-      ? await legacyLandingPage(ctx, projectId, intents, cursor.legacy, remaining, existing)
-      : undefined;
-  const legacy = stamps ? stamps.next : cursor.legacy;
+  const next = notes?.next ?? null;
   return {
-    rows: [
-      ...new Map([...(stamps?.rows ?? []), ...(notes?.rows ?? [])].map(row => [row.receiptId, row])).values(),
-    ],
-    used: (notes?.rows.length ?? 0) + (stamps?.used ?? 0),
-    next: nextNotes === null && legacy === null ? null : { notes: nextNotes, legacy },
+    rows: notes?.rows ?? [],
+    used: notes?.rows.length ?? 0,
+    next: next === null ? null : { notes: next },
   };
 }
 

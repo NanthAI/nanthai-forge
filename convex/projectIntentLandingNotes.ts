@@ -10,6 +10,7 @@ import { v } from 'convex/values';
 import { internalQuery } from './server';
 import { ownedProject } from './projectAuthority';
 import { recordHead } from './projectHostedRecords';
+import { itemIntents } from './projectItemIntentPages';
 import {
   archiveNoteReference,
   landingNoteOrder,
@@ -19,7 +20,6 @@ import {
   type LoadedLandingNote,
 } from './projectIntentLandingNoteArchive';
 import { invariant } from '../src/errors';
-import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import {
   LANDING_NOTE_LANES,
   LANDING_NOTES_PER_ITEM,
@@ -82,37 +82,6 @@ export async function postIntentLandingNote(
   return true;
 }
 
-/** Follow-up Intents have deterministic ids and can leave earlier Lanes open. */
-export async function itemIntentChain(
-  ctx: QueryCtx,
-  projectId: Id<'hostedProjects'>,
-  itemId: string,
-  legacyHeads?: Id<'projectHostedRecordHeads'>[],
-) {
-  const intents: string[] = [];
-  let current = itemId;
-  let head = await recordHead(ctx, projectId, 'intent', current);
-  let state: string | null = null;
-  let selectingStatus = true;
-  for (let hop = 0; head && hop <= maxIntentChain; hop++) {
-    intents.push(current);
-    if (head.planningItemId === undefined) legacyHeads?.push(head._id);
-    if (selectingStatus) {
-      state = head.status.startsWith('journal:') ? null : head.status;
-      selectingStatus = intentFinished(head.status.replace(/^journal:/, ''));
-    }
-    if (hop === maxIntentChain) break;
-    const next = successorIntentId(current);
-    const following = await recordHead(ctx, projectId, 'intent', next);
-    // A reopened earlier Intent becomes the active one again. A verified successor still
-    // serves the same Item and remains part of its Work history.
-    if (!following || (following.planningItemId ?? (selectingStatus ? itemId : null)) !== itemId) break;
-    current = next;
-    head = following;
-  }
-  return { intents, state };
-}
-
 /** System landing comments from the Item's own Intent chain and its linked chains, newest first. */
 export type DiscussionNoteCursor = { at: number; intentId: string; skip: number };
 export async function intentLandingComments(
@@ -121,17 +90,14 @@ export async function intentLandingComments(
   itemId: string,
   limit = LANDING_NOTES_PER_ITEM,
   links: readonly string[] = [itemId],
-  chainRoots?: ReadonlySet<string>,
   before?: DiscussionNoteCursor,
 ) {
   const intents = new Set<string>();
   for (const link of links) {
     if (intents.has(link)) continue;
-    for (const intentId of (await itemIntentChain(ctx, projectId, link)).intents) {
-      // An explicitly linked successor owns its chain, even on a different comment page.
-      if (intentId !== link && chainRoots?.has(intentId)) break;
-      intents.add(intentId);
-    }
+    // A link names an Item or one Intent: the exact Intent is read, then every Intent bound to the id.
+    if (await recordHead(ctx, projectId, 'intent', link)) intents.add(link);
+    for (const intentId of await itemIntents(ctx, projectId, link)) intents.add(intentId);
   }
   const notes: Awaited<ReturnType<typeof landingNoteWindow>> = [];
   let includeThrough = before === undefined || !intents.has(before.intentId);

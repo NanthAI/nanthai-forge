@@ -192,7 +192,6 @@ test('base purge replaces a linked successor’s archived Intent payload without
   const hosted = await import(moduleUrl('../convex/projectHostedRecords.ts'));
   await s.ctx.db.patch(s.projectId, {
     sourceAuthority: { mode: 'server', epoch: 1 },
-    itemLaneMembership: 'verified-v2',
   });
   await hosted.writeHostedRecord(s.ctx, {
     projectId: s.projectId,

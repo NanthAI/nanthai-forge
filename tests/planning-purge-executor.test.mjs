@@ -129,7 +129,10 @@ function addAlias(s, intentId) {
 /** An Item (Intent-born unless `intentBorn` is false) with two versions, a comment, a decision comment and a note,
  * then Deleted; and a kept Item. `records`: the work store is written from the start and primary when the Item is
  * Deleted, and one comment is written through an alias of the Item. */
-async function deletedItem(t, { records = false, intentBorn = true, large = false, useAlias = true } = {}) {
+async function deletedItem(
+  t,
+  { records = false, intentBorn = true, large = false, useAlias = true, converted = true } = {},
+) {
   const s = await setup(t);
   if (records) await storeMode(s, 'dual');
   const initial = await s.read(),
@@ -188,6 +191,10 @@ async function deletedItem(t, { records = false, intentBorn = true, large = fals
       authorLabel: 'agent',
       text: `Comment ${n} ${SECRET}`,
     });
+  // The conversion binds an Intent-born Item's same-id root to it; `converted: false` keeps the old sentinel.
+  const root =
+    intentBorn && converted && (await hostedRecords.recordHead(s.ctx, s.projectId, 'intent', itemId));
+  if (root) await s.ctx.db.patch(root._id, { planningItemId: itemId });
   const read = await s.read(),
     current = read.data.planningItems.filter(item => item.id === itemId).at(-1);
   const deleted = {
@@ -709,18 +716,24 @@ async function pinAndContinue(s, itemId) {
   return successor;
 }
 
+/** The one-off conversion binds a markerless successor chain and its Lanes to their Item. */
 async function repairLegacyMembership(s) {
+  const { page } = await import(moduleUrl('../convex/legacyItemShapes.ts'));
   const old = process.env.CONVEX_CLOUD_URL;
   process.env.CONVEX_CLOUD_URL = 'https://benevolent-wildebeest-974.convex.cloud';
   try {
-    const { run } = await import(moduleUrl('../convex/projectItemLaneBackfill.ts'));
-    let after = null;
-    for (let i = 0; i < 10; i++) {
-      const result = await run._handler(s.ctx, { projectId: s.projectId, after });
-      if (result.next === null) return;
-      after = result.next;
-    }
-    assert.fail('the fixture repair did not finish');
+    for (const family of ['intents', 'lanes'])
+      for (let cursor = null, i = 0; i < 20; i++) {
+        const result = await page._handler(s.ctx, {
+          deployment: 'benevolent-wildebeest-974',
+          projectId: s.projectId,
+          family,
+          cursor,
+          apply: true,
+        });
+        if (result.next === null) break;
+        cursor = result.next;
+      }
   } finally {
     if (old === undefined) delete process.env.CONVEX_CLOUD_URL;
     else process.env.CONVEX_CLOUD_URL = old;
@@ -1723,7 +1736,7 @@ test('purge scrubs lifecycle plans and child events and fences an earlier recove
 });
 
 test('journal capture cannot pack an Intent-born Item while its purge is active', async t => {
-  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
+  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false, converted: false });
   const oldEnv = process.env.FORGE_JOURNAL_SEGMENTS;
   process.env.FORGE_JOURNAL_SEGMENTS = '1';
   t.after(() => {

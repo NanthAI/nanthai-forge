@@ -5,8 +5,7 @@ import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { recordCaller } from './projectHostedFrictionStore';
-import { latestItemIntentHead, legacyItemIntentHead } from './projectItemIntentHeads';
-import { verifiedItemMembership } from './projectItemMembershipVersion';
+import { latestItemIntentHead } from './projectItemIntentHeads';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { isPlanningPrefix, isPlanningUuid, planningIdMaxCandidates } from '../src/planning-id';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -22,13 +21,11 @@ export const intentStates = query({
   returns: v.string(),
   handler: async (ctx, { projectId, ids }) => {
     try {
-      const { project } = await recordCaller(ctx, projectId);
+      await recordCaller(ctx, projectId);
       invariant(ids.length <= 100, 'BAD_ARGUMENT', 'Read at most 100 Issues at a time.');
       const states: Record<string, string> = {};
-      const select =
-        project.itemLaneMembership === verifiedItemMembership ? latestItemIntentHead : legacyItemIntentHead;
       for (const id of new Set(ids)) {
-        const head = await select(ctx, projectId, id);
+        const head = await latestItemIntentHead(ctx, projectId, id);
         if (head && !head.status.startsWith('journal:')) states[id] = head.status;
       }
       return canonicalPayload(states);

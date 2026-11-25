@@ -1905,8 +1905,9 @@ test('plan views and bulk bar: real components keep the view in the address and 
         );
         try {
           const work = page.getByRole('region', { name: 'Work', exact: true });
+          const moreLanes = work.getByRole('button', { name: 'Show more Lanes' });
           const more = work.getByRole('button', { name: 'Show more work' });
-          await more.waitFor();
+          await moreLanes.waitFor();
           await page.getByRole('region', { name: 'Comments', exact: true }).waitFor();
           const shift = await page.evaluate(() => window.shifts.reduce((sum, value) => sum + value, 0));
           t.diagnostic(`Item load shift ${width} ${theme}: ${shift.toFixed(3)}`);
@@ -1925,19 +1926,12 @@ test('plan views and bulk bar: real components keep the view in the address and 
           assert.deepEqual(calls.slice(-1), [
             { itemId, projectId: 'synthetic', limit: 3, cursor: null, details: true },
           ]);
-          const expandedFirst = width === 1440;
-          if (expandedFirst) {
-            await work.getByRole('button', { name: 'Show more Lanes' }).click();
-            await lanes.nth(9).waitFor();
-            assert(calls.at(-1).cursor?.startsWith('forge-item-work-v2:'));
-            assert.equal(calls.at(-1).only, 'lanes');
-            assert.equal(calls.at(-1).limit, 7);
-          } else {
-            await more.click();
-            await lanes.nth(11).waitFor();
-            assert(calls.at(-1).cursor?.startsWith('forge-item-work-v2:'));
-            assert.equal(await more.count(), 0);
-          }
+          // The open page knows only a lower bound, so Lanes expand first; the rest follows as more work.
+          await moreLanes.click();
+          await lanes.nth(9).waitFor();
+          assert(calls.at(-1).cursor?.startsWith('forge-item-work-v2:'));
+          assert.equal(calls.at(-1).only, 'lanes');
+          assert.equal(calls.at(-1).limit, 7);
           const relations = page.getByRole('region', { name: 'Relations', exact: true });
           assert.equal(await lanes.first().textContent(), 'Synthetic outcome');
           assert.match(await lanes.first().locator('..').textContent(), /cobalt-fox.*1 save.*Last save/);
@@ -1956,8 +1950,8 @@ test('plan views and bulk bar: real components keep the view in the address and 
           );
           assert.doesNotMatch(await page.locator('.head .crumb').textContent(), /00000000/);
           const landings = work.getByRole('link', { name: /^Landing / });
-          assert.equal(await lanes.count(), expandedFirst ? 10 : 12);
-          assert.equal(await laneThreads.count(), expandedFirst ? 10 : 12);
+          assert.equal(await lanes.count(), 10);
+          assert.equal(await laneThreads.count(), 10);
           assert.equal(
             await laneThreads.first().getAttribute('href'),
             `/example-builder/synthetic/lanes/${workFixture.open.id}/thread`,
@@ -2006,7 +2000,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
             'projectPlanView:read',
             'projectWorkIndex:workspace',
           ]);
-          if (expandedFirst) await more.click();
+          await more.click();
           await lanes.nth(11).waitFor();
           await work.locator(`a[href$="/lanes/${workFixture.abandoned.id}"]`).waitFor();
           assert.equal(await lanes.count(), 12);
@@ -2018,7 +2012,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
             'projectHostedPlanning:itemHistory',
             'projectItemWork:read',
             'projectItemWork:read',
-            ...(expandedFirst ? ['projectItemWork:read'] : []),
+            'projectItemWork:read',
             'projectWorkIndex:detail',
           ]);
           const history = work.getByRole('button', { name: 'History', exact: true });
@@ -2090,12 +2084,11 @@ test('plan views and bulk bar: real components keep the view in the address and 
           await context.close();
         }
       }
-      assert.equal(calls.length, 5);
+      assert.equal(calls.length, 6, 'open, Lanes and more work at each of two widths');
       for (const cost of costs) {
         assert.equal(cost.writes, 0);
         assert(cost.ranges <= 85, JSON.stringify(cost));
-        // A Work page may probe up to ten legacy Lane stamps. Unrelated
-        // history below must leave the complete database and response costs unchanged.
+        // Unrelated history below must leave the complete database and response costs unchanged.
         assert(cost.documents <= 105, JSON.stringify(cost));
         assert(cost.readBytes < 32 * 1024, JSON.stringify(cost));
       }

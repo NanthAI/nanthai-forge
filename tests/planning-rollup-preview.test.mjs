@@ -11,7 +11,6 @@ import { recordsFixture } from './hosted-records-fixture.mjs';
 const { page, approvedDevRollup } = await import(moduleUrl('../convex/projectPlanRollupPreview.ts'));
 const exact = await import(moduleUrl('../convex/projectPlanRollupExact.ts'));
 const { addPlanLane, removePlanLanes } = await import(moduleUrl('../convex/projectPlanLaneMarks.ts'));
-const { verifiedItemMembership } = await import(moduleUrl('../convex/projectItemMembershipVersion.ts'));
 const row = (id, fields) => ({
   id,
   kind: 'issue',
@@ -145,7 +144,6 @@ test('verified roll-up uses the open-Lane tally across earlier Intents and lates
   const legacyCost = s.counts.at(-1);
 
   await s.ctx.db.patch(s.projectId, {
-    itemLaneMembership: verifiedItemMembership,
     planLaneMarkCoverage: { generationId: s.generationId, cursor: null },
   });
   const indexed = await s.read();

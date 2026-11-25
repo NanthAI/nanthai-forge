@@ -8,7 +8,6 @@ import { ensurePublicRow } from './publicListing';
 import { queueProjectSnapshots } from './publicSnapshotJobs';
 import { syncPersonOrder } from './accountProjectOrder';
 import { chargeProjectCreation } from './accountLimits';
-import { verifiedItemMembership } from './projectItemMembershipVersion';
 
 /** Shared creation seam: archive upload and CLI hosting use the same owner/key identity. */
 export async function createProject(
@@ -30,8 +29,6 @@ export async function createProject(
       visibility: input.visibility ?? 'private',
       currentBackup: null,
       revision: 0,
-      // Fresh projects have no pre-projection execution history to repair.
-      itemLaneMembership: verifiedItemMembership,
     });
     project = (await ctx.db.get(id))!;
     // A public project can be found from its first moment (explore, profiles); private ones get no row.

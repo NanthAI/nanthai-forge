@@ -261,38 +261,44 @@ test('Issue and Intent filters page only indexed matching Lanes at project scale
     intentId = randomUUID(),
     other = randomUUID();
   const putIntent = id =>
-    s.put({
-      kind: 'intent',
+    s.put(
+      {
+        kind: 'intent',
+        id,
+        version: 0,
+        at,
+        outcome: 'Filtered task',
+        constraints: '',
+        creatorAccountId: 'owner',
+        assigneeAccountIds: [],
+        base: { head: hash, receiptId: randomUUID() },
+        status: 'active',
+      },
       id,
-      version: 0,
-      at,
-      outcome: 'Filtered task',
-      constraints: '',
-      creatorAccountId: 'owner',
-      assigneeAccountIds: [],
-      base: { head: hash, receiptId: randomUUID() },
-      status: 'active',
-    });
+    );
   await putIntent(intentId);
   await putIntent(other);
   const matching = [];
   for (let i = 0; i < 5; i++) {
     const id = randomUUID();
     matching.push(id);
-    await s.put({
-      kind: 'lane',
-      id,
-      version: 0,
-      at,
+    await s.put(
+      {
+        kind: 'lane',
+        id,
+        version: 0,
+        at,
+        intentId,
+        actor: 'owner',
+        base: { head: hash, receiptId: randomUUID() },
+        head: hash,
+        sourceVersion: 0,
+        lifecycleVersion: 0,
+        state: 'active',
+        authorityEpoch: 1,
+      },
       intentId,
-      actor: 'owner',
-      base: { head: hash, receiptId: randomUUID() },
-      head: hash,
-      sourceVersion: 0,
-      lifecycleVersion: 0,
-      state: 'active',
-      authorityEpoch: 1,
-    });
+    );
   }
   const read = params =>
     s
@@ -386,7 +392,6 @@ test('indexed open Lane pages skip closed siblings, reach earlier Intents, and p
   const exact = { intentId: successor };
   const before = await read(exact);
   assert(before.continueCursor);
-  await s.ctx.db.patch(s.auth.projectId, { itemLaneMembership: 'verified-v2' });
   assert.deepEqual(
     (await read({ ...exact, cursor: before.continueCursor })).page.map(row => row.laneId),
     [newer.id],

@@ -49,10 +49,7 @@ async function addLanding(s, sequence, paths, itemIds = [s.itemId]) {
 
 async function emptyInitiative() {
   const s = await itemWorkFixture({ details: true });
-  const [note] = s.tables.projectIntentLandingNotes.values();
-  await s.ctx.db.delete(note._id);
-  const stamp = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === s.stamped.id);
-  await s.ctx.db.patch(stamp._id, { landed: undefined });
+  for (const note of [...s.tables.projectIntentLandingNotes.values()]) await s.ctx.db.delete(note._id);
   return s;
 }
 
@@ -96,10 +93,7 @@ test('the Initiative reads exact counts in one bounded query at 80 and at 10,000
 
 test('one receipt on two Items counts once, and replay adds no writes', async t => {
   const s = await emptyInitiative();
-  const head = [...s.tables.projectHostedRecordHeads.values()].find(row => row.key === s.itemId);
-  assert.equal(head.planningItemId, undefined);
   await s.rebuildInitiative();
-  assert.equal((await s.ctx.db.get(head._id)).planningItemId, s.itemId);
   const second = randomUUID();
   await s.planning(second, { title: 'Second item', initiativeId: s.initiativeId });
   const paths = Array.from({ length: 9 }, (_, i) => `src/${i}.ts`);
@@ -272,19 +266,22 @@ test('oversized legacy Item roots leave a truthful bounded count of open Lanes',
   for (let index = 0; index < 14; index++) {
     const id = randomUUID();
     await s.planning(id, { title: 'Large legacy Item', initiativeId: s.initiativeId }, text);
-    await s.put({
-      kind: 'intent',
+    await s.put(
+      {
+        kind: 'intent',
+        id,
+        version: 0,
+        at,
+        outcome: 'Legacy Import',
+        constraints: '',
+        creatorAccountId: 'owner',
+        assigneeAccountIds: [],
+        base: { head: commit, receiptId: randomUUID() },
+        status: 'active',
+      },
       id,
-      version: 0,
-      at,
-      outcome: 'Legacy Import',
-      constraints: '',
-      creatorAccountId: 'owner',
-      assigneeAccountIds: [],
-      base: { head: commit, receiptId: randomUUID() },
-      status: 'active',
-    });
-    await s.put({ ...s.open, id: randomUUID(), intentId: id });
+    );
+    await s.put({ ...s.open, id: randomUUID(), intentId: id }, id);
   }
   const result = await view(s);
   assert(result.openLanes > 1 && result.openLanes < 15);

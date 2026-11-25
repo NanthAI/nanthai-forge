@@ -42,7 +42,7 @@ const baseIntentPage = async (
   );
   return {
     keys: page.heads.map(head => head.key),
-    next: page.next && page.next !== 'indexed' ? { time: page.next[0], id: page.next[1] } : page.next,
+    next: page.next && { time: page.next[0], id: page.next[1] },
   };
 };
 import { notBusy, tombstoneObject } from './projectSavePurgeStore';

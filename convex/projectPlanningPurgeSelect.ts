@@ -8,9 +8,7 @@ import { internalQuery, type QueryCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { purgedFactsDigest, redactPlanningWrite } from '../src/work-intent-types';
-import { purgeableRowTarget, purgedIntentKeys } from '../src/work-planning-purge';
-import { recordHead } from './projectHostedRecords';
-import { verifiedItemMembership } from './projectItemMembershipVersion';
+import { purgeableRowTarget } from '../src/work-planning-purge';
 import { decisionOperationId } from '../src/work-planning-put';
 import { purgedDecisionRequest } from '../src/work-planning-state';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
@@ -81,19 +79,6 @@ export async function purgeTarget(ctx: QueryCtx, projectId: Id<'hostedProjects'>
   };
 }
 
-/** Take the old bounded chain snapshot only while the newer writers' coverage is unverified. */
-export async function legacyPurgeIntentKeys(ctx: QueryCtx, target: Awaited<ReturnType<typeof purgeTarget>>) {
-  if (target.project.itemLaneMembership === verifiedItemMembership) return undefined;
-  const keys: string[] = [];
-  for (const key of purgedIntentKeys(target.historyId)) {
-    if (key !== target.historyId && (await record(ctx, target.partition, 'planningItems', key))) break;
-    const head = await recordHead(ctx, target.project._id, 'intent', key);
-    if (!head || (head.planningItemId && head.planningItemId !== target.historyId)) break;
-    keys.push(key);
-  }
-  return keys;
-}
-
 /** The revision the stored base reaches: the generation's backup, or the record-detail catalog a migration saved for
  * that backup (src/hosted-work-client.ts migrate-record-details), which a full load or rebuild starts from. Rows at
  * or before it are in a stored archive the purge cannot rewrite. */
@@ -149,7 +134,7 @@ export const preflight = internalQuery({
         target.historyId,
         target.project.itemPurges?.find(
           purge => purge.itemId === target.historyId && !purge.commentId && purge.purgedAt === undefined,
-        )?.intentKeys ?? (await legacyPurgeIntentKeys(ctx, target)),
+        )?.intentKeys,
       ),
 
       // Base-checkpoint planning versions: the executor redacts their index copies; the R2 archive stays.

@@ -17,7 +17,6 @@ const lifecycle = await import(moduleUrl('../convex/projectHostedLifecycle.ts'))
 const backfill = await import(moduleUrl('../convex/projectPlanLaneBackfill.ts'));
 const { setPin } = await import(moduleUrl('../convex/projectHostedLanePin.ts'));
 const { rollupWorkReader } = await import(moduleUrl('../convex/projectPlanRollupFacts.ts'));
-const { verifiedItemMembership } = await import(moduleUrl('../convex/projectItemMembershipVersion.ts'));
 const batch = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
 const work = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
@@ -319,64 +318,6 @@ test('purging an Item unlinks its Lane mark in the same transaction', async () =
   assert.equal(markRow(f, id), undefined);
 });
 
-test('backfill restores an existing successor link, pages old work, and replays without recounting', async () => {
-  const f = await acceptanceFixture();
-  const id = randomUUID();
-  await begin(f, planned(id));
-  const row = await f.runAcceptance('legacyIntent', readHostedRecord, { ...f.auth, kind: 'intent', key: id });
-  const old = JSON.parse(row.value);
-  await f.runAcceptance('legacyIntentComplete', writeHostedRecord, {
-    ...f.auth,
-    expectedVersion: old.version,
-    record: { ...old, version: old.version + 1, status: 'completed' },
-  });
-  const successor = successorIntentId(id);
-  const linked = await begin(f, planned(id));
-  assert.equal(linked.intentId, successor);
-  // Simulate a successor and its overlap row retained before the mark and reverse link existed.
-  for (const head of f.tables.projectHostedRecordHeads.values())
-    if (head.key === successor) f.patch('projectHostedRecordHeads', head._id, { planningItemId: undefined });
-  for (const [rowId, overlap] of f.tables.projectHostedOverlapLanes)
-    if (overlap.intentId === id) f.patch('projectHostedOverlapLanes', rowId, { open: false });
-  const ids = Array.from({ length: 43 }, () => randomUUID());
-  addPlan(f, [id, ...ids]);
-  assert.equal((await rows(f)).find(row => row.id === id).inLane, undefined);
-  const run = async () => {
-    let next = { phase: 'items', cursor: null },
-      pages = 0,
-      marked = 0;
-    while (next) {
-      const result = await f.store.transaction('backfill', backfill.run, { projectId: f.projectId, ...next });
-      assert(result.scanned <= 20);
-      assert(++pages <= 8);
-      marked += result.marked;
-      next = result.next;
-    }
-    return [pages, marked];
-  };
-  assert.deepEqual(await run(), [4, 1]);
-  assert.deepEqual(await run(), [4, 0]);
-  assert.equal((await rows(f)).find(row => row.id === id).inLane, true);
-  const overlap = [...f.tables.projectHostedOverlapLanes.values()].find(
-    row => row.laneId === linked.lane.laneId,
-  );
-  assert.deepEqual(overlap.planLanePin, { sourceVersion: 0, lifecycleVersion: 0 });
-  await f.runAcceptance('reopenEarlierIntent', writeHostedRecord, {
-    ...f.auth,
-    expectedVersion: old.version + 1,
-    record: { ...old, version: old.version + 2, status: 'active' },
-  });
-  const work = JSON.parse(
-    await f.store.transaction('itemWork', itemWork.read, {
-      projectId: f.projectId,
-      itemId: id,
-    }),
-  );
-  assert(work.lanes.some(lane => lane.laneId === linked.lane.laneId && lane.state === 'open'));
-  await close(f, linked.lane.laneId);
-  assert.equal((await rows(f)).find(row => row.id === id).inLane, undefined);
-});
-
 const dev = t =>
   t.mock.property(process, 'env', {
     ...process.env,
@@ -429,7 +370,6 @@ test('membership alone does not certify an unmarked open Lane for roll-up', asyn
   );
   f.tables.projectFinishReadRows.delete(overlap.planLaneMark);
   f.patch('projectHostedOverlapLanes', overlap._id, { planLaneMark: undefined, planLanePin: undefined });
-  f.patch('hostedProjects', f.projectId, { itemLaneMembership: verifiedItemMembership });
   await assert.rejects(verifyMarks(f), { code: 'WORK_STALE' });
   assert.equal(
     await workFor(f, itemId),
@@ -456,7 +396,6 @@ for (const older of [false, true])
     const f = await acceptanceFixture();
     const itemId = randomUUID();
     addPlan(f, [itemId]);
-    f.patch('hostedProjects', f.projectId, { itemLaneMembership: verifiedItemMembership });
     const started = await begin(f, planned(itemId));
     const lane = await f.changeLane(started.lane.laneId, { head: f.state.sha256, sourceVersion: 1 });
     const composed = await f.makeCandidate([

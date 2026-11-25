@@ -14,7 +14,7 @@ import { decisionOperationId } from '../src/work-planning-put';
 import type { PlanningItem } from '../src/work-planning-types';
 import { hostedRecordBody } from './projectHostedRecords';
 import { hostedRecordValue } from './hostedRecordValue';
-import { itemIntentChain } from './projectIntentLandingNotes';
+import { itemIntents } from './projectItemIntentPages';
 import { landingNoteWindow } from './projectIntentLandingNoteArchive';
 import { cursorJson, itemLandingFromNote } from './projectItemLandingHistory';
 import { legacyVersions, legacyVersionValue, planningHistoryBudget } from './projectPlanningHistory';
@@ -361,8 +361,7 @@ export async function readItemAuditHistory(
     }
   }
 
-  const { intents } =
-    current.kind === 'issue' ? await itemIntentChain(ctx, project._id, input.itemId) : { intents: [] };
+  const intents = current.kind === 'issue' ? await itemIntents(ctx, project._id, input.itemId) : [];
   const state = decodeCursor(input.cursor, intents.length, current.version);
 
   // 1. Comments stream (read before versions so decision comments can attribute their derived body versions).

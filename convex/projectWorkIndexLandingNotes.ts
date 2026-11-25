@@ -97,14 +97,12 @@ export async function withLandingNotes(
   const links = item?.kind === 'issue' && Array.isArray(item.intentIds) ? plannedLinkIds(item) : [itemId];
   const offset = continuation?.offset ?? 0;
   let pageLinks = links.slice(offset, offset + linksPerPage);
-  let chainRoots: ReadonlySet<string> | undefined = new Set(links);
   if (links.length > 1 && project.visibility === 'public') {
     const viewer = await ctx.auth.getUserIdentity();
     if (!viewer || !(await readProjectRole(ctx, project, viewer.subject))) {
       const plan = publicWorkPlan(ctx, project, new Map());
       const visible = await Promise.all(pageLinks.map(link => link === itemId || plan.allowed(link)));
       pageLinks = pageLinks.filter((_, index) => visible[index]);
-      chainRoots = undefined;
     }
   }
   const notes = await intentLandingComments(
@@ -113,7 +111,6 @@ export async function withLandingNotes(
     itemId,
     LANDING_NOTES_PER_ITEM,
     pageLinks,
-    chainRoots,
     continuation?.noteBefore,
   );
   const ordered = [...page.page].sort((a, b) => b.position - a.position);

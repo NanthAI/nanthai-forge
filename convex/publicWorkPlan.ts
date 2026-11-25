@@ -4,11 +4,9 @@ import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { publicPlanVisible, type PlanRow } from './publicVisibility';
-import { maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import { getDocumentSize } from 'convex/values';
 import { hostedOperationRow } from './projectHostedOperationLookup';
 import { pendingPlanningApply, publicPlanRoot } from './projectPlanningCloseProgress';
-import { verifiedItemMembership } from './projectItemMembershipVersion';
 export type PublicPlanRoot = PlanRow & Record<string, unknown>;
 type LookupBudget = { take: () => boolean; refund: (size: number) => void };
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
@@ -103,36 +101,24 @@ export function publicWorkPlan(
     if (project.visibility !== 'public' || project.planVisibility === 'members') return false;
     return rowAllowed(await lookup(id));
   };
-  let chains: Map<string, string> | undefined;
   const bindings = new Map<string, Promise<string | null>>();
-  /** Verified projects resolve exact Intent membership from its head, then apply the current Item policy.
-   * No membership is inferred from derived IDs once the project has verified the repair. This exact
-   * binding lookup is cached by Intent within the bounded selection/result page; visibleLoaded's
-   * separate relation-budgeted walk never calls it. */
+  /** Exact Intent membership comes from its head, then the current Item policy applies. No membership
+   * is inferred from derived IDs. This binding lookup is cached by Intent within the bounded
+   * selection/result page; visibleLoaded's separate relation-budgeted walk never calls it. */
   const itemOf = async (intentId: string): Promise<string | null> => {
     if (await lookup(intentId)) return intentId;
-    if (project.itemLaneMembership === verifiedItemMembership) {
-      let pending = bindings.get(intentId);
-      if (!pending) {
-        pending = ctx.db
-          .query('projectHostedRecordHeads')
-          .withIndex('by_project_and_kind_and_key', q =>
-            q.eq('projectId', project._id).eq('kind', 'intent').eq('key', intentId),
-          )
-          .unique()
-          .then(head => head?.planningItemId || null);
-        bindings.set(intentId, pending);
-      }
-      return pending;
+    let pending = bindings.get(intentId);
+    if (!pending) {
+      pending = ctx.db
+        .query('projectHostedRecordHeads')
+        .withIndex('by_project_and_kind_and_key', q =>
+          q.eq('projectId', project._id).eq('kind', 'intent').eq('key', intentId),
+        )
+        .unique()
+        .then(head => head?.planningItemId || null);
+      bindings.set(intentId, pending);
     }
-    if (!chains) {
-      chains = new Map();
-      for (const [id, root] of [...known])
-        if (root && root.kind !== 'initiative')
-          for (let next = id, hop = 0; hop < maxIntentChain; hop++)
-            chains.set((next = successorIntentId(next)), id);
-    }
-    return chains.get(intentId) ?? null;
+    return pending;
   };
   /** Whether a Lane's title must stay hidden from a viewer without a role (C1R-03). Visible only when the read ties
    * the Lane's Intent to a visible Item. An Intent the read cannot tie to an Item stays hidden, like an unlooked-up

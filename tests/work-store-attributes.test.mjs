@@ -51,6 +51,29 @@ test('an Intent created in Work retains its independent origin when written to t
   assert.equal(await origin(), '', 'a later update preserves the independent origin');
 });
 
+test('an Intent written in the projection that creates its Item is born bound to it, any other is not', async t => {
+  const s = await setup(t);
+  const base = (await s.read()).sourceHead;
+  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
+  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'dual' });
+  const item = s.item({ title: 'Planned' });
+  await s.send(item);
+  const born = await recordHead(s.ctx, s.projectId, 'intent', item.itemId);
+  assert.equal(
+    born?.planningItemId,
+    item.itemId,
+    'a planned Item’s own Intent is bound when the Item is created',
+  );
+  const stored = (id, bound) =>
+    store.storeIntent(s.ctx, s.projectId, 'owner', intent(id, base), true, undefined, { bound });
+  await stored(item.itemId, true);
+  const stranger = randomUUID();
+  await stored(stranger, false);
+  const marker = id => recordHead(s.ctx, s.projectId, 'intent', id).then(head => head?.planningItemId);
+  assert.equal(await marker(item.itemId), item.itemId);
+  assert.equal(await marker(stranger), undefined, 'no Item of that id: nothing to bind');
+});
+
 test('legacy copy and status mutations preserve imported attributes before data projections can retire', async t => {
   const id = randomUUID();
   let original;

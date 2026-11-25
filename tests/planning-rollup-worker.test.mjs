@@ -602,7 +602,6 @@ for (const mode of ['legacy', 'verified'])
     const partition = s.tables.hostedProjects.get(s.projectId).work.generationId;
     if (mode === 'verified')
       await s.ctx.db.patch(s.projectId, {
-        itemLaneMembership: 'verified-v2',
         planLaneMarkCoverage: { generationId: partition, cursor: null },
       });
     const { splitRecordTable } = await import(moduleUrl('../convex/projectWorkRecordTables.ts'));

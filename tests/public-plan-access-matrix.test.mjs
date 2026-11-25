@@ -136,6 +136,7 @@ async function world(t, policy) {
       actor: 'owner',
       authorityEpoch: 1,
       expectedVersion: null,
+      planningItemId: items[row].itemId,
       record: {
         kind: 'intent',
         id: items[row].itemId,
@@ -155,6 +156,7 @@ async function world(t, policy) {
       actor: 'owner',
       authorityEpoch: 1,
       expectedVersion: null,
+      planningItemId: items[row].itemId,
       record: {
         kind: 'lane',
         id: randomUUID(),
@@ -254,7 +256,6 @@ test('a public Item link preserves the source Item’s landing-note visibility',
 test('verified public Plan shows visible exact successors and rechecks visibility on continuation', async t => {
   const { s, items } = await world(t, 'hidden-initiative');
   as(s, 'owner');
-  await s.ctx.db.patch(s.projectId, { itemLaneMembership: 'verified-v2' });
   const make = async item => {
     let intentId = item.itemId;
     for (let i = 0; i < 24; i++) intentId = successorIntentId(intentId);

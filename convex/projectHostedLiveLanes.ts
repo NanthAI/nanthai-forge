@@ -10,9 +10,8 @@ import {
   hostedRecordBody,
   recordHead,
 } from './projectHostedRecords';
-import { intentBelongsToItem, legacyItemIntentHead } from './projectItemIntentHeads';
+import { intentBelongsToItem } from './projectItemIntentHeads';
 import { itemIntentPage, type ItemIntentPosition } from './projectItemIntentPages';
-import { verifiedItemMembership } from './projectItemMembershipVersion';
 import { z } from 'zod';
 import { isAgentSlug } from '../src/agent-slug';
 import { storedLandingStateSchema } from '../src/hosted-landing';
@@ -192,26 +191,15 @@ export const list = query({
         'BAD_ARGUMENT',
         'Use planningItemId with a full Issue UUID, or intentId with a full execution Intent UUID.',
       );
-      const verified = project.itemLaneMembership === verifiedItemMembership;
-      const indexedItem = !intentId && verified ? planningItemId : undefined;
-      let parent = intentId;
-      if (planningItemId && !indexedItem) {
-        if (intentId && verified) {
-          const head = await recordHead(ctx, projectId, 'intent', intentId);
-          invariant(
-            head && intentBelongsToItem(head, planningItemId),
-            'BAD_ARGUMENT',
-            'planningItemId and intentId select different work.',
-          );
-        } else {
-          const current = (await legacyItemIntentHead(ctx, projectId, planningItemId))?.key ?? planningItemId;
-          invariant(
-            !intentId || intentId === current,
-            'BAD_ARGUMENT',
-            'planningItemId and intentId select different work.',
-          );
-          parent = current;
-        }
+      const indexedItem = intentId ? undefined : planningItemId;
+      const parent = intentId;
+      if (planningItemId && intentId) {
+        const head = await recordHead(ctx, projectId, 'intent', intentId);
+        invariant(
+          head && intentBelongsToItem(head, planningItemId),
+          'BAD_ARGUMENT',
+          'planningItemId and intentId select different work.',
+        );
       }
       const legacyBinding = {
         planningItemId: planningItemId ?? null,

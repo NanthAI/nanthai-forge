@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // What happened on one Item (Issue 1c2ab97a): the Item's Lanes in every state through the Intent→Lane link, landed
-// ones with their receipt (landing note first, overlap stamp for older landings), paged past 20 with a total; the
+// ones with their receipt (the landing note), paged past 20 with a total; the
 // people rule per viewer; and the agent's `planning {id}` `work` section and `lanes {state:"all"}` over it.
 // Incident: Items d4b68402 and 16093ed1 read open with no linked work although their Lanes had landed.
 import test from 'node:test';
@@ -9,10 +9,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { itemWorkFixture as fixture } from './item-work-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { successorIntentId } from '../dist/hosted-intent-chain.js';
 const { liveLanes, liveLanesInput } = await import(moduleUrl('../src/hosted-live-lanes.ts'));
-const fill = await import(moduleUrl('../convex/projectItemLaneBackfill.ts'));
-const { verifiedItemMembership } = await import(moduleUrl('../convex/projectItemMembershipVersion.ts'));
 const other = 'b'.repeat(64);
 const at = '2026-01-01T00:00:00.000Z';
 
@@ -67,7 +64,12 @@ test('an Item read lists its Lanes in every state, landed ones with receipt, com
     sequence: 42,
     landedBy: 'queue',
   });
-  assert.deepEqual(byLane[s.stamped.id].receipt, { receiptId: s.stampReceipt, commit: 'd'.repeat(64), at });
+  assert.deepEqual(byLane[s.stamped.id].receipt, {
+    receiptId: s.stampReceipt,
+    commit: 'd'.repeat(64),
+    at,
+    sequence: 41,
+  });
   assert.equal(byLane[s.open.id].actor, 'synthetic-owner', 'writers see the handle, never the account id');
   const count = s.counts.at(-1);
   t.diagnostic(JSON.stringify(count));
@@ -78,23 +80,11 @@ test('an Item read lists its Lanes in every state, landed ones with receipt, com
   assert(count.readBytes < 12 * 1024, JSON.stringify(count));
 });
 
-test('the Item Lane fill resumes and newest-first pages include older history without rereading it', async t => {
+test('newest-first pages include older history without rereading it', async () => {
   const s = await fixture({ details: true, extra: 65 });
-  const projectId = s.auth.projectId;
   const newest = { ...s.abandoned, id: randomUUID() };
   await s.put(newest);
-  await s.read({ limit: 7 });
-  const legacy = s.counts.at(-1);
-  dev(t);
-  const backfill = after => repair(s, after);
-  const firstFill = await backfill(null);
-  assert(firstFill.next);
-  assert.equal((await s.ctx.db.get(projectId)).itemLaneMembership, firstFill.next);
-  assert.deepEqual(await backfill(null), { scanned: 0, patched: 0, next: firstFill.next });
-  await finishRepair(s, firstFill.next);
-  assert.equal((await s.ctx.db.get(projectId)).itemLaneMembership, verifiedItemMembership);
   const first = await s.read({ limit: 7 });
-  const indexed = s.counts.at(-1);
   assert.equal(first.lanes[0].laneId, newest.id, 'a newer abandoned Lane appears before an older open Lane');
   assert.equal(first.atLeast, true);
   assert(first.nextCursor);
@@ -103,27 +93,17 @@ test('the Item Lane fill resumes and newest-first pages include older history wi
   for (let step = 0; page.nextCursor && step < 15; step++) {
     page = await s.read({ limit: 7, cursor: page.nextCursor });
     seen.push(...page.lanes.map(lane => lane.laneId));
+    assert(s.counts.at(-1).documents < 60, 'a page reads its own Lanes, never the history before it');
   }
   assert.equal(page.nextCursor, null);
   assert.equal(page.total, 70);
   assert.equal(new Set(seen).size, 70);
   assert.equal(seen.length, 70);
   assert(seen.includes(s.abandoned.id));
-  t.diagnostic(
-    JSON.stringify({
-      legacy: legacy.readBytes,
-      indexed: indexed.readBytes,
-      saved: legacy.readBytes - indexed.readBytes,
-    }),
-  );
-  assert(indexed.readBytes < legacy.readBytes);
 });
 
-test('the released CLI and MCP Lane parser can resume a server-issued indexed Item Work cursor', async t => {
+test('the released CLI and MCP Lane parser can resume a server-issued indexed Item Work cursor', async () => {
   const s = await fixture({ details: true, extra: 2 });
-  dev(t);
-  const legacy = await s.read({ limit: 1 });
-  await finishRepair(s, null);
   const first = await s.read({ limit: 1 });
   assert(first.nextCursor);
   const input = { planningItemId: s.itemId, state: 'all', cursor: first.nextCursor, limit: 1 };
@@ -140,121 +120,6 @@ test('the released CLI and MCP Lane parser can resume a server-issued indexed It
   assert.equal(calls, 1);
   assert.equal(next.result.page.length, 1);
   assert.notEqual(next.result.page[0].laneId, first.lanes[0].laneId);
-  assert.equal((await s.read({ limit: 1, cursor: legacy.nextCursor })).lanes.length, 1);
-});
-
-test('old coverage cannot hide a Lane whose legacy lifecycle materialization dropped its stamp', async t => {
-  const s = await fixture({ details: true });
-  dev(t);
-  const projectId = s.auth.projectId;
-  const lane = [...s.tables.projectHostedRecordHeads.values()].find(
-    head => head.kind === 'lane' && head.key === s.abandoned.id,
-  );
-  assert(lane);
-  // Replay the old deployment’s persisted state immediately after a cascade replaced the head.
-  await s.ctx.db.patch(lane._id, { planningItemId: undefined });
-  await s.ctx.db.patch(projectId, { itemLaneMembership: true });
-  assert((await s.read()).lanes.some(row => row.laneId === s.abandoned.id));
-  await finishRepair(s, null);
-  assert.equal((await s.ctx.db.get(lane._id)).planningItemId, s.itemId);
-  assert((await s.read()).lanes.some(row => row.laneId === s.abandoned.id));
-});
-
-function dev(t) {
-  const before = process.env.CONVEX_CLOUD_URL;
-  process.env.CONVEX_CLOUD_URL = 'https://benevolent-wildebeest-974.convex.cloud';
-  t.after(() => {
-    if (before === undefined) delete process.env.CONVEX_CLOUD_URL;
-    else process.env.CONVEX_CLOUD_URL = before;
-  });
-}
-
-const repair = (s, after) => s.call('fill', fill.run, { projectId: s.auth.projectId, after });
-async function finishRepair(s, after = null) {
-  for (let pages = 0; pages < 20; pages++) {
-    const result = await repair(s, after);
-    if (result.next === null) return;
-    assert.notEqual(result.next, after, 'checkpoint advances');
-    after = result.next;
-  }
-  assert.fail('repair did not complete in the fixture');
-}
-
-test('the dev repair follows a 70-hop markerless chain and keeps Intent-born and legacy Resolution Lanes visible', async t => {
-  dev(t);
-  const s = await fixture({ details: true });
-  const intent = [...s.tables.projectHostedRecordHeads.values()].find(row => row.kind === 'intent');
-  await s.ctx.db.patch(intent._id, { planningItemId: '' });
-  let id = s.itemId;
-  for (let i = 1; i <= 70; i++) {
-    id = successorIntentId(id);
-    await s.put({
-      kind: 'intent',
-      id,
-      version: 0,
-      at,
-      outcome: 'Prior Item work',
-      constraints: '',
-      creatorAccountId: 'owner',
-      assigneeAccountIds: [],
-      base: s.open.base,
-      status: 'completed',
-    });
-  }
-  const older = {
-    ...s.open,
-    id: randomUUID(),
-    intentId: successorIntentId(s.itemId),
-    resolution: {
-      candidateId: null,
-      conflicts: { sha256: other, size: 5 },
-      left: other,
-      right: other,
-      draftHead: other,
-      status: 'pending',
-    },
-  };
-  const newest = { ...s.open, id: randomUUID(), intentId: id };
-  await s.put(older);
-  await s.put(newest);
-  const neighbor = successorIntentId(id);
-  await s.planning(neighbor, { title: 'A separate same-ID Item must keep its ownership' });
-  await s.put({
-    kind: 'intent',
-    id: neighbor,
-    version: 0,
-    at,
-    outcome: 'Separate Item',
-    constraints: '',
-    creatorAccountId: 'owner',
-    assigneeAccountIds: [],
-    base: s.open.base,
-    status: 'active',
-  });
-  const unrelated = { ...s.open, id: randomUUID(), intentId: neighbor };
-  await s.put(unrelated);
-  const existing = [...s.tables.projectHostedRecordHeads.values()].find(row => row.key === s.open.id);
-  await s.ctx.db.patch(existing._id, { planningItemId: '' });
-  await finishRepair(s);
-  const result = await s.read({ limit: 20 });
-  assert.equal(result.intent, 'completed');
-  assert.equal((await s.read({ details: true, limit: 20 })).intent, result.intent);
-  for (const lane of [s.open, older, newest]) assert(result.lanes.some(row => row.laneId === lane.id));
-  assert(!result.lanes.some(row => row.laneId === unrelated.id));
-  assert((await s.read({ itemId: neighbor })).lanes.some(row => row.laneId === unrelated.id));
-  const repaired = [...s.tables.projectHostedRecordHeads.values()].filter(
-    row => row.kind === 'intent' && row.planningItemId === s.itemId,
-  );
-  assert.equal(repaired.length, 71);
-});
-
-test('Item membership repair refuses to write from a deployment other than dev', async t => {
-  const s = await fixture();
-  dev(t);
-  process.env.CONVEX_CLOUD_URL = 'https://fixture-prod.convex.cloud';
-  await assert.rejects(repair(s, null), error => error.code === 'PROJECT_UNAVAILABLE');
-  const project = await s.ctx.db.get(s.auth.projectId);
-  assert.equal(project.itemLaneMembership, undefined);
 });
 
 test('Item-page details link recorded saves, acceptance evidence and settled relation titles without writes', async () => {
@@ -350,10 +215,7 @@ test('Item Work keeps Lane attribution and receipt history after a landing note 
 
 test('landing history advances through 10,000 retained notes without offset reads or shifting on a new landing', async t => {
   const s = await fixture({ details: true });
-  const [note] = [...s.tables.projectIntentLandingNotes.values()];
-  await s.ctx.db.delete(note._id);
-  const stamp = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === s.stamped.id);
-  await s.ctx.db.patch(stamp._id, { landed: undefined });
+  for (const note of [...s.tables.projectIntentLandingNotes.values()]) await s.ctx.db.delete(note._id);
   const measure = async (surface, history, read) => {
     const start = performance.now();
     const raw = await read();
@@ -455,11 +317,13 @@ test('an open Lane reads queued while its Intent has a live submission, parked w
 test('past 20 Lanes the read pages with a total and a cursor, without repeats', async () => {
   const s = await fixture({ extra: 22 });
   const first = await s.read();
-  assert.equal(first.total, 26);
+  assert.equal(first.total, 21);
+  assert.equal(first.atLeast, true);
   assert.equal(first.lanes.length, 20);
   assert.ok(first.nextCursor);
   const second = await s.read({ cursor: first.nextCursor }, 'second');
   assert.equal(second.lanes.length, 6);
+  assert.equal(second.total, 26);
   assert.equal(second.nextCursor, null);
   const ids = [...first.lanes, ...second.lanes].map(lane => lane.laneId);
   assert.equal(new Set(ids).size, 26);
@@ -555,7 +419,7 @@ test('lanes {state:"all"} pages the same read and accepts the 8-character Item i
   const short = s.itemId.slice(0, 8);
   const first = (await liveLanes(transport, { planningItemId: short, state: 'all' })).result;
   assert.deepEqual(calls, ['projectHostedPlanning:resolveId', 'projectItemWork:read']);
-  assert.equal(first.total, 26);
+  assert.equal(first.total, 21);
   assert.equal(first.page.length, 20);
   assert.equal(first.isDone, false);
   assert.ok(
@@ -784,7 +648,7 @@ test('411727ba cursor: Lanes expand reads no landing or Related document and equ
   // Other two cursor positions pass through unchanged.
   const openCursor = JSON.parse(open.nextCursor.slice('forge-item-work-v2:'.length));
   const expandCursor = JSON.parse(expandLanes.nextCursor.slice('forge-item-work-v2:'.length));
-  assert.equal(expandCursor.lane, 10);
+  assert.equal(expandCursor.lane.seen, 10);
   assert.deepEqual(expandCursor.history, openCursor.history);
   assert.deepEqual(expandCursor.related, openCursor.related);
 
@@ -818,7 +682,30 @@ test('411727ba cursor: Lanes expand reads no landing or Related document and equ
   assert.equal(onlyRelated.landings, undefined);
   assert.ok(Array.isArray(onlyRelated.related));
   const afterRelated = JSON.parse(onlyRelated.nextCursor.slice('forge-item-work-v2:'.length));
-  assert.equal(afterRelated.lane, 10);
+  assert.equal(afterRelated.lane.seen, 10);
   assert.deepEqual(afterRelated.history, openCursor.history);
   assert.notEqual(afterRelated.related, openCursor.related);
+});
+
+test('a Lane older than the newest landing notes still reads its receipt, with its revert', async () => {
+  const s = await fixture({ details: true });
+  // Sixty newer landings push the noted Lane's note out of the Intent's newest-fifty window.
+  for (let sequence = 100; sequence < 160; sequence++) await s.addLandingNote(sequence);
+  const revert = randomUUID();
+  const overlap = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === s.noted.id);
+  await s.ctx.db.patch(overlap._id, {
+    landed: {
+      receiptId: s.noteReceipt,
+      commit: 'c'.repeat(64),
+      laneHead: other,
+      at,
+      revertedBy: { receiptId: revert, at },
+    },
+  });
+  const work = await s.read({ limit: 20 });
+  const lane = work.lanes.find(row => row.laneId === s.noted.id);
+  assert.deepEqual(
+    [lane.receipt.receiptId, lane.receipt.commit, lane.receipt.revertedBy],
+    [s.noteReceipt, 'c'.repeat(64), revert],
+  );
 });

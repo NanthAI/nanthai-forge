@@ -804,7 +804,6 @@ test('incident 846c635b: planned start reads and selects only the newest executi
   const costs = [];
   for (const history of [4, 14, 17, 24]) {
     const s = await setup();
-    s.patch('hostedProjects', s.projectId, { itemLaneMembership: 'verified-v2' });
     const issue = randomUUID();
     let id = issue;
     for (let i = 0; i < history; i++, id = successorIntentId(id)) {
@@ -934,17 +933,18 @@ test('planned start joins a repaired markerless successor instead of recreating 
       });
     },
   });
-  const { run } = await import(moduleUrl('../convex/projectItemLaneBackfill.ts'));
+  const { page } = await import(moduleUrl('../convex/legacyItemShapes.ts'));
   const old = process.env.CONVEX_CLOUD_URL;
   process.env.CONVEX_CLOUD_URL = 'https://benevolent-wildebeest-974.convex.cloud';
   try {
-    let after = null;
-    for (let i = 0; i < 3; i++) {
-      const result = await s.call('fill', run, { projectId: s.projectId, after });
-      after = result.next;
-      if (after === null) break;
-    }
-    assert.equal(after, null);
+    for (const family of ['intents', 'lanes'])
+      await s.call('fill', page, {
+        deployment: 'benevolent-wildebeest-974',
+        projectId: s.projectId,
+        family,
+        cursor: null,
+        apply: true,
+      });
   } finally {
     if (old === undefined) delete process.env.CONVEX_CLOUD_URL;
     else process.env.CONVEX_CLOUD_URL = old;

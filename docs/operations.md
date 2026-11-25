@@ -1107,26 +1107,12 @@ deployment remains intact.
 
 ### Backfill existing Plan Lane marks
 
-After deploying the Lane mark writer, run this once per existing project using
-the operator's configured deployment. Start with the `items` phase and a null
-cursor. Pass the returned `next.phase` and `next.cursor` to the next call until
-`next` is null. Each call reads at most 20 Items or overlap rows at its cursor.
-The count uses the current Lane state, and replaying a page adds no duplicate marks.
-
-```sh
-npx convex run projectPlanLaneBackfill:run '{"projectId":"PROJECT_ID","phase":"items","cursor":null}'
-```
-
-After Item membership has been verified, dev roll-up requires a separate coverage
-pass for the selected Work generation. On the approved dev deployment, start
-`projectPlanLaneBackfill:run` with `phase:"lanes", cursor:null` and follow its
-returned `next`. Each call scans at most eight active Lane heads, including pinned
-keep-open Lanes that already landed and retired their overlap. The writer checks
-current Item and lifecycle evidence before repairing marks. A caller cannot skip
-pages, a replay does not recount a Lane, and a changed Work generation requires
-a fresh pass. `projectPlanLaneBackfill:verify {projectId}` refuses until a complete
-pass is recorded. Until then, roll-up uses its legacy reader; other indexed
-Item readers do not use the tally and are unaffected. No job runs automatically.
+On the approved dev deployment, start `projectPlanLaneBackfill:run` with `phase:"lanes", cursor:null` and follow its
+returned `next`. Each call scans at most eight active Lane heads, including pinned keep-open Lanes that already landed
+and retired their overlap. The writer checks current Item and lifecycle evidence before repairing marks. A caller
+cannot skip pages, a replay does not recount a Lane, and a changed Work generation requires a fresh pass.
+`projectPlanLaneBackfill:verify {projectId}` refuses until a complete pass is recorded. Until then, roll-up uses its
+legacy reader; other indexed Item readers do not use the tally and are unaffected. No job runs automatically.
 
 ### Overlap change lists live in buckets
 

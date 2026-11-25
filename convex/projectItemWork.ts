@@ -14,17 +14,14 @@ import {
   visibleItemWork,
 } from './projectItemWorkDetails';
 import { readHostedRecord } from './projectHostedRecords';
-import { itemIntentChain } from './projectIntentLandingNotes';
+import { itemIntents } from './projectItemIntentPages';
 import { itemLanePage, itemLanePosition } from './projectItemLanePage';
 import { latestItemIntentHead } from './projectItemIntentHeads';
-import { verifiedItemMembership } from './projectItemMembershipVersion';
 import {
   cursorJson,
   itemLandingHistory,
   itemLandingFromNote,
   landingHistoryCursor,
-  itemLandingStamp,
-  itemLaneLandingStamp,
   type ItemLanding,
 } from './projectItemLandingHistory';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -35,8 +32,6 @@ import { AGENT_CLIENT, agentActor, isAgentSlug } from '../src/agent-slug';
 import { LANDING_NOTES_PER_ITEM } from '../src/intent-landing-note';
 import { landingNoteWindow } from './projectIntentLandingNoteArchive';
 
-/** Lane heads counted per Intent before the total reads "at least". */
-const LANES_COUNTED = 50;
 /** Lanes per page: 20 by default (Done-when "paged past 20"), at most 50. */
 const WORK_PAGE = 20;
 const WORK_PAGE_MAX = 50;
@@ -46,7 +41,8 @@ const WEB_CURSOR = 'forge-item-work-v2:';
 const KEYSET_CURSOR = `${CURSOR}{`;
 
 const webPage = z.object({
-  lane: z.union([z.number().int().min(0), itemLanePosition]).nullable(),
+  /** `first`: the Lane section has not started, so a later page begins at the newest Lane. */
+  lane: z.union([z.literal('first'), itemLanePosition]).nullable(),
   history: landingHistoryCursor.nullable().optional(),
   related: z.string().nullable().optional(),
 });
@@ -67,7 +63,12 @@ function workPage(cursor: string | null, detailed: boolean): WebPage {
     invariant(key.success, 'BAD_ARGUMENT', 'Cursor is invalid. Restart without a cursor.');
     return { lane: key.data };
   }
-  return { lane: decodeOffset(cursor) };
+  invariant(
+    cursor === null,
+    'BAD_ARGUMENT',
+    'cursor: expected the nextCursor from this Item work read. Restart without a cursor.',
+  );
+  return { lane: 'first' };
 }
 
 type LaneRecord = {
@@ -93,55 +94,6 @@ function submissionState(request: Pick<Doc<'projectHostedLandingRequests'>, 'pha
 
 const modelOf = (client: unknown) =>
   typeof client === 'string' && AGENT_CLIENT.test(client) ? (client.split(':')[1] ?? null) : null;
-
-function decodeOffset(cursor: string | null) {
-  if (cursor === null) return 0;
-  const offset = Number(cursor.startsWith(CURSOR) ? cursor.slice(CURSOR.length) : NaN);
-  invariant(
-    Number.isInteger(offset) && offset > 0,
-    'BAD_ARGUMENT',
-    'cursor: expected the nextCursor from this Item work read. Restart without a cursor.',
-  );
-  return offset;
-}
-
-// Before a project has verified its projection, preserve its complete pre-cap legacy pages.
-async function legacyLanePage(
-  ctx: import('./_generated/server').QueryCtx,
-  projectId: Doc<'hostedProjects'>['_id'],
-  intents: string[],
-  offset: number,
-  shown: number,
-  visible: boolean,
-) {
-  let atLeast = false;
-  const heads: Doc<'projectHostedRecordHeads'>[] = [];
-  const completeHeads = new Map<string, Doc<'projectHostedRecordHeads'>[]>();
-  for (const intentId of intents) {
-    const rows = await ctx.db
-      .query('projectHostedRecordHeads')
-      .withIndex('by_project_and_kind_and_parent', q =>
-        q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', intentId),
-      )
-      .order('desc')
-      .take(LANES_COUNTED + 1);
-    if (rows.length > LANES_COUNTED) atLeast = true;
-    else if (visible) completeHeads.set(intentId, rows);
-    heads.push(...rows.slice(0, LANES_COUNTED));
-  }
-  heads.sort(
-    (a, b) =>
-      Number(b.status === 'active') - Number(a.status === 'active') || b._creationTime - a._creationTime,
-  );
-  const next = offset + shown;
-  return {
-    heads: heads.slice(offset, next),
-    next: next < heads.length ? next : null,
-    total: heads.length,
-    atLeast,
-    completeHeads,
-  };
-}
 
 export const read = query({
   args: {
@@ -174,32 +126,14 @@ export const read = query({
         ? Math.min(Math.max(Math.trunc(limit ?? 10), 1), 10)
         : Math.min(Math.max(Math.trunc(limit ?? WORK_PAGE), 1), WORK_PAGE_MAX);
       const position = work.lane;
-      const indexed =
-        project.itemLaneMembership === verifiedItemMembership &&
-        (position === null || !cursor || typeof position === 'object');
-      invariant(
-        indexed || position === null || typeof position === 'number',
-        'BAD_ARGUMENT',
-        'Restart without a cursor.',
-      );
       const historyRequested = readLandings && Boolean(visible && work.history !== null);
-      const chain = !indexed || historyRequested ? await itemIntentChain(ctx, projectId, itemId) : null;
-      const indexedPage =
-        readLanes && indexed && position !== null
-          ? await itemLanePage(ctx, projectId, itemId, typeof position === 'object' ? position : null, shown)
+      const intents = historyRequested ? await itemIntents(ctx, projectId, itemId) : [];
+      const page =
+        readLanes && position !== null
+          ? await itemLanePage(ctx, projectId, itemId, position === 'first' ? null : position, shown)
           : null;
-      const legacy =
-        readLanes && !indexed && typeof position === 'number'
-          ? await legacyLanePage(ctx, projectId, chain!.intents, position, shown, Boolean(visible))
-          : null;
-      const stateHead = indexed ? await latestItemIntentHead(ctx, projectId, itemId) : null;
-      const state = indexed
-        ? stateHead?.status.startsWith('journal:')
-          ? null
-          : (stateHead?.status ?? null)
-        : (chain?.state ?? null);
-      const page = indexedPage ?? legacy;
-      const intents = chain?.intents ?? [];
+      const stateHead = await latestItemIntentHead(ctx, projectId, itemId);
+      const state = stateHead?.status.startsWith('journal:') ? null : (stateHead?.status ?? null);
       const lanes: LaneRecord[] = [];
       for (const head of page?.heads ?? []) {
         const row = await readHostedRecord(ctx, {
@@ -236,13 +170,34 @@ export const read = query({
           for (const laneId of laneIds) landed.set(laneId, receipt);
         }
       }
-      const stamps = new Map<string, Doc<'projectHostedOverlapLanes'>['landed']>();
+      // A Lane older than its Intent's newest notes: the overlap row names its receipt, and that note is
+      // read by its own key. The stamp is only a pointer here; the note holds the landing.
       for (const lane of lanes) {
         if (landed.has(lane.id) || (lane.state !== 'completed' && (!detailed || lane.state === 'abandoned')))
           continue;
-        const stamp = await itemLaneLandingStamp(ctx, projectId, lane.id);
-        if (visible) stamps.set(lane.id, stamp);
-        if (stamp) landed.set(lane.id, itemLandingStamp(stamp));
+        const stamp = (
+          await ctx.db
+            .query('projectHostedOverlapLanes')
+            .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', lane.id))
+            .unique()
+        )?.landed;
+        const note = stamp
+          ? await ctx.db
+              .query('projectIntentLandingNotes')
+              .withIndex('by_project_and_receipt_and_intent_and_kind', q =>
+                q
+                  .eq('projectId', projectId)
+                  .eq('receiptId', stamp.receiptId)
+                  .eq('intentId', lane.intentId)
+                  .eq('kind', 'landed'),
+              )
+              .unique()
+          : null;
+        if (stamp && note)
+          landed.set(lane.id, {
+            ...(await itemLandingFromNote(ctx, projectId, note)),
+            ...(stamp.revertedBy ? { revertedBy: stamp.revertedBy.receiptId } : {}),
+          });
       }
 
       // Open Lanes: the Intent's live submission (its newest Candidate's newest landing request).
@@ -282,10 +237,7 @@ export const read = query({
             lanes.length ? itemWorkLaneDetails(ctx, identity, lanes) : undefined,
             !readLandings || !visible || work.history === null
               ? undefined
-              : itemLandingHistory(ctx, projectId, intents, work.history ?? {}, undefined, {
-                  heads: legacy?.completeHeads ?? new Map(),
-                  stamps,
-                }),
+              : itemLandingHistory(ctx, projectId, intents, work.history ?? {}),
             !readRelated || !visible || work.related === null
               ? undefined
               : itemWorkRelated(ctx, visible, work.related ?? null),
@@ -351,7 +303,7 @@ export const read = query({
       return canonicalPayload({
         role: true,
         intent: state,
-        ...(chain ? { intents: intents.length } : {}),
+        ...(historyRequested ? { intents: intents.length } : {}),
         lanes: rows,
         ...(landings
           ? {
@@ -367,9 +319,7 @@ export const read = query({
             : null
           : lane === null
             ? null
-            : typeof lane === 'number'
-              ? `${CURSOR}${lane}`
-              : CURSOR + JSON.stringify(lane),
+            : CURSOR + JSON.stringify(lane),
       });
     } catch (error) {
       return report(error);
