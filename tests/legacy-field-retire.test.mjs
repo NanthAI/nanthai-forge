@@ -89,3 +89,29 @@ test('F6 leftovers: a backup receipt loses its markers and the project cursor fi
     [undefined, undefined, undefined],
   );
 });
+
+test('F6 leftovers: a spent removed derived row with a native original is deleted; a live one blocks the apply', async () => {
+  const s = state([]);
+  const derived = (id, fields) => ({
+    _id: id,
+    _creationTime: 1,
+    original: 'native-original',
+    kind: 'export',
+    pin: id,
+    originalDigest: 'd',
+    originalSize: 1,
+    digest: 'd',
+    size: 1,
+    contentType: 'application/gzip',
+    removed: true,
+    ...fields,
+  });
+  s.tables.derivedArtifacts.set('spent', derived('spent'));
+  s.tables.derivedArtifacts.set('live', derived('live', { removed: false }));
+  s.tables.derivedArtifacts.set('r2', derived('r2', { original: 'r2blob:a', storageId: 'r2blob:b' }));
+  const dry = await retire.referencesPage._handler(s.ctx, { cursor: null, apply: false });
+  assert.deepEqual([dry.changed, dry.blocked], [1, 1]);
+  assert.equal(s.tables.derivedArtifacts.size, 3, 'a dry run deletes nothing');
+  await retire.referencesPage._handler(s.ctx, { cursor: null, apply: true });
+  assert.deepEqual([...s.tables.derivedArtifacts.keys()].sort(), ['live', 'r2']);
+});

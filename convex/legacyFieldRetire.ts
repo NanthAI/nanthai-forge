@@ -132,34 +132,42 @@ export const smallPage = internalMutation({
   },
 });
 
-/** Read-only P8 gate: artifact references that are not `r2blob:` ids name no readable bytes now. A
- * count above zero in any table means a conversion is needed before the schema and reader go out. */
+/** P8 gate: artifact references that are not `r2blob:` ids name no readable bytes now. A removed derived
+ * row with no stored bytes is a spent tombstone of the old native sweep: it goes (`changed`). Any other
+ * row with such a reference is `blocked`: it needs a conversion before the schema and reader go out. */
 export const referencesPage = internalMutation({
-  args: { cursor: v.union(v.string(), v.null()) },
+  args: { cursor: v.union(v.string(), v.null()), apply: v.boolean() },
   returns: v.object({
     cursor: v.string(),
     isDone: v.boolean(),
     rows: v.number(),
     bytes: v.number(),
     changed: v.number(),
+    blocked: v.number(),
   }),
-  handler: async (ctx, { cursor }) => {
+  handler: async (ctx, { cursor, apply }) => {
     const page = await ctx.db
       .query('derivedArtifacts')
       .paginate({ cursor, numItems: 100, maximumRowsRead: 100, maximumBytesRead: pageBytes });
     const bad = (ref: string | undefined) => ref !== undefined && ref !== '' && !ref.startsWith('r2blob:');
     let bytes = 0,
-      native = 0;
+      changed = 0,
+      blocked = 0;
     for (const row of page.page) {
       bytes += bytesOf(row);
-      if (bad(row.original) || bad(row.storageId)) native++;
+      if (!bad(row.original) && !bad(row.storageId)) continue;
+      if (row.removed && row.storageId === undefined) {
+        changed++;
+        if (apply) await ctx.db.delete(row._id);
+      } else blocked++;
     }
     return {
       cursor: page.continueCursor,
       isDone: page.isDone,
       rows: page.page.length,
       bytes,
-      changed: native,
+      changed,
+      blocked,
     };
   },
 });
@@ -314,12 +322,13 @@ export const run = internalAction({
     const owners = await ctx.runMutation(internal.legacyFieldRetire.ownersCheck, {});
     spent.bytes += owners.bytes;
     const derived = await drain(
-      (cursor): Promise<Page> => ctx.runMutation(internal.legacyFieldRetire.referencesPage, { cursor }),
+      (cursor): Promise<Page> =>
+        ctx.runMutation(internal.legacyFieldRetire.referencesPage, { cursor, apply }),
       budgetBytes,
       spent,
     );
     const nativeRefs =
-      derived.changed + Object.values(owners.native as Record<string, number>).reduce((a, b) => a + b, 0);
+      derived.blocked + Object.values(owners.native as Record<string, number>).reduce((a, b) => a + b, 0);
     const empty: Total = { rows: 0, bytes: 0, changed: 0, blocked: 0, stopped: null };
     if ((apply && nativeRefs > 0) || owners.more) {
       return { objects: empty, backups: empty, proposals: empty, projects: empty, nativeRefs, owners };
