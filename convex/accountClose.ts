@@ -191,14 +191,8 @@ async function closeAccount(ctx: MutationCtx, actor: string, input: { operationI
     );
     // A step that failed or was cancelled starts again from where it stood.
     const task = account.closing.task ? await ctx.db.system.get(account.closing.task) : null;
-    // A close begun while secret grants still existed resumes at its receipts: the purge removed those grants.
     if (!task || !['pending', 'inProgress'].includes(task.state.kind))
-      await schedule(
-        ctx,
-        account,
-        account.closing.phase === 'secrets' ? 'receipts' : account.closing.phase,
-        account.closing.phase === 'secrets' ? null : account.closing.cursor,
-      );
+      await schedule(ctx, account, account.closing.phase, account.closing.cursor);
     return { stage: 'closing' } satisfies Reply;
   }
   invariant(
@@ -264,8 +258,7 @@ export const step = internalMutation({
   args: {
     accountId: v.id('forgeAccounts'),
     operationId: v.string(),
-    // `secrets` is retired: a step scheduled before it went moves on to `receipts`.
-    phase: v.union(v.literal('secrets'), v.literal('receipts'), v.literal('signout'), v.literal('finish')),
+    phase: v.union(v.literal('receipts'), v.literal('signout'), v.literal('finish')),
     cursor: v.union(v.string(), v.null()),
   },
   returns: v.null(),
@@ -285,10 +278,6 @@ export const step = internalMutation({
       await ctx.db.patch(account._id, { closing: undefined });
       await queuePublicAccountRead(ctx, account.handle, { profile: true });
     };
-    if (phase === 'secrets') {
-      await schedule(ctx, account, 'receipts', null);
-      return null;
-    }
     if (phase === 'receipts') {
       // Newest first, so a receipt begun during the close (or one past the first scan) is met before any older one goes.
       const [receipt] = await ctx.db

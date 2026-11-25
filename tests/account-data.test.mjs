@@ -942,49 +942,6 @@ test('a completed or older receipt never starts new work: it keeps the scope it 
   assert.ok(f.tables.teamMembers.has('tm'), 'nothing neither recorded is left');
 });
 
-test('a cleanup begun before Secret Objects were retired finishes: their items are gone and end as done', async () => {
-  const f = sharedWorld();
-  const operationId = randomUUID();
-  f.tables.accountOperations.set(
-    'old-op',
-    row('old-op', {
-      owner: 'owner',
-      operationId,
-      request: 'f'.repeat(64),
-      expectedItems: 2,
-      leave: [],
-      stage: 'running',
-      captured: [],
-      pending: 2,
-      at: 1,
-    }),
-  );
-  for (const [id, kind, hidden] of [
-    ['old-secret', 'secret', false],
-    ['old-grant', 'secrets', true],
-  ])
-    f.tables.accountItems.set(
-      id,
-      row(id, {
-        owner: 'owner',
-        accountId: 'old-op',
-        key: `${kind}:${id}`,
-        kind,
-        resourceId: id,
-        pin: 'a'.repeat(64),
-        operationId: randomUUID(),
-        hidden,
-        state: kind === 'secret' ? 'started' : 'pending',
-      }),
-    );
-  const last = await pass(f, operationId);
-  assert.equal(last.stage, 'completed');
-  assert.deepEqual(
-    ['old-secret', 'old-grant'].map(id => f.tables.accountItems.get(id).state),
-    ['completed', 'completed'],
-  );
-});
-
 test('a selected item that changed after the review is kept, and the receipt counts it', async () => {
   const f = sharedWorld();
   f.tables.teams.set('mine', row('mine', { owner: 'owner', name: 'My team', operationId: randomUUID() }));

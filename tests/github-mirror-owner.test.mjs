@@ -33,7 +33,6 @@ test('a valid scoped agent grant cannot authenticate as its owner to pause, un-p
     expiresAt: Date.now() + 600000,
     revoked: false,
     tokenHash,
-    sealed: { keyId: 'synthetic', nonce: 'synthetic', tag: 'synthetic', ciphertext: 'synthetic' },
   });
   assert.equal(
     (await f.call('authorize-grant', grants.authorize, { tokenHash, tool: 'status' }, null))._id,

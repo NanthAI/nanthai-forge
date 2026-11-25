@@ -191,25 +191,6 @@ test('an account that holds nothing closes: account, handles, receipts, devices 
   assert.equal(await close.preview._handler(f.ctx, {}), null);
 });
 
-test('a close begun while secret grants existed resumes at its receipts and finishes', async () => {
-  const { f, t } = emptyWorld();
-  as(f, 'owner');
-  const operationId = randomUUID();
-  // The state a close left before Secret Objects were retired: the retired phase and epoch, and its task already
-  // scheduled with the retired phase name.
-  t.forgeAccounts.get('acct').closing = { operationId, at: 1, below: 7, phase: 'secrets', cursor: null };
-  assert.deepEqual(await closeAs(f, { operationId, handle: 'sample-owner' }), { stage: 'closing' });
-  assert.equal(f.scheduled.at(-1).args.phase, 'receipts', 'a retry restarts it at the receipts');
-  f.scheduled.length = 0;
-  t.forgeAccounts.get('acct').closing = { operationId, at: 1, below: 7, phase: 'secrets', cursor: null };
-  await f.transaction(() =>
-    close.step._handler(f.ctx, { accountId: 'acct', operationId, phase: 'secrets', cursor: null }),
-  );
-  assert.equal(f.scheduled[0].args.phase, 'receipts', 'a step scheduled before the retirement moves on');
-  await background(f);
-  assert.equal(t.forgeAccounts.size, 0, 'closed');
-});
-
 test('an account signed in with the old provider only (no native user) closes the same way', async () => {
   const { f, t, calls } = emptyWorld({ native: false });
   as(f, 'owner');

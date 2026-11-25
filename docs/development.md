@@ -1107,11 +1107,10 @@ measured sum. `apply:false` writes nothing and returns the counts it would chang
 with nothing to change writes nothing, so replays are free. Repeat with `after` set to the
 returned `next` until it is null. It is never scheduled, so idle costs zero.
 
-**Secret Object purge.** `secretObjectsRetire:purgeRows` and `clearFields` are one-off internal mutations
-(`apply:false` first; steps in [operations](operations.md#sealed-secrets-and-the-retired-secret-objects)). A
-deployment runs them once, then the follow-up landing drops the retired tables and fields from the schema and
-deletes the file. Delete `FORGE_SECRET_KEYS` from the deployment by name once the code that read it is deployed.
-They are never scheduled, so idle costs zero.
+**Secret Object purge.** The one-off job that deleted the retired Secret Object rows ran on dev and is gone from
+`main`; production runs it from the pinned in-between release (steps in
+[operations](operations.md#sealed-secrets-and-the-retired-secret-objects)). Delete `FORGE_SECRET_KEYS` from a
+deployment by name once the code that read it is deployed.
 
 **Command per set.** A copied rotate command carries the set it was listed under:
 Development is the CLI's default, Checks adds `--set checks`, so a Checks row can never

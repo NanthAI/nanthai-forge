@@ -1801,16 +1801,18 @@ the database, a backup or an object-storage copy holds ciphertext and never a va
 `scripts/check-no-server-key.mjs`). There is nothing to back up apart from the database for them, and a lost
 device is recovered by another holder device or by reissuing the value at the provider.
 
-Secret Objects and their server keyring are retired. The setting `FORGE_SECRET_KEYS` is deleted from every
-deployment and no code reads it. A deployment that still holds Secret Object rows runs the one-off purge once, in
-this order (it is never scheduled, so idle costs nothing; delete `convex/secretObjectsRetire.ts` in the landing
-that drops the tables):
+Secret Objects and their server keyring are retired. `FORGE_SECRET_KEYS` is deleted from every deployment and no
+code reads it. The dev deployment's retired rows (7 synthetic QA objects, 11 versions, 7 grants, 106 events and 7
+deletion receipts) were purged on 2026-11-25 with the one-off `secretObjectsRetire` job, which then left the code with
+the tables. A deployment that still holds Secret Object rows (production, at its first release after this) runs that
+job once from the pinned in-between release (main #32064, receipt `ec617fb0`) before it takes a release that drops the
+tables, never scheduled, so idle costs nothing:
 
 1. `secretObjectsRetire:purgeRows '{"apply":false}'` counts the rows it would delete, lists each object by name,
-   repository, reference and version, and writes nothing. It reads at most `limit` rows (default 25, at most 100)
-   and 4 MiB per table, children before parents. No export path remains, so the owner looks at that list first: every
-   object must be synthetic, reissuable at its provider, or already held elsewhere. A production run needs the
-   owner's approval of the list.
+   repository, reference and version, and writes nothing. It reads at most `limit` rows (default 25, at most 100) and
+   4 MiB per table, children before parents. No export path remains, so the owner looks at that list first: every
+   object must be synthetic, reissuable at its provider, or already held elsewhere. A production run needs the owner's
+   approval of the list.
 2. The same call with `"apply":true,"reviewed":true` deletes them; repeat until it returns `deleted: 0` and
    `more: false`.
 3. `secretObjectsRetire:clearFields '{"table":"forgeAccounts","apply":false}'` (then `agentGrants`,

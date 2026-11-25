@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": -5,
+  "reason": "Secret Objects retired: 5 Convex tables and their fields, the one-off purge job, the table doc",
+  "date": "2026-11-25"
+}

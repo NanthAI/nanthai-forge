@@ -128,20 +128,6 @@ export const savedLink = {
   name: v.string(),
   route: savedRoute,
 };
-export const secretCapability = v.union(
-  v.literal('discover'),
-  v.literal('names'),
-  v.literal('use'),
-  v.literal('reveal'),
-  v.literal('modify'),
-  v.literal('delegate'),
-);
-export const sealedSecret = v.object({
-  keyId: v.string(),
-  nonce: v.string(),
-  tag: v.string(),
-  ciphertext: v.string(),
-});
 export const agentTool = v.union(...AGENT_TOOLS.map(tool => v.literal(tool)));
 export const agentFields = {
   owner: v.string(),
@@ -157,9 +143,6 @@ export const agentFields = {
   expiresAt: v.number(),
   revoked: v.boolean(),
   tokenHash: v.string(),
-  /** Retired: the token sealed under the server keyring. Never written now; purged by convex/secretObjectsRetire.ts and
-   * dropped from the schema by the follow-up landing. */
-  sealed: v.optional(sealedSecret),
 };
 export const agentDocument = v.object({
   _id: v.id('agentGrants'),
@@ -222,63 +205,6 @@ export const interestReceipt = {
   revision: v.number(),
   at: v.number(),
   update: interestUpdate,
-};
-export const secretFields = {
-  owner: v.string(),
-  name: v.string(),
-  operationId: v.string(),
-  repository: v.string(),
-  ref: v.string(),
-  version: v.number(),
-  disabled: v.boolean(),
-  policyRevision: v.number(),
-  archived: v.optional(v.boolean()),
-  archiveRevision: v.optional(v.number()),
-  deleting: v.optional(v.boolean()),
-};
-export const secretVersionFields = {
-  secretId: v.id('secretObjects'),
-  version: v.number(),
-  operationId: v.string(),
-  previousVersion: v.number(),
-  inputTag: v.string(),
-  sealed: sealedSecret,
-};
-export const secretEventFields = {
-  secretId: v.id('secretObjects'),
-  actor: v.string(),
-  operationId: v.string(),
-  kind: v.union(
-    v.literal('create'),
-    v.literal('rotate'),
-    v.literal('grant'),
-    v.literal('expire'),
-    v.literal('cascade-revoke'),
-    v.literal('enable'),
-    v.literal('disable'),
-    v.literal('use'),
-    v.literal('reveal'),
-    v.literal('archive'),
-    v.literal('unarchive'),
-  ),
-  version: v.number(),
-  policyRevision: v.number(),
-  at: v.number(),
-  principal: v.optional(v.string()),
-  capabilities: v.optional(v.array(secretCapability)),
-  expiresAt: v.optional(v.number()),
-  sha: v.optional(v.string()),
-  archiveRevision: v.optional(v.number()),
-  cascadeFrom: v.optional(v.string()),
-  affectedGrants: v.optional(
-    v.array(
-      v.object({
-        principal: v.string(),
-        capabilities: v.array(secretCapability),
-        expiresAt: v.union(v.number(), v.null()),
-      }),
-    ),
-  ),
 };
 export const projectBackupPreview = v.object({
   manifestDigest: v.string(),
@@ -775,11 +701,6 @@ export default defineSchema({
     connectedApps: v.optional(connectedApps),
     /** True until the person picks or keeps a handle once; unset until first checked. */
     handlePrompt: v.optional(v.boolean()),
-    /** Retired Secret Object review fields: never written now, cleared by convex/secretObjectsRetire.ts, dropped by the
-     * next landing. */
-    secretsReview: v.optional(v.object({ epoch: v.number(), operationId: v.string() })),
-    secretsLeftBelow: v.optional(v.number()),
-    secretsLeftBefore: v.optional(v.number()),
     /** Set while the account closes (convex/accountClose.ts): its operation, start time and where the background
      * removal stands. The row itself goes last. */
     closing: v.optional(accountClosing),
@@ -1031,36 +952,6 @@ export default defineSchema({
     ),
     tool: v.optional(agentTool),
   }).index('by_agentId', ['agentId']),
-  // Retired Secret Objects (Item 41a0df87, slice 6): nothing reads or writes these tables, so they keep no index. The
-  // one-off purge (convex/secretObjectsRetire.ts) deletes their rows; the next landing drops the tables.
-  secretDeletions: defineTable({
-    secretId: v.id('secretObjects'),
-    owner: v.string(),
-    creationOperationId: v.string(),
-    operationId: v.string(),
-    expectedVersion: v.number(),
-    expectedPolicyRevision: v.number(),
-    expectedArchiveRevision: v.number(),
-    at: v.number(),
-    status: v.union(v.literal('deleting'), v.literal('deleted')),
-    task: v.optional(v.id('_scheduled_functions')),
-  }),
-  secretObjects: defineTable(secretFields),
-  secretVersions: defineTable(secretVersionFields),
-  secretGrants: defineTable({
-    secretId: v.id('secretObjects'),
-    principal: v.string(),
-    capabilities: v.array(secretCapability),
-    expiresAt: v.optional(v.number()),
-    discover: v.boolean(),
-    activeUntil: v.number(),
-    grantedBy: v.optional(v.string()),
-    parentGrantId: v.optional(v.id('secretGrants')),
-    revokedAt: v.optional(v.number()),
-    grantedAt: v.optional(v.number()),
-    epoch: v.optional(v.number()),
-  }),
-  secretEvents: defineTable(secretEventFields),
   teams: defineTable({
     owner: v.string(),
     name: v.string(),

@@ -99,12 +99,6 @@ export const step = internalMutation({
         'This original data selection is unavailable.',
       );
       if (item.state === 'completed' || item.state === 'changed') return { state: item.state };
-      // A cleanup begun before Secret Objects were retired may still list an object or a grant of one. They are gone,
-      // so there is nothing to remove: the item ends as done and the receipt stops waiting on it.
-      if (item.kind === 'secret' || item.kind === 'secrets') {
-        await finish(ctx, account, item, 'completed');
-        return { state: 'completed' as const };
-      }
       if (item.state === 'pending') {
         const value = item.hidden
           ? await incomingCurrent(ctx, item.kind as LeaveKind, item.resourceId, actor)

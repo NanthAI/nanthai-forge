@@ -7,9 +7,6 @@ export const resourceKind = v.union(
 export const leaveKind = v.union(
   ...(['readers', 'zones', 'teams', 'projects', 'projectReaders'] as const).map(v.literal),
 );
-/** Stored `leave` and `captured` lists may still name `secrets` until the Secret Object purge has run
- * (convex/secretObjectsRetire.ts); the follow-up landing narrows them to `leaveKind`. */
-const storedLeaveKind = v.union(leaveKind, v.literal('secrets'));
 /** What others shared with the person that the person can see, and so review row by row. */
 export const sharedKind = v.union(
   ...(['projects', 'projectReaders', 'readers', 'teams', 'zones'] as const).map(v.literal),
@@ -26,18 +23,11 @@ export const accountFields = {
   operationId: v.string(),
   request: v.string(),
   expectedItems: v.number(),
-  leave: v.array(storedLeaveKind),
+  leave: v.array(leaveKind),
   stage: accountStage,
-  captured: v.array(storedLeaveKind),
+  captured: v.array(leaveKind),
   pending: v.number(),
   at: v.number(),
-  /** Retired Secret Object fields, never written now. They stay until the purge has run (convex/secretObjectsRetire.ts);
-   * the follow-up landing deletes them. */
-  secretsBelow: v.optional(v.number()),
-  secretsBefore: v.optional(v.number()),
-  secretsDone: v.optional(v.boolean()),
-  secretsCursor: v.optional(v.union(v.string(), v.null())),
-  secretsTask: v.optional(v.id('_scheduled_functions')),
   /** How many selected items Forge kept because they changed after the review (each one's step found a new pin). */
   kept: v.optional(v.number()),
 };
@@ -54,22 +44,17 @@ export const accountItemFields = {
   expected: v.optional(
     v.object({
       revision: v.optional(v.number()),
-      /** Retired Secret Object fields (see accountFields). */
-      version: v.optional(v.number()),
-      policyRevision: v.optional(v.number()),
-      archiveRevision: v.optional(v.number()),
       creationOperationId: v.optional(v.string()),
       creation: v.optional(v.number()),
     }),
   ),
 };
 /** A closing account (convex/accountClose.ts): the close operation, when it started and the background step that runs
- * next, with its task. `below` and the `secrets` phase are retired (see accountFields). */
+ * next, with its task. */
 export const accountClosing = v.object({
   operationId: v.string(),
   at: v.number(),
-  below: v.optional(v.number()),
-  phase: v.union(v.literal('secrets'), v.literal('receipts'), v.literal('signout'), v.literal('finish')),
+  phase: v.union(v.literal('receipts'), v.literal('signout'), v.literal('finish')),
   cursor: v.union(v.string(), v.null()),
   task: v.optional(v.id('_scheduled_functions')),
 });
