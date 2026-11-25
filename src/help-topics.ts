@@ -48,6 +48,7 @@ More: help wait, help conflict, help check, help overlap.`,
     text: `Keep the turn active while your work is unfinished. Resume with the receipt command: wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance"}'; check-only work uses wait '{"runId":"RUN_ID"}'.
 - wait blocks up to 540 s (--budget SECONDS); transient observation failures retry inside it.
 - Exit 3 is IN PROGRESS: run the same wait again. Never sleep between waits.
+- land --save {"maxChecks":N} waits for queue room (submits when fewer than N checks run or wait); use it, not polling, under a dev-check cap.
 - Terminal failure follows its recovery command; LANDED is acceptance, CHECK PASSED alone is not.
 - wait takes exactly one of runId, operationIds, peer, approval or main. wait {main:"green"} blocks until main's full check passes again (at once when it does), so a landing that failed only on main's red can land again. wait {approval:LANE_ID} blocks until the owner approves or declines request-approval. wait {peer:LANE_ID} blocks until that Lane lands, its latest landing fails or is cancelled, or the Lane closes (exit 0), or a note reaches your Lane (reason message, exit 3).
 - status accepts laneId; observe selects operationId (the original landing UUID), submissionId or runId.

@@ -293,6 +293,18 @@ test('status lists kept entries with their expiry, and only when something is ke
   assert(!JSON.stringify(keptApply).includes('local draft'), 'status carries paths, never file contents');
 });
 
+test('a kept entry holding only deletions says nothing needs doing', async t => {
+  const { s, request } = await blocked(t, s => {
+    rmSync(join(s.root, 'src/dir3/file3.txt'));
+    changeAlso(s, ['src/dir3/file3.txt']);
+  });
+  await recoverLocalApply(s.root, request.operationId, s.transport);
+  const [entry] = keptApplyEnvelope(s.root).keptApply.entries;
+  assert.deepEqual(entry.paths.deleted, ['src/dir3/file3.txt']);
+  assert.match(entry.note, /Only deletions are listed.*Nothing to copy back/);
+  assert.equal(readFileSync(join(s.root, 'src/dir3/file3.txt'), 'utf8'), incoming('src/dir3/file3.txt'));
+});
+
 test('expiry removes a confirmed entry after the TTL and never an unconfirmed one', async t => {
   const { s, request } = await blocked(t, localEdits);
   const recovered = await recoverLocalApply(s.root, request.operationId, s.transport);

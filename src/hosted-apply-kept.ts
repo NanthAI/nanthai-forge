@@ -342,11 +342,15 @@ function summarize(cache: string, name: string, hideEmpty = false): KeptApplySum
     ...counts,
     paths,
     // Kept bytes are not in the Lane head: the note says so, as the reply that kept them fails (48835eea).
-    note: receipt.held
-      ? 'Local bytes found in the previous checkout after an apply are kept here, not in the Lane head, until you delete this folder. Copy back what you need, then save.'
-      : receipt.confirmedAt
-        ? 'Your local changes are kept here, not in the Lane head, until the expiry time. Copy back what you need, then save.'
-        : 'Your local changes are kept here, not in the Lane head, until the apply is confirmed, then for seven days. Copy back what you need, then save.',
+    // Deletions alone keep no bytes: the sync put the baseline file back, so there is nothing to do (friction 991ae352).
+    note:
+      !receipt.held && counts.deleted && !counts.edited && !counts.extra
+        ? 'Only deletions are listed: no bytes were kept and the confirmed apply put those files back from main. Nothing to copy back; delete a path again only if you meant to remove it. This record expires on its own.'
+        : receipt.held
+          ? 'Local bytes found in the previous checkout after an apply are kept here, not in the Lane head, until you delete this folder. Copy back what you need, then save.'
+          : receipt.confirmedAt
+            ? 'Your local changes are kept here, not in the Lane head, until the expiry time. Copy back what you need, then save.'
+            : 'Your local changes are kept here, not in the Lane head, until the apply is confirmed, then for seven days. Copy back what you need, then save.',
   };
 }
 

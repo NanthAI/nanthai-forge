@@ -5,6 +5,8 @@
 export const EVENT_PROBE_PREFIX = '.forge-event-probe-';
 export const hostedLaneMarkerName = 'hosted-lane.json';
 export const laneScratchName = 'scratch';
+/** A loose log or scratch file directly under `.forge` (such as `scratch-build.log`): kept as it is, never a sync obstruction. */
+export const strayScratchFile = (name: string) => /^scratch[-_.][\w.-]*$|\.log$/.test(name);
 export const laneScratchPath = `.forge/${laneScratchName}`;
 
 /** Forge-owned metadata is never live source, even if an older client saved it.

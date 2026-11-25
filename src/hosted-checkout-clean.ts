@@ -16,6 +16,7 @@ import {
   hostedLaneMarkerName,
   laneScratchName,
   laneScratchPath,
+  strayScratchFile,
 } from './forge-cache-paths.js';
 import { ForgeError, invariant } from './errors.js';
 import type { NativeFile } from './state/format.js';
@@ -158,6 +159,11 @@ export function cleanHostedCheckout(
                 existsSync(join(root, laneScratchPath))))
           ) {
             preserved.push(laneScratchPath);
+            continue;
+          }
+          // A loose build log or scratch note a tool left beside the marker is never source (friction 286cc482).
+          if (strayScratchFile(name) && lstatSync(join(root, path, name)).isFile()) {
+            preserved.push(`${path}/${name}`);
             continue;
           }
           if (

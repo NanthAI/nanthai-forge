@@ -83,6 +83,8 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
    ([test signal](lint-rules.md#test-signal)). Run all affected tests (tests you add, direct and transitive
    consumers of changed or deleted modules, changed literal paths) plus the relevant docs, format, lint and
    type checks; never the full suite locally: the landing check is full verification.
+   Prove a new test fails first with `node scripts/failing-first.mjs TEST_FILE...` (runs it on a temporary copy
+   with main's bytes back over your changed sources; exit 0 means it fails on main, as it should).
 8. Never weaken, skip or quarantine tests or raise timeouts to hide races; explain any correction to an
    impossible assertion (the land message's `Weakened-tests:` line). Report observed commands, exit codes and
    counts; label unrun work. Runtime/storage changes also need real billed usage and byte-placement
@@ -104,6 +106,7 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
    The reviewer prompt must include the AGENTS.md safety line verbatim.
    Copy the full line starting with “Never print environment values or
    secrets” from [AGENTS.md](../../AGENTS.md#hard-rules). Check the benchmark hold before each submission.
+   When ready to land under a dev-check cap, use `"maxChecks":N` (it waits for queue room and wakes when a check ends) rather than polling `queue`; a check-only run still needs a `queue` read.
    Never end the turn while your landing, dry run or wait runs; follow the command land prints. End the
    land message with the commit trailers your harness asks for (for example `Co-Authored-By:`).
 10. Fix failures in the same Lane and land again; never cancel and recreate. Before filing an Issue or
@@ -114,7 +117,7 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
     deployment success at that commit; tell the lead the accepted State and do not deploy yourself. Tick
     each proven Done-when line with its evidence (`tick-planning-item`); unmet lines stay open or name their
     next Issue. The landing message says what the change removes or merges, or why nothing can go (growth
-    guard: `node scripts/check-growth.mjs`). Abandon unused Lanes with work preserved; remove only your own
+    guard: `node scripts/check-growth.mjs`). Tidy leftover Lanes in one go with `node scripts/tidy-lanes.mjs` (lists them; `--apply` completes merged Lanes and abandons dormant ones, saves kept). Abandon unused Lanes with work preserved; remove only your own
     regenerable temporary output.
 12. Convex: any `mutation` or `internalMutation` you add or touch imports from
     `./server` (the `finishReadWriter` wrapper), never `./_generated/server`.

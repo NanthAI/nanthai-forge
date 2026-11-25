@@ -362,6 +362,16 @@ test('scratch uses the filesystem spelling of the advertised path and protects a
   }
 });
 
+test('a stray build log under .forge never blocks a sync and stays untouched', async t => {
+  const s = await fixture(t),
+    log = join(s.root, '.forge/scratch-build.log');
+  writeFileSync(log, 'synthetic build output');
+  const request = fullStageCommand(s);
+  const applied = await applyHostedSync(s.root, request, s.transport);
+  assert.equal(applied.head, request.lane.head);
+  assert.equal(readFileSync(log, 'utf8'), 'synthetic build output');
+});
+
 for (const same of [false, true])
   test(`a legacy-shaped cache intersecting incoming source ${same ? 'matches' : 'conflicts'} without quarantine`, async t => {
     const s = await fixture(t),
