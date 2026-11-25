@@ -256,10 +256,12 @@ export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 export const hostedRequiredFeatures: readonly HostedContractFeature[] = [];
 
 export const MAX_CONTRACT_FEATURES = 64;
+export const agentHooksFeature = 'agent-hooks-state';
 
 /** The subset of the asked names this server implements (server side). Feed consumers
  * ask explicitly; the installed CLI's general discovery already uses its full feature budget. */
 export const advertisedFeatures = (asked: readonly string[]) => [
+  ...(asked.includes(agentHooksFeature) ? [agentHooksFeature] : []),
   ...(asked.includes(feedCommitOrder) ? [feedCommitOrder] : []),
   ...(asked.includes(startLaneTitle) ? [startLaneTitle] : []),
   ...(asked.includes(laneUndo) ? [laneUndo] : []),

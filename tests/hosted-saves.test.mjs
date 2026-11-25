@@ -95,6 +95,32 @@ test('clean save succeeds without worker or Lane version change', async () => {
   assert.equal(result.outcome.result.version, 0);
   assert.equal(s.scheduled.length, 0);
 });
+
+test('a clean save reports the saving run’s hook state, and a retry keeps the original report', async () => {
+  const s = await saveFixture();
+  const overlap = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === s.laneId);
+  s.patch('projectHostedOverlapLanes', overlap._id, { agent: 'amber-fox' });
+  const x = await s.prepare([], { authorship: { kind: 'agent' }, agentRun: 'amber-moth', hooks: 'off' });
+  assert.equal(
+    [...s.tables.projectHostedRecordHeads.values()].some(row => row.hooks),
+    false,
+    'preparing publishes no report',
+  );
+  await s.call('prepare', api.prepare, {
+    projectId: s.projectId,
+    request: JSON.stringify({ ...x.request, hooks: 'configured' }),
+  });
+  const terminal = await s.submit(x);
+  assert.equal(terminal.outcome.result.unchanged, true);
+  const save = [...s.tables.projectHostedRecordHeads.values()].find(row => row.kind === 'save');
+  assert.deepEqual(save.hooks, {
+    actor: 'owner',
+    run: 'amber-moth',
+    state: 'off',
+    at: Date.parse(terminal.at),
+  });
+  assert.equal(s.tables.projectHostedOverlapLanes.get(overlap._id).agent, 'amber-fox');
+});
 test('staging rejects uncommitted blobs, changed retries, missing pages, foreign objects and reordered paths', async () => {
   const s = await saveFixture(),
     change = s.change(),

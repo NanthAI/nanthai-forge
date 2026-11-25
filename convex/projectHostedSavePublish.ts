@@ -218,6 +218,7 @@ export async function publishHostedSave(
     ...input,
     authorityEpoch,
     expectedVersion: null,
+    ...(state.request.hooks ? { saveHooks: state.request.hooks } : {}),
     record: {
       kind: 'save',
       ...sourceAuthorship(state.request),

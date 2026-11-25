@@ -12,6 +12,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { activeProject, accessibleProject } from './projectAuthority';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { hostedRecordValue, hostedRecordIndex, type HostedRecordKind } from '../src/hosted-records';
+import { isAgentSlug } from '../src/agent-slug';
 import { indexedSaveStatus, resumeSaveHeadBackfill, saveHeadFact } from './projectMetricSaveHeads';
 import { invariant } from '../src/errors';
 import { commentPurged, planningPurged } from '../src/work-planning-put';
@@ -150,6 +151,7 @@ export async function writeHostedRecord(
     candidateFiles?: { sha256: string; size: number };
     /** Trusted input aggregate; false clears Lane provenance, true seeds a new resolution/Candidate. */
     ownerOnly?: boolean;
+    saveHooks?: import('../src/hosted-lane').AgentHooks;
     overlap?: {
       changes?: OverlapChange[];
       savedBy?: string;
@@ -157,6 +159,7 @@ export async function writeHostedRecord(
       baseSequence?: number;
       intent?: string;
       agent?: string | null;
+      hooks?: import('../src/hosted-lane').AgentHooks;
       holderChanged?: true;
       session?: import('zod').infer<typeof import('../src/hosted-lane').sessionMetadataSchema>;
       /** A sync moved the Lane's base to a newer main: keep its saved-path evidence (4f167dfd). */
@@ -275,6 +278,16 @@ export async function writeHostedRecord(
     ...identity,
     ...indexed,
     ...(record.kind === 'save' ? { status: indexedSaveStatus } : {}),
+    ...(record.kind === 'save' && input.saveHooks && isAgentSlug(record.agentRun)
+      ? {
+          hooks: {
+            actor: input.actor,
+            run: record.agentRun,
+            state: input.saveHooks,
+            at: Date.parse(record.at),
+          },
+        }
+      : {}),
     recordId: id,
     ...(record.kind === 'lane' && head?.saveFailure ? { saveFailure: head.saveFailure } : {}),
     ...(itemId !== undefined && (record.kind === 'intent' || (record.kind === 'lane' && itemId))

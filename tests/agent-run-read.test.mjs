@@ -20,6 +20,7 @@ function world() {
     contributor: 'acct-mate',
   });
   table(s, 'projectReaders').set('reader', { _id: 'reader', projectId: 'project', reader: 'acct-reader' });
+  table(s, 'projectHostedRecordHeads');
   const lane = (laneId, agent, created) => ({
     _id: laneId,
     _creationTime: created,
@@ -141,6 +142,44 @@ test('the page finds its person by the account id the people wrapper passes, not
   const nobody = await read(world(), 'owner', 'acct-nobody');
   assert.deepEqual(nobody.lanes, []);
   assert.doesNotMatch(JSON.stringify(nobody), /amber-fox from|First from|Second from|lane-a/);
+});
+
+test('the agent run reports its latest observed hook state and leaves legacy sessions unknown', async () => {
+  const s = world();
+  assert.equal((await read(s, 'owner')).hooks, null);
+  const lanes = table(s, 'projectHostedOverlapLanes');
+  const lane = lanes.get('lane-a');
+  lane.hooks = { state: 'configured', at: NOW - 4 * HOUR };
+  lanes.set('lane-c', {
+    ...lane,
+    _id: 'lane-c',
+    laneId: 'lane-c',
+    // A later lifecycle write on lane-a must not make its older hook report newer.
+    lastActivityAt: NOW - HOUR,
+    hooks: { state: 'off', at: NOW - 2 * HOUR },
+  });
+  lane.lastActivityAt = NOW;
+  lanes.get('lane-b').hooks = { state: 'configured', at: NOW };
+
+  assert.deepEqual((await read(s, 'owner')).hooks, { state: 'off', at: NOW - 2 * HOUR });
+});
+
+test('a run that saved another agent’s Lane shows its own hook report', async () => {
+  const s = world();
+  table(s, 'projectHostedOverlapLanes').delete('lane-a');
+  table(s, 'projectHostedRecordHeads').set('save-own', {
+    projectId: 'project',
+    kind: 'save',
+    hooks: { actor: 'owner', run: 'amber-fox', state: 'off', at: NOW - HOUR },
+  });
+  table(s, 'projectHostedRecordHeads').set('save-other', {
+    projectId: 'project',
+    kind: 'save',
+    hooks: { actor: 'acct-mate', run: 'amber-fox', state: 'configured', at: NOW },
+  });
+  const result = await read(s, 'owner');
+  assert.deepEqual(result.lanes, []);
+  assert.deepEqual(result.hooks, { state: 'off', at: NOW - HOUR });
 });
 
 test('a reader, a stranger and a signed-out caller get nothing of the run', async () => {

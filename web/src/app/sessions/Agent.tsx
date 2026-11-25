@@ -26,16 +26,32 @@ const at = (ms: number) =>
 export function AgentRun({ person, run, ...props }: PlaceProps & { person: string; run: string }) {
   const [cursor, setCursor] = useState<string | null>(null);
   const [earlier, setEarlier] = useState<AgentLane[]>([]);
+  const [earlierHooks, setEarlierHooks] = useState<AgentRunRead['hooks']>();
   const [asOf] = useState(() => Date.now());
-  const result = useQuery(api.projectAgentRun.read, {
+  const args = {
     projectId: props.projectId,
     person,
     run,
-    cursor,
     asOf,
-  });
-  const data = result ? (JSON.parse(result) as AgentRunRead) : undefined;
-  const read = data?.schema === 1 ? { ...data, lanes: [...earlier, ...data.lanes] } : data;
+  };
+  const liveResult = useQuery(api.projectAgentRun.read, { ...args, cursor: null });
+  const pageResult = useQuery(api.projectAgentRun.read, cursor ? { ...args, cursor } : 'skip');
+  const live = liveResult ? (JSON.parse(liveResult) as AgentRunRead) : undefined;
+  const page = pageResult ? (JSON.parse(pageResult) as AgentRunRead) : undefined;
+  const next = cursor ? page : live;
+  const older = newerHooks(page?.hooks, earlierHooks);
+  const lanes = new Map(live?.lanes.map(lane => [lane.laneId, lane]));
+  for (const lane of [...earlier, ...(page?.lanes ?? [])])
+    if (!lanes.has(lane.laneId)) lanes.set(lane.laneId, lane);
+  const read =
+    live?.schema === 1
+      ? {
+          ...live,
+          lanes: [...lanes.values()],
+          hooks: newerHooks(live.hooks, older),
+          isDone: next?.isDone ?? false,
+        }
+      : live;
   return (
     <AgentView
       route={props.route}
@@ -43,13 +59,17 @@ export function AgentRun({ person, run, ...props }: PlaceProps & { person: strin
       run={run}
       data={read}
       more={() => {
-        if (!data || data.isDone) return;
-        setEarlier(read!.lanes);
-        setCursor(data.continueCursor);
+        if (!next || next.isDone) return;
+        if (page) setEarlier([...earlier, ...page.lanes]);
+        setEarlierHooks(older);
+        setCursor(next.continueCursor);
       }}
     />
   );
 }
+
+const newerHooks = (a: AgentRunRead['hooks'], b: AgentRunRead['hooks']) =>
+  a && (!b || a.at >= b.at) ? a : b;
 
 export function AgentView({
   route,
@@ -89,6 +109,8 @@ export function AgentView({
         sentence={
           !data ? (
             'Loading this agent run…'
+          ) : !lanes.length && data.hooks ? (
+            <b>{run} reported its Forge hook state.</b>
           ) : !lanes.length ? (
             <>
               <b>Nothing from {run} here yet.</b> Its Lanes and landings show once it starts one.
@@ -274,6 +296,17 @@ export function AgentView({
               </dd>
               <dt>Identity from</dt>
               <dd>{data?.identityFrom ?? 'not reported'}</dd>
+              <dt>Forge hooks</dt>
+              <dd>
+                {data?.hooks ? (
+                  <>
+                    {{ configured: 'Configured', off: 'Off', unavailable: 'Unavailable' }[data.hooks.state]}
+                    <span className="sub"> reported {at(data.hooks.at)}</span>
+                  </>
+                ) : (
+                  'not reported'
+                )}
+              </dd>
               <dt>Device</dt>
               <dd className="mono">{data?.device ?? 'not reported'}</dd>
             </dl>

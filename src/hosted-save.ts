@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { z } from 'zod';
 import { authorshipFields, personStampValid } from './work-actor-types.js';
-import { sessionClaimSchema } from './hosted-lane.js';
+import { agentHooksSchema, sessionClaimSchema } from './hosted-lane.js';
 import { saveDeclarations } from './agent-handoff-types.js';
 import { stateSchema } from './state/format.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
@@ -92,6 +92,7 @@ export const saveRequestSchema = z
     ...authorshipFields,
     operationId: z.uuid(),
     laneId: z.uuid(),
+    hooks: agentHooksSchema.optional(),
     /** Reader expansion for the later session-bound holder writer. */
     session: sessionClaimSchema.optional(),
     holderSessionId: z

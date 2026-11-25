@@ -2,6 +2,8 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+/** A bounded local report, never a capability or access grant. */
+export const agentHooks = v.union(v.literal('configured'), v.literal('off'), v.literal('unavailable'));
 export const hostedKind = v.union(
   v.literal('intent'),
   v.literal('lane'),
@@ -107,6 +109,8 @@ export const hostedRecordTables = {
     ...identity,
     ...indexed,
     recordId: v.id('projectHostedRecords'),
+    /** Published alongside the save, even when the Lane's source head stayed the same. */
+    hooks: v.optional(v.object({ actor: v.string(), run: v.string(), state: agentHooks, at: v.number() })),
     /** Transient projection of the latest background save's retained terminal failure. */
     saveFailure: v.optional(
       v.object({
@@ -140,6 +144,13 @@ export const hostedRecordTables = {
     .index('by_project_and_kind_and_parent', ['projectId', 'kind', 'parent'])
     // An Issue's comments or its Intent's notes, without reading the other.
     .index('by_project_and_kind_and_parent_and_status', ['projectId', 'kind', 'parent', 'status'])
+    .index('by_project_and_kind_and_hook_report', [
+      'projectId',
+      'kind',
+      'hooks.actor',
+      'hooks.run',
+      'hooks.at',
+    ])
     .index('by_project_and_kind_and_status', ['projectId', 'kind', 'status']),
   projectHostedOperations: defineTable({
     planningApply: v.optional(v.string()),

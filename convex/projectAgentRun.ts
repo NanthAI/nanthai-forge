@@ -6,6 +6,7 @@
 // - open Lanes: at most AGENT_OPEN_READ rows of the project's open Lanes, filtered to this run;
 // - closed Lanes: one page of at most AGENT_CLOSED_READ rows (64 KB), newest activity first, filtered to this run;
 // - the newest landing's receipt, once, for the declared model;
+// - the newest save with a hook report, one indexed row (first page only);
 // - saves: one range of save records per Lane shown (at most AGENT_SAVE_LANES Lanes, AGENT_SAVES_READ rows each);
 // - comments (first page only): the person's day rows over the run's days (at most AGENT_COMMENT_DAYS rows, newest
 //   first) for the count the day close made, and the person's Work change rows in the run's window (at most
@@ -22,6 +23,7 @@ import { invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { personDaySchema } from '../src/person-days';
 import { firstLine, planningChange, planningCommand, runOf } from './personWork';
+import type { AgentHooks } from '../src/hosted-lane';
 
 export const AGENT_OPEN_READ = 200;
 export const AGENT_CLOSED_READ = 100;
@@ -55,6 +57,7 @@ export type AgentRunRead = {
   app: string | null;
   device: string | null;
   identityFrom: string | null;
+  hooks?: { state: AgentHooks; at: number } | null;
   /** First page only: the count is the day close's (through `through`) plus the listed comments after that day; the
    * list is the ones still in the hot change feed, newest first. Null on later pages. */
   comments: {
@@ -148,6 +151,24 @@ export const read = query({
           ? null
           : await runComments(ctx, projectId, actor, run, rows, { asOf, allLanes: closed.isDone });
       const session = rows.find(lane => lane.session)?.session;
+      const [hookSave] =
+        !cursor && actor
+          ? await ctx.db
+              .query('projectHostedRecordHeads')
+              .withIndex('by_project_and_kind_and_hook_report', q =>
+                q.eq('projectId', projectId).eq('kind', 'save').eq('hooks.actor', actor).eq('hooks.run', run),
+              )
+              .order('desc')
+              .take(1)
+          : [];
+      const saveHooks = hookSave?.hooks;
+      const hooks = rows.reduce<AgentRunRead['hooks']>(
+        (latest, lane) => {
+          const report = lane.hooks;
+          return report && (!latest || report.at > latest.at) ? report : latest;
+        },
+        saveHooks ? { state: saveHooks.state, at: saveHooks.at } : null,
+      );
       const result: AgentRunRead = {
         schema: 1,
         person,
@@ -167,6 +188,7 @@ export const read = query({
         // A device's code is what everyone sees; its name stays with its person (DESIGN.md rule 32).
         device: session?.device?.code ?? null,
         identityFrom: session?.identityFrom ?? null,
+        hooks,
         continueCursor: closed.continueCursor,
         isDone: closed.isDone,
       };

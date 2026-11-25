@@ -34,6 +34,10 @@ export const sessionMetadataSchema = sessionClaimSchema
   })
   .strict();
 
+/** Local Forge hook state, reported by the client as display metadata. */
+export const agentHooksSchema = z.enum(['configured', 'off', 'unavailable']);
+export type AgentHooks = z.infer<typeof agentHooksSchema>;
+
 export const hostedIntentInputSchema = z.discriminatedUnion('kind', [
   z
     .object({
@@ -66,6 +70,7 @@ export const hostedStartSchema = z
     guardRevision: z.string().max(16).optional(),
     /** The calling agent session's slug (feature agent-slug, c29d0780); never part of the payload hash. */
     agent: z.string().refine(isAgentSlug, 'agent must be a Forge agent slug').optional(),
+    hooks: agentHooksSchema.optional(),
     session: sessionClaimSchema.optional(),
     holderSessionId: z
       .string()

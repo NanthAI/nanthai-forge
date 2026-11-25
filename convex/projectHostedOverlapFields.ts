@@ -3,7 +3,7 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { mainRedHoldValidator } from './projectHostedLandingFields';
-import { saveFailureView } from './projectHostedRecordFields';
+import { agentHooks, saveFailureView } from './projectHostedRecordFields';
 const session = v.optional(
   v.object({
     sessionId: v.string(),
@@ -35,6 +35,7 @@ export const hostedOverlapTables = {
     session,
     /** The agent session's word-list slug (c29d0780); absent for a person. Shown as `handle/slug`. */
     agent: v.optional(v.string()),
+    hooks: v.optional(v.object({ state: agentHooks, at: v.number() })),
     /** Authenticated author of the save that published this head. True means the Lane starter. */
     savedBy: v.optional(v.union(v.string(), v.literal(true))),
     intent: v.string(),

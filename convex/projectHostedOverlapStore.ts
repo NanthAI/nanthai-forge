@@ -98,6 +98,7 @@ export async function trackHostedOverlapLane(
     intent?: string;
     /** The starting agent session's slug (c29d0780); later writes keep the stored one. */
     agent?: string | null;
+    hooks?: import('../src/hosted-lane').AgentHooks;
     holderChanged?: true;
     session?: import('zod').infer<typeof import('../src/hosted-lane').sessionMetadataSchema>;
     /** A sync moved the base to a newer main; the Lane's saved paths still describe its own work. */
@@ -218,6 +219,16 @@ export async function trackHostedOverlapLane(
       ? undefined
       : (metadata?.agent ?? old?.agent ?? (origin?.actor === lane.actor ? origin.agent : undefined));
   const savedBy = metadata?.savedBy === lane.actor ? (true as const) : (metadata?.savedBy ?? old?.savedBy);
+  const sameRun =
+    agent === old?.agent &&
+    (!metadata?.holderChanged ||
+      (old?.session?.sessionId === metadata.session?.sessionId && old?.holderActor === lane.holder?.actor));
+  const hooks =
+    agent && metadata?.hooks
+      ? { state: metadata.hooks, at: Date.parse(lane.at) }
+      : sameRun
+        ? old?.hooks
+        : undefined;
   const open = ['active', 'paused', 'ready'].includes(lane.state);
   // Superseded lasts while the Lane stays open at the head it was set on; a save or reopen ends it.
   const superseded = old?.open && open && old.superseded?.laneHead === lane.head ? old.superseded : undefined;
@@ -269,6 +280,7 @@ export async function trackHostedOverlapLane(
         }
       : {}),
     ...(agent ? { agent } : {}),
+    ...(hooks ? { hooks } : {}),
     intent: (metadata?.intent ?? old?.intent ?? lane.intentId).slice(0, 160),
     head: lane.head,
     baseHead: lane.base.head,

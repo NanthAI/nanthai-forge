@@ -34,6 +34,8 @@ import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted
 import { executeCommand } from './projectWorkCommand';
 import { selectedGeneration } from './projectWorkIndexStore';
 import { latestItemIntentHead } from './projectItemIntentHeads';
+import { agentHooks } from './projectHostedRecordFields';
+import type { AgentHooks } from '../src/hosted-lane';
 
 const args = {
   projectId: v.id('hostedProjects'),
@@ -51,6 +53,7 @@ const args = {
   guardRevision: v.optional(v.string()),
   /** The calling agent session's slug (feature agent-slug, c29d0780); not part of the payload. */
   agent: v.optional(v.string()),
+  hooks: v.optional(agentHooks),
   session: v.optional(
     v.object({
       app: v.optional(v.string()),
@@ -83,6 +86,7 @@ type Input = {
   openLanesVersion?: 1 | 2 | 3;
   guardRevision?: string;
   agent?: string;
+  hooks?: AgentHooks;
   authorityEpoch: number;
   expectedMain: { head: string; receiptId: string };
   initialHead?: string;
@@ -153,6 +157,7 @@ async function execute(
     // Never part of the payload hash: a retried start is the same start (13ea93bf).
     guardRevision,
     agent,
+    hooks,
     agentClient,
     authorship,
     session,
@@ -429,6 +434,7 @@ async function execute(
         baseSequence: main.sourceRevision,
         intent: overlapIntent,
         ...(agent ? { agent } : {}),
+        ...(agent && hooks ? { hooks } : {}),
         ...(holderEnabled && sessionIdentity
           ? { session: provenance(sessionIdentity, session, Date.parse(first.at), ctx.forgeDevice) }
           : {}),

@@ -139,7 +139,8 @@ export const prepare = mutation({
             headWrittenAt: current.at,
           });
       }
-      const semantic = withoutAuthorship(request);
+      const { hooks, ...semantic } = withoutAuthorship(request);
+      void hooks;
       const prepared = await beginHostedOperation(ctx, {
         ...auth,
         accountChannel: 'save',
