@@ -275,7 +275,7 @@ test('all reads, writes, retries and callbacks recheck current access and author
   await assert.rejects(owner.callback(done), code('SOURCE_AUTHORITY_CHANGED'));
 });
 test('the registered internal callback resolves its backend key and fences epoch changes before replay', async () => {
-  const s = await checksFixture(),
+  const s = await checksFixture(null, { inline: true }),
     r = await s.activate((await s.enqueue(s.selection())).id, 1);
   const keyName = 'FORGE_HOSTED_CHECK_KEY_SYNTHETIC',
     previous = process.env[keyName];
@@ -410,7 +410,7 @@ test('a Candidate published by the H08 trusted worker goes through the pinned pr
 });
 
 test('one failed shard reports all four failed files and keeps flaky files separate in status', async () => {
-  const s = await checksFixture();
+  const s = await checksFixture(null, { inline: true });
   const r = await s.activate((await s.enqueue(s.selection())).id, 1);
   await s.callback(s.shard(r, 0, 'failed'));
   const contractReports = Object.fromEntries(
@@ -475,7 +475,7 @@ test('same-transaction run reuse still rejects mismatched identity, changed defi
 });
 
 test('operational expiry keeps active checks and all verdict/source/receipt evidence while reclaiming only aged raw detail', async t => {
-  const s = await checksFixture();
+  const s = await checksFixture(null, { inline: true });
   const expiry = await import(moduleUrl('../convex/projectOperationalExpiry.ts'));
   const r = await s.activate((await s.enqueue(s.selection())).id);
   const input = {

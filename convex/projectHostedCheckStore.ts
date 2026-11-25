@@ -149,6 +149,7 @@ export async function loadHostedCheck(
       conclusion: row.reportConclusion,
       collection: row.reportCollection,
     });
+  // Inline-report reader (rows without `reportStorage`): remove on 2026-12-31 once no inline run remains (docs/operations/legacy-small-shapes.md#inline-check-reports-f9).
   if (row.reportParts !== undefined && row.reportStorage !== 'r2') {
     detachCheckReports(run, row.reportParts, row.reportDigest ?? '');
     if (withReports) await hydrateCheckReports(ctx, run);

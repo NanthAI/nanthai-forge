@@ -58,7 +58,8 @@ async function fixture(t, actualEnvironment = false, provider = 'mac', source = 
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
   });
-  const f = await checksFixture(null, source),
+  // Inline runs: these raw worker calls predate R2 reports and send no `check-report-detail` feature; remove with the inline readers (2026-12-31).
+  const f = await checksFixture(null, { ...source, inline: true }),
     scheduled = [];
   f.decorateContext(ctx => {
     ctx.scheduler = {

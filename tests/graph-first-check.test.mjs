@@ -637,6 +637,7 @@ async function server(t, { check = ci(), main = 'green', paths = ['crates/a/src/
         claims: JSON.stringify(claims),
         recipe: JSON.stringify(recipe),
         lockfile: 'e'.repeat(64),
+        resultsBatch: true,
         selectionR2Key: `v1/p/${id.projectId}/o/${savePin(selection).sha256}`,
         recipeR2Key: `v1/p/${id.projectId}/o/${savePin(recipe).sha256}`,
       }),

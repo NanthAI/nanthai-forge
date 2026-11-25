@@ -105,7 +105,8 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null, r
     R2_ACCESS_KEY_ID: 'synthetic-access',
     R2_SECRET_ACCESS_KEY: 'synthetic-secret',
   });
-  const s = await checksFixture(),
+  // Inline runs (pre-2026-11-11 protocol: reports in rows, per-shard results) until their readers go on 2026-12-31.
+  const s = await checksFixture(null, { inline: true }),
     scheduled = [],
     cancelled = [],
     storage = new Map();

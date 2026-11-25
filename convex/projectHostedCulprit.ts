@@ -923,6 +923,7 @@ async function classify(
       });
       return;
     }
+    // Inline-report reader: remove on 2026-12-31 (see projectHostedCheckStore.ts).
     if (own && ownRow?.reportParts !== undefined) {
       detachCheckReports(own, ownRow.reportParts, ownRow.reportDigest ?? '');
       await hydrateCheckReports(ctx, own);
@@ -1466,6 +1467,7 @@ async function beginGreenProbe(
     });
     return;
   }
+  // Inline-report reader: remove on 2026-12-31 (see projectHostedCheckStore.ts).
   if (greenRow?.reportParts !== undefined) {
     detachCheckReports(green, greenRow.reportParts, greenRow.reportDigest ?? '');
     await hydrateCheckReports(ctx, green);

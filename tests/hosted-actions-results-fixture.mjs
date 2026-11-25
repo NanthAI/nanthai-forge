@@ -91,9 +91,11 @@ const report = i =>
       }
     : { durationMs: 1000 + ((i * 37) % 9000) + 0.123, failed: false };
 
-async function landing(t, shards, batch = false, packed = false, r2Reports = false) {
+/** New runs always keep reports in R2 (one folded object, batched results). `inline` re-creates a run
+ * enqueued before 2026-11-11 (reports in rows, optional batch) for the inline-report readers that stay
+ * until their 2026-12-31 removal; delete those callers with the readers. */
+async function landing(t, shards, { batch = false, packed = false, inline = false } = {}) {
   variables(t, {
-    FORGE_CHECK_REPORTS_R2: r2Reports ? '1' : '0',
     CONVEX_SITE_URL: audience,
     CONVEX_CLOUD_URL: 'https://forge.convex.cloud',
     FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-check-key',
@@ -135,6 +137,9 @@ async function landing(t, shards, batch = false, packed = false, r2Reports = fal
   };
   const configuration = await s.configure({ kind: 'runner', configuration: runner }, s.configuration.digest);
   const run = await s.enqueue(s.selection({ expectedConfiguration: configuration.digest }));
+  if (inline)
+    for (const row of s.tables.projectHostedCheckRuns.values())
+      if (row.runId === run.id) delete row.reportStorage;
   const id = { projectId: s.projectId, runId: run.id };
   const reserved = JSON.parse(await s.transaction('reserve', direct.reserve, id));
   await s.transaction('observe', direct.observe, {
@@ -163,7 +168,7 @@ async function landing(t, shards, batch = false, packed = false, r2Reports = fal
     lockfile: 'e'.repeat(64),
     selectionR2Key: `v1/p/${id.projectId}/o/${savePin(recipe.selection).sha256}`,
     recipeR2Key: `v1/p/${id.projectId}/o/${savePin(recipe).sha256}`,
-    ...(batch ? { resultsBatch: true } : {}),
+    ...(batch || !inline ? { resultsBatch: true } : {}),
     ...(packed ? { resultsPacked: true } : {}),
   });
   const provider = { conclusion: 'success', completed: true, runAttempt: 1 };

@@ -24,4 +24,12 @@ The job `convex/legacyShapeSweep.ts` is not on main. It lives in the pinned in-b
 6. Verify, which is not the replay alone: rerun the dry run. Every family must print `stopped: null`, `changed: 0`, an empty `counts` and no `blockedIds`. A replay that stopped at its budget also prints `changed: 0`, so a stop is never a pass.
 7. Deploy main. The deploy validates every stored row against the tightened schema: a refusal names the table and the field the job missed. Rerun step 5 for that family; do not edit the schema.
 
+## Inline check reports (F9)
+
+New runs always write their reports to R2: the server setting `FORGE_CHECK_REPORTS_R2` is deleted, so prod needs no environment value (delete any value prod still holds, through the approved secret tool, never by listing the environment). Runs enqueued before the release keep their reports in rows and expire by the 30-day operational expiry; dev's last inline reports expire by 2026-12-11 (inline writes stopped there on 2026-11-11).
+
+Before the release deploys, every registered runner and CLI must send `check-report-detail`: an older self-hosted or Mac runner, or an older CLI, now gets `CLI_UPGRADE_REQUIRED` on every new run. Check the registered machines' builds and update them first.
+
+The inline readers (`projectHostedCheckStore.ts`, `projectHostedTestTimings.ts`, `projectHostedCulprit.ts`, and the `inline` option of the check test fixtures) carry a removal line dated 2026-12-31. That date is the earliest, set from dev. Delete them only when prod has none left: at least 30 days after the release, and `legacyShapeSweep:reportsEdge` on prod prints `resolved: true` with `lastRunInline: false` for every project that has check runs. Deleting earlier makes the report detail of a still-retained inline run unreadable.
+
 Remove `.env.local` after any Convex CLI use.

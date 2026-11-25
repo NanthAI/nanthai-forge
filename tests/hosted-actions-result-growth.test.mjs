@@ -32,7 +32,7 @@ const sum = (meters, key) => meters.reduce((n, m) => n + m[key], 0);
 const kb = n => Math.round(n / 102.4) / 10;
 
 async function measure(t, shards, replays = []) {
-  const l = await landing(t, shards),
+  const l = await landing(t, shards, { inline: true }),
     calls = [];
   let body;
   for (let index = 0; index < shards; index++) {
@@ -228,7 +228,7 @@ test('replay equals the per-result fold: progress summaries, pool, budget, cap a
     [5, 3, 1, 0, 2, 4],
   ]) {
     const steps = trickySteps(6),
-      l = await landing(t, 6),
+      l = await landing(t, 6, { inline: true }),
       arrived = order.map(index => steps[index]);
     const expected = referenceFold(arrived, 6);
     let body;
@@ -262,7 +262,7 @@ test('replay equals the per-result fold: progress summaries, pool, budget, cap a
 
 test('a check cancelled between shards keeps exactly the reports its shards sent', async t => {
   const steps = trickySteps(6),
-    l = await landing(t, 6);
+    l = await landing(t, 6, { inline: true });
   for (const step of steps.slice(0, 3)) await l.post(step);
   await l.s.cancel(l.id.runId);
   const run = l.stored();
@@ -329,7 +329,7 @@ test('the last shard reads about one copy of the reports, not every shard record
 
 test("a failing early shard's file and first error reach the landing reply", async t => {
   const { checkFailureDetail } = await import('../dist/check-failure-detail.js');
-  const l = await landing(t, 4),
+  const l = await landing(t, 4, { inline: true }),
     file = 'tests/hosted-growth-0300.test.mjs',
     error = 'AssertionError: synthetic shard one failure';
   const steps = [0, 1, 2, 3].map(index => ({
@@ -354,7 +354,7 @@ test("a failing early shard's file and first error reach the landing reply", asy
 test('shard rows written before the compact shape still replay to the same reports', async t => {
   // A run in flight across the deploy has raw rows {reports, yielded}; the replay reads both shapes.
   const steps = trickySteps(6),
-    l = await landing(t, 6);
+    l = await landing(t, 6, { inline: true });
   for (const step of steps.slice(0, 5)) await l.post(step);
   for (const row of l.s.tables.projectHostedActionsResults.values())
     if (row.reports !== undefined) {
@@ -377,7 +377,7 @@ test('shard rows written before the compact shape still replay to the same repor
 });
 
 test('unsealed output: the committed result stands and prepare refuses exactly as before', async t => {
-  const l = await landing(t, 2);
+  const l = await landing(t, 2, { inline: true });
   await l.send(0);
   // An output stream that never sealed: the final manifest must not be published.
   [...l.s.tables.projectHostedOutputHeads.values()][0].streams++;
@@ -410,7 +410,7 @@ test('Issue 0c457ae4: 5,000 test files complete through the hosted result path a
   const failed = many[4321],
     shards = 8,
     per = Math.ceil(many.length / shards);
-  const l = await landing(t, shards);
+  const l = await landing(t, shards, { inline: true });
   const steps = Array.from({ length: shards }, (_, index) => ({
     index,
     exitCode: index === 5 ? 1 : 0,
@@ -456,8 +456,8 @@ test('Issue 0c457ae4: 5,000 test files complete through the hosted result path a
   t.diagnostic(JSON.stringify({ files: many.length, shards, runRowKB: kb(Buffer.byteLength(runRow.value)) }));
 });
 
-async function batchedLanding(t, shards, steps, { conclude = true, replay = false, r2Reports = false } = {}) {
-  const l = await landing(t, shards, true, r2Reports, r2Reports);
+async function batchedLanding(t, shards, steps, { conclude = true, replay = false, inline = false } = {}) {
+  const l = await landing(t, shards, inline ? { batch: true, inline } : { packed: true });
   const r = l.stored();
   for (const result of steps)
     l.inbox.set(
@@ -478,7 +478,7 @@ async function batchedLanding(t, shards, steps, { conclude = true, replay = fals
     assert.equal(response.status, 200);
     return response.json();
   };
-  l.memory.reset(r2Reports);
+  l.memory.reset(!inline);
   await collect();
   if (replay) await collect();
   if (conclude) await l.conclude();
@@ -498,7 +498,7 @@ test('batched CI results: one verdict fold per check run, immutable replay, prov
         },
       },
     }));
-    const l = await batchedLanding(t, 12, steps, { conclude: false, replay: true });
+    const l = await batchedLanding(t, 12, steps, { conclude: false, replay: true, inline: true });
     assert.equal(l.stored().status, failed ? 'failed' : 'running');
     const ingests = l.meters.filter(m => m.name === 'projectHostedActionsResults:batch');
     assert.equal(ingests.length, 2, 'one new batch plus one unchanged retry');
@@ -534,14 +534,14 @@ test('batched CI results: one verdict fold per check run, immutable replay, prov
 test('batch report fold retains shared retry budget, excerpt caps, pool failures and per-file details', async t => {
   const steps = trickySteps(6),
     expected = referenceFold(steps, 6).at(-1);
-  const l = await batchedLanding(t, 6, steps);
+  const l = await batchedLanding(t, 6, steps, { inline: true });
   assert.equal(l.stored().status, 'failed');
   assert.deepEqual((await l.s.status(l.id.runId)).contractReports, expected.reports);
   assert.deepEqual(l.stored().testFiles, expected.testFiles);
 });
 
 test('batch authority rejects stale fences, foreign executions, substituted indices and changed replay bytes', async t => {
-  const l = await landing(t, 2, true),
+  const l = await landing(t, 2, { batch: true, inline: true }),
     r = l.stored();
   const input = { ...l.id, fence: r.fence, executionId: r.executionId, claims: JSON.stringify(claims()) };
   for (const changed of [{ fence: r.fence + 1 }, { executionId: 'other' }])
@@ -623,7 +623,7 @@ test('batched reports: 20,000 all-pass and all-fail files use one pinned object,
           ]),
       ),
     }));
-    const l = await batchedLanding(t, 12, steps, { conclude: false, r2Reports: true });
+    const l = await batchedLanding(t, 12, steps, { conclude: false });
     assert(
       l.memory.growth() < 64 * 1024 * 1024,
       `collector retained heap at I/O boundaries grew ${l.memory.growth()}`,
@@ -727,7 +727,7 @@ test('batched reports: 20,000 all-pass and all-fail files use one pinned object,
 });
 
 async function resultPathBytes(t, batch, packed = batch, r2Reports = false) {
-  const l = await landing(t, 12, batch, packed, r2Reports),
+  const l = await landing(t, 12, { batch, packed, inline: !r2Reports }),
     run = l.stored(),
     steps = [];
   const planReplyBytes = Buffer.byteLength(
@@ -895,7 +895,7 @@ test('immutable result slots reconcile a lost PUT reply and refuse different ret
 });
 
 test('signed workflow completion recovers a lost batch coordinator without trusting the job verdict', async t => {
-  const l = await landing(t, 2, true),
+  const l = await landing(t, 2, { batch: true, inline: true }),
     run = l.stored();
   for (let index = 0; index < 2; index++)
     l.inbox.set(
@@ -912,7 +912,7 @@ test('signed workflow completion recovers a lost batch coordinator without trust
 });
 
 test('provider completion with missing shards retains received failure details and cannot pass', async t => {
-  const l = await landing(t, 3, true),
+  const l = await landing(t, 3, { batch: true, inline: true }),
     run = l.stored();
   l.inbox.set(
     `/synthetic-bucket/${resultSlotKey(run, 0)}`,
@@ -940,7 +940,7 @@ test('provider completion with missing shards retains received failure details a
 });
 
 test('cancellation clears regenerable batch inbox bytes without accepting a late result', async t => {
-  const l = await landing(t, 2, true),
+  const l = await landing(t, 2, { batch: true, inline: true }),
     run = l.stored();
   l.inbox.set(
     `/synthetic-bucket/${resultSlotKey(run, 0)}`,
@@ -1022,7 +1022,7 @@ test('S7: twelve packed shard objects, election and final manifest use at most 1
   assert.equal(packed.r2.classA, 14);
   assert(packed.calls <= legacy.calls, 'no extra Convex calls per landing');
   t.diagnostic(JSON.stringify({ legacy, packed }));
-  const l = await landing(t, 2, true, true),
+  const l = await landing(t, 2, { batch: true, packed: true, inline: true }),
     run = l.stored();
   const log = Buffer.from('exact retained shard log');
   const result = {
@@ -1158,7 +1158,7 @@ test('packed transport keeps a full log beside the existing metadata window in o
 });
 
 test('S7 contract: completed packed shards reach Forge before optional pack/proof workflow completion', async t => {
-  const l = await landing(t, 2, true, true),
+  const l = await landing(t, 2, { batch: true, packed: true, inline: true }),
     run = l.stored();
   // Both fixed supervisors have returned from their successful immutable uploads. The optional
   // pack/proof jobs are still running, so no workflow_run:completed event exists yet.
@@ -1198,7 +1198,7 @@ test('S7 contract: completed packed shards reach Forge before optional pack/proo
 });
 
 test('packed required-shard failure reaches Forge through the election before optional jobs complete', async t => {
-  const l = await landing(t, 2, true, true),
+  const l = await landing(t, 2, { batch: true, packed: true, inline: true }),
     run = l.stored();
   const targets = await batchCollector.resultBatchTargets(run, true);
   let notifications = 0;
@@ -1238,7 +1238,7 @@ test('S3 report object adds exactly one Class A to S7 while healthy calls and da
 
 test('S3 cancel, watchdog and provider recovery fold exactly the present slots without report rows or cancelled timings', async t => {
   for (const kind of ['cancel', 'watchdog', 'provider']) {
-    const l = await landing(t, 3, true, true, true),
+    const l = await landing(t, 3, { packed: true }),
       run = l.stored();
     for (const index of [0, 2])
       l.inbox.set(
@@ -1290,7 +1290,7 @@ test('S3 provider cancellation never contributes timings, including after an ear
         exitCode: failed ? 1 : 0,
         contractReports: { [`tests/cancelled-${index}.test.mjs`]: { failed, durationMs: 123 } },
       })),
-      { r2Reports: true, conclude: false },
+      { conclude: false },
     );
     assert.equal(l.s.tables.projectHostedTestTimings.size, 0, 'a provisional fold never stamps timings');
     await l.conclude('cancelled');
@@ -1314,7 +1314,6 @@ test('S3 header-only exact-tree verdict reuse and old direct-runner refusal add 
       exitCode: 0,
       contractReports: { [`tests/reuse-${index}.test.mjs`]: { failed: false, durationMs: 10 } },
     })),
-    { r2Reports: true },
   );
   const original = l.stored(),
     start = l.s.counts.length;
@@ -1346,7 +1345,7 @@ test('S3 duration arguments above 768 KiB page through idempotent settlement wit
       names.filter((_, i) => i % 12 === index).map(file => [file, { failed: false, durationMs: 13 }]),
     ),
   }));
-  const l = await batchedLanding(t, 12, steps, { r2Reports: true });
+  const l = await batchedLanding(t, 12, steps);
   const row = [...l.s.tables.projectHostedCheckRuns.values()][0];
   assert(row.reportTimingParts.length > 1);
   assert.equal(row.reportTimingComplete, true);
@@ -1363,7 +1362,7 @@ test('incident 238b3573 delayed pass retains the exact R2 report pointer and fil
     exitCode: 0,
     contractReports: { [`tests/delayed-${index}.test.mjs`]: { failed: false, durationMs: 10 } },
   }));
-  const f = await batchedLanding(t, 12, steps, { conclude: false, r2Reports: true });
+  const f = await batchedLanding(t, 12, steps, { conclude: false });
   const held = f.stored();
   assert.equal(held.actions.verdictPending, true);
   const pointer = held.reportPointer;

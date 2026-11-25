@@ -72,7 +72,7 @@ test('detail pages retain all 20,000 exact reports below 256 KiB and bind cursor
 });
 
 test('detail uses status authorization, legacy exact reports, header feature and no storage locator', async () => {
-  const s = await checksFixture();
+  const s = await checksFixture(null, { inline: true });
   const run = await s.activate((await s.enqueue(s.selection())).id, 1);
   await s.callback(s.shard(run, 0, 'failed'));
   const reports = { 'tests/a.test.mjs': { failed: true, firstError: 'exact excerpt' } };
@@ -110,7 +110,7 @@ test('R2 detail verifies digest and size, refuses absent objects and old clients
       else process.env[name] = previous[i];
     });
   });
-  const s = await checksFixture();
+  const s = await checksFixture(null, { inline: true });
   const run = await s.pass(await s.activate((await s.enqueue(s.selection())).id, 1));
   const reports = { 'tests/retained.test.mjs': { failed: true, firstError: 'original excerpt' } };
   const { canonicalPayload } = await import('../dist/hosted-source-operation.js');
@@ -163,7 +163,7 @@ test('single-callback protocol issues a fenced slot in an existing reply and ref
     }),
   );
   const { internalApi } = await import('./hosted-checks-fixture.mjs');
-  const s = await checksFixture();
+  const s = await checksFixture(null, { inline: true });
   const run = await s.activate((await s.enqueue(s.selection())).id, 1);
   const row = [...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id);
   row.reportStorage = 'r2';
@@ -202,7 +202,7 @@ test('report detail maps nested runner identities once before enforcing the comp
       else process.env[name] = previous[i];
     }),
   );
-  const s = await checksFixture();
+  const s = await checksFixture(null, { inline: true });
   const run = await s.pass(await s.activate((await s.enqueue(s.selection())).id, 1));
   s.tables.forgeAccounts.set('account', {
     _id: 'account',

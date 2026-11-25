@@ -50,6 +50,7 @@ export async function hostedTimingHistory(
         try {
           const parsed = hostedCheckRunSchema.safeParse(JSON.parse(item.value));
           if (parsed.success) {
+            // Inline-report reader: remove on 2026-12-31 (see projectHostedCheckStore.ts).
             if (item.reportParts !== undefined) {
               detachCheckReports(parsed.data, item.reportParts, item.reportDigest ?? '');
               await hydrateCheckReports(ctx, parsed.data);
@@ -159,6 +160,7 @@ export const record = internalMutation({
       .unique();
     if (!row || row.reportStorage === 'r2') return null;
     const run = hostedCheckRunSchema.parse(JSON.parse(row.value));
+    // Inline-report reader: remove on 2026-12-31 with the one in projectHostedCheckStore.ts, once no inline run remains.
     if (row.reportParts !== undefined) {
       detachCheckReports(run, row.reportParts, row.reportDigest ?? '');
       await hydrateCheckReports(ctx, run);

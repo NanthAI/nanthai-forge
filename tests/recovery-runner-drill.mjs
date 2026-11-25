@@ -167,6 +167,7 @@ export async function recoveryRunnerDrill(t) {
           ...address,
           runId: queued.id,
           command: JSON.stringify(command),
+          features: ['check-report-detail'],
         }),
       );
     const claim = (await control({ kind: 'claim', owner: address.sessionId, leaseMs: 60000 })).run;
@@ -192,6 +193,7 @@ export async function recoveryRunnerDrill(t) {
                 projectId,
                 callback: JSON.stringify(callback),
                 signature,
+                features: ['check-report-detail'],
               }),
             ),
           output: {
@@ -220,7 +222,7 @@ export async function recoveryRunnerDrill(t) {
         machineKey,
       ),
     );
-    assert.equal((await f.status(queued.id)).status, 'passed');
+    assert.equal((await f.status(queued.id, 'owner', ['check-report-detail'])).status, 'passed');
     assert.equal(selectedLanding.attempt.check.runId, queued.id);
     assert.equal(
       s.tables.projectHostedAcceptances.size,

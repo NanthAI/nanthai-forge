@@ -94,13 +94,14 @@ test('contract selection includes changed tests and semantic union; infrastructu
     { code: 'EVIDENCE_CHANGED' },
   );
 });
-async function fixture(t, gate) {
+/** `inline` runs a pre-2026-11-11 run (reports in rows, per-shard results); remove with the inline readers (2026-12-31). */
+async function fixture(t, gate, { inline = false } = {}) {
   const previous = process.env.CONVEX_SITE_URL;
   process.env.CONVEX_SITE_URL = 'https://fixture.invalid';
   t.after(() =>
     previous === undefined ? delete process.env.CONVEX_SITE_URL : (process.env.CONVEX_SITE_URL = previous),
   );
-  const f = await checksFixture(),
+  const f = await checksFixture(null, { inline }),
     storage = new Map();
   f.decorateContext(ctx => {
     ctx.storage = { getMetadata: async id => storage.get(id) };
@@ -171,6 +172,7 @@ async function fixture(t, gate) {
           claims: JSON.stringify(claims),
           recipe: JSON.stringify(recipe),
           lockfile: 'e'.repeat(64),
+          ...(inline ? {} : { resultsBatch: true }),
           selectionR2Key: `v1/p/${id.projectId}/o/${savePin(selection).sha256}`,
           recipeR2Key: `v1/p/${id.projectId}/o/${savePin(recipe).sha256}`,
         }),
@@ -221,7 +223,7 @@ test('3k-file contract selection and complete metadata run stay below 60 functio
       ? delete process.env.FORGE_HOSTED_CHECK_KEY_SYNTHETIC
       : (process.env.FORGE_HOSTED_CHECK_KEY_SYNTHETIC = previous),
   );
-  const f = await fixture(t, contract),
+  const f = await fixture(t, contract, { inline: true }),
     inventory = files();
   for (let i = inventory.size; i < 3000; i++)
     inventory.set(`src/synthetic-${i}.ts`, `export const value = ${i};`);

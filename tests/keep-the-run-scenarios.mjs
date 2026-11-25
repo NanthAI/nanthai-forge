@@ -295,10 +295,11 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // Item 411727ba (settle): the finish step hands its loaded landing to the cohort step, so each finish wake reads one
 // landing row fewer. The arms run different numbers of wakes, so carry moves by -2,165, scoped recheck by -3,145 and
 // red by +4,158 read bytes against their retires. No call or write changes.
+// Item c0af6cfa: the `reportStorage: 'r2'` field (21 bytes) on every new run row moves red by -375 read and -295 write bytes.
 export const WIRED = {
   carry: { calls: -2, readBytes: 187_212, writeBytes: 18_883 },
   'scoped-recheck': { calls: 8, readBytes: 325_944, writeBytes: 89_950 },
-  red: { calls: -17, readBytes: -383_511, writeBytes: -141_605 },
+  red: { calls: -17, readBytes: -383_886, writeBytes: -141_900 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

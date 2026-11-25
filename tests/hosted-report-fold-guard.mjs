@@ -8,7 +8,7 @@ const collector = await import(moduleUrl('../convex/projectHostedActionsBatch.ts
 const verdict = await import(moduleUrl('../convex/projectHostedActionsVerdict.ts'));
 
 export async function reportFoldFixture(t, { failed = false, conclusion = 'success' } = {}) {
-  const l = await landing(t, 2, true, true, true),
+  const l = await landing(t, 2, { packed: true }),
     run = l.stored();
   for (let index = 0; index < 2; index++)
     l.inbox.set(

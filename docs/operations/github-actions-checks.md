@@ -1703,7 +1703,7 @@ up to 132 discovery HEADs. Discovery skips the uploader's own slot and stops at 
 first missing required object. It removes twelve LISTs and twelve duplicate log-copy
 PUTs, including their verification HEADs and legacy scratch deletes. The marker stays
 in its run/fence/execution namespace so concurrent losers and lost replies can reconcile.
-For new runs pinned by default-off `FORGE_CHECK_REPORTS_R2=1`, the collector
+For every new run (R2 reports), the collector
 adds one immutable folded-report PUT: 15 Class A and 91 Class B requests in the
 twelve-shard fixture. Six Convex executions remain six; duration arguments replace
 the deferred report-row timing read. The fixture reads 44.2 KB and writes 167.8 KB

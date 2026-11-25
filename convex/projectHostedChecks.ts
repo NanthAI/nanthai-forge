@@ -372,8 +372,7 @@ export async function insertHostedCheckRun(
   usageSubmissions?: string[],
   audit?: { donor?: boolean; coverage?: string },
 ): Promise<HostedCheckRun> {
-  const reportsInR2 =
-    process.env.FORGE_CHECK_REPORTS_R2 === '1' && run.configuration.provider !== 'ci-status';
+  const reportsInR2 = run.configuration.provider !== 'ci-status';
   if (reportsInR2) useObjectReports(run);
   await ctx.db.insert('projectHostedCheckRuns', {
     cause,

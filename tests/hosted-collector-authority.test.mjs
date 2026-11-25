@@ -29,7 +29,7 @@ test.after(() => {
 });
 
 async function fixture() {
-  const f = await checksFixture();
+  const f = await checksFixture(null, { inline: true });
   f.decorateContext(ctx => {
     ctx.scheduler = { runAfter: async () => `timer-${randomUUID()}`, cancel: async () => {} };
   });
@@ -347,7 +347,7 @@ test('a caller who is not the machine owner is refused, even with a valid signat
 });
 
 test('collector endpoints refuse provider runs, whose output only the backend signs', async () => {
-  const f = await checksFixture();
+  const f = await checksFixture(null, { inline: true });
   const run = await f.activate((await f.enqueue(f.selection())).id);
   assert.equal(run.configuration.provider, 'github-actions');
   const message = outputMessage(run, {

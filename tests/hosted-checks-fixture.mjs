@@ -7,6 +7,7 @@ import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
 import { checkPin } from '../dist/hosted-check.js';
+import { checkReportPointer } from '../dist/check-file-summary.js';
 import { signHostedCheckCallback } from '../dist/hosted-check-evidence.js';
 import { runSigningSecret } from '../dist/hosted-collector-key.js';
 export const definitions = await import(moduleUrl('../convex/projectHostedCheckDefinitions.ts'));
@@ -27,7 +28,12 @@ export const command = {
 };
 /** `candidateFields` adds fields to the seeded Candidate (for example its governance paths);
  * `stateFiles` gives the seeded State its file entries (blobs are the caller's to serve). */
-export async function checksFixture(source = null, { candidateFields = {}, stateFiles = [] } = {}) {
+/** New runs keep reports in R2. `inline` re-creates a run enqueued before 2026-11-11 (reports in rows) for the
+ * inline-report readers that stay until their 2026-12-31 removal; delete those callers with the readers. */
+export async function checksFixture(
+  source = null,
+  { candidateFields = {}, stateFiles = [], inline = false } = {},
+) {
   const s = source?.store ?? lanesFixture();
   const traffic = { acceptedCalls: 0, acceptedArgumentBytes: 0 };
   const projectId =
@@ -183,9 +189,13 @@ export async function checksFixture(source = null, { candidateFields = {}, state
     const prior = process.env.FORGE_HOSTED_CHECK_KEY_ID;
     process.env.FORGE_HOSTED_CHECK_KEY_ID = 'SYNTHETIC';
     try {
-      return JSON.parse(
+      const run = JSON.parse(
         await call('checkEnqueue', checks.enqueue, { projectId, request: JSON.stringify(request) }, actor),
       );
+      if (inline)
+        for (const row of s.tables.projectHostedCheckRuns.values())
+          if (row.runId === run.id) delete row.reportStorage;
+      return run;
     } finally {
       if (prior === undefined) delete process.env.FORGE_HOSTED_CHECK_KEY_ID;
       else process.env.FORGE_HOSTED_CHECK_KEY_ID = prior;
@@ -200,6 +210,7 @@ export async function checksFixture(source = null, { candidateFields = {}, state
       projectId,
       runId: id,
       command: JSON.stringify(command),
+      features: ['check-report-detail'],
     }).then(JSON.parse);
   // A registered machine runner (self-hosted, mac) claims as its session.
   let machineOwner;
@@ -293,6 +304,10 @@ export async function checksFixture(source = null, { candidateFields = {}, state
       exitCode: status === 'passed' ? 0 : status === 'failed' ? 1 : null,
       output: null,
       cost: { status: 'unknown' },
+      // An R2 run pins its report object by digest; an inline run (`inline`) carries none.
+      ...(overrides.contractReports && !inline
+        ? { reportDigest: checkReportPointer(overrides.contractReports).digest }
+        : {}),
       ...overrides,
     });
   const pass = async r => {

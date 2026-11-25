@@ -95,7 +95,7 @@ test('small reports keep original excerpts and verdicts, including flaky passes'
   });
 });
 test('a complete valid hosted run document stays within 256 KiB for 1,000 failures', async t => {
-  const s = await checksFixture();
+  const s = await checksFixture(null, { inline: true });
   const run = await s.activate((await s.enqueue(s.selection())).id, 1);
   const reports = failures(1000);
   const capped = capCheckReports(reports).reports;
@@ -170,7 +170,7 @@ test('JSON escaping cannot amplify retained excerpts beyond 64 KiB', () => {
 });
 
 test('signed callback completion caps excerpts and retains every failure name', async () => {
-  const s = await checksFixture();
+  const s = await checksFixture(null, { inline: true });
   const run = await s.activate((await s.enqueue(s.selection())).id, 1);
   await s.callback(s.shard(run, 0, 'failed'));
   const reports = failures(100),
@@ -202,7 +202,7 @@ test('signed callback completion caps excerpts and retains every failure name', 
 });
 
 test('the retained callback receipt of a callback over 1 MiB stays under the receipt budget and replays', async () => {
-  const s = await checksFixture();
+  const s = await checksFixture(null, { inline: true });
   const run = await s.activate((await s.enqueue(s.selection())).id, 1);
   await s.callback(s.shard(run, 0, 'failed'));
   const callback = s.complete(run, 'failed', {

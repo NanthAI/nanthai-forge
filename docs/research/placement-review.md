@@ -261,7 +261,7 @@ Done when: bytes written per phase transition and per check callback fall as S0'
 
 #### S3 report transport
 
-Implemented for Issue 324f1d97 behind the default-off server setting `FORGE_CHECK_REPORTS_R2=1`, after the detail readers deployed. New runs pin this choice at enqueue; existing runs retain their protocol. New-mode collectors replace row replay with a single folded R2 object. Legacy report rows and replay remain until the compatibility removal in Issue 589601f7.
+Implemented for Issue 324f1d97 after the detail readers deployed; the server setting that gated it was deleted (Item c0af6cfa), so every new run pins R2 reports at enqueue and existing runs retain their protocol. New-mode collectors replace row replay with a single folded R2 object. Legacy report rows and replay remain until the compatibility removal in Issue 589601f7.
 
 **Decision: the summary lives in Convex, the reports live in one R2 object, and report bytes never become rows.** A run's per-file reports are written once, by the party that already holds them, as one immutable object pinned by digest in the run header. A mutation gets what it needs as arguments; no transaction reads report bytes from the database. The raw result slots are not that object: they embed log bytes, and reading them needs the fold, which would freeze today's fold rules into every client and every later release.
 

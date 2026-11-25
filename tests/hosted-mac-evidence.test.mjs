@@ -85,6 +85,7 @@ async function fixture(preset = 'trusted', provider = 'mac') {
           sessionId,
           runId: queued.id,
           command: JSON.stringify({ owner: sessionId, ...command }),
+          features: ['check-report-detail'],
         })
         .then(JSON.parse);
     const claimed = await control({ kind: 'claim', leaseMs: 60000 });

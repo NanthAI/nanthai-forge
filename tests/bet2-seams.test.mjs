@@ -184,6 +184,7 @@ test('insertHostedCheckRun preserves the exact old inserted document and dispatc
       runId: run.id,
       candidateId: run.request.candidateId,
       ...(machine ? { machineId: configuration.machineId } : {}),
+      reportStorage: 'r2',
       status: run.status,
       value: semanticPayload(run, true),
     });

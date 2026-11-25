@@ -21,7 +21,7 @@ async function fixture(t, shardCount) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
   });
-  const s = await checksFixture();
+  const s = await checksFixture(null, { inline: true });
   s.decorateContext(ctx => {
     ctx.scheduler = { runAfter: async () => 'synthetic-schedule', cancel: async () => {} };
   });

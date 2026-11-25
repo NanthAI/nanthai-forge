@@ -240,7 +240,7 @@ test('enqueue ignores client gate and stamps current contract from the already-r
   assert.deepEqual(await f.enqueue(run.request), run);
 });
 test('strict gate exports validate args/documents and history adoption retains main-run provenance and CAS', async () => {
-  const f = await checksFixture();
+  const f = await checksFixture(null, { inline: true });
   await seed(f, f.candidate);
   const run = await f.enqueue(f.selection());
   const row = [...f.tables.projectHostedCheckRuns.values()][0];
