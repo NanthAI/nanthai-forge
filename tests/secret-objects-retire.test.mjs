@@ -22,6 +22,7 @@ function database(tables) {
       ?.get(id) ?? null;
   return {
     query: table => ({
+      take: async n => [...tables[table].values()].slice(0, n),
       paginate: async ({ numItems, cursor }) => {
         const all = [...tables[table].values()];
         const start = cursor === null ? 0 : Number(cursor);
@@ -90,6 +91,15 @@ test('a dry run counts what it would delete, lists objects by name only and writ
   );
   assert.ok(!JSON.stringify(dry).includes('secret-owner'), 'no owner is shown');
   assert.equal(total(w.tables), 12);
+});
+
+test('a dry run lists the objects even when events fill the page budget', async () => {
+  const w = world();
+  const dry = await purge(w, { apply: false, limit: 3 });
+  assert.equal(dry.counted.secretEvents, 3);
+  assert.equal(dry.counted.secretObjects, 0, 'the page budget ended before the objects');
+  assert.equal(dry.objects.length, 2);
+  assert.equal(dry.more, true);
 });
 
 test('apply refuses until the owner has reviewed the object list, and deletes nothing', async () => {

@@ -83,6 +83,15 @@ export const purgeRows = internalMutation({
       secretObjects: 0,
     };
     const objects: { name: string; repository: string; ref: string; version: number; at: number }[] = [];
+    if (!apply)
+      for (const row of await ctx.db.query('secretObjects').take(OBJECTS_LISTED))
+        objects.push({
+          name: row.name,
+          repository: row.repository,
+          ref: row.ref,
+          version: row.version,
+          at: row._creationTime,
+        });
     let budget = limit,
       deleted = 0,
       more = false;
@@ -98,15 +107,6 @@ export const purgeRows = internalMutation({
       if (!page.isDone) more = true;
       counted[table] = page.page.length;
       budget -= page.page.length;
-      if (!apply && table === 'secretObjects')
-        for (const row of (page.page as { [k: string]: unknown }[]).slice(0, OBJECTS_LISTED))
-          objects.push({
-            name: String(row.name),
-            repository: String(row.repository),
-            ref: String(row.ref),
-            version: Number(row.version),
-            at: Number(row._creationTime),
-          });
       if (apply) {
         for (const row of page.page) await ctx.db.delete(row._id);
         deleted += page.page.length;
