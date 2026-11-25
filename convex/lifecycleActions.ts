@@ -4,7 +4,7 @@
 import { v } from 'convex/values';
 import { action } from './cliServer';
 import { internal } from './_generated/api';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Doc } from './_generated/dataModel';
 import { currentAccess } from './access';
 import { invariant } from '../src/errors';
 import { archiveDownload, directDownloadFields } from './archiveDownload';
@@ -54,7 +54,7 @@ export const snapshotInfo = action({
       invariant(job.artifactKey && job.head, 'INDEX_MISSING', 'This repository has no indexed snapshot yet.');
       const file: { size: number; sha256: string; contentType?: string } | null = await ctx.runQuery(
         internal.lifecycle.fileInfo,
-        { id: job.artifactKey as Id<'_storage'> },
+        { id: job.artifactKey },
       );
       invariant(file, 'INVALID_ARTIFACT', 'Stored source is unavailable.');
       await currentAccess(ctx, id, user.subject, false, true);
@@ -115,7 +115,7 @@ export const downloadPart = action({
       invariant(job.artifactKey && job.head, 'INDEX_MISSING', 'This repository has no indexed snapshot yet.');
       const file: { size: number; sha256: string; contentType?: string } | null = await ctx.runQuery(
         internal.lifecycle.fileInfo,
-        { id: job.artifactKey as Id<'_storage'> },
+        { id: job.artifactKey },
       );
       invariant(file, 'INVALID_ARTIFACT', 'Stored source is unavailable.');
       invariant(
@@ -128,7 +128,7 @@ export const downloadPart = action({
         'BAD_ARGUMENT',
         'Download offset exceeds the snapshot.',
       );
-      const key = job.artifactKey as Id<'_storage'>;
+      const key = job.artifactKey;
       const normalized = /^[0-9a-f]{64}$/.test(file.sha256)
         ? file.sha256
         : Buffer.from(file.sha256, 'base64').toString('hex');

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import type { StorageActionWriter, StorageReader, StorageWriter } from 'convex/server';
-import type { ActionCtx, MutationCtx } from './server';
-import type { Doc, Id } from './_generated/dataModel';
+import type { ActionCtx, MutationCtx, QueryCtx } from './server';
+import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { artifactBlobId } from './artifactBlobFields';
 import { artifactMetadata, removeArtifact } from './artifactStorage';
@@ -12,8 +11,9 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { invariant } from '../src/errors';
 
-/** Opaque legacy storage ID or r2blob:<artifactBlobs ID>. Owning callers always
- * authorize before resolving a reference; storage metadata never grants access. */
+/** `r2blob:<artifactBlobs ID>`. Any other reference names no stored bytes: reads find nothing and a
+ * delete is a no-op. Owning callers always authorize before resolving a reference; storage metadata
+ * never grants access. */
 export type BlobId = string;
 export type BlobMetadata = { size: number; sha256: string; contentType?: string | null };
 export type StoreOptions = { sha256?: string; r2Namespace?: string };
@@ -29,13 +29,13 @@ export interface BlobStore extends BlobWriter {
   store(blob: Blob, options?: StoreOptions): Promise<BlobId>;
 }
 
-type Context = { storage: StorageActionWriter | StorageWriter | StorageReader } & Partial<
-  Pick<ActionCtx, 'runQuery' | 'runMutation' | 'runAction'>
-> &
-  Partial<Pick<MutationCtx, 'db' | 'scheduler'>>;
-export function blobStore(ctx: { storage: StorageActionWriter }): BlobStore;
-export function blobStore(ctx: { storage: StorageWriter }): BlobWriter;
-export function blobStore(ctx: { storage: StorageReader }): BlobReader;
+type Context = Partial<Pick<ActionCtx, 'runQuery' | 'runMutation' | 'runAction'>> & {
+  db?: QueryCtx['db'] | MutationCtx['db'];
+  scheduler?: MutationCtx['scheduler'];
+};
+export function blobStore(ctx: Pick<ActionCtx, 'runQuery' | 'runMutation' | 'runAction'>): BlobStore;
+export function blobStore(ctx: Pick<MutationCtx, 'db' | 'scheduler'>): BlobWriter;
+export function blobStore(ctx: Pick<QueryCtx, 'db'>): BlobReader;
 export function blobStore(ctx: Context): BlobStore {
   const row = async (ref: string): Promise<Doc<'artifactBlobs'> | null> => {
     invariant(ctx.runQuery, 'INVALID_ARTIFACT', 'Artifact bytes require an action.');
@@ -44,7 +44,7 @@ export function blobStore(ctx: Context): BlobStore {
   };
   return {
     get: async id => {
-      if (!artifactBlobId(id)) return (ctx.storage as StorageActionWriter).get(id as Id<'_storage'>);
+      if (!artifactBlobId(id)) return null;
       const value = await row(id);
       if (!value) return null;
       const response = await exchangeFetch(
@@ -89,22 +89,22 @@ export function blobStore(ctx: Context): BlobStore {
       return ref;
     },
     delete: async id => {
-      if (!artifactBlobId(id)) return (ctx.storage as StorageWriter).delete(id as Id<'_storage'>);
+      if (!artifactBlobId(id)) return;
       if (ctx.db && ctx.scheduler) {
         const value = await ctx.db.get(artifactBlobId(id)!);
-        if (value) await removeArtifact({ db: ctx.db, scheduler: ctx.scheduler }, value);
+        if (value) await removeArtifact({ db: ctx.db as MutationCtx['db'], scheduler: ctx.scheduler }, value);
       } else {
         invariant(ctx.runMutation, 'INVALID_ARTIFACT', 'Artifact cleanup requires a writer.');
         await ctx.runMutation(internal.artifactStorage.remove, { ref: id });
       }
     },
     getUrl: async id => {
-      if (!artifactBlobId(id)) return (ctx.storage as StorageReader).getUrl(id as Id<'_storage'>);
+      if (!artifactBlobId(id)) return null;
       const value = await row(id);
       return value ? presignGet(r2Config(), value.r2Key) : null;
     },
     getMetadata: async id => {
-      if (!artifactBlobId(id)) return (ctx.storage as StorageReader).getMetadata(id as Id<'_storage'>);
+      if (!artifactBlobId(id)) return null;
       if (ctx.db) return artifactMetadata({ db: ctx.db }, id);
       const value = await row(id);
       return value ? { size: value.size, sha256: value.digest, contentType: value.contentType } : null;

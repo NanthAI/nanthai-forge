@@ -95,7 +95,6 @@ export const objectTables = {
   projectObjects: defineTable(objectFields)
     .index('by_project_and_digest', ['projectId', 'digest'])
     .index('by_project_and_removed', ['projectId', 'removed'])
-    .index('by_nonce', ['nonce'])
     // Purge reference proof by key prefix (Item 411727ba, convex/projectPurgeReferences.ts).
     .index('by_r2Key', ['r2Key']),
   /** Sorted, immutable object catalog pages: one row per `objectCatalogPage`

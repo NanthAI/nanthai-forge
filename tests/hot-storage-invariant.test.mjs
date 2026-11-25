@@ -20,17 +20,8 @@ const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
 //   read   storage.get / getUrl / getMetadata (Convex file-storage reads)
 //   handle a ctx.storage handle passed on, which could write or read elsewhere
 //   field  v.id('_storage') (a record that names a Convex file)
-// Item c0af6cfa removed every `storageId` pointer on objects, backups and proposals. What stays reads an
-// import or derived artifact reference when it is not an `r2blob:` id; dev holds none.
-const reason =
-  'An artifact reference that is not an r2blob id, from an import or a derived artifact; dev holds none (Item c0af6cfa, next slice).';
-const storageAllowlist = {
-  'blobStore.ts handle': [4, reason, '2026-12-31'],
-  'projectWorkIndexRetry.ts read': [3, reason, '2026-12-31'],
-  'projectWorkIndexRetry.ts handle': [1, reason, '2026-12-31'],
-  'storageMeter.ts read': [1, reason, '2026-12-31'],
-  'storageMeter.ts handle': [1, reason, '2026-12-31'],
-};
+// Item c0af6cfa removed every native Convex-file reference and branch, so the list is empty.
+const storageAllowlist = {};
 const storageCalls = new Set(['store', 'generateUploadUrl', 'get', 'getUrl', 'getMetadata']);
 const member = node => {
   if (ts.isPropertyAccessExpression(node)) return node.name.text;

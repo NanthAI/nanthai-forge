@@ -57,7 +57,6 @@ export const migrateArchive = internalMutation({
         location: undefined,
         r2Key: undefined,
         r2Committed: undefined,
-        r2ConvexPurged: undefined,
         objectManifest: { digest: input.manifestDigest, size: input.manifestSize },
         archiveReceipt: {
           digest: backup.digest,

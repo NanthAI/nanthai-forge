@@ -320,7 +320,7 @@ test('archive HEAD refuses wrong size/checksum and a proposal download signs its
   );
 });
 
-test('import archives sign R2 bytes and preserve a legacy storage row without new writes', async t => {
+test('import archives sign R2 bytes without new Convex writes', async t => {
   const { s } = await setup(t),
     bytes = Buffer.from('archive bytes');
   const ref = await blobStore(s.ctx).store(new Blob([bytes], { type: 'application/gzip' }), {
@@ -331,25 +331,20 @@ test('import archives sign R2 bytes and preserve a legacy storage row without ne
   const part = await lifecycle.downloadPart._handler(s.ctx, { id: 'own', offset: 0 });
   assert.equal(part.direct, true);
   assert.deepEqual(Buffer.from(await (await fetch(part.url)).arrayBuffer()), bytes);
-  s.file('legacy', new Blob([bytes], { type: 'application/gzip' }));
-  s.tables.imports.get('own').artifactKey = 'legacy';
-  const legacy = await lifecycle.downloadPart._handler(s.ctx, { id: 'own', offset: 0 });
-  assert.equal(legacy.direct, undefined);
-  assert.deepEqual(Buffer.from(legacy.data), bytes);
 });
 
-test('new R2 derivatives remove without scheduling a storage sweep; legacy manual sweep stays bounded', async t => {
+test('R2 derivatives remove without scheduling a storage sweep', async t => {
   const { s } = await setup(t);
-  s.file('original', new Blob(['original']));
+  const original = await blobStore(s.ctx).store(new Blob(['original']), { r2Namespace: 'v1/i/own/g/1' });
   const value = await derivedArtifact(
     s.ctx,
-    'original',
+    original,
     'zone-export-v1',
     '',
     async () => new Blob(['export']),
     async () => {},
   );
-  await derived.removeDerived(s.ctx, 'original');
+  await derived.removeDerived(s.ctx, original);
   assert(
     s.scheduled.every(entry =>
       getFunctionName(entry.ref ?? entry.handler ?? entry.fn).includes('artifactStorage'),
@@ -396,15 +391,14 @@ test('2800-file import index decodes the original once across different endpoint
       license: null,
     },
   };
-  s.file('original', await encodeHostedArtifact(artifact));
-  const get = s.ctx.storage.get;
-  let originalReads = 0,
-    checks = 0,
+  const original = await blobStore(s.ctx).store(await encodeHostedArtifact(artifact), {
+    r2Namespace: 'v1/i/own/g/1',
+  });
+  const originalKey = s.tables.artifactBlobs.get(original.slice(7)).r2Key;
+  const originalReads = () =>
+    fake.requests.filter(r => r.method === 'GET' && r.path.includes(originalKey)).length;
+  let checks = 0,
     calls = 0;
-  s.ctx.storage.get = id => {
-    if (id === 'original') originalReads++;
-    return get(id);
-  };
   const run = s.ctx.runQuery,
     mutate = s.ctx.runMutation,
     act = s.ctx.runAction;
@@ -430,7 +424,7 @@ test('2800-file import index decodes the original once across different endpoint
   ]) {
     const actual = await indexedHostedQuery(
       s.ctx,
-      'original',
+      original,
       endpoint,
       snapshot.source.gitHead,
       artifact.repository,
@@ -440,7 +434,7 @@ test('2800-file import index decodes the original once across different endpoint
     );
     assert.deepEqual(actual, hostedQuery(artifact, endpoint, snapshot.source.gitHead));
   }
-  assert.equal(originalReads, 1);
+  assert.equal(originalReads(), 1);
   assert(
     process.memoryUsage().heapUsed - actionMemory.heapUsed < 128 * 1024 * 1024,
     'index action allocations stay bounded',
@@ -454,7 +448,7 @@ test('2800-file import index decodes the original once across different endpoint
     JSON.stringify({
       files: 2800,
       calls,
-      originalReads,
+      originalReads: originalReads(),
       wallMs: Math.round(performance.now() - started),
       peakRssBytes: process.resourceUsage().maxRSS * 1024,
       indexBytes: [...s.tables.derivedArtifacts.values()].find(r => r.kind === 'hosted-query-index-v1').size,
@@ -463,7 +457,7 @@ test('2800-file import index decodes the original once across different endpoint
   await assert.rejects(
     indexedHostedQuery(
       s.ctx,
-      'original',
+      original,
       'source?file=__proto__',
       snapshot.source.gitHead,
       artifact.repository,
@@ -479,7 +473,7 @@ test('2800-file import index decodes the original once across different endpoint
   await assert.rejects(
     indexedHostedQuery(
       s.ctx,
-      'original',
+      original,
       'source?file=f0.ts&start=1&end=1',
       snapshot.source.gitHead,
       artifact.repository,
@@ -528,50 +522,4 @@ test('native recovery signs once and streams a verified R2 archive without a ran
   );
   assert.equal(signs, 1);
   assert.deepEqual(readFileSync(join(directory, 'archive')), bytes);
-});
-
-test('the retained legacy derived sweep reads one 100-file metadata page without a continuation task', async t => {
-  const { s } = await setup(t),
-    uploadType = 'application/x-forge-derived-legacy';
-  const id = await s.ctx.db.insert('derivedArtifacts', {
-    original: 'old',
-    kind: 'export',
-    pin: '',
-    originalDigest: digest('old'),
-    originalSize: 3,
-    digest: digest('bound'),
-    size: 5,
-    removed: true,
-    uploadType,
-    contentType: 'application/gzip',
-  });
-  for (let n = 0; n < 150; n++) {
-    s.file(`legacy-${n}`, new Blob(['unrelated'], { type: 'application/gzip' }));
-    s.files.get(`legacy-${n}`).metadata._creationTime = Date.now() + n + 100;
-  }
-  const query = s.ctx.db.system.query;
-  let pages = 0,
-    scanned = 0;
-  s.ctx.db.system.query = (...args) => {
-    const result = query(...args),
-      order = result.order;
-    result.order = (...input) => {
-      const ordered = order(...input),
-        paginate = ordered.paginate;
-      ordered.paginate = async options => {
-        assert.equal(options.numItems, 100);
-        pages++;
-        const page = await paginate(options);
-        scanned += page.page.length;
-        return page;
-      };
-      return ordered;
-    };
-    return result;
-  };
-  const result = await derived.sweep._handler(s.ctx, { id, cursor: null, followup: false });
-  assert.equal(pages, 1);
-  assert.equal(scanned, 100);
-  assert.equal(result.isDone, false);
-  assert.equal(s.scheduled.length, 0);
 });

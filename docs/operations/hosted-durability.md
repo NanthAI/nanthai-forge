@@ -38,9 +38,8 @@ script keeps its paged project-prefix inventory and abandoned-upload sweep; the 
 Convex copies is deleted with Convex file storage.
 
 Archive receipts name their R2 key and pins; no row carries a Convex file ID. The browser and native
-archive readers use `backupTransfer:sign`. The manual `derivedArtifacts:sweep` handles one bounded legacy
-orphan page and returns its cursor; it schedules no recurring or delayed sweep. New R2 derivatives and
-archives do not start `_storage` scans.
+archive readers use `backupTransfer:sign`. No code scans `_storage`: project deletion, archive removal
+and derived artifacts hold no Convex-file path, and a reference that is not an `r2blob:` id names no bytes.
 
 ## Code rollback limit
 

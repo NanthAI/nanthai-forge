@@ -11,7 +11,7 @@ import { invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 type Entry = Parameters<typeof catalogPages>[0][number];
 /** Only immutable, protected source descriptors. State ancestry, pending uploads,
- * legacy storage and rotated cleanup keys retain their original mutable row. */
+ * and rotated cleanup keys retain their original mutable row. */
 export function catalogEligible(row: Doc<'projectObjects'>) {
   return (
     row.sourceReferenced === true &&
@@ -25,7 +25,6 @@ export function catalogEligible(row: Doc<'projectObjects'>) {
     row.statePhysical === undefined &&
     row.recipeClosure === undefined &&
     !row.r2SweepKey &&
-    !row.r2BackfillOperationId &&
     (!!row.recipe ||
       (row.location === 'r2' &&
         row.r2Committed === true &&

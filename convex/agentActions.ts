@@ -79,7 +79,7 @@ export const create = action({
       // operation therefore cannot show its token a second time; revoke it and issue a new one.
       invariant(!previous, 'AGENT_OPERATION_CHANGED', AGENT_SHOWN_ONCE);
       invariant(job.artifactKey, 'INDEX_MISSING', 'Choose an indexed snapshot.');
-      const blob = await blobStore(ctx).get(job.artifactKey as Id<'_storage'>);
+      const blob = await blobStore(ctx).get(job.artifactKey);
       invariant(blob, 'INVALID_ARTIFACT', 'Stored source is unavailable.');
       const artifact = await decodeHostedArtifact(blob);
       invariant(
@@ -99,7 +99,7 @@ export const create = action({
         tools,
         sourceId: input.sourceId,
         gitHead: artifact.pack.source.gitHead!,
-        artifactKey: job.artifactKey as Id<'_storage'>,
+        artifactKey: job.artifactKey,
         expiresAt: input.expiresAt,
         revoked: false,
         tokenHash: tokenHash(token),

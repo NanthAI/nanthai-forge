@@ -6,11 +6,12 @@ import { getFunctionName } from 'convex/server';
 import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const { derivedArtifact, derivedBytes } = await import(moduleUrl('../convex/derivedArtifactActions.ts'));
+const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
 
-// Derivatives of a legacy Convex original go to R2 (the test runtime's default bucket).
+// Derivatives of an original go to R2 (the test runtime's default bucket), like the original itself.
 async function native(t) {
   const s = state([]);
-  const original = await s.ctx.storage.store(new Blob(['original']));
+  const original = await blobStore(s.ctx).store(new Blob(['original']), { r2Namespace: 'v1/i/own/g/1' });
   const derive = pin =>
     derivedArtifact(
       s.ctx,
@@ -42,7 +43,7 @@ test('derivatives reconcile a lost attach reply in R2 without Convex files', asy
   };
   const second = await derive('attach');
   assert.equal((await derive('attach')).storageId, second.storageId);
-  assert.equal(s.files.size, 1, 'only the legacy original');
+  assert.equal(s.files.size, 0, 'no Convex files');
   assert.equal(s.tables.derivedArtifacts.size, 2);
 });
 
@@ -97,9 +98,10 @@ test('2800 derivative operations keep constant per-operation calls and document 
     'artifactStorage:markCommitted': count,
     'derivedArtifacts:attach': count,
   });
-  assert.equal(reads, 9 * count);
+  // One of them is the R2 original's metadata row, read once per operation.
+  assert.equal(reads, 10 * count);
   assert.equal(writes, 4 * count);
-  assert.equal(s.tables.artifactBlobs.size, count);
+  assert.equal(s.tables.artifactBlobs.size, count + 1, 'one per derivative plus the original');
   assert.equal(s.scheduled.length, 0);
   t.diagnostic(
     JSON.stringify({

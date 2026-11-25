@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 import { setup as r2Setup } from './r2-harness.mjs';
-import { job, providers } from './hosted-fixture.mjs';
+import { job, providers, r2Source } from './hosted-fixture.mjs';
 import { fixture, git } from './helpers.mjs';
 import { capture } from '../dist/snapshot.js';
 import { writeFileSync } from 'node:fs';
@@ -28,8 +28,8 @@ async function setup(t) {
     { ...job('public'), visibility: 'public', owner: '', head: captured.source.gitHead },
   ])
     s.tables.imports.set(row._id, row);
-  s.file(
-    'saved',
+  await r2Source(
+    s,
     await encodeHostedArtifact({
       pack,
       content: Object.fromEntries(captured.content),
@@ -135,8 +135,8 @@ test('saving uses actual source identity, reconciles lost replies and keeps priv
     assert.equal(s.tables.savedViews.size, 1);
     writeFileSync(join(root, 'a.ts'), 'export const a = 2;\n');
     const updated = capture(root);
-    s.file(
-      'saved',
+    await r2Source(
+      s,
       await encodeHostedArtifact({
         pack: analyze(updated),
         content: Object.fromEntries(updated.content),

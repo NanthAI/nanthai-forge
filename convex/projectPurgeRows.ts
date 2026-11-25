@@ -12,7 +12,6 @@ import {
   valuesAt,
   type ProjectPurgeTable,
 } from './projectPurgeInventory';
-import { removeExclusive } from './projectStorage';
 import { purgePageBudget, documentBytes } from './projectPurgeBudget';
 
 export { purgePageBudget, documentBytes };
@@ -77,7 +76,7 @@ export async function purgeProjectRowsPage(ctx: MutationCtx, project: Doc<'hoste
       continue;
     }
     const references =
-      step < projectPurgeOrder.length ? rowReferences(projectPurgeOrder[step]!) : { files: [], tasks: [] };
+      step < projectPurgeOrder.length ? rowReferences(projectPurgeOrder[step]!) : { tasks: [] };
     for (const row of batch) {
       if (rows >= purgePageBudget.rows || bytes >= purgePageBudget.bytes) break;
       rows++;
@@ -99,8 +98,6 @@ export async function purgeProjectRowsPage(ctx: MutationCtx, project: Doc<'hoste
           bytes += documentBytes(body);
         }
       await ctx.db.delete(row._id as never);
-      for (const path of references.files)
-        for (const id of valuesAt(row, path)) await removeExclusive(ctx, id as Id<'_storage'>, row._id);
     }
   }
   if (project.purge && !rows && step === (progress.table ?? 0)) return step >= end;

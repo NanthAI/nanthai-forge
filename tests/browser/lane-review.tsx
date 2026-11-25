@@ -113,7 +113,7 @@ const client = {
     return args.digests.map(digest => ({
       digest,
       size: sizes.get(digest) ?? 0,
-      location: 'convex',
+      location: 'r2',
       url: url(digest),
     }));
   },

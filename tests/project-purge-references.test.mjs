@@ -8,7 +8,6 @@ import { state } from './hosted-fixture.mjs';
 
 const { references } = await import(moduleUrl('../convex/projectRetention.ts'));
 const { authorizedKeys, purgeAuthority } = await import(moduleUrl('../convex/projectPurgeAuthority.ts'));
-const { removeExclusive } = await import(moduleUrl('../convex/projectStorage.ts'));
 const { projectPrefix } = await import(moduleUrl('../convex/r2Operations.ts'));
 const projectId = 'project-a';
 const project = { _id: projectId, _creationTime: 1, removal: 'deleted', owner: 'first-owner' };

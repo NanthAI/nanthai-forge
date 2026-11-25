@@ -10,14 +10,12 @@ const { indexReadContext, indexTransient } = await import(moduleUrl('../convex/p
 test('index read retries recover in place and never retry permanent errors', async () => {
   let calls = 0;
   const ctx = indexReadContext({
-    storage: {
-      getUrl: async () => {
-        if (++calls < 3) throw new Error('Transient error while running storage get url');
-        return 'available';
-      },
+    runQuery: async () => {
+      if (++calls < 3) throw new Error('Transient error while running storage get url');
+      return 'available';
     },
   });
-  assert.equal(await ctx.storage.getUrl('storage'), 'available');
+  assert.equal(await ctx.runQuery('read', {}), 'available');
   assert.equal(calls, 3);
   for (const error of [
     new ForgeError('INVALID_WORK_BACKUP', 'Transient error text in invalid source'),
@@ -30,14 +28,12 @@ test('index read retries recover in place and never retry permanent errors', asy
     assert.equal(indexTransient(error), false);
     let calls = 0;
     const ctx = indexReadContext({
-      storage: {
-        getUrl: async () => {
-          calls++;
-          throw error;
-        },
+      runQuery: async () => {
+        calls++;
+        throw error;
       },
     });
-    await assert.rejects(ctx.storage.getUrl('storage'), actual => actual === error);
+    await assert.rejects(ctx.runQuery('read', {}), actual => actual === error);
     assert.equal(calls, 1);
   }
 });
@@ -45,14 +41,12 @@ test('index read retries recover in place and never retry permanent errors', asy
 test('exhausted timeouts carry a retryable signal without multiplying child attempts', async () => {
   let calls = 0;
   const child = indexReadContext({
-    storage: {
-      get: async () => {
-        calls++;
-        throw new ForgeError('EXCHANGE_REQUEST_TIMEOUT', 'storage request timed out');
-      },
+    runAction: async () => {
+      calls++;
+      throw new ForgeError('EXCHANGE_REQUEST_TIMEOUT', 'storage request timed out');
     },
   });
-  const parent = indexReadContext({ runAction: () => child.storage.get('storage'), storage: {} });
+  const parent = indexReadContext({ runAction: () => child.runAction('read', {}) });
   await assert.rejects(parent.runAction('read', {}), error => {
     assert.equal(error.data.code, 'WORK_INDEX_RETRY');
     return indexTransient(error);

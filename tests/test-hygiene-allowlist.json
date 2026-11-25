@@ -353,7 +353,6 @@
   "tests/queue-sim/parked-incident.mjs": {"date":7},
   "tests/queue-sim/reservation-cycle.mjs": {"date":3},
   "tests/queue-sim/trace-driver.mjs": {"date":2},
-  "tests/r2-bytepaths.test.mjs": {"date":1},
   "tests/r2-harness.mjs": {"date":1},
   "tests/r2-maintenance.test.mjs": {"date":6},
   "tests/r2-read-path.test.mjs": {"date":2},

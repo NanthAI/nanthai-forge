@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { setup as r2Setup } from './r2-harness.mjs';
-import { job, state, providers } from './hosted-fixture.mjs';
+import { job, state, providers, r2Source } from './hosted-fixture.mjs';
 import { fixture, git } from './helpers.mjs';
 import { analyze } from '../dist/analyze.js';
 import { capture } from '../dist/snapshot.js';
@@ -123,7 +123,7 @@ test('team source/graph/export/saved views require membership, an active link an
     documents: { 'README.md': '# Team snapshot\n' },
     repository: {},
   });
-  s.file('saved', blob);
+  await r2Source(s, blob);
   let revoked,
     removeDuringRead = false,
     unlinkDuringRead = false;
@@ -156,7 +156,12 @@ test('team source/graph/export/saved views require membership, an active link an
       'imports?file=a.ts',
     ])
       assert.equal(typeof (await read(endpoint)), 'string');
-    assert.deepEqual(Buffer.from((await part()).data), Buffer.from(await blob.arrayBuffer()));
+    const direct = await part();
+    assert.equal(direct.direct, true);
+    assert.deepEqual(
+      Buffer.from(await (await fetch(direct.url)).arrayBuffer()),
+      Buffer.from(await blob.arrayBuffer()),
+    );
     const route = { view: 'source', state: captured.source.id, file: 'a.ts', line: 1 };
     const savedId = await saved.put._handler(s.ctx, {
       importId: 'own',

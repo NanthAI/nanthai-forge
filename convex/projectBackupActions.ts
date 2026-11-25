@@ -49,14 +49,13 @@ export const prepare = action({
   args: backupTransferArgs,
   returns: v.object({
     backup: backupItem,
-    uploadUrl: v.optional(v.string()),
     target: v.optional(archivePut),
     contentType: v.optional(v.string()),
   }),
   handler: async (
     ctx,
     input,
-  ): Promise<{ backup: Owned['item']; uploadUrl?: string; target?: R2PutTarget; contentType?: string }> => {
+  ): Promise<{ backup: Owned['item']; target?: R2PutTarget; contentType?: string }> => {
     try {
       const owner = await caller(ctx),
         { args, request } = backupTransferRequest(input);
@@ -72,7 +71,7 @@ export const prepare = action({
       const target = await ctx.runMutation(internal.projectBackups.uploadUrl, { id, owner });
       return {
         backup,
-        ...(typeof target === 'string' ? { uploadUrl: target } : { target }),
+        target,
         contentType: `application/x-forge-backup-${original.backup.nonce}`,
       };
     } catch (error) {

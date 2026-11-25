@@ -63,14 +63,6 @@ const rowSchema = z.discriminatedUnion('location', [
   z.object({
     digest: z.string(),
     size: z.number().safe().nonnegative(),
-    location: z.literal('convex'),
-    statePhysical: downloadPinSchema.optional(),
-    sourceVersion: z.literal(2).optional(),
-    url: z.url(),
-  }),
-  z.object({
-    digest: z.string(),
-    size: z.number().safe().nonnegative(),
     location: z.literal('recipe'),
     statePhysical: downloadPinSchema.optional(),
     sourceVersion: z.literal(2).optional(),

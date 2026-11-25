@@ -8,7 +8,6 @@ import { deleteCapsulePins } from './projectLandingCapsulePins';
 import { projectPurgeWriter } from './projectFinishReadWriter';
 import { cleanupReceipt, recordCleanup } from './maintenanceReceipts';
 import { rowReferences, valuesAt, type ProjectPurgeTable } from './projectPurgeInventory';
-import { removeExclusive } from './projectStorage';
 import { storageOwners, storageOwner, projectOwnedScope } from './projectStorageOwnership';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
@@ -131,8 +130,6 @@ export const purgeOrphans = internalMutation({
       if (input.table === 'projectFinishReadRows')
         for (const body of await deleteCapsulePins(ctx.db, row)) bodyBytes += getDocumentSize(body);
       await ctx.db.delete(row._id as never);
-      for (const path of references.files)
-        for (const id of valuesAt(row, path)) await removeExclusive(ctx, id as Id<'_storage'>, row._id);
     }
     const result = {
       deleted: rows.length,

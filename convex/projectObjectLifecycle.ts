@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
-import { removeExclusive, storageDigest, scanComplete } from './projectStorage';
+
 // Called only by the existing explicit project deletion owner. Source history has
 // no automatic expiry. Nonce receipts remain to reconcile attributable late uploads.
 export async function purgeExchangeObjects(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
@@ -13,45 +13,5 @@ export async function purgeExchangeObjects(ctx: MutationCtx, project: Doc<'hoste
   for (const row of rows) {
     await ctx.db.patch(row._id, { removed: true, recipe: undefined });
   }
-  if (rows.length) return false;
-  if (project.exchangeCleanupDone) return true;
-  const page = await ctx.db.system
-    .query('_storage')
-    .order('desc')
-    .paginate({ cursor: project.exchangeCleanupCursor ?? null, numItems: 100 });
-  for (const file of page.page) {
-    const prefix = 'application/x-forge-object-';
-    if (!file.contentType?.startsWith(prefix)) continue;
-    const row = await ctx.db
-      .query('projectObjects')
-      .withIndex('by_nonce', q => q.eq('nonce', file.contentType!.slice(prefix.length)))
-      .unique();
-    // A compacted descriptor still owns its original nonce. A late legacy upload
-    // must remain attributable after migration, with exact digest AND size.
-    const compacted = row
-      ? []
-      : await ctx.db
-          .query('projectObjectReceipts')
-          .withIndex('by_project_and_nonce_and_value', q =>
-            q
-              .eq('projectId', project._id)
-              .eq('nonce', file.contentType!.slice(prefix.length))
-              .eq('value', storageDigest(file.sha256)),
-          )
-          .take(1);
-    if (compacted[0]?.size === file.size) await removeExclusive(ctx, file._id);
-    if (
-      row?.projectId === project._id &&
-      row.removed &&
-      row.size === file.size &&
-      row.digest === storageDigest(file.sha256)
-    )
-      await removeExclusive(ctx, file._id);
-  }
-  const done = scanComplete(page, project._creationTime);
-  await ctx.db.patch(project._id, {
-    exchangeCleanupCursor: done ? undefined : page.continueCursor,
-    exchangeCleanupDone: done,
-  });
-  return done;
+  return rows.length === 0;
 }

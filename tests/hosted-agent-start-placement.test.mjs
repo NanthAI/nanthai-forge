@@ -46,7 +46,7 @@ function signedDownloads(t, s) {
     return args.digests.map(digest => ({
       digest,
       size: s.objects.get(digest).length,
-      location: 'convex',
+      location: 'r2',
       url: `https://fixture.invalid/object/${digest}`,
     }));
   };

@@ -11,19 +11,6 @@ import { invariant } from '../src/errors';
 type Derived = Doc<'derivedArtifacts'>;
 export const hexDigest = (value: string) =>
   /^[0-9a-f]{64}$/.test(value) ? value : Buffer.from(value, 'base64').toString('hex');
-async function reconciled(ctx: ActionCtx, row: Derived): Promise<Derived | null> {
-  let cursor: string | null = null;
-  while (true) {
-    const page: { storageId: string | null; isDone: boolean; cursor: string } = await ctx.runQuery(
-      internal.derivedArtifacts.uploadPage,
-      { id: row._id, cursor },
-    );
-    if (page.storageId)
-      return ctx.runMutation(internal.derivedArtifacts.attach, { id: row._id, storageId: page.storageId });
-    if (page.isDone) return null;
-    cursor = page.cursor;
-  }
-}
 // Cache keys bind original storage metadata and derivative format/pin. Permissions
 // remain current owning-action checks, never stored cache eligibility or authority.
 export async function derivedArtifact(
@@ -48,14 +35,6 @@ export async function derivedArtifact(
       (valid && valid.size === found.size && hexDigest(valid.sha256) === found.digest)
     )
       return found;
-    if (
-      !found.storageId &&
-      found.uploadType &&
-      !found.uploadType.startsWith('application/x-forge-derived-r2-')
-    ) {
-      const stored = await reconciled(ctx, found);
-      if (stored) return stored;
-    }
   }
   await checkAccess();
   const value = await build();
@@ -87,19 +66,10 @@ export async function derivedArtifact(
     if (!row || row.digest !== input.digest) throw error;
   }
   if (!row || row.inline !== undefined || row.storageId) return row;
-  let storageId: string;
-  try {
-    storageId = await blobStore(ctx).store(new Blob([bytes], { type: row.uploadType! }), {
-      r2Namespace: `v1/d/${row._id}`,
-    });
-  } catch (error) {
-    if (!row.uploadType!.startsWith('application/x-forge-derived-r2-')) {
-      const stored = await reconciled(ctx, row);
-      if (stored) return stored;
-    }
-    // A deterministic reservation reconciles by the same R2 key on retry.
-    throw error;
-  }
+  // A deterministic reservation reconciles by the same R2 key on retry.
+  const storageId = await blobStore(ctx).store(new Blob([bytes], { type: row.uploadType! }), {
+    r2Namespace: `v1/d/${row._id}`,
+  });
   try {
     return await ctx.runMutation(internal.derivedArtifacts.attach, { id: row._id, storageId });
   } catch (error) {

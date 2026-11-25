@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 import { setup as r2Setup } from './r2-harness.mjs';
-import { job, state, providers } from './hosted-fixture.mjs';
+import { job, state, providers, r2Source } from './hosted-fixture.mjs';
 import { fixture, git } from './helpers.mjs';
 import { analyze } from '../dist/analyze.js';
 import { capture } from '../dist/snapshot.js';
@@ -76,7 +76,7 @@ test('a reader gets exact source/graph/README/metadata/export only while grant a
     repository: {},
   };
   const blob = await encodeHostedArtifact(artifact);
-  s.file('saved', blob);
+  await r2Source(s, blob);
   let revoked;
   const checked = [];
   const cleanup = providers(
@@ -122,7 +122,11 @@ test('a reader gets exact source/graph/README/metadata/export only while grant a
     assert.match(JSON.parse(await read('readme')).text, /Synthetic private sharing/);
     assert.equal(JSON.parse(await read('readme?file=docs%2Fguide.md')).text, '# Retained private guide');
     const part = await download();
-    assert.deepEqual(Buffer.from(part.data), Buffer.from(await blob.arrayBuffer()));
+    assert.equal(part.direct, true);
+    assert.deepEqual(
+      Buffer.from(await (await fetch(part.url)).arrayBuffer()),
+      Buffer.from(await blob.arrayBuffer()),
+    );
     assert(checked.includes('owner') && checked.includes('reader'));
     await assert.rejects(hosted.refresh._handler(s.ctx, { id: 'own' }), denied);
     await assert.rejects(lifecycle.trash._handler(s.ctx, { id: 'own' }), denied);

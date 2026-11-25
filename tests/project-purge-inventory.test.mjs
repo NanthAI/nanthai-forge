@@ -167,7 +167,6 @@ test('inventory guard: every table that stores a hosted-project id is covered by
     assert.ok(schema.tables[table], `${table} special purge step names a missing table`);
   assert.deepEqual(projectFields('hostedProjects'), [], 'the root row has no owner field');
   // Files and scheduled functions are found from the schema, so new references are covered too.
-  assert.deepEqual(inventory.rowReferences('projectWorkGenerations').files, []);
   assert.ok(inventory.rowReferences('projectHostedLandingDesired').tasks.includes('wake.taskId'));
   assert.deepEqual(inventory.valuesAt({ a: [{ b: 'x' }, { b: 'y' }], c: { d: 'z' } }, 'a[].b'), ['x', 'y']);
   assert.deepEqual(inventory.valuesAt({ c: { d: 'z' } }, 'c.d'), ['z']);

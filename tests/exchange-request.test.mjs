@@ -675,7 +675,7 @@ test('redirected Convex storage/recipe reads bound headers and the complete body
     });
     const blobs = new ConvexExchangeBlobs({
       action: async () => ({ direct: true, digest: pin.sha256, size: pin.size }),
-      mutation: async () => [{ digest: pin.sha256, size: pin.size, location: 'convex', url: f.url }],
+      mutation: async () => [{ digest: pin.sha256, size: pin.size, location: 'r2', url: f.url }],
     });
     const pending = blobs.getPart('synthetic', pin, 0);
     for (const attempt of [1, 2, 3, 4]) {

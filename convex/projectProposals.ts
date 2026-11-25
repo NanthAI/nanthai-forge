@@ -10,7 +10,7 @@ import { intentAuthority } from './projectContributors';
 import { accessibleProject, activeProject } from './projectAuthority';
 import { ownedProject } from './projectAuthority';
 import { invariant } from '../src/errors';
-import { retainUploadCleanup, scheduleUploadSweep, retryRemovedUpload } from './projectLifecycle';
+import { retainUploadCleanup } from './projectLifecycle';
 import { report } from './errors';
 import { assertAccountActive } from './accountLimits';
 import { findObject } from './projectObjectFind';
@@ -102,7 +102,7 @@ export const register = internalMutation({
 });
 export const uploadUrl = internalMutation({
   args: { id: v.id('projectProposals'), actor: v.string() },
-  returns: v.union(v.string(), archivePut),
+  returns: archivePut,
   handler: async (ctx, { id, actor }) => {
     try {
       const proposal = await ctx.db.get(id);
@@ -127,14 +127,10 @@ export const remove = mutation({
       const user = await ctx.auth.getUserIdentity(),
         proposal = await ctx.db.get(id);
       invariant(user, 'PROJECT_UNAVAILABLE', 'This proposal is unavailable.');
-      if (!proposal) {
-        await retryRemovedUpload(ctx, id, user.subject);
-        return null;
-      }
+      if (!proposal) return null;
       const project = await ownedProject(ctx, proposal.projectId, user.subject);
-      const cleanup = await retainUploadCleanup(ctx, project, proposal, 'proposal');
+      await retainUploadCleanup(ctx, project, proposal, 'proposal');
       await ctx.db.delete(id);
-      await scheduleUploadSweep(ctx, cleanup);
       return null;
     } catch (error) {
       return report(error);

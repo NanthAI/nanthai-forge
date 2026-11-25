@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { job, state, providers } from './hosted-fixture.mjs';
+import { job, state, providers, r2Source } from './hosted-fixture.mjs';
 import { setup as r2Setup } from './r2-harness.mjs';
 import { fixture, git } from './helpers.mjs';
 import { capture } from '../dist/snapshot.js';
@@ -77,14 +77,17 @@ test('all-project devices retain source, graph, export and lifecycle under the e
     documents: {},
     repository: {},
   });
-  s.file('saved', blob);
+  await r2Source(s, blob);
   const cleanup = providers(undefined, true, captured.source.gitHead);
   t.after(cleanup);
   device(s, { kind: 'all' });
   for (const endpoint of ['files', 'source?file=a.ts', 'context?search=scopeControl'])
     assert.equal(typeof (await hosted.read._handler(s.ctx, { id: 'own', endpoint })), 'string');
   const part = await downloads.downloadPart._handler(s.ctx, { id: 'own', offset: 0 });
-  assert(Buffer.from(part.data).equals(Buffer.from(await blob.arrayBuffer())));
+  assert.equal(part.direct, true);
+  assert(
+    Buffer.from(await (await fetch(part.url)).arrayBuffer()).equals(Buffer.from(await blob.arrayBuffer())),
+  );
   await lifecycle.trash._handler(s.ctx, { id: 'own' });
   assert.equal(s.tables.imports.get('own').removal, 'trash');
   await downloads.restore._handler(s.ctx, { id: 'own' });

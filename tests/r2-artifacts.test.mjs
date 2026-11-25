@@ -229,9 +229,9 @@ test('hosted imports still fail explicitly when R2 is unconfigured', async t => 
   assert.equal(s.files.size, 0);
 });
 
-test('R2 derivatives of legacy originals retry unknown storage outcomes and reject corrupt reads', async t => {
+test('R2 derivatives of an R2 original retry unknown storage outcomes and reject corrupt reads', async t => {
   const { s, fake } = await setup(t);
-  s.file('old', new Blob(['original']));
+  const old = await blobStore(s.ctx).store(new Blob(['original']), { r2Namespace: 'v1/i/own/g/1' });
   noConvexWrites(s);
   let build = 0,
     lost = true;
@@ -247,7 +247,7 @@ test('R2 derivatives of legacy originals retry unknown storage outcomes and reje
   const derive = () =>
     derivedArtifact(
       s.ctx,
-      'old',
+      old,
       'zone-export-v1',
       'pin',
       async () => {
@@ -261,11 +261,10 @@ test('R2 derivatives of legacy originals retry unknown storage outcomes and reje
   const record = await derive();
   assert.match(record.storageId, /^r2blob:/);
   assert.equal(Buffer.from(await derivedBytes(s.ctx, record)).toString(), 'derived');
-  assert.equal(fake.objects.size, 1);
+  assert.equal(fake.objects.size, 2, 'the original and one derivative');
   assert.equal((await derive())._id, record._id);
   assert.equal(build, 2);
-  const [key] = fake.objects.keys();
-  fake.corrupt.add(key);
+  fake.corrupt.add([...fake.objects.keys()].at(-1));
   await assert.rejects(derivedBytes(s.ctx, record), e => e.code === 'BLOB_DIGEST_MISMATCH');
 });
 

@@ -65,11 +65,6 @@ async function purge(s) {
     'object receipts are purged too',
   );
 }
-test('nonce-bound uploads that finish during the settle wait are removed by the purge itself', async () => {
-  const s = await deletingProject();
-  const late = await s.ctx.storage.store(new Blob([s.bytes], { type: s.contentType }));
-  const later = await s.ctx.storage.store(new Blob([s.bytes], { type: s.contentType }));
-  await purge(s);
-  assert.equal(s.files.has(late), false);
-  assert.equal(s.files.has(later), false);
+test('permanent deletion purges the project across pages and leaves another project its rows', async () => {
+  await purge(await deletingProject());
 });

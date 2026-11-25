@@ -370,14 +370,14 @@ test('Hosted reads retain imported attribution while checking current provider m
   assert.throws(() => hostedQuery(artifact, 'readme', 'c'.repeat(40), current), { code: 'SOURCE_STALE' });
   assert.match(hostedQuery(artifact, 'readme', sha, current).text, /Original MIT license/);
 
-  const { job, providers } = await import('./hosted-fixture.mjs');
+  const { job, providers, r2Source } = await import('./hosted-fixture.mjs');
   const { encodeHostedArtifact } = await import('../dist/hosted-artifact.js');
   const { readSource } = await import(moduleUrl('../convex/hosted.ts'));
   const { s } = await r2Setup(t);
   s.tables.imports.set('own', { ...job(), scope: 'public', visibility: 'public' });
   s.caller(null);
   const blob = await encodeHostedArtifact(artifact);
-  s.file('saved', blob);
+  await r2Source(s, blob);
   const cleanup = providers(() => false, false, 'c'.repeat(40));
   const providerFetch = globalThis.fetch;
   let privateNow = false,
@@ -396,7 +396,6 @@ test('Hosted reads retain imported attribution while checking current provider m
     assert.equal(result.hosted.visibility, 'public');
     assert.equal(result.gitHead, sha);
     assert.equal(result.currentGitHead, 'c'.repeat(40));
-    assert.equal(s.files.get('saved').blob, blob);
     observedHead = sha;
     const readme = JSON.parse(await readSource(s.ctx, { id: 'own', endpoint: 'readme' }));
     assert.match(readme.text, /Original MIT license/);

@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
-import { state, job, providers } from './hosted-fixture.mjs';
+import { state, job, providers, r2Reference } from './hosted-fixture.mjs';
 const removal = await import(moduleUrl('../convex/importRemoval.ts'));
 const lifecycle = await import(moduleUrl('../convex/lifecycle.ts'));
 const imports = await import(moduleUrl('../convex/imports.ts'));
@@ -99,6 +99,10 @@ test('public and private removals disappear immediately from owner, shared proje
 
 test('cleanup drains every import dependency and nested zone/grant records across batches, deleting unshared storage only', async () => {
   const s = state([job(), { ...job('other'), owner: 'another', artifactKey: 'shared' }]);
+  const refs = new Map();
+  const ref = id => refs.get(id) ?? refs.set(id, r2Reference(s, `blob-${id}`)).get(id);
+  s.tables.imports.get('own').artifactKey = ref('saved');
+  s.tables.imports.get('other').artifactKey = ref('shared');
   for (const table of [
     'savedViews',
     'projectInterests',
@@ -111,12 +115,12 @@ test('cleanup drains every import dependency and nested zone/grant records acros
   ]) {
     for (let i = 0; i < 105; i++) {
       const id = `${table}-${i}`;
-      s.tables[table].set(id, { _id: id, importId: 'own', artifactKey: `blob-${table}-${i}` });
+      s.tables[table].set(id, { _id: id, importId: 'own', artifactKey: ref(`blob-${table}-${i}`) });
     }
     s.tables[table].set(`${table}-other`, {
       _id: `${table}-other`,
       importId: 'other',
-      artifactKey: 'shared',
+      artifactKey: ref('shared'),
     });
   }
   for (const table of ['agentEvents', 'zoneReaders', 'zoneChanges']) {
@@ -125,15 +129,17 @@ test('cleanup drains every import dependency and nested zone/grant records acros
       s.tables[table].set(id, { _id: id, agentId: 'agentGrants-0', zoneId: 'sourceZones-0' });
     }
   }
-  s.tables.importArtifacts.set('shared-ref', { _id: 'shared-ref', importId: 'own', artifactKey: 'shared' });
+  s.tables.importArtifacts.set('shared-ref', {
+    _id: 'shared-ref',
+    importId: 'own',
+    artifactKey: ref('shared'),
+  });
   s.tables.derivedArtifacts.set('derived', {
     _id: 'derived',
-    original: 'saved',
+    original: ref('saved'),
     removed: false,
-    storageId: 'derived-blob',
+    storageId: ref('derived-blob'),
   });
-  s.file('saved', new Blob(['source']));
-  s.file('derived-blob', new Blob(['derived']));
   await removal.remove._handler(s.ctx, command);
   let batches = 0;
   while (s.tables.imports.has('own')) {
@@ -156,12 +162,10 @@ test('cleanup drains every import dependency and nested zone/grant records acros
   }
   for (const table of ['agentEvents', 'zoneReaders', 'zoneChanges', 'derivedArtifacts'])
     assert.equal(s.tables[table].size, 0, table);
-  assert.ok(s.deleted.includes('saved'));
-  assert.ok(s.deleted.includes('derived-blob'));
-  assert.ok(s.deleted.includes('blob-sourceZones-0'));
-  assert.ok(s.deleted.includes('blob-agentGrants-0'));
-  assert.ok(!s.deleted.includes('shared'));
-  assert.equal(s.files.has('saved'), false);
+  const removed = id => s.tables.artifactBlobs.get(`blob-${id}`).removed;
+  for (const id of ['saved', 'derived-blob', 'blob-sourceZones-0', 'blob-agentGrants-0'])
+    assert.equal(removed(id), true, id);
+  assert.equal(removed('shared'), false);
   await lifecycle.purge._handler(s.ctx, { id: 'own' });
   await removal.remove._handler(s.ctx, command);
 });

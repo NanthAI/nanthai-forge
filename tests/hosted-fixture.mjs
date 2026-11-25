@@ -738,3 +738,27 @@ export const deleteWorkRecord = (tables, id) =>
   ['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'].forEach(table =>
     tables[table]?.delete(id),
   );
+
+/** Store a snapshot the only way it can be stored (an R2 artifact) and point every import that names a
+ * source at it. Replaces the old Convex-file `s.file('saved', blob)` fixtures. */
+export async function r2Source(s, blob, namespace = 'v1/i/own/g/1') {
+  const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
+  const ref = await blobStore(s.ctx).store(blob, { r2Namespace: namespace });
+  for (const row of s.tables.imports.values()) if (row.artifactKey !== undefined) row.artifactKey = ref;
+  return ref;
+}
+/** A committed artifact row with no bytes, for cleanup tests that only follow references. */
+export function r2Reference(s, id) {
+  s.tables.artifactBlobs.set(id, {
+    _id: id,
+    _creationTime: 1,
+    namespace: `v1/i/${id}`,
+    digest: 'a'.repeat(64),
+    size: 1,
+    contentType: 'application/gzip',
+    r2Key: `v1/i/${id}`,
+    committed: true,
+    removed: false,
+  });
+  return `r2blob:${id}`;
+}

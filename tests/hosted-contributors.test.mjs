@@ -660,25 +660,17 @@ test('contributor proposals publish and read committed R2 roots while retaining 
   assert.equal(fake.objects.size, count);
 });
 
-test('opted-in legacy archive metadata sidecars use R2 and preserve exact Work bytes', async t => {
+test('archive metadata sidecars use R2 and preserve exact Work bytes', async t => {
   const { fake } = await r2Setup(t);
   const s = await setup(t, { r2Ready: true });
-  s.files.set('old-sidecar-original', {
-    blob: new Blob([s.bytes], { type: 'application/gzip' }),
-    metadata: { size: s.bytes.length, sha256: digest(s.bytes), contentType: 'application/gzip' },
+  const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
+  const original = await blobStore(s.ctx).store(new Blob([s.bytes], { type: 'application/gzip' }), {
+    r2Namespace: 'v1/p/project/archives/sidecar-original',
   });
   s.ctx.storage.store = () => assert.fail('opted-in metadata sidecars must not write Convex bytes');
   const { projectArchiveMetadata } = await import(moduleUrl('../convex/projectArchiveMetadata.ts'));
   const load = () =>
-    projectArchiveMetadata(
-      s.ctx,
-      'old-sidecar-original',
-      s.bytes.length,
-      digest(s.bytes),
-      async () => {},
-      true,
-      true,
-    );
+    projectArchiveMetadata(s.ctx, original, s.bytes.length, digest(s.bytes), async () => {}, true, true);
   const first = await load(),
     objects = fake.objects.size;
   const second = await load();
@@ -687,7 +679,7 @@ test('opted-in legacy archive metadata sidecars use R2 and preserve exact Work b
   assert.equal(fake.objects.size, objects);
   assert.ok(
     [...s.tables.derivedArtifacts.values()].some(
-      row => row.original === 'old-sidecar-original' && row.storageId?.startsWith('r2blob:'),
+      row => row.original === original && row.storageId?.startsWith('r2blob:'),
     ),
   );
 });

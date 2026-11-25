@@ -3,9 +3,10 @@
 import type { MutationCtx, QueryCtx } from './server';
 import { invariant } from '../src/errors';
 
-/** Retry receipts for one-off maintenance pages. The table keeps its original name
- * (`legacyStorageCleanupPages`) because operational expiry and the landing capsule also store
- * their own receipts in it; a rename moves rows and capsule pointers (Item c0af6cfa follow-up). */
+/** Retry receipts for maintenance pages. The table keeps its original name
+ * (`legacyStorageCleanupPages`): operational expiry and the landing capsule also store their own
+ * receipts in it, and the capsule names it in stored capsules and the queue-path source
+ * (`src/hosted-landing.ts`); renaming it needs a queue proof (Item c0af6cfa follow-up). */
 export async function cleanupReceipt(ctx: QueryCtx, operationId: string, part: string, request: string) {
   const old = await ctx.db
     .query('legacyStorageCleanupPages')

@@ -239,14 +239,10 @@ export function valuesAt(row: unknown, path: string): string[] {
   }
   return values.filter((value): value is string => typeof value === 'string');
 }
-const cache = new Map<string, { files: string[]; tasks: string[] }>();
-/** Convex files and scheduled functions a project row references; derived from the schema. */
+const cache = new Map<string, { tasks: string[] }>();
+/** Scheduled functions a project row references; derived from the schema. Bytes live in R2, never in Convex files. */
 export function rowReferences(table: ProjectPurgeTable) {
   let found = cache.get(table);
-  if (!found)
-    cache.set(
-      table,
-      (found = { files: idPaths(table, '_storage'), tasks: idPaths(table, '_scheduled_functions') }),
-    );
+  if (!found) cache.set(table, (found = { tasks: idPaths(table, '_scheduled_functions') }));
   return found;
 }

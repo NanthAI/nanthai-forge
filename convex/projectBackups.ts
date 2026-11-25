@@ -39,7 +39,6 @@ export const item = (backup: Doc<'projectBackups'>, project: Doc<'hostedProjects
   current: project.currentBackup === backup._id,
   at: backup._creationTime,
 });
-export { storageDigest } from './projectStorage';
 export const backupItem = v.object({
   objectManifest: v.optional(v.object({ digest: v.string(), size: v.number() })),
   originalArchive: v.optional(v.object({ digest: v.string(), size: v.number() })),
@@ -254,7 +253,7 @@ export const register = internalMutation({
 });
 export const uploadUrl = internalMutation({
   args: { id: v.id('projectBackups'), owner: v.string() },
-  returns: v.union(v.string(), archivePut),
+  returns: archivePut,
   handler: async (ctx, { id, owner }) => {
     try {
       const backup = await ctx.db.get(id);

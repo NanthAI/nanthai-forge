@@ -88,15 +88,11 @@ export class ObjectDownloadReader {
     destination?: Uint8Array,
   ) {
     invariant(row.location !== 'recipe', 'INVALID_WORK_BACKUP', 'Resolve the recipe before reading bytes.');
-    let url = row.location === 'r2' ? signed!.url : row.url;
-    let range = row.location === 'r2' ? signed!.range : undefined;
+    let url = signed!.url;
+    let range = signed!.range;
     const pin = { sha256: row.digest, size: row.size };
     const refresh = async () => {
-      const next = renew
-        ? await renew()
-        : row.location === 'convex'
-          ? (await this.rows([pin], true)).get(row.digest)!
-          : (await this.signatures([pin])).get(row.digest)!;
+      const next = renew ? await renew() : (await this.signatures([pin])).get(row.digest)!;
       invariant(
         (!('location' in next) || next.location !== 'recipe') && 'url' in next && next.url,
         'EXCHANGE_DOWNLOAD_DENIED',
@@ -122,10 +118,7 @@ export class ObjectDownloadReader {
         await refresh();
         continue;
       }
-      if (
-        attempt === 0 &&
-        (response.status === 403 || (row.location === 'convex' && response.status === 404))
-      ) {
+      if (attempt === 0 && response.status === 403) {
         await response.body?.cancel();
         await refresh();
         continue;

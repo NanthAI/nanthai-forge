@@ -11,12 +11,12 @@ const lifecycleActions = await import(moduleUrl('../convex/lifecycleActions.ts')
 const sync = await import(moduleUrl('../convex/sync.ts'));
 const hosted = await import(moduleUrl('../convex/hosted.ts'));
 const { snapshotDownload } = await import(moduleUrl('../web/src/snapshot.ts'));
-import { job, state, providers } from './hosted-fixture.mjs';
+import { job, state, providers, r2Source, r2Reference } from './hosted-fixture.mjs';
 
-test('owner snapshot inspection reports original native stored bytes without blob reads or writes and rejects access loss, absent files and changed observations', async () => {
+test('owner snapshot inspection reports the original stored bytes without blob reads or writes and rejects access loss, absent files and changed observations', async () => {
   const s = state([job(), { ...job('public'), visibility: 'public', scope: 'public' }]),
     blob = new Blob(['x'.repeat(33)], { type: 'application/gzip' });
-  s.file('saved', blob);
+  const ref = await r2Source(s, blob);
   let revoked = false,
     afterMetadata = () => {},
     metadataReads = 0;
@@ -72,7 +72,7 @@ test('owner snapshot inspection reports original native stored bytes without blo
     for (const change of [{ generation: 2 }, { head: 'b'.repeat(40) }, { artifactKey: 'new' }]) {
       afterMetadata = () => Object.assign(s.tables.imports.get('own'), change);
       await assert.rejects(inspect('own'), e => e.data.code === 'STATE_MISMATCH');
-      Object.assign(s.tables.imports.get('own'), job());
+      Object.assign(s.tables.imports.get('own'), job(), { artifactKey: ref });
     }
     afterMetadata = () => {
       s.tables.imports.get('own').removal = 'trash';
@@ -89,7 +89,7 @@ test('owner snapshot inspection reports original native stored bytes without blo
     await assert.rejects(inspect('own'), e => e.data.code === 'GITHUB_UNAVAILABLE');
     delete s.tables.imports.get('own').removal;
     afterMetadata = () => {};
-    s.files.delete('saved');
+    s.tables.artifactBlobs.clear();
     await assert.rejects(inspect('own'), e => e.data.code === 'INVALID_ARTIFACT');
     delete s.tables.imports.get('own').artifactKey;
     await assert.rejects(inspect('own'), e => e.data.code === 'INDEX_MISSING');
@@ -173,40 +173,47 @@ test('private owner list, Trash/Restore and lifecycle metadata preserve tenant i
 });
 
 test('permanent deletion paginates owned artifacts, preserves shared files and reconciles interrupted/de-duplicated deletion', async () => {
-  const s = state([
-    job(),
-    { ...job('public'), visibility: 'public', scope: 'public', artifactKey: 'shared' },
-  ]);
+  const s = state([job(), { ...job('public'), visibility: 'public', scope: 'public' }]);
+  const ref = id => `r2blob:blob-${id}`;
+  for (const id of ['shared', 'saved', ...Array.from({ length: 103 }, (_, i) => `old-${i + 1}`)])
+    r2Reference(s, `blob-${id}`);
+  s.tables.imports.get('own').artifactKey = ref('saved');
+  s.tables.imports.get('public').artifactKey = ref('shared');
+  const purges = () =>
+    s.scheduled.filter(
+      entry => getFunctionName(entry.ref ?? entry.handler ?? entry.fn) === 'lifecycle:purge',
+    );
   for (let i = 0; i < 104; i++) {
     const key = i === 0 ? 'saved' : `old-${i}`;
-    s.tables.importArtifacts.set(key, { _id: key, importId: 'own', artifactKey: key });
+    s.tables.importArtifacts.set(key, { _id: key, importId: 'own', artifactKey: ref(key) });
   }
   s.tables.importArtifacts.set('shared-owner', {
     _id: 'shared-owner',
     importId: 'own',
-    artifactKey: 'shared',
+    artifactKey: ref('shared'),
   });
   s.tables.importArtifacts.set('shared-other', {
     _id: 'shared-other',
     importId: 'public',
-    artifactKey: 'shared',
+    artifactKey: ref('shared'),
   });
   await lifecycle.permanentlyDelete._handler(s.ctx, { id: 'own' });
   await lifecycle.permanentlyDelete._handler(s.ctx, { id: 'own' });
-  assert.equal(s.scheduled.length, 1);
-  const first = s.scheduled[0];
+  assert.equal(purges().length, 1);
+  const first = purges()[0];
   s.tasks.set(first.id, { state: { kind: 'failed' } });
   await lifecycle.permanentlyDelete._handler(s.ctx, { id: 'own' });
-  assert.equal(s.scheduled.length, 2);
-  for (let i = 1; i < s.scheduled.length; i++) await lifecycle.purge._handler(s.ctx, s.scheduled[i].args);
-  assert.equal(s.deleted.length, 104);
-  assert.ok(!s.deleted.includes('shared'));
+  assert.equal(purges().length, 2);
+  for (let i = 1; i < purges().length; i++) await lifecycle.purge._handler(s.ctx, purges()[i].args);
+  const removed = [...s.tables.artifactBlobs.values()].filter(row => row.removed);
+  assert.equal(removed.length, 104);
+  assert.ok(!removed.some(row => row._id === 'blob-shared'));
   assert.equal(s.tables.imports.has('own'), false);
   assert.equal(s.tables.imports.has('public'), true);
   assert.equal(s.tables.importArtifacts.size, 1);
   assert.equal(s.tables.importArtifacts.get('shared-other').importId, 'public');
   await lifecycle.permanentlyDelete._handler(s.ctx, { id: 'own' });
-  assert.equal(s.scheduled.length, 4);
+  assert.equal(purges().length, 4);
   assert.equal(
     await imports.update._handler(s.ctx, { id: 'own', generation: 1, phase: 'ready', artifactKey: 'late' }),
     false,
@@ -227,10 +234,10 @@ test('publication registers old/new artifacts transactionally for future owned c
   assert.equal(s.tables.importArtifacts.size, 2);
 });
 
-test('chunked snapshot transfer exceeds one response budget, verifies bytes and denies revoked/other/Trash access before storage', async () => {
+test('snapshot download verifies each part, hands out a direct R2 URL and denies revoked/other/Trash access before storage', async () => {
   const s = state([{ ...job(), sync: { checkedAt: 1, result: 'checked', head: 'b'.repeat(40) } }]),
-    blob = new Blob(['x'.repeat(22 * 1024 * 1024)], { type: 'application/gzip' });
-  s.file('saved', blob);
+    blob = new Blob(['x'.repeat(1024 * 1024)], { type: 'application/gzip' });
+  await r2Source(s, blob);
   let revoked = false;
   const cleanup = providers(() => revoked);
   try {
@@ -240,21 +247,16 @@ test('chunked snapshot transfer exceeds one response budget, verifies bytes and 
     }
     assert.equal(s.reads(), 0);
     s.caller('owner');
-    const { blob: downloaded, filename } = await snapshotDownload((offset, digest) =>
-      lifecycleActions.downloadPart._handler(s.ctx, { id: 'own', offset, digest }),
-    );
-    assert.equal(downloaded.size, blob.size);
-    assert.equal(s.reads(), 11);
-    assert.ok(filename.endsWith('.forge.json.gz'));
-    assert.ok(
-      filename.includes('a'.repeat(12)),
-      'Export keeps the indexed revision when sync observes a newer head.',
-    );
+    const part = await lifecycleActions.downloadPart._handler(s.ctx, { id: 'own', offset: 0 });
+    assert.equal(part.direct, true);
+    assert.equal(part.size, blob.size);
     assert.equal(
       createHash('sha256')
-        .update(Buffer.from(await downloaded.arrayBuffer()))
+        .update(Buffer.from(await (await fetch(part.url)).arrayBuffer()))
         .digest('hex'),
-      s.files.get('saved').metadata.sha256,
+      createHash('sha256')
+        .update(Buffer.from(await blob.arrayBuffer()))
+        .digest('hex'),
     );
     const data = new Uint8Array([1, 2, 3]).buffer,
       digest = createHash('sha256').update(Buffer.from(data)).digest('base64');

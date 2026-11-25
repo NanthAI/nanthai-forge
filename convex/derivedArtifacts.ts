@@ -6,7 +6,7 @@ import { artifactBlobId } from './artifactBlobFields';
 import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './server';
 import { internal } from './_generated/api';
 import { artifactMetadata } from './artifactStorage';
-import { storageDigest, scanComplete } from './storageDigest';
+import { storageDigest } from './storageDigest';
 import { derivedFields } from './derivedArtifactFields';
 import { invariant } from '../src/errors';
 const key = { original: v.string(), kind: v.string(), pin: v.string() };
@@ -103,27 +103,6 @@ export const attach = internalMutation({
     return ctx.db.get(id);
   },
 });
-export const uploadPage = internalQuery({
-  args: { id: v.id('derivedArtifacts'), cursor: v.union(v.string(), v.null()) },
-  returns: v.any(),
-  handler: async (ctx, { id, cursor }) => {
-    const row = await ctx.db.get(id);
-    if (!row || row.removed || !(await artifactMetadata(ctx, row.original)))
-      return { storageId: null, isDone: true, cursor: '' };
-    const page = await ctx.db.system.query('_storage').order('desc').paginate({ cursor, numItems: 100 });
-    const found = page.page.find(
-      file =>
-        file.contentType === row.uploadType &&
-        file.size === row.size &&
-        storageDigest(file.sha256) === row.digest,
-    );
-    return {
-      storageId: found?._id ?? null,
-      isDone: scanComplete(page, row._creationTime),
-      cursor: page.continueCursor,
-    };
-  },
-});
 export const discard = internalMutation({
   args: { id: v.id('derivedArtifacts'), storageId: v.string() },
   returns: v.null(),
@@ -149,18 +128,9 @@ export async function removeDerived(ctx: MutationCtx, original: string): Promise
     .take(50);
   for (const row of rows) {
     if (row.storageId) await blobStore(ctx).delete(row.storageId);
-    if (row.uploadType) {
+    if (row.uploadType)
       await ctx.db.patch(row._id, { removed: true, storageId: undefined, inline: undefined });
-      if (
-        !row.uploadType.startsWith('application/x-forge-derived-r2-') &&
-        !artifactBlobId(row.storageId ?? '')
-      )
-        await ctx.scheduler.runAfter(0, internal.derivedArtifacts.sweep, {
-          id: row._id,
-          cursor: null,
-          followup: false,
-        });
-    } else await ctx.db.delete(row._id);
+    else await ctx.db.delete(row._id);
   }
   if (rows.length === 50) await ctx.scheduler.runAfter(0, internal.derivedArtifacts.purge, { original });
 }
@@ -170,29 +140,5 @@ export const purge = internalMutation({
   handler: async (ctx, { original }) => {
     if (!(await artifactMetadata(ctx, original))) await removeDerived(ctx, original);
     return null;
-  },
-});
-export const sweep = internalMutation({
-  args: { id: v.id('derivedArtifacts'), cursor: v.union(v.string(), v.null()), followup: v.boolean() },
-  returns: v.union(v.null(), v.object({ isDone: v.boolean(), cursor: v.string() })),
-  handler: async (ctx, args) => {
-    const row = await ctx.db.get(args.id);
-    if (!row?.removed || !row.uploadType) return null;
-    if (row.uploadType.startsWith('application/x-forge-derived-r2-')) return { isDone: true, cursor: '' };
-    const page = await ctx.db.system
-      .query('_storage')
-      .order('desc')
-      .paginate({ cursor: args.cursor, numItems: 100 });
-    for (const file of page.page)
-      if (
-        file.contentType === row.uploadType &&
-        file.size === row.size &&
-        storageDigest(file.sha256) === row.digest
-      )
-        await blobStore(ctx).delete(file._id);
-    // Manual legacy purge only: the caller advances the returned cursor.
-    // Retain the source-free binding for later late-outcome reconciliation. A timed
-    // pass isn't proof that an unknown storage operation can never commit afterwards.
-    return { isDone: scanComplete(page, row._creationTime), cursor: page.continueCursor };
   },
 });

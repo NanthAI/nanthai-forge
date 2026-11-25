@@ -313,7 +313,7 @@ test('M1 phase derive: one row per state, a reason for each purge-blocked code, 
   }
   row({ removal: 'archived-by-a-future-server' }, 'unknown');
 });
-test('permanent removal prevents original initial prepare resurrection and validates known late completion before exclusive cleanup', async () => {
+test('permanent removal prevents original initial prepare resurrection and refuses a late completion', async () => {
   const s = fixture(),
     project = s.tables.hostedProjects.get('project'),
     request = {
@@ -325,39 +325,17 @@ test('permanent removal prevents original initial prepare resurrection and valid
       size: bytes.length,
       preview: s.tables.projectBackups.get('backup').preview,
     };
-  const original = s.tables.projectBackups.get('backup');
   await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, s.operation());
-  // Late completions arrive while the purge waits for issued uploads to expire.
-  s.put('late', `application/x-forge-backup-${original.nonce}`);
-  await assert.rejects(backups.complete._handler(s.ctx, { id: 'backup', storageId: 'late' }), unavailable);
-  s.put('foreign', 'application/gzip');
-  await assert.rejects(backups.complete._handler(s.ctx, { id: 'backup', storageId: 'foreign' }), unavailable);
-  assert.ok(s.files.has('foreign'));
-  s.put('mismatch', `application/x-forge-backup-${original.nonce}`, Buffer.from('different'));
-  await assert.rejects(
-    backups.complete._handler(s.ctx, { id: 'backup', storageId: 'mismatch' }),
-    unavailable,
-  );
-  assert.ok(s.files.has('mismatch'));
-  s.put('actor-denied', `application/x-forge-backup-${original.nonce}`);
+  // A completion that arrives while the purge waits for issued uploads to expire.
+  await assert.rejects(backups.complete._handler(s.ctx, { id: 'backup' }), unavailable);
   s.caller('unrelated');
-  await assert.rejects(
-    backups.complete._handler(s.ctx, { id: 'backup', storageId: 'actor-denied' }),
-    unavailable,
-  );
-  assert.ok(s.files.has('actor-denied'));
+  await assert.rejects(backups.complete._handler(s.ctx, { id: 'backup' }), unavailable);
   s.caller('owner');
-  // The purge runs after every issued upload has expired, so its own exact-binding
-  // sweep removes late bytes; nothing can arrive after it.
   await s.drain();
   await assert.rejects(backups.prepare._handler(s.ctx, request), unavailable);
   assert.equal(s.tables.hostedProjects.size, 1);
-  assert.ok(!s.files.has('late'));
-  assert.ok(!s.files.has('actor-denied'));
-  assert.ok(s.files.has('foreign'));
-  assert.ok(s.files.has('mismatch'));
 });
-test('F6: two issued native URLs for the same initial backup never complete into old Convex file storage', async () => {
+test('two prepares of the same initial backup issue R2 targets and complete refuses until the archive is uploaded', async () => {
   const s = fixture(),
     request = {
       key: randomUUID(),
@@ -371,14 +349,11 @@ test('F6: two issued native URLs for the same initial backup never complete into
   const first = await backups.prepare._handler(s.ctx, request),
     second = await backups.prepare._handler(s.ctx, request);
   assert.equal(first.backup.id, second.backup.id);
-  assert.ok(first.uploadUrl && second.uploadUrl);
-  s.put('url-one', first.contentType);
-  s.put('url-two', second.contentType);
-  for (const storageId of ['url-one', 'url-two'])
-    await assert.rejects(
-      backups.complete._handler(s.ctx, { id: first.backup.id, storageId }),
-      e => (e.code ?? e.data?.code) === 'R2_REQUIRED',
-    );
+  assert.ok(first.target && second.target);
+  await assert.rejects(
+    backups.complete._handler(s.ctx, { id: first.backup.id }),
+    e => (e.code ?? e.data?.code) === 'R2_OBJECT_MISSING',
+  );
   const row = s.tables.projectBackups.get(first.backup.id);
   assert.equal(row.status, 'uploading');
   assert.equal(row.storageId, undefined);

@@ -3,7 +3,6 @@
 'use node';
 import { ConvexError } from 'convex/values';
 import type { ActionCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
 
 export const retryCode = 'WORK_INDEX_RETRY';
 const contexts = new WeakSet<ActionCtx>();
@@ -60,12 +59,6 @@ export function indexReadContext(ctx: ActionCtx): ActionCtx {
     ...ctx,
     runQuery: (ref, args) => indexRead(() => ctx.runQuery(ref, args)),
     runAction: (ref, args) => indexRead(() => ctx.runAction(ref, args)),
-    storage: {
-      ...ctx.storage,
-      get: (id: Id<'_storage'>) => indexRead(() => ctx.storage.get(id)),
-      getMetadata: (id: Id<'_storage'>) => indexRead(() => ctx.storage.getMetadata(id)),
-      getUrl: (id: Id<'_storage'>) => indexRead(() => ctx.storage.getUrl(id)),
-    },
   };
   contexts.add(result);
   return result;

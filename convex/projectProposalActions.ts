@@ -85,7 +85,6 @@ export const prepare = action({
   args: proposalArgs,
   returns: v.object({
     proposal: projectProposalDocument,
-    uploadUrl: v.optional(v.string()),
     target: v.optional(archivePut),
     contentType: v.optional(v.string()),
   }),
@@ -94,7 +93,6 @@ export const prepare = action({
     input,
   ): Promise<{
     proposal: Doc<'projectProposals'>;
-    uploadUrl?: string;
     target?: R2PutTarget;
     contentType?: string;
   }> => {
@@ -167,7 +165,7 @@ export const prepare = action({
       const target = await ctx.runMutation(internal.projectProposals.uploadUrl, { id, actor });
       return {
         proposal,
-        ...(typeof target === 'string' ? { uploadUrl: target } : { target }),
+        target,
         contentType: `application/x-forge-proposal-${proposal.nonce}`,
       };
     } catch (error) {

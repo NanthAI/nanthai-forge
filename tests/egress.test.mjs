@@ -25,6 +25,15 @@ test.beforeEach(async t => {
 });
 const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
+/** An original stored the only way it can be: an R2 artifact. */
+const r2Ref = (s, blob, namespace) => blobStore(s.ctx).store(blob, { r2Namespace: namespace });
+/** Reads of that original's R2 object, counted at the bucket. */
+const originalReads = (t, s, ref) =>
+  buckets
+    .get(t)
+    .requests.filter(
+      r => r.method === 'GET' && r.path.includes(s.tables.artifactBlobs.get(ref.slice(7)).r2Key),
+    ).length;
 async function original(t) {
   const root = fixture(t, { 'a.ts': 'export const value = 1;\n', 'README.md': '# Original attribution\n' });
   git(root, ['add', '.']);
@@ -44,20 +53,15 @@ async function original(t) {
     repository,
   };
   const s = state([{ ...job(), head: snapshot.source.gitHead }]),
-    blob = await encodeHostedArtifact(artifact);
-  s.files.set('saved', {
-    blob,
-    metadata: {
-      size: blob.size,
-      sha256: digest(Buffer.from(await blob.arrayBuffer())),
-      contentType: blob.type,
-    },
-  });
+    blob = await encodeHostedArtifact(artifact),
+    ref = await r2Ref(s, blob, 'v1/i/own/g/1');
+  s.tables.imports.get('own').artifactKey = ref;
   let revoked = false;
   t.after(providers(() => revoked, true, snapshot.source.gitHead));
   const read = async endpoint => JSON.parse(await hosted.read._handler(s.ctx, { id: 'own', endpoint }));
   return {
     s,
+    ref,
     artifact,
     read,
     revoke: () => {
@@ -66,30 +70,21 @@ async function original(t) {
   };
 }
 test('warm status transfers zero artifact bytes, preserving complete status, parameters and current attribution/freshness', async t => {
-  const { s, artifact, read, revoke } = await original(t);
-  let bytes = 0,
-    bodies = 0;
-  const get = s.ctx.storage.get;
-  s.ctx.storage.get = async id => {
-    const blob = await get(id);
-    bodies++;
-    bytes += blob?.size ?? 0;
-    return blob;
-  };
+  const { s, ref, artifact, read, revoke } = await original(t);
+  const bodies = () => originalReads(t, s, ref);
   const first = await read('status');
   assert.deepEqual(
     Object.fromEntries(Object.entries(first).filter(([k]) => k !== 'sync')),
     hostedQuery(artifact, 'status', artifact.pack.source.gitHead),
   );
-  assert.equal(bodies, 1);
-  const cold = bytes;
+  assert.equal(bodies(), 1);
+  const cold = bodies();
   for (let i = 0; i < 4; i++)
     assert.deepEqual(
       Object.fromEntries(Object.entries(await read('status')).filter(([k]) => k !== 'sync')),
       hostedQuery(artifact, 'status', artifact.pack.source.gitHead),
     );
-  assert.equal(bytes, cold);
-  assert.equal(bodies, 1);
+  assert.equal(bodies(), cold);
   assert.ok(cold > 0);
   await assert.rejects(read('status?state=wrong'), code('STATE_MISMATCH'));
   await assert.rejects(read('status?limit=1.5'), code('BAD_ARGUMENT'));
@@ -114,11 +109,11 @@ test('warm status transfers zero artifact bytes, preserving complete status, par
   assert.equal(changed.name, 'example/renamed');
   assert.equal(changed.hosted.license, 'Not specified');
   assert.equal(changed.hosted.currentLicense, 'MIT');
-  assert.equal(bytes, cold);
+  assert.equal(bodies(), cold);
   globalThis.fetch = prior;
   revoke();
   await assert.rejects(read('status'), code('GITHUB_UNAVAILABLE'));
-  assert.equal(bytes, cold);
+  assert.equal(bodies(), cold);
 });
 test('missing/corrupt summaries rebuild from the same original bytes; refreshing retains previous status until new artifact publication', async t => {
   const { s, artifact, read } = await original(t);
@@ -167,28 +162,12 @@ test('warm Work metadata reads only a sidecar, preserving original bytes, unknow
     ]),
   );
   const s = state([]),
-    sha = digest(bytes);
-  s.files.set('archive', {
-    blob: new Blob([bytes]),
-    metadata: { size: bytes.length, sha256: Buffer.from(sha, 'hex').toString('base64') },
-  });
-  let originals = 0,
-    sidecars = 0,
-    access = 0;
-  const getUrl = s.ctx.storage.getUrl,
-    get = s.ctx.storage.get;
-  s.ctx.storage.getUrl = async id => {
-    assert.equal(id, 'archive');
-    originals++;
-    return getUrl(id);
-  };
-  s.ctx.storage.get = async id => {
-    assert.notEqual(id, 'archive');
-    sidecars++;
-    return get(id);
-  };
+    sha = digest(bytes),
+    archive = await r2Ref(s, new Blob([bytes]), 'v1/p/synthetic/archives/a');
+  let access = 0;
+  const originals = () => originalReads(t, s, archive);
   const read = () =>
-    projectArchiveMetadata(s.ctx, 'archive', bytes.length, sha, async t => {
+    projectArchiveMetadata(s.ctx, archive, bytes.length, sha, async () => {
       access++;
     });
   for (let i = 0; i < 2; i++) {
@@ -196,9 +175,9 @@ test('warm Work metadata reads only a sidecar, preserving original bytes, unknow
     assert.deepEqual(Buffer.from(value.manifest), manifest);
     assert.deepEqual(Buffer.from(value.work), work);
   }
-  assert.equal(originals, 1);
-  assert.equal(sidecars, 0);
-  assert.equal(buckets.get(t).requests.filter(r => r.method === 'GET').length, 1);
+  assert.equal(originals(), 1);
+  // The second read is the one sidecar read; the original is not read again.
+  assert.equal(buckets.get(t).requests.filter(r => r.method === 'GET').length, 2);
   assert.ok(access >= 4);
   const row = [...s.tables.derivedArtifacts.values()][0];
   assert.equal(row.kind, 'work-metadata-v3');
@@ -207,19 +186,15 @@ test('warm Work metadata reads only a sidecar, preserving original bytes, unknow
     'Full metadata bytes retained outside database documents',
   );
   assert.ok(row.size < work.length, 'Sidecar compressed without changing metadata bytes');
-  // A legacy sidecar whose metadata disappeared is rebuilt into R2.
-  const legacy = 'missing-legacy';
-  row.storageId = legacy;
+  // A sidecar whose stored bytes disappeared is rebuilt into R2.
+  row.storageId = 'missing-legacy';
   const rebuilt = await read();
   assert.deepEqual(Buffer.from(rebuilt.work), work);
-  assert.equal(originals, 2);
+  assert.equal(originals(), 2);
 });
 test('durable derived upload reservation reconciles lost store/attach replies and concurrent builders', async t => {
-  const s = state([]);
-  s.files.set('original', {
-    blob: new Blob(['original']),
-    metadata: { size: 8, sha256: digest('original') },
-  });
+  const s = state([]),
+    original = await r2Ref(s, new Blob(['original']), 'v1/i/own/g/1');
   let builds = 0;
   const build = async () => {
     builds++;
@@ -245,13 +220,13 @@ test('durable derived upload reservation reconciles lost store/attach replies an
     return result;
   };
   await assert.rejects(
-    derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'pin', build, async () => {}),
+    derivedArtifact(s.ctx, original, 'zone-export-v1', 'pin', build, async () => {}),
     /lost committed storage reply/,
   );
-  const a = await derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'pin', build, async () => {});
+  const a = await derivedArtifact(s.ctx, original, 'zone-export-v1', 'pin', build, async () => {});
   assert.ok(a.storageId);
   assert.equal(a.contentType, 'application/gzip');
-  const b = await derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'pin', build, async () => {});
+  const b = await derivedArtifact(s.ctx, original, 'zone-export-v1', 'pin', build, async () => {});
   assert.equal(a.storageId, b.storageId);
   assert.equal(builds, 2);
   const mutation = s.ctx.runMutation;
@@ -270,105 +245,17 @@ test('durable derived upload reservation reconciles lost store/attach replies an
     return result;
   };
   const [c, d] = await Promise.all([
-    derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'other', build, async () => {}),
-    derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'other', build, async () => {}),
+    derivedArtifact(s.ctx, original, 'zone-export-v1', 'other', build, async () => {}),
+    derivedArtifact(s.ctx, original, 'zone-export-v1', 'other', build, async () => {}),
   ]);
   assert.equal(c.storageId, d.storageId);
-  assert.equal(buckets.get(t).objects.size, 2, 'Concurrent losers cleaned safely');
+  assert.equal(buckets.get(t).objects.size, 3, 'Concurrent losers cleaned safely');
 });
-test('original deletion retains attributable pending upload tombstones and cleans late files without attaching source', async t => {
-  const s = state([]);
-  s.files.set('original', {
-    blob: new Blob(['original']),
-    metadata: { size: 8, sha256: digest('original') },
-  });
-  const store = s.ctx.storage.store;
-  const value = 'private original Work',
-    uploadType = 'application/x-forge-derived-old-upload';
-  const id = await s.ctx.db.insert('derivedArtifacts', {
-    original: 'original',
-    kind: 'work-metadata-v1',
-    pin: '',
-    originalDigest: digest('original'),
-    originalSize: 8,
-    digest: digest(value),
-    size: Buffer.byteLength(value),
-    contentType: 'application/gzip',
-    uploadType,
-    removed: false,
-  });
-  s.files.delete('original');
-  await cache.removeDerived(s.ctx, 'original');
-  const row = s.tables.derivedArtifacts.get(id);
-  assert.equal(row.removed, true);
-  assert.equal(row.inline, undefined);
-  assert.equal(row.storageId, undefined);
-  const veryLate = await store(new Blob(['private original Work'], { type: row.uploadType }));
-  assert.ok(s.files.has(veryLate));
-  await cache.sweep._handler(s.ctx, { id: row._id, cursor: null, followup: true });
-  assert.ok(!s.files.has(veryLate));
-  assert.ok(s.tables.derivedArtifacts.has(row._id), 'Unknown late outcomes remain attributable');
-});
-test('lifecycle parts use exact ranges rather than full storage Blobs, retaining original base64 digest and content type', async t => {
-  const s = state(),
-    size = 9 * 1024 * 1024 + 17,
-    bytes = randomBytes(size),
-    sha = digest(bytes),
-    base64 = Buffer.from(sha, 'hex').toString('base64');
-  s.files.set('saved', { metadata: { size, sha256: base64, contentType: 'application/gzip' } });
-  t.after(providers());
-  const prior = globalThis.fetch;
-  let served = 0;
-  s.ctx.storage.get = async t => {
-    throw Error('No eager source Blob');
-  };
-  s.ctx.storage.getUrl = async () => 'https://storage.invalid/private';
-  globalThis.fetch = async (input, init) => {
-    if (String(input) !== 'https://storage.invalid/private') return prior(input, init);
-    const [, a, b] = /^bytes=(\d+)-(\d+)$/.exec(init.headers.Range);
-    const start = Number(a),
-      end = Number(b);
-    served += end - start + 1;
-    return new Response(bytes.subarray(start, end + 1), {
-      status: 206,
-      headers: {
-        'content-length': String(end - start + 1),
-        'content-range': `bytes ${start}-${end}/${size}`,
-      },
-    });
-  };
-  t.after(() => {
-    globalThis.fetch = prior;
-  });
-  for (const offset of [0, 4 * 1024 * 1024, size - 17]) {
-    const result = await lifecycle.downloadPart._handler(s.ctx, { id: 'own', offset, digest: base64 });
-    assert.deepEqual(
-      Buffer.from(result.data),
-      bytes.subarray(offset, Math.min(size, offset + 2 * 1024 * 1024)),
-    );
-    assert.equal(result.digest, base64);
-    assert.equal(result.contentType, 'application/gzip');
-  }
-  assert.equal(served, 4 * 1024 * 1024 + 17);
-});
-test('zero-byte lifecycle snapshot and absent metadata content type retain existing Blob type behavior', async t => {
-  const s = state(),
-    empty = new Blob([], { type: 'application/custom' });
-  s.files.set('saved', { blob: empty, metadata: { size: 0, sha256: digest('') } });
-  t.after(providers());
-  const result = await lifecycle.downloadPart._handler(s.ctx, { id: 'own', offset: 0 });
-  assert.equal(result.data.byteLength, 0);
-  assert.equal(result.contentType, 'application/custom');
-});
-
 test('a stale missing-cache rebuild cannot delete the concurrently repaired winner during export', async t => {
-  const s = state([]);
-  s.files.set('original', {
-    blob: new Blob(['original']),
-    metadata: { size: 8, sha256: digest('original') },
-  });
+  const s = state([]),
+    original = await r2Ref(s, new Blob(['original']), 'v1/i/own/g/1');
   const build = async () => new Blob(['pinned export bytes'], { type: 'application/gzip' });
-  const first = await derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'pin', build, async () => {});
+  const first = await derivedArtifact(s.ctx, original, 'zone-export-v1', 'pin', build, async () => {});
   s.tables.derivedArtifacts.get(first._id).storageId = 'missing-legacy';
   let started, release;
   const entered = new Promise(resolve => {
@@ -379,7 +266,7 @@ test('a stale missing-cache rebuild cannot delete the concurrently repaired winn
     });
   const slow = derivedArtifact(
     s.ctx,
-    'original',
+    original,
     'zone-export-v1',
     'pin',
     async t => {
@@ -390,7 +277,7 @@ test('a stale missing-cache rebuild cannot delete the concurrently repaired winn
     async () => {},
   );
   await entered;
-  const winner = await derivedArtifact(s.ctx, 'original', 'zone-export-v1', 'pin', build, async () => {});
+  const winner = await derivedArtifact(s.ctx, original, 'zone-export-v1', 'pin', build, async () => {});
   assert.match(winner.storageId, /^r2blob:/);
   release();
   const late = await slow;
@@ -409,11 +296,11 @@ test('verified Work sidecars retain independently stored v1 derivatives and rebu
       Buffer.concat([entry('manifest.json', manifest), entry('work.json', work), Buffer.alloc(1024)]),
     ),
     s = state([]),
-    sha = digest(bytes);
-  s.files.set('archive', { blob: new Blob([bytes]), metadata: { size: bytes.length, sha256: sha } });
+    sha = digest(bytes),
+    archive = await r2Ref(s, new Blob([bytes]), 'v1/p/synthetic/archives/a');
   const old = await derivedArtifact(
     s.ctx,
-    'archive',
+    archive,
     'work-metadata-v1',
     '',
     async () =>
@@ -423,17 +310,14 @@ test('verified Work sidecars retain independently stored v1 derivatives and rebu
       ),
     async () => {},
   );
-  const read = () => projectArchiveMetadata(s.ctx, 'archive', bytes.length, sha, async () => {});
+  const read = () => projectArchiveMetadata(s.ctx, archive, bytes.length, sha, async () => {});
   const first = await read();
   assert.deepEqual(Buffer.from(first.work), work);
   const row = [...s.tables.derivedArtifacts.values()].find(x => x.kind === 'work-metadata-v3');
   assert.ok(row.storageId);
-  const damaged = new Blob(['corrupt sidecar']);
-  row.storageId = 'damaged-legacy';
-  s.files.set(row.storageId, {
-    blob: damaged,
-    metadata: { size: damaged.size, sha256: digest('corrupt sidecar') },
-  });
+  // A stored sidecar whose bytes no longer match its pins is replaced from the original.
+  const corrupt = await r2Ref(s, new Blob(['corrupt sidecar']), 'v1/d/damaged');
+  row.storageId = corrupt;
   const repaired = await read();
   assert.deepEqual(Buffer.from(repaired.manifest), manifest);
   assert.deepEqual(Buffer.from(repaired.work), work);
@@ -442,17 +326,11 @@ test('verified Work sidecars retain independently stored v1 derivatives and rebu
 });
 
 test('repeated endpoint navigation reuses derivatives and still rejects revoked GitHub access', async t => {
-  const { s, read, revoke } = await original(t);
-  let bodies = 0;
-  const get = s.ctx.storage.get;
-  s.ctx.storage.get = async id => {
-    bodies++;
-    return get(id);
-  };
+  const { s, ref, read, revoke } = await original(t);
   const first = await read('files?limit=50');
-  assert.equal(bodies, 1);
+  assert.equal(originalReads(t, s, ref), 1);
   for (let i = 0; i < 5; i++) assert.deepEqual(await read('files?limit=50'), first);
-  assert.equal(bodies, 1);
+  assert.equal(originalReads(t, s, ref), 1);
   await assert.rejects(read('files?state=wrong'), code('STATE_MISMATCH'));
   revoke();
   await assert.rejects(read('files?limit=50'), code('GITHUB_UNAVAILABLE'));

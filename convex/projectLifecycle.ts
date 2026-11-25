@@ -18,7 +18,6 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { internalMutation, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
-import { matchesUpload, scanComplete, removeExclusive } from './projectStorage';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { projectExecution } from './projectExecution';
@@ -418,8 +417,9 @@ export async function retainUploadCleanup(
     .withIndex('by_upload', q => q.eq('uploadId', row._id))
     .unique();
   if (old) return old;
-  const r2Only = row.location === 'r2';
-  if (r2Only && project.removal !== 'deleting') {
+  // An archive that never received its R2 upload target holds no bytes and needs no binding.
+  if (row.location !== 'r2' || !row.r2Key) return null;
+  if (project.removal !== 'deleting') {
     const artifact = await ctx.db
       .query('artifactBlobs')
       .withIndex('by_namespace_and_digest', q =>
@@ -438,43 +438,10 @@ export async function retainUploadCleanup(
     nonce: row.nonce,
     digest: row.digest,
     size: row.size,
-    pending: !r2Only,
-    ...(r2Only ? { r2Key: row.r2Key } : {}),
+    pending: false,
+    r2Key: row.r2Key,
   });
   return (await ctx.db.get(id))!;
-}
-// One metadata page per transaction. Keep original upload bindings for known late outcomes.
-async function sweep(ctx: MutationCtx, binding: Doc<'projectUploadCleanup'>) {
-  if (binding.r2Key) return true;
-  const page = await ctx.db.system
-    .query('_storage')
-    .order('desc')
-    .paginate({ cursor: binding.cursor ?? null, numItems: 100 });
-  for (const file of page.page)
-    if (matchesUpload(file, binding, binding.kind)) await removeExclusive(ctx, file._id);
-  const done = scanComplete(page, (await ctx.db.get(binding.projectId))?._creationTime);
-  await ctx.db.patch(binding._id, {
-    cursor: done ? undefined : page.continueCursor,
-    pending: !done,
-    ...(done ? { task: undefined } : {}),
-  });
-  return done;
-}
-export async function scheduleUploadSweep(ctx: MutationCtx, binding: Doc<'projectUploadCleanup'>) {
-  if (binding.r2Key) return;
-  if (binding.task) {
-    const task = await ctx.db.system.get(binding.task);
-    if (task && ['pending', 'inProgress'].includes(task.state.kind)) return;
-  }
-  const task = await ctx.scheduler.runAfter(0, internal.projectLifecycle.sweepUpload, { id: binding._id });
-  await ctx.db.patch(binding._id, { task });
-}
-export async function retryRemovedUpload(ctx: MutationCtx, uploadId: string, owner: string) {
-  const binding = await ctx.db
-    .query('projectUploadCleanup')
-    .withIndex('by_upload', q => q.eq('uploadId', uploadId))
-    .unique();
-  if (binding?.owner === owner) await scheduleUploadSweep(ctx, binding);
 }
 export const purge = internalMutation({
   args: { projectId: v.id('hostedProjects') },
@@ -523,31 +490,10 @@ export const purge = internalMutation({
               .withIndex('by_project', q => q.eq('projectId', projectId))
               .take(1);
       if (!rows.length) continue;
-      const row = rows[0]!,
-        binding = await retainUploadCleanup(
-          ctx,
-          project,
-          row,
-          table === 'projectBackups' ? 'backup' : 'proposal',
-        );
-      // Sweep any nonce-bound duplicates of this row's upload.
+      const row = rows[0]!;
+      // The binding keeps the archive's R2 key for the guarded key purge after the row is gone.
+      await retainUploadCleanup(ctx, project, row, table === 'projectBackups' ? 'backup' : 'proposal');
       await ctx.db.delete(row._id);
-      if (!(await sweep(ctx, binding))) {
-        // Remaining pages are handled below even though the source record has been erased.
-        await ctx.db.patch(projectId, { task: undefined });
-        await schedule(ctx, (await ctx.db.get(projectId))!);
-        return null;
-      }
-      await ctx.db.patch(projectId, { task: undefined });
-      await schedule(ctx, (await ctx.db.get(projectId))!);
-      return null;
-    }
-    const pending = await ctx.db
-      .query('projectUploadCleanup')
-      .withIndex('by_project_and_pending', q => q.eq('projectId', projectId).eq('pending', true))
-      .take(1);
-    if (pending.length) {
-      await sweep(ctx, pending[0]!);
       await ctx.db.patch(projectId, { task: undefined });
       await schedule(ctx, (await ctx.db.get(projectId))!);
       return null;
@@ -590,19 +536,6 @@ export const purge = internalMutation({
       purgeBlocked: undefined,
     });
     await noteDeleteOutcome(ctx, finished, 'deleted');
-    return null;
-  },
-});
-export const sweepUpload = internalMutation({
-  args: { id: v.id('projectUploadCleanup') },
-  returns: v.null(),
-  handler: async (ctx, { id }) => {
-    const binding = await ctx.db.get(id);
-    if (!binding) return null;
-    if (!(await sweep(ctx, binding))) {
-      await ctx.db.patch(id, { task: undefined });
-      await scheduleUploadSweep(ctx, (await ctx.db.get(id))!);
-    }
     return null;
   },
 });

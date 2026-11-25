@@ -15,7 +15,9 @@ import { validateArtifact } from '../dist/artifact-validation.js';
 import { startAgentMcp } from '../dist/agent-mcp.js';
 import { encodeHostedArtifact } from '../dist/hosted-artifact.js';
 import { job, state, providers } from './hosted-fixture.mjs';
+import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
 const actions = await import(moduleUrl('../convex/agentActions.ts'));
 const grants = await import(moduleUrl('../convex/agentGrants.ts'));
 const lifecycle = await import(moduleUrl('../convex/lifecycle.ts'));
@@ -49,7 +51,10 @@ async function setup(t) {
       },
     };
   const s = state([{ ...job(), head: artifact.pack.source.gitHead }]);
-  s.file('saved', await encodeHostedArtifact(artifact));
+  s.tables.imports.get('own').artifactKey = await blobStore(s.ctx).store(
+    await encodeHostedArtifact(artifact),
+    { r2Namespace: 'v1/i/own/g/1' },
+  );
   let revoked = false;
   const cleanup = providers(() => revoked, true, artifact.pack.source.gitHead);
   t.after(cleanup);
@@ -264,17 +269,19 @@ test('expiry uses a fresh transaction and in-flight revocation/provider loss/lif
   assert.equal(retained.upstreamHead, null);
   assert.equal(retained.originalSourceId, artifact.pack.source.id);
   globalThis.fetch = normalFetch;
-  const originalGet = s.ctx.storage.get;
-  s.ctx.storage.get = async key => {
-    const blob = await originalGet(key);
-    await lifecycle.trash._handler(s.ctx, { id: 'own' });
-    return blob;
+  const query = s.ctx.runQuery;
+  s.ctx.runQuery = async (ref, args) => {
+    const value = await query(ref, args);
+    if (getFunctionName(ref) === 'artifactStorage:get') await lifecycle.trash._handler(s.ctx, { id: 'own' });
+    return value;
   };
   await assert.rejects(read(current, 'status'), denied);
-  s.ctx.storage.get = originalGet;
+  s.ctx.runQuery = query;
   await lifecycle.restore._handler(s.ctx, { id: 'own', owner: 'owner' });
-  s.file('new', new Blob(['invalid new snapshot']));
-  await imports.update._handler(s.ctx, { id: 'own', generation: 2, phase: 'ready', artifactKey: 'new' });
+  const next = await blobStore(s.ctx).store(new Blob(['invalid new snapshot']), {
+    r2Namespace: 'v1/i/own/g/2',
+  });
+  await imports.update._handler(s.ctx, { id: 'own', generation: 2, phase: 'ready', artifactKey: next });
   assert.equal(
     (await read(current, 'source?file=visible.ts')).originalSourceId,
     artifact.pack.source.id,
@@ -289,7 +296,8 @@ test('expiry uses a fresh transaction and in-flight revocation/provider loss/lif
     await lifecycle.purge._handler(s.ctx, { id: 'own' });
   assert.equal(s.tables.agentGrants.size, 0);
   assert.equal(s.tables.agentEvents.size, 0);
-  assert.ok(s.deleted.includes('saved'));
+  const stored = [...s.tables.artifactBlobs.values()].filter(row => row.namespace === 'v1/i/own/g/1');
+  assert.ok(stored.length === 1 && stored.every(row => row.removed), 'the snapshot artifact is removed');
   await assert.rejects(read(current, 'status'), denied);
 });
 

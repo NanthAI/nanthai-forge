@@ -1,31 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import type { StorageActionWriter } from 'convex/server';
-import type { Id } from './_generated/dataModel';
-
-/** Storage bytes one action read: Blob sizes from ctx.storage.get plus bytes a
- * caller notes for its own transfers. Diagnostics only; never an access decision. */
+/** Bytes one action read from object storage, as its callers note them with `noteStorageRead`.
+ * Diagnostics only; never an access decision. */
 export type StorageMeter = { reads: number; bytes: number };
 const meters = new WeakMap<object, StorageMeter>();
 
-export function meteredStorage<Ctx extends { storage: StorageActionWriter }>(ctx: Ctx): Ctx {
+/** The same context, registered so a caller can note its R2 reads against it. */
+export function meteredStorage<Ctx extends object>(ctx: Ctx): Ctx {
   if (meters.has(ctx)) return ctx;
-  const meter = { reads: 0, bytes: 0 };
-  const metered = {
-    ...ctx,
-    storage: {
-      ...ctx.storage,
-      get: async (id: Id<'_storage'>) => {
-        const blob = await ctx.storage.get(id);
-        if (blob) {
-          meter.reads++;
-          meter.bytes += blob.size;
-        }
-        return blob;
-      },
-    },
-  };
-  meters.set(metered, meter);
+  const metered = { ...ctx };
+  meters.set(metered, { reads: 0, bytes: 0 });
   return metered;
 }
 export function storageMeter(ctx: object): StorageMeter {

@@ -20,7 +20,6 @@ const rows = s => [...s.tables.projectObjects.values()];
 test('a new project writes R2', async t => {
   const { s } = await setup(t),
     [row] = await prepare(s, ['plain']);
-  assert.equal(row.uploadUrl, undefined);
   assert.equal(row.target.kind, 'r2');
   assert.equal(rows(s)[0].location, 'r2');
 });
@@ -29,7 +28,6 @@ test('deployment R2 mode returns a presigned create-only PUT and pending R2 row'
   const { s } = await setup(t),
     pin = pinOf('hello r2'),
     [row] = await prepare(s, ['hello r2']);
-  assert.equal(row.uploadUrl, undefined);
   assert.equal(row.stored, false);
   const url = new URL(row.target.url);
   assert.equal(row.target.kind, 'r2');
@@ -69,7 +67,6 @@ test('single-object prepare writes R2 like batches', async t => {
   assert.deepEqual(prepared.target.headers, batch.target.headers);
   assert.equal(prepared.target.kind, 'r2');
   assert.equal(rows(s)[0].location, 'r2');
-  assert.equal(prepared.uploadUrl, undefined);
 });
 
 test('single-object prepare with missing R2 configuration inserts nothing', async t => {
@@ -128,7 +125,6 @@ test('a pending Convex reservation switches new upload targets to deployment R2 
   pendingConvexRow(s, 'old-a');
   const [again] = await prepare(s, ['old-a']);
   assert.equal(again.target.kind, 'r2');
-  assert.equal(again.uploadUrl, undefined);
   assert.equal(fake.objects.size, 0);
 });
 
@@ -237,7 +233,6 @@ test('deployment R2 mode keeps new and pending objects in R2', async t => {
     [first] = await prepare(s, ['flip']);
   assert.ok(first.target);
   const [second] = await prepare(s, ['flip']);
-  assert.equal(second.uploadUrl, undefined);
   assert.equal(second.target.kind, 'r2');
   assert.equal(rows(s)[0].location, 'r2');
   const [fresh] = await prepare(s, ['fresh without opt-in']);

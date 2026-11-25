@@ -49,15 +49,12 @@ export function landingBrowserIO(client: ConvexReactClient, projectId: Id<'hoste
         'SOURCE_UNAVAILABLE',
         'Exact composition metadata is unavailable.',
       );
-      const target: { url: string; range?: PackRange } | undefined =
-        row.location === 'convex'
-          ? { url: row.url }
-          : (
-              await client.mutation(api.projectObjectDownloads.signDownloads, {
-                projectId,
-                digests: [pin.sha256],
-              })
-            ).find(row => 'url' in row);
+      const target: { url: string; range?: PackRange } | undefined = (
+        await client.mutation(api.projectObjectDownloads.signDownloads, {
+          projectId,
+          digests: [pin.sha256],
+        })
+      ).find(row => 'url' in row);
       invariant(target, 'SOURCE_UNAVAILABLE', 'Exact metadata download is unavailable.');
       const response = await fetch(target.url, { headers: packHeaders(target.range, pin.size) });
       invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Metadata download failed.');

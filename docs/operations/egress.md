@@ -123,9 +123,5 @@ selection descriptors, not source file bodies. Plan size is measured in the
 10-file finish test; existing selection pages remain bounded at 128 KiB. This
 reuses project-object durability/cleanup, with no additional idle scheduling.
 
-New binary derivatives also use R2 for legacy originals. New R2 reservations do
-not scan `_storage` or schedule orphan sweeps. The retained
-`derivedArtifacts:sweep` is one manual legacy metadata page (100 files), returning
-`{isDone,cursor}` without scheduling another page or a delayed pass. Old upload
-bindings remain attributable. `projectBackups:findUpload` and duplicate cleanup
-are legacy reconciliation only; R2 uploads reconcile by their immutable key.
+New binary derivatives use R2, like their originals. R2 reservations do not scan `_storage` or
+schedule orphan sweeps. R2 uploads reconcile by their immutable key.

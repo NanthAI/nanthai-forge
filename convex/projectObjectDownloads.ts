@@ -162,14 +162,6 @@ export const describe = mutation({
       v.object({
         digest: v.string(),
         size: v.number(),
-        location: v.literal('convex'),
-        url: v.string(),
-        statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
-        sourceVersion: v.optional(v.literal(2)),
-      }),
-      v.object({
-        digest: v.string(),
-        size: v.number(),
         location: v.literal('recipe'),
         statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
         sourceVersion: v.optional(v.literal(2)),

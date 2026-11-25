@@ -43,7 +43,7 @@ export async function browserSource(states, onGet = () => {}) {
     'projectObjectDownloads:describe': args => args.digests.map(digest => {
       const object = objects.get(digest);
       if (!object) throw new Error('Synthetic source is not retained.');
-      return { digest, size: object.pin.size, location: 'convex', url: object.url };
+      return { digest, size: object.pin.size, location: 'r2', url: object.url };
     }),
     'projectObjectDownloads:signDownloads': () => [],
   } };
