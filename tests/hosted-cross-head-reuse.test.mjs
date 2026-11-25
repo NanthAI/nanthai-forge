@@ -163,7 +163,7 @@ function fixture({
   if (retarget === 'main') merged = relink(merged);
   if (mainRisk) merged.push(main.at(-1));
   if (corrupt) merged.push(file(['extra.txt', 'unexpected recomposition']));
-  const docs = paths => (paths ? { testedDocs: { rule: 'name-mention-v1', paths } } : {});
+  const docs = paths => (paths ? { testedDocs: { rule: 'name-mention-v2', paths } } : {});
   const heads = [
     base,
     state(edit(candidate, 'A\nb\nc\n')),
@@ -443,7 +443,7 @@ test('a text-clean merge of Markdown no test reads lands on its first check (cle
   assert(proof, 'untested Markdown overlap lands');
   assert.equal(proof.algorithm, 'clean-disjoint-v2');
   assert.deepEqual(proof.docsOverlap, ['docs/notes.md']);
-  assert.equal(proof.testedDocsRule, 'name-mention-v1');
+  assert.equal(proof.testedDocsRule, 'name-mention-v2');
   assert(validCrossHeadProof(proof));
   // The same six small reads as a disjoint proof: no Markdown bytes are read.
   assert.deepEqual(f.metrics(), { calls: 2, maxWindow: 4 });

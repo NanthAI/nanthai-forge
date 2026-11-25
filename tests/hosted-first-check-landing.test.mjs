@@ -361,7 +361,7 @@ test('Issue 1018d0f8 / 5d690345: a docs-covered main keeps zero discarded passed
     await f.add(0);
     await drive(f);
     f.rawChecks.setPlanSelection(
-      JSON.stringify({ scope: 'docs', tests: [], testedDocs: { rule: 'name-mention-v1', paths: [] } }),
+      JSON.stringify({ scope: 'docs', tests: [], testedDocs: { rule: 'name-mention-v2', paths: [] } }),
     );
     await f.add(1);
     await drive(f, { until: () => states(f)[1]?.phase === 'ready' });
@@ -909,7 +909,7 @@ const markdown = (path, testedDocs, contents = ['A\nb\nc\n', 'a\nb\nC\n']) => ({
   selection: JSON.stringify({
     scope: 'full',
     tests: [],
-    ...(testedDocs ? { testedDocs: { rule: 'name-mention-v1', paths: testedDocs } } : {}),
+    ...(testedDocs ? { testedDocs: { rule: 'name-mention-v2', paths: testedDocs } } : {}),
   }),
 });
 const fileText = (f, head, path) =>

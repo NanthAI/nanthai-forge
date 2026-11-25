@@ -9,7 +9,7 @@
  * so the server reads no source and any CI can produce it.
  *
  * The signal is deliberately coarse: a Markdown file counts as tested when its
- * file name (case-insensitive) appears in any code, JSON, HTML or YAML file of
+ * file name (case-insensitive) appears in any text file of
  * the repository. That covers literal reads (`readFileSync('docs/x.md')`),
  * fixtures that reuse a real name, and manifests that list documents (the docs
  * package manifest, llms sources). Directory walkers that only read paths,
@@ -17,13 +17,18 @@
  * side's lines, and the main audit covers the rest. Doubt means tested; a missing
  * or over-cap list makes every Markdown file tested.
  */
-export const TESTED_DOCS_RULE = 'name-mention-v1';
+export const TESTED_DOCS_RULE = 'name-mention-v2';
 /** More entries than this and the list is dropped (every Markdown is tested). */
 export const TESTED_DOCS_MAX = 4096;
 export type TestedDocs = { rule: typeof TESTED_DOCS_RULE; paths: string[] };
 export const markdownPath = (path: string) => /\.md$/i.test(path);
-const readerPath = (path: string) =>
-  !path.startsWith('node_modules/') && /\.(?:[cm]?[jt]sx?|json|html?|ya?ml)$/i.test(path);
+/** Binary and media files never name a document. Every other file with an extension is read as text, whatever
+ * its language: a test or script in any ecosystem can read a Markdown file (`include_str!`, `os.ReadFile`,
+ * `open`). `read` returns undefined for non-text. */
+const binaryFile =
+  /\.(?:png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|pdf|zip|gz|tgz|wasm|mp[34]|mov|webm|bin)$/i;
+/** An executable script with no extension: read only when its first line is a shebang. */
+const extensionless = (path: string) => !path.startsWith('node_modules/') && !baseName(path).includes('.');
 const baseName = (path: string) => path.slice(path.lastIndexOf('/') + 1).toLowerCase();
 
 /** `read` returns a file's text, or undefined when it is not readable as text. */
@@ -31,15 +36,22 @@ export function testedDocs(
   paths: Iterable<string>,
   read: (path: string) => string | undefined,
 ): TestedDocs | undefined {
+  const readerPath = (path: string) =>
+    !path.startsWith('node_modules/') &&
+    !markdownPath(path) &&
+    !binaryFile.test(path) &&
+    baseName(path).includes('.');
   const all = [...paths];
   const docs = all.filter(markdownPath);
   if (!docs.length) return { rule: TESTED_DOCS_RULE, paths: [] };
   const wanted = new Set(docs.map(baseName));
   const named = new Set<string>();
   for (const path of all) {
-    if (!readerPath(path) || named.size === wanted.size) continue;
+    if (named.size === wanted.size) continue;
+    const bare = !readerPath(path) && extensionless(path);
+    if (!bare && !readerPath(path)) continue;
     const text = read(path);
-    if (text === undefined) continue;
+    if (text === undefined || (bare && !text.startsWith('#!'))) continue;
     for (const match of text.matchAll(/[\w.@-]*\.md\b/gi)) {
       const name = match[0].toLowerCase();
       if (wanted.has(name)) named.add(name);

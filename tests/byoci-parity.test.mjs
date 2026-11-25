@@ -193,7 +193,7 @@ const scenarios = [
         scope: 'full',
         tests: [],
         testedDocs: isStandardForgeCheck(check)
-          ? { rule: 'name-mention-v1', paths: [] }
+          ? { rule: 'name-mention-v2', paths: [] }
           : declaredTestedDocs(
               ['docs/**'],
               tree.map(([path]) => path),

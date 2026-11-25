@@ -57,7 +57,7 @@ export function storedFastProof(attempt, extraPaths) {
     checkedScope: 'full',
     docsOverlap: [],
     identicalPaths: [literalPath],
-    testedDocsRule: 'name-mention-v1',
+    testedDocsRule: 'name-mention-v2',
     relaxed: ['global-risk'],
     riskPaths: ['package.json'],
   };
