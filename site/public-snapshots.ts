@@ -155,11 +155,14 @@ function content(address: Address, data: Record<string, unknown>) {
   return `<h1>${title}</h1><ul>${links.join('')}</ul>`;
 }
 
+/** A stored object that fails its own reader (wrong size, range, JSON, fence or content) reads as missing:
+ * the visitor gets the plain 404 with the normal failure lifetime, never a 502 that retries nothing.
+ * Only a failed storage call or body read (the bucket itself) still throws. */
 export async function readSnapshot(bucket: NonNullable<SiteEnv['PUBLIC_PAGES']>, address: Address) {
   const range = address.kind === 'explore' ? address.range : undefined;
   const object = await bucket.get(address.key, range ? { range } : undefined);
   if (!object) return null;
-  let json: string;
+  let bytes: ArrayBuffer | string;
   if (range) {
     // R2 reports the whole object size plus the range it actually returned. Never consume a full pack.
     if (
@@ -167,21 +170,27 @@ export async function readSnapshot(bucket: NonNullable<SiteEnv['PUBLIC_PAGES']>,
       object.range?.offset !== range.offset ||
       object.range?.length !== range.length
     )
-      throw new Error('Invalid public snapshot range.');
-    const frame = await object.arrayBuffer();
-    if (frame.byteLength !== range.length) throw new Error('Incomplete public snapshot frame.');
-    json = new TextDecoder('utf-8', { fatal: true }).decode(frame).trimEnd();
+      return null;
+    bytes = await object.arrayBuffer();
   } else {
-    if (!count(object.size) || object.size > address.limit) throw new Error('Public snapshot is too large.');
-    json = await object.text();
+    if (!count(object.size) || object.size > address.limit) return null;
+    bytes = await object.text();
   }
-  const data = record(JSON.parse(json));
-  const fence = data && snapshotFence(data);
-  if (!data || !fence) throw new Error('Public snapshot has no visibility fence.');
-  if (fence.state === 'hidden') return null;
-  const html = content(address, data);
-  if (html === null) throw new Error('Public snapshot does not match its address or visibility fence.');
-  return { data, json, html };
+  try {
+    let json: string;
+    if (typeof bytes === 'string') json = bytes;
+    else {
+      if (bytes.byteLength !== range?.length) return null;
+      json = new TextDecoder('utf-8', { fatal: true }).decode(bytes).trimEnd();
+    }
+    const data = record(JSON.parse(json));
+    const fence = data && snapshotFence(data);
+    if (!data || !fence || fence.state === 'hidden') return null;
+    const html = content(address, data);
+    return html === null ? null : { data, json, html };
+  } catch {
+    return null;
+  }
 }
 
 export async function readSitemap(bucket: NonNullable<SiteEnv['PUBLIC_PAGES']>, origin: string) {

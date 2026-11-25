@@ -40,7 +40,7 @@ const reader = (ctx: QueryCtx, now: number) => {
       id: project._id,
       slug: project.slug,
       name: directoryDisplayName(project.name),
-      since: project._creationTime,
+      since: Math.floor(project._creationTime),
       stars: listing.stars,
       landings,
       days,

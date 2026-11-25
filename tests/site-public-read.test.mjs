@@ -246,11 +246,15 @@ test('bound discovery misses, mismatched addresses and malformed paths never fal
     },
   });
   const request = path => new Request('https://site.example/-/public/v1/' + path);
-  assert.equal((await serve(request('project/ada/atlas.json'))).status, 502);
+  assert.equal(
+    (await serve(request('project/ada/atlas.json'))).status,
+    404,
+    'a stored object for another address reads as missing',
+  );
   assert.equal((await serve(request('explore/newest.json'))).status, 404);
   assert.equal((await serve(request('explore/unknown.json'))).status, 404);
   assert.equal((await serve(request('profile/ada.json/extra'))).status, 404);
-  assert.equal(edge.puts.length, 1, 'only the well-formed missing address is negatively cached');
+  assert.equal(edge.puts.length, 2, 'only well-formed addresses are negatively cached');
   assert.deepEqual(asked, []);
 });
 
@@ -307,7 +311,7 @@ test('the Worker accepts exact-limit snapshots and refuses one byte more before 
     const count = bodies;
     for (const [size, status] of [
       [cap, 200],
-      [cap + 1, 502],
+      [cap + 1, 404],
     ]) {
       const json = JSON.stringify(published(content)).padEnd(size, ' ');
       object = { size, text: async () => (bodies++, json) };
@@ -388,7 +392,7 @@ test('numbered Explore reads exactly one page and refuses incompatible directory
   assert.equal(keys.length, 1);
   for (const invalid of [{ deployment: undefined }, { more: undefined }, { page: 1 }]) {
     data = { ...explore(2, 36, [PAGE.project]), ...invalid };
-    assert.equal((await page(2)).status, 502);
+    assert.equal((await page(2)).status, 404, 'incompatible stored metadata reads as missing');
   }
   assert.equal(asked.length, 0);
 });
@@ -421,7 +425,7 @@ test('one Explore pack uses separate edge keys and refuses to buffer an ignored 
   );
   assert.equal(edge.puts.length, 2);
   packed = false;
-  assert.equal((await read('active/3')).status, 502);
+  assert.equal((await read('active/3')).status, 404);
   assert.equal(asked.length, 0);
 });
 
@@ -490,8 +494,35 @@ test('compact search reads one bounded R2 shard and its tombstone does not reach
   object = snapshotObject({ v: 1, state: 'hidden', generation: 2, at: 100 });
   assert.equal((await read()).status, 404);
   object = { size: 65537, text: () => assert.fail('an oversize shard must not read its body') };
-  assert.equal((await read()).status, 502);
-  assert.deepEqual(keys, Array(3).fill('public-pages/v1/search/1.json'));
+  assert.equal((await read()).status, 404);
+  object = snapshotObject({
+    deployment: 'https://example.convex.cloud',
+    shard: 1,
+    total: 1,
+    start: 0,
+    more: false,
+    projects: [['ada', 'atlas', '', 1, null, 0, 0, 1795558578452.7266]],
+  });
+  assert.equal(
+    (await read()).status,
+    404,
+    'incident 8947a779: a fractional stored figure is missing, not a 502',
+  );
+  object = null;
+  assert.equal((await read()).status, 404);
+  assert.deepEqual(keys, Array(5).fill('public-pages/v1/search/1.json'));
+  assert.equal(asked.length, 0);
+});
+
+test('a failing R2 call is a 502 and never falls back to Convex, unlike an invalid stored object', async t => {
+  const { asked, serve } = backend(t, () => new Error('no Convex fallback'), {
+    PUBLIC_PAGES: {
+      get: async () => {
+        throw new Error('storage unavailable');
+      },
+    },
+  });
+  assert.equal((await serve(new Request('https://site.example/-/public/v1/search/1.json'))).status, 502);
   assert.equal(asked.length, 0);
 });
 

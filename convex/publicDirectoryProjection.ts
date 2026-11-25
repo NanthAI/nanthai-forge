@@ -100,7 +100,9 @@ export function buildPublicDirectory(rows: Listed[], deployment: string) {
       id: input.id,
       slug: input.slug,
       name,
-      since: input.since,
+      // Convex creation times carry a fraction; the stored shard and its reader take whole milliseconds.
+      // Flooring here also repairs rows in an older stored checkpoint on the next rebuild.
+      since: Math.floor(input.since),
       stars: input.stars,
       landings: input.landings,
       days: input.days,
