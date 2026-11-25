@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { memberDataNotice, systemCommentNotice } from './member-data-notice.js';
-import { planningSummary, planningSearchTerms, closingChecklist } from './planning-search.js';
+import {
+  holdAdvice,
+  holdMarker,
+  openDoneWhenLines,
+  planningSearchTerms,
+  planningSummary,
+  reconciledStatus,
+} from './planning-search.js';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -490,21 +497,6 @@ async function intentStates(port: PlanningPort, ids: string[]) {
     );
   return states;
 }
-const holdMarker = (openLines: number) => `Intent completed; ${openLines} Done-when line(s) still open`;
-/** An Issue whose Intent finished is closed (or abandoned) in planning, and the read says so. */
-function reconciledStatus(item: PlanningReadItem, change?: { to: PlanningItem['status']; at?: string }) {
-  if (!change) return {};
-  return {
-    status: change.to,
-    ...(change.at ? { at: change.at } : {}),
-    ...(item.lastStatusChangeAt === undefined
-      ? {}
-      : {
-          lastStatusChangeAt: change.at ?? null,
-          closedAt: change.to === 'closed' ? (change.at ?? null) : null,
-        }),
-  };
-}
 async function reconcile(
   port: PlanningPort,
   ws: Workspace,
@@ -605,27 +597,6 @@ async function reconcile(
     ...(due.length > maxReconcile ? { remaining: due.length - maxReconcile } : {}),
   };
 }
-
-/** Done-when lines not yet ticked: acceptance not yet met. Unticked checkboxes (`- [ ]`, `* [ ]`,
- * `1. [ ]`) count. A Done-when section written without any checkbox (plain bullets or prose, friction
- * 8b4bfd78: Issues c329d191 and 47558a99 closed with agreed work pending) cannot be ticked, so each of
- * its bullet lines (or the paragraph, as one line) counts as open: a person closes such an Issue. A body
- * with no Done-when section keeps closing as before. Returns the line texts (CAS-free, body only). */
-export const openDoneWhenLines = (body: string): string[] => closingChecklist(body).open;
-
-/** What a builder needs after a landing that left Done-when lines open: which lines (at most five, 100
- * characters each) and the one command that closes the Issue with evidence. Pure text from the item
- * already read: no call. `version` is the Issue version the close must name. */
-const holdAdvice = (id: string, version: number, lines: string[]) => {
-  const shown = lines.slice(0, 5).map(line => (line.length > 100 ? `${line.slice(0, 99)}…` : line));
-  const more = lines.length - shown.length;
-  return {
-    lines: shown,
-    close: `nforge agent . put-planning-item '{"itemId":"${id}","expectedVersion":${version},"status":"closed","reason":"Done-when met, evidence in comments"}'`,
-    tick: `nforge agent . tick-planning-item '{"planningItemId":"${id}","line":1,"evidence":"…"}'`,
-    text: `Open: ${shown.map(line => `"${line}"`).join('; ')}${more > 0 ? `; and ${more} more` : ''}. Tick each line with its evidence: nforge agent . tick-planning-item '{"planningItemId":"${id}","line":1,"evidence":"…"}' (line: the checkbox's position or a unique text prefix); the last tick closes the Issue.`,
-  };
-};
 
 /** After the last Done-when tick: close (or abandon) the Issue when its Intent finished, as a reconciling read
  * would. Nothing when the Intent is still running; the Issue then closes on the next list read after landing. */
