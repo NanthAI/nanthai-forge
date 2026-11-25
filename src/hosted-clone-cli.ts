@@ -40,12 +40,14 @@ export async function cloneHostedProject(
         const previous = z
           .object({ url: z.string(), projectId: z.string(), operationId: z.uuid() })
           .parse(readAgentJson(path));
+        if (previous.url === address.url && previous.projectId === address.projectId) return previous;
+        // A failed clone of another project leaves its pin beside an absent or empty folder: nothing was
+        // installed, so this clone is new work (Issue 2b9549e5). A folder with files still refuses.
         invariant(
-          previous.url === address.url && previous.projectId === address.projectId,
+          !checkoutPathExists(root) || (lstatSync(root).isDirectory() && readdirSync(root).length === 0),
           'WORK_OPERATION_CHANGED',
           'Retry clone with its original project and deployment.',
         );
-        return previous;
       }
       if (checkoutPathExists(root)) {
         const stat = lstatSync(root);

@@ -82,3 +82,21 @@ for (const empty of [false, true])
       );
       assert.equal(fs.readFileSync(join(root, 'src/0.txt'), 'utf8'), 'source 0\n');
     });
+
+test('clone after a failed clone of another project starts new work only in an absent or empty folder', async t => {
+  const f = pullFixture(t);
+  const { sourcePack: _pack, ...transport } = f.transport;
+  for (const state of ['absent', 'empty', 'files']) {
+    const root = join(f.directory, `other-${state}`);
+    if (state !== 'absent') fs.mkdirSync(root);
+    if (state === 'files') fs.writeFileSync(join(root, 'keep'), 'x');
+    const agent = hostedAgentDirectory(root, { exactRoot: true });
+    fs.writeFileSync(
+      join(agent, 'clone.json'),
+      JSON.stringify({ url: f.address.url, projectId: 'failed-other', operationId: crypto.randomUUID() }),
+    );
+    const attempt = cloneHostedProject(root, f.address, transport);
+    if (state === 'files') await assert.rejects(attempt, { code: 'WORK_OPERATION_CHANGED' });
+    else assert.equal((await attempt).projectId, f.address.projectId);
+  }
+});

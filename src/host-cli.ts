@@ -88,14 +88,16 @@ export async function hostProject(
       | 'snapshotBytes'
     >(root),
     original = readHostState(store);
-  const selected =
-    options.deployment ??
-    original.hosting?.deployment ??
-    original.binding?.deployment ??
-    process.env.FORGE_DEPLOYMENT_URL ??
-    readAuth().defaultDeployment;
+  const explicit = options.deployment ?? original.hosting?.deployment ?? original.binding?.deployment;
+  const selected = explicit ?? process.env.FORGE_DEPLOYMENT_URL ?? readAuth().defaultDeployment;
   invariant(selected, 'AUTH_REQUIRED', 'Run nforge login DEPLOYMENT_URL with cli scope before hosting.');
   const deployment = deploymentUrl(selected);
+  // A saved default or environment deployment can be the bench rather than the one the caller meant
+  // (friction, Item 2b9549e5): say which one a new project is created on when no flag or binding named it.
+  if (!dependencies && !explicit)
+    process.stderr.write(
+      `Hosting on ${deployment} (from the saved default or FORGE_DEPLOYMENT_URL); pass --deployment URL to host elsewhere.\n`,
+    );
   if (!dependencies) {
     invariant(
       resolveAuthToken(deployment),
