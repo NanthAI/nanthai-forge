@@ -78,6 +78,7 @@ export async function searchPlanning(
     }),
   );
   let cursor: string | null = null;
+  let passed = 0;
   if (supplied !== null) {
     let parsed;
     try {
@@ -91,6 +92,8 @@ export async function searchPlanning(
       'Search selection or Work generation changed. Restart this search.',
     );
     cursor = parsed.cursor;
+    // A cursor from before rows were counted never suppresses anything.
+    passed = typeof parsed.read === 'number' ? parsed.read : Number.POSITIVE_INFINITY;
   }
   const searchTable = await planningRecordTable(ctx, recordPartition(generation));
   const matching = (itemId?: string, payloadKey?: string) =>
@@ -143,13 +146,29 @@ export async function searchPlanning(
       items.push({ ...summary, matchedBy: 'id' });
     }
   }
+  // An exact multi-word title ranks first across pages. The first 100 matching rows are the promotion
+  // window: when the first page is not the whole result and holds no such title, one bounded read of
+  // that window (summaries only, no per-row lookup) finds one; the cursor records rows already passed
+  // so later pages inside the window skip those titles. Single words and later pages read nothing extra.
+  const titled = (summary: { title?: string }) =>
+    ` ${
+      (summary.title ?? '')
+        .toLowerCase()
+        .match(/[\p{L}\p{N}]+/gu)
+        ?.join(' ') ?? ''
+    } `.includes(` ${input.text} `);
+  const promoting = input.text.includes(' ') && !input.omittedTerms;
+  let tracking = supplied !== null && Number.isFinite(passed);
   const representatives = new Map<string, { best?: string; summary?: unknown }>();
   // A single representative per item/query keeps items unique across cursor pages
   // without retaining an unbounded seen-ID list. Retired fragments never match a current root.
-  for (const row of page.page) {
+  for (const [index, row] of page.page.entries()) {
     const { itemId, payloadKey } = row.planning ?? {};
     if (!itemId || !payloadKey) {
-      items.push(JSON.parse(row.value));
+      const summary = JSON.parse(row.value);
+      // Inside the first-page window this title was already promoted there.
+      if (!(tracking && supplied !== null && passed + index < 100 && byId && promoting && titled(summary)))
+        items.push(summary);
       continue;
     }
     const identity = `${itemId}:${payloadKey}`;
@@ -168,6 +187,23 @@ export async function searchPlanning(
     const selected = representatives.get(identity)!;
     if (selected.best === row._id && !named.has(itemId)) items.push(selected.summary);
   }
+  let lookaheadRows = 0;
+  if (byId && promoting && supplied === null && !page.isDone && input.limit < 100) {
+    const ordinary = (row: (typeof page.page)[number]) => !row.planning?.itemId;
+    if (!page.page.some(row => ordinary(row) && titled(JSON.parse(row.value)))) {
+      const window = await matching().take(100);
+      lookaheadRows = window.length;
+      tracking = true;
+      const exact: unknown[] = [];
+      const seen = new Set(items.map(item => (item as { id?: string }).id));
+      for (const row of window.slice(input.limit)) {
+        if (!ordinary(row)) continue;
+        const summary = JSON.parse(row.value);
+        if (!seen.has(summary.id) && titled(summary)) exact.push({ ...summary, matchedBy: 'title' });
+      }
+      items.unshift(...exact);
+    }
+  }
   if (planningHistory) {
     const charge = planningHistoryBudget();
     for (const [index, item] of items.entries())
@@ -178,10 +214,16 @@ export async function searchPlanning(
   return {
     workRevision: (await workHead(ctx, project._id))?.revision ?? project.work?.revision,
     items,
-    nextCursor: page.isDone ? null : canonicalPayload({ binding, cursor: page.continueCursor }),
+    nextCursor: page.isDone
+      ? null
+      : canonicalPayload({
+          binding,
+          cursor: page.continueCursor,
+          ...(tracking ? { read: passed + page.page.length } : {}),
+        }),
     query: { text: input.text, omittedTerms: input.omittedTerms },
     coverage: generation.planningSearchVersion === 2 ? 'complete' : 'partial-needs-preparation',
-    matchedRecordsRead: page.page.length,
+    matchedRecordsRead: page.page.length + lookaheadRows,
     matchedRecordBytes: page.page.reduce(
       (sum, row) => sum + new TextEncoder().encode(canonicalPayload(row)).length,
       0,

@@ -335,3 +335,31 @@ test('source snapshot transport preserves indexed search fields and skips compar
     'a stray history copy is not returned',
   );
 });
+
+test('2fa36bb2: an exact multi-word title leads the first page even when text ranks it later; no extra read otherwise', async t => {
+  const s = await setup(t);
+  installPlanningSearch(s);
+  await add(s, { title: 'Unrelated', body: 'source grant source grant source grant' });
+  await add(s, { title: 'Another', body: 'source grant source grant' });
+  const exact = await add(s, { title: 'Source Grant rollout', body: 'x' });
+  const lead = await run(s, 'source grant', { limit: 1 });
+  assert.equal(lead.items[0].id, exact.itemId);
+  assert.equal(lead.items[0].matchedBy, 'title');
+  assert.equal(lead.items.length, 2);
+  const single = await run(s, 'source', { limit: 1 });
+  assert(
+    single.items.every(item => !item.matchedBy),
+    'one word reads nothing extra',
+  );
+  const ids = lead.items.map(item => item.id);
+  let cursor = lead.nextCursor;
+  while (cursor) {
+    const next = await run(s, 'source grant', { limit: 1, cursor });
+    ids.push(...next.items.map(item => item.id));
+    cursor = next.nextCursor;
+  }
+  assert.equal(new Set(ids).size, ids.length, 'a promoted title is not returned again on later pages');
+  assert.equal(ids.length, 3, 'every match is still reachable');
+  const wide = await run(s, 'source grant', { limit: 2 });
+  assert(wide.items.every(item => !item.matchedBy) || wide.items[0].matchedBy === 'title');
+});
