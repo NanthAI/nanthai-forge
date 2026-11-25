@@ -1284,8 +1284,10 @@ For the dev site, `scripts/site-deploy-plan.mjs` gates every build:
    Item 8b6efb50) ago, the run ends without waiting. When a landing arrives inside the window, Forge schedules a single
    trailing flush right after the 5-minute window opens (zero polling, zero idle cost), and the 3-hour schedule stays as
    disaster catch-up, so active-work lag falls from up to 20–180 minutes to at most 5 minutes.
-3. **Compare, upload, smoke and report**: build, upload only when the digest is new (or the live record lacks a Forge `state`),
-   then run `scripts/forge-deploy-ci.mjs smoke` against `https://dev.forge.nanthai.tech` checking `/_forge/build.json`
+3. **Compare, upload, smoke and report**: build, upload only when the digest is new (or the live record lacks a Forge `state`).
+   The upload makes up to three attempts, 30 seconds apart, for Cloudflare HTTP 5xx or API error 10013.
+   The job logs the next attempt number and error code before each retry. HTTP 4xx, authentication and configuration errors fail immediately.
+   Then run `scripts/forge-deploy-ci.mjs smoke` against `https://dev.forge.nanthai.tech` checking `/_forge/build.json`
    (on upload, waiting up to 120 s with exponential backoff and a cache-busting query for the deployed State while failing fast
    on a newer-but-wrong state or non-200 and recording `live after Ns`; on an unchanged rebuild, checking live health so a
    prior smoke failure is never cleared without passing smoke), followed by one public-read JSON path

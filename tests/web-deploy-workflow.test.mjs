@@ -93,7 +93,7 @@ test('the deploy checks and uploads the same build, with the Cloudflare credenti
     'scripts/web-smoke-load.mjs hosted-web-dist VITE_CONVEX_URL',
     'scripts/build-site.mjs site-output --commit',
     'scripts/site-deploy-plan.mjs compare',
-    'cf deploy --prebuilt --no-provision',
+    'node ../site/deploy/retry.mjs ../site/deploy/node_modules/.bin/cf deploy --prebuilt --no-provision',
     'scripts/forge-deploy-ci.mjs smoke',
     'scripts/forge-deploy-ci.mjs report',
   ].map(step);

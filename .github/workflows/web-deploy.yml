@@ -109,7 +109,7 @@ jobs:
           DEPLOY_SEQUENCE: ${{ steps.plan.outputs.sequence }}
         # A block scalar: in a plain YAML scalar " #" starts a comment and cuts the command at the quote.
         run: |
-          ../site/deploy/node_modules/.bin/cf deploy --prebuilt --no-provision --message "main #$DEPLOY_SEQUENCE $DEPLOY_HEAD"
+          node ../site/deploy/retry.mjs ../site/deploy/node_modules/.bin/cf deploy --prebuilt --no-provision --message "main #$DEPLOY_SEQUENCE $DEPLOY_HEAD"
       - name: Post-deploy smoke
         id: smoke
         if: steps.plan.outputs.build == 'true' && ((steps.compare.outputs.deploy == 'true' && steps.upload.outcome == 'success') || (steps.compare.outcome == 'success' && steps.compare.outputs.deploy != 'true'))
