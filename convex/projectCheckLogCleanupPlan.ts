@@ -18,13 +18,19 @@ import {
   type Node,
   type PlanWrite,
   type Part,
+  type TimingSnapshotTarget,
 } from './projectCheckLogCleanupTypes';
 import { snapshotReader } from './projectCheckLogCleanupSnapshot';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { parseNativeState } from '../src/state/format';
 import { objectRecipeSchema, objectChunkPageSchema } from '../src/object-chunks';
-import { isCheckMaintenancePath, portableCheckPath } from '../src/check-log-policy';
-import { hostedCheckRunSchema, hostedCheckTerminal } from '../src/hosted-check';
+import { hostedCheckLogExpiry, isCheckMaintenancePath, portableCheckPath } from '../src/check-log-policy';
+import {
+  hostedCheckRunSchema,
+  hostedCheckTerminal,
+  timingSnapshotExpiry,
+  timingSnapshotState,
+} from '../src/hosted-check';
 import { invariant } from '../src/errors';
 import { digest } from '../src/hash';
 const phases = [
@@ -303,16 +309,26 @@ export async function planStep(
     invariant(state.guard === page.guard, 'WORK_STALE', 'Project changed during cleanup inventory.');
     const reportRuns = new Map<
       string,
-      ReturnType<typeof hostedCheckRunSchema.parse> & { reportCleanupAttached?: boolean }
+      ReturnType<typeof hostedCheckRunSchema.parse> & {
+        reportCleanupAttached?: boolean;
+        timingCleanup?: TimingSnapshotTarget;
+      }
     >();
+    const timingSnapshots: (TimingSnapshotTarget & { timingSnapshot: true })[] = [];
     for (const row of page.page) {
-      if (state.phase === 'check-runs') put(`run:${row.runId}`, 0, JSON.parse(row.value));
-      else if (state.phase === 'output-streams') {
+      if (state.phase === 'check-runs') {
+        const run = JSON.parse(row.value);
+        const expiresAt = timingSnapshotExpiry(run, row.timingHistoryGeneration);
+        if (timingSnapshotState(run.id, row.timingHistoryGeneration) !== 'expired' && expiresAt !== null) {
+          const target = { rowId: row._id, runId: row.runId, expiresAt };
+          if (state.now >= expiresAt) timingSnapshots.push({ timingSnapshot: true, ...target });
+          else run.timingCleanup = target;
+        }
+        put(`run:${row.runId}`, 0, run);
+      } else if (state.phase === 'output-streams') {
         const run =
           reportRuns.get(row.runId) ??
-          (await lookup<ReturnType<typeof hostedCheckRunSchema.parse> & { reportCleanupAttached?: boolean }>(
-            `run:${row.runId}`,
-          ));
+          (await lookup<NonNullable<ReturnType<typeof reportRuns.get>>>(`run:${row.runId}`));
         if (run) reportRuns.set(row.runId, run);
         const descriptor = JSON.parse(row.descriptor);
         if (
@@ -323,9 +339,7 @@ export async function planStep(
           descriptor.kind === 'summary'
         )
           continue;
-        const expiresAt =
-          descriptor.expiresAt ??
-          Date.parse(run.endedAt ?? run.at) + (run.checkLogs?.retentionDays ?? 90) * 86400000;
+        const expiresAt = descriptor.expiresAt ?? hostedCheckLogExpiry(run);
         if (isMachineRunner(run.configuration) && run.checkLogs?.uploadLocal && state.now < expiresAt)
           continue;
         const report =
@@ -344,6 +358,7 @@ export async function planStep(
         append('hostedOutputs', [
           {
             ...(report ? { report } : {}),
+            ...(report && run.timingCleanup ? { timing: run.timingCleanup } : {}),
             runId: row.runId,
             streamId: row.streamId,
             bytes: row.bytes,
@@ -360,6 +375,7 @@ export async function planStep(
         if (row.sourceReferenced) mark(row.digest, { protected: true });
       } else if (state.phase === 'states') mark(row.head, { state: true });
     }
+    append('hostedOutputs', timingSnapshots);
     state.cursor = page.isDone ? null : page.continueCursor;
     if (page.isDone) advance();
   }

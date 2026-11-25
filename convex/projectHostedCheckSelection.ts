@@ -28,15 +28,15 @@ export const detail = action({
     try {
       const header = () =>
         ctx.runQuery(internal.projectHostedCheckDetail.retained, { ...input, header: true });
-      const { plan, provider, fence, timingHistoryGeneration, machineSelection } = JSON.parse(
-        await header(),
-      ) as {
-        plan: HostedCheckRun['plan'];
-        provider: HostedCheckRun['configuration']['provider'];
-        fence: number;
-        timingHistoryGeneration: string | null;
-        machineSelection: unknown;
-      };
+      const { plan, provider, fence, timingHistoryGeneration, timingHistoryCleanup, machineSelection } =
+        JSON.parse(await header()) as {
+          plan: HostedCheckRun['plan'];
+          provider: HostedCheckRun['configuration']['provider'];
+          fence: number;
+          timingHistoryGeneration: string | null;
+          timingHistoryCleanup: 'purging' | 'expired' | null;
+          machineSelection: unknown;
+        };
       if (!plan) return canonicalPayload(timings ? { timingHistory: null } : { selection: null });
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read check selection.');
@@ -89,15 +89,21 @@ export const detail = action({
         'The retained Actions recipe differs from the check selection.',
       );
       const legacySnapshot =
-        !recipe.timingHistory && timingHistoryGeneration === input.runId
+        timingHistoryCleanup !== 'expired' && !recipe.timingHistory && timingHistoryGeneration === input.runId
           ? await findCheckTimingSnapshot(input)
           : null;
       const timingHistory = recipe.timingHistory ?? legacySnapshot?.timingHistoryPin ?? null;
       if (timings) {
-        const snapshot = recipe.timingHistory
-          ? await readCheckTimingSnapshot(input, recipe.timingHistory)
-          : (legacySnapshot?.timingHistory ?? null);
-        if (snapshot !== null) await header(); // Recheck current check access after the R2 read.
+        const snapshot =
+          timingHistoryCleanup !== 'expired' && recipe.timingHistory
+            ? await readCheckTimingSnapshot(input, recipe.timingHistory)
+            : (legacySnapshot?.timingHistory ?? null);
+        const current = JSON.parse(await header());
+        invariant(
+          !recipe.timingHistory || snapshot !== null || current.timingHistoryCleanup,
+          'SOURCE_UNAVAILABLE',
+          'The original check timing history is unavailable.',
+        );
         return canonicalPayload({
           timingHistory,
           history: snapshot,

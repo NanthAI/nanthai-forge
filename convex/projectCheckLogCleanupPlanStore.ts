@@ -10,7 +10,14 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import { activeOwnedProject } from './projectAuthority';
 import { projectGuard } from './projectCheckLogCleanupGuard';
 import { invariant } from '../src/errors';
-import type { Identity, PlanState, Node, PlanWrite } from './projectCheckLogCleanupTypes';
+import { timingSnapshotExpiry, timingSnapshotState } from '../src/hosted-check';
+import type {
+  Identity,
+  PlanState,
+  Node,
+  PlanWrite,
+  TimingSnapshotTarget,
+} from './projectCheckLogCleanupTypes';
 const identity = { projectId: v.id('hostedProjects'), actor: v.string(), operationId: v.string() };
 async function ledger(ctx: QueryCtx | MutationCtx, input: Identity) {
   return ctx.db
@@ -89,6 +96,41 @@ export const lookup = internalQuery({
     return (await page(ctx, input, input.part, input.position))?.value ?? null;
   },
 });
+/** Bind the original snapshot keys before external deletes. A lost DELETE can
+ * leave a missing object while the run still records its immutable timing pin. */
+export const claimOutput = internalMutation({
+  args: { ...identity, position: v.number() },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, input) => {
+    await activeOwnedProject(ctx, input.projectId, input.actor);
+    const saved = await page(ctx, input, 'hostedOutputs', input.position);
+    if (!saved) return null;
+    const outputs = JSON.parse(saved.value);
+    const standalone = outputs[0]?.timingSnapshot === true;
+    const targets: TimingSnapshotTarget[] = standalone
+      ? outputs
+      : outputs[0]?.timing
+        ? [outputs[0].timing]
+        : [];
+    if (!targets.length) return saved.value;
+    const current = await Promise.all(targets.map(target => ctx.db.get(target.rowId)));
+    for (const [i, target] of targets.entries()) {
+      const row = current[i];
+      invariant(
+        row?.projectId === input.projectId &&
+          row.runId === target.runId &&
+          timingSnapshotExpiry(JSON.parse(row.value), row.timingHistoryGeneration) === target.expiresAt &&
+          (!standalone || Date.now() >= target.expiresAt),
+        'WORK_STALE',
+        'A selected timing snapshot changed after cleanup planning.',
+      );
+      const cleanup = timingSnapshotState(target.runId, row.timingHistoryGeneration);
+      if (cleanup === 'expired') target.expired = true;
+      else if (cleanup !== 'purging') await ctx.db.patch(row._id, { timingHistoryGeneration: 'purging' });
+    }
+    return JSON.stringify(outputs);
+  },
+});
 export const nodes = internalQuery({
   args: { ...identity, cursor: v.union(v.string(), v.null()) },
   returns: v.string(),
@@ -126,7 +168,14 @@ export const nodes = internalQuery({
 /** Cursor, scratch effects, propagation queues and reviewed pages commit together.
  * A concurrent/lost step reply re-observes the winner without repeating effects. */
 export const step = internalMutation({
-  args: { ...identity, expected: v.string(), value: v.string(), nodes: v.string(), writes: v.string() },
+  args: {
+    ...identity,
+    expected: v.string(),
+    value: v.string(),
+    nodes: v.string(),
+    writes: v.string(),
+    removedTimingRuns: v.optional(v.array(v.id('projectHostedCheckRuns'))),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     const project = await activeOwnedProject(ctx, input.projectId, input.actor),
@@ -173,6 +222,8 @@ export const step = internalMutation({
       if (write.part === 'sourceProtection') await protectSourceUnion(ctx, input, JSON.parse(write.value));
       else await put(ctx, input, write);
     }
+    for (const id of input.removedTimingRuns ?? [])
+      await ctx.db.patch(id, { timingHistoryGeneration: 'expired' });
     const value = JSON.stringify(state);
     await ctx.db.patch(row._id, { value });
     return value;

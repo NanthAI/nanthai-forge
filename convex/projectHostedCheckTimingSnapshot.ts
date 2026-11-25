@@ -12,7 +12,7 @@ type RunAddress = { projectId: string; runId: string };
 type Pin = { sha256: string; size: number };
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
-const timingKey = ({ projectId, runId }: RunAddress) =>
+export const timingSnapshotKey = ({ projectId, runId }: RunAddress) =>
   `v1/p/${projectId}/checks/${runId}/selection/timing-history.json`;
 const messages = {
   failed: 'The original check timing history is unavailable.',
@@ -23,7 +23,7 @@ const messages = {
  * concurrent request gets the same bytes even if another run has since trained history. */
 export async function retainCheckTimingSnapshot(input: RunAddress, timingHistory: string) {
   const config = r2Config(),
-    key = timingKey(input),
+    key = timingSnapshotKey(input),
     proposed = encoder.encode(timingHistory);
   invariant(proposed.length <= timingHistoryLimits.bytes, 'R2_VERIFY_FAILED', messages.exceeds);
   const sha256 = digest(proposed);
@@ -52,8 +52,9 @@ export async function retainCheckTimingSnapshot(input: RunAddress, timingHistory
 
 export async function readCheckTimingSnapshot(input: RunAddress, pin: Pin) {
   invariant(pin.size <= timingHistoryLimits.bytes, 'EVIDENCE_CHANGED', messages.exceeds);
-  const url = await presignGet(r2Config(), timingKey(input));
-  const bytes = await readExactObject({ url, size: pin.size }, messages);
+  const url = await presignGet(r2Config(), timingSnapshotKey(input));
+  const bytes = await readExactObject({ url, size: pin.size }, messages, true);
+  if (!bytes) return null;
   invariant(
     bytes.length === pin.size && digest(bytes) === pin.sha256,
     'EVIDENCE_CHANGED',
@@ -65,7 +66,7 @@ export async function readCheckTimingSnapshot(input: RunAddress, pin: Pin) {
 /** Older runners cannot echo a digest. Their plan records the run's immutable
  * generation; retrieve it on demand, with no additional landing-path read. */
 export async function findCheckTimingSnapshot(input: RunAddress) {
-  const object = await readR2Object(r2Config(), timingKey(input), timingHistoryLimits.bytes);
+  const object = await readR2Object(r2Config(), timingSnapshotKey(input), timingHistoryLimits.bytes);
   return object
     ? {
         timingHistory: decoder.decode(object.bytes),

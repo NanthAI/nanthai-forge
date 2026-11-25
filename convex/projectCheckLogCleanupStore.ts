@@ -228,6 +228,7 @@ export {
   step as planStep,
   begin as planBegin,
   lookup as planLookup,
+  claimOutput as planClaimOutput,
   nodes as planNodes,
   queue as planQueue,
   sources as planSources,

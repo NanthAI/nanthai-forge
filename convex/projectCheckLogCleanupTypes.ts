@@ -40,6 +40,12 @@ export type PlanState = {
   stream?: StreamProgress;
 };
 export type PlanWrite = { part: string; position: number; value: string };
+export type TimingSnapshotTarget = {
+  rowId: Id<'projectHostedCheckRuns'>;
+  runId: string;
+  expiresAt: number;
+  expired?: boolean;
+};
 export const readRef = makeFunctionReference<'query'>('projectCheckLogCleanupStore:planRead');
 export const stepRef = makeFunctionReference<'mutation'>('projectCheckLogCleanupStore:planStep');
 export const beginRef = makeFunctionReference<'mutation'>('projectCheckLogCleanupStore:planBegin');

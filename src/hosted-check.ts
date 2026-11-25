@@ -7,7 +7,7 @@ import { semanticPlanSchema, semanticReportsSchema } from './intent-semantic-con
 import { z } from 'zod';
 import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';
 import { ciStatusProviderSchema } from './ci-status.js';
-import { checkLogsSchema } from './check-log-policy.js';
+import { checkLogsSchema, hostedCheckLogExpiry } from './check-log-policy.js';
 import { checkSchema } from './work-types.js';
 import { digest } from './state/hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -408,3 +408,20 @@ export const hostedCheckRunSchema = z
 export type HostedCheckRun = z.infer<typeof hostedCheckRunSchema>;
 export const checkPin = (value: unknown) => digest(canonicalPayload(value));
 export const hostedCheckTerminal = (run: Pick<HostedCheckRun, 'status'>) => checkTerminal(run.status);
+/** The run ID names the immutable timing slot. Cleanup can retire that slot
+ * through the same private row binding, since a run has only one generation. */
+export function timingSnapshotState(runId: string, generation?: string) {
+  if (generation === 'purging' || generation === 'expired') return generation;
+  return generation === runId ? 'retained' : null;
+}
+export function timingSnapshotExpiry(run: HostedCheckRun, generation?: string) {
+  if (
+    run.configuration.provider !== 'github-actions' ||
+    !hostedCheckTerminal(run) ||
+    !(timingSnapshotState(run.id, generation) || (!run.plan && run.actions?.workflowSha))
+  )
+    return null;
+  // A run that stopped after opening a timing session can have an object even
+  // when it never published its plan or its run-scoped generation.
+  return hostedCheckLogExpiry(run);
+}

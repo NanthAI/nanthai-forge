@@ -9,7 +9,7 @@ import { loadHostedCheck } from './projectHostedCheckStore';
 import { presignGet, r2Config } from './r2';
 import { convexFetch } from './networkFetch';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { checkPin, type HostedCheckRun } from '../src/hosted-check';
+import { checkPin, timingSnapshotState, type HostedCheckRun } from '../src/hosted-check';
 import { semanticReportsSchema } from '../src/intent-semantic-conflict';
 import { pageCheckReports } from '../src/check-report-detail';
 import { invariant } from '../src/errors';
@@ -23,13 +23,15 @@ export const retained = internalQuery({
   handler: async (ctx, { header, ...input }) => {
     await checkReader(ctx, input.projectId);
     const { row, run } = await loadHostedCheck(ctx, input, !header);
+    const timingState = timingSnapshotState(run.id, row.timingHistoryGeneration);
     return canonicalPayload(
       header
         ? {
             plan: run.plan,
             provider: run.configuration.provider,
             fence: run.fence,
-            timingHistoryGeneration: row.timingHistoryGeneration ?? null,
+            timingHistoryGeneration: timingState ? run.id : null,
+            timingHistoryCleanup: timingState === 'retained' ? null : timingState,
             machineSelection: row.machineSelection ?? null,
           }
         : run,

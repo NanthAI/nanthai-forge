@@ -38,7 +38,12 @@ import {
   type HostedExpectedPins,
   type HostedOperation,
 } from '../src/hosted-source-operation';
-import { hostedCheckRunSchema, hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
+import {
+  hostedCheckRunSchema,
+  hostedCheckTerminal,
+  timingSnapshotExpiry,
+  type HostedCheckRun,
+} from '../src/hosted-check';
 import { invariant } from '../src/errors';
 import { notifyPullCheck } from './projectGithubPullQueue';
 import { scheduleCheckExpiry } from './projectOperationalExpirySchedule';
@@ -236,14 +241,24 @@ export async function writeHostedCheck(
 export async function completeHostedCheck(
   ctx: MutationCtx,
   run: HostedCheckRun,
-  source?: Pick<Doc<'projectHostedCheckRuns'>, 'cancelledUsage' | 'cause' | 'auditCoverage'>,
+  source?: Pick<
+    Doc<'projectHostedCheckRuns'>,
+    'cancelledUsage' | 'cause' | 'auditCoverage' | 'timingHistoryGeneration'
+  >,
 ) {
+  const expiry = timingSnapshotExpiry(run, source?.timingHistoryGeneration);
   if (run.status === 'cancelled')
     deferCancelledRunWrite(ctx, run.id, source?.cancelledUsage?.submissions ?? [], () =>
       markCancelledRunPending(ctx, run.projectId as Id<'hostedProjects'>, run.id),
     );
   if (run.configuration.provider !== 'ci-status')
-    await scheduleCheckExpiry(ctx, run.projectId as Id<'hostedProjects'>, run.id, Date.parse(run.endedAt!));
+    await scheduleCheckExpiry(
+      ctx,
+      run.projectId as Id<'hostedProjects'>,
+      run.id,
+      Date.parse(run.endedAt!),
+      expiry !== null,
+    );
   // Existing terminal events also clear an interrupted batch inbox; no sweep or idle timer.
   if (
     reportsDetached(run) &&
@@ -281,7 +296,6 @@ export async function completeHostedCheck(
   await onGateRunTerminal(ctx, run);
   // Two-way sync: a pull request check-only run settles forge/verify (one indexed read).
   await notifyPullCheck(ctx, run);
-  await wakeExpiredLogs(ctx, run.projectId as Id<'hostedProjects'>);
   const row = await hostedOperationRow(
     ctx,
     run.projectId as Id<'hostedProjects'>,
@@ -290,6 +304,13 @@ export async function completeHostedCheck(
   );
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original check operation is unavailable.');
   const operation = hostedOperationSchema.parse(JSON.parse(row.value));
+  if (!operation.terminal && expiry !== null)
+    await ctx.db.insert('projectCheckLogRetentions', {
+      projectId: run.projectId as Id<'hostedProjects'>,
+      key: `timing:${run.id}`,
+      expiresAt: expiry,
+    });
+  await wakeExpiredLogs(ctx, run.projectId as Id<'hostedProjects'>);
   const audit = source?.auditCoverage
     ? auditCoverageSchema.parse(JSON.parse(source.auditCoverage))
     : undefined;

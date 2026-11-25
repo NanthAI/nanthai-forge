@@ -13,7 +13,13 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
-import { hostedCheckRunSchema, hostedCheckTerminal } from '../src/hosted-check';
+import {
+  hostedCheckRunSchema,
+  hostedCheckTerminal,
+  timingSnapshotExpiry,
+  timingSnapshotState,
+} from '../src/hosted-check';
+import { retainLogExpiry, wakeExpiredLogs } from './projectCheckLogRetention';
 import { loadSourceJob, sourceJobTerminal } from './projectSourceJobs';
 import { checkDetailRetentionMs, exhaustRetentionMs } from './projectOperationalExpirySchedule';
 import { ForgeError, invariant } from '../src/errors';
@@ -149,6 +155,7 @@ export const checkExpiryArgs = {
   cursor: v.optional(v.union(v.string(), v.null())),
   dueAt: v.number(),
   continue: v.optional(v.boolean()),
+  timingHistoryEnrolled: v.optional(v.literal(true)),
 };
 export async function expireCheck(
   ctx: MutationCtx,
@@ -174,6 +181,18 @@ export async function expireCheck(
       removedBytes = 0,
       more = false;
     if (input.phase === 'callbacks') {
+      if (
+        !input.part &&
+        !input.timingHistoryEnrolled &&
+        input.continue !== false &&
+        timingSnapshotState(run.id, row.timingHistoryGeneration) !== 'expired'
+      ) {
+        const expiry = timingSnapshotExpiry(run, row.timingHistoryGeneration);
+        if (expiry !== null) {
+          await retainLogExpiry(ctx, input.projectId, `timing:${run.id}`, expiry);
+          if (expiry <= Date.now()) await wakeExpiredLogs(ctx, input.projectId);
+        }
+      }
       const page = await ctx.db
         .query('projectHostedCheckCallbacks')
         .withIndex('by_project_and_run', q =>

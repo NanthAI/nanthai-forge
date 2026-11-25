@@ -699,6 +699,11 @@ The local seven-day lifetime can make a later export omit logs even while a
 previous opted-in hosted copy remains within its upload retention. Results,
 failure summaries, compact test evidence, source recipes and selected build outputs remain retained. Local full test reports follow the same opt-in and finite uploaded retention as local logs.
 
+The existing hosted sweep also removes expired Actions timing snapshots in
+pages of up to 50 runs. Checks use the retention window pinned on the run
+(90 days by default) from the end of the run. The dry-run plan lists each
+eligible snapshot, and its byte subtotal covers the objects with recorded sizes.
+
 Generated `coverage/test-impact.json` digest manifests (often `artifacts/artifact-0.bin`) are rebuildable local caches, distinct from selected build outputs. They never enter export, seed, exchange or recovery closures. The cache keeps at most the newest three files and 16 MiB total, for up to seven days; check/coverage activity enforces the bound without an idle timer. This keeps recent comparison evidence available with a fixed local byte bound. Missing, evicted or corrupt manifests use the existing static/full selection; verdicts, check reuse and original evidence hashes do not depend on them. Old archives restore with or without these disposable files; source, results and actual build-output validation remain strict.
 
 One-off migration removes existing provider logs, full CI reports, generated digest caches and expired/unapproved uploaded local logs. Local plans include the exact report/cache paths and hashes; hosted plans identify generated caches from run artifact provenance, preserving ordinary build outputs even when named `artifact-0.bin`. First inspect a dry-run plan, then apply that exact selection. Add

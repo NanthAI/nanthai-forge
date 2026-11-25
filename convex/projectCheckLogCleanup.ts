@@ -4,7 +4,7 @@
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { snapshotReader } from './projectCheckLogCleanupSnapshot';
 import { resumePlan, planStep } from './projectCheckLogCleanupPlan';
-import { stepRef, lookupRef } from './projectCheckLogCleanupTypes';
+import { stepRef, type PlanWrite, type TimingSnapshotTarget } from './projectCheckLogCleanupTypes';
 import { cleanupStreamStep } from './projectCheckLogCleanupStream';
 import { hostedCheckRunSchema, hostedCheckTerminal } from '../src/hosted-check';
 import { v, ConvexError } from 'convex/values';
@@ -18,11 +18,13 @@ import { resolveExchangeWork } from '../src/native-exchange-stream';
 import { sourceManifestSchema } from '../src/work-archive-metadata';
 import { parseNativeState } from '../src/state/format';
 import { objectRecipeSchema, objectChunkPageSchema } from '../src/object-chunks';
-import { isCheckMaintenancePath } from '../src/check-log-policy';
+import { hostedCheckLogExpiry, isCheckMaintenancePath } from '../src/check-log-policy';
 import { checkLogStoragePlan, type LogStorageSnapshot } from '../src/check-log-storage-plan';
 import { digest } from '../src/hash';
 import { deleteR2Object } from './r2Operations';
 import { r2Config } from './r2';
+import { timingSnapshotKey } from './projectHostedCheckTimingSnapshot';
+import { networkTimeout } from './networkFetch';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
@@ -80,9 +82,7 @@ export async function planProjectCheckLogs(
     )
       return [];
     const rawLocal = isMachineRunner(run.configuration);
-    const expiresAt =
-      descriptor.expiresAt ??
-      Date.parse(run.endedAt ?? run.at) + (run.checkLogs?.retentionDays ?? 90) * 86400000;
+    const expiresAt = descriptor.expiresAt ?? hostedCheckLogExpiry(run);
     if (rawLocal && run.checkLogs?.uploadLocal && Date.now() < expiresAt) return [];
     return [{ runId: stream.runId, streamId: stream.streamId, bytes: stream.bytes }];
   });
@@ -198,15 +198,39 @@ export async function applyPlanStep(
   state: import('./projectCheckLogCleanupTypes').PlanState,
 ) {
   if (state.outputOffset < state.counts.hostedOutputs) {
-    const body = await ctx.runQuery(lookupRef, {
+    const body = await ctx.runMutation(internal.projectCheckLogCleanupStore.planClaimOutput, {
       ...identity,
-      part: 'hostedOutputs',
       position: state.outputOffset,
     });
     invariant(body, 'NOT_FOUND', 'Original cleanup stream page is unavailable.');
-    const streams = JSON.parse(body);
+    const outputs = JSON.parse(body);
     const expected = JSON.stringify(state);
-    const writes = await cleanupStreamStep(ctx, identity, state, streams[0]);
+    let removedTimingRuns: Id<'projectHostedCheckRuns'>[] | undefined;
+    let failure: PromiseRejectedResult | undefined;
+    let writes: PlanWrite[] = [];
+    const removeSnapshot = ({ runId }: TimingSnapshotTarget) =>
+      deleteR2Object(
+        r2Config(),
+        timingSnapshotKey({ projectId: identity.projectId, runId }),
+        networkTimeout(20_000),
+      );
+    if (outputs[0]?.timingSnapshot) {
+      const snapshots = (outputs as TimingSnapshotTarget[]).filter(snapshot => !snapshot.expired);
+      const deleted = await Promise.allSettled(snapshots.map(removeSnapshot));
+      failure = deleted.find(result => result.status === 'rejected');
+      removedTimingRuns = snapshots.flatMap(({ rowId }, i) =>
+        deleted[i]?.status === 'fulfilled' ? [rowId] : [],
+      );
+      if (!failure) state.outputOffset += outputs.length;
+    } else {
+      const position = state.outputOffset;
+      const timing: TimingSnapshotTarget | undefined = outputs[0].timing;
+      writes = await cleanupStreamStep(ctx, identity, state, outputs[0]);
+      if (state.outputOffset !== position && timing && !timing.expired) {
+        await removeSnapshot(timing);
+        removedTimingRuns = [timing.rowId];
+      }
+    }
     state.step++;
     state = JSON.parse(
       await ctx.runMutation(stepRef, {
@@ -215,8 +239,10 @@ export async function applyPlanStep(
         value: JSON.stringify(state),
         nodes: '[]',
         writes: JSON.stringify(writes),
+        ...(removedTimingRuns?.length ? { removedTimingRuns } : {}),
       }),
     );
+    if (failure) throw failure.reason;
   } else if (state.offset < state.counts.objects) {
     const pending = JSON.parse(
       await ctx.runMutation(internal.projectCheckLogCleanupStore.claim, {

@@ -8,10 +8,18 @@ export type LogData = Pick<WorkData, 'autonomyPolicy'> & { runs: LogRun[] };
 
 export const DAY_MS = 86_400_000;
 export const LOCAL_LOG_DAYS = 7;
+const defaultRetentionDays = 90;
 export const checkLogsSchema = z.object({
   uploadLocal: z.boolean().default(false),
-  retentionDays: z.number().int().min(1).max(400).default(90),
+  retentionDays: z.number().int().min(1).max(400).default(defaultRetentionDays),
 });
+export function hostedCheckLogExpiry(run: {
+  at: string;
+  endedAt?: string | null | undefined;
+  checkLogs?: { retentionDays: number } | undefined;
+}) {
+  return Date.parse(run.endedAt ?? run.at) + (run.checkLogs?.retentionDays ?? defaultRetentionDays) * DAY_MS;
+}
 /** A provider's log link: https only (review R-09), so no stored or provider-sent value can
  * become a `javascript:`, `data:` or plain-http link in the app, CLI or receipts. */
 export const providerLinkSchema = z.url({ protocol: /^https$/ }).max(2048);

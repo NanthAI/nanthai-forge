@@ -2196,7 +2196,12 @@ test('HTTP plan pairs use verified canonical R2 bytes and reuse both digests on 
   );
 });
 
-test('check replay returns the original shard groups, pool cuts and timing bytes after rolling history changes', async t => {
+test('check replay returns the original shard groups, pool cuts and timing bytes after rolling history changes', t =>
+  assertTimingReplay(t, false));
+test('check replay preserves the pinned timing digest while cleanup deletes its bytes', t =>
+  assertTimingReplay(t, true));
+
+async function assertTimingReplay(t, pinRecipe) {
   const s = await fixture(t, 3);
   await s.bind();
   const r2 = fakeSourceR2(t),
@@ -2257,6 +2262,7 @@ test('check replay returns the original shard groups, pool cuts and timing bytes
       [files[1], files[3]],
     ],
     pool: [[1, 2], [1]],
+    ...(pinRecipe ? { timingHistory: first.timingHistoryPin } : {}),
   };
   const recipe = { ...pins, pin: checkPin(pins) };
   mutations.length = 0;
@@ -2289,7 +2295,48 @@ test('check replay returns the original shard groups, pool cuts and timing bytes
   const reads = r2.requests.length;
   await assert.rejects(detail._handler(ctx, timingInput), code('PROJECT_UNAVAILABLE'));
   assert.equal(r2.requests.length, reads, 'a denied replay reads no R2 objects');
-});
+
+  const cancelled = await s.cancel(s.run.id);
+  await s.cancel(s.run.id);
+  const receipts = [...s.tables.projectCheckLogRetentions.values()].filter(
+    row => row.key === `timing:${s.run.id}`,
+  );
+  assert.equal(receipts.length, 1, 'the terminal transition enrolls the snapshot in the existing sweep once');
+  assert.equal(receipts[0].expiresAt, Date.parse(cancelled.endedAt) + 90 * 86_400_000);
+  assert.equal(s.scheduled.filter(task => task.name === 'projectCheckLogRetentionActions:sweep').length, 0);
+
+  if (!pinRecipe) {
+    const scheduled = s.scheduled.find(
+      task => task.name === 'projectOperationalExpiry:check' && task.input.phase === 'callbacks',
+    );
+    assert.equal(scheduled.input.timingHistoryEnrolled, true);
+    const legacy = { ...scheduled.input };
+    delete legacy.timingHistoryEnrolled;
+    s.tables.projectCheckLogRetentions.delete(receipts[0]._id);
+    t.mock.method(Date, 'now', () => legacy.dueAt);
+    const { check } = await import(moduleUrl('../convex/projectOperationalExpiry.ts'));
+    await s.transaction('prior-rollout-expiry', check, legacy);
+    assert.equal([...s.tables.projectCheckLogRetentions.values()][0]?.expiresAt, receipts[0].expiresAt);
+  }
+
+  const runRow = [...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === s.run.id);
+  s.patch('projectHostedCheckRuns', runRow._id, { timingHistoryGeneration: 'purging' });
+  viewer = 'owner';
+  assert.equal(JSON.parse(await detail._handler(ctx, timingInput)).history, first.timingHistory);
+  r2.objects.delete(key);
+  const remainingPin = pinRecipe ? first.timingHistoryPin : null;
+  assert.deepEqual(JSON.parse(await detail._handler(ctx, timingInput)), {
+    timingHistory: remainingPin,
+    history: null,
+  });
+  s.patch('projectHostedCheckRuns', runRow._id, { timingHistoryGeneration: 'expired' });
+  assert.deepEqual(JSON.parse(await detail._handler(ctx, s.id)), {
+    selection: pins.selection,
+    groups: pins.groups,
+    pool: pins.pool,
+    timingHistory: remainingPin,
+  });
+}
 
 test('HTTP plan stores the selection and recipe objects concurrently with the same R2 requests', async t => {
   const s = await fixture(t);

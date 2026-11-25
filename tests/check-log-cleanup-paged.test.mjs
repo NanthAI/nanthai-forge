@@ -4,7 +4,7 @@ import { atOneInstant } from './still-clock.mjs';
 import { testDeploymentOrigin } from './trusted-origin.mjs';
 import { captureNativeArchive } from './native-archive-fixture.mjs';
 import test from 'node:test';
-import { interceptDefaultR2 } from './default-r2.mjs';
+import { defaultR2Config, defaultR2Objects, interceptDefaultR2 } from './default-r2.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
@@ -291,6 +291,105 @@ test('paged cleanup resumes after a lost durable step, applies only the reviewed
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'stranger' });
   await assert.rejects(drive(s, input), /PROJECT_UNAVAILABLE|unavailable/);
 });
+test('check-log cleanup deletes expired Actions timing snapshots in pages and preserves live runs and selection', async t => {
+  const s = fixture(),
+    input = { projectId: 'project', operationId: randomUUID() };
+  const now = Date.parse('2026-11-25T12:00:00Z'),
+    start = now - 7 * 86_400_000;
+  t.mock.method(Date, 'now', () => now);
+  const seed = (status, end, generation = true, reportPointer) => {
+    const id = randomUUID();
+    const prefix = `${defaultR2Config.bucket}/v1/p/project/checks/${id}/selection/`;
+    const key = `${prefix}timing-history.json`;
+    const selection = `${prefix}recipe.json`;
+    defaultR2Objects.set(key, Buffer.from('{}'));
+    defaultR2Objects.set(selection, Buffer.from('{}'));
+    t.after(() => {
+      defaultR2Objects.delete(key);
+      defaultR2Objects.delete(selection);
+    });
+    s.tables.projectHostedCheckRuns.set(id, {
+      _id: id,
+      _creationTime: start,
+      projectId: input.projectId,
+      runId: id,
+      candidateId: id,
+      status,
+      ...(generation ? { timingHistoryGeneration: id } : {}),
+      value: JSON.stringify({
+        id,
+        status,
+        at: new Date(start).toISOString(),
+        endedAt: end === null ? null : new Date(end).toISOString(),
+        configuration: { provider: 'github-actions' },
+        checkLogs: { uploadLocal: false, retentionDays: 3 },
+        ...(reportPointer ? { reportPointer } : {}),
+      }),
+    });
+    return { key, selection, id };
+  };
+  const expired = Array.from({ length: 51 }, () => seed('passed', start));
+  const retained = [seed('passed', now), seed('running', null), seed('passed', start, false)];
+  const reportPin = { digest: digest('{}'), size: 2, files: 1 };
+  const early = seed('passed', now, true, reportPin);
+  const key = `${defaultR2Config.bucket}/v1/p/project/checks/${early.id}/reports/${reportPin.digest}.json`;
+  defaultR2Objects.set(key, Buffer.from('{}'));
+  t.after(() => defaultR2Objects.delete(key));
+  const streamId = digest('legacy raw output');
+  s.tables.projectHostedOutputStreams.set(streamId, {
+    _id: streamId,
+    _creationTime: now,
+    projectId: input.projectId,
+    runId: early.id,
+    streamId,
+    bytes: 0,
+    chunks: 0,
+    maxSequence: -1,
+    seal: null,
+    descriptor: JSON.stringify({
+      shard: 0,
+      attempt: 0,
+      executionId: 'synthetic',
+      stream: 'stdout',
+      name: '',
+    }),
+  });
+  const dry = await drive(s, input);
+  assert.equal(dry.counts.hostedOutputs, expired.length + 1);
+  assert([...expired, ...retained].every(({ key }) => defaultR2Objects.has(key)));
+  assert(defaultR2Objects.has(early.key) && defaultR2Objects.has(key));
+
+  let loseDelete = true,
+    deletes = 0;
+  t.after(
+    interceptDefaultR2(async (url, init, serve) => {
+      assert.equal(init.method, 'DELETE', 'cleanup never downloads timing bodies');
+      const reply = await serve(url, init);
+      deletes++;
+      if (loseDelete) {
+        loseDelete = false;
+        throw Error('Synthetic lost timing DELETE reply');
+      }
+      return reply;
+    }),
+  );
+  const apply = { ...input, apply: true, expectedPlan: dry.planDigest };
+  await assert.rejects(drive(s, apply), /Object storage deletion failed/);
+  assert.equal((await drive(s, apply)).complete, true);
+  assert.equal(deletes, expired.length + 3, 'only the uncertain snapshot DELETE was replayed');
+  assert(expired.every(({ key }) => !defaultR2Objects.has(key)));
+  assert(
+    !defaultR2Objects.has(early.key) && !defaultR2Objects.has(key),
+    'legacy report and timings retired together',
+  );
+  assert(retained.every(({ key }) => defaultR2Objects.has(key)));
+  assert([...expired, ...retained, early].every(({ selection }) => defaultR2Objects.has(selection)));
+  const finishedDeletes = deletes;
+  assert.equal((await drive(s, apply)).complete, true);
+  assert.equal(deletes, finishedDeletes, 'the completed receipt replays without more deletes');
+  assert.equal((await drive(s, { ...input, operationId: randomUUID() })).counts.hostedOutputs, 0);
+});
+
 test('cleanup planning yields at its five-second deadline before the twenty-step cap and resumes the same operation', async t => {
   const { s } = await seeded(t, 5);
   let now = Date.now();

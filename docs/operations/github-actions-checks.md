@@ -731,10 +731,18 @@ The Actions recipe retains the selection and the ordered groups and pool cuts
 it gave to the shards. The recipe also pins the SHA-256 and byte count of the
 timing history returned to the planner. The first timing session
 stores that history beside the reports in R2. A retry uses the same snapshot
-even if another check has updated the rolling history. Report expiry leaves
-the selection, recipe and timing snapshot available with the run record.
+even if another check has updated the rolling history. The check-log sweep
+removes the timing snapshot after the run's pinned log retention window
+(90 days by default, counted from the run's end). The selection and recipe
+remain available with the run record, including the timing digest when the
+runner recorded one.
 The ordinary landing path adds one R2 PUT per planned Actions run, bounded by
-the existing 1 MiB timing-history limit, and adds zero Convex calls or row reads.
+the existing 1 MiB timing-history limit. Its terminal mutation writes one
+expiry receipt without adding a Convex function call or row read. The existing
+check expiry callback enrolls snapshots from runs that finished before that
+receipt was introduced. At cleanup time, each page claims its snapshot keys,
+sends one R2 DELETE per object, and records the successful deletions. When
+cleanup removes a legacy run's report earlier, it also removes its timing snapshot.
 Older Actions supervisors use the same run-scoped timing generation even when
 their recipe predates the digest field. Machine runners record the selection
 emitted by the standard check in a single R2 PUT of up to 512 KiB. Machine

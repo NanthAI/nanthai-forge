@@ -13,13 +13,22 @@ export async function scheduleCheckExpiry(
   projectId: Id<'hostedProjects'>,
   runId: string,
   now: number,
+  timingHistoryEnrolled: boolean,
 ) {
   for (const phase of ['callbacks', 'detail'] as const) {
     const dueAt = now + (phase === 'callbacks' ? exhaustRetentionMs : checkDetailRetentionMs);
     await ctx.scheduler.runAfter(
       Math.max(0, dueAt - Date.now()),
       makeFunctionReference<'mutation'>('projectOperationalExpiry:check'),
-      { projectId, runId, phase, dueAt, operationId: `exhaust:${runId}:${phase}`, part: 0 },
+      {
+        projectId,
+        runId,
+        phase,
+        dueAt,
+        operationId: `exhaust:${runId}:${phase}`,
+        part: 0,
+        ...(timingHistoryEnrolled && phase === 'callbacks' ? { timingHistoryEnrolled: true } : {}),
+      },
     );
   }
 }

@@ -6,4 +6,5 @@ page's Test reports disclosure read detail on demand. Uploader, provider webhook
 
 Check status also reads the retained test selection, ordered shard groups and
 pool cuts on demand. New Actions plans pin the exact timing snapshot used to
-balance their shards. The snapshot stays in R2 with the run's selection evidence.
+balance their shards. The snapshot stays in R2 until check-log expiry. The run's
+selection and recipe remain available.
