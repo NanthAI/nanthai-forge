@@ -119,7 +119,7 @@ const removal = (): OverviewSet =>
           name: 'SIGNING_KEY.pem',
           kind: 2,
           version: 1,
-          devices: [{ code: 'R2PA-9XNE', handle: 'dana' }],
+          devices: [{ code: 'R2PA-9XNE', handle: 'dana', name: 'MacBook Air' }],
           more: 0,
         },
         {

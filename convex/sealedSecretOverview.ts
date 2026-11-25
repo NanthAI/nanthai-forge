@@ -80,7 +80,9 @@ export async function overviewFor(
         id: u8(h.id),
         ...(h.handle ? { handle: h.handle } : {}),
         ...(h.name ? { name: h.name } : {}),
+        ...(h.account ? { account: u8(h.account) } : {}),
       })),
+      entryNames: (set.entryNames ?? []).map(n => ({ id: u8(n.id), name: n.name })),
       joinRequests: (set.joinRequests ?? []).map(j => ({
         deviceId: u8(j.deviceId),
         accountId: (decodeSealedWire(u8(j.request)) as { accountId?: Uint8Array }).accountId ?? null,
@@ -122,7 +124,12 @@ export async function overviewFor(
       handleOf(view.roster.entries.find(e => equalBytes(e.id, id))?.accountId ?? new Uint8Array());
     const former = {
       handle: (id: Uint8Array) => view.formerHandles.find(h => equalBytes(h.id, id))?.handle ?? null,
-      name: (id: Uint8Array) => view.formerHandles.find(h => equalBytes(h.id, id))?.name,
+      name: (id: Uint8Array) => view.formerHandles.find(h => equalBytes(h.id, id))?.name || undefined,
+      // A removed computer's own name is shown only to its own account, like an active computer's.
+      mine: (id: Uint8Array) => {
+        const row = view.formerHandles.find(h => equalBytes(h.id, id));
+        return Boolean(row?.name && row.account && equalBytes(row.account, self));
+      },
     };
     const base = {
       kind: set.kind,
@@ -183,15 +190,21 @@ export async function overviewFor(
 function rotatePage(
   view: OverviewSet,
   after: string | undefined,
-  former: { handle: (id: Uint8Array) => string | null; name: (id: Uint8Array) => string | undefined },
+  former: {
+    handle: (id: Uint8Array) => string | null;
+    name: (id: Uint8Array) => string | undefined;
+    mine: (id: Uint8Array) => boolean;
+  },
 ) {
   const rows = rotateRows(view.roster, view.head).map(({ record, former: devices, machines }) => ({
     name: record.name,
     kind: record.kind,
     version: record.valueVersion,
-    devices: devices
-      .slice(0, 3)
-      .map(f => ({ code: deviceFingerprint(f.deviceId), handle: former.handle(f.deviceId) })),
+    devices: devices.slice(0, 3).map(f => ({
+      code: deviceFingerprint(f.deviceId),
+      handle: former.handle(f.deviceId),
+      ...(former.mine(f.deviceId) ? { name: former.name(f.deviceId) } : {}),
+    })),
     more: Math.max(0, devices.length - 3),
     // A removed CI machine that could open it: its short id beside the name it was given (it has no sign-in, so no
     // handle). A machine removed before names were kept shows its id alone.

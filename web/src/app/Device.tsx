@@ -13,7 +13,7 @@ import { assertPasskey } from './webauthn';
 import { useAction, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { DeviceSettings as Settings } from './access-contract';
-import { codeComplete, codeProblem, recheckedDraft } from '../device/code';
+import { approvedDevice, codeComplete, codeProblem, draftFor, passkeyRecheck } from '../device/code';
 import { forgetLinkCode, githubReturn, takeLinkCode, takeTypedCode } from '../device/link-code';
 import { DeviceView, type DevicePhase } from './DeviceView';
 export { DeviceView } from './DeviceView';
@@ -61,7 +61,8 @@ export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
         : 'Forge could not check that code. Try again.',
     );
   };
-  const find = async (kept?: { name: string; settings: Settings | undefined }) => {
+  type Draft = { name: string; settings: Settings | undefined };
+  const find = async (kept?: Draft): Promise<Draft> => {
     setPhase({ kind: 'checking' });
     setProblem(null);
     try {
@@ -72,14 +73,16 @@ export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
         fromLink.current = false;
         setCode('');
         setPhase({ kind: 'enter' });
-        return;
+        return kept ?? { name, settings };
       }
-      const draft = recheckedDraft(kept, { name: request.name, settings: request.device?.settings });
+      const draft = draftFor(request, kept);
       setName(draft.name);
       setSettings(draft.settings);
       setPhase({ kind: 'review', request });
+      return draft;
     } catch (error) {
       fail(error, { kind: 'enter' });
+      return kept ?? { name, settings };
     }
   };
   useEffect(() => {
@@ -103,7 +106,7 @@ export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
         ...(requestId ? { requestId } : {}),
         ...(approve && (fromLink.current || requestId) ? { code: typed } : code ? { code } : {}),
         ...decision.current,
-        ...(phase.request.device && !phase.request.device.known ? { name, settings } : {}),
+        ...approvedDevice(phase.request.device, { name, settings }),
       });
       forgetLinkCode();
       setPhase({
@@ -139,8 +142,12 @@ export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
           const back = phase;
           setBusy(true);
           try {
-            await confirm({ response: await assertPasskey(await startConfirmation({})) });
-            await find({ name, settings });
+            await passkeyRecheck(
+              async () =>
+                void (await confirm({ response: await assertPasskey(await startConfirmation({})) })),
+              find,
+              { name, settings },
+            );
           } catch (error) {
             fail(error, back);
           } finally {

@@ -266,7 +266,13 @@ test('fcfc7e62 a device given its name shows it in the holder list; an unnamed o
   // Before names were passed on, a genesis said "this device": that is a placeholder, not a given name.
   const old = setup(t);
   await old.client.write('API_TOKEN', VALUE);
-  const entry = await overview(old);
-  people = entry.sets[0].people.page[0];
+  assert.equal(
+    (await overview(old)).sets[0].people.page[0].computers[0].name,
+    'synthetic',
+    'the sign-in name stands in for the placeholder, taken in the device’s own write',
+  );
+  // A set stored before that: the placeholder is never shown, the code stands alone until the device writes again.
+  delete set(old).entryNames;
+  people = (await overview(old)).sets[0].people.page[0];
   assert.equal(people.computers[0].name, undefined, 'no "this device" in the list');
 });

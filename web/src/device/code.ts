@@ -32,6 +32,33 @@ export function recheckedDraft<S>(
   return kept ? { name: kept.name, settings: kept.settings ?? fresh.settings } : fresh;
 }
 
+/** The draft the approval page holds after the server is asked: what was edited stays, a first look takes the terminal's. */
+export function draftFor<S>(
+  request: { name: string; device?: { settings?: S } },
+  kept: { name: string; settings: S | undefined } | undefined,
+) {
+  return recheckedDraft(kept, { name: request.name, settings: request.device?.settings });
+}
+
+/** The passkey (or GitHub) re-check that enables Approve: the check first, then the server is asked again with the
+ * person's draft, so an edited name is not put back to the terminal's (friction 8710bfcf). */
+export async function passkeyRecheck<D>(
+  confirm: () => Promise<void>,
+  find: (kept: D) => Promise<D>,
+  kept: D,
+) {
+  await confirm();
+  return find(kept);
+}
+
+/** What Approve sends about the device: its draft name and access, only for a device Forge has not seen before. */
+export function approvedDevice<S>(
+  device: { known: boolean } | undefined,
+  draft: { name: string; settings: S | undefined },
+) {
+  return device && !device.known ? { name: draft.name, settings: draft.settings } : {};
+}
+
 /** The access a device asks for, in plain words. */
 export function scopeWords(scope: string): string {
   return scope === 'cli'

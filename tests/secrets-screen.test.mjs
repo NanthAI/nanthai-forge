@@ -247,6 +247,8 @@ test('Secrets: value-free screen, honest states, accessible themes, no sideways 
       assert.match(await needs.innerText(), /change\s+API_TOKEN\s+\(env\)/);
       assert.match(await needs.innerText(), /remove\s+LEGACY_WEBHOOK_SECRET\s+\(removal\)/);
       assert.match(await needs.innerText(), /fp R2PA-9XNE \(@dana\) could open v7/);
+      // A removed computer's own name stands beside its code (fcfc7e62 review 3); one with no name shows the code alone.
+      assert.match(await needs.innerText(), /“MacBook Air” \(fp R2PA-9XNE\) \(@dana\) could open v1/);
       // A removed CI machine shows the name it was given with its id beside it; one with no kept name shows its id.
       assert.match(
         await needs.innerText(),

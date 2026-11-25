@@ -52,8 +52,21 @@ export const sealedSetFields = {
     v.array(v.object({ id: v.bytes(), at: v.number(), handle: v.optional(v.string()) })),
   ),
   formerHandles: v.optional(
-    v.array(v.object({ id: v.bytes(), handle: v.optional(v.string()), name: v.optional(v.string()) })),
+    v.array(
+      v.object({
+        id: v.bytes(),
+        handle: v.optional(v.string()),
+        /** The given name kept for a removed computer or machine; empty when nobody could name it (not looked for
+         * again). `account` is a computer's sealed account id, so the page shows its name only to that account. */
+        name: v.optional(v.string()),
+        account: v.optional(v.bytes()),
+      }),
+    ),
   ),
+  /** Server-owned, display-only (Item fcfc7e62): the approved name of an active computer whose signed roster entry holds
+   * a placeholder, taken from its sign-in on its next write. At most one per roster entry; the page shows it only to
+   * the computer's own account. */
+  entryNames: v.optional(v.array(v.object({ id: v.bytes(), name: v.string() }))),
   /** Server-owned: this set's needs-you total (removed people still listed + names to rotate + waiting proposals),
    * kept by the writes that change them so the project's top-bar counter moves in the same transaction. */
   needs: v.optional(v.number()),

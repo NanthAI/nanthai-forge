@@ -9,7 +9,7 @@ import { invariant, ForgeError } from './errors.js';
 import { localSealedIdentity } from './sealed-identity.js';
 import { SealedClient } from './sealed-client.js';
 import { hostedSealedTransport, sealedRead } from './sealed-transport.js';
-import { safeSecretName } from './sealed-display.js';
+import { safeLabel, safeSecretName } from './sealed-display.js';
 import { checkSecretWriteName } from './secret-names.js';
 
 export const sealedUsage =
@@ -222,7 +222,7 @@ export async function sealedCli(args: string[]) {
         label!,
         operationId ? { operationId } : {},
       );
-      const who = `Machine ${done.label ? `${safeSecretName(done.label)} ` : ''}(id ${done.machineId.slice(0, 8)})`;
+      const who = `Machine ${done.label ? `${safeLabel(done.label)} ` : ''}(id ${done.machineId.slice(0, 8)})`;
       process.stdout.write(
         `${done.already ? `${who} was already removed from Checks` : `${who} was removed from Checks, which is re-keyed; Forge no longer serves it and its key opens nothing new`}. Operation ${done.operationId}. Rotate at their provider what its key could open, then set the new values: ${done.rotate.length ? done.rotate.map(safeSecretName).join(', ') : 'nothing'}.\n`,
       );
@@ -240,7 +240,7 @@ export async function sealedCli(args: string[]) {
         operationId ? { operationId } : {},
       );
       process.stdout.write(
-        `Machine ${safeSecretName(label!)} (id ${added.machineId.slice(0, 8)}) can now open Checks. Operation ${added.operationId}. Its key is shown once. Store it as the CI secret FORGE_SECRETS_KEY, given only to the step that runs nforge run:\n\n${added.bundle}\n\nThat step also needs FORGE_DEPLOYMENT_URL and FORGE_PROJECT_ID, and runs: nforge run --set checks --only NAME,NAME -- COMMAND\nWhoever holds this key opens every Checks value. Never give it to a step that runs untrusted code, such as a pull request from a fork.\n`,
+        `Machine ${safeLabel(label!)} (id ${added.machineId.slice(0, 8)}) can now open Checks. Operation ${added.operationId}. Its key is shown once. Store it as the CI secret FORGE_SECRETS_KEY, given only to the step that runs nforge run:\n\n${added.bundle}\n\nThat step also needs FORGE_DEPLOYMENT_URL and FORGE_PROJECT_ID, and runs: nforge run --set checks --only NAME,NAME -- COMMAND\nWhoever holds this key opens every Checks value. Never give it to a step that runs untrusted code, such as a pull request from a fork.\n`,
       );
     } else if (command === 'set' || command === 'rm') {
       const value = command === 'set' ? await readValue(file) : null;
@@ -302,22 +302,12 @@ export async function sealedCli(args: string[]) {
               `${safeSecretName(n.name)}\t${n.kind === 1 ? 'env' : 'file'}\tv${n.valueVersion}\n`,
             );
         // Design 5.5: what removed devices and machines could open and nobody has changed since, from signed records only.
-        const { rotateList } = await import('./sealed-unshare.js');
+        const { rotateLines, rotateList } = await import('./sealed-unshare.js');
         const rotate = rotateList(result.pin.roster, result.pin.head, result.formerNames);
         // On stderr, so the name table on stdout keeps its shape for scripts.
         if (rotate.length)
           process.stderr.write(
-            `Rotate at their provider, then set the new value (a removed device or machine could open them):\n${rotate
-              .map(r => {
-                const who = [
-                  ...r.devices.map(fp => `fp ${fp}`),
-                  ...(r.machines ?? []).map(m =>
-                    m.name ? `machine “${m.name}” (id ${m.id})` : `machine id ${m.id}`,
-                  ),
-                ];
-                return `${safeSecretName(r.name)}\tremoved ${who.slice(0, 3).join(', ')}${who.length > 3 ? ` and ${who.length - 3} more` : ''}\n`;
-              })
-              .join('')}`,
+            `Rotate at their provider, then set the new value (a removed device or machine could open them):\n${rotateLines(rotate).join('')}`,
           );
       } finally {
         result.key?.fill(0);

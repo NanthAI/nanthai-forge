@@ -50,7 +50,9 @@ export type OverviewSet = {
   roster: Roster;
   revoked: readonly Uint8Array[];
   notes: readonly MarkNote[];
-  formerHandles: readonly { id: Uint8Array; handle?: string; name?: string }[];
+  formerHandles: readonly { id: Uint8Array; handle?: string; name?: string; account?: Uint8Array }[];
+  /** Server-kept names of computers whose signed entry holds a placeholder (convex/sealedSecretNames.ts). */
+  entryNames?: readonly { id: Uint8Array; name: string }[];
   joinRequests: readonly { deviceId: Uint8Array; accountId: Uint8Array | null; at: number }[];
   proposals: readonly PendingFacts[];
 };
@@ -112,6 +114,11 @@ export function holderRows(
     else if (entry.entryKind === 1)
       people.set(accountKey(entry), [...(people.get(accountKey(entry)) ?? []), entry]);
   }
+  // The name signed into the entry, or, while that is a placeholder, the one the server kept from its sign-in.
+  const shown = (e: Entry) =>
+    e.displayName && !isPlaceholderName(e.displayName)
+      ? e.displayName
+      : set.entryNames?.find(n => equalBytes(n.id, e.id))?.name;
   const rows = [...people.entries()].map(([key, entries]) => {
     const accountId = entries[0]!.accountId;
     const mine = equalBytes(accountId, self);
@@ -129,7 +136,7 @@ export function holderRows(
         .map(e => ({
           code: deviceFingerprint(e.id),
           how: howWord(e.how),
-          ...(mine && e.displayName && !isPlaceholderName(e.displayName) ? { name: e.displayName } : {}),
+          ...(mine && shown(e) ? { name: shown(e) } : {}),
           ...(marked(set, e.id) ? { marked: true as const } : {}),
         }))
         .sort((a, b) => byName(a.code, b.code)),

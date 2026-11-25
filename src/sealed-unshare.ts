@@ -17,13 +17,16 @@ import { requireConfirmedWriter } from './sealed-anchors.js';
 import { createTransition } from './sealed-transition.js';
 import { sealedRefusal, sealedWrite, sealedWriteArgs } from './sealed-transport.js';
 import { verifySealedReply, type SealedReply } from './sealed-verify.js';
-import { safeSecretName } from './sealed-display.js';
+import { safeLabel, safeSecretName } from './sealed-display.js';
 import { isPlaceholderName, rotateRows } from './sealed-overview.js';
 import { hex } from './sealed-portable.js';
 import type { SealedClient } from './sealed-client.js';
 
 /** A device as a terminal names it: the name it was given with its fingerprint beside it, or the fingerprint alone. */
-const deviceLabel = (fp: string, name?: string) => (name ? `“${name}” (fp ${fp})` : `fp ${fp}`);
+export const deviceLabel = (fp: string, name?: string) => {
+  const clean = name ? safeLabel(name) : '';
+  return clean ? `“${clean}” (fp ${fp})` : `fp ${fp}`;
+};
 /** What a removal prints: who went, and the names to rotate at their provider. `names` are the removed devices' given
  * names by fingerprint, read from the signed roster before the removal. */
 export const removalLine = (
@@ -78,6 +81,17 @@ export function rotateList(roster: Roster, head: Head, names?: ReadonlyMap<strin
   return rotateRows(roster, head).map(row => ({
     name: row.record.name,
     devices: row.former.map(f => deviceFingerprint(f.deviceId)),
+    // The server's display-only names of removed computers, by fingerprint; absent when none is kept.
+    ...(row.former.some(f => names?.get(hex(f.deviceId)))
+      ? {
+          deviceNames: Object.fromEntries(
+            row.former.flatMap(f => {
+              const name = names?.get(hex(f.deviceId));
+              return name ? [[deviceFingerprint(f.deviceId), name] as const] : [];
+            }),
+          ),
+        }
+      : {}),
     // Only when a removed machine could open it, so a list without machines keeps its shape. The name is the server's
     // display-only hint (a signed former entry holds only an id); a machine removed before it was kept shows its id.
     ...(row.machines.length
@@ -313,4 +327,19 @@ export async function removeMarkedFirst(client: SealedClient, state: Verified | 
   );
   if (done.removed.length) client.notice(removalLine(done.removed, done.rotate, done.names));
   return true;
+}
+
+/** The rotate warning `secret list` prints on stderr, one line per name: who could open it, each label cleaned where it
+ * is printed (a server supplies it, so it never forges a line or moves the cursor). */
+export function rotateLines(rotate: ReturnType<typeof rotateList>) {
+  return rotate.map(r => {
+    const who = [
+      ...r.devices.map(fp => deviceLabel(fp, r.deviceNames?.[fp])),
+      ...(r.machines ?? []).map(m => {
+        const name = m.name ? safeLabel(m.name) : '';
+        return name ? `machine “${name}” (id ${m.id})` : `machine id ${m.id}`;
+      }),
+    ];
+    return `${safeSecretName(r.name)}\tremoved ${who.slice(0, 3).join(', ')}${who.length > 3 ? ` and ${who.length - 3} more` : ''}\n`;
+  });
 }

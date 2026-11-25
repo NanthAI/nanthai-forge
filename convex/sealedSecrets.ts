@@ -12,7 +12,6 @@ import { equalBytes, forgeSecretId } from '../src/sealed-portable';
 import {
   extendsStored,
   isOwnDeviceEntry,
-  nextHandles,
   nextJoinRequests,
   nextSealedState,
   proposalFacts,
@@ -23,6 +22,7 @@ import {
   storedRoster,
 } from './sealedSecretGate';
 import { linkSealedDevice } from './sealedSecretMarkers';
+import { nextEntryNames, nextHandles } from './sealedSecretNames';
 import { storeMachineReaders } from './sealedMachines';
 import { overviewFor } from './sealedSecretOverview';
 import { overviewPart, overviewResult } from './sealedSecretOverviewFields';
@@ -206,7 +206,12 @@ export const write = mutation({
       });
       // Slice 4: the handles kept beside markers follow the entries they name, and this set's needs-you total moves with
       // the project counter in this same mutation (the head and roster are already decoded for the gate).
-      const handles = nextHandles(set, state.revoked, facts.roster);
+      const handles = nextHandles(set, state.revoked, facts.roster, previous);
+      // A computer listed under a placeholder takes the name its own sign-in was approved with (no extra read).
+      const entryNames = nextEntryNames(set, facts.roster, {
+        id: facts.head.signerId,
+        name: forgeDevice.name,
+      });
       const needs = setNeeds(
         facts.roster,
         facts.head,
@@ -228,6 +233,7 @@ export const write = mutation({
         ...(state.revoked.length ? { revoked: state.revoked } : {}),
         ...(handles.revokedNotes.length ? { revokedNotes: handles.revokedNotes } : {}),
         ...(handles.formerHandles.length ? { formerHandles: handles.formerHandles } : {}),
+        ...(entryNames.length ? { entryNames } : {}),
         needs,
         ...(state.joinRequests.length ? { joinRequests: state.joinRequests } : {}),
         // A sweep's later marking steps still skip the device its issuing browser kept, after this write too.

@@ -1129,9 +1129,16 @@ project, their public Forge handle (`revokedNotes`; handles only, never names or
 emails). A re-key moves the handles of the entries it removes to `formerHandles`, so
 "after @handle left" survives the re-key. A removed CI machine's given name moves there
 too (a signed former entry holds only an id), so the rotate list on the page and in
-`nforge secret list` shows `“walk-ci” (id c876f11a)`; a device's own name comes from its
-signed roster entry, written from the sign-in's device name when it first joins, and the
-page shows a computer's name only to its owner. `propose` keeps the proposal's operation and
+`nforge secret list` shows `“walk-ci” (id c876f11a)`, and a removed computer keeps its name
+the same way (with its account, so the page shows it only to that account; the terminal shows
+it to any holder, who can read it in the signed roster). An entry with no kept name is looked
+up once, in the roster the write replaces and then in the history row the write already read,
+and a miss is stored as an empty name so no later write decodes again. A device's own name comes
+from its signed roster entry, written from the sign-in's device name when it first joins, and
+the page shows a computer's name only to its owner. An older entry that still says "this
+device" takes its sign-in's approved name in `entryNames` on the next write that device makes
+(no read is added to a page load; until then the page shows its code). The terminal prints
+every such label after control, escape and direction characters are removed (`safeLabel`). `propose` keeps the proposal's operation and
 kind on the pending facts so the page names them without opening the sealed bytes. A
 computer's sign-in ending and a person leaving the project are separate reasons: a marker
 carries the handle only when the person left, so the holder list says "left the project"

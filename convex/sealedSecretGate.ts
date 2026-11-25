@@ -50,7 +50,8 @@ export type StoredSealedSet = {
   proposals?: SealedPendingProposal[];
   resolvedProposals?: ArrayBuffer[];
   revokedNotes?: SealedMarkNote[];
-  formerHandles?: { id: ArrayBuffer; handle?: string; name?: string }[];
+  formerHandles?: { id: ArrayBuffer; handle?: string; name?: string; account?: ArrayBuffer }[];
+  entryNames?: { id: ArrayBuffer; name: string }[];
   needs?: number;
 };
 const u8 = (bytes: ArrayBuffer) => new Uint8Array(bytes);
@@ -595,31 +596,4 @@ export function nextMarkNotes(
   return notes.length === (set.revokedNotes ?? []).length && notes.every((n, i) => n === set.revokedNotes![i])
     ? null
     : notes;
-}
-/** The handle lists after a head write: markers still set keep their note; the handle of a removed entry moves to
- * `formerHandles` while the roster still lists that device as a former signer, and leaves with it. A CI machine that
- * this write moves to the former list keeps its given name there, read from the roster this write replaces (a signed
- * former entry holds only an id), so the rotate list on the page and in the terminal names it. One decode of the
- * stored roster, only in a write that removes a machine. */
-export function nextHandles(set: StoredSealedSet | null, revoked: readonly ArrayBuffer[], roster: Roster) {
-  const notes = (set?.revokedNotes ?? []).filter(n => revoked.some(id => equalBytes(u8(id), u8(n.id))));
-  const former: NonNullable<StoredSealedSet['formerHandles']> = [
-    ...(set?.formerHandles ?? []),
-    ...(set?.revokedNotes ?? []).flatMap(n => (n.handle ? [{ id: n.id, handle: n.handle }] : [])),
-  ].filter(
-    (h, i, all) =>
-      roster.former.some(f => equalBytes(f.deviceId, u8(h.id))) &&
-      all.findIndex(o => equalBytes(u8(o.id), u8(h.id))) === i,
-  );
-  const fresh = roster.former.filter(
-    f => f.signPub.length === 0 && !former.some(h => h.name && equalBytes(u8(h.id), f.deviceId)),
-  );
-  if (set && fresh.length) {
-    const before = (decodeSealedWire(u8(set.payload)) as Payload).roster;
-    for (const f of fresh) {
-      const name = before.entries.find(e => e.entryKind === 2 && equalBytes(e.id, f.deviceId))?.displayName;
-      if (name) former.push({ id: Uint8Array.from(f.deviceId).buffer, name });
-    }
-  }
-  return { revokedNotes: notes, formerHandles: former };
 }

@@ -470,3 +470,26 @@ test('fcfc7e62 a removed CI machine keeps its given name: the rotate list names 
     ['ci-kept'],
   );
 });
+
+test('fcfc7e62 review 4: a CI machine removed before names were kept regains its name from the stored history, once', async t => {
+  const p = await project(t);
+  await removeMachine(p.checks, p.leaked.machineId.slice(0, 8));
+  const id = p.leaked.machineId.slice(0, 8);
+  const row = () => [...p.s.tables.sealedSecretSets.values()].find(r => r.kind === 2 && r.active);
+  // As stored before the fix: the former list holds the machine, the row holds no name for it.
+  delete row().formerHandles;
+  const named = async () =>
+    (await server.overview._handler(p.s.ctx, { projectId: p.project })).sets
+      .find(set => set.kind === 2)
+      .rotate.page.map(r => r.machines);
+  assert.deepEqual(await named(), [[{ id }], [{ id }], [{ id }]]);
+  // Any later Checks write looks the name up in the history row it already read; the page and the terminal name it.
+  await p.checks.write('API_TOKEN', synthetic('api-rotated'));
+  assert.deepEqual(await named(), [[{ id, name: 'ci' }], [{ id, name: 'ci' }]]);
+  const state = await p.checks.read();
+  assert.deepEqual(
+    rotateList(state.pin.roster, state.pin.head, state.formerNames).map(r => r.machines),
+    [[{ id, name: 'ci' }], [{ id, name: 'ci' }]],
+  );
+  wipe(state);
+});

@@ -32,6 +32,34 @@ test('a name edited before the passkey re-check survives it (friction 8710bfcf)'
   assert.deepEqual(code.recheckedDraft(edited, fresh), edited, 'edited settings stay too');
 });
 
+test('friction 8710bfcf: the passkey re-check passes the edited name on, and Approve submits it, not the terminal name', async () => {
+  const terminal = { name: 'owner Mac', device: { settings: { source: 'write' } } };
+  const calls = [];
+  // The page's `find`: asks the server again and keeps the draft it was given (web/src/app/Device.tsx).
+  const find = async kept => {
+    calls.push('inspect');
+    return code.draftFor(terminal, kept);
+  };
+  const draft = await code.passkeyRecheck(async () => void calls.push('passkey'), find, {
+    name: 'MacBook Air',
+    settings: undefined,
+  });
+  assert.deepEqual(
+    calls,
+    ['passkey', 'inspect'],
+    'the passkey check comes first, then the server is asked again',
+  );
+  assert.equal(draft.name, 'MacBook Air');
+  assert.deepEqual(draft.settings, { source: 'write' });
+  // Approve submits the draft's name for a device Forge has not seen before, and nothing for a known one.
+  assert.deepEqual(code.approvedDevice({ known: false }, draft), {
+    name: 'MacBook Air',
+    settings: draft.settings,
+  });
+  assert.deepEqual(code.approvedDevice({ known: true }, draft), {});
+  assert.deepEqual(code.approvedDevice(undefined, draft), {});
+});
+
 test('a terminal-chosen name is cleaned and capped before it is shown (S-02)', () => {
   const name = 'Forge\u202Eevil\u200B  \n' + 'x'.repeat(100) + '<b>hi</b>';
   const shown = code.shownDeviceName(name);

@@ -106,12 +106,13 @@ function Rotate({
                 <State word="Needs you" state="waiting">
                   To rotate
                 </State>{' '}
-                {row.devices.length ? <> · fp </> : ' · '}
+                {row.devices.length ? <> · </> : ' · '}
                 {row.devices.map((device, i) => (
                   <span key={device.code}>
                     {i ? ', ' : ''}
-                    <span className="dcode">{device.code}</span> (
-                    {device.handle ? `@${device.handle}` : 'not reported'})
+                    {device.name ? `“${device.name}” (fp ` : 'fp '}
+                    <span className="dcode">{device.code}</span>
+                    {device.name ? ')' : ''} ({device.handle ? `@${device.handle}` : 'not reported'})
                   </span>
                 ))}
                 {row.more ? ` and ${count(row.more, 'more computer')}` : ''}
