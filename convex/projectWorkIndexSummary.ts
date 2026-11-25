@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { record, recordPartition } from './projectWorkIndexStore';
@@ -40,7 +40,7 @@ export async function cockpitSummary(
   if (collection === 'views') {
     const row = JSON.parse(result);
     const [latest] = await ctx.db
-      .query(await workRecordTable(ctx, recordPartition(generation), 'viewAcceptances'))
+      .query(splitRecordTable('viewAcceptances'))
       .withIndex('by_generation_and_collection_and_parent_and_position', q =>
         q
           .eq('generationId', recordPartition(generation))

@@ -740,16 +740,15 @@ test('owner decisions project additively into the shared workspace and exact col
   assert.equal(older.metadata.counts.decisions, 0);
 });
 
-test('411727ba row 3: history move replays lost pages, mirrors writes while copying and keeps every record through cleanup', async () => {
+test('Item c0af6cfa F5: Item history and Work events insert into the data table of every partition, with no layout marker row', async () => {
   const { state } = await import('./hosted-fixture.mjs');
-  const migration = await import(moduleUrl('../convex/projectWorkRecordMigration.ts'));
   const { workRecordWriter } = await import(moduleUrl('../convex/projectWorkRecordWriter.ts'));
-  const { workRecordLookup, workRecordTable } = await import(
+  const { workRecordLookup, splitRecordTable } = await import(
     moduleUrl('../convex/projectWorkRecordTables.ts')
   );
   const s = state([], { keysetPaging: true });
-  // A raw insert, as before this change: no layout marker, so the partition is legacy.
-  const generationId = await s.ctx.db.insert('projectWorkGenerations', {
+  const writer = workRecordWriter(s.ctx);
+  const generationId = await writer.db.insert('projectWorkGenerations', {
     projectId: 'project',
     backupId: 'backup',
     revision: 1,
@@ -758,141 +757,24 @@ test('411727ba row 3: history move replays lost pages, mirrors writes while copy
     nextBatch: 1,
     metadata: '{}',
   });
-  for (let position = 0; position < 205; position++) {
-    const collection = position % 2 ? 'planningItems' : 'events';
-    await s.ctx.db.insert(collection === 'events' ? 'projectWorkRecords' : 'projectPlanningRecords', {
-      generationId,
+  const before = s.tables.projectWorkDataRecords.size;
+  for (const collection of ['planningItems', 'planningVersions', 'planningComments', 'events']) {
+    assert.equal(splitRecordTable(collection), 'projectWorkDataRecords');
+    await writer.db.insert('projectWorkRecords', {
       projectId: 'project',
-      collection,
-      key: String(position),
-      parent: '',
-      position,
-      value: JSON.stringify({ position }),
-    });
-  }
-  const coreId = await s.ctx.db.insert('projectWorkRecords', {
-    generationId,
-    projectId: 'project',
-    collection: 'intents',
-    key: 'retained',
-    parent: '',
-    position: 0,
-    value: '{"retained":true}',
-  });
-  const page = (cursor, cleanup = false, operationId = randomUUID()) =>
-    migration.page._handler(s.ctx, {
       generationId,
-      operationId,
-      cursor,
-      ...(cleanup ? { cleanup: true } : {}),
+      collection,
+      key: 'k',
+      parent: '',
+      position: 0,
+      value: '{}',
     });
-  const legacy = () =>
-    [...s.tables.projectPlanningRecords.values(), ...s.tables.projectWorkRecords.values()].filter(
-      row => row.collection !== 'intents',
-    );
-  const moved = () =>
-    [...s.tables.projectWorkDataRecords.values()].filter(row => !row.collection.startsWith('_'));
-  const before = workRecordWriter(s.ctx);
-  assert.equal(await workRecordTable(before, generationId, 'planningItems'), 'projectPlanningRecords');
-  assert.equal(await workRecordTable(before, generationId, 'events'), 'projectWorkRecords');
-  const firstId = randomUUID();
-  const first = JSON.parse(await page(null, false, firstId));
-  assert.equal(first.isDone, false);
-  assert.equal(first.rows, 100);
-  assert.equal(
-    await page(null, false, firstId),
-    JSON.stringify(first),
-    'lost-reply replay does not repeat a copy',
-  );
-  await assert.rejects(page('wrong'), error => (error.data?.code ?? error.code) === 'WORK_STALE');
-  await assert.rejects(page(null, true), error => (error.data?.code ?? error.code) === 'WORK_STALE');
-  // Copying: reads stay on the legacy tables and the writer mirrors every write to the data table.
-  const writer = workRecordWriter(s.ctx);
-  assert.equal(await workRecordTable(writer, generationId, 'planningItems'), 'projectPlanningRecords');
-  // A key lookup finds the exact data-table copy; its write is mirrored back to the legacy row.
-  const copied = await workRecordLookup(writer, generationId, 'planningItems', '1');
-  assert(s.tables.projectWorkDataRecords.has(copied._id));
-  await writer.db.patch(copied._id, { value: '{"updated":true}' });
-  assert.equal(legacy().find(row => row.key === '1').value, '{"updated":true}');
-  // A range read still answers from the legacy table; its write is mirrored to the copy.
-  const [gone] = await writer.db
-    .query(await workRecordTable(writer, generationId, 'planningItems'))
-    .withIndex('by_generation_and_collection_and_key', q =>
-      q.eq('generationId', generationId).eq('collection', 'planningItems').eq('key', '3'),
-    )
-    .take(1);
-  assert(s.tables.projectPlanningRecords.has(gone._id));
-  await writer.db.delete(gone._id);
-  // A row the copy has not reached yet has no copy: the lookup falls back to the legacy table.
-  const uncopied = await workRecordLookup(workRecordWriter(s.ctx), generationId, 'events', '0');
-  assert(s.tables.projectWorkRecords.has(uncopied._id));
-  await writer.db.insert('projectWorkRecords', {
-    generationId,
-    projectId: 'project',
-    collection: 'events',
-    key: 'new',
-    parent: '',
-    position: 205,
-    value: '{}',
-  });
-  assert(legacy().some(row => row.key === 'new') && moved().some(row => row.key === 'new'));
-  assert.equal(moved().find(row => row.key === '1').value, '{"updated":true}');
-  assert(!moved().some(row => row.key === '3' && row.collection === 'planningItems'));
-  let cursor = first.nextCursor,
-    published;
-  do {
-    const seen = new Set(moved().map(row => row._id));
-    const result = JSON.parse(await page(cursor));
-    const copied = new Set(moved().flatMap(row => (seen.has(row._id) ? [] : [row.collection])));
-    assert(
-      copied.size <= 1,
-      'a page reads one collection range (Convex allows one paginate per transaction)',
-    );
-    cursor = result.nextCursor;
-    published ??= result.publishedGenerationId;
-  } while (cursor);
-  // Cutover: the data table answers, with the same logical records.
-  const current = workRecordWriter(s.ctx);
-  assert.equal(await workRecordTable(current, generationId, 'planningItems'), 'projectWorkDataRecords');
-  assert.equal(await workRecordTable(current, generationId, 'intents'), 'projectWorkRecords');
-  assert.equal(
-    (await workRecordLookup(current, generationId, 'planningItems', '1')).value,
-    '{"updated":true}',
-  );
-  assert.equal(await workRecordLookup(current, generationId, 'planningItems', '3'), null);
-  assert.equal((await workRecordLookup(current, generationId, 'events', 'new')).value, '{}');
-  assert.equal(JSON.parse(await page(null, false)).rows, 0, 'a finished copy is a no-op');
-  cursor = null;
-  do {
-    const result = JSON.parse(await page(cursor, true));
-    cursor = result.nextCursor;
-  } while (cursor);
-  assert.equal(
-    await page(null, false, firstId),
-    JSON.stringify(first),
-    'an older page replays after later copy and cleanup pages',
-  );
-  assert.deepEqual(legacy(), [], 'cleanup removes every legacy copy');
-  assert.equal(
-    s.tables.projectWorkRecords.get(coreId).value,
-    '{"retained":true}',
-    'general Work retains its original row identity and exact bytes',
-  );
-  assert.equal(moved().length, 205, '205 seeded - 1 deleted + 1 inserted');
-  assert.equal(
-    (await workRecordLookup(workRecordWriter(s.ctx), generationId, 'planningItems', '1')).value,
-    '{"updated":true}',
-  );
+    assert.equal((await workRecordLookup(writer, generationId, collection, 'k')).collection, collection);
+  }
+  assert.equal(s.tables.projectWorkDataRecords.size, before + 4);
   assert.deepEqual(
-    [...s.tables.projectWorkDataRecords.values()]
-      .filter(row => row.collection.startsWith('_workStoreLayout'))
-      .map(row => [row.collection, row.value]),
-    [['_workStoreLayout', '{"layout":"moved"}']],
-    'the marker says moved and the progress row is gone',
+    [...s.tables.projectWorkDataRecords.values()].filter(row => row.collection === '_workStoreLayout'),
+    [],
   );
-  assert.equal(published, undefined, 'an unselected partition publishes no generation');
-  await assert.rejects(
-    page('changed', false, firstId),
-    error => (error.data?.code ?? error.code) === 'WORK_OPERATION_CHANGED',
-  );
+  assert.equal(s.tables.projectPlanningRecords.size + s.tables.projectWorkRecords.size, 0);
 });

@@ -5,7 +5,7 @@ import { COORDINATION_LIMITS } from './coordination-types.js';
 import { digest } from './hash.js';
 import { reviewPaths } from './native-source-review.js';
 import { contextualHunks } from './review-hunks.js';
-import { isLegacyViewCollection, viewIndexEntries } from './view-hosted-index.js';
+import { viewIndexEntries } from './view-hosted-index.js';
 import { workSourcePins } from './work-archive-metadata.js';
 import { viewReadModels, viewContributors } from './view-read-model.js';
 import type { WorkData } from './work-types.js';
@@ -164,7 +164,7 @@ export function computeOwnerDerived(
       cached = cachedViews.get(view.id);
     if (priorViews.get(view.id) === fingerprint) return;
     if (cached?.fingerprint === fingerprint) {
-      addView([view.id, fingerprint, cached.rows.filter(r => !isLegacyViewCollection(r.collection))]);
+      addView([view.id, fingerprint, cached.rows]);
       return;
     }
     addView([view.id, fingerprint, viewIndexEntries(data, { index, positions: new Map() })]);

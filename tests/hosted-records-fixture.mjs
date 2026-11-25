@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+import { fixtureInsertTable } from './work-record-domain-fixture.mjs';
 import { checkArgs, checkDocument, insertedDocument, updatedDocument } from './convex-args.mjs';
 import { fixtureCommitStart, validateContext } from './convex-context.mjs';
 import { convexToJson } from 'convex/values';
@@ -109,6 +110,7 @@ export function recordsFixture() {
         return read([tables[locations.get(id)]?.get(id) ?? null])[0];
       },
       insert: async (table, row) => {
+        table = fixtureInsertTable(table, row.collection);
         const id = `record-${serial++}`;
         // Creation time follows Date (mockable) and never repeats, as in Convex, so retention windows can age rows.
         write(

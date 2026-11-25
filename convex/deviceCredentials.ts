@@ -71,16 +71,7 @@ export const revoke = revocationMutation({
     // Removal clears the key but retains the approval timestamp and its receipt history.
     const receipt =
       row.deviceKey || row.deviceApprovedAt !== undefined
-        ? await deviceOperation(
-            ctx,
-            row.owner,
-            args.operationId,
-            { credentialId, action },
-            {
-              request: { credentialId },
-              matchesResult: result => result.ended === action,
-            },
-          )
+        ? await deviceOperation(ctx, row.owner, args.operationId, { credentialId, action })
         : null;
     if (receipt?.result) return null;
     const keyRemoved = row.removed && !row.deviceKey;

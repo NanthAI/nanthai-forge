@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { logIoAttribution } from './ioAttribution';
-import { workRecordTable, planningRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable, planningRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
 import type { QueryCtx, MutationCtx } from './server';
 import { query } from './cliServer';
@@ -119,7 +119,7 @@ export async function searchPlanning(
   const named = new Set<string>();
   if (idPrefix) {
     const rows = await ctx.db
-      .query(await workRecordTable(ctx, recordPartition(generation), 'planningSearch'))
+      .query(splitRecordTable('planningSearch'))
       .withIndex('by_generation_and_collection_and_key', q =>
         q
           .eq('generationId', recordPartition(generation))

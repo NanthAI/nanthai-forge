@@ -10,7 +10,6 @@ export async function deviceOperation(
   owner: string,
   operationId: string,
   request: unknown,
-  legacy?: { request: unknown; matchesResult: (result: Record<string, unknown>) => boolean },
 ) {
   const identity = await ctx.auth.getUserIdentity();
   const userId =
@@ -32,14 +31,7 @@ export async function deviceOperation(
   if (previous) {
     invariant(previous.kind === 'device', 'AUTH_OPERATION_CHANGED', 'Retain the original device operation.');
     const receipt = JSON.parse(previous.request) as { hash: string; result: Record<string, unknown> };
-    invariant(
-      receipt.hash === hash ||
-        (legacy &&
-          legacy.matchesResult(receipt.result) &&
-          receipt.hash === digest(canonicalPayload(legacy.request))),
-      'AUTH_OPERATION_CHANGED',
-      'Retain the original device operation.',
-    );
+    invariant(receipt.hash === hash, 'AUTH_OPERATION_CHANGED', 'Retain the original device operation.');
     return { userId: user._id, hash, result: receipt.result, id: previous._id };
   }
   return { userId: user._id, hash, result: null };

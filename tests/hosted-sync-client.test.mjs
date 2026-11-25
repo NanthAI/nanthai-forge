@@ -153,27 +153,6 @@ test('fresh apply rejects a newer remote head and changed original command expli
   assert.equal(readFileSync(join(s.root, 'a'), 'utf8'), 'after\n');
 });
 
-for (const name of ['..forge-client', '.forge-client'])
-  test(`sync apply relocates a verified misplaced ${name} cache without losing bytes`, async t => {
-    const s = await fixture(t);
-    const bytes = Buffer.from('legacy cached bytes'),
-      id = digest(bytes);
-    const objects = join(s.root, name, 'objects');
-    mkdirSync(objects, { recursive: true });
-    writeFileSync(join(objects, id), bytes);
-    const command = s.command();
-    const result = await applyHostedSync(s.root, command, s.transport);
-    assert.equal(result.head, s.selection().head);
-    assert(!existsSync(join(s.root, name)));
-    assert.equal(result.localRecovery.length, 1);
-    const recovery = result.localRecovery[0];
-    assert.deepEqual(readFileSync(join(recovery.preservedAt, 'objects', id)), bytes);
-    assert(recovery.undo.includes(recovery.preservedAt));
-    const replay = await applyHostedSync(s.root, command, s.transport);
-    assert.deepEqual(replay.localRecovery, result.localRecovery);
-    assert.equal(replay.replayed, true);
-  });
-
 for (const unknown of ['unknown file', 'wrong hash', 'symlink', 'hardlink'])
   test(`cache repair preserves ${unknown} as user content instead of discarding it`, async t => {
     const s = await fixture(t),
@@ -287,46 +266,6 @@ for (const phase of ['after-preserve', 'after-baseline', 'after-receipt'])
       recovered.preservedAt,
     );
   });
-
-test('legacy cache relocation interrupted after rename retains all bytes and same apply can resume', async t => {
-  const fs = (await import('node:fs')).default;
-  const { syncBuiltinESMExports } = await import('node:module');
-  const s = await fixture(t),
-    request = s.command(),
-    directory = join(s.root, '..forge-client'),
-    bytes = Buffer.from('cached legacy bytes'),
-    id = digest(bytes);
-  mkdirSync(join(directory, 'objects'), { recursive: true });
-  writeFileSync(join(directory, 'objects', id), bytes);
-  const rename = fs.renameSync;
-  let preserved;
-  t.mock.method(fs, 'renameSync', (from, to) => {
-    const result = rename(from, to);
-    if (from === directory) {
-      preserved = to;
-      throw Error('Synthetic legacy relocation interruption');
-    }
-    return result;
-  });
-  syncBuiltinESMExports();
-  try {
-    await assert.rejects(
-      applyHostedSync(s.root, request, s.transport),
-      /Synthetic legacy relocation interruption/,
-    );
-  } finally {
-    t.mock.restoreAll();
-    syncBuiltinESMExports();
-  }
-  assert(preserved);
-  assert.deepEqual(readFileSync(join(preserved, 'objects', id)), bytes);
-  const receipt = JSON.parse(readFileSync(preserved + '.json'));
-  assert.equal(receipt.preservedAt, preserved);
-  const result = await applyHostedSync(s.root, request, s.transport);
-  assert.equal(result.head, request.lane.head);
-  assert.equal(result.localRecovery[0].preservedAt, preserved);
-  assert.deepEqual(readFileSync(join(preserved, 'objects', id)), bytes);
-});
 
 test('local preservation recovery rechecks authority before moving any local bytes', async t => {
   const { recoverLocalApply } = await import('../dist/hosted-apply-recovery.js');

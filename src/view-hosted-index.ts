@@ -3,10 +3,6 @@
 import type { WorkData } from './work-types.js';
 import { indexedRecord, type IndexEntry } from './work-hosted-index.js';
 import { viewReadModels } from './view-read-model.js';
-/** View collections with no reader, still sent by older CLIs and still in old caches. The server
- * and the CLI cache drop them. Remove by 2026-12-31 with the minimum-CLI bump (Item c0af6cfa F13). */
-export const isLegacyViewCollection = (collection: string) =>
-  /^(viewDetails|viewFiles|laneViews)(:payload)?$/.test(collection);
 /** Built once per publication. Only View acceptances are indexed (projectWorkIndexSummary reads
  * them); legacy View detail, Lane-View and file-provenance rows had no reader (Item c0af6cfa F1). */
 export function viewIndexEntries(

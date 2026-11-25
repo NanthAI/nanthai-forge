@@ -7,7 +7,7 @@ import { isShelved } from '../src/work-planning-types';
 import { planningStatusTransition } from '../src/work-planning-state';
 import { digest } from '../src/state/hash';
 import { hostedRecordBody } from './projectHostedRecords';
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { instant, planningTime, type PlanningTimesRead } from './projectPlanningTimes';
 
 export { instant } from './projectPlanningTimes';
@@ -65,7 +65,7 @@ export async function* legacyVersions(
   itemId: string,
 ) {
   yield* ctx.db
-    .query(await workRecordTable(ctx, partition, 'planningVersions'))
+    .query(splitRecordTable('planningVersions'))
     .withIndex('by_generation_and_collection_and_parent_and_position', q =>
       q.eq('generationId', partition).eq('collection', 'planningVersions').eq('parent', itemId),
     )
@@ -94,7 +94,7 @@ export async function legacyVersionValue(
   const collection = 'planningVersions:payload';
   const chunks: string[] = [];
   const rows = ctx.db
-    .query(await workRecordTable(ctx, partition, collection))
+    .query(splitRecordTable(collection))
     .withIndex('by_generation_and_collection_and_parent_and_position', q =>
       q.eq('generationId', partition).eq('collection', collection).eq('parent', payloadKey),
     );

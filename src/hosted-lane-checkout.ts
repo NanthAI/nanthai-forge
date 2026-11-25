@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
-import { preserveMisplacedReadCaches } from './hosted-legacy-cache.js';
-import { preserveLegacyCacheUse } from './client-cache-use.js';
 import { planCheckoutPreservation, preserveCheckoutArtifacts } from './hosted-checkout-preserve.js';
 import { sourceTree } from './source-tree.js';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
@@ -109,26 +107,6 @@ async function checkout(
     sourcePack: cache.sourcePack,
   });
   const preservationPath = join(cache.root, `preserve-${request.operationId}.json`);
-  const recoveryPath = join(cache.root, `legacy-cache-recovery-${request.operationId}.json`);
-  const preserveCaches = (files: readonly { path: string }[] = []) => {
-    preserveMisplacedReadCaches(
-      root,
-      files,
-      receipt => {
-        const moved = (checkoutPathExists(recoveryPath) ? json(recoveryPath) : []).filter(
-          (item: { preservedAt: string }) => checkoutPathExists(item.preservedAt),
-        );
-        if (!moved.some((item: { preservedAt: string }) => item.preservedAt === receipt.preservedAt))
-          moved.push(receipt);
-        else
-          moved[
-            moved.findIndex((item: { preservedAt: string }) => item.preservedAt === receipt.preservedAt)
-          ] = receipt;
-        durableReplace(recoveryPath, JSON.stringify(moved));
-      },
-      checkoutPathExists(recoveryPath) ? json(recoveryPath) : [],
-    );
-  };
   const markerDigest = () => {
     const bytes = checkoutPathExists(root)
       ? readSource(root, `.forge/${hostedLaneMarkerName}`, Number.MAX_SAFE_INTEGER)
@@ -310,7 +288,6 @@ async function checkout(
           : {}),
         ...(cache.machineObjects ? { machineObjects: cache.machineObjects } : {}),
         replayed,
-        ...(checkoutPathExists(recoveryPath) ? { localRecovery: json(recoveryPath) } : {}),
         ...displaced(),
       });
       if (operation.complete) {
@@ -479,7 +456,6 @@ async function checkout(
                       );
                     if (repairs.length) rebuildCheckoutFiles(root, cache.objects, repairs, text);
                     if (current?.operationId === request.operationId) preserveArtifacts(files);
-                    preserveCaches([...(current?.state.files ?? []), ...state.files]);
                     const index = readCheckoutStatIndex(root);
                     const inPlace =
                       Boolean(delta && request.previous) && current?.operationId !== request.operationId;
@@ -541,12 +517,6 @@ async function checkout(
                       });
                       const settled = settleCheckoutDelta(root, cache.root);
                       if (settled?.conflict) throw settled.conflict;
-                      // A full install replaces `.forge`; in place, retire the persisted legacy record.
-                      const legacyUse = join(root, '.forge', 'cache-use.json');
-                      if (checkoutPathExists(legacyUse) && preserveLegacyCacheUse(root)) {
-                        rmSync(legacyUse);
-                        syncDirectory(join(root, '.forge'));
-                      }
                     } else if (current?.operationId !== request.operationId) {
                       planCheckoutPreservation(preservationPath, artifacts);
                       if (checkoutPathExists(root)) renameSync(root, previous);

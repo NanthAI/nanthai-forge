@@ -48,11 +48,7 @@ test('B1: a cache-shaped user directory recreated between the final clean check 
   fs.mkdirSync(join(parentCache, 'lanes'), { recursive: true });
   fs.renameSync(s.root, root);
   fs.renameSync(clientCacheRoot(s.root), clientCacheRoot(root));
-  // A valid legacy cache directory is verified and quarantined normally first.
-  const candidate = join(root, '..forge-client'),
-    cached = Buffer.from('verified cached bytes');
-  fs.mkdirSync(join(candidate, 'objects'), { recursive: true });
-  fs.writeFileSync(join(candidate, 'objects', digest(cached)), cached);
+  const candidate = join(root, '..forge-client');
   // A file to directory flip forces the whole-checkout publication path.
   s.setFiles([
     { path: 'a', blob: s.put('after\n'), mode: 'file' },

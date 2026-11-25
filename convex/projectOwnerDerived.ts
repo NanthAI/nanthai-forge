@@ -8,7 +8,6 @@ import { sourceTreeEntries } from '../src/source-tree-index';
 import { invariant, ForgeError } from '../src/errors';
 import { resolveOwnerDerived } from '../src/owner-derived-pages';
 import { safeRelative } from '../src/files';
-import { isLegacyViewCollection } from '../src/view-hosted-index';
 import type { WorkData } from '../src/work-types';
 import type { sourceManifestSchema } from '../src/work-archive-metadata';
 import type { z } from 'zod';
@@ -113,9 +112,6 @@ export function ownerDerivedRows(
       const ids = new Set<string>(),
         kept: IndexEntry[] = [];
       for (const row of supplied.rows) {
-        // Older CLIs still send View detail, Lane-View and file rows; nothing reads them.
-        // Dropped without CLI_UPGRADE_REQUIRED. Remove by 2026-12-31 with the minimum-CLI bump (Item c0af6cfa F13).
-        if (isLegacyViewCollection(row.collection)) continue;
         const identity = JSON.stringify([row.collection, row.key]);
         if (ids.has(identity)) return { reason: 'view-row-duplicate' };
         ids.add(identity);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -78,7 +78,7 @@ export async function planningRootsWithPrefix(
   limit: number,
 ) {
   return ctx.db
-    .query(await workRecordTable(ctx, partition, 'planningItems'))
+    .query(splitRecordTable('planningItems'))
     .withIndex('by_generation_and_collection_and_key', q =>
       q
         .eq('generationId', partition)

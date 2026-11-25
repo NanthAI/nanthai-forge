@@ -102,7 +102,7 @@ const exists = (path: string) => {
 /** Newest change and allocated bytes; symlinks (node_modules) are never followed. */
 function scanTree(root: string, snapshots: string | null, deadline = Infinity, countNested = false) {
   const cache = clientCacheRoot(root);
-  const use = snapshots && readCacheUse(root, false) ? exists(cacheUsePath(root)) : null;
+  const use = snapshots && readCacheUse(root) ? exists(cacheUsePath(root)) : null;
   const scratch = join(root, '.forge', 'scratch');
   const recovery = join(cache, 'kept-apply');
   const laneMarkerSuffix = `${sep}.forge${sep}${hostedLaneMarkerName}`;

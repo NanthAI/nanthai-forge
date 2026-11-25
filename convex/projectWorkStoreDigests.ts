@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { JournalNeeded } from './projectJournalStore';
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 // Compact, independently maintained journal fingerprints. These are disposable index metadata, not Work.
 import { writeFingerprint as put } from './projectWorkStoreFingerprintWrites';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -159,7 +159,7 @@ export async function compareFingerprints(
   if (window.invalidated || (!window.complete && newest > window.sampleSize)) return null;
   const cacheCollection = source === 'issueHeads' ? headsCollection('issue') : sourceCollection(source);
   const page = await ctx.db
-    .query(await workRecordTable(ctx, partition, cacheCollection))
+    .query(splitRecordTable(cacheCollection))
     .withIndex('by_generation_and_collection_and_position', q =>
       q.eq('generationId', partition).eq('collection', cacheCollection).gte('position', window.floor),
     )

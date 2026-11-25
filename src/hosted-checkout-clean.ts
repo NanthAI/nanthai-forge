@@ -20,7 +20,6 @@ import {
 import { ForgeError, invariant } from './errors.js';
 import type { NativeFile } from './state/format.js';
 import { captureExclusion, readSource } from './files.js';
-import { preserveLegacyCacheUse } from './client-cache-use.js';
 import { ignoredBy, ignoreLayer } from './source-ignore.js';
 import { indexedBlob, statIndexRefresh, type CheckoutStatIndex } from './checkout-stat-index.js';
 import { diskShapeMatches, diskMode } from './source-links.js';
@@ -164,7 +163,6 @@ export function cleanHostedCheckout(
           if (
             !(
               name === markerName ||
-              (name === 'cache-use.json' && preserveLegacyCacheUse(root)) ||
               // An older client's event probe killed mid-attempt: Forge-owned and empty of work (48835eea).
               name.startsWith(EVENT_PROBE_PREFIX)
             )

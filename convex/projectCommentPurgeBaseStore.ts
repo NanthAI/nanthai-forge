@@ -18,7 +18,7 @@ import { purgedDecisionRequest } from '../src/work-planning-state';
 import { baseEvent, commentRow, purgedHere } from './projectCommentPurge';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { findObject, purgeTargetRow } from './projectObjectFind';
-import { settledRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { purgeRows } from './projectPlanningPurgeRedact';
 import { itemIntentPage } from './projectItemIntentPages';
 
@@ -285,7 +285,7 @@ async function itemComments(ctx: QueryCtx, project: Doc<'hostedProjects'>, itemI
   invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before purging.');
   const partition = recordPartition(generation);
   const comments = await ctx.db
-    .query(await settledRecordTable(ctx, partition, 'planningComments'))
+    .query(splitRecordTable('planningComments'))
     .withIndex('by_generation_and_collection_and_parent_and_position', q =>
       q.eq('generationId', partition).eq('collection', 'planningComments').eq('parent', itemId),
     )

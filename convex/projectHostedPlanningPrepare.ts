@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import { internalMutation } from './server';
@@ -155,7 +155,7 @@ export const page = internalMutation({
       );
     }
     const rows = await ctx.db
-      .query(await workRecordTable(ctx, partition, 'planningItems'))
+      .query(splitRecordTable('planningItems'))
       .withIndex('by_generation_and_collection_and_key', q => {
         const range = q.eq('generationId', partition).eq('collection', 'planningItems');
         return !selection
@@ -180,7 +180,7 @@ export const page = internalMutation({
       );
       const parts = header.payloadKey
         ? await ctx.db
-            .query(await workRecordTable(ctx, partition, 'planningItems:payload'))
+            .query(splitRecordTable('planningItems:payload'))
             .withIndex('by_generation_and_collection_and_parent_and_position', q =>
               q
                 .eq('generationId', partition)

@@ -605,9 +605,9 @@ for (const mode of ['legacy', 'verified'])
         itemLaneMembership: 'verified-v2',
         planLaneMarkCoverage: { generationId: partition, cursor: null },
       });
-    const { workRecordTable } = await import(moduleUrl('../convex/projectWorkRecordTables.ts'));
-    const rootTable = await workRecordTable(s.ctx, partition, 'planningItems');
-    const versionsTable = await workRecordTable(s.ctx, partition, 'planningVersions');
+    const { splitRecordTable } = await import(moduleUrl('../convex/projectWorkRecordTables.ts'));
+    const rootTable = splitRecordTable('planningItems');
+    const versionsTable = splitRecordTable('planningVersions');
     const root = [...s.tables[rootTable].values()].find(
       r => r.collection === 'planningItems' && r.key === id,
     );

@@ -27,11 +27,11 @@ export function ownerDerivedBytes(
   try {
     if (statSync(path).size <= OWNER_DERIVED_MAX_BYTES) {
       const record = JSON.parse(readFileSync(path, 'utf8'));
-      if (record.schema === 3 && digest(JSON.stringify(record.derived)) === record.sha256)
+      if (record.schema === 4 && digest(JSON.stringify(record.derived)) === record.sha256)
         previous = ownerDerivedSchema.parse(record.derived);
     }
   } catch {
-    /* cold cache; legacy full-history caches are not read */
+    /* cold cache; caches of an earlier layout are not read */
   }
   // Missing exact baseline metadata means supply full facts; the server selects
   // the replacements against its authoritative generation.
@@ -43,7 +43,7 @@ export function ownerDerivedBytes(
   );
   const bytes = Buffer.from(JSON.stringify(result));
   const cache = JSON.stringify({
-    schema: 3,
+    schema: 4,
     derived: result,
     sha256: digest(bytes),
   });

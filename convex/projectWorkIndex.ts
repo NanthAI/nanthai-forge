@@ -5,7 +5,7 @@ import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { PaginationOptions } from 'convex/server';
 import type { Infer } from 'convex/values';
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { findWorkEvent } from './projectWorkEventStore';
 import { likelyPlanningDuplicates } from './projectHostedPlanningSearch';
 import { needsFix } from '../src/culprit-bisect';
@@ -67,7 +67,7 @@ export const workspace = query({
       for (const collection of ['sourcePins', 'landingEntries', 'landingBatches'])
         if (counts[collection] === undefined) {
           const [first] = await ctx.db
-            .query(await workRecordTable(ctx, recordPartition(generation), collection))
+            .query(splitRecordTable(collection))
             .withIndex('by_generation_and_collection_and_position', q =>
               q.eq('generationId', recordPartition(generation)).eq('collection', collection),
             )
@@ -472,12 +472,12 @@ export async function journalWorkRecordsRead(
     const rows =
       input.parentId === undefined
         ? ctx.db
-            .query(await workRecordTable(ctx, recordPartition(generation), input.collection))
+            .query(splitRecordTable(input.collection))
             .withIndex('by_generation_and_collection_and_position', q =>
               q.eq('generationId', recordPartition(generation)).eq('collection', input.collection),
             )
         : ctx.db
-            .query(await workRecordTable(ctx, recordPartition(generation), input.collection))
+            .query(splitRecordTable(input.collection))
             .withIndex('by_generation_and_collection_and_parent_and_position', q =>
               q
                 .eq('generationId', recordPartition(generation))

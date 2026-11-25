@@ -277,7 +277,7 @@ export async function itemWorkFixture({
     s.call(name, work.read, { projectId: auth.projectId, itemId, ...args });
   const read = async (...args) => JSON.parse(await readRaw(...args));
   const seedHistory = async () => {
-    const root = [...s.tables.projectPlanningRecords.values()].find(
+    const root = [...s.tables.projectWorkDataRecords.values()].find(
       row => row.collection === 'planningItems' && row.key === itemId,
     );
     const snapshots = [];

@@ -180,7 +180,7 @@ test('records mode: a purged comment version and a retry of the comment answer P
   );
 });
 
-test('records mode: a head stored before heads kept their value gets the tombstone; a failed build’s staged pages go; an unfinished table migration’s old copy refuses', async t => {
+test('records mode: a head stored before heads kept their value gets the tombstone; a failed build’s staged pages go', async t => {
   const { s, itemId, reported } = await commented(t, { records: true });
   const head = [...s.tables.projectHostedRecordHeads.values()].find(
     row => row.kind === 'comment' && row.key === reported.operationId,
@@ -198,33 +198,16 @@ test('records mode: a head stored before heads kept their value gets the tombsto
     position: 0,
     body: `[${JSON.stringify(SECRET)}]`,
   });
-  // A partition still moving its history (Item 411727ba row 3) keeps a second copy of the words.
-  const marker = [...s.tables.projectWorkDataRecords.values()].find(
-    row => row.collection === '_workStoreLayout' && row.generationId === generation._id,
-  ) ?? {
-    _id: 'layout',
+  // The earlier planning split may have left an old core-table copy of the comment: refused.
+  s.tables.projectWorkRecords.set('leftover', {
+    _id: 'leftover',
     _creationTime: 1,
     projectId: s.projectId,
     generationId: generation._id,
-    collection: '_workStoreLayout',
-    key: 'tables',
-    parent: '',
-    position: 0,
-  };
-  const settled = marker.value ?? '{"layout":"legacy"}';
-  for (const layout of ['copying', 'cleaning']) {
-    s.tables.projectWorkDataRecords.set(marker._id, { ...marker, value: JSON.stringify({ layout }) });
-    await assert.rejects(purge(s, itemId, reported.operationId), code('WORK_STALE'));
-    assert.ok(s.tables.projectReturnPages.has('staged'), 'the refusal wrote nothing');
-  }
-  if (marker.value) s.tables.projectWorkDataRecords.set(marker._id, { ...marker, value: settled });
-  else s.tables.projectWorkDataRecords.delete(marker._id);
-  // The earlier planning split may have left an old core-table copy of the comment: still refused.
-  s.tables.projectWorkRecords.set('leftover', {
-    ...marker,
-    _id: 'leftover',
     collection: 'planningComments',
     key: reported.operationId,
+    parent: '',
+    position: 0,
     value: JSON.stringify({ text: SECRET }),
   });
   await assert.rejects(purge(s, itemId, reported.operationId), code('WORK_STALE'));

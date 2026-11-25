@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { hostedRecordBody, recordVersion } from './projectHostedRecords';
 import { instant } from './projectPlanningTimes';
 import type { PlanningItem } from '../src/work-planning-types';
@@ -49,7 +49,7 @@ export async function completionHeldByReopen(
   const notNewer = (v: Version) => completedAt !== undefined && instant(v.at) <= completedAt;
   if (item.version <= 1 || notNewer(item)) return false;
   const rows = await ctx.db
-    .query(await workRecordTable(ctx, partition, 'planningVersions'))
+    .query(splitRecordTable('planningVersions'))
     .withIndex('by_generation_and_collection_and_parent_and_position', q =>
       q.eq('generationId', partition).eq('collection', 'planningVersions').eq('parent', item.id),
     )

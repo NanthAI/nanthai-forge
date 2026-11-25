@@ -255,85 +255,70 @@ test('sign-out keeps the approved key and settings; removal revokes them; replay
   assert((await f.start(device)).flow.user_code);
 });
 
-for (const format of ['current', 'legacy']) {
-  test(`${format} revoke receipts reject changed actions and replay without writes after the sign-in ends`, async t => {
-    const f = fixture(t);
-    const device = key();
-    const signIn = async () => {
-      const { flow } = await f.start(device);
-      await f.approve(flow);
-      const { credentialId, signInId } = await f.poll(flow);
-      return { subject: 'owner', forgeCredential: credentialId, forgeSignIn: signInId };
-    };
-    const first = await signIn();
-    const credentialId = first.forgeCredential;
-    const checkReceipt = (operationId, action) => {
-      const receipt = [...f.tables.authLinkEvents.values()].find(row => row.operationId === operationId);
-      assert.deepEqual(JSON.parse(receipt.request), {
-        hash: deviceHash(JSON.stringify({ action, credentialId })),
-        result: { ended: action },
-      });
-      if (format === 'legacy')
-        f.tables.authLinkEvents.set(receipt._id, {
-          ...receipt,
-          request: JSON.stringify({
-            hash: deviceHash(JSON.stringify({ credentialId })),
-            result: { ended: action },
-          }),
-        });
-    };
-    const signout = { credentialId, operationId: randomUUID() };
-    await f.call('original sign-out', credentials.revoke, signout, first);
-    checkReceipt(signout.operationId, 'signout');
-    assert.equal(
-      await f.call('exact sign-out', credentials.revoke, { ...signout, action: 'signout' }, first),
-      null,
-    );
-    assert.equal(f.counts.at(-1).writes, 0);
-    await assert.rejects(
-      f.call('changed sign-out', credentials.revoke, { ...signout, action: 'remove' }, first),
-      code('AUTH_OPERATION_CHANGED'),
-    );
-    assert.equal(f.counts.at(-1).writes, 0);
+test(`revoke receipts reject changed actions and replay without writes after the sign-in ends`, async t => {
+  const f = fixture(t);
+  const device = key();
+  const signIn = async () => {
+    const { flow } = await f.start(device);
+    await f.approve(flow);
+    const { credentialId, signInId } = await f.poll(flow);
+    return { subject: 'owner', forgeCredential: credentialId, forgeSignIn: signInId };
+  };
+  const first = await signIn();
+  const credentialId = first.forgeCredential;
+  const checkReceipt = (operationId, action) => {
+    const receipt = [...f.tables.authLinkEvents.values()].find(row => row.operationId === operationId);
+    assert.deepEqual(JSON.parse(receipt.request), {
+      hash: deviceHash(JSON.stringify({ action, credentialId })),
+      result: { ended: action },
+    });
+  };
+  const signout = { credentialId, operationId: randomUUID() };
+  await f.call('original sign-out', credentials.revoke, signout, first);
+  checkReceipt(signout.operationId, 'signout');
+  assert.equal(
+    await f.call('exact sign-out', credentials.revoke, { ...signout, action: 'signout' }, first),
+    null,
+  );
+  assert.equal(f.counts.at(-1).writes, 0);
+  await assert.rejects(
+    f.call('changed sign-out', credentials.revoke, { ...signout, action: 'remove' }, first),
+    code('AUTH_OPERATION_CHANGED'),
+  );
+  assert.equal(f.counts.at(-1).writes, 0);
 
-    const second = await signIn();
-    const remove = { credentialId, operationId: randomUUID(), action: 'remove' };
-    await f.call('original removal', credentials.revoke, remove, second);
-    checkReceipt(remove.operationId, 'remove');
-    const removed = [...f.tables.cliCredentials.values()][0];
-    assert.equal(removed.deviceKey, undefined);
-    assert.equal(await f.call('exact removal', credentials.revoke, remove, second), null);
-    assert.equal(f.counts.at(-1).writes, 0);
-    await assert.rejects(
-      f.call(
-        'changed removal',
-        credentials.revoke,
-        { credentialId, operationId: remove.operationId },
-        second,
-      ),
-      code('AUTH_OPERATION_CHANGED'),
-    );
-    assert.equal(f.counts.at(-1).writes, 0);
-    await assert.rejects(
-      f.call('foreign removal replay', credentials.revoke, remove, 'other'),
-      code('AUTH_REQUIRED'),
-    );
-    assert.equal(f.counts.at(-1).writes, 0);
+  const second = await signIn();
+  const remove = { credentialId, operationId: randomUUID(), action: 'remove' };
+  await f.call('original removal', credentials.revoke, remove, second);
+  checkReceipt(remove.operationId, 'remove');
+  const removed = [...f.tables.cliCredentials.values()][0];
+  assert.equal(removed.deviceKey, undefined);
+  assert.equal(await f.call('exact removal', credentials.revoke, remove, second), null);
+  assert.equal(f.counts.at(-1).writes, 0);
+  await assert.rejects(
+    f.call('changed removal', credentials.revoke, { credentialId, operationId: remove.operationId }, second),
+    code('AUTH_OPERATION_CHANGED'),
+  );
+  assert.equal(f.counts.at(-1).writes, 0);
+  await assert.rejects(
+    f.call('foreign removal replay', credentials.revoke, remove, 'other'),
+    code('AUTH_REQUIRED'),
+  );
+  assert.equal(f.counts.at(-1).writes, 0);
 
-    const fresh = { ...remove, operationId: randomUUID() };
-    assert.equal(await f.call('removed CLI sign-in', credentials.revoke, fresh, second), null);
-    assert.equal(f.counts.at(-1).writes, 0);
-    assert.equal(await f.call('owner removes the already removed device', credentials.revoke, fresh), null);
-    assert.equal(f.counts.at(-1).writes, 1);
+  const fresh = { ...remove, operationId: randomUUID() };
+  assert.equal(await f.call('removed CLI sign-in', credentials.revoke, fresh, second), null);
+  assert.equal(f.counts.at(-1).writes, 0);
+  assert.equal(await f.call('owner removes the already removed device', credentials.revoke, fresh), null);
+  assert.equal(f.counts.at(-1).writes, 1);
 
-    await signIn();
-    await f.call('exact removal after fresh approval', credentials.revoke, remove, second);
-    await f.call('owner retries removal after fresh approval', credentials.revoke, fresh);
-    const current = [...f.tables.cliCredentials.values()][0];
-    assert.equal(current.revoked, false);
-    assert.equal(current.deviceKey, device.key);
-  });
-}
+  await signIn();
+  await f.call('exact removal after fresh approval', credentials.revoke, remove, second);
+  await f.call('owner retries removal after fresh approval', credentials.revoke, fresh);
+  const current = [...f.tables.cliCredentials.values()][0];
+  assert.equal(current.revoked, false);
+  assert.equal(current.deviceKey, device.key);
+});
 
 test('renewal reconciles unknown outcomes, rejects changed proof on replay, and never reactivates a signed-out device', async t => {
   const f = fixture(t),

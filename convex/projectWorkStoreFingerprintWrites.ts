@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { HostedRecordRef } from '../src/hosted-records';
@@ -37,7 +37,7 @@ export async function writeFingerprint(
   value: unknown,
 ) {
   // Read and insert in the same table (fingerprints are `_workStore*` collections: projectWorkDataRecords).
-  const table = await workRecordTable(ctx, partition, collection);
+  const table = splitRecordTable(collection);
   const row = await ctx.db
     .query(table)
     .withIndex('by_generation_and_collection_and_key', q =>

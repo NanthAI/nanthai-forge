@@ -116,8 +116,8 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 
 - Nested Lane copies live under `ROOT.forge-client/lanes/`. Each use refreshes usage/size bookkeeping at `FOLDER.forge-client/cache-use.json`, beside
   the copy. Touch, inventory and eviction share this location; checkout replacement leaves it intact.
-  Earlier `.forge/cache-use.json` records are read as known bookkeeping and preserved beside the
-  copy before replacement. Unknown metadata is preserved and prevents eviction or replacement.
+  A `.forge/cache-use.json` inside a copy is unknown metadata like any other: it is preserved and
+  prevents eviction or replacement. Unknown metadata is preserved and prevents eviction or replacement.
 - At most once an hour, from the CLI start, one local pass removes copies over the age limit and
   then least recently used copies until the directory is under the size cap. It reads no server
   and runs no timer. A pass that runs out of its 15-second budget continues on the next start.

@@ -10,7 +10,7 @@ import { publishRollupBranches, readRollupBranch, readRollupScope } from './proj
 import { rollupChecklist, rollupWorkReader } from './projectPlanRollupFacts';
 import { completionHeldByReopen } from './projectPlanRollupReopen';
 import { writeRollupMove } from './projectPlanRollup';
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { rollupBranch, rollupDecision } from '../src/planning-rollup';
 import { isShelved, type PlanningItem } from '../src/work-planning-types';
 import { catchupRow, catchupWake, type CatchupProgress } from './projectPlanRollupCatchupStore';
@@ -65,7 +65,7 @@ export const page = internalMutation({
     const counts: PlanCounts | null = header ? JSON.parse(header.value) : null;
     if (counts?.scopeThrough !== null || counts.scopeBlocked) return stop('scope-tallies-unavailable');
     const source = await ctx.db
-      .query(await workRecordTable(ctx, partition, 'planningItems'))
+      .query(splitRecordTable('planningItems'))
       .withIndex('by_generation_and_collection_and_key', q =>
         q.eq('generationId', partition).eq('collection', 'planningItems').gt('key', progress.after),
       )

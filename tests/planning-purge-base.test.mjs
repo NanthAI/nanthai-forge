@@ -272,7 +272,7 @@ test('review finding 5: an Item with more comments than one purge removes is ref
   const { s, itemId } = await deletedBase(t);
   const project = s.tables.hostedProjects.get(s.projectId);
   const generation = s.tables.projectWorkGenerations.get(project.work.generationId);
-  // A moved partition keeps its comments in the data table (convex/projectWorkRecordLayout.ts).
+  // Item history lives in the data table (convex/projectWorkRecordTables.ts).
   const table = [
     s.tables.projectWorkDataRecords,
     s.tables.projectPlanningRecords,

@@ -15,7 +15,7 @@ test('dry-run writes nothing; atomic cutover keeps main identity, changes epoch 
   const plan = await f.dryRun();
   assert.deepEqual(f.tables, before);
   assert.equal(plan.at, undefined);
-  assert.equal(plan.minimumCliVersion, '0.3.1');
+  assert.equal(plan.minimumCliVersion, '0.3.2');
   const result = await f.applyCutover();
   assert.equal(result.metric7, 'cache-behind-hosted');
   assert(Number.isFinite(Date.parse(result.at)));
@@ -103,8 +103,8 @@ for (const actor of [null, 'stranger'])
   });
 
 test('version comparison handles numeric components and refuses missing/malformed prereleases', () => {
-  for (const value of ['0.3.1', '0.3.10', '0.10.0', '1.0.0']) requireCutoverVersion(value);
-  for (const value of [undefined, '0.3.0', '0.2.99', '0.3.1-beta', 'bad'])
+  for (const value of ['0.3.2', '0.3.10', '0.10.0', '1.0.0']) requireCutoverVersion(value);
+  for (const value of [undefined, '0.3.1', '0.3.0', '0.2.99', '0.3.2-beta', 'bad'])
     assert.throws(() => requireCutoverVersion(value), code('CLI_UPGRADE_REQUIRED'));
 });
 
@@ -145,14 +145,14 @@ test('old CLI gets one actionable structured error; current/new CLI and native-o
     f.cutoverCall('capabilities', discovery.capabilities, { ...(clientVersion ? { clientVersion } : {}) });
   await discover(); // bound does not imply hosted authority
   await f.applyCutover();
-  for (const version of [undefined, '0.2.9', '0.3.0'])
+  for (const version of [undefined, '0.2.9', '0.3.0', '0.3.1'])
     await assert.rejects(discover(version), e => {
       assert.equal(e.data.code, 'CLI_UPGRADE_REQUIRED');
-      assert.match(e.data.message, /nforge to 0\.3\.1/);
+      assert.match(e.data.message, /nforge to 0\.3\.2/);
       assert.match(e.data.message, /npm install -g/);
       return true;
     });
-  for (const version of ['0.3.1', '0.4.0', '1.0.0'])
+  for (const version of ['0.3.2', '0.4.0', '1.0.0'])
     assert.equal(JSON.parse(await discover(version)).authority.mode, 'server');
   assert.equal(f.tables.projectHostedAcceptances.size, 0);
   await f.applyCutover({ operationId: randomUUID(), mode: 'native-owner', pins: await f.pins() });

@@ -17,10 +17,9 @@ import { randomUUID } from 'node:crypto';
 import { invariant } from './errors.js';
 
 export const cacheUsePath = (copy: string) => join(clientCacheRoot(copy), 'cache-use.json');
-const legacyPath = (copy: string) => join(copy, '.forge', 'cache-use.json');
 type CacheUse = { bytes: number | undefined; used: number };
 
-/** Accept only the record written by earlier clients, never arbitrary metadata or links. */
+/** Accept only the record this client writes, never arbitrary metadata or links. */
 function readUse(path: string): CacheUse | null {
   try {
     const stat = lstatSync(path);
@@ -39,9 +38,7 @@ function readUse(path: string): CacheUse | null {
     return null;
   }
 }
-export function readCacheUse(copy: string, withLegacy = true): CacheUse | null {
-  return readUse(cacheUsePath(copy)) ?? (withLegacy ? readUse(legacyPath(copy)) : null);
-}
+export const readCacheUse = (copy: string): CacheUse | null => readUse(cacheUsePath(copy));
 export function writeCacheUse(copy: string, record: CacheUse, durable = false) {
   const file = cacheUsePath(copy),
     directory = dirname(file);
@@ -62,23 +59,6 @@ export function writeCacheUse(copy: string, record: CacheUse, durable = false) {
   }
   utimesSync(file, record.used / 1000, record.used / 1000);
 }
-/** A marked checkout may retain this exact legacy record until replacement.
- * Persist it beside the copy first; leave the original and all unknown metadata alone. */
-export function preserveLegacyCacheUse(copy: string): boolean {
-  const legacy = readUse(legacyPath(copy));
-  if (!legacy) return false;
-  const current = readUse(cacheUsePath(copy));
-  writeCacheUse(
-    copy,
-    {
-      bytes: current?.bytes ?? legacy.bytes,
-      used: Math.max(current?.used ?? 0, legacy.used),
-    },
-    true,
-  );
-  return true;
-}
-
 /** The source dirty check excludes .forge; GC must also preserve unknown metadata. */
 export function unknownCacheMetadata(copy: string): boolean {
   const directory = join(copy, '.forge');
@@ -87,16 +67,12 @@ export function unknownCacheMetadata(copy: string): boolean {
     if (!stat.isDirectory() || stat.isSymbolicLink()) return true;
     const entries = opendirSync(directory);
     try {
-      // Only two names are known. Stop at the first other entry, so even an
-      // arbitrarily large unknown metadata directory costs at most three reads.
+      // Only one name is known. Stop at the first other entry, so even an
+      // arbitrarily large unknown metadata directory costs at most two reads.
       for (;;) {
         const entry = entries.readSync();
         if (!entry) return false;
-        if (
-          entry.name !== 'hosted-lane.json' &&
-          (entry.name !== 'cache-use.json' || !readUse(legacyPath(copy)))
-        )
-          return true;
+        if (entry.name !== 'hosted-lane.json') return true;
       }
     } finally {
       entries.closeSync();

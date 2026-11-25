@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
 import type { Doc } from './_generated/dataModel';
 import { internalMutation, internalQuery, type QueryCtx } from './server';
@@ -47,7 +47,7 @@ async function readRows(
   const query =
     input.parent === undefined
       ? ctx.db
-          .query(await workRecordTable(ctx, input.generationId, input.collection))
+          .query(splitRecordTable(input.collection))
           .withIndex('by_generation_and_collection_and_position', q =>
             q
               .eq('generationId', input.generationId)
@@ -55,7 +55,7 @@ async function readRows(
               .gte('position', input.offset ?? 0),
           )
       : ctx.db
-          .query(await workRecordTable(ctx, input.generationId, input.collection))
+          .query(splitRecordTable(input.collection))
           .withIndex('by_generation_and_collection_and_parent_and_position', q =>
             q
               .eq('generationId', input.generationId)
@@ -225,7 +225,7 @@ export const step = internalMutation({
               .withIndex('by_partition_and_key_and_position', q => q.eq('partitionId', generation._id))
               .take(100)
           : await ctx.db
-              .query(await workRecordTable(ctx, generation._id, input.cleanup!))
+              .query(splitRecordTable(input.cleanup!))
               .withIndex('by_generation_and_collection_and_position', q =>
                 q.eq('generationId', generation._id).eq('collection', input.cleanup!),
               )

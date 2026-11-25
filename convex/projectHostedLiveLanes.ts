@@ -291,10 +291,6 @@ export const list = query({
                     // Paths this Lane changed and the bytes it ends with: the CLI proves them against main.
                     ...(evidence ? { changes: evidence } : {}),
                     pinned: lane.pinned === true,
-                    // False: the Lane's overlap row predates the activity index; abandon-dormant stamps it.
-                    // Older CLIs stamp a Lane when this is false; every row has its time now. Remove by 2026-12-31 with the
-                    // minimum-CLI bump (Item c0af6cfa F13).
-                    indexed: overlap ? true : null,
                   }
                 : {}),
             }

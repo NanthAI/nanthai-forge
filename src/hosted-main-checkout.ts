@@ -5,7 +5,6 @@ import { readHostedMainMarker, readHostedMainSelection } from './hosted-main-mar
 import { checkoutMissing } from './checkout-missing.js';
 import { reuseMainSource } from './hosted-main-reuse.js';
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
-import { preserveMisplacedReadCaches } from './hosted-legacy-cache.js';
 import { planCheckoutPreservation, preserveCheckoutArtifacts } from './hosted-checkout-preserve.js';
 import { recordMetricCache } from './self-metrics-source-observations.js';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, lstatSync } from 'node:fs';
@@ -85,27 +84,6 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
     'UNSAFE_PATH',
     'Client objects must be real.',
   );
-  const recoveryPath = join(cache, `legacy-cache-recovery-${request.operationId}.json`);
-  const localRecovery = () => (existsSync(recoveryPath) ? { localRecovery: json(recoveryPath) } : {});
-  const preserveCaches = (files: readonly { path: string }[]) => {
-    preserveMisplacedReadCaches(
-      root,
-      files,
-      receipt => {
-        const moved = (existsSync(recoveryPath) ? json(recoveryPath) : []).filter(
-          (item: { preservedAt: string }) => existsSync(item.preservedAt),
-        );
-        if (!moved.some((item: { preservedAt: string }) => item.preservedAt === receipt.preservedAt))
-          moved.push(receipt);
-        else
-          moved[
-            moved.findIndex((item: { preservedAt: string }) => item.preservedAt === receipt.preservedAt)
-          ] = receipt;
-        save(recoveryPath, moved);
-      },
-      existsSync(recoveryPath) ? json(recoveryPath) : [],
-    );
-  };
   const preservationPath = join(cache, `preserve-${request.operationId}.json`);
   const receiptPath = join(cache, `${request.operationId}.json`),
     previous = join(cache, 'previous');
@@ -244,7 +222,6 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
       downloadedObjects: 0,
       downloadedBytes: 0,
       replayed: true,
-      ...localRecovery(),
       ...displaced(),
     };
   // Refresh never uses a full source pack, even for a thousand-file delta.
@@ -352,7 +329,6 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
         );
       }
       if (installed) preserveArtifacts();
-      preserveCaches([...beforeFiles, ...state.files]);
       const index = readCheckoutStatIndex(root);
       const artifacts = cleanHostedCheckout(root, beforeFiles, 'hosted-main.json', Boolean(marker), {
         target: state.files,
@@ -435,7 +411,6 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
     downloadedObjects: objects.downloadedObjects,
     downloadedBytes: objects.downloadedBytes,
     replayed: false,
-    ...localRecovery(),
     ...displaced(),
   };
 }

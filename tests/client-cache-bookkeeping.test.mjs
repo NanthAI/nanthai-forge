@@ -98,12 +98,11 @@ test('named checkout eviction uses the exact marker id after a Lane takes over t
 });
 
 for (const kind of ['valid', 'empty', 'unknown field', 'invalid bytes', 'symlink', 'directory'])
-  test(`legacy bookkeeping ${kind} is preserved without ignoring unknown metadata`, t => {
+  test(`an in-checkout .forge/cache-use.json (${kind}) is unknown metadata: it is neither replaced nor evicted`, t => {
     const directory = fixture(t),
       c = copy(join(directory, 'project'));
     fs.rmSync(cacheUsePath(c.path));
     const path = join(c.path, '.forge/cache-use.json');
-    const valid = ['valid', 'empty'].includes(kind);
     if (kind === 'symlink') fs.symlinkSync(join(directory, 'outside'), path);
     else if (kind === 'directory') fs.mkdirSync(path);
     else
@@ -119,30 +118,23 @@ for (const kind of ['valid', 'empty', 'unknown field', 'invalid bytes', 'symlink
                 : { bytes: -1 },
         ),
       );
-    if (valid) {
-      cleanHostedCheckout(c.path, [], 'hosted-lane.json', true);
-      assert.equal(readCacheUse(c.path).bytes, kind === 'valid' ? 654 : undefined);
-      assert(fs.existsSync(cacheUsePath(c.path)), 'legacy record survives checkout replacement');
-      assert(fs.existsSync(path), 'validation leaves the original alone');
-    } else {
-      assert.throws(
-        () => cleanHostedCheckout(c.path, [], 'hosted-lane.json', true),
-        error => {
-          assert.equal(error.code, 'WORK_CONFLICT');
-          assert.match(error.message, /\.forge\/cache-use.json/);
-          return true;
-        },
-      );
-      assert(fs.lstatSync(path));
-      const result = gcNestedLanes({
-        root: join(directory, 'project'),
-        settings,
-        now: Date.now() + 2 * 3_600_000,
-        isDirty: () => false,
-      });
-      assert.equal(result.kept[0].reason, 'unknown Forge metadata');
-      assert(fs.lstatSync(path));
-    }
+    assert.throws(
+      () => cleanHostedCheckout(c.path, [], 'hosted-lane.json', true),
+      error => {
+        assert.equal(error.code, 'WORK_CONFLICT');
+        assert.match(error.message, /\.forge\/cache-use.json/);
+        return true;
+      },
+    );
+    assert(fs.lstatSync(path));
+    const result = gcNestedLanes({
+      root: join(directory, 'project'),
+      settings,
+      now: Date.now() + 2 * 3_600_000,
+      isDirty: () => false,
+    });
+    assert.equal(result.kept[0].reason, 'unknown Forge metadata');
+    assert(fs.lstatSync(path));
   });
 
 test('unknown Forge metadata is neither replaced nor evicted', t => {

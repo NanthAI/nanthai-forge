@@ -13,7 +13,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 
 /** R2 transfer control: prepare/sign are single transactions; only HEAD needs
- * an action. The legacy action API remains available for old in-flight clients. */
+ * an action. */
 export const prepare = mutation({
   args: backupTransferArgs,
   returns: v.object({ backup: backupItem, target: v.optional(archivePut) }),

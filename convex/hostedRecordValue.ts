@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { hostedText } from '../src/hosted-paths';
@@ -24,7 +24,7 @@ export async function hostedRecordValue(
       for (;;) {
         const last = parts.at(-1)?.position;
         const batch = await ctx.db
-          .query(await workRecordTable(ctx, partition, row.collection))
+          .query(splitRecordTable(row.collection))
           .withIndex('by_generation_and_collection_and_parent_and_position', q => {
             const parent = q
               .eq('generationId', partition)

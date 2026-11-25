@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import {
-  layoutRecordTable,
+  isHistoryCollection,
+  splitRecordTable,
   workRecordLookup,
-  workRecordTable,
   workRecordTables,
 } from './projectWorkRecordTables';
-import { isDataRouted, partitionLayout } from './projectWorkRecordLayout';
 import { projectPurgeWriter } from './projectFinishReadWriter';
 import { stream } from 'convex-helpers/server/stream';
 import schema from './schema';
@@ -103,7 +102,7 @@ export const snapshotEntries = internalQuery({
     // A source-return page is a set of keyed entries, not an ordering contract. Drain physical
     // tables in sequence and fill the same RPC page: no empty boundary RPC or merge lookahead reads.
     const selection = input.cursor
-      ? (JSON.parse(input.cursor) as { table: number; cursor: string | null; layout?: string })
+      ? (JSON.parse(input.cursor) as { table: number; cursor: string | null })
       : { table: 0, cursor: input.cursor };
     const page: { page: Doc<(typeof workRecordTables)[number]>[]; isDone: boolean; continueCursor: string } =
       {
@@ -112,15 +111,6 @@ export const snapshotEntries = internalQuery({
         continueCursor: '',
       };
     let bytes = 0;
-    // A partition moving its history tables holds two copies of those rows: return the one it reads.
-    const layout = await partitionLayout(ctx, recordPartition(generation));
-    // A continuation spans pages, so a layout change between them could return a row twice.
-    invariant(
-      selection.layout === undefined || selection.layout === layout,
-      'WORK_STALE',
-      'Work history storage moved while this return was paging. Start the return again.',
-    );
-    selection.layout = layout;
     while (
       selection.table < workRecordTables.length &&
       page.page.length < bounds.numItems &&
@@ -137,10 +127,12 @@ export const snapshotEntries = internalQuery({
           numItems: bounds.numItems - page.page.length,
           maximumBytesRead: bounds.maximumBytesRead - bytes,
         });
-      const table = workRecordTables[selection.table]!;
+      // Item history belongs in the data table only; a stray copy in another table is never returned.
       page.page.push(
         ...part.page.filter(
-          row => !isDataRouted(row.collection) || layoutRecordTable(layout, row.collection) === table,
+          row =>
+            !isHistoryCollection(row.collection) ||
+            workRecordTables[selection.table] === 'projectWorkDataRecords',
         ),
       );
       bytes += part.page.reduce((n, row) => n + getDocumentSize(row), 0);
@@ -497,7 +489,7 @@ export const retirePayload = internalMutation({
     const header = await record(ctx, input.generationId, input.collection, input.key);
     if (header && JSON.parse(header.value).payloadKey === input.payloadKey) return null;
     const rows = await ctx.db
-      .query(await workRecordTable(ctx, input.generationId, `${input.collection}:payload`))
+      .query(splitRecordTable(`${input.collection}:payload`))
       .withIndex('by_generation_and_collection_and_parent_and_position', q =>
         q
           .eq('generationId', input.generationId)
@@ -529,7 +521,7 @@ export const payload = internalQuery({
       generation = await selectedGeneration(ctx, project);
     invariant(generation?._id === input.generationId, 'WORK_STALE', 'Hosted source or Work changed.');
     const page = await ctx.db
-      .query(await workRecordTable(ctx, recordPartition(generation), `${input.collection}:payload`))
+      .query(splitRecordTable(`${input.collection}:payload`))
       .withIndex('by_generation_and_collection_and_parent_and_position', q =>
         q
           .eq('generationId', recordPartition(generation))

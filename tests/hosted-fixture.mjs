@@ -2,10 +2,9 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { equalConvexValue } from './convex-value-equality.mjs';
 import {
+  fixtureInsertTable,
   fixtureWorkRecordTable,
   assertWorkRecordDomain,
-  fixtureMovedCollection,
-  fixtureMovedPartition,
 } from './work-record-domain-fixture.mjs';
 const checkLogModules = Object.fromEntries(
   await Promise.all(
@@ -331,13 +330,8 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
         }),
       },
       insert: async (table, row) => {
-        // As the work writer: Item history and Work events of a moved partition go to the data table.
-        if (
-          ['projectWorkRecords', 'projectPlanningRecords'].includes(table) &&
-          fixtureMovedCollection(row.collection) &&
-          fixtureMovedPartition(tables, row.generationId)
-        )
-          table = 'projectWorkDataRecords';
+        // As the work writer: Item history and Work events go to the data table.
+        table = fixtureInsertTable(table, row.collection);
         assertWorkRecordDomain(table, row, legacyWorkRecords);
         const id = `row-${count++}`;
         tables[table].set(
@@ -723,10 +717,7 @@ export function workRecordRows(tables) {
 /** Logical fixture seeds use the current physical domains independently of the server writer.
  * Migration fixtures seed legacy physical rows directly. */
 export function setWorkRecord(tables, id, row) {
-  const target =
-    fixtureMovedCollection(row.collection) && fixtureMovedPartition(tables, row.generationId)
-      ? 'projectWorkDataRecords'
-      : fixtureWorkRecordTable(row.collection ?? '');
+  const target = fixtureWorkRecordTable(row.collection ?? '');
   tables[target] ??= new Map();
   tables[target].set(id, row);
 }

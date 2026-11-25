@@ -14,7 +14,7 @@ import { getDocumentSize } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import type { Contribution, LatestAction } from '../src/person-days';
 import { PERSON_LATEST } from '../src/person-days';
 import { isAgentSlug } from '../src/agent-slug';
@@ -129,14 +129,14 @@ async function statusBefore(
   const generationId = command.operationId ? await partition() : null;
   if (!generationId) return { status: null, bytes: 0 };
   const own = await ctx.db
-    .query(await workRecordTable(ctx, generationId, 'planningVersions'))
+    .query(splitRecordTable('planningVersions'))
     .withIndex('by_generation_and_collection_and_key', q =>
       q.eq('generationId', generationId).eq('collection', 'planningVersions').eq('key', command.operationId!),
     )
     .unique();
   if (!own || own.parent !== command.itemId) return { status: null, bytes: size(own) };
   const before = await ctx.db
-    .query(await workRecordTable(ctx, generationId, 'planningVersions'))
+    .query(splitRecordTable('planningVersions'))
     .withIndex('by_generation_and_collection_and_parent_and_position', q =>
       q
         .eq('generationId', generationId)

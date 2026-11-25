@@ -279,30 +279,29 @@ test('chunked acceptance payloads retain parity and reject corrupt chunks', () =
   assert.match(ownerDerivedRows(f.cursor, derived).reason, /^payload-invalid:/);
 });
 
-test('legacy View rows from an older CLI or cache are dropped, never stored or refused (Item c0af6cfa F1)', () => {
+test('View rows other than acceptances are refused: no older-CLI shape is accepted (Item c0af6cfa F13)', () => {
   const f = fixture();
   assert.deepEqual(
     [...new Set(f.derived.views[0][2].map(r => r.collection))],
     ['viewAcceptances'],
     'the CLI sends only acceptance rows',
   );
-  const legacy = ['viewDetails', 'viewFiles', 'laneViews', 'viewDetails:payload'].map(
-    (collection, position) => ({
+  for (const [position, collection] of [
+    'viewDetails',
+    'viewFiles',
+    'laneViews',
+    'viewDetails:payload',
+  ].entries()) {
+    const derived = structuredClone(f.derived);
+    derived.views[0][2].push({
       collection,
       key: `legacy-${position}`,
       parent: 'unchecked',
       position,
       value: '{}',
-    }),
-  );
-  f.derived.views[0][2].push(...legacy);
-  const rows = ownerDerivedRows(f.cursor, f.derived).rows;
-  assert.ok(rows);
-  assert.deepEqual(
-    rows.filter(r => /^(viewDetails|viewFiles|laneViews)/.test(r.collection)),
-    [],
-  );
-  assert.equal(rows.filter(r => r.collection === 'viewAcceptances').length, 1);
+    });
+    assert.equal(ownerDerivedRows(f.cursor, derived).reason, 'view-collection-invalid');
+  }
 });
 
 test('exact owner totals include deletion and a mode-only file without extra lines', async () => {

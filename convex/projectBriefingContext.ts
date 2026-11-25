@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { hostedBriefDecisions } from './projectHostedDecisionsStore';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { planningBriefIntent } from '../src/work-planning-lifecycle';
@@ -32,12 +32,12 @@ export async function hostedBriefRecords(
     const rows =
       parent === undefined
         ? ctx.db
-            .query(await workRecordTable(ctx, partition, collection))
+            .query(splitRecordTable(collection))
             .withIndex('by_generation_and_collection_and_position', q =>
               q.eq('generationId', partition).eq('collection', collection),
             )
         : ctx.db
-            .query(await workRecordTable(ctx, partition, collection))
+            .query(splitRecordTable(collection))
             .withIndex('by_generation_and_collection_and_parent_and_position', q =>
               q.eq('generationId', partition).eq('collection', collection).eq('parent', parent),
             );
@@ -53,7 +53,7 @@ export async function hostedBriefRecords(
     const header = JSON.parse(row.value);
     if (!header.payloadKey) return header as T;
     const parts = await ctx.db
-      .query(await workRecordTable(ctx, partition, `${collection}:payload`))
+      .query(splitRecordTable(`${collection}:payload`))
       .withIndex('by_generation_and_collection_and_parent_and_position', q =>
         q
           .eq('generationId', partition)

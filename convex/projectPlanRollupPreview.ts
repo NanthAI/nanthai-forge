@@ -3,7 +3,7 @@
 import { v } from 'convex/values';
 import { internalQuery } from './server';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
-import { workRecordLookup, workRecordTable } from './projectWorkRecordTables';
+import { workRecordLookup, splitRecordTable } from './projectWorkRecordTables';
 import { planCounter, type PlanCounts } from './projectPlanCountsStore';
 import { readRollupBranch } from './projectPlanRollupStore';
 import { completionHeldByReopen } from './projectPlanRollupReopen';
@@ -107,7 +107,7 @@ export const page = internalQuery({
     const source = leaf
       ? { page: [leaf], isDone: true }
       : await ctx.db
-          .query(await workRecordTable(ctx, partition, 'planningItems'))
+          .query(splitRecordTable('planningItems'))
           .withIndex('by_generation_and_collection_and_key', q =>
             q.eq('generationId', partition).eq('collection', 'planningItems').gt('key', args.after),
           )

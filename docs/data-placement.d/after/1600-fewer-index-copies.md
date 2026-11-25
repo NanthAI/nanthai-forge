@@ -7,23 +7,14 @@ custom index and two built-in entries.
 
 - **Row 3, Item history and Work events.** `planningItems`, `planningVersions`,
   `planningComments` and Work `events` need only the generic key, position, parent and
-  actor indexes. In a moved partition they live in `projectWorkDataRecords` (8 copies)
+  actor indexes. Every partition keeps them in `projectWorkDataRecords` (8 copies)
   instead of `projectPlanningRecords` (16) or `projectWorkRecords` (now 10, since the
   finished split migration's `by_generation` index is gone).
-  - Each partition has one `_workStoreLayout` marker row, about 200 bytes
-    (`convex/projectWorkRecordLayout.ts`).
-  - A partition born after this change starts `moved`.
-  - Older partitions move through `projectWorkRecordMigration` in three steps:
-    - `copying`: reads stay on the legacy tables, and the work writer mirrors every insert,
-      patch, replace and delete.
-    - `cleaning`: reads move to the data table, and a fresh public generation makes open
-      cursors fail WORK_STALE once.
-    - `moved`: done.
-  - While a partition moves, purges refuse with a retry message, because they bypass the
-    mirroring writer.
-  - Source return reads only the copy its layout names.
-  - Routing a moved collection costs one marker read per transaction and partition. Other
-    collections still route with no I/O.
+  - The table follows the collection alone (`splitRecordTable` in
+    `convex/projectWorkRecordTables.ts`): no marker row, no layout read and no mirroring
+    writer. Dev finished the move (every partition `moved`); the `legacy`, `copying` and
+    `cleaning` layouts, the marker and `projectWorkRecordMigration` are deleted (Item c0af6cfa F5).
+    Prod converts in the P8 release first: [runbook](../../operations/legacy-work-layout.md).
 - **Row 5, capsule pins.** A capsule pointer's terminal `attempt` and acceptance `plan` are
   read only on replay. They move from the 11-copy `projectFinishReadRows` pointer to one
   unindexed `projectHostedLandingBodies` row (3 copies), owned by the pointer

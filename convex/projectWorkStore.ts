@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { readyJournalRecord } from './projectJournalWake';
 import { JournalNeeded, journalReadReply } from './projectJournalStore';
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import {
   eventDocument,
   findWorkEvent,
@@ -97,7 +97,7 @@ async function indexPage(
   newest?: number,
 ) {
   const page = await ctx.db
-    .query(await workRecordTable(ctx, partition, collection))
+    .query(splitRecordTable(collection))
     .withIndex('by_generation_and_collection_and_position', q =>
       q.eq('generationId', partition).eq('collection', collection),
     )
@@ -118,7 +118,7 @@ async function indexPage(
     for (;;) {
       const last = parts.at(-1)?.position;
       const batch = await ctx.db
-        .query(await workRecordTable(ctx, partition, `${collection}:payload`))
+        .query(splitRecordTable(`${collection}:payload`))
         .withIndex('by_generation_and_collection_and_parent_and_position', q => {
           const parent = q
             .eq('generationId', partition)
@@ -439,7 +439,7 @@ export const setMode = mutation({
         // No per-write invalidation: crossing the migration boundary invalidates its disposable
         // baseline once. Rollback cannot trust fingerprints skipped while writers were primary.
         const coverage = await ctx.db
-          .query(await workRecordTable(ctx, partition, '_workStoreDigestCoverage'))
+          .query(splitRecordTable('_workStoreDigestCoverage'))
           .withIndex('by_generation_and_collection_and_key', q =>
             q.eq('generationId', partition).eq('collection', '_workStoreDigestCoverage'),
           )

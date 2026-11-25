@@ -54,7 +54,7 @@ The index reader map (repository-relative paths):
 | `by_generation_and_collection_and_parent_and_position` | Payload chunks, `viewAcceptances`, `runs`, `notes`, planning history and other parent-selected collections; `convex/hostedRecordValue.ts:27`, `convex/projectWorkIndex.ts:175` |
 | `by_generation_and_collection_and_status_and_position` | `intents`, `landingEntries`, `landingBatches`; `convex/projectWork.ts:395`, `convex/projectWorkIndexBuildStore.ts:202`, `convex/projectSourceAuthorityDrain.ts:24` |
 | `by_project` | Every collection; dynamic permanent purge, `convex/projectPurgeRows.ts:26` and `convex/projectPurgeInventory.ts` |
-| `by_generation` | Every collection; generation retirement in `convex/projectWorkIndexStore.ts:344` and explicit `convex/projectWorkRecordMigration.ts:103` |
+| `by_generation` | Every collection; generation retirement in `convex/projectWorkIndexStore.ts:344` |
 | Seven `by_planning_*` indexes | `planningSearch` roots only; all filter combinations in `convex/projectPlanningList.ts:31`–75 |
 | `search_planning` | `planningSearch` roots/fragments only; `convex/projectHostedPlanningSearch.ts:90` |
 
@@ -84,12 +84,10 @@ storage model; the dashboard figure measures provider storage. A further split o
 core activity/status groups saves at most about 0.08 GB; isolating planning history from its
 search roots saves about 0.11 GB. Neither warrants another live rewrite in this bounded slice.
 
-`projectWorkRecordMigration:run` explicitly drives at most 100 transactional pages per call;
-resume its phase/cursor and original operation id. Each copy page reads at most 100 rows with
-a 512 KB target (plus the provider's final-row overshoot) and upserts exact derived bytes.
-The temporary dual-read/write rollout path is removed once every retained dev partition
-selects the split tables. Ordinary inserts
-route to one table, and reads use that domain with no layout lookup or extra RPC.
+The temporary dual-read/write rollout path is gone: every retained partition selects the split
+tables, ordinary inserts route to one table, and reads use that domain with no layout lookup or
+extra RPC. The operator move that filled the data table (`projectWorkRecordMigration`) is deleted;
+prod uses the pinned release in [the layout runbook](../../operations/legacy-work-layout.md).
 At the one-time cutover, a fresh public generation preserves the record partition and Work
 revision. Outstanding list/search cursors receive `WORK_STALE` instructing callers to restart
 the list/search; fresh cursors retain their existing shape and pagination behaviour.

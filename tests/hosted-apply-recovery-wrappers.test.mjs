@@ -70,46 +70,6 @@ async function finish(s, f, invoke, retained, command) {
 }
 
 for (const wrapper of ['cli', 'mcp'])
-  test(`B2 permissions (${wrapper}): a candidate made mode 000 after its pending receipt keeps typed recovery that runs to completion`, async t => {
-    const { s, f, root, invoke } = await opened(t, wrapper);
-    f.moveMain({ overlap: false });
-    const candidate = join(root, '..forge-client'),
-      bytes = Buffer.from('verified cached bytes');
-    fs.mkdirSync(join(candidate, 'objects'), { recursive: true });
-    fs.writeFileSync(join(candidate, 'objects', digest(bytes)), bytes);
-    const rename = fs.renameSync;
-    let quarantined;
-    t.mock.method(fs, 'renameSync', (from, to) => {
-      const result = rename(from, to);
-      if (from === candidate && !quarantined) {
-        quarantined = String(to);
-        fs.chmodSync(quarantined, 0); // After the pending receipt and the move, before re-verification.
-      }
-      return result;
-    });
-    syncBuiltinESMExports();
-    t.after(() => {
-      if (quarantined && fs.existsSync(quarantined)) fs.chmodSync(quarantined, 0o700);
-    });
-    const command = { laneId: f.lane.laneId, operationId: randomUUID(), apply: true };
-    let first;
-    try {
-      first = await invoke('sync', command);
-    } finally {
-      fs.renameSync.mock.restore();
-      syncBuiltinESMExports();
-    }
-    assert(first.error, 'the apply stops');
-    assert.notEqual(first.error.code, 'HOSTED_ACTION_FAILED');
-    assertAgentResponseShape(first, s.root, { sourceCompleted: true });
-    assert(quarantined, 'the candidate was quarantined');
-    assert(!fs.existsSync(candidate), 'an unreadable candidate is never put back into the checkout');
-    await finish(s, f, invoke, first.error.recovery, command);
-    fs.chmodSync(quarantined, 0o700);
-    assert.deepEqual(fs.readFileSync(join(quarantined, 'objects', digest(bytes))), bytes, 'bytes retained');
-  });
-
-for (const wrapper of ['cli', 'mcp'])
   test(`B2 missing marker (${wrapper}): a marker removed between source submission and the first local apply keeps its baseline, and the advertised action progresses`, async t => {
     const { s, f, root, invoke } = await opened(t, wrapper);
     f.moveMain({ overlap: false });

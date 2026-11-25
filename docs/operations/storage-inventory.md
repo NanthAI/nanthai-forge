@@ -194,20 +194,9 @@ reported only read document bytes (20.5 MB) and billed 72.8 MB total (3.55×).
      `npx convex run projectLandingCapsulePinsMove:run '{"cursor":null,"pages":1,"budgetBytes":1000000}'`.
    - Resume with the returned `nextCursor` until `isDone` is true. A pointer that has
      already moved is skipped. Size later batches by `pages` and `budgetBytes`.
-2. **Item history and Work events (row 3).**
-   - Stop at **0.6 GB billed** ($0.12), including discovery and every partition.
-   - List the partitions with `projectWorkRecordMigration:pending '{"cursor":null}'`, then
-     follow `nextCursor` while the budget permits.
-   - Start each partition with `npx convex run projectWorkRecordMigration:run '{"generationId":"…","operationId":"<fresh uuid>","cursor":null,"budgetBytes":1}'`.
-     The positive one-byte threshold allows a nonempty page to finish but does not
-     cap its I/O. The driver runs copy, then cutover, then cleanup, at most 100 pages per call.
-   - To resume, pass the returned `cursor` and `cleanup` with the same `operationId`. A
-     page whose reply was lost replays its stored receipt.
-   - When the selected partition is cut over, its open list and search cursors fail
-     WORK_STALE once.
-   - Purges of a partition refuse with a retry message until its cleanup finishes.
-   - Size later batches with `budgetBytes` from measured billed I/O. The reply's
-     `deletedBytes` describes documents, not a separate charge to add to provider writes.
+2. **Item history and Work events (row 3).** Dev is converted, and the converter is deleted from
+   main. Prod runs it from the pinned release in
+   [the Work layout runbook](legacy-work-layout.md).
 
 Before each run and a day after it, record:
 

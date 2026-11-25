@@ -3,7 +3,7 @@
 import type { Doc } from './_generated/dataModel';
 import type { MutationCtx } from './server';
 import { record, recordPartition } from './projectWorkIndexStore';
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { commandPayloadRows, commandValues } from './projectWorkCommandRows';
 import { decodePlanPage, PLAN_PAGE_SIZE, PLAN_ROWS, planParent, planViewRow } from './projectPlanRows';
 import { isLive, type PlanRow } from '../src/planning-model';
@@ -19,7 +19,7 @@ async function legacyChildren(
   let after = -1;
   while (true) {
     const page = await ctx.db
-      .query(await workRecordTable(ctx, generationId, 'planningItems'))
+      .query(splitRecordTable('planningItems'))
       .withIndex('by_generation_and_collection_and_position', q =>
         q.eq('generationId', generationId).eq('collection', 'planningItems').gt('position', after),
       )

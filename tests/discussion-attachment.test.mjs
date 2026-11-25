@@ -63,7 +63,7 @@ async function fixture(t, { bytes = Buffer.from('<script>window.active = true</s
     status: item.status,
     value: root.value,
   };
-  s.tables.projectPlanningRecords.set(itemRecord._id, itemRecord);
+  s.tables.projectWorkDataRecords.set(itemRecord._id, itemRecord);
   s.tables.projectHostedRecordHeads.set(itemHead._id, itemHead);
   const addComment = (id, projectId = project._id) =>
     s.tables.projectHostedRecordHeads.set(`head-${projectId}-${id}`, {
@@ -75,7 +75,7 @@ async function fixture(t, { bytes = Buffer.from('<script>window.active = true</s
       status: 'comment',
     });
   addComment(commentId);
-  s.tables.projectPlanningRecords.set('legacy-comment', {
+  s.tables.projectWorkDataRecords.set('legacy-comment', {
     _id: 'legacy-comment',
     generationId: 'current',
     collection: 'planningComments',
@@ -374,7 +374,7 @@ test('the journal-backed discussion resolves the same exact comment and fails if
   const f = await fixture(t);
   delete f.project.workStore;
   assert.equal((await f.download({ viewer: 'visitor' })).status, 200);
-  f.s.tables.projectPlanningRecords.delete('legacy-comment');
+  f.s.tables.projectWorkDataRecords.delete('legacy-comment');
   await expectError(await f.download({ viewer: 'visitor' }), 404, 'NOT_FOUND');
   assert.equal(f.fake.requests.length, 1);
 });

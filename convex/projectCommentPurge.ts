@@ -41,7 +41,6 @@ import {
 import { executeCommand } from './projectWorkCommand';
 import { clearAuditVersions } from './projectPlanningAuditWindow';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
-import { settledLayout } from './projectWorkRecordLayout';
 import { hostedRecordBody, recordHead } from './projectHostedRecords';
 import { journalRow as storedRow } from '../src/work-store-records';
 import { removeArtifact } from './artifactStorage';
@@ -309,10 +308,8 @@ export async function purgeComment(ctx: MutationCtx, input: Input): Promise<0 | 
   // A detail migration writing a new base copies the comment whole (convex/projectWorkDetailMigration.ts).
   await noStagedMigration(ctx, input.projectId);
   const partitions = await partitionsOf(ctx, input.projectId);
-  // A partition whose history is moving tables still keeps a second copy of the words (marker read
-  // only), and the earlier planning split may have left one in the core table.
+  // The earlier planning split may have left a copy of the comment in the core table.
   for (const partition of partitions) {
-    await settledLayout(ctx, partition);
     invariant(
       !(
         await ctx.db
@@ -323,7 +320,7 @@ export async function purgeComment(ctx: MutationCtx, input: Input): Promise<0 | 
           .take(1)
       ).length,
       'WORK_STALE',
-      'A Work record-table migration still keeps an old copy of this comment. Retry the purge after its cleanup finishes. Nothing was purged.',
+      'An old copy of this comment is still in the core Work table. Retire it, then retry the purge. Nothing was purged.',
     );
   }
   invariant(

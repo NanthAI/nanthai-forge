@@ -649,7 +649,10 @@ test('with the store reader on, planning lists, versions, comments and detail re
   const itemHeads = [...s.tables.projectHostedRecordHeads.values()].filter(head => head.kind === 'issue');
   for (const name of ['list', 'comments', 'notes', 'detail']) {
     // At most three ISO dates and the version plus object keys, once per Item already read.
-    const pinAllowance = 176 * (name === 'list' ? itemHeads.length : name === 'detail' ? 1 : 0);
+    // Plus the fixture's row ids: they grow from `row-99` to `row-100` and so on as the shared counter
+    // advances, and store copies are written after the journal rows (up to 4 more bytes a document).
+    const pinAllowance =
+      176 * (name === 'list' ? itemHeads.length : name === 'detail' ? 1 : 0) + 4 * storeCost[name].documents;
     assert.ok(
       storeCost[name].documents <= journalCost[name].documents &&
         storeCost[name].bytes <= journalCost[name].bytes + pinAllowance,

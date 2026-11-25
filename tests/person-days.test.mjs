@@ -731,7 +731,7 @@ test('LATER-2: on a project whose planning is only in the journal index, the ver
     ],
     projectCoordinationEvents: day.rows,
     projectWorkEvents: day.events,
-    projectPlanningRecords: [
+    projectWorkDataRecords: [
       journal('x-v3', 'item-x', 5, { version: 3, status: 'closed' }),
       journal('y-v1', 'item-y', 6, { version: 1, status: 'open' }),
       // Another Item's version in between, and each put's own new version.

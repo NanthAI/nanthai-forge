@@ -317,114 +317,21 @@ test('source snapshot transport preserves indexed search fields and skips compar
   assert.deepEqual(after, before, 'compare metadata adds no source snapshot documents, bytes or pages');
   assert.deepEqual(await store.snapshotEntries._handler(s.ctx, args), snapshot);
   meter.restore();
-  // A continuation is bound to the history layout it started on (Item 411727ba row 3): a move's
-  // cutover between pages would otherwise return a row from both copies.
-  await assert.rejects(
-    store.snapshotEntries._handler(s.ctx, {
-      ...args,
-      cursor: JSON.stringify({ table: 0, cursor: null, layout: 'legacy' }),
-    }),
-    error => (error.data?.code ?? error.code) === 'WORK_STALE',
-  );
-});
-
-test('table cutover rejects outstanding cursors with WORK_STALE and retains equal-score planning order and items', async t => {
-  const s = await setup(t);
-  installPlanningSearch(s);
-  // Opposite UUID order makes creation-time search ties differ from key-order copies.
-  await add(s, {
-    itemId: 'f0000000-0000-4000-8000-000000000001',
-    title: 'cutover first',
-    body: 'unchanged first body',
-  });
-  await add(s, {
-    itemId: '00000000-0000-4000-8000-000000000002',
-    title: 'cutover second',
-    body: 'unchanged second body',
-  });
-  const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
-  const migration = await import(moduleUrl('../convex/projectWorkRecordMigration.ts'));
-  const project = s.tables.hostedProjects.get(s.projectId);
-  const generation = s.tables.projectWorkGenerations.get(project.work.generationId);
-  const before = await run(s, 'cutover');
-  const first = await run(s, 'cutover', { limit: 1 });
-  assert(first.nextCursor);
-  const listInput = {
+  // Item 411727ba row 3 left no stray copies on dev, but a source return never returns one twice.
+  s.tables.projectPlanningRecords.set('stray-comment', {
+    _id: 'stray-comment',
+    _creationTime: 1,
     projectId: s.projectId,
-    generationId: generation._id,
-    collection: 'planningItems',
-    planningFilter: { kind: 'issue' },
-    paginationOpts: { cursor: null, numItems: 1 },
-  };
-  const listFirst = await index.records._handler(s.ctx, listInput);
-  assert(!listFirst.isDone);
-  // Recreate the pre-move physical layout (Item 411727ba row 3), with exactly the same logical
-  // records: Item history in the planning table, Work events in the core table, no layout marker.
-  const legacyTable = { events: 'projectWorkRecords' };
-  for (const [id, row] of s.tables.projectWorkDataRecords) {
-    if (row.collection === '_workStoreLayout') s.tables.projectWorkDataRecords.delete(id);
-    if (!['planningItems', 'planningVersions', 'planningComments', 'events'].includes(row.collection))
-      continue;
-    s.tables[legacyTable[row.collection] ?? 'projectPlanningRecords'].set(id, row);
-    s.tables.projectWorkDataRecords.delete(id);
-  }
-  const moving = () =>
-    [...s.tables.projectPlanningRecords.values(), ...s.tables.projectWorkRecords.values()].filter(row =>
-      ['planningItems', 'planningVersions', 'planningComments', 'events'].includes(row.collection),
-    ).length;
-  assert(moving() > 0, 'the fixture seeds Item history and Work events');
-  const drive = async cleanup => {
-    let cursor = null;
-    do {
-      const result = JSON.parse(
-        await migration.page._handler(s.ctx, {
-          generationId: generation._id,
-          operationId: randomUUID(),
-          cursor,
-          ...(cleanup ? { cleanup: true } : {}),
-        }),
-      );
-      cursor = result.nextCursor;
-    } while (cursor);
-  };
-  await drive(false);
-  assert.notEqual(project.work.generationId, generation._id);
-  const published = s.tables.projectWorkGenerations.get(project.work.generationId);
-  assert.equal(published.recordsGenerationId, generation._id);
-  assert.equal(published.revision, generation.revision);
-  assert.equal(published.backupId, generation.backupId);
-  await assert.rejects(
-    run(s, 'cutover', { limit: 1, cursor: first.nextCursor }),
-    error => code('WORK_STALE')(error) && /Restart this search/.test(error.message),
-  );
-  await assert.rejects(
-    index.records._handler(s.ctx, {
-      ...listInput,
-      paginationOpts: { cursor: listFirst.continueCursor, numItems: 1 },
-    }),
-    error => code('WORK_STALE')(error) && /Restart this list/.test(error.message),
-  );
-  assert.deepEqual((await run(s, 'cutover')).items, before.items);
-  const fresh = await run(s, 'cutover', { limit: 1 });
-  assert.deepEqual(Object.keys(JSON.parse(fresh.nextCursor)), Object.keys(JSON.parse(first.nextCursor)));
-  const second = await run(s, 'cutover', { limit: 1, cursor: fresh.nextCursor });
-  assert.deepEqual([...fresh.items, ...second.items], before.items);
-  assert.equal(second.nextCursor, null);
-  const listFresh = await index.records._handler(s.ctx, {
-    ...listInput,
-    generationId: published._id,
+    generationId: ws.generationId,
+    collection: 'planningComments',
+    key: 'stray',
+    parent: '',
+    position: 0,
+    value: '{}',
   });
-  const listSecond = await index.records._handler(s.ctx, {
-    ...listInput,
-    generationId: published._id,
-    paginationOpts: { cursor: listFresh.continueCursor, numItems: 1 },
-  });
-  assert.equal(listSecond.isDone, true);
   assert.deepEqual(
-    [...listFresh.page, ...listSecond.page].map(row => row.id).sort(),
-    before.items.map(row => row.id).sort(),
+    await store.snapshotEntries._handler(s.ctx, args),
+    snapshot,
+    'a stray history copy is not returned',
   );
-  await drive(true);
-  assert.equal(moving(), 0, 'cleanup leaves no legacy copy');
-  assert.deepEqual((await run(s, 'cutover')).items, before.items);
 });

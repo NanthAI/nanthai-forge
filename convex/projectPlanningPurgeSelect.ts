@@ -14,7 +14,7 @@ import { verifiedItemMembership } from './projectItemMembershipVersion';
 import { decisionOperationId } from '../src/work-planning-put';
 import { purgedDecisionRequest } from '../src/work-planning-state';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
-import { settledRecordTable, splitRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { metadataRequest } from '../src/work-metadata';
 import { pendingIntentArchives } from './projectJournalArchivePlan';
 import { indexValue } from './projectPlanningPurgeRedact';
@@ -210,7 +210,7 @@ export const basePage = internalQuery({
       const parent = which === 'history' ? input.historyId : input.intentId;
       const page = parent
         ? await ctx.db
-            .query(await settledRecordTable(ctx, partition, collection))
+            .query(splitRecordTable(collection))
             .withIndex('by_generation_and_collection_and_parent_and_position', q => {
               const scoped = q
                 .eq('generationId', partition)

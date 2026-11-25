@@ -50,13 +50,7 @@ for (const collection of ['planningSearch:payload', 'planningItems'])
         await finishWorkRecordWrites(writer);
       });
       t.diagnostic(JSON.stringify({ collection, read, cost }));
-      // A write to Item history also reads its partition's ~200-byte layout marker once per
-      // transaction (Item 411727ba row 3) until the layout gate is deleted.
-      assert.equal(
-        cost.readDocuments,
-        collection === 'planningItems' ? 2 : 1,
-        'an already observed non-root costs exactly one document read',
-      );
+      assert.equal(cost.readDocuments, 1, 'an already observed non-root costs exactly one document read');
       assert.equal(cost.writeDocuments, 1);
       if (collection.endsWith(':payload')) assert(cost.readBytes <= 17000, JSON.stringify(cost));
     });

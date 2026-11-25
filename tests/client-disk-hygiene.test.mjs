@@ -25,7 +25,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { checkoutHostedLane } from '../dist/hosted-lane-checkout.js';
 import { gcNestedLanes, gcNestedLanesHourly, touchNestedLane } from '../dist/client-cache-gc.js';
-import { writeCacheUse } from '../dist/client-cache-use.js';
+import { cacheUsePath, writeCacheUse } from '../dist/client-cache-use.js';
 import { pruneDependencyCache, touchDependencyEntry } from '../dist/dependency-cache.js';
 import { hostedLaneDirty } from '../dist/hosted-lane-dirty.js';
 import { laneHousekeeping, pruneCli } from '../dist/lane-prune.js';
@@ -116,8 +116,8 @@ function copy(root, bytes, hours) {
   const laneId = randomUUID(),
     path = join(`${root}.forge-client`, 'lanes', laneId);
   mkdirSync(join(path, '.forge'), { recursive: true });
-  writeFileSync(join(path, '.forge', 'cache-use.json'), JSON.stringify({ bytes }));
-  age(join(path, '.forge', 'cache-use.json'), hours);
+  writeCacheUse(path, { bytes, used: 0 });
+  age(cacheUsePath(path), hours);
   age(path, hours);
   return { laneId, path };
 }
@@ -329,7 +329,6 @@ test('unsaved-edit check is read-only and sees edits, additions, deletions and m
   await realCheckout(root);
   assert.equal(hostedLaneDirty(root), false);
   touchNestedLane(root);
-  writeFileSync(join(root, '.forge', 'cache-use.json'), '{}');
   assert.equal(hostedLaneDirty(root), false, 'Forge metadata is not source');
   writeFileSync(join(root, 'src', 'a.txt'), 'edited\n');
   assert.equal(hostedLaneDirty(root), true);
@@ -387,11 +386,8 @@ test('cache GC never evicts the caller’s Lane, a locked or just-used copy, a l
     linked = copy(root, 1e9, 43),
     edited = copy(root, 1e9, 44),
     free = copy(root, 1e9, 45);
-  writeFileSync(`${locked.path}.forge-client`, 'x');
-  rmSync(`${locked.path}.forge-client`);
-  mkdirSync(`${locked.path}.forge-client`);
   writeFileSync(join(`${locked.path}.forge-client`, 'lock'), '{}');
-  utimesSync(join(justUsed.path, '.forge', 'cache-use.json'), new Date(), new Date());
+  utimesSync(cacheUsePath(justUsed.path), new Date(), new Date());
   symlinkSync(linked.path, join(directory, 'lane-link'));
   writeFileSync(join(edited.path, 'local-draft'), 'preserve this draft');
   age(edited.path, 44);

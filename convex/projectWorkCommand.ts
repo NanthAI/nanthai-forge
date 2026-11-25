@@ -37,7 +37,7 @@ import { internalMutation } from './server';
 import { isItemRetentionOperation, itemRetentionOperation } from './projectItemRetentionStore';
 import { decisionActor, decisionOperationId } from '../src/work-planning-put';
 import { planningParent, restoredTopLevelNotice } from './projectPlanningParent';
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { digest } from '../src/state/hash';
 import { logIoAttribution } from './ioAttribution';
 
@@ -510,7 +510,7 @@ export async function executeCommand(
     // Undo of the preceding parent change, restoring the exact former membership.
     const partition = recordPartition(generation);
     const recent = await ctx.db
-      .query(await workRecordTable(ctx, partition, 'planningVersions'))
+      .query(splitRecordTable('planningVersions'))
       .withIndex('by_generation_and_collection_and_parent_and_position', q =>
         q.eq('generationId', partition).eq('collection', 'planningVersions').eq('parent', command.itemId),
       )

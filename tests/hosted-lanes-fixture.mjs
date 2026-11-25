@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { assertWorkRecordDomain } from './work-record-domain-fixture.mjs';
+import { assertWorkRecordDomain, fixtureInsertTable } from './work-record-domain-fixture.mjs';
 import assert from 'node:assert/strict';
 import { indexEntriesPerWrite } from './convex-index-cost.mjs';
 import { randomUUID } from 'node:crypto';
@@ -318,6 +318,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             meter.writes++;
           },
           insert: async (table, value) => {
+            table = fixtureInsertTable(table, value.collection);
             const alias = table === 'projectMetricFacts' && value.key.startsWith('metric-context-v1:');
             beginWrite(alias);
             assertWorkRecordDomain(table, value, legacyWorkRecords);

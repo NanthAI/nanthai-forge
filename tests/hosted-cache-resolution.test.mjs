@@ -9,70 +9,56 @@ import { dirname, join } from 'node:path';
 import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
 import { canonicalRoot } from '../dist/root-paths.js';
 
-for (const legacy of [false, true])
-  test(`parent housekeeping cannot obstruct a completed nested resolution (legacy=${legacy})`, async t => {
-    const s = await resolutionFixture(t, { overlap: true });
-    // The parent Lane folder sits in a clone's lanes dir; its resolution opens as a sibling copy there.
-    const root = join(
-      dirname(s.root),
-      'arbitrary project.with spaces.forge-client',
-      'lanes',
-      s.f.lane.laneId,
-    );
-    const parent = () => s.transport(root);
-    s.f.moveMain({ overlap: true });
-    await parent().dispatch('open', { laneId: s.f.lane.laneId });
-    await parent().dispatch('save', { operationId: randomUUID(), message: 'Parent work' });
-    const advice = (await parent().dispatch('sync', { laneId: s.f.lane.laneId, apply: false })).result
-      .conflict;
-    const opened = await parent().dispatch('open', { laneId: advice.laneId });
-    const conflict = {
-      root: opened.result.root,
-      laneId: advice.laneId,
-      next: { action: 'resolve', laneId: advice.laneId, operationId: randomUUID() },
-    };
-    assert.equal(conflict.root, join(dirname(canonicalRoot(root)), advice.laneId), 'a sibling, never nested');
-    const legacyFile = join(conflict.root, '.forge', 'cache-use.json');
-    if (legacy) {
-      rmSync(join(`${conflict.root}.forge-client`, 'cache-use.json'));
-      writeFileSync(legacyFile, JSON.stringify({ bytes: 12345 }));
-    }
-    await parent().dispatch('save', { operationId: randomUUID(), message: 'Parent mutation' });
+test(`parent housekeeping cannot obstruct a completed nested resolution`, async t => {
+  const s = await resolutionFixture(t, { overlap: true });
+  // The parent Lane folder sits in a clone's lanes dir; its resolution opens as a sibling copy there.
+  const root = join(dirname(s.root), 'arbitrary project.with spaces.forge-client', 'lanes', s.f.lane.laneId);
+  const parent = () => s.transport(root);
+  s.f.moveMain({ overlap: true });
+  await parent().dispatch('open', { laneId: s.f.lane.laneId });
+  await parent().dispatch('save', { operationId: randomUUID(), message: 'Parent work' });
+  const advice = (await parent().dispatch('sync', { laneId: s.f.lane.laneId, apply: false })).result.conflict;
+  const opened = await parent().dispatch('open', { laneId: advice.laneId });
+  const conflict = {
+    root: opened.result.root,
+    laneId: advice.laneId,
+    next: { action: 'resolve', laneId: advice.laneId, operationId: randomUUID() },
+  };
+  assert.equal(conflict.root, join(dirname(canonicalRoot(root)), advice.laneId), 'a sibling, never nested');
+  await parent().dispatch('save', { operationId: randomUUID(), message: 'Parent mutation' });
+  t.diagnostic(
+    `nested metadata after parent mutation: ${readdirSync(join(conflict.root, '.forge')).join(', ')}`,
+  );
+  writeFileSync(join(conflict.root, 'a.txt'), 'chosen\nb\nc\n');
+  const command = { ...conflict.next };
+  delete command.action;
+  let result;
+  try {
+    result = await s.transport(conflict.root).dispatch('resolve', command);
+  } catch (error) {
     t.diagnostic(
-      `nested metadata after parent mutation: ${readdirSync(join(conflict.root, '.forge')).join(', ')}`,
+      `server resolution after local failure: ${(await s.f.readLane(conflict.laneId)).resolution.status}`,
     );
-    writeFileSync(join(conflict.root, 'a.txt'), 'chosen\nb\nc\n');
-    const command = { ...conflict.next };
-    delete command.action;
-    let result;
-    try {
-      result = await s.transport(conflict.root).dispatch('resolve', command);
-    } catch (error) {
-      t.diagnostic(
-        `server resolution after local failure: ${(await s.f.readLane(conflict.laneId)).resolution.status}`,
-      );
-      throw error;
-    }
-    assert.equal(result.result.source.outcome.result.status, 'resolved');
-    assert.equal(readFileSync(join(conflict.root, 'a.txt'), 'utf8'), 'chosen\nb\nc\n');
-    assert(!existsSync(legacyFile));
-    const usage = JSON.parse(readFileSync(join(`${conflict.root}.forge-client`, 'cache-use.json')));
-    // A sibling copy's size is measured by its clone's housekeeping, not the parent Lane's; the
-    // record (use time is its mtime) must stay valid and never hold anything but a byte count.
-    assert(usage.bytes === undefined || usage.bytes >= 0);
-    assert.deepEqual(
-      Object.keys(usage).filter(key => key !== 'bytes'),
-      [],
-    );
-    if (legacy) assert.equal(usage.bytes, 12345);
-    const replay = await s.transport(conflict.root).dispatch('resolve', command);
-    assert.equal(replay.result.applied.replayed, true);
-    const resolves = s.calls
-      .filter(call => call.name === 'projectHostedSync:prepare')
-      .map(call => JSON.parse(call.args.request))
-      .filter(request => request.kind === 'resolve');
-    assert.equal(new Set(resolves.map(request => request.operationId)).size, 1);
-  });
+    throw error;
+  }
+  assert.equal(result.result.source.outcome.result.status, 'resolved');
+  assert.equal(readFileSync(join(conflict.root, 'a.txt'), 'utf8'), 'chosen\nb\nc\n');
+  const usage = JSON.parse(readFileSync(join(`${conflict.root}.forge-client`, 'cache-use.json')));
+  // A sibling copy's size is measured by its clone's housekeeping, not the parent Lane's; the
+  // record (use time is its mtime) must stay valid and never hold anything but a byte count.
+  assert(usage.bytes === undefined || usage.bytes >= 0);
+  assert.deepEqual(
+    Object.keys(usage).filter(key => key !== 'bytes'),
+    [],
+  );
+  const replay = await s.transport(conflict.root).dispatch('resolve', command);
+  assert.equal(replay.result.applied.replayed, true);
+  const resolves = s.calls
+    .filter(call => call.name === 'projectHostedSync:prepare')
+    .map(call => JSON.parse(call.args.request))
+    .filter(request => request.kind === 'resolve');
+  assert.equal(new Set(resolves.map(request => request.operationId)).size, 1);
+});
 
 for (const obstruction of ['unknown metadata', 'unsaved edit'])
   test(`completed resolution reports and preserves ${obstruction}; original resolve replay recovers`, async t => {

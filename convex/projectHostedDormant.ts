@@ -45,9 +45,6 @@ export const abandon = mutation({
     projectId: v.id('hostedProjects'),
     authorityEpoch: v.number(),
     abandon: v.array(v.string()),
-    /** Ignored: every overlap row carries its activity time. Older CLIs still send it. Remove by 2026-12-31 with
-     * the minimum-CLI bump (Item c0af6cfa F13). */
-    stamp: v.optional(v.array(v.string())),
     onMain: v.optional(v.array(v.object({ laneId: v.string(), head: v.string() }))),
     reopen: v.optional(v.array(v.object({ laneId: v.string(), version: v.number() }))),
     versions: v.optional(v.literal(true)),
