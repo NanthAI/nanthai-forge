@@ -12,7 +12,7 @@ No lease, account transfer, new project or new access condition is involved.
 Use only off-machine inputs: a compatible Forge package and lockfile, this
 runbook, the saved project ID/deployment URL, expected source/Work/evidence pins,
 and the existing account's sign-in and separately backed-up runner references,
-application/auth/environment configuration and Secret Object keyring. Never copy
+application/auth/environment configuration. Never copy
 credential values into request JSON or the report. Local bindings and parent
 finish-driver retry files are not part of the portable backup. Recovery restores
 saved data; it does not resume the old parent command or any check process.
@@ -103,7 +103,7 @@ object bytes. Test that dependency during this drill.
 
 Follow [hosted durability](hosted-durability.md#restore-into-a-fresh-deployment):
 provision a fresh empty deployment, import before deploying matching code/schema,
-then restore application, auth, environment and keyring configuration. Keep the
+then restore application, auth and environment configuration. Keep the
 original ZIP. Use target credentials through the existing private environment.
 
 ```sh
@@ -121,8 +121,8 @@ retrying. Do not infer application health from equal table/file hashes.
 
 Sign in to the restored app. Open the same existing project, accepted main,
 Intent/Lane/Candidate detail and retained evidence; exercise current access under
-the recovered auth configuration. Confirm encrypted Secret Objects can be used
-through their existing capabilities without exposing values. Set
+the recovered auth configuration. Sealed secret records restore as ciphertext and
+open only on the devices their roster lists; the drill needs no key for them. Set
 `DEPLOYMENT_URL` to this restored backend, retain its imported `PROJECT_ID`, then
 run the hosted runner/cache recovery command. Native-owner recovery is removed;
 server mode follows Route B below. This recovers the ZIP's captured project, not newer

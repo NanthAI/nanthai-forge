@@ -664,7 +664,7 @@ Configuration is written to the ignored `.env.local`.
 - `FORGE_CLI_PRIVATE_KEY`: RSA PKCS#8 private PEM for Forge-issued CLI credentials. Generate a dedicated RSA 2048-bit or larger key; keep it server-side, never under `VITE_`.
 - `FORGE_CLI_ISSUER`: exact HTTPS Convex HTTP origin, e.g. `https://your-deployment.convex.site`, without a trailing slash. `/auth/jwks` publishes only its public RSA JWK; the custom JWT provider accepts audience `forge-cli`. A token from any other issuer is treated as signed out.
 - `FORGE_WEB_URL`: HTTPS origin of the Forge web app serving `/device` (the earlier `/-/device` address redirects to it). Deploy the Convex auth config, HTTP actions, functions and schema together, then publish the hosted web build. For a custom HTTP origin, set `FORGE_HTTP_URL` in the CLI environment; standard `.convex.cloud` deployment URLs derive `.convex.site`.
-- `FORGE_SECRET_KEYS`: the Secret Object keyring (see [operations](operations.md)).
+- `FORGE_SECRET_KEYS` is retired: no code reads it and a deployment must not set it. Sealed secrets need no server key (see [operations](operations.md#sealed-secrets-and-the-retired-secret-objects)).
 - `GITHUB_PUBLIC_TOKEN`: optional, for public GitHub API reads only.
 - `GITHUB_APP_SLUG`: optional, the Forge GitHub App's URL slug. An import refusal for an owner without an installation links `https://github.com/apps/SLUG/installations/new` when it is set.
 - `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`: required. Every deployment, self-host included, writes source and artifact bytes to R2, with no opt-in and no Convex-storage fallback; missing settings fail writes with `R2_NOT_CONFIGURED`. `R2_ENDPOINT` optionally points at another S3-compatible store (https, or http on loopback). See [data placement](data-placement.md).
@@ -1106,6 +1106,12 @@ row from its signed records, and sets each row's `needs` and each project's coun
 measured sum. `apply:false` writes nothing and returns the counts it would change; a run
 with nothing to change writes nothing, so replays are free. Repeat with `after` set to the
 returned `next` until it is null. It is never scheduled, so idle costs zero.
+
+**Secret Object purge.** `secretObjectsRetire:purgeRows` and `clearFields` are one-off internal mutations
+(`apply:false` first; steps in [operations](operations.md#sealed-secrets-and-the-retired-secret-objects)). A
+deployment runs them once, then the follow-up landing drops the retired tables and fields from the schema and
+deletes the file. Delete `FORGE_SECRET_KEYS` from the deployment by name once the code that read it is deployed.
+They are never scheduled, so idle costs zero.
 
 **Command per set.** A copied rotate command carries the set it was listed under:
 Development is the CLI's default, Checks adds `--set checks`, so a Checks row can never

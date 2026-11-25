@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": -2,
+  "reason": "Secret Objects retired: 5 tables, 4 Convex modules and 2 public error codes (SECRET_UNAVAILABLE and one more) go; handleLabels, used only by them, is deleted",
+  "date": "2026-11-24"
+}

@@ -759,8 +759,7 @@ timed in the report:
    `scripts/selfhost.mjs` (pinned backend, checked SHA-256) on a free port pair
    (`--port` to choose one) and start it, with index backfill pacing raised (a
    scratch instance has no traffic to protect).
-2. Deploy the current source to the empty scratch instance only (synthetic Secret
-   Object keyring). Its bucket keeps only what the restored app writes and reads
+2. Deploy the current source to the empty scratch instance only. Its bucket keeps only what the restored app writes and reads
    the project's prefix through from R2 (GET only).
 3. Meanwhile stream the backup ZIP from R2 once. The same pass checks its size and
    SHA-256 against the manifest, runs the backup verifier's whole-snapshot
@@ -818,8 +817,7 @@ uses, and `filter.createdEmpty` lists it: the schema push numbered that table fi
 and without it in the import a backup table whose ids carry the same number could not
 go in. `BACKUP_OLDER_THAN_SCHEMA` (with `failed.tables` and `failed.next`) names a
 conflict that is still left; take a new backup (the hosted-backup workflow) and run the
-drill on it. Not covered: real auth configuration and Secret Object values (synthetic
-keyring), and projects whose R2 prefix was purged after the backup: their rows
+drill on it. Not covered: real auth configuration, and projects whose R2 prefix was purged after the backup: their rows
 restore but their bytes are gone, so choose a project that still exists.
 
 ### Route B: recover a runner and cache from hosted
@@ -1785,7 +1783,7 @@ With `lifecycle.cleanRegenerableCopies:true`, Lane completion and abandonment au
 
 ## Account data
 
-Account, then "Your Forge data", then "Refresh inventory" lists everything you own across seven families. "Download metadata" saves the inventory with hashes. It holds no source, raw Work, secret values or credentials. Use project archives, import snapshot controls and Secret Object export for those.
+Account, then "Your Forge data", then "Refresh inventory" lists everything you own across six families. "Download metadata" saves the inventory with hashes. It holds no source, raw Work, secret values or credentials. Use project archives and import snapshot controls for those; sealed secrets live on your devices.
 
 You can select owned items for removal. Projects and imports use their normal final-deletion paths, agent grants are revoked, teams are cleaned up and personal saved items are removed. "Leave incoming access" removes only your own rows in things shared with you. Other people's grants and records are untouched. An interrupted request resumes from "Retained original requests". Receipts, downloaded copies and your GitHub account itself remain.
 
@@ -1797,15 +1795,32 @@ To read a project's reports, call `clientErrors:recent` with `{projectId, pagina
 
 Reports are kept until removed by hand: there is no automatic retention, and they are not yet part of "Your Forge data" inventory or project and account deletion.
 
-## Secret Object recovery
+## Sealed secrets and the retired Secret Objects
 
-Keep the exact `FORGE_SECRET_KEYS` keyring, a JSON object with an `active` key ID and a `keys` map of base64 32-byte keys. Back it up apart from the database. To rotate the encryption key, add a new key and mark it active. Never remove an old one while any export or snapshot may need it. Rotating the credential and rotating the key are different things.
+Forge holds no key that opens a secret a team stored. Sealed secrets are encrypted on members' devices; a copy of
+the database, a backup or an object-storage copy holds ciphertext and never a value or a key (the guard is
+`scripts/check-no-server-key.mjs`). There is nothing to back up apart from the database for them, and a lost
+device is recovered by another holder device or by reissuing the value at the provider.
 
-Open Secret Objects, choose an object, then "Export or delete object". "Download encrypted object" saves every version, grant and audit event, plus its SHA-256. If the object changes mid-download, retry. The file has no key material. In a private Node process, decrypt it with `recoverSecretArchive(text, keyring)` from `@nanthai/forge`. The result is plaintext in memory, and grants are historical only. Create a replacement through `secretActions.create` with a new operation UUID and re-grant access explicitly.
+Secret Objects and their server keyring are retired. The setting `FORGE_SECRET_KEYS` is deleted from every
+deployment and no code reads it. A deployment that still holds Secret Object rows runs the one-off purge once, in
+this order (it is never scheduled, so idle costs nothing; delete `convex/secretObjectsRetire.ts` in the landing
+that drops the tables):
 
-To restore live IDs, grants and audit together, restore a whole-instance snapshot with the original keys (see below).
+1. `secretObjectsRetire:purgeRows '{"apply":false}'` counts the rows it would delete, lists each object by name,
+   repository, reference and version, and writes nothing. It reads at most `limit` rows (default 25, at most 100)
+   and 4 MiB per table, children before parents. No export path remains, so the owner looks at that list first: every
+   object must be synthetic, reissuable at its provider, or already held elsewhere. A production run needs the
+   owner's approval of the list.
+2. The same call with `"apply":true,"reviewed":true` deletes them; repeat until it returns `deleted: 0` and
+   `more: false`.
+3. `secretObjectsRetire:clearFields '{"table":"forgeAccounts","apply":false}'` (then `agentGrants`,
+   `accountOperations` and `accountItems`) counts rows that still hold retired state (fields, the `secrets` leave
+   kind, a close phase, items of a deleted object); with `"apply":true` it clears them. Pass the returned `next` as
+   `after` until it is null.
 
-"Permanently delete object" removes encrypted values, grants and audit rows and leaves a minimal receipt. Reconcile an interrupted deletion from "Deletion receipts". Existing downloads and the GitHub credential itself are unaffected, so revoke the credential at GitHub as well.
+Agent read grants no longer keep a copy of their token: it is shown once, and only its hash is stored. A grant whose
+token was lost is revoked and issued again.
 
 ## R2 object storage
 

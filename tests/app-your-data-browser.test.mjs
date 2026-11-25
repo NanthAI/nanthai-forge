@@ -22,7 +22,7 @@ import { createRoot } from 'react-dom/client';
 import { YourDataView } from ${JSON.stringify(join(root, 'web/src/app/data/YourData.tsx'))};
 import { AccountFrame } from ${JSON.stringify(join(root, 'web/src/app/frames.tsx'))};
 import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
-const kinds = ['project', 'import', 'secret', 'agent', 'team', 'view', 'interest'];
+const kinds = ['project', 'import', 'agent', 'team', 'view', 'interest'];
 const row = (id, label, note) => ({ id, pin: '0'.repeat(64), label, ...(note ? { note } : {}) });
 const none = () => Object.fromEntries(kinds.map(kind => [kind, { rows: [], more: false }]));
 const sample = none();
@@ -196,7 +196,11 @@ test('your data: holdings, take-out, the before-list behind the typed handle, an
     assert.match(await main.textContent(), /docs-site/);
     assert.match(await main.textContent(), /in the trash/);
     assert.match(await main.textContent(), /Their team/);
-    assert.match(await main.textContent(), /any secret objects shared with you/);
+    assert.doesNotMatch(
+      await main.textContent(),
+      /secret objects?/i,
+      'Secret Objects are gone from Your data',
+    );
     const remove = page.getByRole('button', { name: 'Delete 5 items for good' });
     assert.equal(await remove.isDisabled(), true);
     await page.getByLabel('Type your handle, sample-owner, to confirm').fill('sample-owne');

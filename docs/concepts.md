@@ -93,7 +93,6 @@ Existing projects, including Forge's dogfooding owner, read as custom with their
 - **Reader / team / contributor** — who may see or propose changes to a hosted project.
 - **Zone** — a pinned subset of a project's source that can be shared separately.
 - **Agent grant** — a scoped, read-only token for an agent to read authorized source.
-- **Secret Object** — encrypted credential versions with separate capabilities (discover, use, reveal, modify, delegate). Used only by fixed, controlled operations.
 
 Access is always checked against current policy at read time; past access never grants new access.
 

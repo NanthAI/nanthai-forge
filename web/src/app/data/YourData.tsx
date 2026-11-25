@@ -3,9 +3,8 @@
 // Account > Your data (Item 17cdc774): what Forge holds for the account, the way to take it out, and deleting it.
 // Reads (review 8e86eb09): one `accountData.overview` query on open (the first rows of each kind and the latest
 // receipts; no provider call), a one-off read, not a subscription, so nothing runs while the tab is idle. Everything
-// else runs only on a press: the export pages the inventory action (current provider checks); the review starts with
-// `accountData.review` (its one write, the server's boundary for secret grants) and pages `accountData.owned` and
-// `accountData.shared` into the exact before-list and the token that binds the cleanup to it;
+// else runs only on a press: the export pages the inventory action (current provider checks); the review starts by
+// paging `accountData.owned` and `accountData.shared` into the exact before-list and the token that binds the cleanup to it;
 // the cleanup is accountActions.begin + advance. Removals that run on elsewhere are followed by the reactive
 // `accountData.watch` (only while the tab is shown), never by a timer. Person-only on the server.
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
@@ -158,9 +157,7 @@ export default function YourData({ handle, leave }: AccountProps) {
   }
   /** The exact before-list: every owned row with its pin, everything visibly shared, and the token over all of it. */
   async function reviewAll(): Promise<Review> {
-    // The review's one write, first: the server issues the boundary its token starts from, so secret grants given to
-    // the person after this stay.
-    let { token } = await client.mutation(api.accountData.review, { review: crypto.randomUUID() });
+    let token = '';
     const owned: Owned[] = [];
     for (const kind of KINDS)
       for (let cursor: string | null = null; ;) {
@@ -175,7 +172,7 @@ export default function YourData({ handle, leave }: AccountProps) {
     for (const kind of SHARED)
       for (let cursor: string | null = null; ;) {
         const page: { rows: Shared[]; token: string; isDone: boolean; continueCursor: string } = await client
-          .query(api.accountData.shared, { kind, cursor, token })
+          .query(api.accountData.shared, { kind, cursor, token: token || undefined })
           .then(p => ({ ...p, rows: p.rows.map(row => ({ ...row, kind })) }));
         token = page.token;
         shared.push(...page.rows);
@@ -575,11 +572,7 @@ function DeleteRegion(props: Parameters<typeof YourDataView>[0]) {
             ),
           )}
           <div className="pf">
-            <p>
-              {owned.length || review.shared.length ? 'You also leave ' : 'You leave '}
-              {LEAVE_WORDS.secrets.toLowerCase()} before this review started; any shared with you after that
-              stay. Nothing else is touched.
-            </p>
+            <p>Nothing else is touched.</p>
           </div>
           <form className="confirm" onSubmit={submit} noValidate>
             <label htmlFor="data-confirm">Type your handle, {word}, to confirm</label>

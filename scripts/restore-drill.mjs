@@ -4,7 +4,7 @@
 // Reads the backup and one project's R2 prefix (GET/LIST only), streamed: neither is written
 // whole to disk. Writes only to the new scratch instance and its in-memory bucket, never to the
 // source deployment or bucket.
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { readFileSync, statfsSync } from 'node:fs';
 import { lstat, mkdir, open, readdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -202,11 +202,6 @@ export async function drill(command, env = process.env) {
       deploySmoke(cli.call, {
         issuer: '',
         token: '',
-        // A synthetic keyring: Secret Object values are not part of this drill.
-        keys: JSON.stringify({
-          active: 'drill',
-          keys: { drill: randomBytes(32).toString('base64') },
-        }),
         r2: {
           R2_ACCOUNT_ID: fakeR2Config.accountId,
           R2_BUCKET: fakeR2Config.bucket,

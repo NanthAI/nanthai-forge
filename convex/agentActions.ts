@@ -14,18 +14,10 @@ import { agentProjection, agentQuery, type AgentTool, AGENT_TOOLS } from '../src
 import { digest, identity } from '../src/hash';
 import { githubJson } from '../src/github';
 import { ForgeError, invariant } from '../src/errors';
-import { secretKeyring, openSecret, sealSecret } from '../src/secret-crypto';
 import { report } from './errors';
 
-function binding(grant: Pick<Doc<'agentGrants'>, 'owner' | 'operationId' | 'importId' | 'request'>) {
-  return {
-    owner: grant.owner,
-    operationId: grant.operationId,
-    repository: `forge-agent-read:${grant.importId}`,
-    ref: grant.request,
-    version: 1,
-  };
-}
+const AGENT_SHOWN_ONCE =
+  'A grant was already issued for this operation. Forge keeps only a hash of its token, so it cannot show the token again: revoke that grant, then issue a new one.';
 async function owner(ctx: ActionCtx) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'AGENT_UNAVAILABLE', 'Sign in to manage agent grants.');
@@ -83,12 +75,9 @@ export const create = action({
       );
       const { job } = await currentAccess(ctx, input.id, actor, false, true);
       invariant(job.owner === actor, 'AGENT_UNAVAILABLE', 'Only this import’s owner can issue agent grants.');
-      const keys = secretKeyring(process.env.FORGE_SECRET_KEYS);
-      if (previous) {
-        const token = openSecret(keys, binding(previous), previous.sealed);
-        await ctx.runMutation(internal.agentGrants.authorize, { tokenHash: tokenHash(token) });
-        return { id: previous._id, token };
-      }
+      // The token is shown once and Forge keeps only its hash: no key opens it again. A grant already issued for this
+      // operation therefore cannot show its token a second time; revoke it and issue a new one.
+      invariant(!previous, 'AGENT_OPERATION_CHANGED', AGENT_SHOWN_ONCE);
       invariant(job.artifactKey, 'INDEX_MISSING', 'Choose an indexed snapshot.');
       const blob = await blobStore(ctx).get(job.artifactKey as Id<'_storage'>);
       invariant(blob, 'INVALID_ARTIFACT', 'Stored source is unavailable.');
@@ -114,32 +103,11 @@ export const create = action({
         expiresAt: input.expiresAt,
         revoked: false,
         tokenHash: tokenHash(token),
-        sealed: sealSecret(keys, binding(base), token),
       });
-      // Concurrent same-operation issuance returns the first committed encrypted token, never an unregistered token.
-      const committed = openSecret(keys, binding(grant), grant.sealed);
-      await ctx.runMutation(internal.agentGrants.authorize, { tokenHash: tokenHash(committed) });
-      return { id: grant._id, token: committed };
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
-export const recover = action({
-  args: { id: v.id('agentGrants') },
-  returns: v.string(),
-  handler: async (ctx, { id }): Promise<string> => {
-    try {
-      const actor = await owner(ctx),
-        grant: Doc<'agentGrants'> | null = await ctx.runQuery(internal.agentGrants.owned, {
-          id,
-          owner: actor,
-        });
-      invariant(grant, 'AGENT_UNAVAILABLE', 'This agent grant is unavailable.');
-      await currentAccess(ctx, grant.importId, actor, false, true);
-      const token = openSecret(secretKeyring(process.env.FORGE_SECRET_KEYS), binding(grant), grant.sealed);
+      // A concurrent same-operation issuance committed first: its token is the one that exists, and this one never shows.
+      invariant(grant.tokenHash === tokenHash(token), 'AGENT_OPERATION_CHANGED', AGENT_SHOWN_ONCE);
       await ctx.runMutation(internal.agentGrants.authorize, { tokenHash: tokenHash(token) });
-      return token;
+      return { id: grant._id, token };
     } catch (error) {
       return report(error);
     }

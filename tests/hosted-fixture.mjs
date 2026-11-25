@@ -49,8 +49,6 @@ const sync = await import(moduleUrl('../convex/sync.ts'));
 const sharing = await import(moduleUrl('../convex/sharing.ts'));
 const savedViews = await import(moduleUrl('../convex/savedViews.ts'));
 const teams = await import(moduleUrl('../convex/teams.ts'));
-const secretLifecycle = await import(moduleUrl('../convex/secretLifecycle.ts'));
-const secrets = await import(moduleUrl('../convex/secrets.ts'));
 const agentGrants = await import(moduleUrl('../convex/agentGrants.ts'));
 const interests = await import(moduleUrl('../convex/interests.ts'));
 const sourceZones = await import(moduleUrl('../convex/sourceZones.ts'));
@@ -620,8 +618,6 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
     sharing: fixtureSharing,
     savedViews,
     teams,
-    secrets,
-    secretLifecycle,
     agentGrants,
     sourceZones,
     interests,

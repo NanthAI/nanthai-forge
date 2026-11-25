@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import assert from 'node:assert/strict';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, writeFile, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -30,13 +30,7 @@ const targetRelease = process.env.FORGE_NATIVE_TARGET_RELEASE ?? release;
 const storageEnv = process.env.FORGE_NATIVE_S3_ENV && resolve(process.env.FORGE_NATIVE_S3_ENV);
 const issuer = 'https://native-smoke.invalid',
   paginationOpts = { cursor: null, numItems: 20 };
-const keys = JSON.stringify({
-  active: 'native-smoke',
-  keys: { 'native-smoke': randomBytes(32).toString('base64') },
-});
 const secrets = [
-  keys,
-  ...Object.values(JSON.parse(keys).keys),
   ...Object.entries(process.env)
     .filter(([name]) => /TOKEN|SECRET|PASSWORD|KEY|CREDENTIAL|AUTH/i.test(name))
     .map(([, value]) => value),
@@ -126,7 +120,6 @@ const r2 = {
 async function deploy(directory) {
   await deploySmoke(args => cli(directory, args), {
     token,
-    keys,
     r2,
     webUrl: smokeWebUrl,
   });
@@ -233,21 +226,8 @@ try {
     name: 'Native restore QA',
     operationId: randomUUID(),
   });
-  const secretValue = 'native-synthetic-' + randomUUID(),
-    operationId = randomUUID();
-  secrets.push(secretValue);
-  const secret = await primary.admin.action(api.secretActions.create, {
-    name: 'Native encrypted restore QA',
-    repository,
-    ref,
-    value: secretValue,
-    operationId,
-  });
-  const originalSecret = await primary.admin.query(internal.secrets.created, { owner, operationId });
-  assert(originalSecret);
-  assert(!JSON.stringify(originalSecret).includes(secretValue));
   stage = 'Convex Auth sign-up, token verification and revocation';
-  let convexAuth = await verifyConvexAuth(primary, repository, ref, undefined, { secrets });
+  let convexAuth = await verifyConvexAuth(primary, undefined, { secrets });
   stage = 'snapshot export';
   const backup = join(root, 'backup.zip');
   cli(primaryPath, ['export', '--include-file-storage', '--path', backup]);
@@ -293,17 +273,8 @@ try {
     for (const caller of [clients.anon, clients.outsider]) {
       assert.deepEqual((await caller.query(api.teams.list, { paginationOpts })).page, []);
       await assert.rejects(caller.query(api.teams.members, { id: team, paginationOpts }));
-      await assert.rejects(caller.query(api.secrets.details, { id: secret }));
     }
-    assert.deepEqual(
-      await clients.admin.query(internal.secrets.created, { owner, operationId }),
-      originalSecret,
-    );
-    assert.equal(
-      (await clients.admin.action(api.secretActions.reveal, { id: secret, operationId: randomUUID() })).value,
-      secretValue,
-    );
-    convexAuth = await verifyConvexAuth(clients, repository, ref, convexAuth, { secrets });
+    convexAuth = await verifyConvexAuth(clients, convexAuth, { secrets });
   };
   stage = 'restored original data';
   await verify(restored);

@@ -152,16 +152,10 @@ per-check `allow` bindings, public-log rule, CI-provider mask registration or
 push of a machine key into a CI provider's secrets. Outside contributors get no
 Checks values.
 
-### Settings and the older store
+### Settings and the retired store
 
-The rebuilt **Settings → Secrets** page is value-free and currently shows that
-sealed secrets are not connected. Its metadata-only interface covers names in
-Development and Checks, holders, waiting computers, rotation state and recent
-changes. It makes no secret reads or writes. There is no value field, reveal
-control or public sample-data route. Proposed CLI commands are marked Proposed.
-
-Sealed Development and Checks sets are tracked by Item `41a0df87`. Passkey
-recovery, import and Secret Object retirement remain unimplemented. Gate A
-passed; Gate B is a separate code review after sharing. No
-database-wide confidentiality claim applies while legacy Secret Objects and their
-server keyring remain.
+The **Settings → Secrets** page is value-free: its names-only read covers names in
+Development and Checks, holders, waiting computers, rotation state and recent changes.
+It has no value field, reveal control or public sample-data route. The older Secret
+Objects, their server keyring and their web dotenv import are retired; see
+[no server key](1500-no-server-key.md).

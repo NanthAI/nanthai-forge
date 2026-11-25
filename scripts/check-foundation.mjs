@@ -17,6 +17,7 @@ import { actionPinFindings, isWorkflowPath } from './check-action-pins.mjs';
 import { candidateStepFindings } from './check-candidate-steps.mjs';
 import { spdxFindings, spdxScanned } from './check-spdx.mjs';
 import { envPrintFindings } from './check-env-print.mjs';
+import { serverKeyFindings } from './check-no-server-key.mjs';
 import { readBaseline, scanSet, testSignalFindings } from './check-test-signal.mjs';
 import { statusListFindings } from './check-status-lists.mjs';
 import { currentCounts, growthFindings, readBaseline as readGrowthBaseline } from './check-growth.mjs';
@@ -88,6 +89,7 @@ for (const file of files) {
       errors.push(...pathConventionFindings(path, source));
     }
     errors.push(...recoveryAdviceFindings(path, source));
+    errors.push(...serverKeyFindings(path.split(sep).join('/'), source));
     errors.push(...statusListFindings(path.split(sep).join('/'), source));
   }
   if (

@@ -7,7 +7,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { projectRow, state } from './hosted-fixture.mjs';
 const modules = Object.fromEntries(
   await Promise.all(
-    ['secretActions', 'projectLifecycle', 'accountActions', 'projectHostedCheckWorker'].map(async name => [
+    ['projectLifecycle', 'accountActions', 'projectHostedCheckWorker'].map(async name => [
       name,
       await import(moduleUrl(`../convex/${name}.ts`)),
     ]),
@@ -33,9 +33,8 @@ function fixture() {
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: 'synthetic-device' });
   return s;
 }
-test('owner device credentials cannot reveal secret values, permanently delete projects or receive runner signing keys', async () => {
+test('owner device credentials cannot permanently delete projects, run Your data cleanup or receive runner signing keys', async () => {
   for (const [module, name, input] of [
-    ['secretActions', 'reveal', { id: 'secret', operationId: randomUUID() }],
     [
       'projectLifecycle',
       'permanentlyDelete',

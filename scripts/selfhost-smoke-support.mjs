@@ -69,12 +69,11 @@ export function smokeFailure(error, { stage, secrets = [], command, stderr } = {
 
 /** Bytes always go to R2 (self-host included): `r2` names the bucket settings, here a local
  * S3-compatible fake reached through R2_ENDPOINT. */
-export async function deploySmoke(cli, { token, keys, r2, webUrl }) {
+export async function deploySmoke(cli, { token, r2, webUrl }) {
   // Convex rejects reads of unset auth-config variables, including guarded optional reads.
   await cli(['env', 'set', 'FORGE_CLI_ISSUER', '']);
   if (webUrl !== undefined) await cli(['env', 'set', 'FORGE_WEB_URL', webUrl]);
   await cli(['env', 'set', 'GITHUB_PUBLIC_TOKEN', token]);
-  await cli(['env', 'set', 'FORGE_SECRET_KEYS', keys]);
   for (const [name, value] of Object.entries(r2)) await cli(['env', 'set', name, value]);
   await cli(['deploy', '--typecheck', 'enable', '--yes']);
 }

@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { v } from 'convex/values';
 import { moduleUrl } from './convex-module.mjs';
@@ -20,9 +20,6 @@ const hosted = await import(moduleUrl('../convex/hosted.ts'));
 const projectImport = await import(moduleUrl('../convex/projectGithubImport.ts'));
 const viewActions = await import(moduleUrl('../convex/savedViewActions.ts'));
 const views = await import(moduleUrl('../convex/savedViews.ts'));
-const secretActions = await import(moduleUrl('../convex/secretActions.ts'));
-const secrets = await import(moduleUrl('../convex/secrets.ts'));
-const secretLifecycle = await import(moduleUrl('../convex/secretLifecycle.ts'));
 const refused = e => (e.data?.code ?? e.code) === 'AUTH_SCOPE_DENIED';
 const restricted = [
   { source: 'write', projects: { kind: 'project', projectId: 'selected' } },
@@ -200,132 +197,6 @@ test('restricted devices cannot save, rename or remove saved views; unrestricted
       assert.equal(s.tables.savedViews.has(id), false);
     }
   }
-});
-
-test('only unrestricted devices can create, rotate, grant, disable or trash Secret Objects', async t => {
-  t.after(providers());
-  const previous = process.env.FORGE_SECRET_KEYS;
-  process.env.FORGE_SECRET_KEYS = JSON.stringify({
-    active: 'fixture',
-    keys: { fixture: randomBytes(32).toString('base64') },
-  });
-  t.after(() => {
-    if (previous === undefined) delete process.env.FORGE_SECRET_KEYS;
-    else process.env.FORGE_SECRET_KEYS = previous;
-  });
-  const create = {
-    name: 'FIXTURE',
-    repository: 'example/project',
-    ref: 'main',
-    value: 'synthetic',
-    operationId: randomUUID(),
-  };
-  for (const settings of [...restricted, unrestricted]) {
-    const s = state();
-    const id = await secretActions.create._handler(actionContext(s), create);
-    credential(s, settings);
-    const ctx = actionContext(s);
-    const envInput = {
-      env: 'FIXTURE=synthetic',
-      variable: 'FIXTURE',
-      repository: create.repository,
-      ref: 'other',
-      operationId: randomUUID(),
-    };
-    const rotate = { id, value: 'rotated', expectedVersion: 1, operationId: randomUUID() };
-    const grant = {
-      id,
-      principal: 'synthetic-reader',
-      capabilities: ['use'],
-      expectedPolicyRevision: 1,
-      operationId: randomUUID(),
-    };
-    const disable = { id, enabled: false, expectedPolicyRevision: 2, operationId: randomUUID() };
-    const trash = { id, archived: true, expectedArchiveRevision: 0, operationId: randomUUID() };
-    if (settings !== unrestricted) {
-      await assert.rejects(secretActions.create._handler(ctx, create), refused);
-      await assert.rejects(secretActions.createFromEnv._handler(ctx, envInput), refused);
-      await assert.rejects(secretActions.rotate._handler(ctx, rotate), refused);
-      await assert.rejects(secretActions.grant._handler(ctx, grant), refused);
-      await assert.rejects(secrets.enabled._handler(s.ctx, disable), refused);
-      await assert.rejects(secrets.archive._handler(s.ctx, trash), refused);
-      assert.equal(s.tables.secretVersions.size, 1);
-      assert.equal(s.tables.secretEvents.size, 1);
-      assert.equal(s.tables.secretGrants.size, 1);
-      assert.equal(s.tables.secretObjects.get(id).disabled, false);
-      assert.equal(s.tables.secretObjects.get(id).archived, undefined);
-      continue;
-    }
-    assert.equal(
-      typeof (await secretActions.create._handler(ctx, { ...create, operationId: randomUUID() })),
-      'string',
-    );
-    assert.equal(typeof (await secretActions.createFromEnv._handler(ctx, envInput)).id, 'string');
-    assert.equal(await secretActions.rotate._handler(ctx, rotate), 2);
-    await secretActions.grant._handler(ctx, grant);
-    assert.deepEqual(
-      [...s.tables.secretGrants.values()].find(
-        row => row.secretId === id && row.principal === grant.principal,
-      )?.capabilities,
-      grant.capabilities,
-    );
-    await secrets.enabled._handler(s.ctx, disable);
-    assert.equal(s.tables.secretObjects.get(id).disabled, true);
-    await secrets.archive._handler(s.ctx, trash);
-    assert.equal(s.tables.secretObjects.get(id).archived, true);
-
-    credential(s, restricted[1]);
-    await secrets.enabled._handler(s.ctx, {
-      ...disable,
-      enabled: true,
-      expectedPolicyRevision: 3,
-      operationId: randomUUID(),
-    });
-    await secrets.archive._handler(s.ctx, {
-      ...trash,
-      archived: false,
-      expectedArchiveRevision: 1,
-      operationId: randomUUID(),
-    });
-    assert.equal(s.tables.secretObjects.get(id).disabled, false);
-    assert.equal(s.tables.secretObjects.get(id).archived, false);
-    await secretActions.grant._handler(actionContext(s), {
-      ...grant,
-      capabilities: [],
-      expectedPolicyRevision: 4,
-      operationId: randomUUID(),
-    });
-    assert.equal(
-      [...s.tables.secretGrants.values()].some(
-        row => row.secretId === id && row.principal === grant.principal,
-      ),
-      false,
-    );
-  }
-});
-
-test('permanent Secret Object deletion refuses even an unrestricted device and the browser owner can delete and replay', async () => {
-  const s = state();
-  const person = s.ctx.auth.getUserIdentity;
-  const id = await s.ctx.db.insert('secretObjects', {
-    owner: 'owner',
-    name: 'Fixture',
-    operationId: randomUUID(),
-    repository: 'example/project',
-    ref: 'main',
-    version: 1,
-    disabled: false,
-    policyRevision: 1,
-  });
-  const input = { id, operationId: randomUUID(), version: 1, policyRevision: 1, archiveRevision: 0 };
-  credential(s, unrestricted);
-  await assert.rejects(secretLifecycle.permanentlyDelete._handler(s.ctx, input), refused);
-  assert.equal(s.tables.secretDeletions.size, 0);
-  assert.equal(s.tables.secretObjects.get(id).deleting, undefined);
-  s.ctx.auth.getUserIdentity = person;
-  const receipt = await secretLifecycle.permanentlyDelete._handler(s.ctx, input);
-  assert.equal(receipt.status, 'deleting');
-  assert.deepEqual(await secretLifecycle.permanentlyDelete._handler(s.ctx, input), receipt);
 });
 
 test('SI-03 incident: invitation answers and unblock refuse even unrestricted device and agent credentials before account writes', async () => {

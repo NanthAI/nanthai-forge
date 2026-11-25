@@ -2,13 +2,15 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
 export const resourceKind = v.union(
-  ...(['project', 'import', 'secret', 'agent', 'team', 'view', 'interest'] as const).map(v.literal),
+  ...(['project', 'import', 'agent', 'team', 'view', 'interest'] as const).map(v.literal),
 );
 export const leaveKind = v.union(
-  ...(['readers', 'zones', 'teams', 'projects', 'projectReaders', 'secrets'] as const).map(v.literal),
+  ...(['readers', 'zones', 'teams', 'projects', 'projectReaders'] as const).map(v.literal),
 );
-/** What others shared with the person that the person can see, and so review row by row. Secret grants are not among
- * them: a hidden grant is never listed, counted or hashed into a review (accountExecute.leaveSecrets). */
+/** Stored `leave` and `captured` lists may still name `secrets` until the Secret Object purge has run
+ * (convex/secretObjectsRetire.ts); the follow-up landing narrows them to `leaveKind`. */
+const storedLeaveKind = v.union(leaveKind, v.literal('secrets'));
+/** What others shared with the person that the person can see, and so review row by row. */
 export const sharedKind = v.union(
   ...(['projects', 'projectReaders', 'readers', 'teams', 'zones'] as const).map(v.literal),
 );
@@ -24,20 +26,16 @@ export const accountFields = {
   operationId: v.string(),
   request: v.string(),
   expectedItems: v.number(),
-  leave: v.array(leaveKind),
+  leave: v.array(storedLeaveKind),
   stage: accountStage,
-  captured: v.array(leaveKind),
+  captured: v.array(storedLeaveKind),
   pending: v.number(),
   at: v.number(),
-  /** The review epoch the cleanup was registered with: one that leaves secret grants leaves only those given below it
-   * (secretGrantAuthority.givenBefore). */
+  /** Retired Secret Object fields, never written now. They stay until the purge has run (convex/secretObjectsRetire.ts);
+   * the follow-up landing deletes them. */
   secretsBelow: v.optional(v.number()),
-  /** The same by time, on receipts registered before epochs: grants given at or before it. */
   secretsBefore: v.optional(v.number()),
-  /** Leaving those grants: unset until started, false while their rows are deleted in the background, true when done.
-   * They stop giving access when it starts (forgeAccounts.secretsLeftBelow), so no receipt waits for or shows it. */
   secretsDone: v.optional(v.boolean()),
-  /** Where the next background page starts, and the task that runs it: a failed task is rescheduled from here. */
   secretsCursor: v.optional(v.union(v.string(), v.null())),
   secretsTask: v.optional(v.id('_scheduled_functions')),
   /** How many selected items Forge kept because they changed after the review (each one's step found a new pin). */
@@ -56,6 +54,7 @@ export const accountItemFields = {
   expected: v.optional(
     v.object({
       revision: v.optional(v.number()),
+      /** Retired Secret Object fields (see accountFields). */
       version: v.optional(v.number()),
       policyRevision: v.optional(v.number()),
       archiveRevision: v.optional(v.number()),
@@ -64,9 +63,8 @@ export const accountItemFields = {
     }),
   ),
 };
-/** A closing account (convex/accountClose.ts): the close operation, when it started, the review epoch it issued
- * (secret grants given to the person below it stop giving access at once; closes from before epochs cut by `at`) and
- * the background step that runs next, with its task. */
+/** A closing account (convex/accountClose.ts): the close operation, when it started and the background step that runs
+ * next, with its task. `below` and the `secrets` phase are retired (see accountFields). */
 export const accountClosing = v.object({
   operationId: v.string(),
   at: v.number(),

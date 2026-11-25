@@ -1,1 +1,1 @@
-| `secretObjects`, `secretVersions`, `secretGrants`, `secretEvents`, `secretDeletions` | Encrypted Secret Objects and grants. | Fixed |
+| `secretObjects`, `secretVersions`, `secretGrants`, `secretEvents`, `secretDeletions` | Retired Secret Objects: no code reads or writes them; the one-off purge deletes the rows, then the tables go. | Fixed |

@@ -5,19 +5,18 @@
 // leaves, and where a deletion stands. Pure; the reads are convex/accountData.ts (overview, owned, shared, watch), the
 // export is accountActions.inventory and the cleanup machine is accountActions.begin + advance.
 
-export const KINDS = ['project', 'import', 'secret', 'agent', 'team', 'view', 'interest'] as const;
+export const KINDS = ['project', 'import', 'agent', 'team', 'view', 'interest'] as const;
 export type Kind = (typeof KINDS)[number];
 /** Access the person has to other people's things; deleting their data also leaves these. */
-export const LEAVES = ['projectReaders', 'projects', 'readers', 'secrets', 'teams', 'zones'] as const;
+export const LEAVES = ['projectReaders', 'projects', 'readers', 'teams', 'zones'] as const;
 export type Leave = (typeof LEAVES)[number];
-/** What the review lists row by row, in the order the server builds its token. Secret objects shared with the person
- * are not listed, counted or hashed: the deletion leaves the ones they had when they read the list. */
+/** What the review lists row by row, in the order the server builds its token. */
 export const SHARED = ['projects', 'projectReaders', 'readers', 'teams', 'zones'] as const;
 export type SharedKind = (typeof SHARED)[number];
 /** One owned row as the overview and the review read it: a safe label, never a repository location. */
 export type Row = { id: string; pin: string; label: string; note?: 'trash' | 'deleting' };
 export type Owned = Row & { kind: Kind };
-/** One row of what someone else shared with the person. Secret objects shared with them never come back as rows. */
+/** One row of what someone else shared with the person. */
 export type Shared = { kind: SharedKind; id: string; label: string };
 /** The export's rows (accountActions.inventory), with their full current metadata. */
 export type Item = { kind: Kind; id: string; pin: string; metadata: Record<string, unknown> };
@@ -54,7 +53,6 @@ export const KIND_WORDS: Record<Kind, { title: string; one: string; many: string
     goes: 'deleted for good, with everything in them',
   },
   import: { title: 'Private imports', one: 'private import', many: 'private imports', goes: 'deleted' },
-  secret: { title: 'Secret objects', one: 'secret object', many: 'secret objects', goes: 'deleted' },
   agent: { title: 'Agent access', one: 'agent access grant', many: 'agent access grants', goes: 'revoked' },
   team: { title: 'Teams you own', one: 'team', many: 'teams', goes: 'deleted' },
   view: { title: 'Saved views', one: 'saved view', many: 'saved views', goes: 'removed' },
@@ -71,7 +69,6 @@ export const LEAVE_WORDS: Record<Leave, string> = {
   teams: 'Teams you are in',
   readers: 'Imports shared with you',
   zones: 'Source Zones you can read',
-  secrets: 'Any secret objects shared with you',
 };
 
 /** "in the trash" / "being deleted" for a removed project; nothing for the rest. */

@@ -12,8 +12,8 @@ exact Candidate/check pins, current policy and the main head/receipt CAS still a
 | Invited contributor | Start and save hosted Lanes, compose, sync, check and submit finish; use their own local runner or submit an archive proposal for an authorized Intent. Shared Lane writes remain visible as contributor work. | Ordinary server-authoritative public changes may land under auto-on-pass with an exact passing check. Selecting person authority does not bypass these rules. Protected changes need the owner. Cannot change project execution settings, membership, policy, source authority or mirror settings. |
 | Owner | All project operations, including inviting contributors and accepting proposals. | Can explicitly accept an exact prepared Candidate with person authority. The owner person's own landings and settings writes are direct. An agent signed in with the owner's account is an agent: the owner-approval paths and `acceptance.protectedPaths` hold it for the owner person, and its policy, check and runner changes become approval requests (below). Review mode turns automatic landing off. |
 
-Secret Objects have separate per-capability grants. Public visibility and contributor
-membership confer no secret discovery, use, modification or delegation authority.
+Public visibility and contributor membership confer no secret access: sealed secrets
+are opened only by the devices their signed roster lists (see the security document).
 A user can import a GitHub repository into a new project they own; that does not
 grant writes to an existing project. Analysis imports and signed GitHub webhooks
 update derived import observations, not accepted Forge main.

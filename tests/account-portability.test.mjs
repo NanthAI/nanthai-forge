@@ -33,7 +33,7 @@ async function reviewed(f, leave) {
     leave.includes(kind),
   );
   if (!kinds.length) return null;
-  let { token } = await data.review._handler(f.ctx, { review: randomUUID() });
+  let token;
   for (const kind of kinds)
     for (let cursor = null; ;) {
       const p = await data.shared._handler(f.ctx, { kind, cursor, token });
@@ -61,25 +61,12 @@ async function pass(f, r) {
     cursor = p.cursor;
   }
 }
-/** A pass, the secret-grant pages it scheduled (accountExecute.leaveSecrets), and the pass the page's watch starts. */
-async function advance(f, r) {
-  const last = await pass(f, r);
-  let ran = 0;
-  for (
-    let task;
-    (task = f.scheduled.find(t => getFunctionName(t.fn) === 'accountExecute:leaveSecrets'));
-    ran++
-  ) {
-    f.scheduled.splice(f.scheduled.indexOf(task), 1);
-    await f.ctx.runMutation(task.fn, task.args);
-  }
-  return ran ? pass(f, r) : last;
-}
+const advance = pass;
 // Distinct creation times, as Convex gives: index-key cursors order ties by id, which the fixture does not model.
 let clock = 1;
 const row = (id, fields) => ({ _id: id, _creationTime: clock++, ...fields });
 
-test('full paged ownership inventory omits all other owners, credential/source bytes and hidden grants', async () => {
+test('full paged ownership inventory omits all other owners and credential/source bytes', async () => {
   const f = state([job(), { ...job('foreign'), owner: 'other' }]);
   for (let n = 0; n < 3; n++)
     f.tables.savedViews.set(
@@ -95,42 +82,6 @@ test('full paged ownership inventory omits all other owners, credential/source b
   f.tables.savedViews.set(
     'other',
     row('other', { owner: 'other', name: 'foreign-name', importId: 'foreign', route: {} }),
-  );
-  f.tables.secretObjects.set(
-    'secret',
-    row('secret', {
-      owner: 'owner',
-      name: 'own-secret',
-      operationId: randomUUID(),
-      repository: 'x/y',
-      ref: 'main',
-      version: 1,
-      policyRevision: 1,
-      disabled: false,
-    }),
-  );
-  f.tables.secretObjects.set(
-    'hidden',
-    row('hidden', {
-      owner: 'other',
-      name: 'hidden-secret-name',
-      operationId: randomUUID(),
-      repository: 'hidden/repo',
-      ref: 'main',
-      version: 1,
-      policyRevision: 1,
-      disabled: false,
-    }),
-  );
-  f.tables.secretGrants.set(
-    'grant',
-    row('grant', {
-      secretId: 'hidden',
-      principal: 'owner',
-      discover: false,
-      capabilities: ['use'],
-      activeUntil: 9999999999999,
-    }),
   );
   f.tables.agentGrants.set(
     'agent',
@@ -150,17 +101,10 @@ test('full paged ownership inventory omits all other owners, credential/source b
   const views = await inventory(f, 'view');
   assert.equal(views.length, 3);
   const all = [];
-  for (const k of ['project', 'import', 'secret', 'agent', 'team', 'view', 'interest'])
+  for (const k of ['project', 'import', 'agent', 'team', 'view', 'interest'])
     all.push(...(await inventory(f, k)));
   const text = JSON.stringify(all);
-  for (const forbidden of [
-    'foreign-name',
-    'hidden-secret-name',
-    'hidden/repo',
-    'never-export',
-    'sealed',
-    'artifactKey',
-  ])
+  for (const forbidden of ['foreign-name', 'never-export', 'sealed', 'artifactKey'])
     assert.ok(!text.includes(forbidden));
   f.caller(null);
   await assert.rejects(
@@ -219,115 +163,33 @@ test('original selection/retry is stable; personal deletion preserves changed an
   );
 });
 
-test('incoming self-leave keeps other grants/shared source and never exposes hidden identifiers/counts', async () => {
+test('incoming self-leave removes only the person own reader row and keeps the shared source', async () => {
   const f = state([job(), { ...job('foreign'), owner: 'other' }]);
-  f.tables.secretObjects.set(
-    'hidden',
-    row('hidden', {
-      owner: 'other',
-      name: 'invisible',
-      operationId: randomUUID(),
-      repository: 'private/name',
-      ref: 'main',
-      version: 1,
-      policyRevision: 1,
-      disabled: false,
-    }),
-  );
-  f.tables.secretGrants.set(
-    'mine',
-    row('mine', {
-      secretId: 'hidden',
-      principal: 'owner',
-      discover: false,
-      capabilities: ['use'],
-      activeUntil: 9999999999999,
-    }),
-  );
-  f.tables.secretGrants.set(
-    'other-grant',
-    row('other-grant', {
-      secretId: 'hidden',
-      principal: 'someone',
-      discover: false,
-      capabilities: ['use'],
-      activeUntil: 9999999999999,
-    }),
-  );
   f.tables.importReaders.set('reader', row('reader', { importId: 'foreign', reader: 'owner' }));
-  const r = await begin(f, [], ['secrets', 'readers']);
+  f.tables.importReaders.set('their', row('their', { importId: 'foreign', reader: 'someone' }));
+  const r = await begin(f, [], ['readers']);
   const publicReceipt = await plan.read._handler(f.ctx, { operationId: r.operationId });
-  assert.ok(!JSON.stringify(publicReceipt).includes('hidden'));
   assert.ok(!('pending' in publicReceipt));
-  const publicPage = await plan.progress._handler(f.ctx, {
-    operationId: r.operationId,
-    paginationOpts: page,
-  });
-  assert.equal(publicPage.page.length, 0);
-  assert.equal(publicPage.isDone, true);
   assert.equal((await advance(f, r)).stage, 'completed');
-  assert.ok(!f.tables.secretGrants.has('mine'));
-  assert.ok(f.tables.secretGrants.has('other-grant'));
   assert.ok(!f.tables.importReaders.has('reader'));
+  assert.ok(f.tables.importReaders.has('their'), 'another person keeps their access');
   assert.ok(f.tables.imports.has('foreign'));
-  assert.equal(f.tables.secretObjects.get('hidden').policyRevision, 2);
-  assert.equal([...f.tables.secretEvents.values()][0].principal, 'owner');
-  // A grant made after the deletion started is not one it covers.
-  f.tables.secretGrants.set(
-    'later',
-    row('later', {
-      _creationTime: Date.now() + 60_000,
-      secretId: 'hidden',
-      principal: 'owner',
-      discover: false,
-      capabilities: ['names'],
-      activeUntil: 9999999999999,
-    }),
-  );
-  await advance(f, r);
-  assert.ok(f.tables.secretGrants.has('later'));
 });
 
 test('changed incoming grants are preserved; owned creator memberships never self-left', async () => {
   const f = state();
-  f.tables.secretObjects.set(
-    'hidden',
-    row('hidden', {
-      owner: 'other',
-      name: 'invisible',
-      operationId: randomUUID(),
-      repository: 'x/y',
-      ref: 'main',
-      version: 1,
-      policyRevision: 1,
-      disabled: false,
-    }),
-  );
-  f.tables.secretGrants.set(
-    'mine',
-    row('mine', {
-      secretId: 'hidden',
-      principal: 'owner',
-      discover: false,
-      capabilities: ['use'],
-      activeUntil: 9999999999999,
-    }),
-  );
   f.tables.teams.set(
     'their-team',
     row('their-team', { owner: 'other', name: 'theirs', operationId: randomUUID() }),
   );
   f.tables.teamMembers.set('tm', row('tm', { teamId: 'their-team', member: 'owner' }));
   const own = await teams.create._handler(f.ctx, { name: 'my team', operationId: randomUUID() });
-  const r = await begin(f, [], ['teams', 'secrets']);
-  // A listed grant replaced after the deletion started (removed, then given again) is kept; a secret grant is left
-  // as it stood when the deletion started (it is never listed, so it is bound by time, not by its bytes).
+  const r = await begin(f, [], ['teams']);
+  // A listed grant replaced after the deletion started (removed, then given again) is kept.
   f.tables.teamMembers.delete('tm');
   f.tables.teamMembers.set('tm-again', row('tm-again', { teamId: 'their-team', member: 'owner' }));
-  f.tables.secretGrants.get('mine').capabilities = ['names'];
   await advance(f, r);
   assert.ok(f.tables.teamMembers.has('tm-again'));
-  assert.ok(!f.tables.secretGrants.has('mine'));
   assert.ok([...f.tables.teamMembers.values()].some(x => x.teamId === own));
 });
 
@@ -369,31 +231,17 @@ test('selected import cleanup keeps another owner shared artifact and original o
   assert.equal((await account.begin._handler(f.ctx, r)).stage, 'completed');
 });
 
-test('selected native project and SecretObject retain exact child receipts through lost committed replies', async () => {
+test('selected native project and team retain exact child receipts through lost committed replies', async () => {
   const f = state();
   f.tables.hostedProjects.set(
     'project',
     row('project', { owner: 'owner', name: 'synthetic', key: 'synthetic', currentBackup: null, revision: 1 }),
   );
-  f.tables.secretObjects.set(
-    'secret',
-    row('secret', {
-      owner: 'owner',
-      operationId: randomUUID(),
-      name: 'synthetic',
-      repository: 'example/synthetic',
-      ref: 'main',
-      version: 1,
-      policyRevision: 1,
-      disabled: false,
-    }),
-  );
-  f.tables.secretVersions.set('version', row('version', { secretId: 'secret', version: 1 }));
-  const selected = [...(await inventory(f, 'project')), ...(await inventory(f, 'secret'))],
+  const team = await teams.create._handler(f.ctx, { name: 'synthetic', operationId: randomUUID() });
+  const selected = [...(await inventory(f, 'project')), ...(await inventory(f, 'team'))],
     r = await begin(f, selected);
   const original = f.ctx.runMutation;
   let discarded = false;
-  const { getFunctionName } = await import('convex/server');
   f.ctx.runMutation = async (fn, args) => {
     const result = await original(fn, args);
     if (!discarded && getFunctionName(fn) === 'accountExecute:step') {
@@ -408,24 +256,20 @@ test('selected native project and SecretObject retain exact child receipts throu
   const children = [...f.tables.accountItems.values()].map(x => x.operationId);
   assert.equal(new Set(children).size, 2);
   const { purgeSettleMs } = await import(moduleUrl('../convex/projectRetention.ts'));
-  const { purge: projectPurge } = await import(moduleUrl('../convex/projectLifecycle.ts')),
-    { purge: secretPurge } = await import(moduleUrl('../convex/secretLifecycle.ts'));
+  const { purge: projectPurge } = await import(moduleUrl('../convex/projectLifecycle.ts'));
   // Time passes beyond the project purge's upload-expiry settle wait.
   f.tables.hostedProjects.get('project').removedAt -= purgeSettleMs;
   for (let n = 0; n < 5; n++) {
     settleR2Purge(f.tables.hostedProjects.get('project'));
     await projectPurge._handler(f.ctx, { projectId: 'project' });
-    const deletion = [...f.tables.secretDeletions.values()][0];
-    await secretPurge._handler(f.ctx, { deletionId: deletion._id });
+    await teamLife.purge._handler(f.ctx, { id: team });
   }
   assert.equal((await advance(f, r)).stage, 'completed');
   assert.equal(f.tables.hostedProjects.get('project').removal, 'deleted');
-  assert.ok(!f.tables.secretObjects.has('secret'));
-  const deletion = [...f.tables.secretDeletions.values()][0];
-  assert.ok(children.includes(deletion.operationId));
+  assert.equal(f.tables.teams.get(team).removal, 'deleted');
+  assert.ok(children.includes(f.tables.teams.get(team).removalOperation));
   assert.ok(children.includes(f.tables.hostedProjects.get('project').lifecycle.operationId));
   assert.equal((await advance(f, r)).stage, 'completed');
-  assert.equal(f.tables.secretDeletions.size, 1);
 });
 
 test('bounded operation pages finish >40 preferences without touching another owner', async () => {
@@ -527,27 +371,15 @@ test('self-leave covers Zone, team and native project relationships without eras
 
 test('a caller cannot turn a cross-table ID into personal deletion or bypass its lifecycle owner', async () => {
   const f = state();
-  f.tables.secretObjects.set(
-    'secret',
-    row('secret', {
-      owner: 'owner',
-      name: 'synthetic',
-      repository: 'x/y',
-      ref: 'main',
-      version: 1,
-      policyRevision: 1,
-      disabled: false,
-    }),
-  );
+  f.tables.teams.set('team', row('team', { owner: 'owner', name: 'synthetic', operationId: randomUUID() }));
   const { digest } = await import('../dist/hash.js');
   const forged = {
     kind: 'view',
-    id: 'secret',
-    pin: digest(JSON.stringify({ id: 'secret', name: 'synthetic' })),
+    id: 'team',
+    pin: digest(JSON.stringify({ id: 'team', name: 'synthetic' })),
   };
   await assert.rejects(() => begin(f, [forged]), /ACCOUNT_CHANGED/);
-  assert.ok(f.tables.secretObjects.has('secret'));
-  assert.equal(f.tables.secretDeletions.size, 0);
+  assert.equal(f.tables.teams.get('team').removal, undefined);
 });
 
 test('account metadata, planner, executor and team lifecycle bundle without Node imports in Convex mutation/query runtime', async () => {

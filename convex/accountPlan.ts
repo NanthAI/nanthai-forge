@@ -54,7 +54,6 @@ export const register = internalMutation({
     request: v.string(),
     expectedItems: v.number(),
     leave: v.array(leaveKind),
-    secretsBelow: v.optional(v.number()),
   },
   returns: v.any(),
   handler: async (ctx, input) => {
@@ -71,19 +70,6 @@ export const register = internalMutation({
           'Reconcile your original selected Forge data operation.',
         );
         return old;
-      }
-      // The secret boundary is the epoch the server issued for the person's latest review, read in this transaction:
-      // a token carrying any other (an older review, or a number the caller made up) is not that review.
-      if (input.secretsBelow !== undefined) {
-        const person = await ctx.db
-          .query('forgeAccounts')
-          .withIndex('by_owner', q => q.eq('owner', owner))
-          .unique();
-        invariant(
-          person?.secretsReview?.epoch === input.secretsBelow,
-          'ACCOUNT_CHANGED',
-          'What is shared with you changed after your review. Review again; nothing was deleted.',
-        );
       }
       const id = await ctx.db.insert('accountOperations', {
         ...input,
@@ -167,16 +153,10 @@ export const append = internalMutation({
           if (old) continue;
           const r = value as {
             revision?: number;
-            version?: number;
-            policyRevision?: number;
-            archiveRevision?: number;
             creation?: number;
           };
           expected = {
             ...('revision' in r ? { revision: r.revision } : {}),
-            ...('version' in r
-              ? { version: r.version, policyRevision: r.policyRevision, archiveRevision: r.archiveRevision }
-              : {}),
             ...('creation' in r ? { creation: r.creation } : {}),
           };
           if (item.kind === 'view') {
@@ -302,7 +282,6 @@ export const complete = internalMutation({
         'ACCOUNT_OPERATION_CHANGED',
         'Reconcile the original selection first.',
       );
-      // Only the listed items: the secret grants it leaves run on in the background and never change a receipt.
       if (r.pending) return receipt(r);
       await ctx.db.patch(r._id, { stage: 'completed' });
       return { ...receipt(r), stage: 'completed' as const };

@@ -1,7 +1,7 @@
 # Hosted deployment durability
 
 This procedure backs up a whole Convex deployment, including private table data,
-source objects, Work, grants, encrypted Secret Objects and file storage. It is
+source objects, Work, grants, sealed secret records (ciphertext only) and file storage. It is
 separate from a Forge project archive and from the canonical local owner's backup.
 A hosted copy can lag local accepted `main`; this procedure preserves the hosted
 snapshot, not unpublished local work. Keep the local owner and its portable backup.
@@ -94,8 +94,9 @@ Keep the original ZIP unchanged in private storage outside the project. Save its
 SHA-256, accepted source/lockfile identity, source deployment identity, snapshot
 observation time and byte size separately. Preserve code, backend configuration,
 authentication configuration and environment variables through existing private
-operator backups. Preserve the exact Secret Object keyring separately; never add
-it to the comparison report.
+operator backups. Forge holds no key that opens a team's secret, so a backup needs
+no secret keyring; the GitHub token keyring is configuration like the rest. Never
+add configuration values to the comparison report.
 
 Convex's [export command](https://docs.convex.dev/cli/reference/export) and
 [snapshot guide](https://docs.convex.dev/database/backup-restore) describe a

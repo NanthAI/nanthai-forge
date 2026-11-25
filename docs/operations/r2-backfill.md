@@ -129,8 +129,8 @@ private operator environment without printing them.
    both legacy storage IDs and R2-only archive references, and the writers use
    R2 for imports, derivatives, archives and finish plans. Identify every project
    in the deployment: a project-level R6 receipt does not cover other projects,
-   legacy imports or derived artifacts. Preserve matching code/configuration and
-   the Secret Object keyring separately from the database backup.
+   legacy imports or derived artifacts. Preserve matching code/configuration
+   separately from the database backup.
 2. **LIVE: file-inclusive fallback backup.** Preflight: confirm the explicit
    deployment, existing private credential selection, bucket/prefix and private
    state directory. Run the existing file-inclusive weekly backup command in

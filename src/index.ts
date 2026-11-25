@@ -11,8 +11,6 @@ import type { GraphPack, Limits, Snapshot } from './types.js';
 export { capture, DEFAULT_LIMITS } from './snapshot.js';
 export { analyze } from './analyze.js';
 export { validateArtifact } from './artifact-validation.js';
-export { recoverSecretArchive } from './secretArchive.js';
-export { secretKeyring, type SecretKeyring } from './secret-crypto.js';
 export { ForgeError } from './errors.js';
 export type * from './types.js';
 

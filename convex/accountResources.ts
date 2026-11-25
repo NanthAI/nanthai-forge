@@ -13,8 +13,8 @@ import { digest } from '../src/state/hash';
 import { isDeviceIdentity } from './cliServer';
 import { metadataBytes } from './accountMetadata';
 
-export type ResourceKind = 'project' | 'import' | 'secret' | 'agent' | 'team' | 'view' | 'interest';
-export type LeaveKind = 'readers' | 'zones' | 'teams' | 'projects' | 'projectReaders' | 'secrets';
+export type ResourceKind = 'project' | 'import' | 'agent' | 'team' | 'view' | 'interest';
+export type LeaveKind = 'readers' | 'zones' | 'teams' | 'projects' | 'projectReaders';
 export async function accountActor(ctx: QueryCtx | MutationCtx) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'ACCOUNT_UNAVAILABLE', 'Sign in to manage your Forge data.');
@@ -31,7 +31,6 @@ export async function accountActor(ctx: QueryCtx | MutationCtx) {
 const OWNED_TABLE = {
   project: 'hostedProjects',
   import: 'imports',
-  secret: 'secretObjects',
   agent: 'agentGrants',
   team: 'teams',
   view: 'savedViews',
@@ -62,20 +61,6 @@ export function ownedProjection(kind: ResourceKind, row: OwnedRow | null, actor:
           phase: r.phase,
           generation: r.generation,
           removal: r.removal ?? null,
-        }
-      : null;
-  if (kind === 'secret')
-    return !r.deleting
-      ? {
-          id: r._id,
-          name: r.name,
-          repository: r.repository,
-          ref: r.ref,
-          version: r.version,
-          policyRevision: r.policyRevision,
-          archiveRevision: r.archiveRevision ?? 0,
-          archived: !!r.archived,
-          disabled: r.disabled,
         }
       : null;
   if (kind === 'agent')
@@ -178,15 +163,13 @@ export function ownedPage(ctx: QueryCtx | MutationCtx, kind: ResourceKind, actor
         ? s
             .query('imports')
             .withIndex('by_owner_and_visibility', q => q.eq('owner', actor).eq('visibility', 'private'))
-        : kind === 'secret'
-          ? s.query('secretObjects').withIndex('by_owner_and_operationId', q => q.eq('owner', actor))
-          : kind === 'agent'
-            ? s.query('agentGrants').withIndex('by_owner', q => q.eq('owner', actor))
-            : kind === 'team'
-              ? s.query('teams').withIndex('by_owner_and_operationId', q => q.eq('owner', actor))
-              : kind === 'view'
-                ? s.query('savedViews').withIndex('by_owner', q => q.eq('owner', actor))
-                : s.query('projectInterests').withIndex('by_owner_and_importId', q => q.eq('owner', actor));
+        : kind === 'agent'
+          ? s.query('agentGrants').withIndex('by_owner', q => q.eq('owner', actor))
+          : kind === 'team'
+            ? s.query('teams').withIndex('by_owner_and_operationId', q => q.eq('owner', actor))
+            : kind === 'view'
+              ? s.query('savedViews').withIndex('by_owner', q => q.eq('owner', actor))
+              : s.query('projectInterests').withIndex('by_owner_and_importId', q => q.eq('owner', actor));
   return (page as QueryStream<OwnedRow>).paginate(bounds);
 }
 /** The export reads full metadata, so its pages are byte-capped too (at most the cap plus one document). */
@@ -212,7 +195,7 @@ export const page = internalQuery({
     }
   },
 });
-export type SharedKind = Exclude<LeaveKind, 'secrets'>;
+export type SharedKind = LeaveKind;
 /** The kinds a review lists, in the order its token is built. */
 export const SHARED: readonly SharedKind[] = ['projects', 'projectReaders', 'readers', 'teams', 'zones'];
 export const SHARED_PAGE = 100;
@@ -310,25 +293,16 @@ export async function incomingPage(
 }
 /** The chain a review and its cleanup both compute: one link per page, in SHARED order, over exactly the rows the
  * review shows (ids and labels). It is built from nothing the person cannot see, so it cannot tell anyone anything
- * hidden, whatever prefix a caller chooses; secret grants are never part of it. A token is `<epoch>:<digest>`: `epoch`
- * is the review epoch the server issued when the review started (accountData.review), carried through the chain
- * unchanged. The cleanup accepts it only while it is the person's latest (accountPlan.register) and leaves only the
- * secret grants given before it (accountExecute.leaveSecrets). */
-export function incomingStart(epoch: number) {
-  return `${epoch}:${digest(`forge-incoming\n${epoch}`)}`;
-}
-/** The review epoch a token carries, or null when it carries none. */
-export function reviewEpoch(token: string) {
-  const at = Number(token.slice(0, token.indexOf(':')));
-  return token.includes(':') && Number.isSafeInteger(at) && at > 0 ? at : null;
+ * hidden, whatever prefix a caller chooses. */
+export function incomingStart() {
+  return digest('forge-incoming');
 }
 export function incomingLink(
   token: string,
   kind: SharedKind,
   shown: { id: string; label: string; access: string }[],
 ) {
-  const at = token.includes(':') ? token.slice(0, token.indexOf(':')) : '';
-  return `${at}:${digest(`${token}\n${kind}\n${metadataBytes(shown)}`)}`;
+  return digest(`${token}\n${kind}\n${metadataBytes(shown)}`);
 }
 /** One page of what is shared and the chain after it. Internal: cleanup re-reads exactly what the review read. */
 export const incoming = internalQuery({
@@ -363,7 +337,6 @@ export async function incomingCurrent(
     teams: 'teamMembers',
     projects: 'projectContributors',
     projectReaders: 'projectReaders',
-    secrets: 'secretGrants',
   } as const;
   if (!ctx.db.normalizeId(table[kind], id)) return null;
   const get = async <T extends GenericDocument>(doc: Promise<T | null>) => {
@@ -389,10 +362,6 @@ export async function incomingCurrent(
       ? grantAccess(kind, r)
       : null;
   }
-  if (kind === 'projectReaders') {
-    const r = await get(ctx.db.get(id as Id<'projectReaders'>));
-    return r?.reader === actor && (await get(ctx.db.get(r.projectId)))?.owner !== actor ? r : null;
-  }
-  const r = await get(ctx.db.get(id as Id<'secretGrants'>));
-  return r?.principal === actor && (await get(ctx.db.get(r.secretId)))?.owner !== actor ? r : null;
+  const r = await get(ctx.db.get(id as Id<'projectReaders'>));
+  return r?.reader === actor && (await get(ctx.db.get(r.projectId)))?.owner !== actor ? r : null;
 }

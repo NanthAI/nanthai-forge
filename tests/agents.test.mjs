@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -50,18 +50,9 @@ async function setup(t) {
     };
   const s = state([{ ...job(), head: artifact.pack.source.gitHead }]);
   s.file('saved', await encodeHostedArtifact(artifact));
-  const previousKey = process.env.FORGE_SECRET_KEYS;
-  process.env.FORGE_SECRET_KEYS = JSON.stringify({
-    active: 'test',
-    keys: { test: randomBytes(32).toString('base64') },
-  });
   let revoked = false;
   const cleanup = providers(() => revoked, true, artifact.pack.source.gitHead);
-  t.after(() => {
-    cleanup();
-    if (previousKey === undefined) delete process.env.FORGE_SECRET_KEYS;
-    else process.env.FORGE_SECRET_KEYS = previousKey;
-  });
+  t.after(cleanup);
   const request = {
     id: 'own',
     name: 'Synthetic read agent',
@@ -146,25 +137,33 @@ test('registered agent actions delegate creator access only, preserve unknown is
   let lose = true;
   s.ctx.runMutation = async (fn, args) => {
     const result = await originalMutation(fn, args);
-    if (lose && args.sealed) {
+    if (lose && args.tokenHash && args.operationId) {
       lose = false;
       throw new Error('Lost committed issue reply');
     }
     return result;
   };
   await assert.rejects(actions.create._handler(s.ctx, request));
-  const issued = await actions.create._handler(s.ctx, request);
-  assert.deepEqual(await actions.create._handler(s.ctx, request), issued);
-  assert.equal(s.tables.agentGrants.size, 1);
+  // The token is shown once and no key opens it again: a retry of the lost issue is refused and says what to do.
+  await assert.rejects(
+    actions.create._handler(s.ctx, request),
+    error => error.data.code === 'AGENT_OPERATION_CHANGED' && /revoke that grant/.test(error.data.message),
+  );
+  const issuing = { ...request, operationId: randomUUID() };
+  const issued = await actions.create._handler(s.ctx, issuing);
+  assert.equal(s.tables.agentGrants.size, 2);
   assert.match(issued.token, /^fga_[A-Za-z0-9_-]{43}$/);
   assert.ok(!JSON.stringify([...s.tables.agentGrants.values()]).includes(issued.token));
   await assert.rejects(
     actions.create._handler(s.ctx, { ...request, files: ['visible.ts'] }),
     error => error.data.code === 'AGENT_OPERATION_CHANGED',
   );
-  assert.equal(await actions.recover._handler(s.ctx, { id: issued.id }), issued.token);
   const metadata = await grants.list._handler(s.ctx, { paginationOpts });
-  assert.equal(metadata.page.length, 1);
+  assert.equal(
+    metadata.page.length,
+    2,
+    'the grant whose reply was lost stays listed, so its owner can revoke it',
+  );
   assert.equal(metadata.page[0].repository, s.tables.imports.get('own').repository);
   assert.ok(!JSON.stringify(metadata).includes(issued.token));
   assert.ok(!JSON.stringify(metadata).includes('sealed'));
@@ -187,15 +186,13 @@ test('registered agent actions delegate creator access only, preserve unknown is
   );
   assert.equal(s.reads(), count);
   s.caller('other');
-  await assert.rejects(actions.recover._handler(s.ctx, { id: issued.id }), denied);
   await assert.rejects(grants.revoke._handler(s.ctx, { id: issued.id }), denied);
   await assert.rejects(grants.audit._handler(s.ctx, { id: issued.id, paginationOpts }), denied);
   await assert.rejects(actions.create._handler(s.ctx, { ...request, operationId: randomUUID() }), denied);
   s.caller('owner');
   revoked(true);
   await assert.rejects(read(issued, 'status'), denied);
-  await assert.rejects(actions.recover._handler(s.ctx, { id: issued.id }), denied);
-  assert.equal((await grants.list._handler(s.ctx, { paginationOpts })).page.length, 1);
+  assert.equal((await grants.list._handler(s.ctx, { paginationOpts })).page.length, 2);
   revoked(false);
   const metadataOnly = await actions.create._handler(s.ctx, {
     ...request,
@@ -217,7 +214,11 @@ test('registered agent actions delegate creator access only, preserve unknown is
   await grants.revoke._handler(s.ctx, { id: issued.id });
   await assert.rejects(read(issued, 'status'), denied);
   await assert.rejects(actions.describe._handler(s.ctx, { token: issued.token }), denied);
-  await assert.rejects(actions.create._handler(s.ctx, request), denied);
+  // A revoked grant is never given back: retrying its issue refuses, the same as for any grant already issued.
+  await assert.rejects(
+    actions.create._handler(s.ctx, issuing),
+    error => error.data.code === 'AGENT_OPERATION_CHANGED',
+  );
   assert.equal([...s.tables.agentEvents.values()].filter(row => row.kind === 'revoke').length, 1);
 });
 

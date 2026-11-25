@@ -32,7 +32,7 @@ function signUntrustedJwt(claims) {
   return `${signingInput}.${sig.toString('base64url')}`;
 }
 
-const secretDenied = error => error?.data?.code === 'SECRET_UNAVAILABLE';
+const paginationOpts = { numItems: 1, cursor: null };
 const signedOutDenied = error => error?.data?.code === 'GITHUB_UNAVAILABLE';
 const invalidBearerDenied = error =>
   signedOutDenied(error) ||
@@ -166,14 +166,12 @@ export function createSoftwarePasskey(origin = smokeWebUrl) {
 
 /**
  * Verify Convex Auth end to end on a live self-hosted backend without admin auth on user calls.
- * First invocation signs up a fresh passkey account and creates an owner-scoped Secret Object;
+ * First invocation signs up a fresh passkey account and creates an owner-scoped team;
  * later invocations (after snapshot restore, restart, upgrade or rollback) sign back in with the
  * same passkey and confirm ownership, refresh rotation, negative checks and live session revocation.
  */
 export async function verifyConvexAuth(
   clients,
-  repository,
-  ref,
   original,
   {
     secrets = [],
@@ -222,17 +220,13 @@ export async function verifyConvexAuth(
     assert.equal(finished.status, 'complete');
     tokens = finished.tokens;
     remember(tokens);
-    const value = `auth-synthetic-${randomUUID()}`;
-    secrets.push(value);
     retained = {
       handle,
       passkey,
       userId: tokens.userId,
       accountKey: `user_${tokens.userId}`,
       operationId: randomUUID(),
-      value,
       id: null,
-      stored: null,
       badSignatureChecked: false,
     };
   } else {
@@ -279,33 +273,23 @@ export async function verifyConvexAuth(
   assert.equal(await client.query(api.auth.isAuthenticated, {}), true);
   assert.equal((await client.query(api.urlAccounts.current, {}))?.handle, retained.handle);
 
-  if (!retained.id)
-    retained.id = await client.action(api.secretActions.create, {
+  const createTeam = () =>
+    client.mutation(api.teams.create, {
       name: 'Convex Auth native restore QA',
-      repository,
-      ref,
       operationId: retained.operationId,
-      value: retained.value,
     });
+  if (!retained.id) retained.id = await createTeam();
 
-  const stored = await clients.admin.query(internal.secrets.created, {
-    owner: retained.accountKey,
-    operationId: retained.operationId,
-  });
-  assert(stored);
-  assert.equal(stored.object._id, retained.id);
-  assert.equal(stored.object.owner, retained.accountKey);
-  assert(!JSON.stringify(stored).includes(retained.value));
-  if (retained.stored) assert.deepEqual(stored, retained.stored);
-  else retained.stored = stored;
-
-  assert.equal((await client.query(api.secrets.details, { id: retained.id })).owned, true);
+  // The team is owned by this account and by nobody else: the owner reads it, every other caller is refused.
   assert.equal(
-    (await client.action(api.secretActions.reveal, { id: retained.id, operationId: randomUUID() })).value,
-    retained.value,
+    await clients.admin.query(internal.teams.owned, { id: retained.id, owner: retained.accountKey }),
+    null,
+    'the lookup returns nothing for the owner',
   );
+  await assert.rejects(clients.admin.query(internal.teams.owned, { id: retained.id, owner: 'someone_else' }));
+  await client.query(api.teams.members, { id: retained.id, paginationOpts });
   for (const caller of [clients.anon, clients.outsider, clients.admin])
-    await assert.rejects(caller.query(api.secrets.details, { id: retained.id }), secretDenied);
+    await assert.rejects(caller.query(api.teams.members, { id: retained.id, paginationOpts }));
 
   // Negative JWT checks: a tampered payload and an untrusted-signer ES256 JWT must never write.
   const invalid = makeClient(url);
@@ -343,16 +327,7 @@ export async function verifyConvexAuth(
   remember(refreshed.tokens);
   client.setAuth(refreshed.tokens.accessToken);
   assert.equal(await client.query(api.auth.isAuthenticated, {}), true);
-  assert.equal(
-    await client.action(api.secretActions.create, {
-      name: 'Convex Auth native restore QA',
-      repository,
-      ref,
-      operationId: retained.operationId,
-      value: retained.value,
-    }),
-    retained.id,
-  );
+  assert.equal(await createTeam(), retained.id);
 
   // Live session revocation: signing out immediately invalidates the still-unexpired access token.
   await retryWriteThrottle(() =>
@@ -360,7 +335,7 @@ export async function verifyConvexAuth(
   );
   assert.equal(await client.query(api.auth.isAuthenticated, {}), false);
   assert.equal(await client.query(api.urlAccounts.current, {}), null);
-  await assert.rejects(client.query(api.secrets.details, { id: retained.id }), secretDenied);
+  await assert.rejects(client.query(api.teams.members, { id: retained.id, paginationOpts }));
   await assert.rejects(
     client.mutation(api.teams.create, {
       name: 'Revoked session must not write',

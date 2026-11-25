@@ -5,8 +5,8 @@ byte-body rule (Issue `41a0df87`). They hold client-signed public metadata, key
 wraps and padded ciphertext; no private key, value encoding or unkeyed value hash
 belongs in either row. One set and one history row per project/set kind are
 replaced together in one compare-and-swap mutation. This atomic publication is
-why these bounded records stay in Convex. Existing Secret Objects are separate
-and remain until their approved retirement.
+why these bounded records stay in Convex. They hold ciphertext sealed to device keys and
+signed rosters only: no copy of them opens without a device key, and no server setting does.
 
 The server enforces a complete set-row ceiling of 512 KiB and a complete history
 ceiling of 128 KiB, including metadata allowance. It appends each write's own

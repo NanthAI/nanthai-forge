@@ -40,7 +40,6 @@ for (const name of [
   'projectGithubStatus',
   'projectSourceAuthority',
   'projectHostedSeed',
-  'secrets',
 ])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 const keyId = process.env.FORGE_HOSTED_CHECK_KEY_ID;
@@ -255,45 +254,6 @@ test('signed-in public stranger matrix refuses writes, including forged owner ap
       );
       assert.equal(JSON.stringify(f.currentMain()), before);
     });
-  const secretId = f.insert('secretObjects', {
-    owner: 'owner',
-    name: 'synthetic',
-    operationId: randomUUID(),
-    repository: 'synthetic/repo',
-    ref: 'main',
-    version: 1,
-    disabled: false,
-    policyRevision: 0,
-  });
-  await assert.rejects(
-    f.transaction('strangerSecret', modules.secrets.details, { id: secretId }, 'stranger'),
-    code('SECRET_UNAVAILABLE'),
-  );
-  for (const actor of ['stranger', 'contributor']) {
-    await assert.rejects(
-      f.transaction(
-        'secretWrite',
-        modules.secrets.enabled,
-        withRequiredArgs(modules.secrets.enabled, {
-          id: secretId,
-          enabled: false,
-          expectedPolicyRevision: 0,
-          operationId,
-        }),
-        actor,
-      ),
-      code('SECRET_UNAVAILABLE'),
-    );
-    await assert.rejects(
-      f.transaction(
-        'secretRotate',
-        modules.secrets.rotate,
-        withRequiredArgs(modules.secrets.rotate, { id: secretId, actor, operationId }),
-        actor,
-      ),
-      code('SECRET_UNAVAILABLE'),
-    );
-  }
   // Import replay cannot be used to write somebody else's hosted project.
   f.insert('projectGithubImports', {
     visibility: 'private',

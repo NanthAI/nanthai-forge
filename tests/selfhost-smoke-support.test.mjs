@@ -67,7 +67,6 @@ test('fresh native auth reproduces the unset optional issuer failure; smoke defi
       },
       {
         token: 'synthetic-token',
-        keys: 'synthetic-keyring',
         r2: { R2_BUCKET: 'synthetic-bucket', R2_ENDPOINT: 'http://127.0.0.1:9' },
         ...(webUrl !== undefined ? { webUrl } : {}),
       },
@@ -80,7 +79,7 @@ test('fresh native auth reproduces the unset optional issuer failure; smoke defi
     assert.equal(variables.R2_BUCKET, 'synthetic-bucket');
     assert.equal(variables.R2_ENDPOINT, 'http://127.0.0.1:9');
     assert.equal(variables.GITHUB_PUBLIC_TOKEN, 'synthetic-token');
-    assert.equal(variables.FORGE_SECRET_KEYS, 'synthetic-keyring');
+    assert.equal('FORGE_SECRET_KEYS' in variables, false, 'no server key for secrets is set on a deployment');
     assert.deepEqual(commands.at(-1), ['deploy', '--typecheck', 'enable', '--yes']);
   }
 });

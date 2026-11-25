@@ -13,23 +13,19 @@ import { moduleUrl } from './convex-module.mjs';
 import { state, providers } from './hosted-fixture.mjs';
 
 const close = await import(moduleUrl('../convex/accountClose.ts'));
-const authority = await import(moduleUrl('../convex/secretGrantAuthority.ts'));
-const secrets = await import(moduleUrl('../convex/secrets.ts'));
-const data = await import(moduleUrl('../convex/accountData.ts'));
-const actions = await import(moduleUrl('../convex/accountActions.ts'));
 test.beforeEach(t => t.after(providers()));
 let clock = 1;
 const row = (id, fields) => ({ _id: id, _creationTime: clock++, ...fields });
 const code = c => e => (e.data?.code ?? e.code) === c;
 
 /** An account that holds nothing: two handles, a handle change, two finished receipts, a deleted-project tombstone, a
- * device sign-in, an ordering hint and a hidden secret grant someone else gave it. `native` adds a Convex Auth user
+ * device sign-in and an ordering hint. `native` adds a Convex Auth user
  * with GitHub, two sessions and passkeys behind stubbed components. */
 function emptyWorld({ native = true } = {}) {
   clock = 1;
   const f = state([]);
   const t = f.tables;
-  t.forgeAccounts.set('acct', row('acct', { owner: 'owner', handle: 'sample-owner', secretsLeftBefore: 5 }));
+  t.forgeAccounts.set('acct', row('acct', { owner: 'owner', handle: 'sample-owner' }));
   t.accountHandles.set('h1', row('h1', { owner: 'owner', handle: 'sample-owner' }));
   t.accountHandles.set('h0', row('h0', { owner: 'owner', handle: 'older-name' }));
   t.accountHandles.set('hx', row('hx', { owner: 'other', handle: 'someone-else' }));
@@ -85,29 +81,6 @@ function emptyWorld({ native = true } = {}) {
   t.accountProjectOrder.set(
     'order',
     row('order', { person: 'owner', projectId: 'gone', role: 'owner', activityHour: 1 }),
-  );
-  t.secretObjects.set(
-    'their-secret',
-    row('their-secret', {
-      owner: 'other',
-      name: 'canary',
-      operationId: randomUUID(),
-      repository: 'private/canary',
-      ref: 'main',
-      version: 1,
-      policyRevision: 1,
-      disabled: false,
-    }),
-  );
-  t.secretGrants.set(
-    'hidden-grant',
-    row('hidden-grant', {
-      secretId: 'their-secret',
-      principal: 'owner',
-      discover: false,
-      capabilities: ['use'],
-      activeUntil: 9999999999999,
-    }),
   );
   const calls = [];
   if (native) {
@@ -194,14 +167,11 @@ test('an account that holds nothing closes: account, handles, receipts, devices 
   });
   const operationId = randomUUID();
   assert.deepEqual(await closeAs(f, { operationId, handle: 'sample-owner' }), { stage: 'closing' });
-  // The hidden grant gives nothing from the close's own write, before its row goes.
-  assert.equal(await authority.leftByCleanup(f.ctx, t.secretGrants.get('hidden-grant')), true);
   assert.ok((await background(f)) >= 3);
   assert.equal(t.forgeAccounts.size, 0);
   assert.deepEqual([...t.accountHandles.keys()], ['hx']);
   assert.equal(t.handleOperations.size + t.accountOperations.size + t.accountItems.size, 0);
   assert.equal(t.accountProjectOrder.size + t.authLinkEvents.size, 0);
-  assert.equal(t.secretGrants.size, 0);
   assert.equal(t.cliCredentials.get('cred').revoked, true);
   assert.ok(t.hostedProjects.has('gone'), 'the deleted-project tombstone stays');
   // GitHub keeps its own account link, so the users row keeps only the numeric id, under a fresh account key: the next
@@ -221,80 +191,23 @@ test('an account that holds nothing closes: account, handles, receipts, devices 
   assert.equal(await close.preview._handler(f.ctx, {}), null);
 });
 
-test('a secret grant given in the same millisecond after the close starts is ordered by transaction and stays', async t => {
-  // Reviews s1-sol62 r4 #1 and s1-astra62 r4 #3, for the close's own cutoff: one clock value for every write.
-  t.mock.timers.enable({ apis: ['Date'], now: 1_800_000_000_000 });
-  const { f, t: tables } = emptyWorld();
+test('a close begun while secret grants existed resumes at its receipts and finishes', async () => {
+  const { f, t } = emptyWorld();
   as(f, 'owner');
-  tables.secretObjects.set(
-    'later-secret',
-    row('later-secret', { ...tables.secretObjects.get('their-secret'), _id: 'later-secret', name: 'later' }),
-  );
-  await closeAs(f, { operationId: randomUUID(), handle: 'sample-owner' });
-  await f.transaction(() =>
-    secrets.grant._handler(f.ctx, {
-      id: 'later-secret',
-      actor: 'other',
-      principal: 'owner',
-      capabilities: ['use'],
-      expectedPolicyRevision: 1,
-      operationId: randomUUID(),
-    }),
-  );
-  const later = [...tables.secretGrants.values()].find(g => g.secretId === 'later-secret');
-  assert.equal(later.grantedAt, tables.forgeAccounts.get('acct').closing.at, 'the grant ties with the close');
-  assert.equal(await authority.leftByCleanup(f.ctx, later), false);
-  assert.equal(await authority.leftByCleanup(f.ctx, tables.secretGrants.get('hidden-grant')), true);
-  await background(f);
-  assert.equal(tables.forgeAccounts.size, 0, 'closed');
-  assert.deepEqual(
-    [...tables.secretGrants.keys()],
-    [later._id],
-    'only the grant given before the close went',
-  );
-  // Signed in again on the same key (the old provider keeps it), the new account row's first review still covers that
-  // grant: epochs keep rising across rows, so a cleanup leaves it.
-  t.mock.timers.tick(60_000);
-  const { token } = await data.review._handler(f.ctx, { review: randomUUID() });
-  let incoming = token;
-  for (const kind of ['projects', 'projectReaders', 'readers', 'teams', 'zones'])
-    incoming = (await data.shared._handler(f.ctx, { kind, cursor: null, token: incoming })).token;
   const operationId = randomUUID();
-  const leave = ['projectReaders', 'projects', 'readers', 'secrets', 'teams', 'zones'];
-  await actions.begin._handler(f.ctx, { operationId, selection: [], leave, incoming });
-  await actions.advance._handler(f.ctx, { operationId, cursor: null });
-  for (let task; (task = f.scheduled.find(x => getFunctionName(x.fn) === 'accountExecute:leaveSecrets'));) {
-    f.scheduled.splice(f.scheduled.indexOf(task), 1);
-    await f.ctx.runMutation(task.fn, task.args);
-  }
-  assert.equal(tables.secretGrants.size, 0, 'the grant from before the new row is left');
-});
-
-test('a close begun before review epochs keeps its time cutoff', async () => {
-  const { f, t: tables } = emptyWorld();
-  tables.secretGrants.get('hidden-grant').grantedAt = 100;
-  tables.secretObjects.set(
-    'later-secret',
-    row('later-secret', { ...tables.secretObjects.get('their-secret'), _id: 'later-secret', name: 'later' }),
+  // The state a close left before Secret Objects were retired: the retired phase and epoch, and its task already
+  // scheduled with the retired phase name.
+  t.forgeAccounts.get('acct').closing = { operationId, at: 1, below: 7, phase: 'secrets', cursor: null };
+  assert.deepEqual(await closeAs(f, { operationId, handle: 'sample-owner' }), { stage: 'closing' });
+  assert.equal(f.scheduled.at(-1).args.phase, 'receipts', 'a retry restarts it at the receipts');
+  f.scheduled.length = 0;
+  t.forgeAccounts.get('acct').closing = { operationId, at: 1, below: 7, phase: 'secrets', cursor: null };
+  await f.transaction(() =>
+    close.step._handler(f.ctx, { accountId: 'acct', operationId, phase: 'secrets', cursor: null }),
   );
-  tables.secretGrants.set(
-    'later-grant',
-    row('later-grant', {
-      ...tables.secretGrants.get('hidden-grant'),
-      _id: 'later-grant',
-      secretId: 'later-secret',
-      grantedAt: 300,
-    }),
-  );
-  const account = tables.forgeAccounts.get('acct');
-  account.closing = { operationId: randomUUID(), at: 200, phase: 'secrets', cursor: null };
-  await close.step._handler(f.ctx, {
-    accountId: 'acct',
-    operationId: account.closing.operationId,
-    phase: 'secrets',
-    cursor: null,
-  });
-  assert.deepEqual([...tables.secretGrants.keys()], ['later-grant']);
+  assert.equal(f.scheduled[0].args.phase, 'receipts', 'a step scheduled before the retirement moves on');
+  await background(f);
+  assert.equal(t.forgeAccounts.size, 0, 'closed');
 });
 
 test('an account signed in with the old provider only (no native user) closes the same way', async () => {
@@ -351,11 +264,6 @@ test('an account that still holds or is shared anything is refused with the next
       t => t.accountOperations.set('op1', { ...t.accountOperations.get('op1'), stage: 'running' }),
       /still running/,
     ],
-    [
-      'secret grants still being left',
-      t => t.accountOperations.set('op1', { ...t.accountOperations.get('op1'), secretsDone: false }),
-      /still running/,
-    ],
   ];
   for (const [label, add, words] of cases) {
     const { f, t } = emptyWorld();
@@ -369,9 +277,6 @@ test('an account that still holds or is shared anything is refused with the next
       label,
     );
     assert.equal(t.forgeAccounts.get('acct').closing, undefined, label);
-    assert.equal(t.forgeAccounts.get('acct').secretsLeftBefore, 5, label);
-    assert.equal(t.forgeAccounts.get('acct').secretsLeftBelow, undefined, label);
-    assert.equal(t.forgeAccounts.get('acct').secretsReview, undefined, label);
     assert.equal(f.scheduled.length, 0, label);
   }
 });
@@ -395,7 +300,7 @@ test('close is retry-safe by operation id: a retry reconciles, a failed step res
   await closeAs(f, { operationId, handle: 'sample-owner' });
   assert.equal(f.scheduled.length, 1);
   await f.transaction(() => close.step._handler(f.ctx, { ...stale.args, cursor: 'stale' }));
-  assert.equal(t.secretGrants.size, 1, 'a step the account row does not name does nothing');
+  assert.equal(t.accountHandles.has('h1'), true, 'a step the account row does not name does nothing');
   await background(f);
   assert.equal(t.forgeAccounts.size, 0);
   assert.deepEqual(await closeAs(f, { operationId, handle: 'sample-owner' }), { stage: 'closed' });
@@ -470,7 +375,6 @@ test('a deletion stuck at preparing no longer blocks the close once nothing is h
     await background(f);
     assert.equal(t.forgeAccounts.size, 0);
     assert.equal(t.accountOperations.size + t.accountItems.size, 0);
-    assert.equal(t.secretGrants.size, 0, 'the hidden grant is left as in any close');
     assert.ok(t.hostedProjects.has('gone'));
   }
 });
@@ -528,9 +432,7 @@ test('closing past a stuck preparing deletion is retry-safe; one begun during th
   const failed = f.scheduled.splice(0, 1)[0];
   f.tasks.set(failed.id, { state: { kind: 'failed' } });
   await closeFor(f, { operationId, handle: 'sample-owner' });
-  // Run the secrets step, then fail the receipts step that drops the stuck receipt: the same id restarts it there.
-  const secrets = f.scheduled.splice(0, 1)[0];
-  await f.transaction(() => close.step._handler(f.ctx, secrets.args));
+  // Fail the receipts step that drops the stuck receipt: the same id restarts it there.
   const receipts = f.scheduled.find(x => getFunctionName(x.fn) === 'accountClose:step');
   assert.equal(receipts.args.phase, 'receipts');
   f.scheduled.splice(f.scheduled.indexOf(receipts), 1);

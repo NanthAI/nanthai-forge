@@ -9,13 +9,13 @@ import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { resourceKind, accountSelection, leaveKind } from './accountTypes';
 import { metadataBytes } from './accountMetadata';
-import { incomingStart, reviewEpoch } from './accountResources';
+import { incomingStart } from './accountResources';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
 type Selection = {
-  kind: 'project' | 'import' | 'secret' | 'agent' | 'team' | 'view' | 'interest';
+  kind: 'project' | 'import' | 'agent' | 'team' | 'view' | 'interest';
   id: string;
   pin: string;
 };
@@ -28,7 +28,7 @@ type Receipt = {
 };
 type Metadata = Record<string, unknown> & { id: string };
 type Inventory = Page<{ kind: Selection['kind']; id: string; pin: string; metadata: Metadata }>;
-type Leave = 'readers' | 'zones' | 'teams' | 'projects' | 'projectReaders' | 'secrets';
+type Leave = 'readers' | 'zones' | 'teams' | 'projects' | 'projectReaders';
 const receipt = (r: Doc<'accountOperations'>) => ({
   operationId: r.operationId,
   request: r.request,
@@ -175,11 +175,7 @@ export const begin = accountAction('person')({
         );
         if (original.stage !== 'preparing') return receipt(original);
       }
-      // The review epoch the server issued when the review started (accountData.review), carried by its token; a token
-      // that carries none is not a review. register accepts it only while it is the person's latest.
-      const epoch = incoming === null ? null : reviewEpoch(incoming);
-      invariant(incoming === null || epoch !== null, 'ACCOUNT_CHANGED', changedShared);
-      const start = epoch === null ? '' : incomingStart(epoch);
+      const start = incomingStart();
       if (selection.some(item => item.kind === 'project'))
         await requireOwnerPerson(ctx, 'permanently delete projects through account cleanup');
       // The reviewed before-list, first without keeping anything: nothing is registered unless it still matches.
@@ -190,7 +186,6 @@ export const begin = accountAction('person')({
         request,
         expectedItems: selection.length,
         leave,
-        ...(epoch !== null && leave.includes('secrets') ? { secretsBelow: epoch } : {}),
       });
       invariant(account, 'ACCOUNT_UNAVAILABLE', 'The original operation is unavailable.');
       // An overlapping retry of this same request sealed it first (review s1-sol62 #4): that is this begin's answer.
@@ -240,7 +235,6 @@ export const begin = accountAction('person')({
             })
           : null;
       invariant(again === incoming, 'ACCOUNT_CHANGED', changedShared);
-      // Secret grants are left by time when the cleanup runs (accountExecute.leaveSecrets), never listed here.
       for (const kind of leave)
         await ctx.runMutation(internal.accountPlan.captured, { operationId: input.operationId, kind });
       const restored = await savedSelection(ctx, input.operationId);
@@ -280,9 +274,6 @@ export const advance = accountAction('person')({
     }
   > => {
     try {
-      // The first pass starts leaving the secret grants this deletion covers, as bounded background work: one write
-      // here whatever the person holds, and nothing about them comes back.
-      if (cursor === null) await ctx.runMutation(internal.accountExecute.startSecrets, { operationId });
       const page: Page<Doc<'accountItems'>> = await ctx.runQuery(internal.accountPlan.items, {
         operationId,
         paginationOpts: { cursor, numItems: 40 },

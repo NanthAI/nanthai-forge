@@ -84,8 +84,8 @@ test('de67c77d: verifyConvexAuth exercises sign-up, owner isolation, negative JW
   const challenges = new Map();
   const sessions = new Map();
   const refreshTokens = new Map();
-  const secretsById = new Map();
-  const secretsByOwnerOp = new Map();
+  const teamsById = new Map();
+  const teamsByOwnerOp = new Map();
   const issuedJwts = new Set();
 
   const makeJwt = (sessionId, userId) => {
@@ -221,47 +221,30 @@ test('de67c77d: verifyConvexAuth exercises sign-up, owner isolation, negative JW
       }
       if (name === 'auth:isAuthenticated') return Boolean(viewer);
       if (name === 'urlAccounts:current') return viewer ? { handle: viewer.handle } : null;
-      if (name === 'secretActions:create') {
-        if (!viewer) throw new Error('AUTH_REQUIRED');
-        const key = `${viewer.accountKey}:${args.operationId}`;
-        if (secretsByOwnerOp.has(key)) return secretsByOwnerOp.get(key).object._id;
-        const id = `sec_${randomUUID()}`;
-        const record = {
-          object: { _id: id, owner: viewer.accountKey, sealed: 'ciphertext-only' },
-          plaintext: args.value,
-        };
-        secretsById.set(id, record);
-        secretsByOwnerOp.set(key, record);
-        return id;
-      }
-      if (name === 'secrets:created') {
-        assert.equal(role, 'admin');
-        const record = secretsByOwnerOp.get(`${args.owner}:${args.operationId}`);
-        return record ? { object: record.object } : null;
-      }
-      if (name === 'secrets:details') {
-        const record = secretsById.get(args.id);
-        if (!viewer || !record || record.object.owner !== viewer.accountKey)
-          throw Object.assign(new Error('This Secret Object is unavailable with the current access.'), {
-            data: { code: 'SECRET_UNAVAILABLE' },
-          });
-        return { owned: true };
-      }
-      if (name === 'secretActions:reveal') {
-        const record = secretsById.get(args.id);
-        if (!viewer || !record || record.object.owner !== viewer.accountKey)
-          throw Object.assign(new Error('This Secret Object is unavailable with the current access.'), {
-            data: { code: 'SECRET_UNAVAILABLE' },
-          });
-        return { value: record.plaintext };
-      }
       if (name === 'teams:create') {
         if (token && !issuedJwts.has(token)) throw new Error('Failed to authenticate: invalid JWT signature');
         if (!viewer)
           throw Object.assign(new Error('Sign in to create a team.'), {
             data: { code: 'GITHUB_UNAVAILABLE' },
           });
-        return `team_${randomUUID()}`;
+        const key = `${viewer.accountKey}:${args.operationId}`;
+        if (teamsByOwnerOp.has(key)) return teamsByOwnerOp.get(key);
+        const id = `team_${randomUUID()}`;
+        teamsById.set(id, viewer.accountKey);
+        teamsByOwnerOp.set(key, id);
+        return id;
+      }
+      if (name === 'teams:owned') {
+        assert.equal(role, 'admin');
+        assert.equal(teamsById.get(args.id), args.owner);
+        return null;
+      }
+      if (name === 'teams:members') {
+        if (!viewer || teamsById.get(args.id) !== viewer.accountKey)
+          throw Object.assign(new Error('This team is unavailable with the current access.'), {
+            data: { code: 'GITHUB_UNAVAILABLE' },
+          });
+        return { page: [], isDone: true, continueCursor: '' };
       }
       throw new Error(`Unexpected call: ${name}`);
     };
@@ -282,20 +265,16 @@ test('de67c77d: verifyConvexAuth exercises sign-up, owner isolation, negative JW
     admin: makeClient(url, 'admin'),
   };
   const capturedSecrets = [];
-  const first = await verifyConvexAuth(clients, 'owner/repo', 'a'.repeat(40), undefined, {
+  const first = await verifyConvexAuth(clients, undefined, {
     secrets: capturedSecrets,
     makeClient: u => makeClient(u, 'user'),
     now: () => NOW,
   });
   assert.equal(first.accountKey, `user_${first.userId}`);
   assert.equal(first.badSignatureChecked, false);
-  assert(capturedSecrets.includes(first.value));
-  assert(
-    capturedSecrets.length >= 5,
-    'access tokens, refresh tokens and secret value are tracked for redaction',
-  );
+  assert(capturedSecrets.length >= 4, 'access tokens and refresh tokens are tracked for redaction');
 
-  const restored = await verifyConvexAuth(clients, 'owner/repo', 'a'.repeat(40), first, {
+  const restored = await verifyConvexAuth(clients, first, {
     secrets: capturedSecrets,
     makeClient: u => makeClient(u, 'user'),
     now: () => NOW,

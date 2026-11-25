@@ -4,9 +4,7 @@
 // device, agent and legacy CLI credentials through the real wrappers, before an account row is read. The cleanup is
 // bound to the exact reviewed before-list of what the person can see: anything shared, removed or renamed after the
 // review refuses before anything is registered. A person who owns nothing can leave everything shared with them.
-// Secret grants others gave the person change nothing a caller can see (no row, token, page boundary, refusal or
-// count); a deletion leaves the ones that existed when it started. Every query and mutation stays within one Convex
-// paginated query, and every read stops at its byte cap, measured here at the largest record a name allows.
+// Every query and mutation stays within one Convex paginated query, and every read stops at its byte cap, measured here at the largest record a name allows.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -18,9 +16,7 @@ const actions = await import(moduleUrl('../convex/accountActions.ts'));
 const plan = await import(moduleUrl('../convex/accountPlan.ts'));
 const data = await import(moduleUrl('../convex/accountData.ts'));
 const resources = await import(moduleUrl('../convex/accountResources.ts'));
-const secrets = await import(moduleUrl('../convex/secrets.ts'));
-const authority = await import(moduleUrl('../convex/secretGrantAuthority.ts'));
-const LEAVES = ['projectReaders', 'projects', 'readers', 'secrets', 'teams', 'zones'];
+const LEAVES = ['projectReaders', 'projects', 'readers', 'teams', 'zones'];
 const SHARED = ['projects', 'projectReaders', 'readers', 'teams', 'zones'];
 test.beforeEach(t => t.after(providers()));
 // Distinct creation times, as Convex gives: index-key cursors order ties by id, which the fixture does not model.
@@ -28,7 +24,7 @@ let clock = 1;
 const row = (id, fields) => ({ _id: id, _creationTime: clock++, ...fields });
 const refused = e => /^AUTH_/.test(e.data?.code ?? e.code ?? '');
 
-/** Someone else's team, project, zone, import and hidden secret, each shared with `owner`. */
+/** Someone else's team, project, zone and import, each shared with `owner`. */
 function sharedWorld() {
   clock = 1; // every world starts alike: worlds differ only in what a test adds
   const f = state([{ ...job('foreign'), owner: 'other' }]);
@@ -41,29 +37,6 @@ function sharedWorld() {
   );
   f.tables.projectContributors.set('pc', row('pc', { projectId: 'fp', contributor: 'owner' }));
   f.tables.importReaders.set('ir', row('ir', { importId: 'foreign', reader: 'owner' }));
-  f.tables.secretObjects.set(
-    'hidden-secret',
-    row('hidden-secret', {
-      owner: 'other',
-      name: 'canary-secret-name',
-      operationId: randomUUID(),
-      repository: 'private/canary-repo',
-      ref: 'main',
-      version: 1,
-      policyRevision: 1,
-      disabled: false,
-    }),
-  );
-  f.tables.secretGrants.set(
-    'hidden-grant',
-    row('hidden-grant', {
-      secretId: 'hidden-secret',
-      principal: 'owner',
-      discover: false,
-      capabilities: ['use'],
-      activeUntil: 9999999999999,
-    }),
-  );
   // A project someone else shares with the person to read, not to contribute (review s1-sol62 #3).
   f.tables.hostedProjects.set(
     'rp',
@@ -72,22 +45,9 @@ function sharedWorld() {
   f.tables.projectReaders.set('prd', row('prd', { projectId: 'rp', reader: 'owner' }));
   return f;
 }
-/** Runs the secret-grant pages a deletion scheduled (accountExecute.leaveSecrets) until none is left. */
-async function background(f) {
-  let ran = 0;
-  for (
-    let task;
-    (task = f.scheduled.find(t => getFunctionName(t.fn) === 'accountExecute:leaveSecrets'));
-    ran++
-  ) {
-    f.scheduled.splice(f.scheduled.indexOf(task), 1);
-    await f.ctx.runMutation(task.fn, task.args);
-  }
-  return ran;
-}
-/** A review as the page makes it: the server issues its boundary first (accountData.review), then the shared pages. */
+/** A review as the page makes it: the shared pages, each chained from the one before, the first from nothing. */
 async function review(f, kinds = SHARED) {
-  let { token } = await data.review._handler(f.ctx, { review: randomUUID() });
+  let token;
   const rows = [];
   for (const kind of kinds)
     for (let cursor = null; ;) {
@@ -107,11 +67,7 @@ async function pass(f, operationId) {
     cursor = last.cursor;
   }
 }
-/** A pass, its background secret work, and the pass the page's watch then starts. */
-async function drive(f, operationId) {
-  const last = await pass(f, operationId);
-  return (await background(f)) ? pass(f, operationId) : last;
-}
+const drive = pass;
 function device(f, fields) {
   f.tables.cliCredentials.set('cred', {
     _id: 'cred',
@@ -133,11 +89,10 @@ test('every device, agent and legacy CLI credential is refused by every Your dat
   const entries = [
     ['accountData.overview', () => data.overview, {}],
     ['accountData.owned', () => data.owned, { kind: 'team', cursor: null }],
-    ['accountData.review', () => data.review, { review: randomUUID() }],
     [
       'accountData.shared',
       () => data.shared,
-      { kind: 'teams', cursor: null, token: resources.incomingStart(1) },
+      { kind: 'teams', cursor: null, token: resources.incomingStart() },
     ],
     ['accountData.watch', () => data.watch, { operationId: randomUUID(), resources: [] }],
     ['accountPlan.read', () => plan.read, { operationId: randomUUID() }],
@@ -174,7 +129,7 @@ test('every device, agent and legacy CLI credential is refused by every Your dat
       const query = f.ctx.db.query.bind(f.ctx.db);
       f.ctx.db.query = table => {
         if (
-          /^(accountOperations|accountItems|teamMembers|projectContributors|importReaders|zoneReaders|secretGrants|teams|savedViews|agentGrants)$/.test(
+          /^(accountOperations|accountItems|teamMembers|projectContributors|importReaders|zoneReaders|teams|savedViews|agentGrants)$/.test(
             table,
           )
         )
@@ -184,12 +139,7 @@ test('every device, agent and legacy CLI credential is refused by every Your dat
       await assert.rejects(fn()._handler(f.ctx, args), refused, `${label}: ${name}`);
       assert.equal(accountReads, 0, `${label}: ${name} read no account rows`);
       assert.equal(f.tables.accountOperations.size, 0);
-      assert.equal(
-        f.tables.forgeAccounts.get('acct').secretsReview,
-        undefined,
-        `${label}: ${name} issued no review`,
-      );
-      assert.ok(f.tables.teamMembers.has('tm') && f.tables.secretGrants.has('hidden-grant'));
+      assert.ok(f.tables.teamMembers.has('tm'));
     }
   // A token from the legacy CLI issuer, without a current credential, is refused too.
   const before = process.env.FORGE_CLI_ISSUER;
@@ -240,14 +190,12 @@ test('a person who owns nothing reviews what is shared with them and leaves all 
     ['projectContributors', 'pc'],
     ['importReaders', 'ir'],
     ['projectReaders', 'prd'],
-    ['secretGrants', 'hidden-grant'],
   ])
     assert.ok(!f.tables[table].has(id), `${table}:${id} left`);
   assert.ok(f.tables.hostedProjects.has('rp'), 'the project they read stays');
   // Their things stay theirs.
   assert.ok(f.tables.teams.has('ft'), 'their team stays');
   assert.ok(f.tables.hostedProjects.has('fp'), 'their project stays');
-  assert.ok(f.tables.secretObjects.has('hidden-secret'), 'their secret stays');
 });
 
 test('cleanup binds to the exact reviewed before-list: anything shared, removed or renamed after it refuses before registering', async () => {
@@ -317,412 +265,6 @@ test('cleanup binds to the exact reviewed before-list: anything shared, removed 
     /ACCOUNT_CHANGED/,
   );
   assert.equal(f.tables.accountOperations.size, 0);
-});
-
-/** n more secret grants to `owner` on someone else's secret, discoverable or not. */
-function hiddenGrants(f, n, at = undefined) {
-  for (let i = 0; i < n; i++)
-    f.tables.secretGrants.set(
-      `hidden-${i}`,
-      row(`hidden-${i}`, {
-        ...(at === undefined ? {} : { _creationTime: at + i }),
-        secretId: 'hidden-secret',
-        principal: 'owner',
-        discover: i % 2 === 0,
-        capabilities: ['use'],
-        activeUntil: 9999999999999,
-      }),
-    );
-}
-/** Everything a caller can see of the review and the cleanup: every reply, every chosen-prefix token, every page
- * boundary, every refusal. */
-async function transcript(f, operationId) {
-  const seen = [];
-  const reply = async (name, run) => {
-    try {
-      seen.push([name, await run()]);
-    } catch (e) {
-      seen.push([name, 'refused', e.data?.code ?? String(e)]);
-    }
-  };
-  for (const kind of SHARED)
-    for (const token of ['a'.repeat(64), resources.incomingStart(1)])
-      await reply(`shared ${kind} ${token}`, () =>
-        data.shared._handler(f.ctx, { kind, cursor: null, token }),
-      );
-  await reply('shared secrets', () =>
-    data.shared._handler(f.ctx, { kind: 'secrets', cursor: null, token: null }),
-  );
-  await reply('overview', () => data.overview._handler(f.ctx, {}));
-  const { token, rows } = await review(f);
-  seen.push(['review', token, rows]);
-  const receipt = ({ at: _at, ...rest }) => rest;
-  await reply('begin', async () =>
-    receipt(
-      await actions.begin._handler(f.ctx, { operationId, selection: [], leave: LEAVES, incoming: token }),
-    ),
-  );
-  for (let n = 0; n < 2; n++) {
-    await reply(`pass ${n}`, async () => {
-      const pages = [];
-      for (let cursor = null; ;) {
-        const p = await actions.advance._handler(f.ctx, { operationId, cursor });
-        pages.push(receipt(p));
-        if (p.isDone) return pages;
-        cursor = p.cursor;
-      }
-    });
-    // The secret pages run as background work between the passes; nothing about them is a reply.
-    await background(f);
-  }
-  await reply('read', async () => receipt(await plan.read._handler(f.ctx, { operationId })));
-  await reply('progress', () =>
-    plan.progress._handler(f.ctx, { operationId, paginationOpts: { cursor: null, numItems: 10 } }),
-  );
-  await reply('receipts', async () =>
-    (await plan.receipts._handler(f.ctx, { paginationOpts: { cursor: null, numItems: 10 } })).page.map(
-      receipt,
-    ),
-  );
-  return seen;
-}
-
-test('secret grants shared with the person change nothing a caller can see, and a deletion leaves them', async t => {
-  // One server time for every world: a review's token carries the time it was read.
-  const now = Date.now;
-  Date.now = () => 1_800_000_000_000;
-  t.after(() => (Date.now = now));
-  const operationId = randomUUID();
-  const worlds = [0, 1, 150].map(n => {
-    const f = sharedWorld();
-    f.tables.secretGrants.delete('hidden-grant');
-    hiddenGrants(f, n);
-    return f;
-  });
-  const seen = [];
-  for (const f of worlds) seen.push(await transcript(f, operationId));
-  // No hidden grants, one, or more than a page of them (discoverable or not): every reply, chosen-prefix token, page
-  // boundary and refusal is the same.
-  const differs = (a, b) =>
-    a
-      .filter((x, i) => JSON.stringify(x) !== JSON.stringify(b[i]))
-      .map(([name]) => name)
-      .join(', ');
-  assert.deepEqual(seen[1], seen[0], `one hidden grant changes: ${differs(seen[1], seen[0])}`);
-  assert.deepEqual(
-    seen[2],
-    seen[0],
-    `more than a page of hidden grants changes: ${differs(seen[2], seen[0])}`,
-  );
-  assert.ok(
-    seen[0].some(([name, ...rest]) => name === 'shared secrets' && rest[1] === 'BAD_ARGUMENT'),
-    'secret grants have no review page',
-  );
-  assert.doesNotMatch(JSON.stringify(seen), /hidden-|canary-secret-name|canary-repo/);
-  // The deletion left every one of them; the secret itself stays its owner's.
-  for (const f of worlds) {
-    assert.equal(f.tables.secretGrants.size, 0);
-    assert.ok(f.tables.secretObjects.has('hidden-secret'));
-  }
-  assert.equal(worlds[2].tables.secretObjects.get('hidden-secret').policyRevision, 1 + 150);
-});
-
-test('a deletion leaves the secret grants given before the list was read, and keeps any given or given again after', async t => {
-  const now = Date.now;
-  let at = 1_800_000_000_000;
-  Date.now = () => at;
-  t.after(() => (Date.now = now));
-  const f = sharedWorld();
-  // A second secret of theirs, whose grant to the person was revoked before the review.
-  f.tables.secretObjects.set(
-    'renewed-secret',
-    row('renewed-secret', {
-      owner: 'other',
-      name: 'second',
-      operationId: randomUUID(),
-      repository: 'private/canary-repo',
-      ref: 'main',
-      version: 1,
-      policyRevision: 1,
-      disabled: false,
-    }),
-  );
-  f.tables.secretGrants.set(
-    'renewed',
-    row('renewed', {
-      secretId: 'renewed-secret',
-      principal: 'owner',
-      discover: false,
-      capabilities: [],
-      activeUntil: 0,
-      revokedAt: 5,
-    }),
-  );
-  const { token } = await review(f);
-  // After the list was read and before the deletion started (review fdd5e2f4): a new grant, and the revoked one given
-  // again in place, which keeps its row and creation time (review s1-astra62 #1).
-  at += 10;
-  f.tables.secretGrants.set(
-    'later',
-    row('later', {
-      _creationTime: at,
-      epoch: f.tables.forgeAccounts.get('acct').secretsReview.epoch, // as secrets.grant records it after the review
-      secretId: 'hidden-secret',
-      principal: 'owner',
-      discover: false,
-      capabilities: ['use'],
-      activeUntil: 9999999999999,
-    }),
-  );
-  at += 10;
-  await f.transaction(() =>
-    secrets.grant._handler(f.ctx, {
-      id: 'renewed-secret',
-      actor: 'other',
-      principal: 'owner',
-      capabilities: ['use'],
-      expectedPolicyRevision: 1,
-      operationId: randomUUID(),
-    }),
-  );
-  assert.equal(f.tables.secretGrants.get('renewed').revokedAt, undefined, 'given again in place');
-  at += 10;
-  const operationId = randomUUID();
-  await actions.begin._handler(f.ctx, { operationId, selection: [], leave: LEAVES, incoming: token });
-  for (let n = 0; n < 2; n++) await drive(f, operationId);
-  assert.deepEqual([...f.tables.secretGrants.keys()].sort(), ['later', 'renewed']);
-  assert.equal((await plan.read._handler(f.ctx, { operationId })).stage, 'completed');
-  // Leaving only what is listed leaves no secret grant at all.
-  const g = sharedWorld();
-  const reviewed = await review(g, ['teams']);
-  const op = randomUUID();
-  await actions.begin._handler(g.ctx, {
-    operationId: op,
-    selection: [],
-    leave: ['teams'],
-    incoming: reviewed.token,
-  });
-  await drive(g, op);
-  assert.ok(g.tables.secretGrants.has('hidden-grant') && !g.tables.teamMembers.has('tm'));
-});
-
-/** Someone else's further secret, with no grant yet. */
-function theirSecret(f, id) {
-  f.tables.secretObjects.set(
-    id,
-    row(id, {
-      owner: 'other',
-      name: id,
-      operationId: randomUUID(),
-      repository: 'private/canary-repo',
-      ref: 'main',
-      version: 1,
-      policyRevision: 1,
-      disabled: false,
-    }),
-  );
-}
-const give = (f, id) =>
-  f.transaction(() =>
-    secrets.grant._handler(f.ctx, {
-      id,
-      actor: 'other',
-      principal: 'owner',
-      capabilities: ['use'],
-      expectedPolicyRevision: f.tables.secretObjects.get(id).policyRevision,
-      operationId: randomUUID(),
-    }),
-  );
-const grantOn = (f, id) => [...f.tables.secretGrants.values()].find(g => g.secretId === id);
-
-test('a grant given in the same millisecond as the review is ordered by transaction: before it is left, after it stays', async t => {
-  // Reviews s1-sol62 r4 #1 and s1-astra62 r4 #3: one clock value for every write, so time cannot order them.
-  t.mock.timers.enable({ apis: ['Date'], now: 1_800_000_000_000 });
-  const f = sharedWorld();
-  for (const id of ['given-before', 'given-after', 'given-again']) theirSecret(f, id);
-  await give(f, 'given-before');
-  await give(f, 'given-again');
-  const again = grantOn(f, 'given-again')._id;
-  const { token } = await review(f);
-  // Same millisecond, after the review's write: a new grant, and one given again in place (same row).
-  await give(f, 'given-after');
-  await give(f, 'given-again');
-  assert.equal(grantOn(f, 'given-again')._id, again, 'given again in place');
-  const times = ['given-before', 'given-after', 'given-again'].map(id => grantOn(f, id)?.grantedAt);
-  assert.deepEqual(
-    new Set(times),
-    new Set([1_800_000_000_000]),
-    'every grant ties with the review on the clock',
-  );
-  const operationId = randomUUID();
-  await actions.begin._handler(f.ctx, { operationId, selection: [], leave: LEAVES, incoming: token });
-  await drive(f, operationId);
-  assert.equal(grantOn(f, 'given-before'), undefined, 'given before the review: left');
-  assert.equal(f.tables.secretGrants.has('hidden-grant'), false, 'given before epochs: left');
-  for (const id of ['given-after', 'given-again']) {
-    assert.ok(grantOn(f, id), `${id}: stays`);
-    const object = f.tables.secretObjects.get(id);
-    assert.deepEqual((await authority.grantAuthority(f.ctx, object, 'owner')).capabilities, ['use'], id);
-  }
-});
-
-test('a cleanup takes only the boundary the server issued for the latest review: a made-up or older one refuses', async () => {
-  const f = sharedWorld();
-  const id = randomUUID();
-  const first = await data.review._handler(f.ctx, { review: id });
-  // A lost reply retried with the same review id gets the same boundary; nothing else moves.
-  assert.deepEqual(await data.review._handler(f.ctx, { review: id }), first);
-  assert.equal(f.tables.forgeAccounts.get('acct').secretsReview.epoch, resources.reviewEpoch(first.token));
-  const chain = async start => {
-    let token = start;
-    for (const kind of SHARED)
-      for (let cursor = null; ;) {
-        const p = await data.shared._handler(f.ctx, { kind, cursor, token });
-        token = p.token;
-        if (p.isDone) break;
-        cursor = p.continueCursor;
-      }
-    return token;
-  };
-  const older = await chain(first.token);
-  const latest = await review(f);
-  const issued = resources.reviewEpoch(latest.token);
-  // A boundary the caller chose (the chain is public, so it can be built over any number) and a superseded review.
-  for (const [label, incoming] of [
-    ['made up, ahead', await chain(resources.incomingStart(issued + 1))],
-    ['made up, behind', await chain(resources.incomingStart(issued - 1))],
-    ['an older review', older],
-  ])
-    await assert.rejects(
-      actions.begin._handler(f.ctx, { operationId: randomUUID(), selection: [], leave: LEAVES, incoming }),
-      /ACCOUNT_CHANGED/,
-      label,
-    );
-  assert.equal(f.tables.accountOperations.size, 0, 'nothing registered');
-  assert.ok(f.tables.secretGrants.has('hidden-grant'));
-  const operationId = randomUUID();
-  await actions.begin._handler(f.ctx, { operationId, selection: [], leave: LEAVES, incoming: latest.token });
-  await drive(f, operationId);
-  assert.equal(f.tables.secretGrants.has('hidden-grant'), false);
-});
-
-test('a grant-cleanup page that fails after the receipt says Done is picked up again by itself (review c4ece6f2 #3)', async () => {
-  const f = sharedWorld();
-  f.tables.secretGrants.delete('hidden-grant');
-  hiddenGrants(f, 350); // several pages
-  const { token } = await review(f);
-  const operationId = randomUUID();
-  await actions.begin._handler(f.ctx, { operationId, selection: [], leave: LEAVES, incoming: token });
-  assert.equal((await pass(f, operationId)).stage, 'completed');
-  const named = name => f.scheduled.filter(t => getFunctionName(t.fn) === name);
-  const take = task => (f.scheduled.splice(f.scheduled.indexOf(task), 1), task);
-  const first = take(named('accountExecute:leaveSecrets')[0]);
-  await f.ctx.runMutation(first.fn, first.args);
-  // The next page fails for good after the person saw Done; the person does nothing more.
-  const stopped = take(named('accountExecute:leaveSecrets')[0]);
-  f.tasks.set(stopped.id, { state: { kind: 'failed', error: 'synthetic' } });
-  const left = f.tables.secretGrants.size;
-  assert.ok(left > 0 && left < 350);
-  const [check] = named('accountExecute:recheckSecrets');
-  assert.equal(check.args.attempt, 0);
-  take(check);
-  await f.ctx.runMutation(check.fn, check.args);
-  // The check started that page again from its stored cursor, and will look again later.
-  assert.deepEqual(
-    named('accountExecute:leaveSecrets').map(t => t.args.cursor),
-    [stopped.args.cursor],
-  );
-  assert.equal(named('accountExecute:recheckSecrets')[0].args.attempt, 1);
-  assert.ok((await background(f)) > 0);
-  assert.equal(f.tables.secretGrants.size, 0, 'every grant left');
-  // Once the rows are gone, the next check ends the chain.
-  const last = take(named('accountExecute:recheckSecrets')[0]);
-  await f.ctx.runMutation(last.fn, last.args);
-  assert.equal(f.scheduled.length, 0);
-  // A healthy cleanup has finished by the first check: that one call, then nothing.
-  const g = sharedWorld();
-  const reviewed = await review(g);
-  const op = randomUUID();
-  await actions.begin._handler(g.ctx, {
-    operationId: op,
-    selection: [],
-    leave: LEAVES,
-    incoming: reviewed.token,
-  });
-  await drive(g, op);
-  const checks = g.scheduled.filter(t => getFunctionName(t.fn) === 'accountExecute:recheckSecrets');
-  assert.equal(checks.length, 1);
-  g.scheduled.splice(g.scheduled.indexOf(checks[0]), 1);
-  await g.ctx.runMutation(checks[0].fn, checks[0].args);
-  assert.equal(g.scheduled.length, 0);
-});
-
-test('the recovery check stops after RECHECK_LIMIT checks of a page that keeps failing', async () => {
-  const execute = await import(moduleUrl('../convex/accountExecute.ts'));
-  const f = sharedWorld();
-  const { token } = await review(f);
-  const operationId = randomUUID();
-  await actions.begin._handler(f.ctx, { operationId, selection: [], leave: LEAVES, incoming: token });
-  await pass(f, operationId);
-  const account = [...f.tables.accountOperations.values()].find(a => a.operationId === operationId);
-  f.tasks.set(account.secretsTask, { state: { kind: 'failed', error: 'synthetic' } });
-  f.scheduled.length = 0;
-  await execute.recheckSecrets._handler(f.ctx, {
-    accountId: account._id,
-    attempt: execute.RECHECK_LIMIT - 1,
-  });
-  // The last check still starts the page once more, and schedules no further check.
-  assert.deepEqual(
-    f.scheduled.map(t => getFunctionName(t.fn)),
-    ['accountExecute:leaveSecrets'],
-  );
-});
-
-test('receipts from before review epochs keep their time cutoff, and a gone task record is started again', async () => {
-  const f = sharedWorld();
-  // A receipt registered before epochs, still leaving secret grants by its time; its task record has expired.
-  f.tables.secretGrants.get('hidden-grant').grantedAt = 100;
-  theirSecret(f, 'given-later');
-  f.tables.secretGrants.set(
-    'later-grant',
-    row('later-grant', {
-      secretId: 'given-later',
-      principal: 'owner',
-      discover: false,
-      capabilities: ['use'],
-      activeUntil: 9999999999999,
-      grantedAt: 300,
-    }),
-  );
-  const operationId = randomUUID();
-  f.tables.accountOperations.set(
-    'legacy-op',
-    row('legacy-op', {
-      owner: 'owner',
-      operationId,
-      request: 'f'.repeat(64),
-      expectedItems: 0,
-      leave: LEAVES,
-      stage: 'completed',
-      captured: LEAVES,
-      pending: 0,
-      at: 200,
-      secretsBefore: 200,
-      secretsDone: false,
-      secretsCursor: null,
-      secretsTask: 'task-expired',
-    }),
-  );
-  f.tables.forgeAccounts.get('acct').secretsLeftBefore = 200;
-  assert.equal(await authority.leftByCleanup(f.ctx, f.tables.secretGrants.get('hidden-grant')), true);
-  assert.equal(await authority.leftByCleanup(f.ctx, f.tables.secretGrants.get('later-grant')), false);
-  await pass(f, operationId);
-  assert.equal(await background(f), 1, 'the page starts again from the stored cursor');
-  assert.deepEqual(
-    [...f.tables.secretGrants.keys()],
-    ['later-grant'],
-    'only the grant given by its time went',
-  );
 });
 
 /** Meters every read the handlers make through `f.ctx.db` (each document returned or yielded, as JSON bytes) and
@@ -984,7 +526,7 @@ test('at the largest record a name allows, every read stops at its byte cap and 
   assert.ok(most.reply <= 1_000, `owned reply ${most.reply} B`);
   most = { bytes: 0, reply: 0 };
   const shared = [];
-  for (let cursor = null, { token } = await data.review._handler(f.ctx, { review: randomUUID() }); ;) {
+  for (let cursor = null, token; ;) {
     const p = await call(() => data.shared._handler(f.ctx, { kind: 'teams', cursor, token }));
     most = { bytes: Math.max(most.bytes, p.bytes), reply: Math.max(most.reply, p.reply) };
     shared.push(...p.value.rows.map(r => r.id));
@@ -1091,17 +633,13 @@ test('cleanup calls are page-level: steps check their own pins, no read per item
   console.log(`account-data begin ${JSON.stringify(begun)}; advance ${JSON.stringify(calls)}`);
   // Begin: original; the reviewed pages twice (a check that keeps nothing, then again while appending), one page per
   // listed kind each time; register; one append for the 30 owned rows and one per non-empty listed page; one captured
-  // per leave kind; one page of the saved selection; seal. No per-item query, no secret grant read.
+  // per leave kind; one page of the saved selection; seal. No per-item query.
   assert.equal(begun['query accountResources:incoming'], 2 * SHARED.length);
   assert.equal(begun['mutation accountPlan:append'], 1 + 4);
   assert.equal(begun['mutation accountPlan:captured'], LEAVES.length);
   assert.equal(begun['query accountPlan:items'], 1);
   assert.ok(!Object.keys(begun).some(k => k.startsWith('action')), 'no provider call in begin');
-  // Advance: the pass starts the secret-grant work (one write, whatever the person holds; the pages run as background
-  // work, never from the person's calls), then one items page and one step per item (34 items, one page of 40), then
-  // complete. No per-item query.
-  assert.equal(calls['mutation accountExecute:startSecrets'], 1);
-  assert.equal(calls['mutation accountExecute:leaveSecrets'], undefined);
+  // Advance: one items page and one step per item (34 items, one page of 40), then complete. No per-item query.
   assert.equal(calls['mutation accountExecute:step'], 34);
   assert.equal(calls['query accountPlan:items'], 1);
   assert.equal(
@@ -1251,13 +789,7 @@ test('a retry of a preparation interrupted between shared pages refuses once any
   await assert.rejects(actions.begin._handler(f.ctx, request), /ACCOUNT_CHANGED/);
   assert.equal((await plan.read._handler(f.ctx, { operationId })).stage, 'preparing', 'still nothing sealed');
   await assert.rejects(actions.advance._handler(f.ctx, { operationId, cursor: null }));
-  assert.equal(await background(f), 0);
-  assert.ok(
-    f.tables.projectContributors.has('pc') &&
-      f.tables.teamMembers.has('tm') &&
-      f.tables.secretGrants.has('hidden-grant'),
-    'nothing is left',
-  );
+  assert.ok(f.tables.projectContributors.has('pc') && f.tables.teamMembers.has('tm'), 'nothing is left');
   // A fresh review starts a new deletion that leaves everything.
   const again = randomUUID();
   assert.equal(
@@ -1376,14 +908,13 @@ test('a deletion left preparing (as one begun before this version) deletes nothi
     }),
   );
   await assert.rejects(actions.advance._handler(f.ctx, { operationId, cursor: null }));
-  assert.equal(await background(f), 0, 'no secret work starts');
-  assert.ok(f.tables.teamMembers.has('tm') && f.tables.secretGrants.has('hidden-grant'), 'nothing left');
+  assert.ok(f.tables.teamMembers.has('tm'), 'nothing left');
   assert.equal(f.tables.accountItems.get('old-item').state, 'pending');
 });
 
 test('a completed or older receipt never starts new work: it keeps the scope it recorded', async () => {
   const f = sharedWorld();
-  // Receipts of operations registered before secret grants were left by time: one completed, one still running.
+  // Receipts of operations registered by an earlier version: one completed, one still running.
   const legacy = (id, stage) => {
     const operationId = randomUUID();
     f.tables.accountOperations.set(
@@ -1407,104 +938,51 @@ test('a completed or older receipt never starts new work: it keeps the scope it 
   // Asked again (a lost reply, a replayed page), the completed one answers with its receipt and starts nothing
   // (review s1-astra62 r4 #1); the running one finishes what it recorded, and nothing more.
   assert.equal((await pass(f, done)).stage, 'completed');
-  assert.equal(await background(f), 0, 'no secret work is scheduled for the completed one');
   assert.equal((await pass(f, running)).stage, 'completed');
-  assert.equal(await background(f), 0, 'nor for the older running one');
-  assert.ok(f.tables.secretGrants.has('hidden-grant'), 'a grant neither recorded stays');
-  const person = f.tables.forgeAccounts.get('acct');
-  assert.deepEqual([person.secretsLeftBefore, person.secretsLeftBelow], [undefined, undefined]);
+  assert.ok(f.tables.teamMembers.has('tm'), 'nothing neither recorded is left');
 });
 
-test('a stopped secret page is started again from where it stopped, once, when the deletion is continued', async () => {
+test('a cleanup begun before Secret Objects were retired finishes: their items are gone and end as done', async () => {
   const f = sharedWorld();
-  f.tables.secretGrants.delete('hidden-grant');
-  hiddenGrants(f, 350); // several pages, so a page that stops leaves more than one to go
-  const { token } = await review(f);
   const operationId = randomUUID();
-  await actions.begin._handler(f.ctx, { operationId, selection: [], leave: LEAVES, incoming: token });
-  await pass(f, operationId);
-  const pages = () => f.scheduled.filter(t => getFunctionName(t.fn) === 'accountExecute:leaveSecrets');
-  // While a page is pending, continuing schedules nothing more.
-  await pass(f, operationId);
-  assert.equal(pages().length, 1);
-  // The first page runs; the next one fails for good (review s1-sol62 r4 #3, s1-astra62 r4 #5).
-  const first = pages()[0];
-  f.scheduled.splice(f.scheduled.indexOf(first), 1);
-  await f.ctx.runMutation(first.fn, first.args);
-  const stopped = pages()[0];
-  assert.ok(stopped && stopped.args.cursor !== null, 'more than one page');
-  f.scheduled.splice(f.scheduled.indexOf(stopped), 1);
-  f.tasks.set(stopped.id, { state: { kind: 'failed', error: 'synthetic' } });
-  const left = f.tables.secretGrants.size;
-  assert.ok(left > 0 && left < 350);
-  // Continuing the deletion starts that page again from its stored cursor and the rest follows.
-  await pass(f, operationId);
-  assert.deepEqual(
-    pages().map(t => t.args.cursor),
-    [stopped.args.cursor],
+  f.tables.accountOperations.set(
+    'old-op',
+    row('old-op', {
+      owner: 'owner',
+      operationId,
+      request: 'f'.repeat(64),
+      expectedItems: 2,
+      leave: [],
+      stage: 'running',
+      captured: [],
+      pending: 2,
+      at: 1,
+    }),
   );
-  // Should the stopped task still run after all, only one of the two carries on: the one that runs second finds the
-  // stored cursor moved on and does nothing.
-  const recovered = pages()[0];
-  f.scheduled.splice(f.scheduled.indexOf(recovered), 1);
-  await f.ctx.runMutation(stopped.fn, stopped.args);
-  const size = f.tables.secretGrants.size,
-    next = pages().length;
-  await f.ctx.runMutation(recovered.fn, recovered.args);
-  assert.equal(f.tables.secretGrants.size, size, 'no second chain of pages');
-  assert.equal(pages().length, next);
-  await background(f);
-  assert.equal(f.tables.secretGrants.size, 0, 'every grant left');
-});
-
-test('what the person sees of a deletion never depends on how many secret grants it leaves, and they stop at once', async t => {
-  // One server time and one operation for every world, so their replies compare whole.
-  const now = Date.now;
-  Date.now = () => 1_800_000_000_000;
-  t.after(() => (Date.now = now));
-  const operationId = randomUUID();
-  const worlds = [0, 1, 150].map(n => {
-    const f = sharedWorld();
-    f.tables.secretGrants.delete('hidden-grant');
-    hiddenGrants(f, n);
-    for (const g of f.tables.secretGrants.values()) g.grantedBy = 'other';
-    return f;
-  });
-  const object = f => f.tables.secretObjects.get('hidden-secret');
-  const seen = [];
-  for (const f of worlds) {
-    const n = f.tables.secretGrants.size;
-    // (Every grant of these worlds is on one object; one world holds a single one, whose authority is checked.)
-    if (n === 1)
-      assert.deepEqual((await authority.grantAuthority(f.ctx, object(f), 'owner')).capabilities, ['use']);
-    const { token } = await review(f);
-    await actions.begin._handler(f.ctx, { operationId, selection: [], leave: LEAVES, incoming: token });
-    const view = async () => {
-      const { at: _at, ...rest } = await plan.read._handler(f.ctx, { operationId });
-      return rest;
-    };
-    // One pass completes the deletion (review s1-sol62 r4 #2, s1-astra62 r4 #4) …
-    const after = [await pass(f, operationId).then(({ at: _at, ...rest }) => rest), await view()];
-    assert.equal(after[1].stage, 'completed');
-    // … and from that pass on, the grants it leaves give nothing, before their rows are deleted.
-    assert.equal(f.tables.secretGrants.size, n, 'rows still there');
-    if (n === 1) {
-      assert.deepEqual((await authority.grantAuthority(f.ctx, object(f), 'owner')).capabilities, []);
-    }
-    // The rows are deleted in the background, page by page; between pages nothing a caller sees moves.
-    for (let page = 0; page < 3; page++) {
-      const task = f.scheduled.find(t => getFunctionName(t.fn) === 'accountExecute:leaveSecrets');
-      if (task) {
-        f.scheduled.splice(f.scheduled.indexOf(task), 1);
-        await f.ctx.runMutation(task.fn, task.args);
-      }
-      after.push(await view());
-    }
-    assert.equal(f.tables.secretGrants.size, 0);
-    seen.push(after);
-  }
-  assert.deepEqual(seen[1], seen[0]);
-  assert.deepEqual(seen[2], seen[0]);
+  for (const [id, kind, hidden] of [
+    ['old-secret', 'secret', false],
+    ['old-grant', 'secrets', true],
+  ])
+    f.tables.accountItems.set(
+      id,
+      row(id, {
+        owner: 'owner',
+        accountId: 'old-op',
+        key: `${kind}:${id}`,
+        kind,
+        resourceId: id,
+        pin: 'a'.repeat(64),
+        operationId: randomUUID(),
+        hidden,
+        state: kind === 'secret' ? 'started' : 'pending',
+      }),
+    );
+  const last = await pass(f, operationId);
+  assert.equal(last.stage, 'completed');
+  assert.deepEqual(
+    ['old-secret', 'old-grant'].map(id => f.tables.accountItems.get(id).state),
+    ['completed', 'completed'],
+  );
 });
 
 test('a selected item that changed after the review is kept, and the receipt counts it', async () => {

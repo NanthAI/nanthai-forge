@@ -14,8 +14,9 @@ marked for removal; an owner's next
 write (or `nforge secret unshare --marked`) removes and re-keys, and `nforge secret
 list` shows what to rotate. `nforge secret import` seals a `.env` into Development,
 adds its names to `.env.example` and removes the plaintext after a full import,
-printing the undo (`--restore`, a person only). Code sharing,
-proposals, passkey recovery, per-added-name owner
-alerts and Secret Object retirement remain pending. Gate B follows the sharing
-slice; no completed code-review gate is claimed. Default policies protect
+printing the undo (`--restore`, a person only). Secret Objects and the server
+keyring are retired: Forge holds no key that opens a team's secret, and a guard test
+(`scripts/check-no-server-key.mjs`, run by `npm run check`) fails if a database, backup or object-storage copy
+could. Code sharing, passkey recovery and per-added-name owner alerts remain pending;
+Gate B cleared for the slice-1 and slice-2 code. Default policies protect
 `.env.example`; explicit owner lists stay authoritative. See [security](../../security.md#sealed-development-core).

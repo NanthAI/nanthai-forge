@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { ForgeError, invariant } from './errors.js';
+
+// Seals the server's own service credentials (today only the GitHub App user tokens, convex/githubUserTokenActions.ts)
+// under a server keyring. It is never used for a value a person or team stores: those are sealed sets, encrypted on
+// devices, and no key that opens one exists on the server (scripts/check-no-server-key.mjs).
 
 export interface SecretBinding {
   owner: string;
@@ -31,12 +35,12 @@ export function secretKeyring(text: string | undefined): SecretKeyring {
         typeof ring.keys === 'object' &&
         !Array.isArray(ring.keys),
       'SECRET_SETUP_REQUIRED',
-      'Secret Object encryption is not configured.',
+      'Service credential encryption is not configured.',
     );
     secretKey(ring, ring.active);
     return ring;
   } catch {
-    throw new ForgeError('SECRET_SETUP_REQUIRED', 'Secret Object encryption is not configured.');
+    throw new ForgeError('SECRET_SETUP_REQUIRED', 'Service credential encryption is not configured.');
   }
 }
 function secretKey(ring: SecretKeyring, id: string): Buffer {
@@ -46,7 +50,7 @@ function secretKey(ring: SecretKeyring, id: string): Buffer {
       /^[A-Za-z0-9+/]{43}=$/.test(value) &&
       Buffer.from(value, 'base64').length === 32,
     'SECRET_SETUP_REQUIRED',
-    'The retained Secret Object encryption key is unavailable.',
+    'The retained service credential key is unavailable.',
   );
   return Buffer.from(value, 'base64');
 }
@@ -61,18 +65,6 @@ function bindingBytes(binding: SecretBinding): Buffer {
       version: binding.version,
     }),
   );
-}
-export function secretInputTag(
-  ring: SecretKeyring,
-  binding: SecretBinding,
-  value: string,
-  keyId = ring.active,
-): string {
-  return createHmac('sha256', secretKey(ring, keyId))
-    .update(bindingBytes(binding))
-    .update('\0')
-    .update(value)
-    .digest('hex');
 }
 export function sealSecret(ring: SecretKeyring, binding: SecretBinding, value: string): SealedSecret {
   const nonce = randomBytes(12),
@@ -99,6 +91,6 @@ export function openSecret(ring: SecretKeyring, binding: SecretBinding, sealed: 
       'utf8',
     );
   } catch {
-    throw new ForgeError('SECRET_INVALID', 'The stored Secret Object could not be verified.');
+    throw new ForgeError('SECRET_INVALID', 'The stored service credential could not be verified.');
   }
 }

@@ -48,7 +48,7 @@ holder device; owner devices only for Checks and roster changes reserved to
 owners). Scoped, read-only, browser-only and keyless agent credentials cannot
 write sealed records. Readers verify the
 roster and signatures locally; the server stores ciphertext without decrypting.
-Secret Objects values stay owner-person only until their retirement. Agent and
+Agent and
 non-interactive entry points can add new Development names in slice 1; changing
 or removing an existing name needs a person until proposals ship.
 
@@ -73,26 +73,11 @@ exactly the shared teams, projects (as a contributor or a direct reader), import
 and Source Zones the person reviewed, with the access each gave them when it was
 read (a changed maintainer flag counts as a change): if any of them changed after
 that review, it refuses before registering anything, and the person reviews again.
-Secret objects shared with the person are never listed, counted or part of the
-review, so nothing in it can show whether one exists. Leaving everything also
-leaves every secret grant the person held when the review started. Starting a
-review is one person-only write that issues the next review number on the
-account; every grant records the number current when it was given, so a grant
-given, or given again in place, after that write stays, even in the same
-millisecond. The cleanup accepts only the number issued for the person's latest
-review, never one the caller chose. Those grants stop giving access as soon as the
-cleanup starts; their rows are then deleted in bounded background work, which
-never changes what the cleanup reports. A background page that fails, even after
-the receipt says Done, is started again from where it stopped by a check that
-backs off from one minute to once a day, for about a month; after that,
-continuing the deletion starts it again.
 
 Closing the account (Your data, once it holds nothing) is person-only too, behind
 the typed handle. Another person's handle is refused, so nobody closes an account
 but its own person. The close refuses with the next step while the account holds
-or is shared anything, or while an earlier deletion runs. Secret grants given to
-the person before the close starts (ordered the same way, by review number) stop
-giving access then, and their rows go before the account row. The close then ends
+or is shared anything, or while an earlier deletion runs. The close then ends
 every device sign-in, every waiting device code and every native browser session.
 Only after that does it check the holdings again. In one transaction it then
 removes the passkeys, username, current handle and account row. If anything is

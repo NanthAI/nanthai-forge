@@ -8,8 +8,7 @@ one trailing newline, so `echo TOKEN | nforge secret set X` stores `TOKEN`; a se
 newline is kept. With `--file` stdin bytes are kept exactly. Agent markers and non-interactive input permit new names
 only; changes/removals require a person until the proposals slice. The server's
 storage gate requires the owner account's unrestricted stable device credential;
-value authority is the owner device signature in the verified roster. Legacy
-Secret Objects keep their existing owner-person gate.
+value authority is the owner device signature in the verified roster.
 
 Device signing and agreement keys are independent. Their account binding, set
 keys, wraps, padded values, hiding value commitments, per-name change signatures,

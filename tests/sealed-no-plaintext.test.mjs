@@ -13,6 +13,7 @@ import { device, owner } from './helpers/sealed-devices.mjs';
 import { assertLocalFiles, assertNoPlaintext, deviceSecrets } from './helpers/sealed-no-plaintext.mjs';
 import { deviceFingerprint } from '../dist/sealed-join.js';
 import { removeMarked, unshareDevice } from '../dist/sealed-unshare.js';
+import { defaultR2Objects } from './default-r2.mjs';
 
 const contributors = await import(moduleUrl('../convex/projectContributors.ts'));
 const code = expected => error => (error.code ?? error.data?.code) === expected;
@@ -25,6 +26,7 @@ const values = [
 test('T18 slice-2 sharing journeys keep values and keys out of every stored row, call, notice and local file', async t => {
   const h = setup(t),
     o = owner(h),
+    objectsBefore = defaultR2Objects.size,
     calls = h.calls,
     notices = [o.notices],
     setKeys = [];
@@ -84,6 +86,9 @@ test('T18 slice-2 sharing journeys keep values and keys out of every stored row,
   assert(['owner', 'fixture-a', 'fixture-b', 'fixture-c'].every(l => calls.some(x => x.label === l)));
   assert(calls.some(x => x.action === 'join'));
 
+  // Nothing of a journey goes to file storage or to object storage: no copy of either can hold a value or a key.
+  assert.equal(h.s.files.size, 0, 'no file-storage copy');
+  assert.equal(defaultR2Objects.size, objectsBefore, 'no object-storage copy');
   const devices = [
     { label: 'owner', keys: h.f.keys, directory: h.directory },
     ...[a, b, c].map((d, i) => ({ label: `device-${i}`, keys: d.keys, directory: d.directory })),

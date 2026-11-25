@@ -12,18 +12,15 @@
  *   another id while one runs is refused; once the row is gone it answers `closed`.
  * - `closeFor`: the same close for an operator with deployment access (no browser person exists for synthetic keys).
  * - `step`: the background removal, one bounded page per task, in this order (review of the delete path, round 1):
- *   1. `secrets` leaves the secret grants given to the person before the close's start, like a Your data cleanup
- *      (accountExecute.leaveSecrets): `close` issues a review epoch, and from that write grants below it give nothing;
- *      their rows go here.
- *   2. `receipts` deletes finished deletion receipts, and unsealed (`preparing`) ones from before the close, with their
+ *   1. `receipts` deletes finished deletion receipts, and unsealed (`preparing`) ones from before the close, with their
  *      items; an unfinished one, or one begun after the close started, stops the close.
- *   3. `signout` revokes every device sign-in page by page, denies device codes still waiting to be redeemed and ends
+ *   2. `signout` revokes every device sign-in page by page, denies device codes still waiting to be redeemed and ends
  *      every browser session. From then on nothing acts as the account.
- *   4. `finish` removes handle operations, ordering hints, link receipts and earlier handles, then, in one final
+ *   3. `finish` removes handle operations, ordering hints, link receipts and earlier handles, then, in one final
  *      transaction, re-checks the holdings and removes the native sign-in, the current handle and the account row
  *      together. Anything held by then stops the close and keeps the account whole, its sign-in included.
  *
- * Hidden secret grants never show in a reply, refusal or count. The native `users` row gets a fresh account key, so a
+ * The native `users` row gets a fresh account key, so a
  * later sign-in never acts as the closed key again (no grant, invitation or credential given to the old key reaches
  * it). A GitHub sign-in keeps its numeric id (and any conflict mark) on that row, because the GitHub component keeps its
  * own account link: signing in with GitHub again starts a new, empty account. A passkey-only user row goes. Scale: `close` reads one small page per owned and shared kind plus up to
@@ -34,24 +31,12 @@ import { internalMutation, type MutationCtx } from './server';
 import { accountMutation, query, type QueryCtx } from './cliServer';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
-import {
-  accountActor,
-  grantsWithParents,
-  incomingPage,
-  ownedPage,
-  ownedProjection,
-  SHARED,
-} from './accountResources';
+import { accountActor, incomingPage, ownedPage, ownedProjection, SHARED } from './accountResources';
 import { KINDS } from './accountData';
-import { leaveSecret } from './accountExecute';
-import { givenBefore, nextReview } from './secretGrantAuthority';
 import { accountFor } from './urlIdentity';
 import { endSessions, nativeUser, passkeyCount, removeNativeSignIn } from './accountCloseSignIn';
 import { invariant } from '../src/errors';
-import { digest } from '../src/state/hash';
 import { report } from './errors';
-import { stream, type QueryStream } from 'convex-helpers/server/stream';
-import schema from './schema';
 
 /** Rows one background step reads or deletes at most. */
 export const STEP = 100;
@@ -59,11 +44,10 @@ export const STEP = 100;
 export const RECEIPTS_SCAN = 500;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 type Ctx = QueryCtx | MutationCtx;
-type Phase = 'secrets' | 'receipts' | 'signout' | 'finish';
+type Phase = 'receipts' | 'signout' | 'finish';
 const WORDS: Record<(typeof KINDS)[number], string> = {
   project: 'projects',
   import: 'private repository imports',
-  secret: 'secrets',
   agent: 'agent grants',
   team: 'teams',
   view: 'saved views',
@@ -73,12 +57,11 @@ const AFTER = 'Delete it under "Delete your Forge data" first, then close the ac
 const RUNNING =
   'An earlier deletion is still running. Continue it under "Earlier deletions", then close the account.';
 /** A deletion that can still remove something. One still `preparing` (its begin stopped before sealing) cannot: no step
- * runs on an unsealed receipt (accountExecute.step, startSecrets and accountPlan.complete refuse it), and continuing it
+ * runs on an unsealed receipt (accountExecute.step and accountPlan.complete refuse it), and continuing it
  * means a new begin that checks every pin again. Each item it could target is either still held, which `blocker`
  * refuses before it reads a receipt, or gone. So once nothing is held the close drops it with the finished receipts
  * (Item 17cdc774: two dormant accounts held one since 2026-11-11 and nobody could sign in to continue it). */
-const unfinished = (r: Doc<'accountOperations'>) =>
-  (r.stage !== 'completed' && r.stage !== 'preparing') || r.secretsDone === false;
+const unfinished = (r: Doc<'accountOperations'>) => r.stage !== 'completed' && r.stage !== 'preparing';
 
 /** What still stops the close, as the next step to take, or null when the account holds nothing. */
 export async function blocker(ctx: Ctx, actor: string): Promise<string | null> {
@@ -208,8 +191,14 @@ async function closeAccount(ctx: MutationCtx, actor: string, input: { operationI
     );
     // A step that failed or was cancelled starts again from where it stood.
     const task = account.closing.task ? await ctx.db.system.get(account.closing.task) : null;
+    // A close begun while secret grants still existed resumes at its receipts: the purge removed those grants.
     if (!task || !['pending', 'inProgress'].includes(task.state.kind))
-      await schedule(ctx, account, account.closing.phase, account.closing.cursor);
+      await schedule(
+        ctx,
+        account,
+        account.closing.phase === 'secrets' ? 'receipts' : account.closing.phase,
+        account.closing.phase === 'secrets' ? null : account.closing.cursor,
+      );
     return { stage: 'closing' } satisfies Reply;
   }
   invariant(
@@ -219,16 +208,11 @@ async function closeAccount(ctx: MutationCtx, actor: string, input: { operationI
   );
   const stop = await blocker(ctx, actor);
   invariant(stop === null, 'ACCOUNT_CHANGED', stop ?? '');
-  const at = Date.now(),
-    below = await nextReview(ctx, account, input.operationId);
-  // From this write, every secret grant given to the person before it gives nothing (secretGrantAuthority.leftByCleanup);
-  // one given after it carries this epoch or a later one, whatever the clock.
   await ctx.db.patch(account._id, {
-    secretsLeftBelow: Math.max(account.secretsLeftBelow ?? 0, below),
-    closing: { operationId: input.operationId, at, below, phase: 'secrets', cursor: null },
+    closing: { operationId: input.operationId, at: Date.now(), phase: 'receipts', cursor: null },
   });
   await queuePublicAccountRead(ctx, account.handle, { profile: true });
-  await schedule(ctx, (await ctx.db.get(account._id))!, 'secrets', null);
+  await schedule(ctx, (await ctx.db.get(account._id))!, 'receipts', null);
   return { stage: 'closing' } satisfies Reply;
 }
 
@@ -280,6 +264,7 @@ export const step = internalMutation({
   args: {
     accountId: v.id('forgeAccounts'),
     operationId: v.string(),
+    // `secrets` is retired: a step scheduled before it went moves on to `receipts`.
     phase: v.union(v.literal('secrets'), v.literal('receipts'), v.literal('signout'), v.literal('finish')),
     cursor: v.union(v.string(), v.null()),
   },
@@ -301,26 +286,7 @@ export const step = internalMutation({
       await queuePublicAccountRead(ctx, account.handle, { profile: true });
     };
     if (phase === 'secrets') {
-      const p = await grantsWithParents(
-        () =>
-          stream(ctx.db, schema)
-            .query('secretGrants')
-            .withIndex('by_principal_and_discover_and_secretId', q =>
-              q.eq('principal', actor),
-            ) as unknown as QueryStream<Doc<'secretGrants'>>,
-        cursor,
-        async row => ctx.db.get(row.secretId),
-      );
-      for (const { row: grant, parent } of p.rows)
-        if (
-          givenBefore(
-            grant,
-            closing.below !== undefined ? { below: closing.below } : { before: closing.at },
-          ) &&
-          parent?.owner !== actor
-        )
-          await leaveSecret(ctx, grant, actor, childId(operationId, `secrets:${grant._id}`));
-      await schedule(ctx, account, p.isDone ? 'receipts' : 'secrets', p.isDone ? null : p.continueCursor);
+      await schedule(ctx, account, 'receipts', null);
       return null;
     }
     if (phase === 'receipts') {
@@ -403,9 +369,3 @@ export const step = internalMutation({
     return null;
   },
 });
-
-/** The child operation id of one left grant, in the same form as accountExecute's. */
-function childId(operationId: string, key: string) {
-  const d = digest(operationId + '\n' + key);
-  return `${d.slice(0, 8)}-${d.slice(8, 12)}-4${d.slice(13, 16)}-8${d.slice(17, 20)}-${d.slice(20, 32)}`;
-}

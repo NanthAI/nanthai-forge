@@ -433,19 +433,3 @@ export async function actionPublicPeople(ctx: ActionCtx, args: unknown, result: 
     shape,
   );
 }
-
-/** Actions: a handle label for each id in one internal query. Ids that are not
- * accounts (agent principals) label themselves; an account without a handle is ''. */
-export async function handleLabels(
-  ctx: ActionCtx,
-  ids: string[],
-  projectId: Id<'hostedProjects'> | null = null,
-): Promise<Map<string, string>> {
-  const { view } = await ctx.runQuery(resolveRef, { projectId, values: [...new Set(ids)], handles: [] });
-  return new Map(
-    view.values.map(row => [
-      row.value,
-      row.person ? (row.self || view.writer ? (row.handle ?? '') : '') : row.value,
-    ]),
-  );
-}

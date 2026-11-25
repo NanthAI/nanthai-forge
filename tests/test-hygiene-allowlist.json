@@ -1,8 +1,7 @@
 {
 "version": 1,
 "files": {
-  "tests/account-data.test.mjs": {"date":6},
-  "tests/account-portability.test.mjs": {"date":1},
+  "tests/account-data.test.mjs": {"date":3},
   "tests/account-projects.test.mjs": {"date":2},
   "tests/account-teams.test.mjs": {"date":4},
   "tests/actions-runner-fixture.test.mjs": {"poll":1,"date":2},
@@ -115,7 +114,6 @@
   "tests/github-mirror-owner.test.mjs": {"date":1},
   "tests/github-project-source.test.mjs": {"date":1},
   "tests/github-sync.test.mjs": {"date":3},
-  "tests/grant-cascade.test.mjs": {"date":5},
   "tests/graph-first-check.test.mjs": {"date":5},
   "tests/heavy-bound.test.mjs": {"date":2},
   "tests/heavy-fairness.test.mjs": {"sleep":1,"poll":1,"date":3},
@@ -313,7 +311,6 @@
   "tests/native-work-history.test.mjs": {"poll":1,"date":1},
   "tests/native-work.test.mjs": {"timeout":1,"poll":1},
   "tests/network-deadlines.test.mjs": {"sleep":2},
-  "tests/object-secrets.test.mjs": {"date":1},
   "tests/optimistic-landing.test.mjs": {"date":6},
   "tests/owner-cleanup.mjs": {"poll":1,"date":3},
   "tests/owner-review.test.mjs": {"date":4},
@@ -376,7 +373,6 @@
   "tests/sealed-client.test.mjs": {"date":2},
   "tests/sealed-identity.test.mjs": {"date":2},
   "tests/sealed-review.test.mjs": {"date":1},
-  "tests/secrets.test.mjs": {"date":7},
   "tests/self-metrics-hosted-fixture.mjs": {"date":1},
   "tests/self-metrics-hosted-receipts.test.mjs": {"date":2},
   "tests/self-metrics-weekly-fixture.mjs": {"sleep":1},
