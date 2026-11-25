@@ -283,3 +283,30 @@ test('authorization failures and malformed board replies fail open with incomple
   }
   assert.equal(calls, 2);
 });
+
+test('first-write hook skips unread board notes and leaves the local board cursor untouched (Item f3495abe)', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-hook-no-notes-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  boardState(t, root, 'synthetic');
+  const { readBoardCursor } = await import('../dist/board-local.js');
+  const sent = [];
+  const note = {
+    id: '01234567-89ab-4cde-8123-456789abcdef',
+    author: 'peer-h',
+    target: `lane:${laneB}`,
+    text: 'Unread note for command replies only',
+    at: 42,
+  };
+  const result = await readHostedEditPeers(
+    { root, project: 'synthetic', laneId: laneB, url: 'https://example.test', path: 'src/a.ts' },
+    async (_name, args) => {
+      sent.push(args);
+      return { board: { messages: [note], more: 0, cursor: 42 } };
+    },
+  );
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].board, { after: Number.MAX_SAFE_INTEGER });
+  assert.equal(result.board, undefined);
+  assert.equal(hostedEditContext(result), '');
+  assert.equal(readBoardCursor(root, laneB), 0, 'hook never advances the local board cursor');
+});

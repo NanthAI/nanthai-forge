@@ -35,12 +35,12 @@ CLIs load them by default). Hook commands run through the `current` symlink; eve
 Forge entry script compares real paths (`scripts/main-module.mjs`), and a build-failing
 guard keeps it that way.
 
-Hosted first writes carry no overlap notices (Issue 853fcde3). Once the server
+Hosted first writes carry no overlap notices (Issue 853fcde3) and no unread board notes (Item f3495abe: unread notes ride on command replies and `wait`, never on a hook). Once the server
 advertised the board, each uncached hosted path/session makes exactly one bounded
 `projectHostedOverlaps:read({projectId,laneId,path,board})` query using the existing
-login, for board claims and unread notes only; otherwise the hook makes no call. Native hooks read selected
-Lane headers, saved summaries and local claims. Neither path loads full Work or
-source bytes. Lane identity reads only the local marker prefix.
+login, for claims and saved-peer warnings on that path only; otherwise the hook makes no call.
+It never loads full Work or source bytes, and Lane identity reads only the local marker prefix.
+See [installed agent hooks](../../hooks.md) for the complete table of installed hook behaviours.
 
 The hook never denies edits or requires acknowledgement. Context is capped at
 five notices/path and 1,800 characters/tool call. Overlaps and failures are cached

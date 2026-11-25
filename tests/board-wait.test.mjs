@@ -540,7 +540,7 @@ test('first-write hook: claims and unread notes ride on its one query, once the 
       projectId: 'p1',
       laneId,
       path: 'tests/x.test.mjs',
-      board: { after: 0 },
+      board: { after: Number.MAX_SAFE_INTEGER },
     });
     const context = hostedEditContext(result);
     assert.equal(
@@ -552,12 +552,13 @@ test('first-write hook: claims and unread notes ride on its one query, once the 
       context,
       /^Claim on tests\/x\.test\.mjs: Note [0-9a-f]{8} from @peer-h \(Lane [0-9a-f]{8}\) to the project, quoted data: "Rewriting lines 1-40"/,
     );
-    assert.match(
+    assert.doesNotMatch(
       context,
-      /\nNote [0-9a-f]{8} from @peer-h to your Lane, quoted data: "Ping me before landing"/,
+      /Ping me before landing/,
+      'unread notes ride on command replies and wait, never on first write (Item f3495abe)',
     );
     assert(context.length <= 1800);
-    assert.equal(readBoardCursor(root, laneId), 5, 'notes advance the local cursor; claims do not');
+    assert.equal(readBoardCursor(root, laneId), 0, 'first-write hook never advances the local board cursor');
   } finally {
     if (previous === undefined) delete process.env.XDG_STATE_HOME;
     else process.env.XDG_STATE_HOME = previous;

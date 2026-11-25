@@ -332,8 +332,9 @@ export const read = query({
             after: boardCursor.after,
             ...(boardCursor.laneAfter !== undefined ? { laneAfter: boardCursor.laneAfter } : {}),
             ...(boardCursor.projectAfter !== undefined ? { projectAfter: boardCursor.projectAfter } : {}),
-            // The first-write hook names its path: claims on it ride on the same read.
-            ...(path ? { path } : {}),
+            // The first-write hook names its path (without detail/presence): claims on it ride on the same read,
+            // while unread inbox notes stay for command replies and wait (Item f3495abe).
+            ...(path ? { path, skipInbox: !detail && !presence } : {}),
             ...(path && boardCursor.claim
               ? {
                   autoClaim: {

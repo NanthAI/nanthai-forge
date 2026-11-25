@@ -85,23 +85,30 @@ const read = (kind, f, query) => {
     return boardHostedSource({ root: f.root, advertisedFeatures: features, query }, 'board', {
       laneId: f.laneId,
     });
-  if (kind === 'hook')
-    return readHostedEditPeers(
-      {
-        root: f.root,
-        project: 'project',
-        url: 'https://synthetic.invalid',
-        laneId: f.laneId,
-        path: 'src/file.ts',
-      },
-      query,
-    );
   return readHostedOverlapAdvice({ query }, f.laneId, false, undefined, undefined, {
     after: 0,
     laneAfter: 0,
   });
 };
-for (const kind of ['board', 'hook', 'advice']) {
+test('hook: first-write claims query sends no laneAfter or projectAfter cursors (Item f3495abe)', async t => {
+  const f = fixture(t),
+    calls = [];
+  await readHostedEditPeers(
+    {
+      root: f.root,
+      project: 'project',
+      url: 'https://synthetic.invalid',
+      laneId: f.laneId,
+      path: 'src/file.ts',
+    },
+    async (_name, args) => {
+      calls.push(args.board);
+      return f.reply;
+    },
+  );
+  assert.deepEqual(calls, [{ after: Number.MAX_SAFE_INTEGER }]);
+});
+for (const kind of ['board', 'advice']) {
   test(`${kind}: a cached laneAfter rejected after server rollback retries once without changing the ordinary cursor`, async t => {
     const f = fixture(t),
       calls = [];

@@ -153,8 +153,10 @@ export async function boardClaims(
 }
 
 /** The overlap read's board field (Lane actions): at most 2 notes, absent when nothing is new.
- * With `path` (the first-write hook) it also lists claims on that path. No access, board off or
- * nothing new all return undefined: nothing is added to the reply. */
+ * With `path` (the first-write hook) it returns only claims on that path and skips inbox reads
+ * (unread notes ride on command replies and wait, never on a hook; Item f3495abe). Wire fields
+ * `messages: [], more: 0, cursor: input.after` stay present so older CLIs keep parsing claims
+ * without advancing their local cursor. */
 export async function boardDelivery(
   ctx: Ctx,
   input: {
@@ -166,6 +168,8 @@ export async function boardDelivery(
     laneAfter?: number;
     projectAfter?: number;
     path?: string;
+    /** Skip unread inbox reads (default true when `path` is set: first-write hook). */
+    skipInbox?: boolean;
     /** First-write hook with feature board-claims: decide whether to send an automatic claim, and
      * list other Lanes' automatic claims on the path. `lane` is the caller's Lane as already read. */
     autoClaim?: { open: boolean; saved: Set<string>; peers?: ClaimPeers };
@@ -174,8 +178,10 @@ export async function boardDelivery(
   const project = await boardWriterProject(ctx, input.projectId, input.viewer);
   if (!project) return undefined;
   if (await boardStopped(ctx, input.projectId)) return undefined;
-  const { path, autoClaim, ...rest } = input;
-  const inbox = await boardInbox(ctx, { ...rest, limit: 2, order: 'asc' });
+  const { path, skipInbox = Boolean(path), autoClaim, ...rest } = input;
+  const inbox = skipInbox
+    ? { messages: [], more: 0, cursor: input.after }
+    : await boardInbox(ctx, { ...rest, limit: 2, order: 'asc' });
   const now = Date.now();
   const claims =
     path && boardPathVisible(project, input.viewer, path)

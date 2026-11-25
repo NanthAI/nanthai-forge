@@ -330,12 +330,12 @@ test('first-write hook: one query asks to claim; claim queued off the hook path;
     // Server without board-claims: today's board arg, nothing queued.
     rememberBoardServerFeatures('p1', ['agent-board', 'board-wait']);
     await readHostedEditPeers(target, query, value => queued.push(value));
-    assert.deepEqual(calls[0][1].board, { after: 0 });
+    assert.deepEqual(calls[0][1].board, { after: Number.MAX_SAFE_INTEGER });
     assert.equal(queued.length, 0);
     rememberBoardServerFeatures('p1', ['agent-board', 'board-wait', 'board-claims']);
     const result = await readHostedEditPeers(target, query, value => queued.push(value));
     assert.equal(calls.length, 2, 'still one query per first write');
-    assert.deepEqual(calls[1][1].board, { after: 0, claim: true });
+    assert.deepEqual(calls[1][1].board, { after: Number.MAX_SAFE_INTEGER, claim: true });
     assert.deepEqual(queued, [
       { root, laneId: target.laneId, project: 'p1', url: target.url, path: 'tests/x.test.mjs' },
     ]);

@@ -133,15 +133,16 @@ test('Antigravity entry: malformed or unknown input still gets an accepted reply
   }
 });
 
-test('the line shows only beside an overlap: board notes alone carry no coordination line', () => {
-  const notesOnly = hostedEditContext({
-    status: 'allowed',
-    coverage: 'hosted',
-    checked: 1,
-    board: { claims: [], notices: ['Note from @peer: synthetic'] },
-  });
-  assert.ok(notesOnly.length > 0);
-  assert.equal(notesOnly.includes(COORDINATE_HINT), false);
+test('the line shows only beside an overlap: no claims means no hook context (Item f3495abe)', () => {
+  assert.equal(
+    hostedEditContext({
+      status: 'allowed',
+      coverage: 'hosted',
+      checked: 1,
+      board: { claims: [] },
+    }),
+    '',
+  );
   assert.equal(hostedEditContext({ status: 'allowed', coverage: 'hosted', checked: 1 }), '');
 });
 

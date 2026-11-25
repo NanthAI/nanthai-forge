@@ -220,86 +220,62 @@ test('70b38346 M1: reading newest history acknowledges neither Lane nor project 
   assert.equal(unread.notices.length, 10);
 });
 
-for (const kind of ['board', 'hook']) {
-  test(`70b38346 L2: ${kind} excludes own notes before filling the unread page`, async t => {
-    const { f, root, note } = setup(t);
-    const own = kind === 'board' ? 11 : 3;
-    for (let at = 1; at <= own; at++) note('project', at, `Own ${at}`, f.lanes.A);
-    note('project', own + 1, 'Other unread', f.lanes.B);
-    let calls = 0;
-    const result =
-      kind === 'board'
-        ? await boardHostedSource(
-            {
-              root,
-              advertisedFeatures: features,
-              query: async (_name, args) => {
-                calls++;
-                return f.read(args, 'writer');
-              },
-            },
-            'board',
-            { laneId: f.lanes.A },
-          )
-        : (
-            await readHostedEditPeers(
-              {
-                root,
-                project: 'project',
-                url: 'https://synthetic.invalid',
-                laneId: f.lanes.A,
-                path: 'src/file.ts',
-              },
-              async (_name, args) => {
-                calls++;
-                return {
-                  board: await delivery.boardDelivery(f.ctx, {
-                    projectId: 'project',
-                    viewer: 'writer',
-                    laneId: f.lanes.A,
-                    intentId: f.issue,
-                    ...args.board,
-                  }),
-                };
-              },
-            )
-          ).board;
-    assert.equal(calls, 1);
-    assert.equal(result.notices.length, 1);
-    assert.match(result.notices[0], /Other unread/);
-    assert.equal(readBoardCursor(root, f.lanes.A), own + 1);
-  });
-}
+test('70b38346 L2: board excludes own notes before filling the unread page', async t => {
+  const { f, root, note } = setup(t);
+  const own = 11;
+  for (let at = 1; at <= own; at++) note('project', at, `Own ${at}`, f.lanes.A);
+  note('project', own + 1, 'Other unread', f.lanes.B);
+  let calls = 0;
+  const result = await boardHostedSource(
+    {
+      root,
+      advertisedFeatures: features,
+      query: async (_name, args) => {
+        calls++;
+        return f.read(args, 'writer');
+      },
+    },
+    'board',
+    { laneId: f.lanes.A },
+  );
+  assert.equal(calls, 1);
+  assert.equal(result.notices.length, 1);
+  assert.match(result.notices[0], /Other unread/);
+  assert.equal(readBoardCursor(root, f.lanes.A), own + 1);
+});
 
-test('70b38346 S1(a): delivered Lane notes cannot fill an ascending two-note hook page with an empty more hint', async t => {
+test('70b38346 S1(a): delivered Lane notes cannot fill an ascending two-note command-reply page with an empty more hint', async t => {
   const { f, root, note, directed } = setup(t);
   note(`lane:${f.lanes.A}`, 5, 'Delivered first');
   note(`lane:${f.lanes.A}`, 6, 'Delivered second');
   await directed(0);
   note('project', 7, 'Unread project note');
-  const target = {
-    root,
-    project: 'project',
-    url: 'https://synthetic.invalid',
+  const { boardReadPosition } = await import('../dist/board-local.js');
+  const page = await delivery.boardDelivery(f.ctx, {
+    projectId: 'project',
+    viewer: 'writer',
     laneId: f.lanes.A,
-    path: 'src/file.ts',
-  };
-  let calls = 0;
-  const result = await readHostedEditPeers(target, async (_name, args) => {
-    calls++;
-    return {
-      board: await delivery.boardDelivery(f.ctx, {
-        projectId: 'project',
-        viewer: 'writer',
-        laneId: f.lanes.A,
-        intentId: f.issue,
-        ...args.board,
-      }),
-    };
+    intentId: f.issue,
+    ...boardReadPosition(root, f.lanes.A, features),
   });
-  assert.equal(calls, 1);
-  assert.equal(result.board.notices.length, 1);
-  assert.match(result.board.notices[0], /Unread project note/);
+  const result = boardEnvelope(root, f.lanes.A, page);
+  assert.equal(result.notices.length, 1);
+  assert.match(result.notices[0], /Unread project note/);
+});
+
+test('f3495abe: server boardDelivery with path (first-write hook) skips unread inbox notes', async t => {
+  const { f, note } = setup(t);
+  note('project', 10, 'Project note for command replies');
+  note(`lane:${f.lanes.A}`, 11, 'Directed note for command replies');
+  const reply = await delivery.boardDelivery(f.ctx, {
+    projectId: 'project',
+    viewer: 'writer',
+    laneId: f.lanes.A,
+    intentId: f.issue,
+    after: 0,
+    path: 'src/file.ts',
+  });
+  assert.equal(reply, undefined, 'no claims on path and inbox notes skipped');
 });
 
 test('70b38346 S1(b): ten-plus delivered Lane notes cannot hide older unread project and Issue notes on board reads', async t => {

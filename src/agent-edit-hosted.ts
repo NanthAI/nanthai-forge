@@ -4,14 +4,7 @@ import { PeersCache } from './agent-peers-cache.js';
 import type { EditTarget } from './agent-edit-target.js';
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import { resolveAuthToken, deploymentUrl } from './auth-store.js';
-import {
-  boardEnvelope,
-  boardNoticeLine,
-  boardReadPosition,
-  readBoardCompatible,
-  readBoardServerFeatures,
-  type BoardNote,
-} from './board-local.js';
+import { boardNoticeLine, readBoardServerFeatures, type BoardNote } from './board-local.js';
 import { queueBoardClaim, type ClaimTarget } from './board-claim-queue.js';
 import { BOARD_NOTICE_CHARS, BOARD_PATH_CHARS } from './board-text.js';
 import { actorLabel } from './agent-slug.js';
@@ -25,15 +18,17 @@ export const incompleteEdit = () => ({
   coverage: 'hosted-incomplete',
   checked: 1,
 });
-/** Board claims and unread notes for the written path: one authorized query, only once the server
- * advertised the board; no probes, retries, subscriptions, writes or source downloads. Path overlap
- * notices were removed (Issue 853fcde3): each save trial-merges saved files and reports real conflicts. */
+/** Board claims for the written path: one authorized query, only once the server advertised the
+ * board; no probes, retries, subscriptions, writes or source downloads. Unread notes ride on
+ * command replies and wait, never on a hook (Item f3495abe); `after: MAX_SAFE_INTEGER` tells
+ * older servers to skip message scans too. Path overlap notices were removed (Issue 853fcde3):
+ * each save trial-merges saved files and reports real conflicts. */
 export async function readHostedEditPeers(
   target: EditTarget,
   query?: EditQuery,
   enqueue: ClaimQueue = queueBoardClaim,
 ) {
-  // Board notes and claims ride on this query, once the server advertised the board (marker
+  // Board claims ride on this query, once the server advertised the board (marker
   // written by Lane actions on change; the hook makes no capability read).
   const features = target.url ? readBoardServerFeatures(target.project) : [];
   if (!features.includes('agent-board')) return { status: 'allowed', coverage: 'hosted', checked: 0 };
@@ -58,15 +53,12 @@ export async function readHostedEditPeers(
     client.setAuth(token);
     query = (name, args) => client.query(makeFunctionReference<'query'>(name), args);
   }
-  const send = query;
-  const raw = await readBoardCompatible(boardReadPosition(target.root, target.laneId, features), cursor =>
-    send('projectHostedOverlaps:read', {
-      projectId: target.project,
-      laneId: target.laneId,
-      path: target.path,
-      board: { ...cursor, ...(claim ? { claim: true } : {}) },
-    }),
-  );
+  const raw = await query('projectHostedOverlaps:read', {
+    projectId: target.project,
+    laneId: target.laneId,
+    path: target.path,
+    board: { after: Number.MAX_SAFE_INTEGER, ...(claim ? { claim: true } : {}) },
+  });
   const value = typeof raw === 'string' ? JSON.parse(raw) : raw;
   return {
     status: 'allowed',
@@ -139,7 +131,7 @@ function boardLines(
   field: unknown,
   enqueue: ClaimQueue,
   evidence?: unknown,
-): { board?: { claims: string[]; notices: string[] } } {
+): { board?: { claims: string[] } } {
   const value = field as {
     messages?: unknown;
     more?: unknown;
@@ -156,11 +148,9 @@ function boardLines(
     typeof value.cursor !== 'number' ||
     !(value.claims === undefined || (Array.isArray(value.claims) && value.claims.every(isNote)))
   ) {
-    // No board news (the server omits the field then): a peer's saved file still warns.
+    // No board claims (the server omits the field then): a peer's saved file still warns.
     const saved = savedPeers(target.laneId, target.path, evidence).slice(0, 2);
-    return saved.length
-      ? { board: { claims: saved.map(row => savedLine(target.path, row)), notices: [] } }
-      : {};
+    return saved.length ? { board: { claims: saved.map(row => savedLine(target.path, row)) } } : {};
   }
   // Off the hook's path: queue this path; a detached sender batches and sends it.
   if (value.claim === 'send' && target.url)
@@ -190,14 +180,7 @@ function boardLines(
     ...others.slice(0, saved.length ? 2 : 3),
     ...saved.map(row => savedLine(target.path, row)),
   ].slice(0, 3);
-  const notices = value.messages.length
-    ? boardEnvelope(target.root, target.laneId, {
-        messages: value.messages.slice(0, 2),
-        more: value.more,
-        cursor: value.cursor,
-      }).notices
-    : [];
-  return claims.length || notices.length ? { board: { claims, notices } } : {};
+  return claims.length ? { board: { claims } } : {};
 }
 /** Reserve before IO, so a supervisor timeout is cached too. No cached evidence grants authority. */
 export async function preEditHosted(
@@ -221,11 +204,10 @@ export async function preEditHosted(
 /** Board lines are data, never peer-authored instructions; cap context regardless of server text. */
 export function hostedEditContext(result: Awaited<ReturnType<typeof preEditHosted>>) {
   if (result.status === 'cached') return '';
-  const board = (result as { board?: { claims: string[]; notices: string[] } }).board;
-  const lines = [...(board?.claims ?? []), ...(board?.notices ?? [])];
+  const board = (result as { board?: { claims?: string[] } }).board;
+  const lines = board?.claims ?? [];
   if (!lines.length) return '';
-  // Board lines are already single quoted-data lines (claims and unread notes, ≤2 each); one marker
-  // for all of them (S-17). A claim is an overlap: the coordination hint follows it (c6615b66).
+  // Claims on the written path are quoted data (S-17) and an overlap: the coordination hint follows (c6615b66).
   return (
     lines
       .map(line =>
@@ -233,6 +215,6 @@ export function hostedEditContext(result: Awaited<ReturnType<typeof preEditHoste
           .replace(/[\x00-\x1f\x7f]/g, ' ')
           .slice(0, BOARD_NOTICE_CHARS + BOARD_PATH_CHARS + 'Claim on : '.length),
       )
-      .join('\n') + `\n${memberDataNotice}${board?.claims.length ? `\n${COORDINATE_HINT}` : ''}`
+      .join('\n') + `\n${memberDataNotice}\n${COORDINATE_HINT}`
   );
 }
