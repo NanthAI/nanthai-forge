@@ -381,6 +381,37 @@ test('agent entry points add new names; a change or removal of an existing recor
   );
   clear(read);
 });
+test('fcfc7e62 friction 67582337: removing a name the set does not hold writes nothing and hands out no operation id', async t => {
+  const { s, client, project, account, keys, pins, transport, calls } = setup(t),
+    agent = new SealedClient(project, account, keys, pins, transport, true);
+  // Not set up at all: still the clear not-set-up error, never a receipt.
+  await assert.rejects(client.write('NEVER_SET', null), code('SECRETS_NOT_SET_UP'));
+  await client.write('API_TOKEN', Buffer.from('synthetic-value-one'));
+  await client.write('GONE_TOKEN', Buffer.from('synthetic-value-two'));
+  await client.write('GONE_TOKEN', null);
+  const set = () => [...s.tables.sealedSecretSets.values()].find(row => row.kind === 1),
+    head = Buffer.from(set().headHash),
+    writes = calls.filter(c => c.action === 'write').length,
+    history = s.tables.sealedSecretHistory.size;
+  for (const who of [client, agent])
+    for (const name of ['NEVER_SET', 'GONE_TOKEN']) {
+      const receipt = await who.write(name, null);
+      assert.equal(receipt.absent, true, `${name} is reported absent`);
+      assert.equal(receipt.removed, false);
+      assert.equal(receipt.operationId, undefined, 'no operation happened, so no id is handed out');
+      assert.equal(receipt.proposed, undefined);
+    }
+  // Nothing reached the server: same head, same history, no write call, no proposal.
+  assert(Buffer.from(set().headHash).equals(head));
+  assert.equal(calls.filter(c => c.action === 'write').length, writes);
+  assert.equal(s.tables.sealedSecretHistory.size, history);
+  assert.equal(set().proposals?.length ?? 0, 0);
+  // A name the set holds still returns a real receipt.
+  const removed = await client.write('API_TOKEN', null);
+  assert.match(removed.operationId, /^[0-9a-f-]{36}$/);
+  assert.equal(removed.removed, true);
+  assert.equal(removed.absent, undefined);
+});
 test('an unknown write outcome replays its exact ciphertext rather than sealing a second mutation', async t => {
   const { client, transport, calls } = setup(t),
     original = transport.write,

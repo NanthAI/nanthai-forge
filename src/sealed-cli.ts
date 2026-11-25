@@ -246,6 +246,11 @@ export async function sealedCli(args: string[]) {
       const value = command === 'set' ? await readValue(file) : null;
       try {
         const receipt = await client.write(name!, value, { file, ...(operationId ? { operationId } : {}) });
+        if ('absent' in receipt) {
+          // No write, no proposal and no operation happened: say so, never a success line (friction 67582337).
+          process.stdout.write(`${safeSecretName(name!)} is not in ${where}. Nothing was removed.\n`);
+          return;
+        }
         const proposed = 'proposed' in receipt ? receipt.proposed?.slice(0, 8) : undefined;
         const op = 'op' in receipt ? receipt.op : undefined;
         process.stdout.write(

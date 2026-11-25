@@ -196,7 +196,17 @@ export class SealedClient {
     const proposal = done.proposed[0];
     if (proposal)
       return { operationId: done.operationId, name, removed: false, proposed: proposal.id, op: proposal.op };
-    if (!done.written.length && !done.replay) return { operationId: done.operationId, name, removed: false };
+    if (!done.written.length && !done.replay) {
+      // Nothing was written and nothing proposed: no operation happened, so no operation id is handed out. A removal
+      // of a name the set does not hold (or holds only as removed) says so; a value that was not stored is an error,
+      // never a success line (friction 67582337).
+      invariant(
+        value === null,
+        'SECRETS_WRITE_UNKNOWN',
+        `${name} was not stored in ${this.setName}. Nothing was written; repeat the change as a new operation.`,
+      );
+      return { name, removed: false as const, absent: true as const };
+    }
     return { operationId: done.operationId, name, removed: value === null, replay: done.replay };
   }
   /** One signed head write for up to 100 changes, 98 for the first write (the server's work cap; slice 3 import). An
