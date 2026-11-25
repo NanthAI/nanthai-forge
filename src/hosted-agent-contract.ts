@@ -654,6 +654,9 @@ export const hostedAgentCommandSchemas = {
         .optional(),
       limit: z.number().int().min(1).max(100).default(50),
       cursor: z.string().nullable().default(null),
+      /** An Item read lists this many newest comments (default 50); commentsCursor continues. Smaller pages keep
+       * the reply short. */
+      commentLimit: z.number().int().min(1).max(50).optional(),
       /** Close or abandon Issues whose Intent finished; reports what it changed. Default: list reads
        * reconcile; search and Item (id/planningItemId) reads do not. */
       reconcile: z.boolean().optional(),
@@ -762,6 +765,15 @@ export const hostedAgentCommandSchemas = {
             .optional(),
         })
         .optional(),
+      /** Change one Done-when line without sending the body (src/hosted-agent-planning-tick.ts): with `line` (1-based
+       * checkbox position or unique text prefix) the text replaces that line; without it one open checkbox is added.
+       * Needs no expectedVersion. */
+      doneWhen: z
+        .object({
+          line: z.union([z.number().int().positive(), z.string().trim().min(1)]).optional(),
+          text: z.string().trim().min(1).max(2000),
+        })
+        .optional(),
       /** One backlog batch (src/hosted-agent-planning-batch.ts): up to 100 puts or comments, one call, one Undo. */
       batch: z.array(z.record(z.string(), z.unknown())).min(1).max(100).optional(),
     })
@@ -771,6 +783,10 @@ export const hostedAgentCommandSchemas = {
         value.batch === undefined ||
         Object.keys(value).every(key => key === 'batch' || key === 'expectedVersion'),
       'batch: send the entries alone.',
+    )
+    .refine(
+      value => !value.doneWhen || value.body === undefined,
+      'doneWhen edits one line; do not send body with it.',
     ),
   'comment-planning-item': planningCommentCommandSchema
     .omit({

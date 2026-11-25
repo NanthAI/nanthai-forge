@@ -249,7 +249,7 @@ const commentsContinue = (ws: Workspace, id: string, cursor: string) => ({
       'base64url',
     ),
 });
-async function olderComments(port: PlanningPort, ws: Workspace, id: string, cursor: string) {
+async function olderComments(port: PlanningPort, ws: Workspace, id: string, cursor: string, count = 50) {
   const bound = decodeBound(cursor, ws) as {
     cursor: string | null;
     comments?: unknown;
@@ -259,7 +259,7 @@ async function olderComments(port: PlanningPort, ws: Workspace, id: string, curs
     'BAD_ARGUMENT',
     'cursor: with planningItemId, pass the commentsCursor that planning returned for this Item.',
   );
-  const comments = await page(port, ws, 'planningComments', bound.cursor, 50, {
+  const comments = await page(port, ws, 'planningComments', bound.cursor, count, {
     parentId: id,
     newestFirst: true,
   });
@@ -761,6 +761,7 @@ async function readPlanning(
         items?: {
           id: string;
           kind?: string;
+          title?: string;
           status: PlanningItem['status'];
           waitingOn?: PlanningItem['waitingOn'];
         }[];
@@ -781,6 +782,7 @@ async function readPlanning(
             ...(prefix && found.nextCursor ? { nextCursor: prefix + found.nextCursor } : {}),
             items: found.items
               .filter(item => (!multiple || multiple.has(item.status)) && waitMatches(item) && keep(item))
+              .sort(phraseFirst(input.search))
               .map(withPlannedLink),
           }
         : found;
@@ -906,10 +908,10 @@ async function readPlanning(
       };
     }
     // Older comments (f0d0fdd6): the detail's commentsCursor as cursor, one bounded page per call.
-    if (input.cursor !== null) return await olderComments(port, ws, id, input.cursor);
+    if (input.cursor !== null) return await olderComments(port, ws, id, input.cursor, input.commentLimit);
     const item = await fullItem(port, ws, id, planningHistory);
     invariant(item, 'NOT_FOUND', 'Planning item not found.');
-    const comments = await page(port, ws, 'planningComments', null, 50, {
+    const comments = await page(port, ws, 'planningComments', null, input.commentLimit ?? 50, {
       parentId: id,
       newestFirst: true,
     });
@@ -1245,6 +1247,15 @@ function groupPage(items: readonly { id: string }[], field: string) {
   ];
 }
 
+/** Within a page, an Item whose title holds the whole multi-word query comes before token-only matches (friction 1279ef8d).
+ * A stable sort: everything else keeps the index's relevance order. No extra read. */
+export function phraseFirst(search: string) {
+  const phrase = search.replace(/\s+/g, ' ').trim().toLowerCase();
+  const exact = (item: { title?: string }) =>
+    phrase.includes(' ') && (item.title ?? '').replace(/\s+/g, ' ').toLowerCase().includes(phrase) ? 0 : 1;
+  return (a: { title?: string }, b: { title?: string }) => exact(a) - exact(b);
+}
+
 export async function executeHostedPlanning(
   port: PlanningPort,
   actor: string,
@@ -1400,7 +1411,56 @@ export async function executeHostedPlanning(
       }),
     };
   }
-  const put = flattenModelFields(port, hostedAgentCommandSchemas['put-planning-item'].parse(input)) as Omit<
+  const parsedPut = hostedAgentCommandSchemas['put-planning-item'].parse(input);
+  if (parsedPut.doneWhen) {
+    // One Done-when line, no body sent: the CLI re-reads and re-applies only this edit on a version race.
+    invariant(
+      input.itemId || input.planningItemId || input.id,
+      'BAD_ARGUMENT',
+      'doneWhen: name the Item with itemId.',
+    );
+    const extra = Object.keys(parsedPut).filter(
+      key => !['itemId', 'doneWhen', 'expectedVersion'].includes(key),
+    );
+    invariant(
+      !extra.length && !parsedPut.expectedVersion,
+      'BAD_ARGUMENT',
+      `doneWhen changes one Done-when line and nothing else; send ${extra.length ? extra.join(', ') : 'expectedVersion'} in a separate put.`,
+    );
+    const doneId = await resolvePlanningId(port, parsedPut.itemId!, journal);
+    const { editDoneWhen } = await import('./hosted-agent-planning-tick.js');
+    const edited = await editDoneWhen<PlanningReadItem>({
+      edit: {
+        ...(parsedPut.doneWhen.line === undefined
+          ? { add: parsedPut.doneWhen.text }
+          : { amend: { line: parsedPut.doneWhen.line, text: parsedPut.doneWhen.text } }),
+      },
+      read: async () => {
+        const item = await fullItem(port, await workspace(port), doneId);
+        invariant(item, 'NOT_FOUND', 'Planning item not found.');
+        return item;
+      },
+      write: async (item, body, key) =>
+        (
+          await writePlanning(
+            port,
+            {
+              action: 'put-planning-item',
+              operationId: await journal.id(key),
+              itemId: doneId,
+              expectedVersion: item.version,
+              body,
+              ...putAgent(port),
+            } as PlanningWrite,
+            journal,
+            undefined,
+            item,
+          )
+        ).revision,
+    });
+    return { operationId: journal.operationId, result: { itemId: doneId, ...edited } };
+  }
+  const put = flattenModelFields(port, parsedPut) as Omit<
     Extract<PlanningWrite, { action: 'put-planning-item' }>,
     'action' | 'operationId' | 'itemId'
   > & { itemId?: string };

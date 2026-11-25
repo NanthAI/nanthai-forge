@@ -501,7 +501,12 @@ test('lanes {state:"all"} pages the same read and accepts the 8-character Item i
   const open = (await liveLanes(transport, { planningItemId: short })).result;
   assert.equal(open.args.planningItemId, s.itemId);
   assert.equal(open.args.state, undefined);
-  assert.deepEqual(calls, ['projectHostedPlanning:resolveId', 'projectHostedLiveLanes:list']);
+  // An empty open list reads the Issue's Lanes once more, to name a preserved Lane with unlanded work (986422c9).
+  assert.deepEqual(calls, [
+    'projectHostedPlanning:resolveId',
+    'projectHostedLiveLanes:list',
+    'projectItemWork:read',
+  ]);
   await assert.rejects(liveLanes(transport, { intentId: s.itemId, state: 'all' }), /state "all"/);
 });
 

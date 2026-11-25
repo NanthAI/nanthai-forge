@@ -662,3 +662,34 @@ test('the CLI lanes tree is one transport query, renders children under their pa
     `33333333 [held] Peer work · next: status {"laneId":"${peer}"} names its wait`,
   ]);
 });
+
+test('an Issue with no open Lane still names a preserved Lane that holds unlanded saved work (986422c9)', async () => {
+  const { liveLanes } = await import('../dist/hosted-live-lanes.js');
+  const issue = '44444444-4444-4444-8444-444444444444';
+  const kept = { laneId: '55555555-5555-4555-8555-555555555555', state: 'open', run: 'x' };
+  const landed = {
+    laneId: '66666666-6666-4666-8666-666666666666',
+    state: 'closed',
+    receipt: { receiptId: 'r' },
+  };
+  const calls = [];
+  const transport = {
+    root: '/synthetic',
+    query: async (name, args) => {
+      calls.push(name);
+      return name === 'projectItemWork:read'
+        ? { lanes: [kept, landed], total: 2 }
+        : { page: [], isDone: true, continueCursor: null };
+    },
+  };
+  const { result } = await liveLanes(transport, { planningItemId: issue });
+  assert.deepEqual(result.preserved, [kept]);
+  assert.deepEqual(calls, ['projectHostedLiveLanes:list', 'projectItemWork:read']);
+  calls.length = 0;
+  const open = {
+    query: async name => (calls.push(name), { page: [{ laneId: 'a' }], isDone: true }),
+    root: '/s',
+  };
+  await liveLanes(open, { planningItemId: issue });
+  assert.deepEqual(calls, ['projectHostedLiveLanes:list'], 'a non-empty open list costs no extra read');
+});

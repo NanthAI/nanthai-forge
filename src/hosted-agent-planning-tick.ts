@@ -109,3 +109,51 @@ export async function tickPlanningLine<Item extends { version: number; body: str
     };
   }
 }
+
+/** Replace the text of one checkbox line (position or unique text prefix), keeping its box and mark. */
+export function amendBodyLine(body: string, line: number | string, text: string) {
+  const found = tickBodyLine(body, line); // Throws BAD_ARGUMENT naming the candidates when `line` is not one box.
+  const rows = body.split('\n');
+  for (const { row, position, match } of planningTaskLines(rows)) {
+    if (position !== found.index) continue;
+    const [, head, mark, tail, , cr] = match;
+    rows[row] = `${head}${mark}${tail}${text.replace(/\s+/g, ' ').trim()}${cr}`;
+    return rows.join('\n');
+  }
+  throw new ForgeError('BAD_ARGUMENT', 'That Done-when line moved; read the Item and retry.');
+}
+
+/** Add one open checkbox after the last Done-when checkbox, or under a new `Done-when:` heading at the end. */
+export function appendBodyLine(body: string, text: string) {
+  const rows = body.split('\n');
+  const clean = text.replace(/\s+/g, ' ').trim();
+  let last = -1;
+  for (const { row } of planningTaskLines(rows)) last = row;
+  if (last < 0) return `${body.replace(/\s+$/, '')}\n\nDone-when:\n- [ ] ${clean}\n`;
+  rows.splice(last + 1, 0, `- [ ] ${clean}`);
+  return rows.join('\n');
+}
+
+/** Read-modify-write of one Done-when line without the caller sending the body. A version race (ITEM_CHANGED)
+ * re-reads and re-applies only this edit. */
+export async function editDoneWhen<Item extends { version: number; body: string }>(ports: {
+  edit: { amend?: { line: number | string; text: string }; add?: string };
+  read: () => Promise<Item>;
+  write: (item: Item, body: string, key: string) => Promise<number | undefined>;
+}) {
+  // A position names a slot, not a criterion: after a race, find the line by the text it had on the first read.
+  let target: number | string | undefined = ports.edit.amend?.line;
+  for (let attempt = 0; ; attempt++) {
+    const item = await ports.read();
+    const { amend, add } = ports.edit;
+    if (amend && attempt === 0 && typeof target === 'number') target = tickBodyLine(item.body, target).text;
+    const body = amend ? amendBodyLine(item.body, target!, amend.text) : appendBodyLine(item.body, add!);
+    try {
+      const workRevision = await ports.write(item, body, `done-when-put-${attempt}`);
+      return { version: item.version + 1, workRevision };
+    } catch (error) {
+      if (error instanceof ForgeError && error.code === 'ITEM_CHANGED' && attempt + 1 < maxAttempts) continue;
+      throw error;
+    }
+  }
+}

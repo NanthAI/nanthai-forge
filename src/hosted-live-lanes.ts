@@ -131,6 +131,33 @@ async function itemLanes(
   };
 }
 
+/** The open list for one Issue can be empty while a preserved Lane still holds unlanded saved work (friction 986422c9).
+ * Only then, one extra read of the Issue's Lanes in every state names those Lanes (no receipt) under `preserved`. */
+async function openWithPreserved(transport: HostedAgentTransport, input: Record<string, unknown>) {
+  const reply = await transport.query<{ page?: unknown[]; isDone?: boolean } & Record<string, unknown>>(
+    'projectHostedLiveLanes:list',
+    { ...input, limit: input.limit ?? 50 },
+  );
+  const item = input.planningItemId;
+  if (typeof item !== 'string' || input.cursor || input.view || input.intentId) return reply;
+  if (reply.page?.length || reply.isDone === false) return reply;
+  try {
+    const all = await itemLanes(transport, item, { limit: 50, cursor: null });
+    const preserved = all.page.filter(
+      row => (row as { state?: string }).state === 'open' && !(row as { receipt?: unknown }).receipt,
+    );
+    return preserved.length
+      ? {
+          ...reply,
+          preserved,
+          note: 'No open Lane, but these Lanes of the Issue hold saved work that has not landed. Reopen one with start --open {laneId}.',
+        }
+      : reply;
+  } catch {
+    return reply; // A note on the reply never fails the read.
+  }
+}
+
 /** The tree view: the same one `lanes` page with stack and overlap fields, rendered as text lines. */
 async function laneTree(transport: HostedAgentTransport, input: Record<string, unknown>) {
   const reply = await transport.query<{ page: unknown[]; isDone: boolean; continueCursor: string | null }>(
@@ -198,10 +225,7 @@ export async function liveLanes(transport: HostedAgentTransport, input: Record<s
             : input.view === 'tree'
               ? await laneTree(transport, input)
               : {
-                  ...(await transport.query<Record<string, unknown>>('projectHostedLiveLanes:list', {
-                    ...input,
-                    limit: input.limit ?? 50,
-                  })),
+                  ...(await openWithPreserved(transport, input)),
                   // A Lane whose folder or land operation id is gone recovers its landing by laneId (7da396ed).
                   recover: `nforge agent ${shellQuote(hostedAgentRoot(transport.root))} status '{"laneId":"LANE_ID"}' names a Lane's landing in flight and its wait, even without its folder.`,
                 },

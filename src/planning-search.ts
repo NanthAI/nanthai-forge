@@ -73,6 +73,7 @@ export function doneWhenCounts(body: string): [number, number] | null {
 export function proseDoneWhenLines(body: string, plainBulletsOnly = false): string[] {
   const heading = /^[ \t>#*_]*done[- ]when\b/im.exec(body);
   if (!heading) return [];
+  const sectionLevel = /#+/.exec(heading[0])?.[0].length ?? 0;
   const lines = body
     .slice(heading.index + heading[0].length)
     .split('\n')
@@ -81,7 +82,9 @@ export function proseDoneWhenLines(body: string, plainBulletsOnly = false): stri
   let first = lines[0]?.replace(/^[:*_\s]+/, '') ?? '';
   let text = /\w/.test(first);
   for (const line of lines.slice(1)) {
-    if (/^#{1,6}\s/.test(line) || /^\*\*[^*]+\*\*:?$/.test(line)) break;
+    // A deeper heading (### under ## Done-when) is still part of the section; only the same or a higher level ends it.
+    const level = /^(#{1,6})\s/.exec(line)?.[1]!.length;
+    if ((level !== undefined && level <= (sectionLevel || 6)) || /^\*\*[^*]+\*\*:?$/.test(line)) break;
     if (plainBulletsOnly && /^(?:[-*+]|\d+[.)])\s+\[[ xX~]\]/.test(line)) continue;
     if (/^(?:[-*+]|\d+[.)])\s+\S/.test(line))
       bullets.push(

@@ -770,6 +770,15 @@ test('a planning detail past 50 comments continues with commentsCursor, one boun
     [...older.comments, ...detail.comments].map(comment => comment.text),
     Array.from({ length: 60 }, (_, i) => `comment ${i}`),
   );
+  const small = await list(p, { id: issue.itemId, reconcile: false, commentLimit: 5 });
+  assert.deepEqual(
+    small.comments.map(comment => comment.text),
+    ['comment 55', 'comment 56', 'comment 57', 'comment 58', 'comment 59'],
+    'commentLimit keeps the newest N',
+  );
+  assert.equal(small.commentsMore, true);
+  const next = await list(p, { id: issue.itemId, cursor: small.commentsCursor, commentLimit: 5 });
+  assert.equal(next.comments.at(-1).text, 'comment 54', 'the cursor continues with the next older page');
   // The cursor names its Item: another Item's id or a list cursor is refused.
   await assert.rejects(list(p, { id: other.itemId, cursor: detail.commentsCursor }), code('BAD_ARGUMENT'));
   const page = await list(p, { limit: 1 });
@@ -4713,5 +4722,58 @@ test('closing counts plain-bullet Done-when criteria that sit beside checkboxes 
     'Why.\n\nDone-when:\n- [x] ticked line\n- plain criterion one\n1. plain criterion two\n\n## Decisions\n- a decision';
   assert.deepEqual(closingChecklist(mixed).open, ['plain criterion one', 'plain criterion two']);
   assert.deepEqual(closingChecklist('Done-when:\n- [x] a\n- [ ] b').open, ['b']);
+  assert.deepEqual(
+    closingChecklist('## Done-when\n- [x] Ship\n### Verification\n- Verify the rollout\n## Decisions\n- note')
+      .open,
+    ['Verify the rollout'],
+    'a deeper heading stays inside the section; a same-level heading ends it',
+  );
   assert.deepEqual(closingChecklist('Done-when:\n- [x] a\n- [x] b').open, []);
+});
+
+test('a multi-word search puts the exact phrase in the title before token-only matches, keeping the rest in order (1279ef8d)', async () => {
+  const { phraseFirst } = await import('../dist/hosted-agent-planning.js');
+  const items = [
+    { title: 'Source access grants' },
+    { title: 'Unrelated grant' },
+    { title: 'The source grant Issue' },
+  ];
+  assert.deepEqual(
+    [...items].sort(phraseFirst('Source  Grant')).map(item => item.title),
+    ['The source grant Issue', 'Source access grants', 'Unrelated grant'],
+  );
+  assert.deepEqual([...items].sort(phraseFirst('grant')), items, 'one word never reorders');
+});
+
+test('put-planning-item can amend or add one Done-when line without sending the body, and retries a version race (fb65fd56)', async () => {
+  const { amendBodyLine, appendBodyLine, editDoneWhen } =
+    await import('../dist/hosted-agent-planning-tick.js');
+  const { ForgeError } = await import('../dist/errors.js');
+  const body = 'Why.\n\nDone-when:\n- [x] first\n- [ ] second line\n\n## Decisions\n- d';
+  assert.equal(
+    amendBodyLine(body, 4 - 3 + 1, 'second line, changed'),
+    'Why.\n\nDone-when:\n- [x] first\n- [ ] second line, changed\n\n## Decisions\n- d',
+    'a ticked box keeps its mark; only the text changes',
+  );
+  assert.equal(amendBodyLine(body, 'first', 'one').includes('- [x] one'), true);
+  assert.equal(
+    appendBodyLine(body, 'third'),
+    'Why.\n\nDone-when:\n- [x] first\n- [ ] second line\n- [ ] third\n\n## Decisions\n- d',
+  );
+  assert.match(appendBodyLine('Just prose', 'a'), /Done-when:\n- \[ \] a\n$/);
+  assert.throws(() => amendBodyLine(body, 9, 'x'), /no Done-when checkbox/);
+  let reads = 0;
+  const writes = [];
+  const result = await editDoneWhen({
+    edit: { add: 'new' },
+    read: async () => ({ version: ++reads, body: reads === 1 ? body : `${body}\n- [ ] raced` }),
+    write: async (item, text) => {
+      writes.push(text);
+      if (item.version === 1) throw new ForgeError('ITEM_CHANGED', 'stale');
+      return 7;
+    },
+  });
+  assert.equal(writes.length, 2);
+  assert.ok(writes[1].includes('raced') && writes[1].includes('- [ ] new'), 'the retry keeps the other edit');
+  assert.deepEqual(result, { version: 3, workRevision: 7 });
 });

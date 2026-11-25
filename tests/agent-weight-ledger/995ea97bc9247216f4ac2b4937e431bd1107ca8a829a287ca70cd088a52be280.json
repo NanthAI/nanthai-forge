@@ -1,0 +1,4 @@
+{
+  "issue": "2fa36bb2-6ff0-41d2-8fdd-91e5baaa4fb1",
+  "reason": "toolListBytes 5790 -> 5814 (+24 bytes): put-planning-item lists the optional doneWhen:o(line,text) field (edit one Done-when line without the body) and planning lists commentLimit:n (newest N comments). No new module on the start, status or planning list path; the edit code loads lazily only when doneWhen is sent."
+}
